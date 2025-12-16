@@ -28,7 +28,6 @@ from weakincentives.prompt import (
     SetVisibilityOverride,
     VisibilityExpansionRequired,
 )
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.progressive_disclosure import (
     OpenSectionsParams,
     build_summary_suffix,
@@ -41,6 +40,7 @@ from weakincentives.prompt.section import Section
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
+from weakincentives.types.dataclass import SupportsDataclass
 
 
 @dataclass

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from ...prompt._types import SupportsDataclass
+from ...types.dataclass import SupportsDataclass
 
 type SessionSliceType = type[SupportsDataclass]
 

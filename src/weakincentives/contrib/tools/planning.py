@@ -21,12 +21,12 @@ from typing import Final, Literal, cast, override
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
-from ...prompt import SupportsDataclass, SupportsToolResult
 from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import PromptRenderError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Session, reducer, replace_latest
+from ...types import SupportsDataclass, SupportsToolResult
 from ._context import ensure_context_uses_session
 
 PlanStatus = Literal["active", "completed"]

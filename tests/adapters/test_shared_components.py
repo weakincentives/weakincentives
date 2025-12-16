@@ -41,11 +41,6 @@ from weakincentives.adapters.shared import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
-from weakincentives.prompt._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
@@ -58,6 +53,11 @@ from weakincentives.runtime.events import (
 from weakincentives.runtime.events._types import EventHandler
 from weakincentives.runtime.logging import get_logger
 from weakincentives.runtime.session.session import Session
+from weakincentives.types.dataclass import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 
 
 class RecordingBus(EventBus):

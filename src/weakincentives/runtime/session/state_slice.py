@@ -52,7 +52,7 @@ from dataclasses import dataclass, is_dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from ...dbc import pure
-from ...prompt._types import SupportsDataclass
+from ...types.dataclass import SupportsDataclass
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
 
 if TYPE_CHECKING:

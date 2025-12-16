@@ -112,5 +112,4 @@ __all__ = [
     "PromptEvaluationPhase",
     "PromptResponse",
     "ProviderAdapter",
-    "SessionProtocol",
 ]

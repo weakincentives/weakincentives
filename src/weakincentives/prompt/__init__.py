@@ -14,12 +14,7 @@
 
 from __future__ import annotations
 
-from ._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-    ToolRenderableResult,
-)
+from ._types import ToolRenderableResult
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -99,9 +94,6 @@ __all__ = [
     "SectionVisibility",
     "SetVisibilityOverride",
     "StructuredOutputConfig",
-    "SupportsDataclass",
-    "SupportsDataclassOrNone",
-    "SupportsToolResult",
     "TaskExample",
     "TaskExamplesSection",
     "TaskStep",

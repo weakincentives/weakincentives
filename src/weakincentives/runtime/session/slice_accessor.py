@@ -21,7 +21,7 @@ from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from ...dbc import pure
-from ...prompt._types import SupportsDataclass
+from ...types.dataclass import SupportsDataclass
 
 if TYPE_CHECKING:
     from ._types import TypedReducer

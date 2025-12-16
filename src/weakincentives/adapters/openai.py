@@ -24,10 +24,10 @@ from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
-from ..prompt._types import SupportsDataclass
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
 from ..runtime.logging import StructuredLogger, get_logger
+from ..types.dataclass import SupportsDataclass
 from . import shared as _shared
 from ._provider_protocols import (
     ProviderChoice,

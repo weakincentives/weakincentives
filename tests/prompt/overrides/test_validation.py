@@ -18,7 +18,6 @@ from typing import Literal, cast
 
 import pytest
 
-from weakincentives.prompt import SupportsDataclassOrNone, SupportsToolResult
 from weakincentives.prompt.overrides.validation import (
     FORMAT_VERSION,
     load_sections,
@@ -42,7 +41,7 @@ from weakincentives.prompt.overrides.versioning import (
     _tool_contract_hash,
 )
 from weakincentives.prompt.tool import Tool
-from weakincentives.types import JSONValue
+from weakincentives.types import JSONValue, SupportsDataclassOrNone, SupportsToolResult
 
 _NONE_TYPE = type(None)
 

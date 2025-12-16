@@ -28,11 +28,11 @@ from ...optimizers._base import BasePromptOptimizer, OptimizerConfig
 from ...optimizers._context import OptimizationContext
 from ...optimizers._results import PersistenceScope, WorkspaceDigestResult
 from ...prompt import MarkdownSection, Prompt, PromptTemplate
-from ...prompt._types import SupportsDataclass
 from ...prompt.overrides import PromptLike, PromptOverridesError
 from ...prompt.section import Section
 from ...runtime.session import Session
 from ...runtime.session.protocols import SessionProtocol
+from ...types.dataclass import SupportsDataclass
 from ..tools.asteval import AstevalSection
 from ..tools.digests import (
     WorkspaceDigestSection,

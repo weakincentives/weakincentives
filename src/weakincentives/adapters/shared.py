@@ -29,11 +29,6 @@ from ..budget import BudgetExceededError, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
-from ..prompt._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
@@ -55,6 +50,11 @@ from ..runtime.events import (
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse, schema
 from ..types import JSONValue
+from ..types.dataclass import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 from ._names import LITELLM_ADAPTER_NAME, OPENAI_ADAPTER_NAME, AdapterName
 from ._provider_protocols import (
     ProviderChoice,

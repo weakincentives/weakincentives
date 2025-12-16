@@ -21,7 +21,11 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, override
 
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
-from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
+from ..types.dataclass import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 from ._visibility import SectionVisibility
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .progressive_disclosure import (

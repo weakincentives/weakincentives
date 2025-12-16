@@ -16,7 +16,8 @@ import json
 from typing import cast
 
 from weakincentives.adapters._tool_messages import serialize_tool_message
-from weakincentives.prompt import SupportsToolResult, ToolResult
+from weakincentives.prompt import ToolResult
+from weakincentives.types import SupportsToolResult
 
 try:
     from tests.adapters._test_stubs import ToolPayload
