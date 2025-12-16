@@ -208,6 +208,28 @@ class TestClaudeAgentWorkspaceSectionCleanup:
             finally:
                 section.cleanup()
 
+    def test_clone_preserves_filesystem_instance(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+
+        try:
+            # Write a file through the filesystem
+            fs = section.filesystem
+            _ = fs.write("test_file.txt", "test content")
+
+            # Clone to a new session
+            new_bus = InProcessEventBus()
+            new_session = Session(bus=new_bus)
+            cloned = section.clone(session=new_session)
+
+            # Filesystem instance should be the same
+            assert cloned.filesystem is section.filesystem
+
+            # Content should be accessible through the cloned section's filesystem
+            result = cloned.filesystem.read("test_file.txt")
+            assert result.content == "test content"
+        finally:
+            section.cleanup()
+
     def test_clone_requires_session(self, session: Session) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
 
