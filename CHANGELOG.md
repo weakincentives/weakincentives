@@ -95,7 +95,7 @@ class AgentPlan:
 
 # Install once, then use naturally
 session.install(AgentPlan, initial=AgentPlan)
-session[AgentPlan].apply(AddStep(step="Research"))
+session.mutate(AgentPlan).dispatch(AddStep(step="Research"))
 session[AgentPlan].latest()  # Convenient indexing access
 ```
 
@@ -141,7 +141,7 @@ from weakincentives.runtime import Session
 
 session = Session()
 
-session[VisibilityOverrides].apply(
+session.mutate(VisibilityOverrides).dispatch(
     SetVisibilityOverride(path=("section",), visibility=SectionVisibility.FULL)
 )
 response = adapter.evaluate(prompt, session=session)
