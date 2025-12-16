@@ -67,7 +67,6 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         self.params_type: type[SectionParamsT] | None = cast(
             type[SectionParamsT] | None, params_type
         )
-        self.param_type: type[SectionParamsT] | None = self.params_type
         self.title = title
         self.key = self._normalize_key(key)
         self.default_params = default_params

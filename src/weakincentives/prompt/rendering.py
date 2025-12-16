@@ -150,7 +150,7 @@ class PromptRenderer[OutputT]:
                     "Duplicate params type supplied to prompt.",
                     dataclass_type=params_type,
                 )
-            if params_type not in self._registry.param_types:
+            if params_type not in self._registry.params_types:
                 raise PromptValidationError(
                     "Unexpected params type supplied to prompt.",
                     dataclass_type=params_type,
@@ -332,7 +332,7 @@ class PromptRenderer[OutputT]:
                 raise PromptRenderError(
                     "Section enabled predicate failed.",
                     section_path=node.path,
-                    dataclass_type=node.section.param_type,
+                    dataclass_type=node.section.params_type,
                 ) from error
 
             if not enabled:
@@ -348,7 +348,7 @@ class PromptRenderer[OutputT]:
         override_body: str | None,
         effective_visibility: SectionVisibility,
     ) -> str:
-        params_type = node.section.param_type
+        params_type = node.section.params_type
         try:
             render_override = getattr(node.section, "render_with_template", None)
             if override_body is not None and callable(render_override):

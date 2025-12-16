@@ -57,7 +57,7 @@ class RegistrySnapshot:
     ) -> SupportsDataclass | None:
         """Return parameters for a section, applying defaults when necessary."""
 
-        params_type = node.section.param_type
+        params_type = node.section.params_type
         if params_type is None:
             return None
 
@@ -113,7 +113,7 @@ class RegistrySnapshot:
         return params
 
     @property
-    def param_types(self) -> set[type[SupportsDataclass]]:
+    def params_types(self) -> set[type[SupportsDataclass]]:
         """Return the set of parameter dataclasses registered for sections."""
 
         return set(self.params_registry.keys())
@@ -179,7 +179,7 @@ def _validate_default_paths(
 
     for path, default in defaults_by_path.items():
         node = node_by_path[path]
-        params_type = node.section.param_type
+        params_type = node.section.params_type
         if params_type is None:
             return False, f"section at {path!r} does not accept params but has defaults"
         if type(default) is not params_type:
@@ -247,7 +247,7 @@ def _validate_param_nodes(
                 "params registry references unknown node at path "
                 f"{node.path!r} for {params_type.__name__}"
             )
-        node_params_type = node.section.param_type
+        node_params_type = node.section.params_type
         if node_params_type is None:
             return False, (
                 "params registry references section without params at path "
@@ -319,7 +319,7 @@ class PromptRegistry:
         section: Section[SupportsDataclass],
         path: SectionPath,
     ) -> type[SupportsDataclass] | None:
-        params_type = section.param_type
+        params_type = section.params_type
         if params_type is not None and not is_dataclass(params_type):
             raise PromptValidationError(
                 "Section params must be a dataclass.",
