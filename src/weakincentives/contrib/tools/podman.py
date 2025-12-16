@@ -45,7 +45,7 @@ from .asteval import (
     EvalParams,
     EvalResult,
 )
-from .filesystem import Filesystem, InMemoryFilesystem
+from .filesystem import Filesystem, HostFilesystem
 from .vfs import (
     DeleteEntry,
     EditFileParams,
@@ -642,7 +642,10 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._resolved_mounts,
             self._mount_previews,
         ) = _resolve_podman_host_mounts(self._mounts, self._allowed_roots)
-        self._filesystem = InMemoryFilesystem()
+        # Create overlay directory eagerly so filesystem is available immediately
+        self._overlay_path = self._overlay_root / str(self._session.session_id)
+        self._overlay_path.mkdir(parents=True, exist_ok=True)
+        self._filesystem: Filesystem = HostFilesystem(_root=str(self._overlay_path))
         self._clock = config.clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
@@ -1024,7 +1027,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         return _WorkspaceHandle(descriptor=descriptor, overlay_path=overlay)
 
     def _workspace_overlay_path(self) -> Path:
-        return self._overlay_root / str(self._session.session_id)
+        return self._overlay_path
 
     def _hydrate_overlay_mounts(self, overlay: Path) -> None:
         if not self._resolved_mounts:

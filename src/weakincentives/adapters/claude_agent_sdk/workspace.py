@@ -24,7 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, override
 
-from ...contrib.tools.filesystem import Filesystem, InMemoryFilesystem
+from ...contrib.tools.filesystem import Filesystem, HostFilesystem
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
 from ...prompt import MarkdownSection
@@ -352,7 +352,6 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         self._mounts = tuple(mounts)
         self._allowed_host_roots = tuple(Path(r) for r in allowed_host_roots)
         self._accepts_overrides = accepts_overrides
-        self._filesystem = InMemoryFilesystem()
 
         if _temp_dir is not None and _mount_previews is not None:
             # Cloning path - reuse existing workspace state
@@ -371,6 +370,9 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             self._temp_dir = Path(tempfile.mkdtemp(prefix="wink-sdk-"))
             self._mount_previews = ()
             self._created_at = _utcnow()
+
+        # Create filesystem backed by the temp directory
+        self._filesystem: Filesystem = HostFilesystem(_root=str(self._temp_dir))
 
         template = _render_workspace_template(self._mount_previews)
 
@@ -407,9 +409,8 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
     def filesystem(self) -> Filesystem:
         """Return the filesystem managed by this workspace section.
 
-        Note: ClaudeAgentWorkspaceSection operates on the real filesystem
-        via native SDK tools. This returns an empty InMemoryFilesystem
-        to satisfy the WorkspaceSection protocol.
+        Returns a HostFilesystem backed by the temporary workspace directory.
+        Tools can use this to read/write files in the workspace.
         """
         return self._filesystem
 

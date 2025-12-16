@@ -14,6 +14,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from weakincentives.contrib.tools.filesystem import (
@@ -21,6 +23,7 @@ from weakincentives.contrib.tools.filesystem import (
     FileStat,
     GlobMatch,
     GrepMatch,
+    HostFilesystem,
     InMemoryFilesystem,
     ReadResult,
     WriteResult,
@@ -447,3 +450,382 @@ class TestDataclassRendering:
         result = WriteResult(path="file.txt", bytes_written=5, mode="create")
         rendered = str(result)
         assert "file.txt" in rendered
+
+
+# HostFilesystem tests
+
+
+class TestHostFilesystemBasics:
+    """Basic tests for HostFilesystem."""
+
+    def test_root_property(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        assert fs.root == str(tmp_path)
+
+    def test_read_only_property_default(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        assert fs.read_only is False
+
+    def test_read_only_property_set(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path), _read_only=True)
+        assert fs.read_only is True
+
+    def test_exists_returns_false_for_missing(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        assert fs.exists("missing.txt") is False
+
+    def test_exists_returns_true_for_file(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        assert fs.exists("file.txt") is True
+
+
+class TestHostFilesystemRead:
+    """Tests for HostFilesystem read operations."""
+
+    def test_read_file_content(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("hello world")
+        fs = HostFilesystem(_root=str(tmp_path))
+        result = fs.read("file.txt")
+        assert result.content == "hello world"
+        assert result.path == "file.txt"
+
+    def test_read_with_offset(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("line1\nline2\nline3")
+        fs = HostFilesystem(_root=str(tmp_path))
+        result = fs.read("file.txt", offset=1)
+        assert "line2" in result.content
+
+    def test_read_with_limit(self, tmp_path: Path) -> None:
+        lines = "\n".join([f"line{i}" for i in range(100)])
+        (tmp_path / "file.txt").write_text(lines)
+        fs = HostFilesystem(_root=str(tmp_path))
+        result = fs.read("file.txt", limit=5)
+        assert result.limit == 5
+        assert result.truncated is True
+
+    def test_read_missing_file_raises(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileNotFoundError):
+            fs.read("missing.txt")
+
+    def test_read_directory_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "mydir").mkdir()
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(IsADirectoryError):
+            fs.read("mydir")
+
+
+class TestHostFilesystemWrite:
+    """Tests for HostFilesystem write operations."""
+
+    def test_write_creates_file(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        result = fs.write("file.txt", "content", mode="create")
+        assert result.path == "file.txt"
+        assert result.bytes_written > 0
+        assert (tmp_path / "file.txt").read_text() == "content"
+
+    def test_write_create_mode_fails_if_exists(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("original")
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileExistsError):
+            fs.write("file.txt", "new", mode="create")
+
+    def test_write_overwrite_mode(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("original")
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("file.txt", "updated", mode="overwrite")
+        assert (tmp_path / "file.txt").read_text() == "updated"
+
+    def test_write_append_mode(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("hello")
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("file.txt", " world", mode="append")
+        assert (tmp_path / "file.txt").read_text() == "hello world"
+
+    def test_write_creates_parents(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("dir1/dir2/file.txt", "content")
+        assert (tmp_path / "dir1/dir2/file.txt").exists()
+
+    def test_write_without_parents_fails(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileNotFoundError):
+            fs.write("dir1/dir2/file.txt", "content", create_parents=False)
+
+    def test_write_readonly_fails(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path), _read_only=True)
+        with pytest.raises(PermissionError):
+            fs.write("file.txt", "content")
+
+
+class TestHostFilesystemStat:
+    """Tests for HostFilesystem stat operations."""
+
+    def test_stat_file(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("hello")
+        fs = HostFilesystem(_root=str(tmp_path))
+        stat = fs.stat("file.txt")
+        assert stat.path == "file.txt"
+        assert stat.is_file is True
+        assert stat.is_directory is False
+        assert stat.size_bytes == len("hello")
+
+    def test_stat_directory(self, tmp_path: Path) -> None:
+        (tmp_path / "mydir").mkdir()
+        fs = HostFilesystem(_root=str(tmp_path))
+        stat = fs.stat("mydir")
+        assert stat.is_directory is True
+        assert stat.is_file is False
+
+    def test_stat_missing_raises(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileNotFoundError):
+            fs.stat("missing")
+
+
+class TestHostFilesystemList:
+    """Tests for HostFilesystem directory listing."""
+
+    def test_list_root(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("content")
+        (tmp_path / "mydir").mkdir()
+        fs = HostFilesystem(_root=str(tmp_path))
+        entries = fs.list(".")
+        assert len(entries) == 2
+
+    def test_list_subdirectory(self, tmp_path: Path) -> None:
+        (tmp_path / "dir").mkdir()
+        (tmp_path / "dir/file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        entries = fs.list("dir")
+        assert len(entries) == 1
+        assert entries[0].name == "file.txt"
+
+    def test_list_missing_raises(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileNotFoundError):
+            fs.list("missing")
+
+    def test_list_file_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(NotADirectoryError):
+            fs.list("file.txt")
+
+
+class TestHostFilesystemGlob:
+    """Tests for HostFilesystem glob operations."""
+
+    def test_glob_all_files(self, tmp_path: Path) -> None:
+        (tmp_path / "a.txt").write_text("a")
+        (tmp_path / "b.txt").write_text("b")
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.glob("*.txt")
+        assert len(matches) == 2
+
+    def test_glob_in_subdirectory(self, tmp_path: Path) -> None:
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src/main.py").write_text("code")
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.glob("*.py", path="src")
+        assert len(matches) == 1
+
+    def test_glob_nonexistent_path(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.glob("*.py", path="missing")
+        assert len(matches) == 0
+
+
+class TestHostFilesystemGrep:
+    """Tests for HostFilesystem grep operations."""
+
+    def test_grep_finds_matches(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("hello world\nfoo bar\nhello again")
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.grep("hello")
+        assert len(matches) == 2
+
+    def test_grep_with_glob_filter(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("hello")
+        (tmp_path / "file.py").write_text("hello")
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.grep("hello", glob="*.txt")
+        assert len(matches) == 1
+
+    def test_grep_with_max_matches(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("match\nmatch\nmatch")
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.grep("match", max_matches=2)
+        assert len(matches) == 2
+
+    def test_grep_invalid_regex_raises(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(ValueError, match="Invalid regex"):
+            fs.grep("[invalid")
+
+    def test_grep_nonexistent_path(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.grep("pattern", path="missing")
+        assert len(matches) == 0
+
+
+class TestHostFilesystemDelete:
+    """Tests for HostFilesystem delete operations."""
+
+    def test_delete_file(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.delete("file.txt")
+        assert not (tmp_path / "file.txt").exists()
+
+    def test_delete_empty_directory(self, tmp_path: Path) -> None:
+        (tmp_path / "mydir").mkdir()
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.delete("mydir")
+        assert not (tmp_path / "mydir").exists()
+
+    def test_delete_nonempty_directory_fails(self, tmp_path: Path) -> None:
+        (tmp_path / "mydir").mkdir()
+        (tmp_path / "mydir/file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(IsADirectoryError, match="not empty"):
+            fs.delete("mydir", recursive=False)
+
+    def test_delete_nonempty_directory_recursive(self, tmp_path: Path) -> None:
+        (tmp_path / "mydir").mkdir()
+        (tmp_path / "mydir/file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.delete("mydir", recursive=True)
+        assert not (tmp_path / "mydir").exists()
+
+    def test_delete_missing_raises(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileNotFoundError):
+            fs.delete("missing")
+
+    def test_delete_readonly_fails(self, tmp_path: Path) -> None:
+        (tmp_path / "file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path), _read_only=True)
+        with pytest.raises(PermissionError):
+            fs.delete("file.txt")
+
+
+class TestHostFilesystemMkdir:
+    """Tests for HostFilesystem mkdir operations."""
+
+    def test_mkdir_creates_directory(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.mkdir("mydir")
+        assert (tmp_path / "mydir").is_dir()
+
+    def test_mkdir_with_parents(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.mkdir("a/b/c", parents=True)
+        assert (tmp_path / "a/b/c").is_dir()
+
+    def test_mkdir_without_parents_fails(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileNotFoundError):
+            fs.mkdir("a/b/c", parents=False)
+
+    def test_mkdir_exist_ok(self, tmp_path: Path) -> None:
+        (tmp_path / "mydir").mkdir()
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.mkdir("mydir", exist_ok=True)  # Should not raise
+
+    def test_mkdir_exist_not_ok_fails(self, tmp_path: Path) -> None:
+        (tmp_path / "mydir").mkdir()
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileExistsError):
+            fs.mkdir("mydir", exist_ok=False)
+
+    def test_mkdir_over_file_fails(self, tmp_path: Path) -> None:
+        (tmp_path / "file").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(FileExistsError):
+            fs.mkdir("file")
+
+    def test_mkdir_readonly_fails(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path), _read_only=True)
+        with pytest.raises(PermissionError):
+            fs.mkdir("mydir")
+
+
+class TestHostFilesystemPathSecurity:
+    """Tests for HostFilesystem path security."""
+
+    def test_path_escape_prevented(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        # Attempting to escape the root should fail
+        with pytest.raises(PermissionError, match="escapes root"):
+            fs.read("../etc/passwd")
+
+    def test_exists_returns_false_for_escape_attempt(self, tmp_path: Path) -> None:
+        fs = HostFilesystem(_root=str(tmp_path))
+        # Should return False rather than raise
+        assert fs.exists("../etc/passwd") is False
+
+
+class TestHostFilesystemEdgeCases:
+    """Tests for HostFilesystem edge cases and validation."""
+
+    def test_glob_skips_directories(self, tmp_path: Path) -> None:
+        """Glob should only return files, not directories."""
+        (tmp_path / "subdir").mkdir()
+        (tmp_path / "file.txt").write_text("content")
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.glob("*")
+        # Should only match the file, not the directory
+        assert len(matches) == 1
+        assert matches[0].path == "file.txt"
+
+    def test_grep_skips_directories(self, tmp_path: Path) -> None:
+        """Grep should only search files, not directories."""
+        (tmp_path / "subdir").mkdir()
+        (tmp_path / "file.txt").write_text("hello")
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.grep("hello")
+        assert len(matches) == 1
+
+    def test_grep_skips_binary_files(self, tmp_path: Path) -> None:
+        """Grep should skip files that fail to decode as UTF-8."""
+        # Write a file with invalid UTF-8 bytes
+        (tmp_path / "binary.bin").write_bytes(b"\xff\xfe\x00\x01")
+        (tmp_path / "text.txt").write_text("hello")
+        fs = HostFilesystem(_root=str(tmp_path))
+        matches = fs.grep(".*")  # Match anything
+        # Should only match the text file
+        assert len(matches) == 1
+        assert matches[0].path == "text.txt"
+
+    def test_write_to_root_fails(self, tmp_path: Path) -> None:
+        """Writing to root path should fail."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(ValueError, match="Cannot write to root"):
+            fs.write(".", "content")
+
+    def test_write_content_too_long_fails(self, tmp_path: Path) -> None:
+        """Writing content that exceeds max length should fail."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(ValueError, match="Content exceeds maximum"):
+            fs.write("file.txt", "x" * 50000)
+
+    def test_delete_root_fails(self, tmp_path: Path) -> None:
+        """Deleting root directory should fail."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        with pytest.raises(PermissionError, match="Cannot delete root"):
+            fs.delete(".")
+
+    def test_mkdir_root_is_noop(self, tmp_path: Path) -> None:
+        """Creating root directory should be a no-op."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.mkdir(".")  # Should not raise
+
+    def test_mkdir_single_level_without_parents(self, tmp_path: Path) -> None:
+        """Creating a single directory level without parents should work."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.mkdir("newdir", parents=False)
+        assert (tmp_path / "newdir").is_dir()
