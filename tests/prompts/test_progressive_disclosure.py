@@ -121,7 +121,7 @@ def test_has_summarized_sections_no_summarized() -> None:
 
 
 def test_has_summarized_sections_without_summary_text() -> None:
-    """Returns False when SUMMARY visibility but no summary text."""
+    """Raises when SUMMARY visibility but no summary text."""
     section = _make_section(
         visibility=SectionVisibility.SUMMARY,
         summary=None,
@@ -129,7 +129,10 @@ def test_has_summarized_sections_without_summary_text() -> None:
     registry = _make_registry((section,))
     snapshot = registry.snapshot()
 
-    assert has_summarized_sections(snapshot) is False
+    with pytest.raises(PromptValidationError) as excinfo:
+        has_summarized_sections(snapshot)
+
+    assert "SUMMARY visibility requested" in str(excinfo.value)
 
 
 def test_has_summarized_sections_with_summary_text() -> None:

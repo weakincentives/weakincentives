@@ -22,6 +22,7 @@ from weakincentives.prompt._normalization import (
     COMPONENT_KEY_PATTERN,
     normalize_component_key,
 )
+from weakincentives.prompt.errors import PromptValidationError
 
 
 @dataclass
@@ -149,16 +150,18 @@ def test_section_effective_visibility_returns_override_when_provided() -> None:
     )
 
 
-def test_section_effective_visibility_fallback_to_full_without_summary() -> None:
+def test_section_effective_visibility_raises_when_summary_without_template() -> None:
     section = PlainSection(title="No Summary", key="no-summary")
 
     # Default is FULL when no summary
     assert section.effective_visibility() == SectionVisibility.FULL
-    # Falls back to FULL when requesting SUMMARY but no summary is set
-    assert (
+
+    # Raises when requesting SUMMARY but no summary is set
+    with pytest.raises(PromptValidationError) as excinfo:
         section.effective_visibility(override=SectionVisibility.SUMMARY)
-        == SectionVisibility.FULL
-    )
+
+    assert "SUMMARY visibility requested" in str(excinfo.value)
+    assert "no-summary" in str(excinfo.value)
 
 
 def test_section_visibility_callable_receives_params() -> None:

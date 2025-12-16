@@ -34,7 +34,7 @@ from ._visibility import (
     VisibilitySelector,
     normalize_visibility_selector,
 )
-from .errors import SectionPath
+from .errors import PromptValidationError, SectionPath
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -181,9 +181,11 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             path: Section path used to look up session-based overrides.
 
         Returns:
-            The effective visibility to use. If no summary is available and
-            SUMMARY visibility is requested, FULL visibility is used as a
-            fallback.
+            The effective visibility to use.
+
+        Raises:
+            PromptValidationError: If SUMMARY visibility is requested but no
+                summary template is defined for this section.
         """
         visibility = override
 
@@ -197,9 +199,13 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         if visibility is None:
             visibility = self._visibility(params, session)
 
-        # SUMMARY falls back to FULL if no summary template
+        # Raise if SUMMARY requested but no summary template
         if visibility == SectionVisibility.SUMMARY and self.summary is None:
-            return SectionVisibility.FULL
+            msg = (
+                f"SUMMARY visibility requested for section '{self.key}' "
+                "but no summary template is defined."
+            )
+            raise PromptValidationError(msg, section_path=path)
         return visibility
 
     @staticmethod
