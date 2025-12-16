@@ -22,8 +22,7 @@ from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from ..budget import BudgetTracker
-    from ..runtime.events._types import EventBus
+    from ..budget import Budget, BudgetTracker
     from ..runtime.session.protocols import SessionProtocol
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
@@ -74,7 +73,11 @@ class RenderedPromptProtocol(Protocol[RenderedOutputT]):
 
 
 class PromptTemplateProtocol(Protocol[TemplateOutputT]):
-    """Interface describing the subset of prompt template state exposed to tools."""
+    """Interface describing the subset of prompt template state exposed to tools.
+
+    Note: PromptTemplate does NOT have a render() method. Rendering is performed
+    by creating a Prompt wrapper around the template and calling Prompt.render().
+    """
 
     ns: str
     key: str
@@ -87,13 +90,6 @@ class PromptTemplateProtocol(Protocol[TemplateOutputT]):
     def structured_output(
         self,
     ) -> StructuredOutputConfig[SupportsDataclass] | None: ...
-
-    def render(
-        self,
-        *params: SupportsDataclass,
-        overrides_store: PromptOverridesStore | None = None,
-        tag: str = "latest",
-    ) -> RenderedPromptProtocol[TemplateOutputT]: ...
 
 
 class PromptProtocol(Protocol[PromptOutputT]):
@@ -124,15 +120,18 @@ class PromptProtocol(Protocol[PromptOutputT]):
 
 
 class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
-    """Interface describing the subset of adapter behaviour required by tools."""
+    """Interface describing the subset of adapter behaviour required by tools.
+
+    Telemetry is published via session.event_bus, not a separate bus parameter.
+    """
 
     def evaluate(
         self,
         prompt: PromptProtocol[AdapterOutputT],
         *,
-        bus: EventBus,
         session: SessionProtocol,
         deadline: Deadline | None = None,
+        budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponseProtocol[AdapterOutputT]: ...
 
