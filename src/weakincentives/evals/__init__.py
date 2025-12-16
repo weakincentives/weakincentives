@@ -15,7 +15,7 @@
 This module provides a minimal evaluation framework built on MainLoop.
 MainLoop handles orchestration; this module adds datasets and scoring.
 
-Basic usage::
+Basic usage with ``run_eval`` (simple, synchronous)::
 
     from weakincentives.evals import Sample, run_eval, exact_match, load_jsonl
 
@@ -31,6 +31,19 @@ Basic usage::
     # Run evaluation
     report = run_eval(loop, dataset, exact_match)
     print(f"Pass rate: {report.pass_rate:.1%}")
+
+Event-driven usage with ``EvalLoop`` (for cluster deployment)::
+
+    from weakincentives.evals import EvalLoop, EvalLoopRequest, EvalLoopCompleted
+
+    # Create EvalLoop with MainLoop, evaluator, and bus
+    eval_loop = EvalLoop(loop=main_loop, evaluator=exact_match, bus=bus)
+
+    # Subscribe to completion events
+    bus.subscribe(EvalLoopCompleted, handle_completed)
+
+    # Submit evaluation request via bus
+    bus.publish(EvalLoopRequest(dataset=dataset))
 
 LLM-as-judge for subjective criteria::
 
@@ -58,6 +71,13 @@ from ._types import (
     Score,
 )
 from .dataset import load_jsonl
+from .eval_loop import (
+    EvalLoop,
+    EvalLoopCompleted,
+    EvalLoopConfig,
+    EvalLoopFailed,
+    EvalLoopRequest,
+)
 from .evaluators import (
     all_of,
     any_of,
@@ -73,6 +93,11 @@ __all__ = [
     "JUDGE_TEMPLATE",
     "PASSING_RATINGS",
     "RATING_VALUES",
+    "EvalLoop",
+    "EvalLoopCompleted",
+    "EvalLoopConfig",
+    "EvalLoopFailed",
+    "EvalLoopRequest",
     "EvalReport",
     "EvalResult",
     "Evaluator",

@@ -10,7 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Evaluation runner."""
+"""Evaluation runner convenience function.
+
+For full event-driven control, use EvalLoop directly. This module provides
+a simpler run_eval function for basic use cases.
+"""
 
 from __future__ import annotations
 
@@ -33,6 +37,9 @@ def run_eval[I, O, E](
     bus: EventBus | None = None,
 ) -> EvalReport:
     """Run evaluation using MainLoop.
+
+    This is a convenience function for simple evaluation runs. For event-driven
+    execution with request/response patterns, use ``EvalLoop`` directly.
 
     For each sample in the dataset:
     1. Execute the sample input through MainLoop

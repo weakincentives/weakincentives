@@ -26,9 +26,26 @@ report = run_eval(loop, dataset, exact_match)
 print(f"Pass rate: {report.pass_rate:.1%}")
 ```
 
+Event-driven usage with `EvalLoop` (for cluster deployment):
+
+```python
+from weakincentives.evals import EvalLoop, EvalLoopRequest, EvalLoopCompleted
+
+# Create EvalLoop with MainLoop, evaluator, and bus
+eval_loop = EvalLoop(loop=main_loop, evaluator=exact_match, bus=bus)
+
+# Subscribe to completion events
+bus.subscribe(EvalLoopCompleted, handle_completed)
+
+# Submit evaluation request via bus
+bus.publish(EvalLoopRequest(dataset=dataset))
+```
+
 Features:
 
 - **Core types**: `Sample`, `Score`, `EvalResult`, `EvalReport`
+- **Event-driven orchestration**: `EvalLoop` mirrors `MainLoop` for cluster deployment
+- **Request/response events**: `EvalLoopRequest`, `EvalLoopCompleted`, `EvalLoopFailed`
 - **Built-in evaluators**: `exact_match`, `contains`, `all_of`, `any_of`
 - **Custom evaluators**: `within_tolerance`, `json_subset`
 - **JSONL loading**: `load_jsonl` for loading datasets from files
