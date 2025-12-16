@@ -21,7 +21,6 @@ from typing import cast
 import pytest
 
 from weakincentives.adapters import OpenAIClientConfig, OpenAIModelConfig
-from weakincentives.adapters.core import SessionProtocol
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt import (
     MarkdownSection,
@@ -32,7 +31,7 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.runtime.events import PromptExecuted
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.session import Session, SessionProtocol
 
 pytest.importorskip("openai")
 

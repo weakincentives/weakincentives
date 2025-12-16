@@ -31,7 +31,6 @@ from .core import (
     PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
-    SessionProtocol,
 )
 from .shared import ThrottleError, ThrottlePolicy, new_throttle_policy
 
@@ -48,7 +47,6 @@ __all__ = [
     "PromptEvaluationError",
     "PromptResponse",
     "ProviderAdapter",
-    "SessionProtocol",
     "ThrottleError",
     "ThrottlePolicy",
     "new_throttle_policy",
