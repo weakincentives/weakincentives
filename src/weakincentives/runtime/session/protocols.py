@@ -65,10 +65,6 @@ class SessionProtocol(Protocol):
     @property
     def event_bus(self) -> TelemetryBus: ...
 
-    def select_all(
-        self, slice_type: type[SupportsDataclass]
-    ) -> tuple[SupportsDataclass, ...]: ...
-
     def observe[T: SupportsDataclass](
         self,
         slice_type: type[T],

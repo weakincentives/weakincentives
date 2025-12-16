@@ -28,9 +28,9 @@ flowchart TB
     end
 
     subgraph Query["Query API"]
-        Select["select_all()"]
-        QueryBuilder["query().latest()"]
-        QueryFilter["query().where()"]
+        All["[Slice].all()"]
+        Latest["[Slice].latest()"]
+        Where["[Slice].where()"]
     end
 
     subgraph Mutate["Mutation API"]
@@ -74,9 +74,7 @@ class Session:
     @property
     def tags(self) -> Mapping[str, str]: ...
 
-    def select_all[S](self, slice_type: type[S]) -> tuple[S, ...]: ...
-
-    def query[T](self, slice_type: type[T]) -> QueryBuilder[T]: ...
+    def __getitem__[T](self, slice_type: type[T]) -> SliceAccessor[T]: ...
 
     def mutate[T](self, slice_type: type[T]) -> MutationBuilder[T]: ...
     def mutate(self) -> GlobalMutationBuilder: ...

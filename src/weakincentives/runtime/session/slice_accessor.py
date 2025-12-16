@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 class _SliceAccessorProvider(Protocol):
     """Protocol for objects that support slice access with targeted dispatch."""
 
-    def select_all[S: SupportsDataclass](
+    def _select_all[S: SupportsDataclass](
         self, slice_type: type[S]
     ) -> tuple[S, ...]: ...
 
@@ -110,12 +110,12 @@ class SliceAccessor[T: SupportsDataclass]:
     @pure
     def all(self) -> tuple[T, ...]:
         """Return the entire slice for the provided type."""
-        return self._provider.select_all(self._slice_type)
+        return self._provider._select_all(self._slice_type)
 
     @pure
     def latest(self) -> T | None:
         """Return the most recent item in the slice, if any."""
-        values = self._provider.select_all(self._slice_type)
+        values = self._provider._select_all(self._slice_type)
         if not values:
             return None
         return values[-1]
@@ -125,7 +125,7 @@ class SliceAccessor[T: SupportsDataclass]:
         """Return items that satisfy the predicate."""
         return tuple(
             value
-            for value in self._provider.select_all(self._slice_type)
+            for value in self._provider._select_all(self._slice_type)
             if predicate(value)
         )
 
