@@ -26,7 +26,7 @@ from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import PromptRenderError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
-from ...runtime.session import Session, reducer
+from ...runtime.session import Session, reducer, replace_latest
 from ._context import ensure_context_uses_session
 
 PlanStatus = Literal["active", "completed"]
@@ -285,6 +285,8 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             Plan,
             initial=lambda: Plan(objective="", status="active", steps=()),
         )
+        # Register replace_latest for Plan type itself (when returned from tools)
+        session.mutate(Plan).register(Plan, replace_latest)
 
     @override
     def clone(self, **kwargs: object) -> PlanningToolsSection:

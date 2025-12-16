@@ -111,7 +111,7 @@ def reducer(
 
 Built-in reducers:
 
-- `append` - Default, dedupes by equality
+- `append_all` - Ledger semantics, always appends (default for all slices)
 - `upsert_by(key_fn)` - Replaces items with matching key
 - `replace_latest` - Stores only the most recent value
 - `replace_latest_by(key_fn)` - Like `replace_latest` but keyed
@@ -337,9 +337,9 @@ Use `@reducer` methods when:
 - **Complex transformations** - Reducers need access to slice state to compute updates
 - **Domain modeling** - The slice represents a domain concept with defined behaviors
 
-Use built-in reducers (`append`, `replace_latest`, etc.) when:
+Use built-in reducers (`append_all`, `replace_latest`, etc.) when:
 
-- **Simple accumulation** - Just collecting items without transformation (`append`)
+- **Event ledgers** - Recording every event unconditionally (`append_all`)
 - **Latest-wins semantics** - Only the most recent value matters (`replace_latest`)
 - **Key-based updates** - Upserting by a derived key (`upsert_by`, `replace_latest_by`)
 
@@ -354,8 +354,8 @@ class Plan:
         # Complex logic: find step, update status, check completion
         ...
 
-# Good fit for built-in: simple accumulation
-session.mutate(Notification).register(Notification, append)
+# Good fit for built-in: event stream / ledger (default for all slices)
+session.mutate(ToolInvoked).register(ToolInvoked, append_all)
 
 # Good fit for built-in: latest value only
 session.mutate(PodmanWorkspace).register(PodmanWorkspace, replace_latest)

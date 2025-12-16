@@ -24,7 +24,7 @@ from ...prompt.errors import VisibilityExpansionRequired
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
-from ...runtime.session import append
+from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol
 from ...serde import parse, schema
 from .._names import AdapterName
@@ -238,7 +238,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
 
         # Register Notification reducer if not already registered
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         hook_context = HookContext(
             session=session,

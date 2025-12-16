@@ -23,7 +23,12 @@ from .mutation import GlobalMutationBuilder, MutationBuilder
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
 from .reducer_context import ReducerContext, build_reducer_context
-from .reducers import append, replace_latest, replace_latest_by, upsert_by
+from .reducers import (
+    append_all,
+    replace_latest,
+    replace_latest_by,
+    upsert_by,
+)
 from .session import DataEvent, Session, iter_sessions_bottom_up
 from .snapshots import (
     Snapshot,
@@ -55,7 +60,7 @@ __all__ = [
     "SnapshotSerializationError",
     "Subscription",
     "TypedReducer",
-    "append",
+    "append_all",
     "build_reducer_context",
     "install_state_slice",
     "iter_sessions_bottom_up",
