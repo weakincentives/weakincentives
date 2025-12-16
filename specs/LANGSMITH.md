@@ -403,23 +403,94 @@ logic above.
 
 ### Recommended Configuration
 
+For most use cases, use both integrations with WINK tool tracing disabled:
+
 ```python
 from langsmith.integrations.claude_agent_sdk import configure_claude_agent_sdk
-from weakincentives.contrib.langsmith import configure_wink, LangSmithConfig
+from weakincentives.contrib.langsmith import configure_wink
 
-# Option 1: WINK-only tracing (full control)
-configure_wink(
-    project="my-agent",
-    trace_native_tools=True,  # Include Claude Code native tools
-)
-
-# Option 2: Combined tracing (richest traces)
 configure_claude_agent_sdk()  # Detailed Claude SDK internals
 configure_wink(
     project="my-agent",
-    trace_native_tools=False,  # Avoid duplication
+    trace_native_tools=False,  # Let Claude SDK handle tool tracing
 )
 ```
+
+### Trace Context Correlation
+
+**Critical**: For traces to appear unified in LangSmith, both integrations must
+share the same trace context. WINK achieves this by setting up the LangSmith
+run context before invoking the Claude Agent SDK:
+
+```mermaid
+sequenceDiagram
+    participant W as WINK Telemetry
+    participant C as ContextVar
+    participant S as Claude SDK
+    participant L as LangSmith
+
+    W->>L: Create chain run (PromptRendered)
+    L-->>W: run_id, trace_id
+    W->>C: Set run context (parent_run_id)
+    W->>S: adapter.evaluate() → sdk.query()
+    S->>C: Read parent context
+    S->>L: Create LLM run (parent=chain run)
+    S->>L: Create tool runs (parent=LLM run)
+    W->>L: Update chain run (PromptExecuted)
+```
+
+**Implementation:**
+
+```python
+class LangSmithTelemetryHandler:
+    def _on_prompt_rendered(self, event: PromptRendered) -> None:
+        # Create parent run
+        run = self._client.create_run(
+            name=event.prompt_name,
+            run_type="chain",
+            inputs={"rendered_prompt": event.rendered_prompt},
+        )
+
+        # Set context so Claude SDK integration inherits this parent
+        langsmith_context.set_parent_run(run.id, run.trace_id)
+
+        # Store for later update
+        self._active_runs[event.session_id] = run
+```
+
+The `langsmith` SDK uses `contextvars` for trace propagation. As long as WINK
+sets the parent context before `sdk.query()` is called, all Claude SDK traces
+automatically nest under the WINK chain run.
+
+**Resulting Unified Trace:**
+
+```
+my_prompt (chain) ← WINK
+  ├─ claude-sdk-query (llm) ← Claude SDK
+  │   ├─ Read (tool) ← Claude SDK
+  │   ├─ Write (tool) ← Claude SDK
+  │   └─ Bash (tool) ← Claude SDK
+  └─ [completion metadata] ← WINK (PromptExecuted)
+```
+
+**Session ID Propagation:**
+
+WINK's `session_id` is included as metadata on all runs:
+
+```python
+run = self._client.create_run(
+    name=event.prompt_name,
+    run_type="chain",
+    metadata={
+        "wink_session_id": str(event.session_id),
+        "prompt_ns": event.prompt_ns,
+        "prompt_key": event.prompt_key,
+    },
+)
+```
+
+This enables querying all runs for a session in LangSmith:
+`metadata.wink_session_id = "uuid-here"`
 
 ### Isolation and Tracing
 
