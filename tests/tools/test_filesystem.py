@@ -22,10 +22,10 @@ from weakincentives.contrib.tools.filesystem import (
     READ_ENTIRE_FILE,
     FileEntry,
     FileStat,
-    GlobMatch,
-    GrepMatch,
     HostFilesystem,
     InMemoryFilesystem,
+    ProtocolGlobMatch,
+    ProtocolGrepMatch,
     ReadResult,
     WriteResult,
 )
@@ -432,12 +432,12 @@ class TestDataclassRendering:
         assert "file.txt" in rendered
 
     def test_glob_match_str(self) -> None:
-        match = GlobMatch(path="file.txt", is_file=True)
+        match = ProtocolGlobMatch(path="file.txt", is_file=True)
         rendered = str(match)
         assert "file.txt" in rendered
 
     def test_grep_match_str(self) -> None:
-        match = GrepMatch(
+        match = ProtocolGrepMatch(
             path="file.txt",
             line_number=1,
             line_content="hello world",

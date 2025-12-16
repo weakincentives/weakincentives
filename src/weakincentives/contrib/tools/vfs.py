@@ -21,18 +21,29 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Final, Literal, cast, override
+from typing import Final, cast, override
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Session
-from ...types import SupportsDataclass, SupportsToolResult
-from .filesystem import READ_ENTIRE_FILE, Filesystem, InMemoryFilesystem
-
-FileEncoding = Literal["utf-8"]
-WriteMode = Literal["create", "overwrite", "append"]
+from .filesystem import (
+    READ_ENTIRE_FILE,
+    DeleteEntry,
+    FileEncoding,
+    FileInfo,
+    Filesystem,
+    GlobMatch,
+    GrepMatch,
+    InMemoryFilesystem,
+    ReadFileResult,
+    VfsFile,
+    VfsPath,
+    WriteFile,
+    WriteMode,
+    format_path,
+)
 
 _ASCII: Final[str] = "ascii"
 _DEFAULT_ENCODING: Final[FileEncoding] = "utf-8"
@@ -56,268 +67,9 @@ _VFS_SECTION_TEMPLATE: Final[str] = (
 )
 
 
-@FrozenDataclass()
-class VfsPath:
-    """Relative POSIX-style path representation."""
-
-    segments: tuple[str, ...] = field(
-        metadata={
-            "description": (
-                "Ordered path segments. Values must be relative, ASCII-only, and "
-                "free of '.' or '..'."
-            )
-        }
-    )
-
-
-@FrozenDataclass()
-class VfsFile:
-    """Snapshot of a single file stored in the virtual filesystem."""
-
-    path: VfsPath = field(
-        metadata={"description": "Location of the file within the virtual filesystem."}
-    )
-    content: str = field(
-        metadata={
-            "description": (
-                "UTF-8 text content of the file. Binary data is not supported."
-            )
-        }
-    )
-    encoding: FileEncoding = field(
-        metadata={"description": "Name of the codec used to decode the file contents."}
-    )
-    size_bytes: int = field(
-        metadata={"description": "Size of the encoded file on disk, in bytes."}
-    )
-    version: int = field(
-        metadata={
-            "description": (
-                "Monotonic version counter that increments after each write."
-            )
-        }
-    )
-    created_at: datetime = field(
-        metadata={
-            "description": "Timestamp indicating when the file was first created."
-        }
-    )
-    updated_at: datetime = field(
-        metadata={"description": "Timestamp of the most recent write operation."}
-    )
-
-
-@FrozenDataclass()
-class WriteFile:
-    """Result of a file write operation."""
-
-    path: VfsPath = field(
-        metadata={"description": "Destination file path being written inside the VFS."}
-    )
-    content: str = field(
-        metadata={
-            "description": (
-                "UTF-8 payload that will be persisted to the target file after validation."
-            )
-        }
-    )
-    mode: WriteMode = field(
-        default="create",
-        metadata={
-            "description": (
-                "Write strategy describing whether the file is newly created, overwritten, or appended."
-            )
-        },
-    )
-    encoding: FileEncoding = field(
-        default=_DEFAULT_ENCODING,
-        metadata={
-            "description": (
-                "Codec used to encode the content when persisting it to the virtual filesystem."
-            )
-        },
-    )
-
-    def render(self) -> str:
-        path_label = _format_path(self.path)
-        byte_count = len(self.content.encode(self.encoding))
-        header = (
-            f"{path_label} - mode {self.mode}, {byte_count} bytes ({self.encoding})"
-        )
-        body = self.content or "<empty>"
-        return f"{header}\n\n{body}"
-
-
-@FrozenDataclass()
-class DeleteEntry:
-    """Result of a file/directory deletion."""
-
-    path: VfsPath = field(
-        metadata={
-            "description": "Path of the file or directory slated for removal from the VFS."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = _format_path(self.path)
-        return f"Removed entries under {path_label}"
-
-
-@FrozenDataclass()
-class FileInfo:
-    """Metadata describing a directory entry."""
-
-    path: VfsPath = field(
-        metadata={"description": "Normalized VFS path referencing the directory entry."}
-    )
-    kind: Literal["file", "directory"] = field(
-        metadata={
-            "description": (
-                "Entry type; directories surface nested paths while files carry metadata."
-            )
-        }
-    )
-    size_bytes: int | None = field(
-        default=None,
-        metadata={
-            "description": (
-                "On-disk size for files. Directories omit sizes to avoid redundant traversal."
-            )
-        },
-    )
-    version: int | None = field(
-        default=None,
-        metadata={
-            "description": (
-                "Monotonic file version propagated from the VFS snapshot. Directories omit versions."
-            )
-        },
-    )
-    updated_at: datetime | None = field(
-        default=None,
-        metadata={
-            "description": (
-                "Timestamp describing the most recent mutation for files; directories omit the value."
-            )
-        },
-    )
-
-    def render(self) -> str:
-        path_label = _format_path(self.path)
-        if self.kind == "directory":
-            directory_label = path_label if path_label == "/" else f"{path_label}/"
-            return f"DIR  {directory_label}"
-        size_label = "size ?"
-        if self.size_bytes is not None:
-            size_label = f"{self.size_bytes} B"
-        version_label = "v?" if self.version is None else f"v{self.version}"
-        updated_label = _format_timestamp(self.updated_at)
-        return (
-            f"FILE {path_label} ("
-            f"{size_label}, {version_label}, updated {updated_label})"
-        )
-
-
-@FrozenDataclass()
-class ReadFileResult:
-    """Payload returned from :func:`read_file`."""
-
-    path: VfsPath = field(
-        metadata={"description": "Path of the file that was read inside the VFS."}
-    )
-    content: str = field(
-        metadata={
-            "description": (
-                "Formatted slice of the file contents with line numbers applied for clarity."
-            )
-        }
-    )
-    offset: int = field(
-        metadata={
-            "description": (
-                "Zero-based line offset applied to the read window after normalization."
-            )
-        }
-    )
-    limit: int = field(
-        metadata={
-            "description": (
-                "Maximum number of lines returned in this response after clamping to file length."
-            )
-        }
-    )
-    total_lines: int = field(
-        metadata={
-            "description": "Total line count of the file so callers can paginate follow-up reads."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = _format_path(self.path)
-        if self.limit == 0:
-            window = "no lines returned"
-        else:
-            end_line = self.offset + self.limit
-            window = f"lines {self.offset + 1}-{end_line}"
-        header = f"{path_label} - {window} of {self.total_lines}"
-        body = self.content or "<empty>"
-        return f"{header}\n\n{body}"
-
-
-@FrozenDataclass()
-class GlobMatch:
-    """Match returned by the :func:`glob` tool."""
-
-    path: VfsPath = field(
-        metadata={"description": "Path of the file or directory that matched the glob."}
-    )
-    size_bytes: int = field(
-        metadata={
-            "description": (
-                "File size in bytes captured at snapshot time to help prioritize large assets."
-            )
-        }
-    )
-    version: int = field(
-        metadata={
-            "description": "Monotonic VFS version counter reflecting the latest write to the entry."
-        }
-    )
-    updated_at: datetime = field(
-        metadata={
-            "description": "Timestamp from the snapshot identifying when the entry last changed."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = _format_path(self.path)
-        timestamp = _format_timestamp(self.updated_at)
-        return (
-            f"{path_label} - {self.size_bytes} B, v{self.version}, updated {timestamp}"
-        )
-
-
-@FrozenDataclass()
-class GrepMatch:
-    """Regex match returned by :func:`grep`."""
-
-    path: VfsPath = field(
-        metadata={
-            "description": "Path of the file containing the regex hit, normalized to the VFS."
-        }
-    )
-    line_number: int = field(
-        metadata={"description": "One-based line number where the regex matched."}
-    )
-    line: str = field(
-        metadata={
-            "description": "Full line content containing the match so callers can review context."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = _format_path(self.path)
-        return f"{path_label}:{self.line_number}: {self.line}"
+# Type definitions for VfsPath, VfsFile, WriteFile, DeleteEntry, FileInfo,
+# ReadFileResult, GlobMatch, GrepMatch have been moved to filesystem.py
+# and are now imported from there.
 
 
 @FrozenDataclass()
@@ -1197,7 +949,7 @@ def _ensure_ascii(value: str, field: str) -> None:
 def _format_directory_message(path: VfsPath, entries: Sequence[FileInfo]) -> str:
     directory_count = sum(1 for entry in entries if entry.kind == "directory")
     file_count = sum(1 for entry in entries if entry.kind == "file")
-    prefix = _format_path(path)
+    prefix = format_path(path)
     subdir_label = "subdir" if directory_count == 1 else "subdirs"
     file_label = "file" if file_count == 1 else "files"
     return (
@@ -1207,14 +959,14 @@ def _format_directory_message(path: VfsPath, entries: Sequence[FileInfo]) -> str
 
 
 def _format_read_file_message_from_result(path: VfsPath, start: int, end: int) -> str:
-    path_label = _format_path(path)
+    path_label = format_path(path)
     if start == end:
         return f"Read file {path_label} (no lines returned)."
     return f"Read file {path_label} (lines {start + 1}-{end})."
 
 
 def _format_write_file_message(path: VfsPath, content: str, mode: WriteMode) -> str:
-    path_label = _format_path(path)
+    path_label = format_path(path)
     action = {
         "create": "Created",
         "overwrite": "Updated",
@@ -1225,7 +977,7 @@ def _format_write_file_message(path: VfsPath, content: str, mode: WriteMode) -> 
 
 
 def _format_edit_message(path: VfsPath, replacements: int) -> str:
-    path_label = _format_path(path)
+    path_label = format_path(path)
     label = "occurrence" if replacements == 1 else "occurrences"
     return f"Replaced {replacements} {label} in {path_label}."
 
@@ -1233,7 +985,7 @@ def _format_edit_message(path: VfsPath, replacements: int) -> str:
 def _format_glob_message(
     base: VfsPath, pattern: str, matches: Sequence[GlobMatch]
 ) -> str:
-    path_label = _format_path(base)
+    path_label = format_path(base)
     match_label = "match" if len(matches) == 1 else "matches"
     return f"Found {len(matches)} {match_label} under {path_label} for pattern '{pattern}'."
 
@@ -1244,20 +996,12 @@ def _format_grep_message(pattern: str, matches: Sequence[GrepMatch]) -> str:
 
 
 def _format_delete_message_count(path: VfsPath, count: int) -> str:
-    path_label = _format_path(path)
+    path_label = format_path(path)
     entry_label = "entry" if count == 1 else "entries"
     return f"Deleted {count} {entry_label} under {path_label}."
 
 
-def _format_path(path: VfsPath) -> str:
-    return "/".join(path.segments) or "/"
-
-
-def _format_timestamp(value: datetime | None) -> str:
-    if value is None:
-        return "-"
-    aware = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-    return aware.isoformat()
+# format_path and format_timestamp helper functions are imported from filesystem.py
 
 
 def normalize_host_root(path: os.PathLike[str] | str) -> Path:
@@ -1289,7 +1033,7 @@ def render_host_mounts_block(previews: Sequence[HostMountPreview]) -> str:
 
     lines: list[str] = ["Configured host mounts:"]
     for preview in previews:
-        mount_label = _format_path(preview.mount_path)
+        mount_label = format_path(preview.mount_path)
         resolved_label = str(preview.resolved_host)
         lines.append(
             f"- Host `{resolved_label}` (configured as `{preview.host_path}`) mounted at `{mount_label}`."

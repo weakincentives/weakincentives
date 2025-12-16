@@ -56,14 +56,24 @@ from .digests import (
 )
 from .filesystem import (
     READ_ENTIRE_FILE,
+    DeleteEntry,
+    FileEncoding,
     FileEntry,
+    FileInfo,
     FileStat,
     Filesystem,
-    GlobMatch as FilesystemGlobMatch,
-    GrepMatch as FilesystemGrepMatch,
+    GlobMatch,
+    GrepMatch,
     HostFilesystem,
     InMemoryFilesystem,
+    ProtocolGlobMatch,
+    ProtocolGrepMatch,
+    ReadFileResult,
     ReadResult,
+    VfsFile,
+    VfsPath,
+    WriteFile,
+    WriteMode,
     WriteResult,
 )
 from .planning import (
@@ -79,12 +89,8 @@ from .planning import (
     UpdateStep,
 )
 from .vfs import (
-    DeleteEntry,
     EditFileParams,
-    FileInfo,
-    GlobMatch,
     GlobParams,
-    GrepMatch,
     GrepParams,
     HostMount,
     ListDirectory,
@@ -92,12 +98,8 @@ from .vfs import (
     ListDirectoryResult,
     ReadFile,
     ReadFileParams,
-    ReadFileResult,
     RemoveParams,
-    VfsFile,
-    VfsPath,
     VfsToolsSection,
-    WriteFile,
     WriteFileParams,
 )
 from .workspace import WorkspaceSection
@@ -109,9 +111,7 @@ PodmanShellResult: Any
 PodmanWorkspace: Any
 
 __all__ = [
-    # Constants (SCREAMING_SNAKE_CASE)
     "READ_ENTIRE_FILE",
-    # Classes and types (CamelCase)
     "AddStep",
     "AstevalSection",
     "DeleteEntry",
@@ -120,12 +120,11 @@ __all__ = [
     "EvalFileWrite",
     "EvalParams",
     "EvalResult",
+    "FileEncoding",
     "FileEntry",
     "FileInfo",
     "FileStat",
     "Filesystem",
-    "FilesystemGlobMatch",
-    "FilesystemGrepMatch",
     "GlobMatch",
     "GlobParams",
     "GrepMatch",
@@ -146,6 +145,8 @@ __all__ = [
     "PodmanShellParams",
     "PodmanShellResult",
     "PodmanWorkspace",
+    "ProtocolGlobMatch",
+    "ProtocolGrepMatch",
     "ReadFile",
     "ReadFileParams",
     "ReadFileResult",
@@ -163,8 +164,8 @@ __all__ = [
     "WorkspaceSection",
     "WriteFile",
     "WriteFileParams",
+    "WriteMode",
     "WriteResult",
-    # Functions (snake_case)
     "clear_workspace_digest",
     "latest_workspace_digest",
     "set_workspace_digest",

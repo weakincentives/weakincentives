@@ -45,6 +45,7 @@ from weakincentives.contrib.tools import (
     WriteFile,
     WriteFileParams,
 )
+from weakincentives.contrib.tools.filesystem import format_timestamp
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
@@ -148,9 +149,9 @@ def test_delete_entry_render_mentions_path() -> None:
 def test_format_timestamp_helper_and_write_render() -> None:
     naive = datetime(2024, 1, 1, 12, 0, 0)
     aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
-    assert vfs_module._format_timestamp(naive).endswith("+00:00")
-    assert vfs_module._format_timestamp(aware).endswith("+00:00")
-    assert vfs_module._format_timestamp(None) == "-"
+    assert format_timestamp(naive).endswith("+00:00")
+    assert format_timestamp(aware).endswith("+00:00")
+    assert format_timestamp(None) == "-"
 
     write = WriteFile(
         path=VfsPath(("docs", "notes.txt")), content="full content", mode="create"
