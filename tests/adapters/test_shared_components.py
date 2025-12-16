@@ -31,11 +31,11 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.adapters.shared import (
     ResponseParser,
-    ToolExecutionContext,
     ToolExecutionOutcome,
     ToolExecutor,
     _parse_tool_params,
     _publish_tool_invocation,
+    _ToolExecutionContext,
     parse_tool_arguments,
     tool_to_spec,
 )
@@ -215,7 +215,7 @@ def test_publish_tool_invocation_attaches_usage() -> None:
         tool.name: typed_tool
     }
 
-    context = ToolExecutionContext(
+    context = _ToolExecutionContext(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[Any], object()),
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
