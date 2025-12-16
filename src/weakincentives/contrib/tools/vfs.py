@@ -805,7 +805,8 @@ class FilesystemToolHandlers:
         path_str = "/".join(path.segments)
 
         try:
-            read_result = self._fs.read(path_str)
+            # Read entire file to avoid truncation (limit=-1)
+            read_result = self._fs.read(path_str, limit=-1)
         except FileNotFoundError:
             raise ToolValidationError(
                 "File does not exist in the filesystem."

@@ -137,7 +137,8 @@ class Filesystem(Protocol):
         Args:
             path: Relative path from workspace root.
             offset: Line number to start reading (0-indexed).
-            limit: Maximum lines to return. None means backend default.
+            limit: Maximum lines to return. None means backend default (2000).
+                Use -1 to read entire file without truncation.
             encoding: Text encoding. Only "utf-8" is guaranteed.
 
         Raises:
@@ -418,7 +419,11 @@ class InMemoryFilesystem:
         lines = file.content.splitlines(keepends=True)
         total_lines = len(lines)
 
-        actual_limit = limit if limit is not None else _DEFAULT_READ_LIMIT
+        # limit=-1 means read entire file; None uses default window
+        if limit is not None and limit < 0:
+            actual_limit = total_lines
+        else:
+            actual_limit = limit if limit is not None else _DEFAULT_READ_LIMIT
         start = min(offset, total_lines)
         end = min(start + actual_limit, total_lines)
         selected_lines = lines[start:end]
@@ -823,7 +828,11 @@ class HostFilesystem:
             lines = f.readlines()
 
         total_lines = len(lines)
-        actual_limit = limit if limit is not None else _DEFAULT_READ_LIMIT
+        # limit=-1 means read entire file; None uses default window
+        if limit is not None and limit < 0:
+            actual_limit = total_lines
+        else:
+            actual_limit = limit if limit is not None else _DEFAULT_READ_LIMIT
         start = min(offset, total_lines)
         end = min(start + actual_limit, total_lines)
         selected_lines = lines[start:end]

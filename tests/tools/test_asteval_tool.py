@@ -270,6 +270,32 @@ def test_helper_write_appends() -> None:
     assert files["logs", "activity.log"] == "started-continued"
 
 
+def test_helper_write_append_preserves_content_beyond_default_read_limit() -> None:
+    """Test that append mode doesn't truncate files with more than 2000 lines."""
+    session, vfs_section, tool = _setup_sections()
+    fs = vfs_section.filesystem
+
+    # Create a large file with more than 2000 lines
+    lines = [f"line{i}" for i in range(2500)]
+    initial_content = "\n".join(lines)
+    fs.write("big.txt", initial_content, mode="create")
+
+    # Append to it
+    params = EvalParams(
+        code="write_text('big.txt', '\\nAPPENDED', mode='append')\n'done'",
+    )
+    result = invoke_tool(tool, params, session=session)
+
+    assert result.value is not None
+    assert result.value.value_repr == "'done'"
+
+    # Verify the file wasn't truncated
+    read_result = fs.read("big.txt", limit=-1)
+    assert "line0" in read_result.content
+    assert "line2499" in read_result.content  # Last original line
+    assert "APPENDED" in read_result.content  # The appended content
+
+
 def test_helper_write_success_reports_pending_writes() -> None:
     session, _vfs_section, tool = _setup_sections()
 

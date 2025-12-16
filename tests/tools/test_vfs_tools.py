@@ -1176,3 +1176,34 @@ def test_edit_file_nonexistent_raises_error() -> None:
             ),
             session=session,
         )
+
+
+def test_edit_file_preserves_content_beyond_default_read_limit() -> None:
+    """Test that edit_file doesn't truncate files with more than 2000 lines."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    fs = section.filesystem
+
+    # Create a file with more than 2000 lines
+    lines = [f"line{i}" for i in range(2500)]
+    content = "\n".join(lines)
+    fs.write("big.txt", content, mode="create")
+
+    # Edit the first line
+    edit_tool = find_tool(section, "edit_file")
+    invoke_tool(
+        edit_tool,
+        EditFileParams(
+            file_path="big.txt",
+            old_string="line0",
+            new_string="MODIFIED",
+        ),
+        session=session,
+    )
+
+    # Verify the edit was applied AND the file wasn't truncated
+    result = fs.read("big.txt", limit=-1)
+    assert "MODIFIED" in result.content
+    assert "line2499" in result.content  # Last line should still be present
+    assert result.total_lines == 2500

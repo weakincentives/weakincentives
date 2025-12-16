@@ -90,6 +90,19 @@ class TestInMemoryFilesystemRead:
         with pytest.raises(IsADirectoryError):
             fs.read("mydir")
 
+    def test_read_negative_limit_reads_entire_file(self) -> None:
+        """Test that limit=-1 reads the entire file without truncation."""
+        fs = InMemoryFilesystem()
+        # Create a file with more than the default 2000 line limit
+        lines = "\n".join([f"line{i}" for i in range(2500)])
+        fs.write("big.txt", lines)
+        result = fs.read("big.txt", limit=-1)
+        assert result.total_lines == 2500
+        assert result.truncated is False
+        # Verify all content is present
+        assert "line0" in result.content
+        assert "line2499" in result.content
+
 
 class TestInMemoryFilesystemWrite:
     """Tests for write operations."""
@@ -514,6 +527,19 @@ class TestHostFilesystemRead:
         fs = HostFilesystem(_root=str(tmp_path))
         with pytest.raises(IsADirectoryError):
             fs.read("mydir")
+
+    def test_read_negative_limit_reads_entire_file(self, tmp_path: Path) -> None:
+        """Test that limit=-1 reads the entire file without truncation."""
+        # Create a file with more than the default 2000 line limit
+        lines = "\n".join([f"line{i}" for i in range(2500)])
+        (tmp_path / "big.txt").write_text(lines)
+        fs = HostFilesystem(_root=str(tmp_path))
+        result = fs.read("big.txt", limit=-1)
+        assert result.total_lines == 2500
+        assert result.truncated is False
+        # Verify all content is present
+        assert "line0" in result.content
+        assert "line2499" in result.content
 
 
 class TestHostFilesystemWrite:

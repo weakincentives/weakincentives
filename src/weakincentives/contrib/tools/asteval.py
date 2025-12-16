@@ -442,8 +442,8 @@ def _apply_writes_to_filesystem(
             continue
 
         if write.mode == "append" and exists:
-            # Read existing content and append
-            result = fs.read(path_str)
+            # Read entire existing content and append (limit=-1 avoids truncation)
+            result = fs.read(path_str, limit=-1)
             content = result.content + write.content
             _ = fs.write(path_str, content, mode="overwrite")
         else:
