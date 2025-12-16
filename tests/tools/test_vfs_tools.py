@@ -35,6 +35,7 @@ from weakincentives.contrib.tools import (
     HostMount,
     InMemoryFilesystem,
     ListDirectoryParams,
+    ListDirectoryResult,
     ReadFileParams,
     ReadFileResult,
     RemoveParams,
@@ -1099,3 +1100,79 @@ def test_clone_preserves_filesystem_state() -> None:
     # Verify the file content is accessible from the cloned section
     result = section2.filesystem.read("myfile.txt")
     assert result.content == "my content"
+
+
+def test_clone_requires_session() -> None:
+    """Test that clone raises error when session is missing."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+
+    with pytest.raises(TypeError, match="session is required to clone"):
+        section.clone()
+
+
+def test_clone_requires_matching_bus() -> None:
+    """Test that clone raises error when bus doesn't match session's bus."""
+    bus1 = InProcessEventBus()
+    session1 = Session(bus=bus1)
+    section = VfsToolsSection(session=session1)
+
+    bus2 = InProcessEventBus()
+    session2 = Session(bus=bus2)
+    bus3 = InProcessEventBus()  # Different bus than session2
+
+    with pytest.raises(TypeError, match="Provided bus must match"):
+        section.clone(session=session2, bus=bus3)
+
+
+def test_list_directory_result_render_formats_output() -> None:
+    """Test that ListDirectoryResult.render() formats output correctly."""
+    path = VfsPath(("subdir",))
+    result = ListDirectoryResult(
+        path=path,
+        directories=("child_dir",),
+        files=("file1.txt", "file2.txt"),
+    )
+    rendered = result.render()
+
+    assert "Directory listing for subdir:" in rendered
+    assert "Directories:" in rendered
+    assert "- child_dir" in rendered
+    assert "Files:" in rendered
+    assert "- file1.txt" in rendered
+    assert "- file2.txt" in rendered
+
+
+def test_list_directory_result_render_empty_entries() -> None:
+    """Test that ListDirectoryResult.render() handles empty entries."""
+    path = VfsPath(())
+    result = ListDirectoryResult(
+        path=path,
+        directories=(),
+        files=(),
+    )
+    rendered = result.render()
+
+    assert "Directory listing for /:" in rendered
+    assert "Directories: <none>" in rendered
+    assert "Files: <none>" in rendered
+
+
+def test_edit_file_nonexistent_raises_error() -> None:
+    """Test that edit_file raises error for non-existent file."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    edit_tool = find_tool(section, "edit_file")
+
+    with pytest.raises(ToolValidationError, match="File does not exist"):
+        invoke_tool(
+            edit_tool,
+            EditFileParams(
+                file_path="nonexistent.txt",
+                old_string="old",
+                new_string="new",
+            ),
+            session=session,
+        )

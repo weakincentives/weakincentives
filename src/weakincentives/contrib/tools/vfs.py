@@ -17,7 +17,7 @@ from __future__ import annotations
 import fnmatch
 import os
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -633,7 +633,9 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         self._mount_previews = mount_previews
         self._session = session
 
-        tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
+        tools = _build_tools(
+            filesystem=self._filesystem, accepts_overrides=accepts_overrides
+        )
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
@@ -672,182 +674,39 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         )
 
 
-def _build_tools(
-    *,
-    section: VfsToolsSection,
-    accepts_overrides: bool,
-) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
-    suite = _VfsToolSuite(section=section)
-    return cast(
-        tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
-        (
-            Tool[ListDirectoryParams, tuple[FileInfo, ...]](
-                name="ls",
-                description="List directory entries under a relative path.",
-                handler=suite.list_directory,
-                accepts_overrides=accepts_overrides,
-                examples=(
-                    ToolExample(
-                        description=(
-                            "List the source directory to see top-level modules."
-                        ),
-                        input=ListDirectoryParams(path="src"),
-                        output=(
-                            FileInfo(
-                                path=VfsPath(("src", "tests")),
-                                kind="directory",
-                            ),
-                            FileInfo(
-                                path=VfsPath(("src", "weakincentives")),
-                                kind="directory",
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            Tool[ReadFileParams, ReadFileResult](
-                name="read_file",
-                description="Read UTF-8 file contents with pagination support.",
-                handler=suite.read_file,
-                accepts_overrides=accepts_overrides,
-                examples=(
-                    ToolExample(
-                        description="Read the repository README header.",
-                        input=ReadFileParams(file_path="README.md", offset=0, limit=2),
-                        output=ReadFileResult(
-                            path=VfsPath(("README.md",)),
-                            content=(
-                                "   1 | # Weak Incentives\n"
-                                "   2 | Open-source agent orchestration platform."
-                            ),
-                            offset=0,
-                            limit=2,
-                            total_lines=120,
-                        ),
-                    ),
-                ),
-            ),
-            Tool[WriteFileParams, WriteFile](
-                name="write_file",
-                description="Create a new UTF-8 text file.",
-                handler=suite.write_file,
-                accepts_overrides=accepts_overrides,
-                examples=(
-                    ToolExample(
-                        description="Create a scratch note in the workspace.",
-                        input=WriteFileParams(
-                            file_path="notes/todo.txt",
-                            content="- Outline VFS design decisions",
-                        ),
-                        output=WriteFile(
-                            path=VfsPath(("notes", "todo.txt")),
-                            content="- Outline VFS design decisions",
-                            mode="create",
-                        ),
-                    ),
-                ),
-            ),
-            Tool[EditFileParams, WriteFile](
-                name="edit_file",
-                description="Replace occurrences of a string within a file.",
-                handler=suite.edit_file,
-                accepts_overrides=accepts_overrides,
-                examples=(
-                    ToolExample(
-                        description="Update a configuration value in place.",
-                        input=EditFileParams(
-                            file_path="src/weakincentives/config.py",
-                            old_string="DEBUG = True",
-                            new_string="DEBUG = False",
-                            replace_all=False,
-                        ),
-                        output=WriteFile(
-                            path=VfsPath(("src", "weakincentives", "config.py")),
-                            content='DEBUG = False\nLOG_LEVEL = "info"',
-                            mode="overwrite",
-                        ),
-                    ),
-                ),
-            ),
-            Tool[GlobParams, tuple[GlobMatch, ...]](
-                name="glob",
-                description="Match files beneath a directory using shell patterns.",
-                handler=suite.glob,
-                accepts_overrides=accepts_overrides,
-                examples=(
-                    ToolExample(
-                        description="Find Python tests under the tests directory.",
-                        input=GlobParams(pattern="**/test_*.py", path="tests"),
-                        output=(
-                            GlobMatch(
-                                path=VfsPath(("tests", "unit", "test_vfs.py")),
-                                size_bytes=2048,
-                                version=3,
-                                updated_at=datetime(2024, 1, 5, tzinfo=UTC),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            Tool[GrepParams, tuple[GrepMatch, ...]](
-                name="grep",
-                description="Search files for a regular expression pattern.",
-                handler=suite.grep,
-                accepts_overrides=accepts_overrides,
-                examples=(
-                    ToolExample(
-                        description="Search for log level constants in config files.",
-                        input=GrepParams(
-                            pattern=r"LOG_LEVEL", path="src/weakincentives"
-                        ),
-                        output=(
-                            GrepMatch(
-                                path=VfsPath(("src", "weakincentives", "config.py")),
-                                line_number=5,
-                                line='LOG_LEVEL = "info"',
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-            Tool[RemoveParams, DeleteEntry](
-                name="rm",
-                description="Remove files or directories recursively.",
-                handler=suite.remove,
-                accepts_overrides=accepts_overrides,
-                examples=(
-                    ToolExample(
-                        description="Delete a temporary build directory.",
-                        input=RemoveParams(path="tmp/build"),
-                        output=DeleteEntry(path=VfsPath(("tmp", "build"))),
-                    ),
-                ),
-            ),
-        ),
-    )
+class FilesystemToolHandlers:
+    """Reusable tool handlers that operate on the Filesystem protocol.
 
+    This class provides handlers for common filesystem operations (ls, read,
+    write, edit, glob, grep, rm) that work with any Filesystem implementation.
 
-class _VfsToolSuite:
-    """Collection of VFS handlers bound to a section instance."""
+    Both VfsToolsSection (InMemoryFilesystem) and PodmanSandboxSection
+    (HostFilesystem) use these handlers to provide consistent file operations.
+    """
 
-    def __init__(self, *, section: VfsToolsSection) -> None:
+    def __init__(
+        self, *, filesystem: Filesystem, clock: Callable[[], datetime] | None = None
+    ) -> None:
+        """Initialize handlers with a filesystem backend.
+
+        Args:
+            filesystem: The filesystem to operate on.
+            clock: Optional callable returning current datetime. Defaults to UTC now.
+        """
         super().__init__()
-        self._section = section
-
-    def _get_filesystem(self) -> InMemoryFilesystem:
-        """Get the filesystem from the section."""
-        return self._section._filesystem  # pyright: ignore[reportPrivateUsage]
+        self._fs = filesystem
+        self._clock = clock or _now
 
     def list_directory(
         self, params: ListDirectoryParams, *, context: ToolContext
     ) -> ToolResult[tuple[FileInfo, ...]]:
-        del context  # Not used - filesystem is accessed via section
+        """List directory contents."""
+        del context  # Not used - filesystem is provided at init
         path = _normalize_string_path(params.path, allow_empty=True, field="path")
-        fs = self._get_filesystem()
+        path_str = "/".join(path.segments) if path.segments else "."
 
-        path_str = "/".join(path.segments)
         try:
-            entries = fs.list(path_str if path_str else ".")
+            entries = self._fs.list(path_str)
         except NotADirectoryError:
             raise ToolValidationError(
                 "Cannot list a file path; provide a directory."
@@ -857,13 +716,13 @@ class _VfsToolSuite:
         for entry in entries:
             entry_path = VfsPath(tuple(entry.path.split("/")))
             if entry.is_file:
-                stat = fs.stat(entry.path)
+                stat = self._fs.stat(entry.path)
                 result_entries.append(
                     FileInfo(
                         path=entry_path,
                         kind="file",
                         size_bytes=stat.size_bytes,
-                        version=1,  # Version tracking not in new protocol
+                        version=1,
                         updated_at=stat.modified_at,
                     )
                 )
@@ -877,19 +736,19 @@ class _VfsToolSuite:
     def read_file(
         self, params: ReadFileParams, *, context: ToolContext
     ) -> ToolResult[ReadFileResult]:
+        """Read file contents with pagination."""
         del context
         path = _normalize_string_path(params.file_path, field="file_path")
         offset = _normalize_offset(params.offset)
         limit = _normalize_limit(params.limit)
 
-        fs = self._get_filesystem()
         path_str = "/".join(path.segments)
 
         try:
-            read_result = fs.read(path_str, offset=offset, limit=limit)
+            read_result = self._fs.read(path_str, offset=offset, limit=limit)
         except FileNotFoundError:
             raise ToolValidationError(
-                "File does not exist in the virtual filesystem."
+                "File does not exist in the filesystem."
             ) from None
 
         lines = read_result.content.splitlines()
@@ -914,20 +773,20 @@ class _VfsToolSuite:
     def write_file(
         self, params: WriteFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
+        """Create a new file (fails if file exists)."""
         del context
         path = _normalize_string_path(params.file_path, field="file_path")
         content = _normalize_content(params.content)
 
-        fs = self._get_filesystem()
         path_str = "/".join(path.segments)
 
-        if fs.exists(path_str):
+        if self._fs.exists(path_str):
             raise ToolValidationError(
                 "File already exists; use edit_file to modify existing content."
             )
 
         try:
-            _ = fs.write(path_str, content, mode="create")
+            _ = self._fs.write(path_str, content, mode="create")
         except FileExistsError:  # pragma: no cover
             raise ToolValidationError(  # pragma: no cover
                 "File already exists; use edit_file to modify existing content."
@@ -940,16 +799,16 @@ class _VfsToolSuite:
     def edit_file(
         self, params: EditFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
+        """Edit an existing file using string replacement."""
         del context
         path = _normalize_string_path(params.file_path, field="file_path")
-        fs = self._get_filesystem()
         path_str = "/".join(path.segments)
 
         try:
-            read_result = fs.read(path_str)
-        except FileNotFoundError:  # pragma: no cover
-            raise ToolValidationError(  # pragma: no cover
-                "File does not exist in the virtual filesystem."
+            read_result = self._fs.read(path_str)
+        except FileNotFoundError:
+            raise ToolValidationError(
+                "File does not exist in the filesystem."
             ) from None
 
         file_content = read_result.content
@@ -979,7 +838,7 @@ class _VfsToolSuite:
             updated = file_content.replace(old, new, 1)
 
         normalized_content = _normalize_content(updated)
-        _ = fs.write(path_str, normalized_content, mode="overwrite")
+        _ = self._fs.write(path_str, normalized_content, mode="overwrite")
 
         normalized = WriteFile(
             path=path,
@@ -992,6 +851,7 @@ class _VfsToolSuite:
     def glob(
         self, params: GlobParams, *, context: ToolContext
     ) -> ToolResult[tuple[GlobMatch, ...]]:
+        """Search for files matching a glob pattern."""
         del context
         base = _normalize_string_path(params.path, allow_empty=True, field="path")
         pattern = params.pattern.strip()
@@ -999,21 +859,20 @@ class _VfsToolSuite:
             raise ToolValidationError("Pattern must not be empty.")
         _ensure_ascii(pattern, "pattern")
 
-        fs = self._get_filesystem()
         base_str = "/".join(base.segments) if base.segments else "."
 
-        glob_results = fs.glob(pattern, path=base_str)
+        glob_results = self._fs.glob(pattern, path=base_str)
         matches: list[GlobMatch] = []
 
         for match in glob_results:
             if match.is_file:
-                stat = fs.stat(match.path)
+                stat = self._fs.stat(match.path)
                 matches.append(
                     GlobMatch(
                         path=VfsPath(tuple(match.path.split("/"))),
                         size_bytes=stat.size_bytes,
                         version=1,
-                        updated_at=stat.modified_at or _now(),
+                        updated_at=stat.modified_at or self._clock(),
                     )
                 )
 
@@ -1024,6 +883,7 @@ class _VfsToolSuite:
     def grep(
         self, params: GrepParams, *, context: ToolContext
     ) -> ToolResult[tuple[GrepMatch, ...]]:
+        """Search for a pattern in file contents."""
         del context
         try:
             _ = re.compile(params.pattern)
@@ -1043,14 +903,13 @@ class _VfsToolSuite:
         if glob_pattern:
             _ensure_ascii(glob_pattern, "glob")
 
-        fs = self._get_filesystem()
         base_str = (
             "/".join(base_path.segments)
             if base_path is not None and base_path.segments
             else "."
         )
 
-        grep_results = fs.grep(params.pattern, path=base_str, glob=glob_pattern)
+        grep_results = self._fs.grep(params.pattern, path=base_str, glob=glob_pattern)
         matches = [
             GrepMatch(
                 path=VfsPath(tuple(result.path.split("/"))),
@@ -1066,29 +925,185 @@ class _VfsToolSuite:
     def remove(
         self, params: RemoveParams, *, context: ToolContext
     ) -> ToolResult[DeleteEntry]:
+        """Remove files or directories recursively."""
         del context
         path = _normalize_string_path(params.path, field="path")
-        fs = self._get_filesystem()
         path_str = "/".join(path.segments)
 
-        if not fs.exists(path_str):
+        if not self._fs.exists(path_str):
             raise ToolValidationError("No files matched the provided path.")
 
         # Count files being deleted for message
         deleted_count = 0
-        if fs.stat(path_str).is_file:
+        stat = self._fs.stat(path_str)
+        if stat.is_file:
             deleted_count = 1
         else:
             # Count files in directory
-            glob_results = fs.glob("**/*", path=path_str)
+            glob_results = self._fs.glob("**/*", path=path_str)
             deleted_count = len([m for m in glob_results if m.is_file])
             if deleted_count == 0:
                 deleted_count = 1  # At least the directory itself
 
-        fs.delete(path_str, recursive=True)
+        self._fs.delete(path_str, recursive=True)
         normalized = DeleteEntry(path=path)
         message = _format_delete_message_count(path, deleted_count)
         return ToolResult(message=message, value=normalized)
+
+
+def _build_tools(
+    *,
+    filesystem: Filesystem,
+    accepts_overrides: bool,
+) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
+    handlers = FilesystemToolHandlers(filesystem=filesystem)
+    return cast(
+        tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
+        (
+            Tool[ListDirectoryParams, tuple[FileInfo, ...]](
+                name="ls",
+                description="List directory entries under a relative path.",
+                handler=handlers.list_directory,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description=(
+                            "List the source directory to see top-level modules."
+                        ),
+                        input=ListDirectoryParams(path="src"),
+                        output=(
+                            FileInfo(
+                                path=VfsPath(("src", "tests")),
+                                kind="directory",
+                            ),
+                            FileInfo(
+                                path=VfsPath(("src", "weakincentives")),
+                                kind="directory",
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            Tool[ReadFileParams, ReadFileResult](
+                name="read_file",
+                description="Read UTF-8 file contents with pagination support.",
+                handler=handlers.read_file,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Read the repository README header.",
+                        input=ReadFileParams(file_path="README.md", offset=0, limit=2),
+                        output=ReadFileResult(
+                            path=VfsPath(("README.md",)),
+                            content=(
+                                "   1 | # Weak Incentives\n"
+                                "   2 | Open-source agent orchestration platform."
+                            ),
+                            offset=0,
+                            limit=2,
+                            total_lines=120,
+                        ),
+                    ),
+                ),
+            ),
+            Tool[WriteFileParams, WriteFile](
+                name="write_file",
+                description="Create a new UTF-8 text file.",
+                handler=handlers.write_file,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Create a scratch note in the workspace.",
+                        input=WriteFileParams(
+                            file_path="notes/todo.txt",
+                            content="- Outline VFS design decisions",
+                        ),
+                        output=WriteFile(
+                            path=VfsPath(("notes", "todo.txt")),
+                            content="- Outline VFS design decisions",
+                            mode="create",
+                        ),
+                    ),
+                ),
+            ),
+            Tool[EditFileParams, WriteFile](
+                name="edit_file",
+                description="Replace occurrences of a string within a file.",
+                handler=handlers.edit_file,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Update a configuration value in place.",
+                        input=EditFileParams(
+                            file_path="src/weakincentives/config.py",
+                            old_string="DEBUG = True",
+                            new_string="DEBUG = False",
+                            replace_all=False,
+                        ),
+                        output=WriteFile(
+                            path=VfsPath(("src", "weakincentives", "config.py")),
+                            content='DEBUG = False\nLOG_LEVEL = "info"',
+                            mode="overwrite",
+                        ),
+                    ),
+                ),
+            ),
+            Tool[GlobParams, tuple[GlobMatch, ...]](
+                name="glob",
+                description="Match files beneath a directory using shell patterns.",
+                handler=handlers.glob,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Find Python tests under the tests directory.",
+                        input=GlobParams(pattern="**/test_*.py", path="tests"),
+                        output=(
+                            GlobMatch(
+                                path=VfsPath(("tests", "unit", "test_vfs.py")),
+                                size_bytes=2048,
+                                version=3,
+                                updated_at=datetime(2024, 1, 5, tzinfo=UTC),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            Tool[GrepParams, tuple[GrepMatch, ...]](
+                name="grep",
+                description="Search files for a regular expression pattern.",
+                handler=handlers.grep,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Search for log level constants in config files.",
+                        input=GrepParams(
+                            pattern=r"LOG_LEVEL", path="src/weakincentives"
+                        ),
+                        output=(
+                            GrepMatch(
+                                path=VfsPath(("src", "weakincentives", "config.py")),
+                                line_number=5,
+                                line='LOG_LEVEL = "info"',
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+            Tool[RemoveParams, DeleteEntry](
+                name="rm",
+                description="Remove files or directories recursively.",
+                handler=handlers.remove,
+                accepts_overrides=accepts_overrides,
+                examples=(
+                    ToolExample(
+                        description="Delete a temporary build directory.",
+                        input=RemoveParams(path="tmp/build"),
+                        output=DeleteEntry(path=VfsPath(("tmp", "build"))),
+                    ),
+                ),
+            ),
+        ),
+    )
 
 
 def _normalize_content(content: str) -> str:
