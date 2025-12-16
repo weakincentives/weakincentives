@@ -195,16 +195,34 @@ def json_subset(output: dict, expected: dict) -> Score:
 
 ## LLM-as-Judge
 
-For subjective criteria, use an LLM to score outputs. The `llm_judge` factory
-creates an evaluator that calls an adapter:
+For subjective criteria, use an LLM to score outputs. Rather than asking for
+numerical scores (which LLMs calibrate poorly), the judge selects from a fixed
+set of rating labels that map to values.
+
+### Rating Scale
+
+```python
+Rating = Literal["excellent", "good", "fair", "poor", "wrong"]
+
+RATING_VALUES: dict[Rating, float] = {
+    "excellent": 1.0,   # Fully meets criterion
+    "good": 0.75,       # Meets criterion with minor issues
+    "fair": 0.5,        # Partially meets criterion
+    "poor": 0.25,       # Mostly fails criterion
+    "wrong": 0.0,       # Completely fails criterion
+}
+
+PASSING_RATINGS: frozenset[Rating] = frozenset({"excellent", "good"})
+```
+
+### Judge Output
 
 ```python
 @dataclass(slots=True, frozen=True)
 class JudgeOutput:
     """Structured output from judge prompt."""
-    score: float  # 0.0 to 1.0
-    passed: bool
-    reason: str
+    rating: Rating  # Categorical label
+    reason: str     # Brief explanation
 
 
 JUDGE_TEMPLATE = PromptTemplate[JudgeOutput](
@@ -214,7 +232,7 @@ JUDGE_TEMPLATE = PromptTemplate[JudgeOutput](
     sections=[
         MarkdownSection(
             title="Evaluation Task",
-            template="""You are an evaluation judge. Score the output on the given criterion.
+            template="""You are an evaluation judge. Rate the output on the given criterion.
 
 ## Criterion
 $criterion
@@ -225,16 +243,23 @@ $output
 ## Reference Answer
 $expected
 
-## Instructions
-- Score from 0.0 (completely wrong) to 1.0 (perfect)
-- Set passed=true if score >= 0.7
-- Explain your reasoning briefly""",
+## Rating Scale
+- **excellent**: Fully meets the criterion
+- **good**: Meets the criterion with minor issues
+- **fair**: Partially meets the criterion
+- **poor**: Mostly fails the criterion
+- **wrong**: Completely fails the criterion
+
+Select one rating and explain your reasoning briefly.""",
             key="task",
         ),
     ],
 )
+```
 
+### llm_judge Factory
 
+```python
 def llm_judge(
     adapter: ProviderAdapter[JudgeOutput],
     criterion: str,
@@ -255,9 +280,10 @@ def llm_judge(
             expected=expected,
         )
         response = adapter.evaluate(prompt)
+        rating = response.output.rating
         return Score(
-            value=response.output.score,
-            passed=response.output.passed,
+            value=RATING_VALUES[rating],
+            passed=rating in PASSING_RATINGS,
             reason=response.output.reason,
         )
     return evaluate
