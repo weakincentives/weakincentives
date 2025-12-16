@@ -41,7 +41,7 @@ from weakincentives.runtime.session import (
     SnapshotRestoreError,
     SnapshotSerializationError,
     Subscription,
-    append,
+    append_all,
     replace_latest,
     upsert_by,
 )
@@ -120,7 +120,9 @@ def make_prompt_rendered(
     )
 
 
-def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> None:
+def test_tool_invoked_appends_payload_every_time(
+    session_factory: SessionFactory,
+) -> None:
     session, bus = session_factory()
 
     event = make_tool_event(1)
@@ -129,7 +131,11 @@ def test_tool_invoked_appends_payload_once(session_factory: SessionFactory) -> N
 
     assert first_result.ok
     assert second_result.ok
-    assert session.query(ExamplePayload).all() == (ExamplePayload(value=1),)
+    # append_all uses ledger semantics - every publish appends
+    assert session.query(ExamplePayload).all() == (
+        ExamplePayload(value=1),
+        ExamplePayload(value=1),
+    )
     assert isinstance(event.event_id, UUID)
 
 
@@ -371,7 +377,7 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 ) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, append)
+    session.mutate(ExampleOutput).register(ExampleOutput, append_all)
 
     def faulty(
         slice_values: tuple[ExampleOutput, ...],
@@ -389,11 +395,15 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
     assert session.query(ExampleOutput).all() == (ExampleOutput(text="first"),)
     assert first_result.handled_count == 1
 
-    # Second publish should leave slice unchanged due to faulty reducer
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    # Second publish adds another entry (append_all doesn't dedupe)
+    # The faulty reducer fails but append_all already ran successfully
+    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
     assert second_result.handled_count == 1
-    assert session.query(ExampleOutput).all() == (ExampleOutput(text="first"),)
+    assert session.query(ExampleOutput).all() == (
+        ExampleOutput(text="first"),
+        ExampleOutput(text="second"),
+    )
 
 
 def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> None:
@@ -558,7 +568,7 @@ def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) 
 def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, append)
+    session.mutate(ExampleOutput).register(ExampleOutput, append_all)
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert first_result.ok
@@ -872,7 +882,7 @@ def test_mutate_register_adds_reducer(session_factory: SessionFactory) -> None:
 def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, append)
+    session.mutate(ExampleOutput).register(ExampleOutput, append_all)
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert session.query(ExampleOutput).all()
 
@@ -884,7 +894,7 @@ def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None
 def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    session.mutate(ExampleOutput).register(ExampleOutput, append)
+    session.mutate(ExampleOutput).register(ExampleOutput, append_all)
     bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     snapshot = session.snapshot()
@@ -1051,7 +1061,7 @@ def test_observer_exception_does_not_break_other_observers(
     assert session.query(ExampleOutput).all() == (ExampleOutput(text="value"),)
 
 
-def test_observer_not_called_when_state_unchanged(
+def test_observer_called_on_every_append(
     session_factory: SessionFactory,
 ) -> None:
     session, bus = session_factory()
@@ -1069,9 +1079,9 @@ def test_observer_not_called_when_state_unchanged(
     bus.publish(make_prompt_event(ExampleOutput(text="value")))
     assert len(calls) == 1
 
-    # Second publish of same value - default append dedupes, so no change
+    # Second publish of same value - append_all always appends (ledger semantics)
     bus.publish(make_prompt_event(ExampleOutput(text="value")))
-    assert len(calls) == 1  # Observer not called since state didn't change
+    assert len(calls) == 2  # Observer called since state changed
 
 
 def test_observer_works_with_custom_reducer(session_factory: SessionFactory) -> None:

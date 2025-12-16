@@ -27,19 +27,19 @@ from ._types import (
 
 
 @pure
-def append[T: SupportsDataclass](
+def append_all[T: SupportsDataclass](
     slice_values: tuple[T, ...],
     event: ReducerEvent,
     *,
     context: ReducerContextProtocol,
 ) -> tuple[T, ...]:
-    """Append the event value if it is not already present."""
+    """Append the event value unconditionally (ledger semantics).
 
+    Use for event streams and ledgers where every event should be recorded,
+    even if it equals a previous entry.
+    """
     del context
-    value = cast(T, event)
-    if value in slice_values:
-        return slice_values
-    return (*slice_values, value)
+    return (*slice_values, cast(T, event))
 
 
 def upsert_by[T: SupportsDataclass, K](key_fn: Callable[[T], K]) -> TypedReducer[T]:
@@ -103,4 +103,9 @@ def replace_latest_by[T: SupportsDataclass, K](
     return pure(reducer)
 
 
-__all__ = ["append", "replace_latest", "replace_latest_by", "upsert_by"]
+__all__ = [
+    "append_all",
+    "replace_latest",
+    "replace_latest_by",
+    "upsert_by",
+]

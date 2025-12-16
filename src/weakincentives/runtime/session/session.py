@@ -32,12 +32,12 @@ from ..events import PromptExecuted, PromptRendered, TelemetryBus, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ._observer_types import SliceObserver, Subscription
 from ._slice_types import SessionSlice, SessionSliceType
-from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
+from ._types import ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
 from .mutation import GlobalMutationBuilder, MutationBuilder
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
-from .reducers import append
+from .reducers import append_all
 from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -93,16 +93,6 @@ _PROMPT_EXECUTED_TYPE: type[SupportsDataclass] = cast(
 )
 
 EMPTY_SLICE: SessionSlice = ()
-
-
-def _append_event(
-    slice_values: tuple[SupportsDataclass, ...],
-    event: ReducerEvent,
-    *,
-    context: ReducerContextProtocol,
-) -> tuple[SupportsDataclass, ...]:
-    del context
-    return (*slice_values, event)
 
 
 @dataclass(slots=True)
@@ -651,14 +641,10 @@ class Session(SessionProtocol):
         with self.locked():
             registrations = list(self._reducers.get(data_type, ()))
             if not registrations:
-                default_reducer: TypedReducer[Any]
-                if data_type in {_TOOL_INVOKED_TYPE, _PROMPT_EXECUTED_TYPE}:
-                    default_reducer = cast(TypedReducer[Any], _append_event)
-                else:
-                    default_reducer = cast(TypedReducer[Any], append)
+                # Default: ledger semantics (always append)
                 registrations = [
                     _ReducerRegistration(
-                        reducer=default_reducer,
+                        reducer=cast(TypedReducer[Any], append_all),
                         slice_type=data_type,
                     )
                 ]

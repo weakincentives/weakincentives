@@ -17,7 +17,10 @@ from dataclasses import dataclass
 from weakincentives.runtime.events import EventBus
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session._types import ReducerContextProtocol
-from weakincentives.runtime.session.reducers import replace_latest_by
+from weakincentives.runtime.session.reducers import (
+    append_all,
+    replace_latest_by,
+)
 
 
 @dataclass(slots=True)
@@ -48,3 +51,28 @@ def test_replace_latest_by_replaces_matching_entry() -> None:
     assert updated[-1].key == "a"
     assert updated[-1].data == "updated"
     assert any(item.data == "second" for item in updated)
+
+
+def test_append_all_always_appends() -> None:
+    """append_all appends unconditionally (ledger semantics)."""
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+    initial = (_Sample("a", "first"),)
+
+    # Append same value - should still append
+    updated = append_all(initial, _Sample("a", "first"), context=context)
+
+    assert len(updated) == 2
+    assert updated[0] == _Sample("a", "first")
+    assert updated[1] == _Sample("a", "first")
+
+
+def test_append_all_appends_to_empty_slice() -> None:
+    """append_all works on empty slices."""
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+
+    updated = append_all((), _Sample("a", "first"), context=context)
+
+    assert len(updated) == 1
+    assert updated[0] == _Sample("a", "first")

@@ -4,7 +4,20 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-- No changes yet.
+### Ledger Semantics for Reducers
+
+The default reducer now uses ledger semantics with `append_all`, which always
+appends unconditionally. The previous `append` reducer (which deduped by equality)
+has been replaced.
+
+All slices now default to `append_all` for consistent event stream behavior.
+
+```python
+from weakincentives.runtime.session import append_all
+
+# Event stream - record every invocation (default for all slices)
+session.mutate(ToolInvoked).register(ToolInvoked, append_all)
+```
 
 ## v0.14.0 - 2025-12-15
 

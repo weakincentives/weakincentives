@@ -42,7 +42,7 @@ from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.events._types import TokenUsage, ToolInvoked
-from weakincentives.runtime.session import Session, append
+from weakincentives.runtime.session import Session, append_all
 
 
 @pytest.fixture
@@ -701,7 +701,7 @@ class TestNotification:
 class TestSubagentStartHook:
     def test_dispatches_notification_to_session(self, session: Session) -> None:
         # Register reducer for Notification
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -727,7 +727,7 @@ class TestSubagentStartHook:
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
         # Register reducer for Notification
-        hook_context.session.mutate(Notification).register(Notification, append)
+        hook_context.session.mutate(Notification).register(Notification, append_all)
 
         hook = create_subagent_start_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
@@ -737,7 +737,7 @@ class TestSubagentStartHook:
 
 class TestSubagentStopHook:
     def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -760,7 +760,7 @@ class TestSubagentStopHook:
         assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session.mutate(Notification).register(Notification, append)
+        hook_context.session.mutate(Notification).register(Notification, append_all)
 
         hook = create_subagent_stop_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
@@ -768,7 +768,7 @@ class TestSubagentStopHook:
         assert result == {}
 
     def test_expands_transcript_path(self, session: Session, tmp_path: Path) -> None:
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         # Create a temporary JSONL transcript file
         transcript_file = tmp_path / "transcript.jsonl"
@@ -803,7 +803,7 @@ class TestSubagentStopHook:
     def test_expands_agent_transcript_path(
         self, session: Session, tmp_path: Path
     ) -> None:
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         # Create a temporary JSONL transcript file
         transcript_file = tmp_path / "agent_transcript.jsonl"
@@ -832,7 +832,7 @@ class TestSubagentStopHook:
     def test_expands_both_transcript_paths(
         self, session: Session, tmp_path: Path
     ) -> None:
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         transcript_file = tmp_path / "transcript.jsonl"
         transcript_file.write_text('{"role": "user", "content": "test"}\n')
@@ -863,7 +863,7 @@ class TestSubagentStopHook:
         assert notif.payload["agent_transcript_path"] == [{"event": "start"}]
 
     def test_handles_nonexistent_transcript_path(self, session: Session) -> None:
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -993,7 +993,7 @@ class TestExpandTranscriptPaths:
 
 class TestPreCompactHook:
     def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -1016,7 +1016,7 @@ class TestPreCompactHook:
         assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session.mutate(Notification).register(Notification, append)
+        hook_context.session.mutate(Notification).register(Notification, append_all)
 
         hook = create_pre_compact_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
@@ -1026,7 +1026,7 @@ class TestPreCompactHook:
 
 class TestNotificationHook:
     def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -1049,7 +1049,7 @@ class TestNotificationHook:
         assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session.mutate(Notification).register(Notification, append)
+        hook_context.session.mutate(Notification).register(Notification, append_all)
 
         hook = create_notification_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
@@ -1060,7 +1060,7 @@ class TestNotificationHook:
 class TestMultipleNotificationsAccumulate:
     def test_multiple_hooks_accumulate_notifications(self, session: Session) -> None:
         """Test that notifications from different hooks accumulate in session."""
-        session.mutate(Notification).register(Notification, append)
+        session.mutate(Notification).register(Notification, append_all)
 
         context = HookContext(
             session=session,
