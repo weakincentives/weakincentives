@@ -37,14 +37,15 @@ class WorkspaceSection(Protocol):
     This enables the WorkspaceDigestOptimizer to identify valid
     workspace sections without importing adapter-specific code.
 
+    The protocol is ``@runtime_checkable``, so use ``isinstance(section,
+    WorkspaceSection)`` to test whether a section implements workspace
+    functionality.
+
     The protocol requires:
-    - A `_is_workspace_section` class attribute set to True (marker)
     - A session property returning the associated Session
     - A filesystem property returning the Filesystem managed by this section
     - A clone() method for creating copies with a new session
     """
-
-    _is_workspace_section: bool
 
     @property
     def session(self) -> Session:

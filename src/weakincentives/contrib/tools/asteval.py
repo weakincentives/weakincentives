@@ -966,8 +966,6 @@ def summarize_eval_writes(writes: Sequence[EvalFileWrite]) -> str | None:
 class AstevalSection(MarkdownSection[_AstevalSectionParams]):
     """Prompt section exposing the :mod:`asteval` evaluation tool."""
 
-    _is_workspace_section: bool = True
-
     def __init__(
         self,
         *,

@@ -236,9 +236,9 @@ sequenceDiagram
 
 1. **Async upload queue**: Events are queued and uploaded in batches to avoid
    blocking the evaluation loop.
-2. **Trace context propagation**: A trace ID generated at `PromptRendered` links
+1. **Trace context propagation**: A trace ID generated at `PromptRendered` links
    all subsequent runs in a single trace.
-3. **Graceful failure**: Queue overflow or upload failures are logged but do not
+1. **Graceful failure**: Queue overflow or upload failures are logged but do not
    raise to callers.
 
 ### Prompt Hub Layer
@@ -364,7 +364,7 @@ search_tool = Tool(
 Claude Code's native tools (Read, Write, Bash, etc.) are traced via:
 
 1. **LangSmith's `configure_claude_agent_sdk()`**: Captures at SDK level
-2. **WINK's `PostToolUse` hook**: Publishes `ToolInvoked` events
+1. **WINK's `PostToolUse` hook**: Publishes `ToolInvoked` events
 
 To avoid duplication, configure one or the other, or use the deduplication
 logic above.
