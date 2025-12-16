@@ -190,15 +190,15 @@ def test_install_without_initial_factory_ignores_empty(
 # ──────────────────────────────────────────────────────────────────────
 
 
-def test_getitem_returns_query_builder(session_factory: SessionFactory) -> None:
-    """Verify session[SliceType] returns QueryBuilder."""
-    from weakincentives.runtime.session import QueryBuilder
+def test_getitem_returns_slice_accessor(session_factory: SessionFactory) -> None:
+    """Verify session[SliceType] returns SliceAccessor."""
+    from weakincentives.runtime.session import SliceAccessor
 
     session, _ = session_factory()
 
-    builder = session[ItemList]
+    accessor = session[ItemList]
 
-    assert isinstance(builder, QueryBuilder)
+    assert isinstance(accessor, SliceAccessor)
 
 
 def test_getitem_query_latest(session_factory: SessionFactory) -> None:

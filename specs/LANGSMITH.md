@@ -10,13 +10,14 @@ LangSmith Hub.
 
 - **Non-invasive instrumentation**: Telemetry hooks into existing event bus
   infrastructure without requiring changes to business logic.
-- **Decoupled from critical path**: Network calls to LangSmith run asynchronously
-  to avoid blocking prompt evaluation.
-- **Bidirectional prompt management**: Override system supports both push (publish
-  to Hub) and pull (fetch from Hub) workflows.
-- **Graceful degradation**: LangSmith unavailability does not break agent execution.
-- **Composable with LangSmith SDK**: Works alongside `@traceable` decorator and
-  native LangSmith integrations (e.g., `configure_claude_agent_sdk()`).
+- **Decoupled from critical path**: Network calls to LangSmith run
+  asynchronously to avoid blocking prompt evaluation.
+- **Bidirectional prompt management**: Override system supports both push
+  (publish to Hub) and pull (fetch from Hub) workflows.
+- **Graceful degradation**: LangSmith unavailability does not break agent
+  execution.
+- **Composable with LangSmith SDK**: Works alongside `@traceable` decorator
+  and native LangSmith integrations (e.g., `configure_claude_agent_sdk()`).
 
 ## Auto-Instrumentation
 
@@ -159,11 +160,12 @@ receive lifecycle events without modifying adapter or prompt code.
 
 **Available Events:**
 
-| Event | When Fired | Key Fields |
-|-------|------------|------------|
-| `PromptRendered` | After render, before provider call | `prompt_ns`, `prompt_key`, `prompt_name`, `adapter`, `rendered_prompt`, `descriptor` |
-| `ToolInvoked` | After each tool handler | `name`, `params`, `result`, `usage`, `call_id` |
-| `PromptExecuted` | After final parse | `result`, `usage`, `prompt_name` |
+| Event | When Fired | Key Fields | |-------|------------|------------| |
+`PromptRendered` | After render, before provider call | `prompt_ns`,
+`prompt_key`, `prompt_name`, `adapter`, `rendered_prompt`, `descriptor` | |
+`ToolInvoked` | After each tool handler | `name`, `params`, `result`, `usage`,
+`call_id` | | `PromptExecuted` | After final parse | `result`, `usage`,
+`prompt_name` |
 
 **Mapping to LangSmith Runs:**
 
@@ -199,11 +201,9 @@ class PromptOverridesStore(Protocol):
 **Hub Mapping:**
 
 | WINK Concept | LangSmith Hub Concept |
-|--------------|----------------------|
-| `ns/prompt_key` | Prompt name |
-| `tag` | Commit hash or alias |
-| `SectionOverride.body` | Prompt template content |
-| `ToolOverride.description` | Tool description in template |
+|--------------|----------------------| | `ns/prompt_key` | Prompt name | |
+`tag` | Commit hash or alias | | `SectionOverride.body` | Prompt template
+content | | `ToolOverride.description` | Tool description in template |
 
 ## Architecture
 
@@ -236,10 +236,10 @@ sequenceDiagram
 
 1. **Async upload queue**: Events are queued and uploaded in batches to avoid
    blocking the evaluation loop.
-1. **Trace context propagation**: A trace ID generated at `PromptRendered` links
-   all subsequent runs in a single trace.
-1. **Graceful failure**: Queue overflow or upload failures are logged but do not
-   raise to callers.
+1. **Trace context propagation**: A trace ID generated at `PromptRendered`
+   links all subsequent runs in a single trace.
+1. **Graceful failure**: Queue overflow or upload failures are logged but do
+   not raise to callers.
 
 ### Prompt Hub Layer
 
@@ -265,12 +265,12 @@ flowchart LR
 
 **Caching Strategy:**
 
-- **TTL-based invalidation**: Cached overrides expire after configurable duration
-  (default: 5 minutes).
-- **Tag-aware**: `latest` tag bypasses cache for freshness; versioned tags cache
-  indefinitely.
-- **Fail-open on network errors**: Use cached value or skip overrides rather than
-  failing evaluation.
+- **TTL-based invalidation**: Cached overrides expire after configurable
+  duration (default: 5 minutes).
+- **Tag-aware**: `latest` tag bypasses cache for freshness; versioned tags
+  cache indefinitely.
+- **Fail-open on network errors**: Use cached value or skip overrides rather
+  than failing evaluation.
 
 ## Claude Agent SDK Adapter Integration
 
@@ -312,16 +312,15 @@ flowchart TB
 The Claude Agent SDK adapter's hooks map to LangSmith runs:
 
 | SDK Hook | WINK Event | LangSmith Run |
-|----------|------------|---------------|
-| `PreToolUse` | (none - internal) | Child span start |
-| `PostToolUse` | `ToolInvoked` | Tool run complete |
-| `Stop` | `PromptExecuted` | Chain run complete |
+|----------|------------|---------------| | `PreToolUse` | (none - internal) |
+Child span start | | `PostToolUse` | `ToolInvoked` | Tool run complete | |
+`Stop` | `PromptExecuted` | Chain run complete |
 
 ### Deduplication
 
-When both WINK and LangSmith's native Claude SDK integration are enabled,
-tool invocations may be reported twice. The telemetry handler deduplicates
-based on `call_id`:
+When both WINK and LangSmith's native Claude SDK integration are enabled, tool
+invocations may be reported twice. The telemetry handler deduplicates based on
+`call_id`:
 
 ```python
 class LangSmithTelemetryHandler:
@@ -386,9 +385,9 @@ configure_wink(
 
 ### Trace Context Correlation
 
-**Critical**: For traces to appear unified in LangSmith, both integrations must
-share the same trace context. WINK achieves this by setting up the LangSmith
-run context before invoking the Claude Agent SDK:
+**Critical**: For traces to appear unified in LangSmith, both integrations
+must share the same trace context. WINK achieves this by setting up the
+LangSmith run context before invoking the Claude Agent SDK:
 
 ```mermaid
 sequenceDiagram
@@ -507,12 +506,11 @@ class LangSmithConfig:
 
 ### Environment Variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `LANGCHAIN_API_KEY` | LangSmith API key | (required) |
-| `LANGCHAIN_PROJECT` | Default project name | `"default"` |
-| `LANGCHAIN_TRACING_V2` | Enable tracing | `"true"` |
-| `LANGCHAIN_ENDPOINT` | API endpoint | `"https://api.smith.langchain.com"` |
+| Variable | Description | Default | |----------|-------------|---------| |
+`LANGCHAIN_API_KEY` | LangSmith API key | (required) | | `LANGCHAIN_PROJECT` |
+Default project name | `"default"` | | `LANGCHAIN_TRACING_V2` | Enable tracing
+| `"true"` | | `LANGCHAIN_ENDPOINT` | API endpoint |
+`"https://api.smith.langchain.com"` |
 
 ## Implementation Components
 
@@ -940,15 +938,16 @@ def mock_hub():
 
 - **Synchronous WINK runtime**: Telemetry upload runs on background threads to
   avoid blocking, but the WINK event loop itself is synchronous.
-- **No mid-evaluation updates**: Traces are created/updated at event boundaries,
-  not during streaming.
+- **No mid-evaluation updates**: Traces are created/updated at event
+  boundaries, not during streaming.
 - **Hub schema constraints**: Complex WINK prompt structures may require
   flattening for Hub storage.
-- **Claude Agent SDK deduplication**: When using both `configure_claude_agent_sdk()`
-  and `configure_wink()`, careful configuration is needed to avoid duplicate traces.
-- **Isolated subprocess tracing**: When using `IsolationConfig`, LangSmith's native
-  Claude SDK integration cannot trace the isolated subprocess directly; use WINK's
-  hook-based tracing instead.
+- **Claude Agent SDK deduplication**: When using both
+  `configure_claude_agent_sdk()` and `configure_wink()`, careful configuration
+  is needed to avoid duplicate traces.
+- **Isolated subprocess tracing**: When using `IsolationConfig`, LangSmith's
+  native Claude SDK integration cannot trace the isolated subprocess directly;
+  use WINK's hook-based tracing instead.
 
 ## Future Considerations
 
@@ -958,4 +957,5 @@ def mock_hub():
   optimization via LangSmith experiments.
 - **Multi-project support**: Route different prompt namespaces to different
   LangSmith projects.
-- **Cost tracking**: Aggregate token costs per prompt/tool in LangSmith dashboards.
+- **Cost tracking**: Aggregate token costs per prompt/tool in LangSmith
+  dashboards.

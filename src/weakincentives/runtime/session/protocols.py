@@ -25,6 +25,7 @@ from .snapshots import Snapshot
 if TYPE_CHECKING:
     from .mutation import GlobalMutationBuilder, MutationBuilder
     from .query import QueryBuilder
+    from .slice_accessor import SliceAccessor
 
 type SnapshotProtocol = Snapshot
 
@@ -63,7 +64,7 @@ class SessionProtocol(Protocol):
 
     def __getitem__[T: SupportsDataclass](
         self, slice_type: type[T]
-    ) -> QueryBuilder[T]: ...
+    ) -> SliceAccessor[T]: ...
 
     def install[T: SupportsDataclass](
         self,
@@ -71,6 +72,18 @@ class SessionProtocol(Protocol):
         *,
         initial: Callable[[], T] | None = None,
     ) -> None: ...
+
+    def apply(self, event: SupportsDataclass) -> None:
+        """Broadcast an event to all reducers registered for its type."""
+        ...
+
+    def apply_to_slice(
+        self,
+        slice_type: type[SupportsDataclass],
+        event: SupportsDataclass,
+    ) -> None:
+        """Dispatch an event to reducers targeting a specific slice."""
+        ...
 
     @property
     def parent(self) -> Self | None: ...
