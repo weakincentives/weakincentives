@@ -59,6 +59,21 @@ Dataset = tuple[Sample[InputT, ExpectedT], ...]
 **Loading from JSONL:**
 
 ```python
+def _coerce[T](value: object, target: type[T]) -> T:
+    """Coerce JSON value to target type.
+
+    Primitives (str, int, float, bool) pass through directly.
+    Mappings are parsed as dataclasses via serde.parse.
+    """
+    if target in (str, int, float, bool):
+        if not isinstance(value, target):
+            raise TypeError(f"expected {target.__name__}, got {type(value).__name__}")
+        return value  # type: ignore[return-value]
+    if isinstance(value, Mapping):
+        return parse(target, value)
+    raise TypeError(f"cannot coerce {type(value).__name__} to {target.__name__}")
+
+
 def load_jsonl[I, E](
     path: Path,
     input_type: type[I],
@@ -67,8 +82,8 @@ def load_jsonl[I, E](
     """Load samples from JSONL file.
 
     Each line must be a JSON object with "id", "input", and "expected" keys.
-    The input and expected values are parsed into the specified types using
-    the serde module.
+    Primitives (str, int, float, bool) are used directly; mappings are
+    deserialized into dataclasses via serde.parse.
     """
     samples: list[Sample[I, E]] = []
     with path.open() as f:
@@ -76,8 +91,8 @@ def load_jsonl[I, E](
             obj = json.loads(line)
             samples.append(Sample(
                 id=obj["id"],
-                input=parse(input_type, obj["input"]),
-                expected=parse(expected_type, obj["expected"]),
+                input=_coerce(obj["input"], input_type),
+                expected=_coerce(obj["expected"], expected_type),
             ))
     return tuple(samples)
 ```
