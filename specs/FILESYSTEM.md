@@ -14,9 +14,8 @@ perform file operations without coupling to a specific storage implementation.
   `Prompt`, not global state.
 - **Immutable snapshots**: Read operations return immutable data; writes go
   through the protocol and may be journaled.
-- **No session slice coupling**: The protocol replaces direct
-  `VirtualFileSystem` slice queries. The existing `VirtualFileSystem` slice is
-  removed; backends manage their own persistence.
+- **Backend-managed state**: Backends manage their own persistence; no session
+  slice coupling.
 - **Backend-agnostic tools**: Tool handlers call `context.filesystem.*` and
   remain portable across workspace types.
 
@@ -461,8 +460,7 @@ def _build_tool_context(
 
 ### InMemoryFilesystem
 
-Replaces direct `VirtualFileSystem` slice usage. State is managed internally
-rather than through session reducers.
+Session-scoped in-memory storage. State is managed internally by the backend.
 
 ```python
 @dataclass(slots=True)
@@ -551,61 +549,6 @@ class HostFilesystem:
         return _HostReadResult(...)
 
     # ... remaining methods
-```
-
-## Migration: Removing VirtualFileSystem Slice
-
-### Rationale
-
-The `VirtualFileSystem` slice couples file state to session reducers, which:
-
-1. Forces tools to query session state directly
-2. Prevents backend-agnostic tool implementations
-3. Duplicates state management between slice and backends
-
-The `Filesystem` protocol provides a cleaner abstraction where:
-
-1. Backends manage their own state
-2. Tools use a uniform interface
-3. Session state is optional (backends can journal to session if needed)
-
-### Migration Steps
-
-1. **Deprecate `VirtualFileSystem` slice exports** - Mark as deprecated in
-   `__init__.py`
-2. **Update `VfsToolsSection`** - Construct `InMemoryFilesystem` internally
-   instead of registering slice
-3. **Update tool handlers** - Replace `session.query(VirtualFileSystem)` with
-   `context.filesystem`
-4. **Remove slice registration** - Delete `@reducer` decorators and slice class
-5. **Remove slice from exports** - Final cleanup
-
-### Code Changes
-
-Before:
-```python
-# In VfsToolsSection.__init__
-session.install(VirtualFileSystem, initial=lambda: VirtualFileSystem())
-
-# In tool handler
-def read_file(self, params: ReadFileParams, *, context: ToolContext) -> ToolResult[ReadFileResult]:
-    snapshot = context.session.query(VirtualFileSystem).latest()
-    file = _find_file(snapshot.files, params.path)
-    ...
-```
-
-After:
-```python
-# In VfsToolsSection.__init__
-self._filesystem = InMemoryFilesystem()
-# Hydrate from mounts
-for mount in mounts:
-    self._filesystem.hydrate_from_host(mount)
-
-# In tool handler
-def read_file(self, params: ReadFileParams, *, context: ToolContext) -> ToolResult[ReadFileResult]:
-    result = context.filesystem.read(params.path, offset=params.offset, limit=params.limit)
-    ...
 ```
 
 ## Limits
