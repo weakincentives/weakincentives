@@ -271,10 +271,13 @@ class Session(SessionProtocol):
 
         return clone
 
-    @override
     @_locked_method
-    def select_all[S: SupportsDataclass](self, slice_type: type[S]) -> tuple[S, ...]:
-        """Return the tuple slice maintained for the provided type."""
+    def _select_all[S: SupportsDataclass](self, slice_type: type[S]) -> tuple[S, ...]:
+        """Return the tuple slice maintained for the provided type.
+
+        Internal method used by SliceAccessor. Use ``session[SliceType].all()``
+        for public access.
+        """
 
         return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
 
