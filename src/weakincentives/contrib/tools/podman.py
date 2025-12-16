@@ -608,7 +608,12 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     _is_workspace_section: bool = True
 
     def __init__(
-        self, *, session: Session, config: PodmanSandboxConfig | None = None
+        self,
+        *,
+        session: Session,
+        config: PodmanSandboxConfig | None = None,
+        _overlay_path: Path | None = None,
+        _filesystem: Filesystem | None = None,
     ) -> None:
         config = config or PodmanSandboxConfig()
         self._session = session
@@ -643,9 +648,16 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._mount_previews,
         ) = _resolve_podman_host_mounts(self._mounts, self._allowed_roots)
         # Create overlay directory eagerly so filesystem is available immediately
-        self._overlay_path = self._overlay_root / str(self._session.session_id)
-        self._overlay_path.mkdir(parents=True, exist_ok=True)
-        self._filesystem: Filesystem = HostFilesystem(_root=str(self._overlay_path))
+        # Use provided overlay path (for cloning) or create new one based on session_id
+        if _overlay_path is not None and _filesystem is not None:
+            # Cloning path - reuse existing overlay and filesystem
+            self._overlay_path = _overlay_path
+            self._filesystem: Filesystem = _filesystem
+        else:
+            # Fresh initialization
+            self._overlay_path = self._overlay_root / str(self._session.session_id)
+            self._overlay_path.mkdir(parents=True, exist_ok=True)
+            self._filesystem = HostFilesystem(_root=str(self._overlay_path))
         self._clock = config.clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
@@ -935,7 +947,12 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         if provided_bus is not None and provided_bus is not session.event_bus:
             msg = "Provided bus must match the target session's event bus."
             raise TypeError(msg)
-        return PodmanSandboxSection(session=session, config=self._config)
+        return PodmanSandboxSection(
+            session=session,
+            config=self._config,
+            _overlay_path=self._overlay_path,
+            _filesystem=self._filesystem,
+        )
 
     @property
     def filesystem(self) -> Filesystem:

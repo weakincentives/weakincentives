@@ -3217,3 +3217,48 @@ def test_tools_module_missing_attr_raises() -> None:
 
     with pytest.raises(AttributeError):
         _ = tools.TOTALLY_UNKNOWN
+
+
+def test_section_init_with_overlay_path_and_filesystem(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    """Test that PodmanSandboxSection accepts _overlay_path and _filesystem for cloning."""
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    cache_dir = tmp_path / "cache"
+
+    # Create initial section
+    section1 = _make_section(session=session, client=client, cache_dir=cache_dir)
+
+    # Write a file through the filesystem
+    fs = section1.filesystem
+    _ = fs.write("test_file.txt", "test content")
+
+    # Create new session for clone
+    new_bus = InProcessEventBus()
+    new_session = Session(bus=new_bus)
+
+    # Create a new section with the preserved overlay path and filesystem
+    # Must provide base_url to avoid Podman connection resolution
+    section2 = PodmanSandboxSection(
+        session=new_session,
+        config=PodmanSandboxConfig(
+            cache_dir=cache_dir,
+            client_factory=lambda: client,
+            exec_runner=_FakeCliRunner(),
+            base_url="unix:///tmp/fake.sock",
+        ),
+        _overlay_path=section1._overlay_path,
+        _filesystem=section1._filesystem,
+    )
+
+    # Filesystem instance should be the same
+    assert section2.filesystem is section1.filesystem
+
+    # Content should be accessible
+    result = section2.filesystem.read("test_file.txt")
+    assert result.content == "test content"
+
+    # Overlay path should be the same
+    assert section2._overlay_path == section1._overlay_path
