@@ -28,8 +28,8 @@ from typing import (
 )
 
 from ..dataclasses import FrozenDataclass
+from ..types import SupportsDataclass
 from ._overrides_protocols import PromptOverridesStore
-from ._types import SupportsDataclass
 from .errors import PromptValidationError, SectionPath
 from .overrides import PromptDescriptor
 from .registry import PromptRegistry, SectionNode

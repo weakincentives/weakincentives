@@ -22,14 +22,13 @@ import pytest
 import weakincentives.prompt.tool as tool_module
 from weakincentives.prompt import (
     PromptValidationError,
-    SupportsDataclass,
-    SupportsDataclassOrNone,
     Tool,
     ToolContext,
     ToolExample,
     ToolResult,
 )
 from weakincentives.prompt.markdown import _render_example_value
+from weakincentives.types import SupportsDataclass, SupportsDataclassOrNone
 
 
 @dataclass

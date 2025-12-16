@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING  # pragma: no cover
 if TYPE_CHECKING:  # pragma: no cover
     from typing import assert_type
 
-    from ._types import SupportsDataclass
+    from ..types import SupportsDataclass
     from .markdown import MarkdownSection
 
     _parameterless_section = MarkdownSection[SupportsDataclass](

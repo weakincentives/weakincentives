@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Generic, TypeVar, cast
 
-from ._types import SupportsDataclass
+from ..types import SupportsDataclass
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclass, covariant=True)
 

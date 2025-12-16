@@ -66,7 +66,6 @@ from weakincentives.prompt import (
     ToolHandler,
     ToolResult,
 )
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
@@ -76,6 +75,7 @@ from weakincentives.runtime.session import (
     SessionProtocol,
     replace_latest,
 )
+from weakincentives.types import SupportsDataclass
 
 
 def _split_tool_message_content(content: str) -> tuple[str, str | None]:

@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Literal, TypeVar
 
 from ..dataclasses import FrozenDataclass
-from ._types import SupportsDataclass
+from ..types import SupportsDataclass
 
 __all__ = ["StructuredOutputConfig"]
 

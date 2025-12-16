@@ -18,7 +18,7 @@ from collections.abc import Callable
 from typing import override
 from uuid import UUID, uuid4
 
-from ...prompt._types import SupportsDataclass
+from ...types import SupportsDataclass
 
 type SliceObserver[T: SupportsDataclass] = Callable[
     [tuple[T, ...], tuple[T, ...]],

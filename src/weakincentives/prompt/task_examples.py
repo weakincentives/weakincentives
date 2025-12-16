@@ -21,8 +21,8 @@ from dataclasses import dataclass
 from typing import Any, Final, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass, dump
+from ..types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._enabled_predicate import EnabledPredicate
-from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._visibility import SectionVisibility, VisibilitySelector
 from .errors import PromptValidationError
 from .section import Section

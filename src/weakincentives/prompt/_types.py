@@ -16,13 +16,7 @@ from __future__ import annotations
 
 from typing import Protocol, runtime_checkable
 
-# Re-export core dataclass protocols from centralized location
-from ..types.dataclass import (
-    DataclassFieldMapping,
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
+from ..types import SupportsDataclass
 
 
 @runtime_checkable
@@ -32,10 +26,4 @@ class ToolRenderableResult(SupportsDataclass, Protocol):
     def render(self) -> str: ...
 
 
-__all__ = [
-    "DataclassFieldMapping",
-    "SupportsDataclass",
-    "SupportsDataclassOrNone",
-    "SupportsToolResult",
-    "ToolRenderableResult",
-]
+__all__ = ["ToolRenderableResult"]

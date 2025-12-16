@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, Self
 
-from ...prompt._types import SupportsDataclass
+from ...types import SupportsDataclass
 from ..events._types import TelemetryBus
 from ._observer_types import SliceObserver, Subscription
 from .snapshots import Snapshot

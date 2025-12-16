@@ -18,8 +18,8 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
 
 from ..deadlines import Deadline
+from ..types import SupportsDataclass
 from ._overrides_protocols import PromptOverridesStore
-from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import BudgetTracker

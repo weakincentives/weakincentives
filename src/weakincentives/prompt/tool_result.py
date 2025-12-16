@@ -21,7 +21,7 @@ from dataclasses import dataclass, is_dataclass
 from typing import Any, cast
 
 from ..serde import dump
-from ._types import SupportsDataclass
+from ..types import SupportsDataclass
 
 _LOGGER = logging.getLogger(__name__)
 

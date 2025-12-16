@@ -34,13 +34,13 @@ from weakincentives.adapters.core import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.prompt._types import SupportsDataclassOrNone, SupportsToolResult
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.protocols import SessionProtocol
+from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
 
 
 @dataclass(slots=True)

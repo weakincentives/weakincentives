@@ -64,7 +64,6 @@ from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
     SectionVisibility,
-    SupportsDataclass,
 )
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -77,6 +76,7 @@ from weakincentives.runtime import (
     MainLoopRequest,
     Session,
 )
+from weakincentives.types import SupportsDataclass
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 

@@ -20,11 +20,7 @@ from string import Template
 from typing import Any, Literal, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass, dump
-from ._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
+from ..types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptRenderError
 from .section import Section, SectionVisibility, VisibilitySelector
 from .tool import Tool

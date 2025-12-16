@@ -45,11 +45,6 @@ from weakincentives.adapters.shared import (
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
-from weakincentives.prompt._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-)
 from weakincentives.prompt.overrides import PromptDescriptor
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
@@ -68,6 +63,11 @@ from weakincentives.runtime.events._types import EventHandler
 from weakincentives.runtime.session.protocols import SnapshotProtocol
 from weakincentives.runtime.session.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
+from weakincentives.types import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 
 from ._test_stubs import DummyChoice, DummyMessage, DummyResponse, DummyToolCall
 

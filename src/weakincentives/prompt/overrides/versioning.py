@@ -21,8 +21,7 @@ from typing import Literal, Protocol, TypeVar, cast, overload
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
 from ...serde.schema import schema
-from ...types import JSONValue
-from .._types import SupportsDataclass, SupportsDataclassOrNone
+from ...types import JSONValue, SupportsDataclass, SupportsDataclassOrNone
 
 
 def _section_override_mapping_factory() -> dict[tuple[str, ...], SectionOverride]:

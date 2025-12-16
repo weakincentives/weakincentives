@@ -20,9 +20,9 @@ import pytest
 
 from weakincentives.dbc import dbc_enabled
 from weakincentives.prompt import Section, SectionVisibility
-from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.registry import PromptRegistry, SectionNode
 from weakincentives.serde import clone as clone_dataclass
+from weakincentives.types import SupportsDataclass
 
 
 @dataclass

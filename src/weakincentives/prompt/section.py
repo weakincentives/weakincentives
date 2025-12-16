@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from ..runtime.session.protocols import SessionProtocol
     from .tool import Tool
 
+from ..types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._enabled_predicate import (
     EnabledPredicate,
     NormalizedEnabledPredicate,
@@ -27,7 +28,6 @@ from ._enabled_predicate import (
 )
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
-from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from ._visibility import (
     NormalizedVisibilitySelector,
     SectionVisibility,

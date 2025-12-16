@@ -24,14 +24,13 @@ from uuid import UUID
 
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
-from ...prompt._types import SupportsDataclass
 from ...serde import dump, parse
 from ...serde._utils import (
     TYPE_REF_KEY,
     resolve_type_identifier,
     type_identifier,
 )
-from ...types import JSONValue
+from ...types import JSONValue, SupportsDataclass
 from ._slice_types import SessionSlice, SessionSliceType
 from .dataclasses import is_dataclass_instance
 

@@ -27,12 +27,12 @@ from weakincentives.prompt import (
     PromptTemplate,
     PromptValidationError,
     SectionVisibility,
-    SupportsDataclass,
 )
 from weakincentives.prompt.prompt import (
     RenderedPrompt,
     _format_specialization_argument,
 )
+from weakincentives.types import SupportsDataclass
 
 
 @dataclass

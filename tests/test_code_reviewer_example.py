@@ -41,10 +41,11 @@ from weakincentives.contrib.tools.digests import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
-from weakincentives.prompt import Prompt, SupportsDataclass
+from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 from weakincentives.runtime.events import InProcessEventBus, PromptRendered
 from weakincentives.runtime.session import Session
+from weakincentives.types import SupportsDataclass
 
 
 @dataclass(slots=True, frozen=True)

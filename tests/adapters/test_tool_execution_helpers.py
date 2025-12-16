@@ -43,8 +43,6 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptTemplate,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
     Tool,
     ToolContext,
     ToolHandler,
@@ -52,6 +50,7 @@ from weakincentives.prompt import (
 )
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, SessionProtocol
+from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
 
 
 def _build_prompt(tool: Tool[ToolParams, ToolPayload]) -> PromptTemplate[ToolPayload]:

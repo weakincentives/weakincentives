@@ -21,7 +21,7 @@ from typing import Any, cast
 
 from ..dataclasses import FrozenDataclass
 from ..dbc import invariant
-from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
+from ..types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .section import Section
 from .tool import Tool

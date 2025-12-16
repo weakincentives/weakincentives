@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Set
 
     from ..runtime.session.protocols import SessionProtocol
-    from ._types import SupportsDataclass
+    from ..types import SupportsDataclass
     from .registry import RegistrySnapshot
 
 

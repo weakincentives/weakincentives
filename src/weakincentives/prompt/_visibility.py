@@ -19,8 +19,8 @@ from collections.abc import Callable
 from enum import Enum
 from typing import TYPE_CHECKING, cast
 
+from ..types import SupportsDataclass
 from ._enabled_predicate import callable_accepts_session_kwarg
-from ._types import SupportsDataclass
 
 if TYPE_CHECKING:
     from ..runtime.session.protocols import SessionProtocol

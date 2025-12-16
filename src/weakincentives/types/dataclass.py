@@ -10,7 +10,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataclass typing helpers."""
+"""Dataclass typing helpers.
+
+This module is the canonical location for dataclass-related type protocols.
+Import from :mod:`weakincentives.types` for public use::
+
+    from weakincentives.types import SupportsDataclass, SupportsToolResult
+"""
 
 from __future__ import annotations
 

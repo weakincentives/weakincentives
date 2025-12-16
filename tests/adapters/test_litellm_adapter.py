@@ -83,7 +83,6 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptTemplate,
-    SupportsDataclass,
     Tool,
     ToolContext,
     ToolHandler,
@@ -101,6 +100,7 @@ from weakincentives.runtime.session import (
     Session,
     replace_latest,
 )
+from weakincentives.types import SupportsDataclass
 
 MODULE_PATH = "weakincentives.adapters.litellm"
 PROMPT_NS = "tests/adapters/litellm"

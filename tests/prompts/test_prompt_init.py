@@ -25,9 +25,9 @@ from weakincentives.prompt import (
     PromptTemplate,
     PromptValidationError,
     SectionNode,
-    SupportsDataclass,
 )
 from weakincentives.prompt.section import Section
+from weakincentives.types import SupportsDataclass
 
 
 @dataclass
