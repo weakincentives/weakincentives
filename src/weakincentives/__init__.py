@@ -22,7 +22,6 @@ from .errors import DeadlineExceededError, ToolValidationError, WinkError
 from .prompt import (
     MarkdownSection,
     Prompt,
-    SupportsDataclass,
     Tool,
     ToolContext,
     ToolHandler,
@@ -30,7 +29,7 @@ from .prompt import (
     parse_structured_output,
 )
 from .runtime import StructuredLogger, configure_logging, get_logger
-from .types import JSONValue
+from .types import JSONValue, SupportsDataclass
 
 __all__ = [
     "Budget",

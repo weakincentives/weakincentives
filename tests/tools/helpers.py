@@ -21,18 +21,17 @@ from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
-    SessionProtocol,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
 )
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import ToolInvoked
+from weakincentives.runtime.session import SessionProtocol
+from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclassOrNone)
 ResultT = TypeVar("ResultT", bound=SupportsToolResult)

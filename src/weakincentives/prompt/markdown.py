@@ -20,7 +20,7 @@ from string import Template
 from typing import Any, Literal, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass, dump
-from ._types import (
+from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,

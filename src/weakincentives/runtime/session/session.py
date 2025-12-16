@@ -27,7 +27,7 @@ from typing import Any, Concatenate, Final, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
-from ...prompt._types import SupportsDataclass
+from ...types.dataclass import SupportsDataclass
 from ..events import PromptExecuted, PromptRendered, TelemetryBus, ToolInvoked
 from ..logging import StructuredLogger, get_logger
 from ._observer_types import SliceObserver, Subscription

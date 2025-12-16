@@ -33,7 +33,11 @@ from typing import (
 
 from ..budget import BudgetTracker
 from ..deadlines import Deadline
-from ._types import SupportsDataclass, SupportsDataclassOrNone, SupportsToolResult
+from ..types.dataclass import (
+    SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
+)
 from .errors import PromptValidationError
 from .tool_result import ToolResult
 

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Final
 
-from ..prompt._types import SupportsToolResult
 from ..prompt.tool_result import ToolResult, render_tool_payload
+from ..types.dataclass import SupportsToolResult
 
 _UNSET: Final = object()
 

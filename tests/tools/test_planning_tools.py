@@ -32,10 +32,10 @@ from weakincentives.contrib.tools import (
     SetupPlan,
     UpdateStep,
 )
-from weakincentives.prompt import SupportsDataclass
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import Session
+from weakincentives.types import SupportsDataclass
 
 
 def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:

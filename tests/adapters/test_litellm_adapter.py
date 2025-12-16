@@ -33,12 +33,12 @@ from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
     ProviderAdapter,
-    SessionProtocol,
 )
 from weakincentives.prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     StructuredOutputConfig,
 )
+from weakincentives.runtime.session import SessionProtocol
 
 try:
     from tests.adapters._test_stubs import (
@@ -83,7 +83,6 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptTemplate,
-    SupportsDataclass,
     Tool,
     ToolContext,
     ToolHandler,
@@ -101,6 +100,7 @@ from weakincentives.runtime.session import (
     Session,
     replace_latest,
 )
+from weakincentives.types import SupportsDataclass
 
 MODULE_PATH = "weakincentives.adapters.litellm"
 PROMPT_NS = "tests/adapters/litellm"

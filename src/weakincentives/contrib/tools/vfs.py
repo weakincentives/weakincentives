@@ -25,10 +25,10 @@ from typing import Final, Literal, cast, override
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
-from ...prompt import SupportsDataclass, SupportsToolResult
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Session
+from ...types import SupportsDataclass, SupportsToolResult
 from .filesystem import READ_ENTIRE_FILE, Filesystem, InMemoryFilesystem
 
 FileEncoding = Literal["utf-8"]

@@ -18,7 +18,7 @@ from collections.abc import Callable
 from typing import cast
 
 from ...dbc import pure
-from ...prompt._types import SupportsDataclass
+from ...types.dataclass import SupportsDataclass
 from ._types import (
     ReducerContextProtocol,
     ReducerEvent,
