@@ -324,8 +324,6 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         created_at: UTC timestamp when the workspace was created.
     """
 
-    _is_workspace_section: bool = True
-
     def __init__(
         self,
         *,

@@ -90,7 +90,6 @@ class TestClaudeAgentWorkspaceSectionCore:
         section = ClaudeAgentWorkspaceSection(session=session)
         try:
             assert isinstance(section, WorkspaceSection)
-            assert section._is_workspace_section is True
         finally:
             section.cleanup()
 

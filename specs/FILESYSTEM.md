@@ -417,8 +417,6 @@ class WorkspaceSection(Protocol):
 class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
     """Prompt section providing virtual filesystem tools."""
 
-    _is_workspace_section: ClassVar[bool] = True
-
     def __init__(
         self,
         *,
@@ -471,8 +469,8 @@ class Prompt(Generic[OutputT]):
     def _find_workspace_section(self) -> WorkspaceSection | None:
         """Locate the workspace section in the template tree."""
         for section in self.template.sections:
-            if getattr(section, "_is_workspace_section", False):
-                return cast(WorkspaceSection, section)
+            if isinstance(section, WorkspaceSection):
+                return section
             # Recursively search children
             found = self._search_children(section)
             if found is not None:
@@ -569,8 +567,6 @@ class PodmanFilesystem:
 
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     """Prompt section providing containerized workspace tools."""
-
-    _is_workspace_section: ClassVar[bool] = True
 
     def __init__(self, *, image: str = "python:3.12-slim", ...) -> None:
         self._container = self._create_container(image)

@@ -398,15 +398,17 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
 
         Returns None if no workspace section exists in the template.
         """
+        # Import here to avoid circular imports; the protocol is runtime_checkable
+        from ..contrib.tools.workspace import WorkspaceSection
+
         snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
         if snapshot is None:  # pragma: no cover
             return None
 
         for node in snapshot.sections:
             section = node.section
-            if getattr(section, "_is_workspace_section", False):
-                # Section implements WorkspaceSection protocol
-                return getattr(section, "filesystem", None)
+            if isinstance(section, WorkspaceSection):
+                return section.filesystem
         return None
 
 
