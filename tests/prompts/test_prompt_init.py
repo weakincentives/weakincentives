@@ -21,12 +21,12 @@ import pytest
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
-    PromptDescriptor,
     PromptTemplate,
     PromptValidationError,
-    SectionNode,
-    SupportsDataclass,
 )
+from weakincentives.prompt._types import SupportsDataclass
+from weakincentives.prompt.overrides import PromptDescriptor
+from weakincentives.prompt.prompt import SectionNode
 from weakincentives.prompt.section import Section
 
 

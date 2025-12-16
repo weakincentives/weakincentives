@@ -18,7 +18,7 @@ from typing import Literal, cast
 
 import pytest
 
-from weakincentives.prompt import SupportsDataclassOrNone, SupportsToolResult
+from weakincentives.prompt._types import SupportsDataclassOrNone, SupportsToolResult
 from weakincentives.prompt.overrides.validation import (
     FORMAT_VERSION,
     load_sections,

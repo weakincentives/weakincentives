@@ -24,13 +24,15 @@ from weakincentives.prompt import (
     PromptTemplate,
     PromptValidationError,
     SectionVisibility,
-    TaskExample,
-    TaskExamplesSection,
-    TaskStep,
     Tool,
     ToolContext,
     ToolExample,
     ToolResult,
+)
+from weakincentives.prompt.task_examples import (
+    TaskExample,
+    TaskExamplesSection,
+    TaskStep,
 )
 
 # --- Test fixtures and helper types ---

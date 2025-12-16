@@ -21,7 +21,7 @@ from typing import Final, Literal, cast, override
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
-from ...prompt import SupportsDataclass, SupportsToolResult
+from ...prompt._types import SupportsDataclass, SupportsToolResult
 from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import PromptRenderError
 from ...prompt.markdown import MarkdownSection

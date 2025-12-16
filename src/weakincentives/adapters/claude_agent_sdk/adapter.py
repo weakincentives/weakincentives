@@ -19,8 +19,9 @@ from typing import Any, TypeVar, cast, override
 
 from ...budget import Budget, BudgetTracker
 from ...deadlines import Deadline
-from ...prompt import Prompt, RenderedPrompt
+from ...prompt import Prompt
 from ...prompt.errors import VisibilityExpansionRequired
+from ...prompt.rendering import RenderedPrompt
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger

@@ -10,22 +10,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Runtime primitives for :mod:`weakincentives`."""
+"""Runtime primitives for :mod:`weakincentives`.
+
+This module exports essential runtime types. Advanced types are available
+in submodules:
+
+- :mod:`weakincentives.runtime.session` — Session internals and protocols
+- :mod:`weakincentives.runtime.session.reducers` — Reducer helper functions
+- :mod:`weakincentives.runtime.events` — Event types and bus implementations
+"""
 
 from __future__ import annotations
 
-from . import events, main_loop, session
 from .events import (
-    ControlBus,
     EventBus,
-    HandlerFailure,
     InProcessEventBus,
-    PromptExecuted,
-    PromptRendered,
-    PublishResult,
-    TelemetryBus,
-    TokenUsage,
-    ToolInvoked,
 )
 from .logging import StructuredLogger, configure_logging, get_logger
 from .main_loop import (
@@ -35,65 +34,20 @@ from .main_loop import (
     MainLoopFailed,
     MainLoopRequest,
 )
-from .session import (
-    DataEvent,
-    ReducerContext,
-    ReducerContextProtocol,
-    ReducerEvent,
-    Session,
-    SessionProtocol,
-    Snapshot,
-    SnapshotProtocol,
-    SnapshotRestoreError,
-    SnapshotSerializationError,
-    TypedReducer,
-    append_all,
-    build_reducer_context,
-    iter_sessions_bottom_up,
-    replace_latest,
-    replace_latest_by,
-    upsert_by,
-)
+from .session import Session
 
 __all__ = [
-    "ControlBus",
-    "DataEvent",
     "EventBus",
-    "HandlerFailure",
     "InProcessEventBus",
     "MainLoop",
     "MainLoopCompleted",
     "MainLoopConfig",
     "MainLoopFailed",
     "MainLoopRequest",
-    "PromptExecuted",
-    "PromptRendered",
-    "PublishResult",
-    "ReducerContext",
-    "ReducerContextProtocol",
-    "ReducerEvent",
     "Session",
-    "SessionProtocol",
-    "Snapshot",
-    "SnapshotProtocol",
-    "SnapshotRestoreError",
-    "SnapshotSerializationError",
     "StructuredLogger",
-    "TelemetryBus",
-    "TokenUsage",
-    "ToolInvoked",
-    "TypedReducer",
-    "append_all",
-    "build_reducer_context",
     "configure_logging",
-    "events",
     "get_logger",
-    "iter_sessions_bottom_up",
-    "main_loop",
-    "replace_latest",
-    "replace_latest_by",
-    "session",
-    "upsert_by",
 ]
 
 

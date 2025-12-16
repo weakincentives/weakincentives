@@ -43,13 +43,12 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptTemplate,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
     Tool,
     ToolContext,
     ToolHandler,
     ToolResult,
 )
+from weakincentives.prompt._types import SupportsDataclassOrNone, SupportsToolResult
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session, SessionProtocol
 

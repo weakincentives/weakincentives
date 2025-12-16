@@ -22,13 +22,13 @@ from .errors import DeadlineExceededError, ToolValidationError, WinkError
 from .prompt import (
     MarkdownSection,
     Prompt,
-    SupportsDataclass,
     Tool,
     ToolContext,
     ToolHandler,
     ToolResult,
-    parse_structured_output,
 )
+from .prompt._types import SupportsDataclass
+from .prompt.structured_output import parse_structured_output
 from .runtime import StructuredLogger, configure_logging, get_logger
 from .types import JSONValue
 

@@ -4,6 +4,52 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Breaking: Reduced Public API Surface
+
+The `weakincentives.prompt` and `weakincentives.runtime` modules now export
+only essential types. Advanced types have been moved to submodules.
+
+**prompt module** - Reduced from 43 to 13 exports:
+
+- Core types remain: `Prompt`, `PromptTemplate`, `Section`, `MarkdownSection`,
+  `SectionVisibility`, `Tool`, `ToolContext`, `ToolExample`, `ToolHandler`,
+  `ToolResult`, `PromptError`, `PromptRenderError`, `PromptValidationError`
+- Moved to `weakincentives.prompt._types`: `SupportsDataclass`,
+  `SupportsDataclassOrNone`, `SupportsToolResult`, `ToolRenderableResult`
+- Moved to `weakincentives.prompt.protocols`: `PromptProtocol`,
+  `PromptTemplateProtocol`, `RenderedPromptProtocol`, `ProviderAdapterProtocol`
+- Moved to `weakincentives.prompt.rendering`: `RenderedPrompt`
+- Moved to `weakincentives.prompt.prompt`: `SectionNode`
+- Moved to `weakincentives.prompt.errors`: `SectionPath`,
+  `VisibilityExpansionRequired`
+- Already in `weakincentives.prompt.overrides`: `LocalPromptOverridesStore`,
+  `PromptDescriptor`, `PromptLike`, `PromptOverride`, `PromptOverridesError`,
+  `PromptOverridesStore`, `SectionDescriptor`, `SectionOverride`,
+  `ToolDescriptor`, `ToolOverride`, `hash_json`, `hash_text`
+- Already in `weakincentives.prompt.structured_output`: `OutputParseError`,
+  `StructuredOutputConfig`, `parse_structured_output`
+- Already in `weakincentives.prompt.task_examples`: `TaskExample`,
+  `TaskExamplesSection`, `TaskStep`
+- Already in `weakincentives.prompt.progressive_disclosure`: `OpenSectionsParams`
+- Already in `weakincentives.prompt.visibility_overrides`: `VisibilityOverrides`,
+  `SetVisibilityOverride`, `ClearVisibilityOverride`, `ClearAllVisibilityOverrides`,
+  `register_visibility_reducers`, `get_session_visibility_override`
+
+**runtime module** - Reduced from 30 to 11 exports:
+
+- Core types remain: `Session`, `MainLoop`, `MainLoopConfig`, `MainLoopRequest`,
+  `MainLoopCompleted`, `MainLoopFailed`, `EventBus`, `InProcessEventBus`,
+  `StructuredLogger`, `configure_logging`, `get_logger`
+- Moved to `weakincentives.runtime.events`: `ControlBus`, `TelemetryBus`,
+  `HandlerFailure`, `PromptExecuted`, `PromptRendered`, `PublishResult`,
+  `TokenUsage`, `ToolInvoked`
+- Moved to `weakincentives.runtime.session`: `DataEvent`, `ReducerContext`,
+  `ReducerContextProtocol`, `ReducerEvent`, `SessionProtocol`, `Snapshot`,
+  `SnapshotProtocol`, `SnapshotRestoreError`, `SnapshotSerializationError`,
+  `TypedReducer`, `build_reducer_context`, `iter_sessions_bottom_up`
+- Moved to `weakincentives.runtime.session.reducers`: `append_all`,
+  `replace_latest`, `replace_latest_by`, `upsert_by`
+
 ### Breaking: Simplified Dispatch API
 
 The dispatch API has been simplified to a single broadcast method. The targeted

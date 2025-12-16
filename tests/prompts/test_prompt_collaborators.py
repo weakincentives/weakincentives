@@ -21,9 +21,9 @@ from weakincentives.prompt import (
     MarkdownSection,
     PromptValidationError,
     Section,
-    SupportsDataclass,
     Tool,
 )
+from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.overrides import ToolOverride, hash_text
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.rendering import PromptRenderer

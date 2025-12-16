@@ -28,11 +28,10 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptTemplate,
-    SectionPath,
     SectionVisibility,
-    VisibilityExpansionRequired,
-    VisibilityOverrides,
 )
+from weakincentives.prompt.errors import SectionPath, VisibilityExpansionRequired
+from weakincentives.prompt.visibility_overrides import VisibilityOverrides
 from weakincentives.runtime.events import EventBus, InProcessEventBus
 from weakincentives.runtime.main_loop import (
     MainLoop,

@@ -27,9 +27,8 @@ from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
 )
+from weakincentives.prompt._types import SupportsDataclassOrNone, SupportsToolResult
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import ToolInvoked

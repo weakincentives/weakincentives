@@ -20,8 +20,8 @@ import sys
 from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
-from weakincentives.runtime import (
-    EventBus,
+from weakincentives.runtime import EventBus
+from weakincentives.runtime.events import (
     PromptExecuted,
     PromptRendered,
     TokenUsage,

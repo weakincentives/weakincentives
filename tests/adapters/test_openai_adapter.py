@@ -79,12 +79,12 @@ from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
     PromptTemplate,
-    SupportsDataclass,
     Tool,
     ToolContext,
     ToolHandler,
     ToolResult,
 )
+from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.events import (
     HandlerFailure,

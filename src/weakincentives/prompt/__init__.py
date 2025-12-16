@@ -10,116 +10,47 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt authoring primitives exposed by :mod:`weakincentives.prompt`."""
+"""Prompt authoring primitives exposed by :mod:`weakincentives.prompt`.
+
+This module exports essential types for prompt authoring. Advanced types
+are available in submodules:
+
+- :mod:`weakincentives.prompt.overrides` — Prompt override infrastructure
+- :mod:`weakincentives.prompt.protocols` — Protocol types
+- :mod:`weakincentives.prompt.rendering` — RenderedPrompt and related types
+- :mod:`weakincentives.prompt.structured_output` — Structured output parsing
+- :mod:`weakincentives.prompt.task_examples` — TaskExample, TaskExamplesSection
+- :mod:`weakincentives.prompt.visibility_overrides` — Visibility override events
+- :mod:`weakincentives.prompt.progressive_disclosure` — OpenSectionsParams
+"""
 
 from __future__ import annotations
 
-from ._types import (
-    SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
-    ToolRenderableResult,
-)
 from .errors import (
     PromptError,
     PromptRenderError,
     PromptValidationError,
-    SectionPath,
-    VisibilityExpansionRequired,
 )
 from .markdown import MarkdownSection
-from .overrides import (
-    LocalPromptOverridesStore,
-    PromptDescriptor,
-    PromptLike,
-    PromptOverride,
-    PromptOverridesError,
-    PromptOverridesStore,
-    SectionDescriptor,
-    SectionOverride,
-    ToolDescriptor,
-    ToolOverride,
-    hash_json,
-    hash_text,
-)
-from .progressive_disclosure import OpenSectionsParams
-from .prompt import Prompt, PromptTemplate, SectionNode
-from .protocols import (
-    PromptProtocol,
-    PromptTemplateProtocol,
-    ProviderAdapterProtocol,
-    RenderedPromptProtocol,
-)
-from .rendering import RenderedPrompt
+from .prompt import Prompt, PromptTemplate
 from .section import Section, SectionVisibility
-from .structured_output import (
-    OutputParseError,
-    StructuredOutputConfig,
-    parse_structured_output,
-)
-from .task_examples import TaskExample, TaskExamplesSection, TaskStep
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
-from .visibility_overrides import (
-    ClearAllVisibilityOverrides,
-    ClearVisibilityOverride,
-    SetVisibilityOverride,
-    VisibilityOverrides,
-    get_session_visibility_override,
-    register_visibility_reducers,
-)
 
 __all__ = [
-    "ClearAllVisibilityOverrides",
-    "ClearVisibilityOverride",
-    "LocalPromptOverridesStore",
     "MarkdownSection",
-    "OpenSectionsParams",
-    "OutputParseError",
     "Prompt",
-    "PromptDescriptor",
     "PromptError",
-    "PromptLike",
-    "PromptOverride",
-    "PromptOverridesError",
-    "PromptOverridesStore",
-    "PromptProtocol",
     "PromptRenderError",
     "PromptTemplate",
-    "PromptTemplateProtocol",
     "PromptValidationError",
-    "ProviderAdapterProtocol",
-    "RenderedPrompt",
-    "RenderedPromptProtocol",
     "Section",
-    "SectionDescriptor",
-    "SectionNode",
-    "SectionOverride",
-    "SectionPath",
     "SectionVisibility",
-    "SetVisibilityOverride",
-    "StructuredOutputConfig",
-    "SupportsDataclass",
-    "SupportsDataclassOrNone",
-    "SupportsToolResult",
-    "TaskExample",
-    "TaskExamplesSection",
-    "TaskStep",
     "Tool",
     "ToolContext",
-    "ToolDescriptor",
     "ToolExample",
     "ToolHandler",
-    "ToolOverride",
-    "ToolRenderableResult",
     "ToolResult",
-    "VisibilityExpansionRequired",
-    "VisibilityOverrides",
-    "get_session_visibility_override",
-    "hash_json",
-    "hash_text",
-    "parse_structured_output",
-    "register_visibility_reducers",
 ]
 
 

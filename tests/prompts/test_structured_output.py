@@ -19,14 +19,16 @@ import pytest
 
 from weakincentives.prompt import (
     MarkdownSection,
-    OutputParseError,
     Prompt,
     PromptTemplate,
     PromptValidationError,
-    parse_structured_output,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.prompt.structured_output import StructuredOutputConfig
+from weakincentives.prompt.structured_output import (
+    OutputParseError,
+    StructuredOutputConfig,
+    parse_structured_output,
+)
 
 
 @dataclass

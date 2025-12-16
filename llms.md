@@ -171,16 +171,13 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `WorkspaceBudgetExceededError`: Raised when mount exceeds max_bytes.
     - `WorkspaceSecurityError`: Raised when accessing paths outside
       allowed_host_roots.
-- `weakincentives.prompt`: Prompt authoring, rendering, and override helpers.
-  - Authoring:
-    - `PromptTemplate`: Immutable prompt blueprint with sections (import from
-      here).
-    - `MarkdownSection`: Render markdown content using `string.Template`.
+- `weakincentives.prompt`: Prompt authoring essentials (advanced types in
+  submodules).
+  - Core types (top-level exports):
     - `Prompt`: Coordinate prompt sections and their parameter bindings.
-    - `RenderedPrompt`: Result of rendering a prompt.
+    - `PromptTemplate`: Immutable prompt blueprint with sections.
     - `Section`: Base class for prompt sections.
-    - `SectionNode`: Node in section tree.
-    - `SectionPath`: Path to a section.
+    - `MarkdownSection`: Render markdown content using `string.Template`.
     - `SectionVisibility`: Enum controlling how a section is rendered (`FULL`,
       `SUMMARY`).
     - `Tool`: Describe a callable tool exposed by prompt sections.
@@ -189,19 +186,29 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `ToolExample`: Representative invocation for a tool documenting inputs
       and outputs.
     - `ToolHandler`: Callable protocol implemented by tool handlers.
-    - `ToolRenderableResult`: Protocol for tool results that can be rendered.
     - `ToolResult`: Structured response emitted by a tool handler.
-    - `SupportsDataclass`: Protocol satisfied by dataclass types and
-      instances.
+    - `PromptError`: Base class for prompt errors.
+    - `PromptRenderError`: Raised when prompt rendering fails.
+    - `PromptValidationError`: Raised when prompt validation fails.
+  - Internal types (`weakincentives.prompt._types`):
+    - `SupportsDataclass`: Protocol satisfied by dataclass types and instances.
     - `SupportsDataclassOrNone`: Protocol for dataclass types or None.
     - `SupportsToolResult`: Protocol for tool results.
+    - `ToolRenderableResult`: Protocol for tool results that can be rendered.
+  - Protocols (`weakincentives.prompt.protocols`):
     - `PromptProtocol`: Protocol for prompts.
     - `PromptTemplateProtocol`: Protocol for prompt templates.
     - `RenderedPromptProtocol`: Protocol for rendered prompts.
     - `ProviderAdapterProtocol`: Protocol for provider adapters.
-  - Composition:
-    - `OpenSectionsParams`: Parameters for progressive disclosure of sections.
-  - Overrides:
+  - Rendering (`weakincentives.prompt.rendering`):
+    - `RenderedPrompt`: Result of rendering a prompt.
+  - Prompt internals (`weakincentives.prompt.prompt`):
+    - `SectionNode`: Node in section tree.
+  - Errors (`weakincentives.prompt.errors`):
+    - `SectionPath`: Path to a section.
+    - `VisibilityExpansionRequired`: Raised when model requests expansion of
+      summarized sections.
+  - Overrides (`weakincentives.prompt.overrides`):
     - `LocalPromptOverridesStore`: Store for local prompt overrides.
     - `PromptDescriptor`: Descriptor for a prompt.
     - `PromptLike`: Protocol for objects that look like prompts.
@@ -214,57 +221,59 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `ToolOverride`: Override for a tool.
     - `hash_json`: Hash a JSON value.
     - `hash_text`: Hash a text value.
-  - Structured output and validation:
+  - Structured output (`weakincentives.prompt.structured_output`):
     - `OutputParseError`: Raised when structured output parsing fails.
     - `StructuredOutputConfig`: Configuration for structured output.
     - `parse_structured_output`: Parse a model response into the structured
       output type declared by the prompt.
-    - `PromptError`: Base class for prompt errors.
-    - `PromptRenderError`: Raised when prompt rendering fails.
-    - `PromptValidationError`: Raised when prompt validation fails.
-    - `VisibilityExpansionRequired`: Raised when model requests expansion of
-      summarized sections.
-- `weakincentives.runtime`: Session, event, and orchestration primitives.
-  - Logging:
-    - `StructuredLogger`: Logger adapter enforcing a minimal structured event
-      schema.
+  - Task examples (`weakincentives.prompt.task_examples`):
+    - `TaskExample`, `TaskExamplesSection`, `TaskStep`: Task demonstration types.
+  - Progressive disclosure (`weakincentives.prompt.progressive_disclosure`):
+    - `OpenSectionsParams`: Parameters for progressive disclosure of sections.
+  - Visibility overrides (`weakincentives.prompt.visibility_overrides`):
+    - `VisibilityOverrides`, `SetVisibilityOverride`, `ClearVisibilityOverride`,
+      `ClearAllVisibilityOverrides`: Session-managed visibility state.
+    - `register_visibility_reducers`, `get_session_visibility_override`: Helpers.
+- `weakincentives.runtime`: Runtime essentials (advanced types in submodules).
+  - Core types (top-level exports):
+    - `Session`: Immutable event ledger with Redux-like reducers.
+    - `MainLoop`: Abstract base class for standardized agent workflow.
+    - `MainLoopConfig`: Configuration for default deadline/budget.
+    - `MainLoopRequest`: Event requesting execution with optional constraints.
+    - `MainLoopCompleted`: Success event published via bus.
+    - `MainLoopFailed`: Failure event published via bus.
+    - `EventBus`: Interface for publishing events.
+    - `InProcessEventBus`: Simple in-process event bus.
+    - `StructuredLogger`: Logger adapter enforcing a minimal structured schema.
     - `configure_logging`: Configure the root logger with sensible defaults.
     - `get_logger`: Return a `StructuredLogger` scoped to a name.
-  - Events:
-    - `EventBus`: Interface for publishing events.
+  - Events (`weakincentives.runtime.events`):
+    - `ControlBus`: Control event bus interface.
+    - `TelemetryBus`: Telemetry event bus interface.
     - `HandlerFailure`: Event emitted when a handler fails.
-    - `InProcessEventBus`: Simple in-process event bus.
     - `PromptExecuted`: Event emitted when a prompt is executed.
     - `PromptRendered`: Event emitted when a prompt is rendered.
     - `PublishResult`: Result of publishing an event.
     - `TokenUsage`: Token usage data from provider responses.
     - `ToolInvoked`: Event emitted when a tool is invoked.
-  - Main loop orchestration:
-    - `MainLoop`: Abstract base class for standardized agent workflow
-      orchestration.
-    - `MainLoopConfig`: Configuration for default deadline/budget.
-    - `MainLoopRequest`: Event requesting execution with optional constraints.
-    - `MainLoopCompleted`: Success event published via bus.
-    - `MainLoopFailed`: Failure event published via bus.
-  - Session ledger:
+  - Session (`weakincentives.runtime.session`):
     - `DataEvent`: Event carrying data.
     - `ReducerContext`: Context for reducers.
     - `ReducerContextProtocol`: Protocol for reducer context.
     - `ReducerEvent`: Type alias for reducer events (dataclasses).
-    - `Session`: Immutable event ledger with Redux-like reducers.
     - `SessionProtocol`: Protocol for sessions.
     - `Snapshot`: Session snapshot.
     - `SnapshotProtocol`: Protocol for session snapshots.
     - `SnapshotRestoreError`: Raised when snapshot restoration fails.
     - `SnapshotSerializationError`: Raised when snapshot serialization fails.
     - `TypedReducer`: Reducer for typed state.
-    - `append`: Append an event to a session.
     - `build_reducer_context`: Build a reducer context.
     - `iter_sessions_bottom_up`: Iterate over sessions bottom-up.
-    - `QueryBuilder`: Fluent query builder for session slices.
-    - `replace_latest`: Replace the latest value in a session.
-    - `replace_latest_by`: Replace the latest value in a session by key.
-    - `upsert_by`: Upsert a value in a session by key.
+  - Reducer helpers (`weakincentives.runtime.session.reducers`):
+    - `append_all`: Append event unconditionally (ledger semantics).
+    - `replace_latest`: Keep only the most recent event value.
+    - `replace_latest_by`: Keep only the most recent item for each key.
+    - `upsert_by`: Return a reducer that upserts items sharing the same key.
 - `weakincentives.optimizers`: Prompt optimization algorithms and utilities.
   - Protocol and base classes:
     - `PromptOptimizer`: Protocol for prompt optimization algorithms.
@@ -746,13 +755,14 @@ session.mutate().reset()                            # Clear all slices
 session.mutate().rollback(snapshot)                 # Restore from snapshot
 ```
 
-### Legacy helpers (still available)
+### Reducer helpers
 
 ```python
-from weakincentives.runtime import append, replace_latest
+from weakincentives.runtime.session.reducers import append_all, replace_latest
 
-session = append(session, my_data)
-session = replace_latest(session, MyType, updated)
+# Register reducers for state slices
+session[MyType].register(MyEvent, append_all)
+session[MyType].register(UpdateEvent, replace_latest)
 ```
 
 ### In tool handlers
@@ -830,7 +840,7 @@ accumulating visibility overrides and retrying evaluation. A shared
 ## Event Subscription
 
 ```python
-from weakincentives.runtime import PromptRendered, PromptExecuted, ToolInvoked, TokenUsage
+from weakincentives.runtime.events import PromptRendered, PromptExecuted, ToolInvoked, TokenUsage
 
 session = Session()
 

@@ -321,7 +321,8 @@ cloned = section.clone(session=new_session, bus=new_bus)
 
 ```python
 from dataclasses import dataclass
-from weakincentives.prompt import Prompt, MarkdownSection, parse_structured_output
+from weakincentives.prompt import Prompt, MarkdownSection
+from weakincentives.prompt.structured_output import parse_structured_output
 
 @dataclass
 class TaskParams:

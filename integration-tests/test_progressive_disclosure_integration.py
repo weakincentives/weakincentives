@@ -29,14 +29,15 @@ from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
     SectionVisibility,
-    SetVisibilityOverride,
     Tool,
     ToolContext,
     ToolResult,
-    VisibilityExpansionRequired,
+)
+from weakincentives.prompt.errors import SectionPath, VisibilityExpansionRequired
+from weakincentives.prompt.visibility_overrides import (
+    SetVisibilityOverride,
     VisibilityOverrides,
 )
-from weakincentives.prompt.errors import SectionPath
 from weakincentives.runtime.session import Session
 
 pytest.importorskip("openai")

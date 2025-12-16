@@ -64,8 +64,8 @@ from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
     SectionVisibility,
-    SupportsDataclass,
 )
+from weakincentives.prompt._types import SupportsDataclass
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
