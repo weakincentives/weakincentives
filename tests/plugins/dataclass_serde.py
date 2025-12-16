@@ -110,10 +110,6 @@ def _make_vfs_file() -> vfs_tools.VfsFile:
     )
 
 
-def _make_virtual_file_system() -> vfs_tools.VirtualFileSystem:
-    return vfs_tools.VirtualFileSystem(files=(_make_vfs_file(),))
-
-
 def _make_list_directory() -> vfs_tools.ListDirectory:
     return vfs_tools.ListDirectory(path=_make_vfs_path())
 
@@ -190,7 +186,6 @@ def _discover_vfs() -> dict[type[Any], SupportsFactory]:
     return {
         vfs_tools.VfsPath: _make_vfs_path,
         vfs_tools.VfsFile: _make_vfs_file,
-        vfs_tools.VirtualFileSystem: _make_virtual_file_system,
         vfs_tools.ListDirectory: _make_list_directory,
         vfs_tools.ListDirectoryResult: _make_list_directory_result,
         vfs_tools.ReadFile: _make_read_file,

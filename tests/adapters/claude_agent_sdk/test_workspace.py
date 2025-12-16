@@ -27,6 +27,7 @@ from weakincentives.adapters.claude_agent_sdk.workspace import (
     WorkspaceBudgetExceededError,
     WorkspaceSecurityError,
 )
+from weakincentives.contrib.tools.filesystem import Filesystem
 from weakincentives.contrib.tools.workspace import WorkspaceSection
 from weakincentives.runtime import InProcessEventBus, Session
 
@@ -158,6 +159,16 @@ class TestClaudeAgentWorkspaceSectionCore:
         finally:
             section.cleanup()
 
+    def test_filesystem_property(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            fs = section.filesystem
+            assert isinstance(fs, Filesystem)
+            # Filesystem should be empty by default
+            assert fs.list(".") == []
+        finally:
+            section.cleanup()
+
 
 class TestClaudeAgentWorkspaceSectionCleanup:
     """Cleanup and clone tests for ClaudeAgentWorkspaceSection."""
@@ -196,6 +207,28 @@ class TestClaudeAgentWorkspaceSectionCleanup:
                 assert cloned.mount_previews == section.mount_previews
             finally:
                 section.cleanup()
+
+    def test_clone_preserves_filesystem_instance(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+
+        try:
+            # Write a file through the filesystem
+            fs = section.filesystem
+            _ = fs.write("test_file.txt", "test content")
+
+            # Clone to a new session
+            new_bus = InProcessEventBus()
+            new_session = Session(bus=new_bus)
+            cloned = section.clone(session=new_session)
+
+            # Filesystem instance should be the same
+            assert cloned.filesystem is section.filesystem
+
+            # Content should be accessible through the cloned section's filesystem
+            result = cloned.filesystem.read("test_file.txt")
+            assert result.content == "test content"
+        finally:
+            section.cleanup()
 
     def test_clone_requires_session(self, session: Session) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)

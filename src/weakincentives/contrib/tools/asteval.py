@@ -23,7 +23,6 @@ import statistics
 import threading
 from collections.abc import Callable, Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
 from importlib import import_module
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast, override
@@ -33,14 +32,9 @@ from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
-from ...runtime.session import (
-    ReducerContextProtocol,
-    ReducerEvent,
-    Session,
-    TypedReducer,
-)
-from ._context import ensure_context_uses_session
-from .vfs import VfsFile, VfsPath, VirtualFileSystem
+from ...runtime.session import Session
+from .filesystem import READ_ENTIRE_FILE, Filesystem, InMemoryFilesystem
+from .vfs import VfsPath
 
 _LOGGER: StructuredLogger = get_logger(__name__, context={"component": "tools.asteval"})
 
@@ -281,12 +275,6 @@ class _AstevalSectionParams:
     pass
 
 
-def _now() -> datetime:
-    value = datetime.now(UTC)
-    microsecond = value.microsecond - value.microsecond % 1000
-    return value.replace(microsecond=microsecond, tzinfo=UTC)
-
-
 def _truncate_stream(text: str) -> str:
     if len(text) <= _MAX_STREAM_LENGTH:
         return text
@@ -334,12 +322,18 @@ def _format_vfs_path(path: VfsPath) -> str:
     return "/".join(path.segments) or "/"
 
 
-def _require_file(snapshot: VirtualFileSystem, path: VfsPath) -> VfsFile:
+def _require_file_from_filesystem(fs: Filesystem, path: VfsPath) -> str:
+    """Read file content from filesystem, raising ToolValidationError if not found."""
     normalized = _normalize_vfs_path(path)
-    for file in snapshot.files:
-        if file.path.segments == normalized.segments:
-            return file
-    raise ToolValidationError("File does not exist in the virtual filesystem.")
+    path_str = "/".join(normalized.segments)
+    try:
+        result = fs.read(path_str)
+    except FileNotFoundError:
+        raise ToolValidationError(
+            "File does not exist in the virtual filesystem."
+        ) from None
+    else:
+        return result.content
 
 
 def _normalize_code(code: str) -> str:
@@ -428,48 +422,35 @@ def _summarize_writes(writes: Sequence[EvalFileWrite]) -> str | None:
     return f"writes={total} file(s): {preview_paths}"
 
 
-def _apply_writes(
-    snapshot: VirtualFileSystem, writes: Iterable[EvalFileWrite]
-) -> VirtualFileSystem:
-    files = list(snapshot.files)
-    timestamp = _now()
+def _apply_writes_to_filesystem(
+    fs: Filesystem, writes: Iterable[EvalFileWrite]
+) -> None:
+    """Apply write operations to the filesystem.
+
+    Writes that fail mode constraints are silently skipped:
+    - create mode: skipped if file already exists
+    - overwrite/append mode: skipped if file doesn't exist
+    """
     for write in writes:
-        existing_index = next(
-            (index for index, file in enumerate(files) if file.path == write.path),
-            None,
-        )
-        existing = files[existing_index] if existing_index is not None else None
-        if write.mode == "create" and existing is not None:
-            raise ToolValidationError("File already exists; use overwrite or append.")
-        if write.mode in {"overwrite", "append"} and existing is None:
-            raise ToolValidationError("File does not exist for the requested mode.")
-        if write.mode == "append" and existing is not None:
-            content = existing.content + write.content
-            created_at = existing.created_at
-            version = existing.version + 1
-        elif existing is not None:
-            content = write.content
-            created_at = existing.created_at
-            version = existing.version + 1
+        path_str = "/".join(write.path.segments)
+        exists = fs.exists(path_str)
+
+        # Skip writes that fail mode constraints
+        if write.mode == "create" and exists:
+            continue
+        if write.mode in {"overwrite", "append"} and not exists:
+            continue
+
+        if write.mode == "append" and exists:
+            # Read entire existing content and append
+            result = fs.read(path_str, limit=READ_ENTIRE_FILE)
+            content = result.content + write.content
+            _ = fs.write(path_str, content, mode="overwrite")
         else:
-            content = write.content
-            created_at = timestamp
-            version = 1
-        size_bytes = len(content.encode("utf-8"))
-        updated = VfsFile(
-            path=write.path,
-            content=content,
-            encoding="utf-8",
-            size_bytes=size_bytes,
-            version=version,
-            created_at=created_at,
-            updated_at=timestamp,
-        )
-        if existing_index is not None:
-            _ = files.pop(existing_index)
-        files.append(updated)
-    files.sort(key=lambda file: file.path.segments)
-    return VirtualFileSystem(files=tuple(files))
+            mode: Literal["create", "overwrite", "append"] = (
+                "create" if write.mode == "create" else "overwrite"
+            )
+            _ = fs.write(path_str, write.content, mode=mode)
 
 
 def _parse_string_path(path: str) -> VfsPath:
@@ -479,13 +460,13 @@ def _parse_string_path(path: str) -> VfsPath:
 
 
 def _build_eval_globals(
-    snapshot: VirtualFileSystem, reads: tuple[EvalFileRead, ...]
+    fs: Filesystem, reads: tuple[EvalFileRead, ...]
 ) -> dict[str, str]:
     values: dict[str, str] = {}
     for read in reads:
         alias = _alias_for_path(read.path)
-        file = _require_file(snapshot, read.path)
-        values[alias] = file.content
+        content = _require_file_from_filesystem(fs, read.path)
+        values[alias] = content
     return values
 
 
@@ -657,12 +638,11 @@ class _AstevalToolSuite:
         super().__init__()
         self._section = section
 
-    def run(  # noqa: PLR0914
+    def run(
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        session = self._section.session
+        del context  # Filesystem accessed via section
+        fs = self._section.filesystem
         code = _normalize_code(params.code)
         reads = _normalize_reads(params.reads)
         writes = _normalize_writes(params.writes)
@@ -671,14 +651,13 @@ class _AstevalToolSuite:
         if read_paths & write_paths:
             raise ToolValidationError("Reads and writes must not target the same path.")
 
-        snapshot = session.query(VirtualFileSystem).latest() or VirtualFileSystem()
-        read_globals = _build_eval_globals(snapshot, reads)
+        read_globals = _build_eval_globals(fs, reads)
         user_globals = _parse_user_globals(params.globals)
 
         sandbox = self._initialize_sandbox(
+            fs=fs,
             reads=reads,
             writes=writes,
-            snapshot=snapshot,
             read_globals=read_globals,
             user_globals=user_globals,
         )
@@ -700,6 +679,11 @@ class _AstevalToolSuite:
             pending_write_attempted=sandbox.pending_write_attempted,
             execution=execution,
         )
+
+        # Apply writes to filesystem if evaluation succeeded
+        if final_writes and not execution.stderr:
+            _apply_writes_to_filesystem(fs, final_writes)
+
         result = self._assemble_result(
             _ResultAssemblyContext(
                 reads=reads,
@@ -730,9 +714,9 @@ class _AstevalToolSuite:
     @staticmethod
     def _initialize_sandbox(
         *,
+        fs: Filesystem,
         reads: tuple[EvalFileRead, ...],
         writes: tuple[EvalFileWrite, ...],
-        snapshot: VirtualFileSystem,
         read_globals: Mapping[str, str],
         user_globals: Mapping[str, object],
     ) -> _SandboxState:
@@ -777,8 +761,7 @@ class _AstevalToolSuite:
 
         def read_text(path: str) -> str:
             normalized = _normalize_vfs_path(_parse_string_path(path))
-            file = _require_file(snapshot, normalized)
-            return file.content
+            return _require_file_from_filesystem(fs, normalized)
 
         def write_text(path: str, content: str, mode: str = "create") -> None:
             state.pending_write_attempted = True
@@ -954,24 +937,6 @@ class _AstevalToolSuite:
         return ToolResult(message=message, value=result)
 
 
-def _make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
-    def reducer(
-        slice_values: tuple[VirtualFileSystem, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[VirtualFileSystem, ...]:
-        del context
-        previous = slice_values[-1] if slice_values else VirtualFileSystem()
-        value = cast(EvalResult, event)
-        if not value.writes:
-            return (previous,)
-        snapshot = _apply_writes(previous, value.writes)
-        return (snapshot,)
-
-    return reducer
-
-
 def normalize_eval_reads(reads: Iterable[EvalFileRead]) -> tuple[EvalFileRead, ...]:
     return _normalize_reads(reads)
 
@@ -998,23 +963,24 @@ def summarize_eval_writes(writes: Sequence[EvalFileWrite]) -> str | None:
     return _summarize_writes(writes)
 
 
-def make_eval_result_reducer() -> TypedReducer[VirtualFileSystem]:
-    return _make_eval_result_reducer()
-
-
 class AstevalSection(MarkdownSection[_AstevalSectionParams]):
     """Prompt section exposing the :mod:`asteval` evaluation tool."""
+
+    _is_workspace_section: bool = True
 
     def __init__(
         self,
         *,
         session: Session,
+        filesystem: Filesystem | None = None,
         accepts_overrides: bool = False,
     ) -> None:
         self._session = session
-        session.mutate(VirtualFileSystem).register(
-            EvalResult, _make_eval_result_reducer()
+        # Use provided filesystem or create a new one
+        self._filesystem = (
+            filesystem if filesystem is not None else InMemoryFilesystem()
         )
+
         tool_suite = _AstevalToolSuite(section=self)
         tool = Tool[EvalParams, EvalResult](
             name="evaluate_python",
@@ -1071,13 +1037,22 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
     def session(self) -> Session:
         return self._session
 
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the filesystem used by this section."""
+        return self._filesystem
+
     @override
     def clone(self, **kwargs: object) -> AstevalSection:
         session = kwargs.get("session")
         if not isinstance(session, Session):
             msg = "session is required to clone AstevalSection."
             raise TypeError(msg)
-        return AstevalSection(session=session, accepts_overrides=self.accepts_overrides)
+        return AstevalSection(
+            session=session,
+            filesystem=self._filesystem,
+            accepts_overrides=self.accepts_overrides,
+        )
 
 
 __all__ = [
@@ -1087,7 +1062,6 @@ __all__ = [
     "EvalParams",
     "EvalResult",
     "alias_for_eval_path",
-    "make_eval_result_reducer",
     "normalize_eval_reads",
     "normalize_eval_write",
     "normalize_eval_writes",

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from ...runtime.session import Session
+    from .filesystem import Filesystem
 
 __all__ = ["WorkspaceSection"]
 
@@ -39,6 +40,7 @@ class WorkspaceSection(Protocol):
     The protocol requires:
     - A `_is_workspace_section` class attribute set to True (marker)
     - A session property returning the associated Session
+    - A filesystem property returning the Filesystem managed by this section
     - A clone() method for creating copies with a new session
     """
 
@@ -47,6 +49,11 @@ class WorkspaceSection(Protocol):
     @property
     def session(self) -> Session:
         """Return the session associated with this workspace section."""
+        ...
+
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the filesystem managed by this workspace section."""
         ...
 
     def clone(self, **kwargs: object) -> WorkspaceSection:

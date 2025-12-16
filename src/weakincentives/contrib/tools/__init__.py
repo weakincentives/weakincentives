@@ -14,6 +14,7 @@
 
 This package provides domain-specific tools that extend the core primitives:
 
+- **Filesystem**: Protocol and backends for workspace file operations
 - **Planning tools**: Session-scoped todo list for background agents
 - **VFS tools**: Virtual filesystem with glob, grep, and file operations
 - **Asteval tools**: Sandboxed Python expression evaluation
@@ -23,6 +24,8 @@ This package provides domain-specific tools that extend the core primitives:
 Example usage::
 
     from weakincentives.contrib.tools import (
+        Filesystem,
+        InMemoryFilesystem,
         PlanningToolsSection,
         VfsToolsSection,
         AstevalSection,
@@ -50,6 +53,18 @@ from .digests import (
     clear_workspace_digest,
     latest_workspace_digest,
     set_workspace_digest,
+)
+from .filesystem import (
+    READ_ENTIRE_FILE,
+    FileEntry,
+    FileStat,
+    Filesystem,
+    GlobMatch as FilesystemGlobMatch,
+    GrepMatch as FilesystemGrepMatch,
+    HostFilesystem,
+    InMemoryFilesystem,
+    ReadResult,
+    WriteResult,
 )
 from .planning import (
     AddStep,
@@ -82,7 +97,6 @@ from .vfs import (
     VfsFile,
     VfsPath,
     VfsToolsSection,
-    VirtualFileSystem,
     WriteFile,
     WriteFileParams,
 )
@@ -95,6 +109,9 @@ PodmanShellResult: Any
 PodmanWorkspace: Any
 
 __all__ = [
+    # Constants (SCREAMING_SNAKE_CASE)
+    "READ_ENTIRE_FILE",
+    # Classes and types (CamelCase)
     "AddStep",
     "AstevalSection",
     "DeleteEntry",
@@ -103,12 +120,19 @@ __all__ = [
     "EvalFileWrite",
     "EvalParams",
     "EvalResult",
+    "FileEntry",
     "FileInfo",
+    "FileStat",
+    "Filesystem",
+    "FilesystemGlobMatch",
+    "FilesystemGrepMatch",
     "GlobMatch",
     "GlobParams",
     "GrepMatch",
     "GrepParams",
+    "HostFilesystem",
     "HostMount",
+    "InMemoryFilesystem",
     "ListDirectory",
     "ListDirectoryParams",
     "ListDirectoryResult",
@@ -126,6 +150,7 @@ __all__ = [
     "ReadFileParams",
     "ReadFileResult",
     "ReadPlan",
+    "ReadResult",
     "RemoveParams",
     "SetupPlan",
     "StepStatus",
@@ -133,12 +158,13 @@ __all__ = [
     "VfsFile",
     "VfsPath",
     "VfsToolsSection",
-    "VirtualFileSystem",
     "WorkspaceDigest",
     "WorkspaceDigestSection",
     "WorkspaceSection",
     "WriteFile",
     "WriteFileParams",
+    "WriteResult",
+    # Functions (snake_case)
     "clear_workspace_digest",
     "latest_workspace_digest",
     "set_workspace_digest",

@@ -22,20 +22,21 @@ from typing import cast
 import pytest
 
 import weakincentives.contrib.tools.asteval as asteval_module
-from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
+from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives import ToolValidationError
 from weakincentives.contrib.tools import (
+    READ_ENTIRE_FILE,
     AstevalSection,
     EvalFileRead,
     EvalFileWrite,
     EvalParams,
     EvalResult,
     HostMount,
+    InMemoryFilesystem,
     ListDirectory,
     ListDirectoryResult,
     VfsPath,
     VfsToolsSection,
-    VirtualFileSystem,
     WriteFile,
     WriteFileParams,
 )
@@ -78,9 +79,26 @@ def _setup_sections() -> tuple[
     bus = InProcessEventBus()
     session = Session(bus=bus)
     vfs_section = VfsToolsSection(session=session)
-    section = AstevalSection(session=session)
+    section = AstevalSection(session=session, filesystem=vfs_section.filesystem)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
     return session, vfs_section, tool
+
+
+def _get_filesystem(section: VfsToolsSection) -> InMemoryFilesystem:
+    """Get the InMemoryFilesystem from a section."""
+    fs = section.filesystem
+    assert isinstance(fs, InMemoryFilesystem)
+    return fs
+
+
+def _get_files_dict(section: VfsToolsSection) -> dict[tuple[str, ...], str]:
+    """Get all files as a dict of path segments to content."""
+    fs = _get_filesystem(section)
+    result: dict[tuple[str, ...], str] = {}
+    for path, file in fs._files.items():
+        segments = tuple(path.split("/")) if path else ()
+        result[segments] = file.content
+    return result
 
 
 def test_eval_file_render_helpers() -> None:
@@ -149,20 +167,8 @@ def test_asteval_section_override_flags_opt_in() -> None:
     assert tool.accepts_overrides is True
 
 
-def test_asteval_tool_rejects_mismatched_context_session() -> None:
-    _session, _vfs_section, tool = _setup_sections()
-    handler = tool.handler
-    assert handler is not None
-    other_bus = InProcessEventBus()
-    mismatched_session = Session(bus=other_bus)
-    context = build_tool_context(mismatched_session)
-
-    with pytest.raises(RuntimeError, match="session does not match"):
-        handler(EvalParams(code="1"), context=context)
-
-
 def test_expression_success() -> None:
-    session, _vfs_section, tool = _setup_sections()
+    session, vfs_section, tool = _setup_sections()
 
     result = invoke_tool(tool, EvalParams(code="1 + 2"), session=session)
 
@@ -176,8 +182,8 @@ def test_expression_success() -> None:
     assert payload.reads == ()
     assert payload.globals == {}
 
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is None or not snapshot.files
+    fs = _get_filesystem(vfs_section)
+    assert not fs._files
 
 
 def test_success_without_writes_message_is_simple() -> None:
@@ -237,14 +243,12 @@ def test_multiline_reads_and_writes() -> None:
         ),
     )
 
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is not None
-    written = {file.path.segments: file.content for file in snapshot.files}
+    written = _get_files_dict(vfs_section)
     assert written["output", "summary.txt"] == "Report: hello"
 
 
 def test_helper_write_appends() -> None:
-    session, _vfs_section, tool = _setup_sections()
+    session, vfs_section, tool = _setup_sections()
 
     params = EvalParams(
         code="write_text('logs/activity.log', 'started')",
@@ -263,10 +267,34 @@ def test_helper_write_appends() -> None:
     assert payload.value_repr == "'done'"
     assert payload.stderr == ""
 
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is not None
-    files = {file.path.segments: file.content for file in snapshot.files}
+    files = _get_files_dict(vfs_section)
     assert files["logs", "activity.log"] == "started-continued"
+
+
+def test_helper_write_append_preserves_content_beyond_default_read_limit() -> None:
+    """Test that append mode doesn't truncate files with more than 2000 lines."""
+    session, vfs_section, tool = _setup_sections()
+    fs = vfs_section.filesystem
+
+    # Create a large file with more than 2000 lines
+    lines = [f"line{i}" for i in range(2500)]
+    initial_content = "\n".join(lines)
+    fs.write("big.txt", initial_content, mode="create")
+
+    # Append to it
+    params = EvalParams(
+        code="write_text('big.txt', '\\nAPPENDED', mode='append')\n'done'",
+    )
+    result = invoke_tool(tool, params, session=session)
+
+    assert result.value is not None
+    assert result.value.value_repr == "'done'"
+
+    # Verify the file wasn't truncated
+    read_result = fs.read("big.txt", limit=READ_ENTIRE_FILE)
+    assert "line0" in read_result.content
+    assert "line2499" in read_result.content  # Last original line
+    assert "APPENDED" in read_result.content  # The appended content
 
 
 def test_helper_write_success_reports_pending_writes() -> None:
@@ -301,7 +329,7 @@ def test_invalid_globals_raise() -> None:
 
 
 def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
-    session, _vfs_section, tool = _setup_sections()
+    session, vfs_section, tool = _setup_sections()
 
     def fake_timeout(func: Callable[[], object]) -> tuple[bool, object | None, str]:
         return True, None, "Execution timed out."
@@ -328,8 +356,8 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
     assert payload.stderr == "Execution timed out."
     assert payload.writes == ()
 
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is None or not snapshot.files
+    fs = _get_filesystem(vfs_section)
+    assert not fs._files
 
 
 def test_timeout_reports_discarded_writes_message(
@@ -622,14 +650,12 @@ def test_create_mode_rejects_existing_file() -> None:
     )
 
     _assert_success_message(result)
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is not None
-    files = {file.path.segments: file.content for file in snapshot.files}
+    files = _get_files_dict(vfs_section)
     assert files[existing_path.segments] == "original"
 
 
 def test_append_requires_existing_file() -> None:
-    session, _vfs_section, tool = _setup_sections()
+    session, vfs_section, tool = _setup_sections()
 
     result = invoke_tool(
         tool,
@@ -647,8 +673,8 @@ def test_append_requires_existing_file() -> None:
     )
 
     _assert_success_message(result)
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is None or not snapshot.files
+    fs = _get_filesystem(vfs_section)
+    assert not fs._files
 
 
 def test_overwrite_updates_existing_file() -> None:
@@ -674,14 +700,12 @@ def test_overwrite_updates_existing_file() -> None:
     )
 
     _assert_success_message(result)
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is not None
-    files = {file.path.segments: file.content for file in snapshot.files}
+    files = _get_files_dict(vfs_section)
     assert files[path.segments] == "updated"
 
 
 def test_message_summarizes_multiple_writes() -> None:
-    session, _vfs_section, tool = _setup_sections()
+    session, vfs_section, tool = _setup_sections()
 
     writes = tuple(
         EvalFileWrite(path=VfsPath(("output", f"file{i}.txt")), content="x")
@@ -699,9 +723,8 @@ def test_message_summarizes_multiple_writes() -> None:
         "writes=4 file(s): output/file0.txt, output/file1.txt, output/file2.txt, +1 more"
         in result.message
     )
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is not None
-    paths = sorted(file.path.segments for file in snapshot.files)
+    files = _get_files_dict(vfs_section)
+    paths = sorted(files.keys())
     assert paths == [("output", f"file{i}.txt") for i in range(4)]
 
 
@@ -725,7 +748,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
         find_tool(vfs_section, "ls"),
     )
     invoke_tool(list_tool, ListDirectory(), session=session)
-    section = AstevalSection(session=session)
+    section = AstevalSection(session=session, filesystem=vfs_section.filesystem)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
     result = invoke_tool(
@@ -925,7 +948,7 @@ def test_duplicate_final_writes_detected() -> None:
 
 
 def test_overwrite_requires_existing_file() -> None:
-    session, _vfs_section, tool = _setup_sections()
+    session, vfs_section, tool = _setup_sections()
 
     params = EvalParams(
         code="0",
@@ -940,8 +963,8 @@ def test_overwrite_requires_existing_file() -> None:
 
     result = invoke_tool(tool, params, session=session)
     _assert_success_message(result)
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is None or not snapshot.files
+    fs = _get_filesystem(vfs_section)
+    assert not fs._files
 
 
 def test_execute_with_timeout_times_out(

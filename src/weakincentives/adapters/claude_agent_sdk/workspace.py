@@ -24,6 +24,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, override
 
+from ...contrib.tools.filesystem import Filesystem, HostFilesystem
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
 from ...prompt import MarkdownSection
@@ -335,6 +336,7 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         _temp_dir: Path | None = None,
         _mount_previews: tuple[HostMountPreview, ...] | None = None,
         _created_at: datetime | None = None,
+        _filesystem: Filesystem | None = None,
     ) -> None:
         """Initialize the workspace section.
 
@@ -346,6 +348,7 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             _temp_dir: Internal - pre-existing temp directory (for cloning).
             _mount_previews: Internal - pre-existing mount previews (for cloning).
             _created_at: Internal - pre-existing creation timestamp (for cloning).
+            _filesystem: Internal - pre-existing filesystem (for cloning).
         """
         self._session = session
         self._mounts = tuple(mounts)
@@ -357,6 +360,12 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             self._temp_dir = _temp_dir
             self._mount_previews = _mount_previews
             self._created_at = _created_at or _utcnow()
+            # Use provided filesystem or create new one (for backward compatibility)
+            self._filesystem: Filesystem = (
+                _filesystem
+                if _filesystem is not None
+                else HostFilesystem(_root=str(self._temp_dir))
+            )
         elif mounts:
             # Create workspace from mounts
             self._temp_dir, self._mount_previews = _create_workspace(
@@ -364,11 +373,13 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
                 allowed_host_roots=self._allowed_host_roots,
             )
             self._created_at = _utcnow()
+            self._filesystem = HostFilesystem(_root=str(self._temp_dir))
         else:
             # Empty workspace
             self._temp_dir = Path(tempfile.mkdtemp(prefix="wink-sdk-"))
             self._mount_previews = ()
             self._created_at = _utcnow()
+            self._filesystem = HostFilesystem(_root=str(self._temp_dir))
 
         template = _render_workspace_template(self._mount_previews)
 
@@ -400,6 +411,15 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
     def created_at(self) -> datetime:
         """Return the UTC timestamp when the workspace was created."""
         return self._created_at
+
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the filesystem managed by this workspace section.
+
+        Returns a HostFilesystem backed by the temporary workspace directory.
+        Tools can use this to read/write files in the workspace.
+        """
+        return self._filesystem
 
     def cleanup(self) -> None:
         """Remove the temporary workspace directory."""
@@ -435,4 +455,5 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             _temp_dir=self._temp_dir,
             _mount_previews=self._mount_previews,
             _created_at=self._created_at,
+            _filesystem=self._filesystem,
         )

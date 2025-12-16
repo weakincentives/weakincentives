@@ -18,7 +18,6 @@ import subprocess
 import sys
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import UTC, datetime
 from pathlib import Path
 from subprocess import CompletedProcess
 from types import MethodType, SimpleNamespace
@@ -339,7 +338,7 @@ def test_section_registers_eval_tool(
     assert tool.description.startswith("Run a short Python")
 
 
-def test_host_mount_snapshot_starts_empty(
+def test_host_mount_filesystem_starts_empty(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
@@ -354,9 +353,9 @@ def test_host_mount_snapshot_starts_empty(
         allowed_host_roots=(host_root,),
     )
 
-    snapshot = section.latest_snapshot()
+    fs = section.filesystem
 
-    assert snapshot.files == ()
+    assert fs.list(".") == []
 
 
 def test_host_mount_populates_prompt_copy(
@@ -3074,7 +3073,6 @@ def test_build_directory_entries_handles_missing_dir(
     result = suite._build_directory_entries(
         base=vfs_module.VfsPath(()),
         host_path=tmp_path / "missing",
-        snapshot=vfs_module.VirtualFileSystem(),
         overlay_root=tmp_path,
     )
     assert result == []
@@ -3100,7 +3098,6 @@ def test_build_directory_entries_handles_oserror(
         suite._build_directory_entries(
             base=vfs_module.VfsPath(()),
             host_path=host,
-            snapshot=vfs_module.VirtualFileSystem(),
             overlay_root=tmp_path,
         )
 
@@ -3125,7 +3122,6 @@ def test_build_directory_entries_skips_invalid_entries(
     result = suite._build_directory_entries(
         base=vfs_module.VfsPath(()),
         host_path=host,
-        snapshot=vfs_module.VirtualFileSystem(),
         overlay_root=tmp_path,
     )
     assert result == []
@@ -3144,7 +3140,6 @@ def test_build_directory_entries_handles_directories(
     result = suite._build_directory_entries(
         base=vfs_module.VfsPath(()),
         host_path=host,
-        snapshot=vfs_module.VirtualFileSystem(),
         overlay_root=tmp_path,
     )
     assert any(entry.kind == "directory" for entry in result)
@@ -3170,13 +3165,12 @@ def test_build_directory_entries_skips_failed_file_info(
     result = suite._build_directory_entries(
         base=vfs_module.VfsPath(()),
         host_path=host,
-        snapshot=vfs_module.VirtualFileSystem(),
         overlay_root=tmp_path,
     )
     assert result == []
 
 
-def test_build_glob_match_returns_existing_metadata(tmp_path: Path) -> None:
+def test_build_glob_match_returns_metadata(tmp_path: Path) -> None:
     suite = podman_module._PodmanVfsSuite(
         section=_make_section(
             session=Session(bus=InProcessEventBus()),
@@ -3185,24 +3179,14 @@ def test_build_glob_match_returns_existing_metadata(tmp_path: Path) -> None:
         )
     )
     path = vfs_module.VfsPath(("src", "main.py"))
-    file = vfs_module.VfsFile(
-        path=path,
-        content="print()",
-        encoding="utf-8",
-        size_bytes=10,
-        version=2,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
-    )
-    snapshot = vfs_module.VirtualFileSystem(files=(file,))
     host = Path(__file__)
     result = suite._build_glob_match(
         target=path,
         host_path=host,
-        snapshot=snapshot,
         overlay_root=host.parent,
     )
-    assert result.version == file.version
+    assert result.version == 1
+    assert result.path == path
 
 
 def test_write_via_container_handles_cli_failures(
@@ -3233,3 +3217,48 @@ def test_tools_module_missing_attr_raises() -> None:
 
     with pytest.raises(AttributeError):
         _ = tools.TOTALLY_UNKNOWN
+
+
+def test_section_init_with_overlay_path_and_filesystem(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    """Test that PodmanSandboxSection accepts _overlay_path and _filesystem for cloning."""
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    cache_dir = tmp_path / "cache"
+
+    # Create initial section
+    section1 = _make_section(session=session, client=client, cache_dir=cache_dir)
+
+    # Write a file through the filesystem
+    fs = section1.filesystem
+    _ = fs.write("test_file.txt", "test content")
+
+    # Create new session for clone
+    new_bus = InProcessEventBus()
+    new_session = Session(bus=new_bus)
+
+    # Create a new section with the preserved overlay path and filesystem
+    # Must provide base_url to avoid Podman connection resolution
+    section2 = PodmanSandboxSection(
+        session=new_session,
+        config=PodmanSandboxConfig(
+            cache_dir=cache_dir,
+            client_factory=lambda: client,
+            exec_runner=_FakeCliRunner(),
+            base_url="unix:///tmp/fake.sock",
+        ),
+        _overlay_path=section1._overlay_path,
+        _filesystem=section1._filesystem,
+    )
+
+    # Filesystem instance should be the same
+    assert section2.filesystem is section1.filesystem
+
+    # Content should be accessible
+    result = section2.filesystem.read("test_file.txt")
+    assert result.content == "test content"
+
+    # Overlay path should be the same
+    assert section2._overlay_path == section1._overlay_path
