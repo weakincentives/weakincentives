@@ -30,6 +30,7 @@ from .reducers import (
     upsert_by,
 )
 from .session import DataEvent, Session, iter_sessions_bottom_up
+from .slice_accessor import SliceAccessor
 from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -53,6 +54,7 @@ __all__ = [
     "ReducerMeta",
     "Session",
     "SessionProtocol",
+    "SliceAccessor",
     "SliceObserver",
     "Snapshot",
     "SnapshotProtocol",

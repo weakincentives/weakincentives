@@ -11,12 +11,12 @@ event emission and subscription, deadline enforcement, and budget tracking.
 - **Pure state transitions**: Reducers never mutate in place; every event
   produces a new tuple.
 - **Typed first**: Event payloads route by concrete dataclass type.
-- **Deterministic playback**: Sessions respond only to supported events, making
-  state easy to reconstruct.
+- **Deterministic playback**: Sessions respond only to supported events,
+  making state easy to reconstruct.
 - **Publisher isolation**: Event dispatch is fire-and-forget; handler failures
   are logged and isolated.
-- **Explicit buses**: Callers may provide an `EventBus`. When omitted, `Session`
-  creates an in-process bus for telemetry.
+- **Explicit buses**: Callers may provide an `EventBus`. When omitted,
+  `Session` creates an in-process bus for telemetry.
 
 ```mermaid
 flowchart TB
@@ -126,7 +126,8 @@ filtered = session.query(Issue).where(lambda i: i.severity == "high")
 
 ### Observer API
 
-Observers enable reactive programming by notifying callbacks when slices change:
+Observers enable reactive programming by notifying callbacks when slices
+change:
 
 ```python
 def on_plan_change(old: tuple[Plan, ...], new: tuple[Plan, ...]) -> None:
@@ -144,8 +145,8 @@ subscription.unsubscribe()
 type SliceObserver[T] = Callable[[tuple[T, ...], tuple[T, ...]], None]
 ```
 
-The observer receives `(old_values, new_values)` after each state update where the
-slice actually changed.
+The observer receives `(old_values, new_values)` after each state update where
+the slice actually changed.
 
 **Subscription handle:**
 
@@ -168,15 +169,33 @@ class Subscription:
 
 ### Mutation API
 
-The `mutate()` method provides a fluent interface for session state mutations:
+### Dispatch APIs
+
+Session provides two dispatch methods with explicit scope:
+
+```python
+# Broadcast dispatch - runs ALL reducers for the event type
+session.apply(SetupPlan(objective="Build feature"))
+
+# Targeted dispatch - runs only reducers for the specified slice
+session[Plan].apply(SetupPlan(objective="Build feature"))
+```
+
+Use **broadcast** (`session.apply()`) for cross-cutting events that affect
+multiple slices. Use **targeted** (`session[SliceType].apply()`) when you want
+to dispatch to a specific slice's reducers only.
+
+### Mutation Builder
+
+The `mutate()` method provides a fluent interface for direct mutations and
+reducer registration:
 
 ```python
 # Slice-specific mutations
 session.mutate(Plan).seed(initial_plan)           # Initialize/replace slice
 session.mutate(Plan).clear()                       # Remove all items
 session.mutate(Plan).clear(lambda p: not p.active) # Predicate-based removal
-session.mutate(Plan).dispatch(SetupPlan(...))      # Event-driven mutation
-session.mutate(Plan).append(new_plan)              # Shorthand for dispatch
+session.mutate(Plan).append(new_plan)              # Append via default reducer
 session.mutate(Plan).register(SetupPlan, reducer)  # Register reducer
 
 # Session-wide mutations
@@ -186,40 +205,38 @@ session.mutate().rollback(snapshot)    # Restore from snapshot
 
 **MutationBuilder methods:**
 
-- `seed(values)` - Initialize or replace the slice with provided value(s). Bypasses
-  reducers. Useful for initial state setup or restoration.
-- `clear(predicate=None)` - Remove items from the slice. With a predicate, only
-  matching items are removed. Bypasses reducers.
-- `dispatch(event)` - Dispatch an event to registered reducers. This is the
-  preferred mutation path as it maintains traceability.
-- `append(value)` - Shorthand for dispatching when event type equals slice type.
-  Uses the default `append` reducer.
-- `register(data_type, reducer)` - Register a reducer for events of the given type.
+- `seed(values)` - Initialize or replace the slice with provided value(s).
+  Bypasses reducers. Useful for initial state setup or restoration.
+- `clear(predicate=None)` - Remove items from the slice. With a predicate,
+  only matching items are removed. Bypasses reducers.
+- `append(value)` - Shorthand for dispatching when event type equals slice
+  type. Uses the default `append` reducer.
+- `register(data_type, reducer)` - Register a reducer for events of the given
+  type.
 
 **GlobalMutationBuilder methods:**
 
 - `reset()` - Clear all stored slices while preserving reducer registrations.
 - `rollback(snapshot)` - Restore session slices from the provided snapshot.
 
-### Indexing Access
+### Slice Accessor (Indexing)
 
-Sessions support indexing for convenient query access:
+Sessions support indexing for query and targeted dispatch:
 
 ```python
-# Equivalent to session.query(Plan).latest()
-session[Plan].latest()
+# Query operations
+session[Plan].latest()                    # Get most recent
+session[Plan].all()                       # Get all items
+session[Plan].where(lambda p: p.active)   # Filter items
 
-# Equivalent to session.query(Plan).all()
-session[Plan].all()
-
-# Equivalent to session.query(Plan).where(predicate)
-session[Plan].where(lambda p: p.active)
+# Targeted dispatch
+session[Plan].apply(AddStep(step="x"))    # Dispatch to Plan reducers only
 ```
 
 ## Declarative State Slices
 
-The `@reducer` decorator enables self-describing state slices where reducers are
-co-located as methods on the dataclass itself.
+The `@reducer` decorator enables self-describing state slices where reducers
+are co-located as methods on the dataclass itself.
 
 ### Motivation
 
@@ -274,14 +291,14 @@ session.install(AgentPlan)
 
 # Now use the slice
 session.mutate(AgentPlan).seed(AgentPlan(steps=("Research",)))
-session.mutate(AgentPlan).dispatch(AddStep(step="Implement"))
+session[AgentPlan].apply(AddStep(step="Implement"))
 latest = session[AgentPlan].latest()
 ```
 
 ### Initial State Factory
 
-For slices that need auto-initialization when empty, provide an `initial` factory
-to `session.install()`:
+For slices that need auto-initialization when empty, provide an `initial`
+factory to `session.install()`:
 
 ```python
 @dataclass(frozen=True)
@@ -296,8 +313,9 @@ class Counters:
 session.install(Counters, initial=Counters)
 ```
 
-With an initial factory, reducers can handle events even when no state exists yet.
-The factory creates the initial instance, then the reducer method is called.
+With an initial factory, reducers can handle events even when no state exists
+yet. The factory creates the initial instance, then the reducer method is
+called.
 
 ### How It Works
 
@@ -333,9 +351,12 @@ def method_name(self, event: EventType) -> SelfType:
 
 Use `@reducer` methods when:
 
-- **Multiple event types** - The slice handles several distinct events with custom logic
-- **Complex transformations** - Reducers need access to slice state to compute updates
-- **Domain modeling** - The slice represents a domain concept with defined behaviors
+- **Multiple event types** - The slice handles several distinct events with
+  custom logic
+- **Complex transformations** - Reducers need access to slice state to compute
+  updates
+- **Domain modeling** - The slice represents a domain concept with defined
+  behaviors
 
 Use built-in reducers (`append_all`, `replace_latest`, etc.) when:
 
@@ -685,9 +706,11 @@ subscription.unsubscribe()
 ## Limitations
 
 - **Synchronous reducers**: Run on publisher thread; keep them lightweight
-- **Synchronous observers**: Run after reducers on same thread; keep them lightweight
+- **Synchronous observers**: Run after reducers on same thread; keep them
+  lightweight
 - **Dataclass focus**: Non-dataclass payloads only populate generic slices
 - **No implicit eviction**: State grows; use `replace_latest` when needed
 - **No mid-request cancellation**: Limits checked at checkpoints only
 - **Clock synchronization**: Deadlines require synchronized UTC clocks
-- **Observers not cloned**: `session.clone()` does not copy observer registrations
+- **Observers not cloned**: `session.clone()` does not copy observer
+  registrations

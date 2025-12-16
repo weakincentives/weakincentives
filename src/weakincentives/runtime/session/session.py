@@ -38,6 +38,7 @@ from .mutation import GlobalMutationBuilder, MutationBuilder
 from .protocols import SessionProtocol, SnapshotProtocol
 from .query import QueryBuilder
 from .reducers import append_all
+from .slice_accessor import SliceAccessor
 from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -284,12 +285,16 @@ class Session(SessionProtocol):
             # Slice-specific mutations
             session.mutate(Plan).seed(initial_plan)
             session.mutate(Plan).clear()
-            session.mutate(Plan).dispatch(SetupPlan(objective="..."))
             session.mutate(Plan).register(AddStep, add_step_reducer)
 
             # Session-wide mutations
             session.mutate().reset()
             session.mutate().rollback(snapshot)
+
+        For event-driven dispatch, use the explicit APIs::
+
+            session.apply(event)           # Broadcast to all reducers
+            session[Plan].apply(event)     # Targeted to Plan slice
 
         """
         if slice_type is None:
@@ -345,19 +350,29 @@ class Session(SessionProtocol):
         return subscription
 
     @override
-    def __getitem__[S: SupportsDataclass](self, slice_type: type[S]) -> QueryBuilder[S]:
-        """Convenient access to query builder via indexing.
+    def __getitem__[S: SupportsDataclass](
+        self, slice_type: type[S]
+    ) -> SliceAccessor[S]:
+        """Convenient access to slice for querying and targeted dispatch.
 
         Supports declarative state slices with natural syntax.
 
         Usage::
 
+            # Query operations
             session[Plan].latest()
             session[Plan].all()
             session[Plan].where(lambda p: p.active)
 
+            # Targeted dispatch (slice-scoped)
+            session[Plan].apply(AddStep(step="x"))
+
+        For broadcast dispatch (event-type routed)::
+
+            session.apply(AddStep(step="x"))
+
         """
-        return QueryBuilder(self, slice_type)
+        return SliceAccessor(self, slice_type)
 
     @override
     def install[S: SupportsDataclass](
@@ -397,6 +412,58 @@ class Session(SessionProtocol):
         from .state_slice import install_state_slice
 
         install_state_slice(self, slice_type, initial=initial)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Dispatch API (apply / apply_to_slice)
+    # ──────────────────────────────────────────────────────────────────────
+
+    @override
+    def apply(self, event: SupportsDataclass) -> None:
+        """Broadcast an event to all reducers registered for its type.
+
+        This routes by event type and runs all registrations for that type,
+        regardless of which slice they target. Use this for cross-cutting
+        events that affect multiple slices.
+
+        For targeted dispatch that only runs reducers for a specific slice::
+
+            session[Plan].apply(AddStep(step="x"))
+
+        Args:
+            event: The event to dispatch. All reducers registered for
+                ``type(event)`` will be executed.
+
+        Example::
+
+            # Broadcasts to ALL reducers registered for AddStep
+            session.apply(AddStep(step="implement feature"))
+
+        """
+        self._dispatch_data_event(type(event), event)
+
+    @override
+    def apply_to_slice(
+        self,
+        slice_type: type[SupportsDataclass],
+        event: SupportsDataclass,
+    ) -> None:
+        """Dispatch an event to reducers targeting a specific slice.
+
+        This filters registrations by ``(event_type, slice_type)`` so only
+        reducers that handle this event type AND target this slice type
+        will be executed.
+
+        This method is used internally by :class:`SliceAccessor`. Prefer
+        using the indexing syntax for clarity::
+
+            session[Plan].apply(AddStep(step="x"))
+
+        Args:
+            slice_type: The target slice type to filter reducers.
+            event: The event to dispatch.
+
+        """
+        self._dispatch_data_event(type(event), event, target_slice_type=slice_type)
 
     # ──────────────────────────────────────────────────────────────────────
     # MutationProvider implementation (used by MutationBuilder)
@@ -634,18 +701,37 @@ class Session(SessionProtocol):
         )
 
     def _dispatch_data_event(
-        self, data_type: SessionSliceType, event: ReducerEvent
+        self,
+        data_type: SessionSliceType,
+        event: ReducerEvent,
+        *,
+        target_slice_type: SessionSliceType | None = None,
     ) -> None:
         from .reducer_context import build_reducer_context
 
         with self.locked():
-            registrations = list(self._reducers.get(data_type, ()))
+            all_registrations = list(self._reducers.get(data_type, ()))
+
+            # Filter by target slice type if specified (targeted dispatch)
+            if target_slice_type is not None:
+                registrations = [
+                    reg
+                    for reg in all_registrations
+                    if reg.slice_type == target_slice_type
+                ]
+            else:
+                registrations = all_registrations
+
             if not registrations:
                 # Default: ledger semantics (always append)
+                # For targeted dispatch, use the target slice type; otherwise event type
+                default_slice = (
+                    target_slice_type if target_slice_type is not None else data_type
+                )
                 registrations = [
                     _ReducerRegistration(
                         reducer=cast(TypedReducer[Any], append_all),
-                        slice_type=data_type,
+                        slice_type=default_slice,
                     )
                 ]
 
@@ -749,6 +835,7 @@ __all__ = [
     "MutationBuilder",
     "QueryBuilder",
     "Session",
+    "SliceAccessor",
     "SliceObserver",
     "Subscription",
     "TypedReducer",

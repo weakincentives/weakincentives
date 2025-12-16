@@ -90,7 +90,8 @@ flowchart LR
 1. Create session via `create_session()`
 1. Create prompt via `create_prompt(request)`
 1. Evaluate with adapter
-1. On `VisibilityExpansionRequired`: write overrides into session state, retry step 4
+1. On `VisibilityExpansionRequired`: write overrides into session state, retry
+   step 4
 1. Publish `MainLoopCompleted` or `MainLoopFailed`
 
 ### Visibility Handling
@@ -112,12 +113,13 @@ def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Sessi
             return response, session
         except VisibilityExpansionRequired as e:
             for path, visibility in e.requested_overrides.items():
-                session.mutate(VisibilityOverrides).dispatch(
+                session[VisibilityOverrides].apply(
                     SetVisibilityOverride(path=path, visibility=visibility)
                 )
 ```
 
-Overrides are stored in the session; session persists across retries; prompt is not recreated.
+Overrides are stored in the session; session persists across retries; prompt
+is not recreated.
 
 ## Usage
 
@@ -195,10 +197,9 @@ def create_prompt(self, request: Request) -> Prompt[Output]:
 
 ## Error Handling
 
-| Exception | Behavior |
-|-----------|----------|
-| `VisibilityExpansionRequired` | Retry with updated overrides |
-| All others | Publish `MainLoopFailed`, re-raise |
+| Exception | Behavior | |-----------|----------| |
+`VisibilityExpansionRequired` | Retry with updated overrides | | All others |
+Publish `MainLoopFailed`, re-raise |
 
 ## Code Reviewer Integration
 
@@ -218,8 +219,8 @@ def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
     # ... proceed with evaluation
 ```
 
-**Default deadline:** All requests receive a 5-minute deadline unless overridden
-at the request level.
+**Default deadline:** All requests receive a 5-minute deadline unless
+overridden at the request level.
 
 ```python
 config = MainLoopConfig(

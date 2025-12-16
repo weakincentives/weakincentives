@@ -34,12 +34,16 @@ class MutationBuilder[T: SupportsDataclass]:
         session.mutate(Plan).clear()
         session.mutate(Plan).clear(lambda p: not p.active)
 
-        # Event-driven mutations (through reducers)
-        session.mutate(Plan).dispatch(SetupPlan(objective="Build feature"))
+        # Append using default reducer
         session.mutate(Plan).append(new_plan)
 
         # Reducer registration
         session.mutate(Plan).register(SetupPlan, setup_plan_reducer)
+
+    For event-driven dispatch, use the explicit dispatch APIs::
+
+        session.apply(event)           # Broadcast to all reducers
+        session[Plan].apply(event)     # Targeted to Plan slice
 
     """
 
@@ -78,20 +82,6 @@ class MutationBuilder[T: SupportsDataclass]:
 
         """
         self._provider.mutation_clear_slice(self._slice_type, predicate)
-
-    def dispatch(self, event: SupportsDataclass) -> None:
-        """Dispatch an event to be processed by registered reducers.
-
-        This is the preferred mutation path as it:
-        - Flows through registered reducers
-        - Maintains traceability of state changes
-
-        Args:
-            event: The event to dispatch. Must have a reducer registered
-                for its type that targets this slice type.
-
-        """
-        self._provider.mutation_dispatch_event(type(event), event)
 
     def append(self, value: T) -> None:
         """Append a value to the slice using the default append reducer.
