@@ -20,6 +20,7 @@ Subpackages:
 
 - ``contrib.tools``: Planning tools, VFS, Podman sandbox, asteval, workspace digest
 - ``contrib.optimizers``: Workspace digest optimizer
+- ``contrib.langsmith``: LangSmith telemetry and prompt hub integration
 
 Example usage::
 
@@ -29,10 +30,12 @@ Example usage::
         AstevalSection,
         PodmanSandboxSection,
     )
+
+    from weakincentives.contrib.langsmith import configure_wink
 """
 
 from __future__ import annotations
 
-from . import optimizers, tools
+from . import langsmith, optimizers, tools
 
-__all__ = ["optimizers", "tools"]
+__all__ = ["langsmith", "optimizers", "tools"]

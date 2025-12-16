@@ -41,6 +41,38 @@ from weakincentives.runtime.session import append_all
 session.mutate(ToolInvoked).register(ToolInvoked, append_all)
 ```
 
+### LangSmith Integration
+
+A new contrib module provides full observability of WINK agents through LangSmith,
+including automatic tracing and Prompt Hub integration.
+
+```python
+from weakincentives.contrib.langsmith import configure_wink
+
+# Enable automatic tracing at application start
+configure_wink()
+
+# All WINK evaluations are now traced to LangSmith
+response = adapter.evaluate(prompt, session=session)
+```
+
+Key features:
+
+- **Auto-instrumentation**: Single-call `configure_wink()` patches `InProcessEventBus`
+  to automatically trace all evaluations.
+- **Event-based tracing**: `PromptRendered`, `ToolInvoked`, and `PromptExecuted`
+  events map to LangSmith runs with proper parent-child relationships.
+- **Prompt Hub integration**: `LangSmithPromptOverridesStore` enables bidirectional
+  prompt management with LangSmith Hub (pull overrides, push changes).
+- **Async upload**: Telemetry is uploaded in batches via background thread to avoid
+  blocking evaluation.
+- **Graceful degradation**: Network failures are logged but don't break agent
+  execution.
+- **Claude SDK composition**: Works alongside `configure_claude_agent_sdk()` with
+  automatic trace context correlation.
+- **Testing utilities**: `MockLangSmithClient` and `MockLangSmithHub` for
+  deterministic testing.
+
 ## v0.14.0 - 2025-12-15
 
 ### Claude Agent SDK Adapter
