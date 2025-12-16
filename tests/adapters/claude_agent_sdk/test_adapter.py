@@ -65,6 +65,8 @@ class MockClaudeAgentOptions:
     cwd: str | None
     permission_mode: str | None
     max_turns: int | None
+    max_budget_usd: float | None
+    betas: list[str] | None
     output_format: dict[str, object] | None
     allowed_tools: list[str] | None
     disallowed_tools: list[str] | None
@@ -626,6 +628,62 @@ class TestSDKConfigOptions:
         assert "PostToolUse" in options.hooks
         assert "Stop" in options.hooks
         assert "UserPromptSubmit" in options.hooks
+
+    def test_passes_max_budget_usd_option(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(max_budget_usd=5.0),
+        )
+
+        with sdk_patches():
+            adapter.evaluate(simple_prompt, session=session)
+
+        assert len(MockSDKQuery.captured_options) == 1
+        assert MockSDKQuery.captured_options[0].max_budget_usd == 5.0
+
+    def test_passes_betas_option(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                betas=("extended-thinking", "computer-use")
+            ),
+        )
+
+        with sdk_patches():
+            adapter.evaluate(simple_prompt, session=session)
+
+        assert len(MockSDKQuery.captured_options) == 1
+        assert MockSDKQuery.captured_options[0].betas == [
+            "extended-thinking",
+            "computer-use",
+        ]
+
+    def test_passes_max_thinking_tokens_option(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        _setup_mock_query(
+            [MockResultMessage(result="Done", usage=None, structured_output=None)]
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            model_config=ClaudeAgentSDKModelConfig(max_thinking_tokens=10000),
+        )
+
+        with sdk_patches():
+            adapter.evaluate(simple_prompt, session=session)
+
+        assert len(MockSDKQuery.captured_options) == 1
+        assert MockSDKQuery.captured_options[0].max_thinking_tokens == 10000
 
 
 class TestSDKErrorHandling:

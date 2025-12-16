@@ -42,6 +42,9 @@ class ClaudeAgentSDKClientConfig:
         cwd: Working directory for SDK operations. None uses the current
             working directory.
         max_turns: Maximum number of conversation turns. None means unlimited.
+        max_budget_usd: Maximum budget in USD for the session. None means
+            unlimited budget. When set, the SDK will stop execution if the
+            budget is exceeded.
         suppress_stderr: If True, suppress stderr output from the Claude Code
             CLI process. Useful for hiding bun-related errors or other CLI
             noise in programmatic usage.
@@ -51,14 +54,18 @@ class ClaudeAgentSDKClientConfig:
         isolation: Hermetic isolation configuration. When provided, creates
             an ephemeral home directory and prevents access to the host's
             ~/.claude configuration. See :class:`IsolationConfig` for details.
+        betas: Beta features to enable. Passed to the SDK as a list of
+            beta feature identifiers. None means no beta features.
     """
 
     permission_mode: PermissionMode = "bypassPermissions"
     cwd: str | None = None
     max_turns: int | None = None
+    max_budget_usd: float | None = None
     suppress_stderr: bool = True
     stop_on_structured_output: bool = True
     isolation: IsolationConfig | None = None
+    betas: tuple[str, ...] | None = None
 
 
 @FrozenDataclass()
@@ -70,6 +77,10 @@ class ClaudeAgentSDKModelConfig(LLMConfig):
 
     Attributes:
         model: Claude model identifier. Defaults to the latest Sonnet model.
+        max_thinking_tokens: Maximum tokens for extended thinking mode. When
+            set, enables extended thinking and allocates up to this many
+            tokens for the model's internal reasoning. Requires a minimum
+            of approximately 1024 tokens. None disables extended thinking.
 
     Notes:
         The Claude Agent SDK does not support ``seed``, ``stop``,
@@ -78,6 +89,7 @@ class ClaudeAgentSDKModelConfig(LLMConfig):
     """
 
     model: str = "claude-sonnet-4-5-20250929"
+    max_thinking_tokens: int | None = None
 
     def __post_init__(self) -> None:
         unsupported: dict[str, object | None] = {

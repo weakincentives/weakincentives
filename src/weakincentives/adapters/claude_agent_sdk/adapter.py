@@ -367,6 +367,12 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         if self._client_config.max_turns:
             options_kwargs["max_turns"] = self._client_config.max_turns
 
+        if self._client_config.max_budget_usd is not None:
+            options_kwargs["max_budget_usd"] = self._client_config.max_budget_usd
+
+        if self._client_config.betas:
+            options_kwargs["betas"] = list(self._client_config.betas)
+
         if output_format:
             options_kwargs["output_format"] = output_format
 
@@ -385,12 +391,11 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         # Apply model config parameters
         # Note: The Claude Agent SDK does not expose max_tokens or temperature
-        # parameters directly. It manages token budgets internally. The
-        # max_thinking_tokens option is for extended thinking mode, which
-        # requires a minimum of ~2000 tokens. For now, we simply ignore
-        # max_tokens and temperature from model_config as they don't map
-        # cleanly to SDK options.
-        _ = self._model_config  # Model config applied via model name only
+        # parameters directly. It manages token budgets internally.
+        if self._model_config.max_thinking_tokens is not None:
+            options_kwargs["max_thinking_tokens"] = (
+                self._model_config.max_thinking_tokens
+            )
 
         # Register custom tools via MCP server if any are provided
         if bridged_tools:
