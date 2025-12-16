@@ -21,7 +21,10 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from weakincentives.contrib.langsmith import LangSmithTelemetryHandler
 
 from examples import (
     build_logged_session,
@@ -77,6 +80,9 @@ from weakincentives.runtime import (
     MainLoopRequest,
     Session,
 )
+
+# Optional LangSmith integration - only imported when enabled
+_LANGSMITH_HANDLER: LangSmithTelemetryHandler | None = None
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
@@ -382,6 +388,70 @@ def _create_bus_with_logging() -> EventBus:
     return bus
 
 
+def _is_langsmith_available() -> bool:
+    """Check if LangSmith integration can be enabled."""
+    return bool(
+        os.environ.get("LANGCHAIN_API_KEY") or os.environ.get("LANGSMITH_API_KEY")
+    )
+
+
+def _configure_langsmith(bus: EventBus) -> LangSmithTelemetryHandler | None:
+    """Configure LangSmith telemetry if available.
+
+    Returns the handler if configured, None otherwise.
+    """
+    global _LANGSMITH_HANDLER
+
+    if not _is_langsmith_available():
+        return None
+
+    try:
+        from weakincentives.contrib.langsmith import (
+            LangSmithConfig,
+            LangSmithTelemetryHandler,
+            LangSmithTraceCompleted,
+        )
+
+        config = LangSmithConfig(
+            project=os.environ.get("LANGCHAIN_PROJECT", "code-reviewer-example"),
+            async_upload=True,
+            flush_on_exit=True,
+        )
+
+        handler = LangSmithTelemetryHandler(config=config)
+        handler.attach(bus)
+        _LANGSMITH_HANDLER = handler
+
+        # Subscribe to trace completion for URL logging
+        def _log_trace_url(event: object) -> None:
+            if isinstance(event, LangSmithTraceCompleted) and event.trace_url:
+                _LOGGER.info("LangSmith trace: %s", event.trace_url)
+
+        bus.subscribe(LangSmithTraceCompleted, _log_trace_url)
+
+        _LOGGER.info(
+            "LangSmith telemetry enabled (project: %s)", config.resolved_project()
+        )
+
+    except ImportError:
+        _LOGGER.debug("LangSmith package not installed, telemetry disabled")
+        return None
+    except Exception as exc:
+        _LOGGER.warning("Failed to configure LangSmith: %s", exc)
+        return None
+    else:
+        return handler
+
+
+def _shutdown_langsmith() -> None:
+    """Shutdown LangSmith handler if configured."""
+    global _LANGSMITH_HANDLER
+    if _LANGSMITH_HANDLER is not None:
+        _LANGSMITH_HANDLER.shutdown()
+        _LANGSMITH_HANDLER = None
+        _LOGGER.info("LangSmith telemetry shutdown")
+
+
 def parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
@@ -400,6 +470,14 @@ def parse_args() -> argparse.Namespace:
             "Requires ANTHROPIC_API_KEY. Uses SDK's built-in tools."
         ),
     )
+    parser.add_argument(
+        "--langsmith",
+        action="store_true",
+        help=(
+            "Enable LangSmith telemetry. Requires LANGCHAIN_API_KEY or LANGSMITH_API_KEY. "
+            "Traces will be sent to LangSmith for observability."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -408,21 +486,39 @@ def main() -> None:
     args = parse_args()
     configure_logging()
 
-    if args.claude_agent:
-        # Create bus first since build_claude_agent_adapter needs it to materialize workspace
-        bus = _create_bus_with_logging()
-        adapter, workspace_section = build_claude_agent_adapter(bus)
-        app = CodeReviewApp(
-            adapter,
-            use_podman=False,
-            use_claude_agent=True,
-            workspace_section=workspace_section,
+    # Check LangSmith availability
+    use_langsmith = args.langsmith or _is_langsmith_available()
+    if args.langsmith and not _is_langsmith_available():
+        _LOGGER.warning(
+            "LangSmith requested but LANGCHAIN_API_KEY/LANGSMITH_API_KEY not set"
         )
-    else:
-        adapter = build_adapter()
-        app = CodeReviewApp(adapter, use_podman=args.podman)
+        use_langsmith = False
 
-    app.run()
+    try:
+        if args.claude_agent:
+            # Create bus first since build_claude_agent_adapter needs it
+            bus = _create_bus_with_logging()
+            # Configure LangSmith after bus creation
+            if use_langsmith:
+                _configure_langsmith(bus)
+            adapter, workspace_section = build_claude_agent_adapter(bus)
+            app = CodeReviewApp(
+                adapter,
+                use_podman=False,
+                use_claude_agent=True,
+                workspace_section=workspace_section,
+            )
+        else:
+            adapter = build_adapter()
+            # For non-Claude mode, we need to pass langsmith info to the app
+            app = CodeReviewApp(adapter, use_podman=args.podman)
+            # Configure LangSmith on the app's bus
+            if use_langsmith:
+                _configure_langsmith(app._bus)
+
+        app.run()
+    finally:
+        _shutdown_langsmith()
 
 
 def build_adapter() -> ProviderAdapter[ReviewResponse]:
@@ -752,6 +848,12 @@ def _build_workspace_section(
 def _build_intro(
     override_tag: str, *, use_podman: bool, use_claude_agent: bool = False
 ) -> str:
+    langsmith_status = (
+        "LangSmith: Enabled (traces sent to LangSmith)"
+        if _LANGSMITH_HANDLER is not None
+        else "LangSmith: Disabled (set LANGCHAIN_API_KEY to enable)"
+    )
+
     if use_claude_agent:
         return textwrap.dedent(
             f"""
@@ -762,6 +864,7 @@ def _build_intro(
             - Tools: SDK's native Read, Write, Bash + custom MCP tools (planning, open_sections)
             - Network: Access to peps.python.org, docs.python.org for code quality reference
             - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
+            - {langsmith_status}
 
             Note: Custom MCP tools are bridged via streaming mode for full feature parity.
             """
@@ -775,6 +878,7 @@ def _build_intro(
         - Workspace: {workspace_mode} (use --podman flag to enable Podman sandbox).
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
         - Auto-optimization: Workspace digest generated on first request.
+        - {langsmith_status}
 
         Note: Full prompt text and tool calls will be logged to the console for observability.
         """
