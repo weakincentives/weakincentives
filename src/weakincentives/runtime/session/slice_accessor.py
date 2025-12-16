@@ -28,7 +28,7 @@ class _SliceAccessorProvider(Protocol):
         self, slice_type: type[S]
     ) -> tuple[S, ...]: ...
 
-    def apply_to_slice(
+    def _apply_to_slice(
         self,
         slice_type: type[SupportsDataclass],
         event: SupportsDataclass,
@@ -103,7 +103,7 @@ class SliceAccessor[T: SupportsDataclass]:
             session[Plan].apply(AddStep(step="implement feature"))
 
         """
-        self._provider.apply_to_slice(self._slice_type, event)
+        self._provider._apply_to_slice(self._slice_type, event)  # pyright: ignore[reportPrivateUsage]
 
 
 __all__ = ["SliceAccessor"]

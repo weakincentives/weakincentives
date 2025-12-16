@@ -414,7 +414,7 @@ class Session(SessionProtocol):
         install_state_slice(self, slice_type, initial=initial)
 
     # ──────────────────────────────────────────────────────────────────────
-    # Dispatch API (apply / apply_to_slice)
+    # Dispatch API
     # ──────────────────────────────────────────────────────────────────────
 
     @override
@@ -441,8 +441,7 @@ class Session(SessionProtocol):
         """
         self._dispatch_data_event(type(event), event)
 
-    @override
-    def apply_to_slice(
+    def _apply_to_slice(
         self,
         slice_type: type[SupportsDataclass],
         event: SupportsDataclass,
@@ -453,14 +452,9 @@ class Session(SessionProtocol):
         reducers that handle this event type AND target this slice type
         will be executed.
 
-        This method is used internally by :class:`SliceAccessor`. Prefer
-        using the indexing syntax for clarity::
+        Used internally by :class:`SliceAccessor`. Prefer the indexing syntax::
 
             session[Plan].apply(AddStep(step="x"))
-
-        Args:
-            slice_type: The target slice type to filter reducers.
-            event: The event to dispatch.
 
         """
         self._dispatch_data_event(type(event), event, target_slice_type=slice_type)

@@ -77,14 +77,6 @@ class SessionProtocol(Protocol):
         """Broadcast an event to all reducers registered for its type."""
         ...
 
-    def apply_to_slice(
-        self,
-        slice_type: type[SupportsDataclass],
-        event: SupportsDataclass,
-    ) -> None:
-        """Dispatch an event to reducers targeting a specific slice."""
-        ...
-
     @property
     def parent(self) -> Self | None: ...
 
