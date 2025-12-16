@@ -111,8 +111,8 @@ def test_install_registers_reducers(session_factory: SessionFactory) -> None:
     session[ItemList].seed(ItemList(items=()))
 
     # Apply events - should work via installed reducers
-    session[ItemList].apply(AddItem(item="first"))
-    session[ItemList].apply(AddItem(item="second"))
+    session.broadcast(AddItem(item="first"))
+    session.broadcast(AddItem(item="second"))
 
     result = session[ItemList].latest()
     assert result is not None
@@ -164,7 +164,7 @@ def test_install_with_initial_factory(session_factory: SessionFactory) -> None:
     session.install(Counter, initial=Counter)
 
     # Apply without seeding - should use initial factory
-    session[Counter].apply(Increment(amount=5))
+    session.broadcast(Increment(amount=5))
 
     result = session[Counter].latest()
     assert result is not None
@@ -179,7 +179,7 @@ def test_install_without_initial_factory_ignores_empty(
     session.install(ItemList)
 
     # Apply without seeding - should be ignored (no initial factory)
-    session[ItemList].apply(AddItem(item="ignored"))
+    session.broadcast(AddItem(item="ignored"))
 
     result = session[ItemList].latest()
     assert result is None
@@ -250,7 +250,7 @@ def test_reducer_method_transforms_state(session_factory: SessionFactory) -> Non
     session.install(ItemList)
 
     session[ItemList].seed(ItemList(items=("a", "b", "c")))
-    session[ItemList].apply(RemoveItem(item="b"))
+    session.broadcast(RemoveItem(item="b"))
 
     result = session[ItemList].latest()
     assert result is not None
@@ -263,7 +263,7 @@ def test_reducer_method_can_clear_state(session_factory: SessionFactory) -> None
     session.install(ItemList)
 
     session[ItemList].seed(ItemList(items=("a", "b")))
-    session[ItemList].apply(ClearItems())
+    session.broadcast(ClearItems())
 
     result = session[ItemList].latest()
     assert result is not None
@@ -275,8 +275,8 @@ def test_reducer_method_receives_event(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
     session.install(Counter, initial=Counter)
 
-    session[Counter].apply(Increment(amount=10))
-    session[Counter].apply(Increment(amount=5))
+    session.broadcast(Increment(amount=10))
+    session.broadcast(Increment(amount=5))
 
     result = session[Counter].latest()
     assert result is not None
@@ -288,8 +288,8 @@ def test_reducer_method_reset(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
     session.install(Counter, initial=Counter)
 
-    session[Counter].apply(Increment(amount=100))
-    session[Counter].apply(Reset())
+    session.broadcast(Increment(amount=100))
+    session.broadcast(Reset())
 
     result = session[Counter].latest()
     assert result is not None
@@ -329,7 +329,7 @@ def test_multiple_reducers_for_same_event(session_factory: SessionFactory) -> No
     session.install(SliceB, initial=SliceB)
 
     # Broadcast applies to all reducers for SharedEvent across all slices
-    session.apply(SharedEvent(value=10))
+    session.broadcast(SharedEvent(value=10))
 
     a_result = session[SliceA].latest()
     b_result = session[SliceB].latest()
@@ -348,7 +348,7 @@ def test_chained_applies(session_factory: SessionFactory) -> None:
     session.install(Counter, initial=Counter)
 
     for i in range(1, 6):
-        session[Counter].apply(Increment(amount=i))
+        session.broadcast(Increment(amount=i))
 
     result = session[Counter].latest()
     assert result is not None
@@ -450,7 +450,7 @@ def test_reducer_validates_return_type(
 
     # Session logs reducer failures instead of raising
     with caplog.at_level(logging.ERROR):
-        session[WrongReturn].apply(BadEvent())
+        session.broadcast(BadEvent())
 
     # Verify the TypeError was logged
     assert "must return WrongReturn, got str" in caplog.text

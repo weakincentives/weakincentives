@@ -28,17 +28,11 @@ if TYPE_CHECKING:
 
 
 class _SliceAccessorProvider(Protocol):
-    """Protocol for objects that support slice access with targeted dispatch."""
+    """Protocol for objects that support slice access."""
 
     def select_all[S: SupportsDataclass](
         self, slice_type: type[S]
     ) -> tuple[S, ...]: ...
-
-    def _apply_to_slice(
-        self,
-        slice_type: type[SupportsDataclass],
-        event: SupportsDataclass,
-    ) -> None: ...
 
     def _mutation_seed_slice[S: SupportsDataclass](
         self, slice_type: type[S], values: Iterable[S]
@@ -64,12 +58,11 @@ class _SliceAccessorProvider(Protocol):
 
 
 class SliceAccessor[T: SupportsDataclass]:
-    """Fluent interface for querying, dispatching, and mutating a specific slice.
+    """Fluent interface for querying and mutating a specific slice.
 
     Accessed via ``session[SliceType]``, providing:
 
     - **Query operations**: Retrieve state from the slice
-    - **Dispatch operations**: Send events to slice-specific reducers
     - **Mutation operations**: Directly modify slice state (bypassing reducers)
 
     Usage::
@@ -78,9 +71,6 @@ class SliceAccessor[T: SupportsDataclass]:
         session[Plan].all()
         session[Plan].latest()
         session[Plan].where(lambda p: p.active)
-
-        # Targeted dispatch (only runs reducers for Plan slice)
-        session[Plan].apply(AddStep(step="x"))
 
         # Direct mutations (bypass reducers)
         session[Plan].seed(initial_plan)
@@ -92,7 +82,7 @@ class SliceAccessor[T: SupportsDataclass]:
 
     For broadcast dispatch that runs all reducers for an event type::
 
-        session.apply(AddStep(step="x"))
+        session.broadcast(AddStep(step="x"))
 
     """
 
@@ -128,29 +118,6 @@ class SliceAccessor[T: SupportsDataclass]:
             for value in self._provider.select_all(self._slice_type)
             if predicate(value)
         )
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Dispatch Operations
-    # ──────────────────────────────────────────────────────────────────────
-
-    def apply(self, event: SupportsDataclass) -> None:
-        """Dispatch an event targeting only this slice's reducers.
-
-        Unlike ``session.apply(event)`` which broadcasts to all reducers
-        registered for the event type, this method filters to only run
-        reducers that target this specific slice type.
-
-        Args:
-            event: The event to dispatch. Only reducers registered for
-                ``(type(event), self._slice_type)`` will be executed.
-
-        Example::
-
-            # Only runs reducers for AddStep that target the Plan slice
-            session[Plan].apply(AddStep(step="implement feature"))
-
-        """
-        self._provider._apply_to_slice(self._slice_type, event)
 
     # ──────────────────────────────────────────────────────────────────────
     # Mutation Operations (bypass reducers)

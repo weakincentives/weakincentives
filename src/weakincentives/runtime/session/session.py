@@ -156,17 +156,14 @@ class Session(SessionProtocol):
         session[Plan].all()
         session[Plan].where(lambda p: p.active)
 
-        # Targeted dispatch (slice-scoped)
-        session[Plan].apply(AddStep(step="x"))
-
         # Direct mutations
         session[Plan].seed(initial_plan)
         session[Plan].clear()
         session[Plan].register(AddStep, reducer)
 
-    For broadcast dispatch (event-type routed to all matching reducers)::
+    For broadcast dispatch (routes to all reducers for the event type)::
 
-        session.apply(AddStep(step="x"))
+        session.broadcast(AddStep(step="x"))
 
     Global operations are available directly on the session::
 
@@ -330,7 +327,7 @@ class Session(SessionProtocol):
     def __getitem__[S: SupportsDataclass](
         self, slice_type: type[S]
     ) -> SliceAccessor[S]:
-        """Access a slice for querying, dispatch, and mutation operations.
+        """Access a slice for querying and mutation operations.
 
         This is the primary API for working with session state. All slice
         operations are available through the returned accessor.
@@ -342,9 +339,6 @@ class Session(SessionProtocol):
             session[Plan].all()
             session[Plan].where(lambda p: p.active)
 
-            # Targeted dispatch (slice-scoped)
-            session[Plan].apply(AddStep(step="x"))
-
             # Direct mutations (bypass reducers)
             session[Plan].seed(initial_plan)
             session[Plan].clear()
@@ -353,9 +347,9 @@ class Session(SessionProtocol):
             # Reducer registration
             session[Plan].register(AddStep, add_step_reducer)
 
-        For broadcast dispatch (event-type routed)::
+        For broadcast dispatch (routes to all reducers for the event type)::
 
-            session.apply(AddStep(step="x"))
+            session.broadcast(AddStep(step="x"))
 
         """
         return SliceAccessor(self, slice_type)
@@ -404,16 +398,12 @@ class Session(SessionProtocol):
     # ──────────────────────────────────────────────────────────────────────
 
     @override
-    def apply(self, event: SupportsDataclass) -> None:
+    def broadcast(self, event: SupportsDataclass) -> None:
         """Broadcast an event to all reducers registered for its type.
 
         This routes by event type and runs all registrations for that type,
         regardless of which slice they target. Use this for cross-cutting
         events that affect multiple slices.
-
-        For targeted dispatch that only runs reducers for a specific slice::
-
-            session[Plan].apply(AddStep(step="x"))
 
         Args:
             event: The event to dispatch. All reducers registered for
@@ -422,30 +412,10 @@ class Session(SessionProtocol):
         Example::
 
             # Broadcasts to ALL reducers registered for AddStep
-            session.apply(AddStep(step="implement feature"))
+            session.broadcast(AddStep(step="implement feature"))
 
         """
         self._dispatch_data_event(type(event), event)
-
-    def _apply_to_slice(
-        self,
-        slice_type: type[SupportsDataclass],
-        event: SupportsDataclass,
-    ) -> None:
-        """Dispatch an event to reducers targeting a specific slice.
-
-        This filters registrations by ``(event_type, slice_type)`` so only
-        reducers that handle this event type AND target this slice type
-        will be executed.
-
-        Internal method used by :class:`SliceAccessor`.
-
-        Args:
-            slice_type: The target slice type to filter reducers.
-            event: The event to dispatch.
-
-        """
-        self._dispatch_data_event(type(event), event, target_slice_type=slice_type)
 
     # ──────────────────────────────────────────────────────────────────────
     # Global Mutation Operations
@@ -701,34 +671,18 @@ class Session(SessionProtocol):
         self,
         data_type: SessionSliceType,
         event: ReducerEvent,
-        *,
-        target_slice_type: SessionSliceType | None = None,
     ) -> None:
         from .reducer_context import build_reducer_context
 
         with self.locked():
-            all_registrations = list(self._reducers.get(data_type, ()))
-
-            # Filter by target slice type if specified (targeted dispatch)
-            if target_slice_type is not None:
-                registrations = [
-                    reg
-                    for reg in all_registrations
-                    if reg.slice_type == target_slice_type
-                ]
-            else:
-                registrations = all_registrations
+            registrations = list(self._reducers.get(data_type, ()))
 
             if not registrations:
                 # Default: ledger semantics (always append)
-                # For targeted dispatch, use the target slice type; otherwise event type
-                default_slice = (
-                    target_slice_type if target_slice_type is not None else data_type
-                )
                 registrations = [
                     _ReducerRegistration(
                         reducer=cast(TypedReducer[Any], append_all),
-                        slice_type=default_slice,
+                        slice_type=data_type,
                     )
                 ]
 

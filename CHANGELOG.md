@@ -4,27 +4,29 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-### Breaking: Explicit Dispatch Scope APIs
+### Breaking: Simplified Dispatch API
 
-The `dispatch()` method on `MutationBuilder` has been removed. Use the new
-explicit dispatch APIs instead:
+The dispatch API has been simplified to a single broadcast method. The targeted
+dispatch method has been removed to eliminate the footgun where `session.apply()`
+and `session[Plan].apply()` had subtly different behaviors.
+
+**Old API (removed):**
 
 ```python
-# Broadcast dispatch (runs ALL reducers for the event type)
-session.apply(AddStep(step="x"))
-
-# Targeted dispatch (runs only reducers for the specified slice)
-session[Plan].apply(AddStep(step="x"))
+session.apply(AddStep(step="x"))           # Broadcast to all reducers
+session[Plan].apply(AddStep(step="x"))     # Targeted to Plan slice only
 ```
 
-The old API `session.mutate(Plan).dispatch(event)` appeared to target a
-specific slice but actually broadcast to all reducers for the event type. The
-new APIs make the dispatch scope explicit.
+**New API:**
 
-Migration:
+```python
+session.broadcast(AddStep(step="x"))       # Broadcast to all reducers
+```
 
-- `session.mutate(X).dispatch(e)` → `session[X].apply(e)` (targeted)
-- For cross-cutting events affecting multiple slices, use `session.apply(e)`
+**Migration:**
+
+- `session.apply(e)` → `session.broadcast(e)`
+- `session[Plan].apply(e)` → `session.broadcast(e)` (targeted dispatch removed)
 
 ### Ledger Semantics for Reducers
 

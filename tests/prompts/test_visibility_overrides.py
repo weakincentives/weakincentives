@@ -67,7 +67,7 @@ def test_session_auto_registers_visibility_reducers() -> None:
     assert session[VisibilityOverrides].latest() is None
 
     # Set an override - should work without explicit registration
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("section",), visibility=SectionVisibility.SUMMARY)
     )
     overrides = session[VisibilityOverrides].latest()
@@ -75,7 +75,7 @@ def test_session_auto_registers_visibility_reducers() -> None:
     assert overrides.get(("section",)) == SectionVisibility.SUMMARY
 
     # Set another override
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("other",), visibility=SectionVisibility.FULL)
     )
     overrides = session[VisibilityOverrides].latest()
@@ -90,15 +90,15 @@ def test_clear_visibility_override_event() -> None:
     session = Session(bus=bus)
 
     # Set some overrides
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("a",), visibility=SectionVisibility.SUMMARY)
     )
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("b",), visibility=SectionVisibility.FULL)
     )
 
     # Clear one
-    session[VisibilityOverrides].apply(ClearVisibilityOverride(path=("a",)))
+    session.broadcast(ClearVisibilityOverride(path=("a",)))
 
     overrides = session[VisibilityOverrides].latest()
     assert overrides is not None
@@ -112,15 +112,15 @@ def test_clear_all_visibility_overrides_event() -> None:
     session = Session(bus=bus)
 
     # Set some overrides
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("a",), visibility=SectionVisibility.SUMMARY)
     )
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("b",), visibility=SectionVisibility.FULL)
     )
 
     # Clear all
-    session[VisibilityOverrides].apply(ClearAllVisibilityOverrides())
+    session.broadcast(ClearAllVisibilityOverrides())
 
     overrides = session[VisibilityOverrides].latest()
     assert overrides is not None
@@ -146,7 +146,7 @@ def test_get_session_visibility_override_returns_override_from_session() -> None
     bus = InProcessEventBus()
     session = Session(bus=bus)
 
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("section",), visibility=SectionVisibility.SUMMARY)
     )
 
@@ -163,7 +163,7 @@ def test_cloned_session_preserves_visibility_reducers() -> None:
     session = Session(bus=bus)
 
     # Set an override on original session
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("original",), visibility=SectionVisibility.SUMMARY)
     )
 
@@ -176,7 +176,7 @@ def test_cloned_session_preserves_visibility_reducers() -> None:
     assert len(cloned._reducers.get(ClearAllVisibilityOverrides, [])) == 1
 
     # Cloned session should work with visibility events
-    cloned[VisibilityOverrides].apply(
+    cloned.broadcast(
         SetVisibilityOverride(path=("cloned",), visibility=SectionVisibility.FULL)
     )
 
@@ -203,7 +203,7 @@ def test_builtin_reducer_registration_is_idempotent() -> None:
     session._register_builtin_reducers()
 
     # Should still work correctly
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("test",), visibility=SectionVisibility.FULL)
     )
     overrides = session[VisibilityOverrides].latest()
@@ -223,7 +223,7 @@ def test_register_visibility_reducers_is_idempotent() -> None:
     register_visibility_reducers(session)
 
     # Visibility events should work
-    session[VisibilityOverrides].apply(
+    session.broadcast(
         SetVisibilityOverride(path=("test",), visibility=SectionVisibility.SUMMARY)
     )
     overrides = session[VisibilityOverrides].latest()
