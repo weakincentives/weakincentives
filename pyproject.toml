@@ -93,7 +93,7 @@ dev = [
     "pip-audit>=2.9.0",
     "ruff>=0.14.5",
     "pyright>=1.1.407",
-    "ty==0.0.1a26",
+    "ty==0.0.1a35",
     "mdformat>=1.0.0",
     "mutmut>=3.1.0",
     "hypothesis>=6.100.0",
@@ -307,10 +307,14 @@ division-by-zero = "error"
 invalid-ignore-comment = "error"
 possibly-missing-import = "error"
 possibly-unresolved-reference = "error"
-redundant-cast = "error"
+# redundant-cast disabled: false positives on cast(Self, ...) pattern
+# which is common for working around type system limitations
+redundant-cast = "ignore"
 undefined-reveal = "error"
 unresolved-global = "error"
-unsupported-base = "error"
+# unsupported-base disabled: false positives on dynamic class creation
+# patterns like `class Foo(cls):` inside __class_getitem__
+unsupported-base = "ignore"
 unused-ignore-comment = "error"
 useless-overload-body = "error"
 # High-impact additions

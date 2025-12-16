@@ -991,7 +991,7 @@ class HostFilesystem:
     @staticmethod
     def _grep_file(
         file_path: Path, regex: re.Pattern[str], rel_path: str, max_remaining: int
-    ) -> list[GrepMatch]:
+    ) -> list[GrepMatch]:  # ty: ignore[invalid-type-form]  # ty bug: resolves list to class method
         """Search a single file for regex matches."""
         matches: list[GrepMatch] = []
         try:

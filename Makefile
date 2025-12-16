@@ -36,15 +36,11 @@ pip-audit:
 markdown-check:
 	@uv run python build/run_mdformat.py
 
-# Run ty type checker
+# Run ty type checker (src only, consistent with pyright scope)
 ty:
-	@uv run --all-extras ty check --error-on-warning -qq \
-		--exclude 'test-repositories/**' --exclude '.git/**' \
-		--exclude '.uv-cache/**' --exclude '.venv/**' --exclude 'dist/**' . || \
+	@uv run --all-extras ty check --error-on-warning -qq src || \
 			(echo "ty check failed; rerunning with verbose output..." >&2; \
-			uv run --all-extras ty check --error-on-warning \
-			--exclude 'test-repositories/**' --exclude '.git/**' \
-			--exclude '.uv-cache/**' --exclude '.venv/**' --exclude 'dist/**' .)
+			uv run --all-extras ty check --error-on-warning src)
 
 # Run pyright type checker
 pyright:

@@ -272,7 +272,7 @@ class TaskExample(Section[TaskExampleParamsT]):
             steps=self.steps,
             title=self.title,
             default_params=cloned_default,
-            enabled=self._enabled,
+            enabled=self._enabled,  # ty: ignore[invalid-argument-type]  # callback arity
             accepts_overrides=self.accepts_overrides,
             summary=self.summary,
             visibility=self.visibility,
@@ -378,7 +378,7 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
             title=self.title,
             examples=cloned_children,
             default_params=cloned_default,
-            enabled=self._enabled,
+            enabled=self._enabled,  # ty: ignore[invalid-argument-type]  # callback arity
             accepts_overrides=self.accepts_overrides,
             summary=self.summary,
             visibility=self.visibility,

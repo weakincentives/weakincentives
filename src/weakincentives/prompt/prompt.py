@@ -138,7 +138,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             "_output_container_spec": container if candidate is not None else None,
             "_output_dataclass_candidate": candidate,
         }
-        return type(name, (cls,), namespace)
+        return type(name, (cls,), namespace)  # ty: ignore[invalid-return-type]  # dynamic type
 
     @classmethod
     def __pre_init__(
