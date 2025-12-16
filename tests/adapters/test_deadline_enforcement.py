@@ -81,8 +81,8 @@ def _tool_context(
     prompt_name: str,
     provider_payload: dict[str, Any] | None = None,
     deadline: Deadline | None = None,
-) -> shared.ToolExecutionContext:
-    return shared.ToolExecutionContext(
+) -> shared._ToolExecutionContext:
+    return shared._ToolExecutionContext(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,

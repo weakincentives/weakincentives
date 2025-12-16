@@ -544,7 +544,7 @@ def _parse_tool_call_arguments(
 
 def _build_tool_logger(
     *,
-    context: ToolExecutionContext,
+    context: _ToolExecutionContext,
     tool_name: str,
     tool_call: ProviderToolCall,
 ) -> tuple[str | None, StructuredLogger]:
@@ -674,7 +674,7 @@ def _handle_unexpected_tool_error(
 @contextmanager
 def tool_execution(
     *,
-    context: ToolExecutionContext,
+    context: _ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> Iterator[ToolExecutionOutcome]:
     """Context manager that executes a tool call and standardizes logging."""
@@ -764,7 +764,7 @@ def tool_execution(
 
 def _publish_tool_invocation(
     *,
-    context: ToolExecutionContext,
+    context: _ToolExecutionContext,
     outcome: ToolExecutionOutcome,
 ) -> ToolInvoked:
     snapshot = context.session.snapshot()
@@ -816,7 +816,7 @@ def _publish_tool_invocation(
 
 def execute_tool_call(
     *,
-    context: ToolExecutionContext,
+    context: _ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
     """Execute a provider tool call and publish the resulting event."""
@@ -1063,7 +1063,6 @@ __all__ = (  # noqa: RUF022
     "ThrottlePolicy",
     "ToolArgumentsParser",
     "ToolChoice",
-    "ToolExecutionContext",
     "ToolMessageSerializer",
     "_content_part_text",
     "_parsed_payload_from_part",
@@ -1171,7 +1170,7 @@ class ToolExecutor:
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
     _log: StructuredLogger = field(init=False)
-    _context: ToolExecutionContext = field(init=False)
+    _context: _ToolExecutionContext = field(init=False)
     _tool_message_records: list[
         tuple[ToolResult[SupportsToolResult], dict[str, Any]]
     ] = field(init=False)
@@ -1181,7 +1180,7 @@ class ToolExecutor:
             adapter=self.adapter_name,
             prompt=self.prompt_name,
         )
-        self._context = ToolExecutionContext(
+        self._context = _ToolExecutionContext(
             adapter_name=self.adapter_name,
             adapter=self.adapter,
             prompt=self.prompt,
@@ -1714,7 +1713,7 @@ def run_inner_loop[
 
 
 @dataclass(slots=True)
-class ToolExecutionContext:
+class _ToolExecutionContext:
     """Inputs and collaborators required to execute a provider tool call."""
 
     adapter_name: AdapterName
@@ -1733,7 +1732,7 @@ class ToolExecutionContext:
 
     def with_provider_payload(
         self, provider_payload: dict[str, Any] | None
-    ) -> ToolExecutionContext:
+    ) -> _ToolExecutionContext:
         """Return a copy of the context with a new provider payload."""
 
         return replace(self, provider_payload=provider_payload)

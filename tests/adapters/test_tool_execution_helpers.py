@@ -31,9 +31,9 @@ from weakincentives.adapters.core import (
     PromptEvaluationError,
 )
 from weakincentives.adapters.shared import (
-    ToolExecutionContext,
     ToolExecutionOutcome,
     _RejectedToolParams,
+    _ToolExecutionContext,
     format_publish_failures,
     parse_tool_arguments,
     tool_execution,
@@ -75,11 +75,11 @@ def _base_context(
     *,
     deadline: Deadline | None = None,
     session: SessionProtocol | None = None,
-) -> ToolExecutionContext:
+) -> _ToolExecutionContext:
     bus = InProcessEventBus()
     prompt_template = _build_prompt(tool)
     prompt = Prompt(prompt_template)
-    return ToolExecutionContext(
+    return _ToolExecutionContext(
         adapter_name="adapter",
         adapter=cast(Any, object()),
         prompt=prompt,
