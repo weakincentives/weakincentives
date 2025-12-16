@@ -110,9 +110,9 @@ def test_install_registers_reducers(session_factory: SessionFactory) -> None:
     # Seed initial state
     session.mutate(ItemList).seed(ItemList(items=()))
 
-    # Dispatch events - should work via installed reducers
-    session.mutate(ItemList).dispatch(AddItem(item="first"))
-    session.mutate(ItemList).dispatch(AddItem(item="second"))
+    # Apply events - should work via installed reducers
+    session[ItemList].apply(AddItem(item="first"))
+    session[ItemList].apply(AddItem(item="second"))
 
     result = session[ItemList].latest()
     assert result is not None
@@ -163,8 +163,8 @@ def test_install_with_initial_factory(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
     session.install(Counter, initial=Counter)
 
-    # Dispatch without seeding - should use initial factory
-    session.mutate(Counter).dispatch(Increment(amount=5))
+    # Apply without seeding - should use initial factory
+    session[Counter].apply(Increment(amount=5))
 
     result = session[Counter].latest()
     assert result is not None
@@ -178,8 +178,8 @@ def test_install_without_initial_factory_ignores_empty(
     session, _ = session_factory()
     session.install(ItemList)
 
-    # Dispatch without seeding - should be ignored (no initial factory)
-    session.mutate(ItemList).dispatch(AddItem(item="ignored"))
+    # Apply without seeding - should be ignored (no initial factory)
+    session[ItemList].apply(AddItem(item="ignored"))
 
     result = session[ItemList].latest()
     assert result is None
@@ -250,7 +250,7 @@ def test_reducer_method_transforms_state(session_factory: SessionFactory) -> Non
     session.install(ItemList)
 
     session.mutate(ItemList).seed(ItemList(items=("a", "b", "c")))
-    session.mutate(ItemList).dispatch(RemoveItem(item="b"))
+    session[ItemList].apply(RemoveItem(item="b"))
 
     result = session[ItemList].latest()
     assert result is not None
@@ -263,7 +263,7 @@ def test_reducer_method_can_clear_state(session_factory: SessionFactory) -> None
     session.install(ItemList)
 
     session.mutate(ItemList).seed(ItemList(items=("a", "b")))
-    session.mutate(ItemList).dispatch(ClearItems())
+    session[ItemList].apply(ClearItems())
 
     result = session[ItemList].latest()
     assert result is not None
@@ -275,8 +275,8 @@ def test_reducer_method_receives_event(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
     session.install(Counter, initial=Counter)
 
-    session.mutate(Counter).dispatch(Increment(amount=10))
-    session.mutate(Counter).dispatch(Increment(amount=5))
+    session[Counter].apply(Increment(amount=10))
+    session[Counter].apply(Increment(amount=5))
 
     result = session[Counter].latest()
     assert result is not None
@@ -288,8 +288,8 @@ def test_reducer_method_reset(session_factory: SessionFactory) -> None:
     session, _ = session_factory()
     session.install(Counter, initial=Counter)
 
-    session.mutate(Counter).dispatch(Increment(amount=100))
-    session.mutate(Counter).dispatch(Reset())
+    session[Counter].apply(Increment(amount=100))
+    session[Counter].apply(Reset())
 
     result = session[Counter].latest()
     assert result is not None
@@ -328,9 +328,8 @@ def test_multiple_reducers_for_same_event(session_factory: SessionFactory) -> No
     session.install(SliceA, initial=SliceA)
     session.install(SliceB, initial=SliceB)
 
-    # Dispatch to SliceA - but since both slices have reducers for
-    # SharedEvent, both will be invoked (registered to same event type)
-    session.mutate(SliceA).dispatch(SharedEvent(value=10))
+    # Broadcast applies to all reducers for SharedEvent across all slices
+    session.apply(SharedEvent(value=10))
 
     a_result = session[SliceA].latest()
     b_result = session[SliceB].latest()
@@ -338,18 +337,18 @@ def test_multiple_reducers_for_same_event(session_factory: SessionFactory) -> No
     assert a_result is not None
     assert a_result.value == 20
 
-    # Both slices have reducers for SharedEvent, so SliceB is also updated
+    # Both slices have reducers for SharedEvent, so both are updated
     assert b_result is not None
     assert b_result.value == 30
 
 
-def test_chained_dispatches(session_factory: SessionFactory) -> None:
-    """Test multiple dispatches in sequence."""
+def test_chained_applies(session_factory: SessionFactory) -> None:
+    """Test multiple applies in sequence."""
     session, _ = session_factory()
     session.install(Counter, initial=Counter)
 
     for i in range(1, 6):
-        session.mutate(Counter).dispatch(Increment(amount=i))
+        session[Counter].apply(Increment(amount=i))
 
     result = session[Counter].latest()
     assert result is not None
@@ -451,7 +450,7 @@ def test_reducer_validates_return_type(
 
     # Session logs reducer failures instead of raising
     with caplog.at_level(logging.ERROR):
-        session.mutate(WrongReturn).dispatch(BadEvent())
+        session[WrongReturn].apply(BadEvent())
 
     # Verify the TypeError was logged
     assert "must return WrongReturn, got str" in caplog.text

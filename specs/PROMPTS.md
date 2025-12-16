@@ -2,10 +2,10 @@
 
 ## Purpose
 
-The `Prompt` abstraction centralizes every string template that flows to an LLM
-so the codebase has a single, inspectable source for system prompts and per-turn
-instructions. This specification covers prompt construction, section composition,
-structured output, and progressive disclosure.
+The `Prompt` abstraction centralizes every string template that flows to an
+LLM so the codebase has a single, inspectable source for system prompts and
+per-turn instructions. This specification covers prompt construction, section
+composition, structured output, and progressive disclosure.
 
 ## Guiding Principles
 
@@ -133,7 +133,8 @@ depth-first and producing markdown with deterministic headings.
 
 - Root sections: `##`
 - Each depth level adds one `#` (depth 1 = `###`, depth 2 = `####`)
-- Headings include numbering with a trailing period after the index: `## 1. Title`, `### 1.1. Subtitle`
+- Headings include numbering with a trailing period after the index:
+  `## 1. Title`, `### 1.1. Subtitle`
 
 ### Parameter Lookup
 
@@ -196,7 +197,8 @@ for structured output to work correctly.
 
 ### Parsing
 
-`parse_structured_output(output_text, rendered)` validates assistant responses:
+`parse_structured_output(output_text, rendered)` validates assistant
+responses:
 
 1. **Extract JSON**: Prefer fenced `json` block, else parse entire message,
    else scan for `{...}` or `[...]`
@@ -270,7 +272,7 @@ while True:
         break
     except VisibilityExpansionRequired as e:
         for path, visibility in e.requested_overrides.items():
-            session.mutate(VisibilityOverrides).dispatch(
+            session[VisibilityOverrides].apply(
                 SetVisibilityOverride(path=path, visibility=visibility)
             )
 ```

@@ -231,7 +231,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             except VisibilityExpansionRequired as e:
                 # Update session state with requested visibility overrides
                 for path, visibility in e.requested_overrides.items():
-                    session.mutate(VisibilityOverrides).dispatch(
+                    session[VisibilityOverrides].apply(
                         SetVisibilityOverride(path=path, visibility=visibility)
                     )
             else:

@@ -59,10 +59,13 @@ src/weakincentives/
 └── types/           # JSON type aliases
 ```
 
-The library is organized as "core primitives" + "batteries for specific agent styles":
+The library is organized as "core primitives" + "batteries for specific agent
+styles":
 
-- **Core** (`weakincentives.*`): Prompt composition, sessions, adapters, serde, dbc
-- **Contrib** (`weakincentives.contrib.*`): Planning tools, VFS, Podman, asteval, workspace optimizers
+- **Core** (`weakincentives.*`): Prompt composition, sessions, adapters,
+  serde, dbc
+- **Contrib** (`weakincentives.contrib.*`): Planning tools, VFS, Podman,
+  asteval, workspace optimizers
 
 ## Code Conventions
 
@@ -134,22 +137,21 @@ Always finish with `make test` to verify coverage.
 
 Consult these specs before modifying related code:
 
-| Spec | When to Read |
-|------|--------------|
-| `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
-| `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging |
-| `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
-| `specs/DBC.md` | Editing DbC-decorated modules (required) |
-| `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
-| `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
-| `specs/PROMPTS.md` | Prompt system, composition, structured output |
-| `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
-| `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
-| `specs/TOOLS.md` | Adding/modifying tools, planning tools |
-| `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
-| `specs/THREAD_SAFETY.md` | Concurrency or shared state |
-| `specs/LOGGING.md` | Logging surfaces |
-| `specs/LANGSMITH.md` | LangSmith telemetry, prompt hub, evaluation integration |
+| Spec | When to Read | |------|--------------| | `specs/ADAPTERS.md` |
+Provider adapters, structured output, throttling | |
+`specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging | |
+`specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns | |
+`specs/DBC.md` | Editing DbC-decorated modules (required) | |
+`specs/FILESYSTEM.md` | Filesystem protocol, backend implementations,
+ToolContext integration | | `specs/MAIN_LOOP.md` | Main loop orchestration,
+visibility handling, event-driven execution | | `specs/PROMPTS.md` | Prompt
+system, composition, structured output | | `specs/PROMPT_OPTIMIZATION.md` |
+Override system or optimizer logic | | `specs/SESSIONS.md` | Session
+lifecycle, events, deadlines, budgets | | `specs/TOOLS.md` | Adding/modifying
+tools, planning tools | | `specs/WORKSPACE.md` | VFS, Podman, asteval,
+workspace digest | | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
+| `specs/LOGGING.md` | Logging surfaces | | `specs/LANGSMITH.md` | LangSmith
+telemetry, prompt hub, evaluation integration |
 
 Full spec index in `AGENTS.md`.
 
@@ -195,10 +197,14 @@ session = Session(bus=bus)
 
 # Query state
 plan = session.query(Plan).latest()
+plan = session[Plan].latest()                     # Shorthand for query
 
-# Mutate state (fluent API mirrors query)
+# Dispatch events (through reducers)
+session.apply(AddStep(...))                       # Broadcast to all reducers
+session[Plan].apply(AddStep(...))                 # Targeted to Plan slice
+
+# Direct mutations (bypass reducers)
 session.mutate(Plan).seed(initial_plan)           # Initialize slice
-session.mutate(Plan).dispatch(AddStep(...))       # Event through reducers
 session.mutate(Plan).register(AddStep, reducer)   # Register reducer
 session.mutate().reset()                          # Clear all slices
 ```
@@ -215,9 +221,9 @@ output = response.output  # Typed result
 
 ## Stability Notice
 
-This is **alpha software**. All APIs may change without backward compatibility.
-Do not add backward-compatibility shims or deprecation warnings—delete unused
-code completely.
+This is **alpha software**. All APIs may change without backward
+compatibility. Do not add backward-compatibility shims or deprecation
+warnings—delete unused code completely.
 
 ## Quick Checklist
 

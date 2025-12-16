@@ -285,12 +285,16 @@ class Session(SessionProtocol):
             # Slice-specific mutations
             session.mutate(Plan).seed(initial_plan)
             session.mutate(Plan).clear()
-            session.mutate(Plan).dispatch(SetupPlan(objective="..."))
             session.mutate(Plan).register(AddStep, add_step_reducer)
 
             # Session-wide mutations
             session.mutate().reset()
             session.mutate().rollback(snapshot)
+
+        For event-driven dispatch, use the explicit APIs::
+
+            session.apply(event)           # Broadcast to all reducers
+            session[Plan].apply(event)     # Targeted to Plan slice
 
         """
         if slice_type is None:

@@ -832,7 +832,7 @@ def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
     assert session.query(ExampleOutput).all() == (ExampleOutput(text="banana"),)
 
 
-def test_mutate_dispatch_triggers_registered_reducer(
+def test_slice_accessor_apply_triggers_registered_reducer(
     session_factory: SessionFactory,
 ) -> None:
     session, _ = session_factory()
@@ -852,7 +852,7 @@ def test_mutate_dispatch_triggers_registered_reducer(
         return (ExampleOutput(text=value.text),)
 
     session.mutate(ExampleOutput).register(SetText, set_text_reducer)
-    session.mutate(ExampleOutput).dispatch(SetText(text="dispatched"))
+    session[ExampleOutput].apply(SetText(text="dispatched"))
 
     assert session.query(ExampleOutput).all() == (ExampleOutput(text="dispatched"),)
 
@@ -1365,58 +1365,3 @@ def test_apply_vs_slice_accessor_apply_demonstrates_scope_difference(
     session[CounterB].apply(IncrementCounter(amount=3))
     assert session[CounterA].latest() == CounterA(15)  # Unchanged
     assert session[CounterB].latest() == CounterB(13)
-
-
-def test_mutate_dispatch_still_broadcasts_by_event_type(
-    session_factory: SessionFactory,
-) -> None:
-    """Verifies that mutate().dispatch() retains broadcast behavior (for compatibility)."""
-
-    @dataclass(slots=True, frozen=True)
-    class MyEvent:
-        value: str
-
-    @dataclass(slots=True, frozen=True)
-    class SliceA:
-        value: str
-
-    @dataclass(slots=True, frozen=True)
-    class SliceB:
-        value: str
-
-    session, _ = session_factory()
-
-    call_order: list[str] = []
-
-    def reducer_a(
-        slice_values: tuple[SliceA, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[SliceA, ...]:
-        del context
-        call_order.append("A")
-        value = cast(MyEvent, event)
-        return (*slice_values, SliceA(value.value))
-
-    def reducer_b(
-        slice_values: tuple[SliceB, ...],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> tuple[SliceB, ...]:
-        del context
-        call_order.append("B")
-        value = cast(MyEvent, event)
-        return (*slice_values, SliceB(value.value))
-
-    session.mutate(SliceA).register(MyEvent, reducer_a)
-    session.mutate(SliceB).register(MyEvent, reducer_b)
-
-    # The old API (mutate().dispatch()) still broadcasts to all reducers
-    # This is by design - the slice_type in mutate() was always misleading
-    session.mutate(SliceA).dispatch(MyEvent(value="via-mutate"))
-
-    assert call_order == ["A", "B"]  # Both reducers were called
-    assert session.query(SliceA).all() == (SliceA("via-mutate"),)
-    assert session.query(SliceB).all() == (SliceB("via-mutate"),)

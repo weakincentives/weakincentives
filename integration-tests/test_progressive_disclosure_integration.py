@@ -225,7 +225,7 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
             # Model requested section expansion - update session state
             expansion_count += 1
             for path, visibility in e.requested_overrides.items():
-                session.mutate(VisibilityOverrides).dispatch(
+                session[VisibilityOverrides].apply(
                     SetVisibilityOverride(path=path, visibility=visibility)
                 )
             # Continue the loop with updated visibility in session state
@@ -290,7 +290,7 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
 
         except VisibilityExpansionRequired as e:
             for path, visibility in e.requested_overrides.items():
-                session.mutate(VisibilityOverrides).dispatch(
+                session[VisibilityOverrides].apply(
                     SetVisibilityOverride(path=path, visibility=visibility)
                 )
 

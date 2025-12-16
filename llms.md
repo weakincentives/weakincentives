@@ -3,13 +3,14 @@
 WINK is an open source toolkit for developing and optimizing side-effect-free
 background agents (e.g., research, review, and coding agents) that translate
 end-user instructions into deterministic actions. The library is designed for
-human developers, but this README is written so automated coding agents (OpenAI
-Codex web/CLI, Claude Code, Cursor background agents, etc.) can be productive
-consumers of the API surface without depending on internals.
+human developers, but this README is written so automated coding agents
+(OpenAI Codex web/CLI, Claude Code, Cursor background agents, etc.) can be
+productive consumers of the API surface without depending on internals.
 
-The public API centers on typed prompts, declarative tool contracts, replayable
-sessions, and provider-agnostic adapters so you can keep determinism,
-observability, and safety front and center while iterating on agent behaviors.
+The public API centers on typed prompts, declarative tool contracts,
+replayable sessions, and provider-agnostic adapters so you can keep
+determinism, observability, and safety front and center while iterating on
+agent behaviors.
 
 This document is the package README published to PyPI. It focuses on the
 supported, public API surface you can depend on when wiring WINK into your own
@@ -19,17 +20,28 @@ agent or orchestration system.
 
 An agent harness in WINK wires together five core components:
 
-1. **PromptTemplate** (`weakincentives.prompt.PromptTemplate`): Immutable blueprint defining sections, tools, and structured output schema. Import from `weakincentives.prompt`.
+1. **PromptTemplate** (`weakincentives.prompt.PromptTemplate`): Immutable
+   blueprint defining sections, tools, and structured output schema. Import
+   from `weakincentives.prompt`.
 
-1. **Prompt** (`weakincentives.Prompt`): Wraps a template with parameter bindings and optional overrides. Pass params to the constructor or call `.bind()` to attach additional params before evaluation.
+1. **Prompt** (`weakincentives.Prompt`): Wraps a template with parameter
+   bindings and optional overrides. Pass params to the constructor or call
+   `.bind()` to attach additional params before evaluation.
 
-1. **Session** (`weakincentives.runtime.Session`): Redux-like event ledger that records all prompt renders, tool invocations, and custom state. Creates its own `EventBus` internally (access via `session.event_bus`).
+1. **Session** (`weakincentives.runtime.Session`): Redux-like event ledger
+   that records all prompt renders, tool invocations, and custom state.
+   Creates its own `EventBus` internally (access via `session.event_bus`).
 
-1. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to LLM providers. Call `adapter.evaluate(prompt, session=session)` to execute.
+1. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to
+   LLM providers. Call `adapter.evaluate(prompt, session=session)` to execute.
 
-1. **Tool handlers**: Functions with signature `(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]` that implement side effects when the model requests tool calls.
+1. **Tool handlers**: Functions with signature
+   `(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]` that
+   implement side effects when the model requests tool calls.
 
-**Data flow**: PromptTemplate → Prompt (with bound params) → `adapter.evaluate()` → LLM response → Tool calls dispatched → ToolResult returned → Session updated → Events published
+**Data flow**: PromptTemplate → Prompt (with bound params) →
+`adapter.evaluate()` → LLM response → Tool calls dispatched → ToolResult
+returned → Session updated → Events published
 
 ## Installation
 
@@ -43,7 +55,8 @@ Optional extras enable specific providers or tooling:
 
 - `pip install "weakincentives[openai]"` for the OpenAI adapter.
 - `pip install "weakincentives[litellm]"` for the LiteLLM adapter.
-- `pip install "weakincentives[claude-agent-sdk]"` for the Claude Agent SDK adapter.
+- `pip install "weakincentives[claude-agent-sdk]"` for the Claude Agent SDK
+  adapter.
 - `pip install "weakincentives[asteval]"` to enable the sandboxed Python eval
   tool.
 - `pip install "weakincentives[podman]"` for Podman-based sandboxes.
@@ -64,10 +77,10 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   record every prompt render and tool invocation as immutable events. Reducers
   keep state deterministic and replayable.
 - **Adapters** (`weakincentives.adapters.ProviderAdapter`): Bridges to model
-  providers that negotiate tool calls and structured outputs without locking you
-  into a single vendor.
-- **Structured Output** (`parse_structured_output`): JSON-schema-backed parsing
-  that turns model responses into typed dataclass instances.
+  providers that negotiate tool calls and structured outputs without locking
+  you into a single vendor.
+- **Structured Output** (`parse_structured_output`): JSON-schema-backed
+  parsing that turns model responses into typed dataclass instances.
 - **Overrides** (`PromptOverride`, `LocalPromptOverridesStore`): Hash-based
   prompt overrides that let you refine prompt text safely in version control.
 
@@ -78,75 +91,108 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - Classes and functions:
     - `Budget`: Resource envelope combining time and token limits.
     - `BudgetExceededError`: Exception raised when a budget limit is breached.
-    - `BudgetTracker`: Thread-safe tracker for cumulative token usage against a Budget.
+    - `BudgetTracker`: Thread-safe tracker for cumulative token usage against
+      a Budget.
     - `Deadline`: Immutable value object describing a wall-clock expiration.
     - `DeadlineExceededError`: Exception raised when a deadline is exceeded.
-    - `FrozenDataclass`: Decorator providing immutable dataclass utilities (copy, asdict, normalization).
-    - `JSONValue`: Type alias for JSON-compatible primitives, objects, and arrays.
+    - `FrozenDataclass`: Decorator providing immutable dataclass utilities
+      (copy, asdict, normalization).
+    - `JSONValue`: Type alias for JSON-compatible primitives, objects, and
+      arrays.
     - `MarkdownSection`: Render markdown content using `string.Template`.
     - `Prompt`: Coordinate prompt sections and their parameter bindings.
     - `PromptResponse`: Structured result emitted by an adapter evaluation.
-    - `StructuredLogger`: Logger adapter enforcing a minimal structured event schema.
-    - `SupportsDataclass`: Protocol satisfied by dataclass types and instances.
+    - `StructuredLogger`: Logger adapter enforcing a minimal structured event
+      schema.
+    - `SupportsDataclass`: Protocol satisfied by dataclass types and
+      instances.
     - `Tool`: Describe a callable tool exposed by prompt sections.
-    - `ToolContext`: Immutable container exposing prompt execution state to handlers.
+    - `ToolContext`: Immutable container exposing prompt execution state to
+      handlers.
     - `ToolHandler`: Callable protocol implemented by tool handlers.
     - `ToolResult`: Structured response emitted by a tool handler.
-    - `ToolValidationError`: Raised when tool parameters fail validation checks.
+    - `ToolValidationError`: Raised when tool parameters fail validation
+      checks.
     - `WinkError`: Base class for all weakincentives exceptions.
     - `configure_logging`: Configure the root logger with sensible defaults.
     - `get_logger`: Return a `StructuredLogger` scoped to a name.
-    - `parse_structured_output`: Parse a model response into the structured output type declared by the prompt.
+    - `parse_structured_output`: Parse a model response into the structured
+      output type declared by the prompt.
   - Modules: `adapters`, `cli`, `contrib`, `deadlines`, `debug`, `optimizers`,
     `prompt`, `runtime`, `serde`, `types`.
-- `weakincentives.adapters`: Provider integrations, configuration, and throttling primitives.
-  - Constants: `CLAUDE_AGENT_SDK_ADAPTER_NAME`, `LITELLM_ADAPTER_NAME`, `OPENAI_ADAPTER_NAME`.
+- `weakincentives.adapters`: Provider integrations, configuration, and
+  throttling primitives.
+  - Constants: `CLAUDE_AGENT_SDK_ADAPTER_NAME`, `LITELLM_ADAPTER_NAME`,
+    `OPENAI_ADAPTER_NAME`.
   - Types:
     - `AdapterName`: Type alias for adapter names.
-    - `PromptEvaluationError`: Raised when evaluation against a provider fails.
+    - `PromptEvaluationError`: Raised when evaluation against a provider
+      fails.
     - `PromptResponse`: Structured result emitted by an adapter evaluation.
-    - `ProviderAdapter`: Abstract base class describing the synchronous adapter contract.
-    - `SessionProtocol`: Protocol describing the session interface required by adapters.
+    - `ProviderAdapter`: Abstract base class describing the synchronous
+      adapter contract.
+    - `SessionProtocol`: Protocol describing the session interface required by
+      adapters.
     - `ThrottleError`: Raised when a provider throttles a request.
-    - `ThrottlePolicy`: Configuration for automatic retry/backoff on throttling.
+    - `ThrottlePolicy`: Configuration for automatic retry/backoff on
+      throttling.
   - Configuration:
-    - `LLMConfig`: Base configuration for common LLM parameters (temperature, max_tokens, top_p, etc.).
-    - `OpenAIClientConfig`: Configuration for OpenAI client instantiation (api_key, base_url, timeout).
-    - `OpenAIModelConfig`: OpenAI-specific model configuration extending LLMConfig.
+    - `LLMConfig`: Base configuration for common LLM parameters (temperature,
+      max_tokens, top_p, etc.).
+    - `OpenAIClientConfig`: Configuration for OpenAI client instantiation
+      (api_key, base_url, timeout).
+    - `OpenAIModelConfig`: OpenAI-specific model configuration extending
+      LLMConfig.
     - `LiteLLMClientConfig`: Configuration for LiteLLM client instantiation.
-    - `LiteLLMModelConfig`: LiteLLM-specific model configuration extending LLMConfig.
-    - `ClaudeAgentSDKClientConfig`: Configuration for Claude Agent SDK (permission_mode, cwd, max_turns, isolation).
-    - `ClaudeAgentSDKModelConfig`: Claude Agent SDK model configuration extending LLMConfig.
+    - `LiteLLMModelConfig`: LiteLLM-specific model configuration extending
+      LLMConfig.
+    - `ClaudeAgentSDKClientConfig`: Configuration for Claude Agent SDK
+      (permission_mode, cwd, max_turns, isolation).
+    - `ClaudeAgentSDKModelConfig`: Claude Agent SDK model configuration
+      extending LLMConfig.
   - Factory: `new_throttle_policy`: Factory for creating throttle policies.
   - Claude Agent SDK Isolation (`weakincentives.adapters.claude_agent_sdk`):
-    - `IsolationConfig`: Hermetic isolation configuration (network_policy, sandbox, env, api_key).
-    - `NetworkPolicy`: Network access constraints (allowed_domains). Use `NetworkPolicy.no_network()` for API-only.
-    - `SandboxConfig`: OS-level sandboxing (enabled, writable_paths, readable_paths, bash_auto_allow).
-    - `EphemeralHome`: Temporary HOME directory for isolation (auto-created when IsolationConfig is set).
-    - `PermissionMode`: Literal type for SDK permission levels ("default", "acceptEdits", "plan", "bypassPermissions").
+    - `IsolationConfig`: Hermetic isolation configuration (network_policy,
+      sandbox, env, api_key).
+    - `NetworkPolicy`: Network access constraints (allowed_domains). Use
+      `NetworkPolicy.no_network()` for API-only.
+    - `SandboxConfig`: OS-level sandboxing (enabled, writable_paths,
+      readable_paths, bash_auto_allow).
+    - `EphemeralHome`: Temporary HOME directory for isolation (auto-created
+      when IsolationConfig is set).
+    - `PermissionMode`: Literal type for SDK permission levels ("default",
+      "acceptEdits", "plan", "bypassPermissions").
   - Claude Agent SDK Workspace (`weakincentives.adapters.claude_agent_sdk`):
-    - `ClaudeAgentWorkspaceSection`: Section that materializes host files into a temp directory for SDK access.
-    - `HostMount`: Configuration for mounting host paths (host_path, mount_path, include_glob, exclude_glob, max_bytes).
+    - `ClaudeAgentWorkspaceSection`: Section that materializes host files into
+      a temp directory for SDK access.
+    - `HostMount`: Configuration for mounting host paths (host_path,
+      mount_path, include_glob, exclude_glob, max_bytes).
     - `HostMountPreview`: Preview of mount contents before materialization.
     - `WorkspaceBudgetExceededError`: Raised when mount exceeds max_bytes.
-    - `WorkspaceSecurityError`: Raised when accessing paths outside allowed_host_roots.
+    - `WorkspaceSecurityError`: Raised when accessing paths outside
+      allowed_host_roots.
 - `weakincentives.prompt`: Prompt authoring, rendering, and override helpers.
   - Authoring:
-    - `PromptTemplate`: Immutable prompt blueprint with sections (import from here).
+    - `PromptTemplate`: Immutable prompt blueprint with sections (import from
+      here).
     - `MarkdownSection`: Render markdown content using `string.Template`.
     - `Prompt`: Coordinate prompt sections and their parameter bindings.
     - `RenderedPrompt`: Result of rendering a prompt.
     - `Section`: Base class for prompt sections.
     - `SectionNode`: Node in section tree.
     - `SectionPath`: Path to a section.
-    - `SectionVisibility`: Enum controlling how a section is rendered (`FULL`, `SUMMARY`).
+    - `SectionVisibility`: Enum controlling how a section is rendered (`FULL`,
+      `SUMMARY`).
     - `Tool`: Describe a callable tool exposed by prompt sections.
-    - `ToolContext`: Immutable container exposing prompt execution state to handlers.
-    - `ToolExample`: Representative invocation for a tool documenting inputs and outputs.
+    - `ToolContext`: Immutable container exposing prompt execution state to
+      handlers.
+    - `ToolExample`: Representative invocation for a tool documenting inputs
+      and outputs.
     - `ToolHandler`: Callable protocol implemented by tool handlers.
     - `ToolRenderableResult`: Protocol for tool results that can be rendered.
     - `ToolResult`: Structured response emitted by a tool handler.
-    - `SupportsDataclass`: Protocol satisfied by dataclass types and instances.
+    - `SupportsDataclass`: Protocol satisfied by dataclass types and
+      instances.
     - `SupportsDataclassOrNone`: Protocol for dataclass types or None.
     - `SupportsToolResult`: Protocol for tool results.
     - `PromptProtocol`: Protocol for prompts.
@@ -171,14 +217,17 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - Structured output and validation:
     - `OutputParseError`: Raised when structured output parsing fails.
     - `StructuredOutputConfig`: Configuration for structured output.
-    - `parse_structured_output`: Parse a model response into the structured output type declared by the prompt.
+    - `parse_structured_output`: Parse a model response into the structured
+      output type declared by the prompt.
     - `PromptError`: Base class for prompt errors.
     - `PromptRenderError`: Raised when prompt rendering fails.
     - `PromptValidationError`: Raised when prompt validation fails.
-    - `VisibilityExpansionRequired`: Raised when model requests expansion of summarized sections.
+    - `VisibilityExpansionRequired`: Raised when model requests expansion of
+      summarized sections.
 - `weakincentives.runtime`: Session, event, and orchestration primitives.
   - Logging:
-    - `StructuredLogger`: Logger adapter enforcing a minimal structured event schema.
+    - `StructuredLogger`: Logger adapter enforcing a minimal structured event
+      schema.
     - `configure_logging`: Configure the root logger with sensible defaults.
     - `get_logger`: Return a `StructuredLogger` scoped to a name.
   - Events:
@@ -191,7 +240,8 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `TokenUsage`: Token usage data from provider responses.
     - `ToolInvoked`: Event emitted when a tool is invoked.
   - Main loop orchestration:
-    - `MainLoop`: Abstract base class for standardized agent workflow orchestration.
+    - `MainLoop`: Abstract base class for standardized agent workflow
+      orchestration.
     - `MainLoopConfig`: Configuration for default deadline/budget.
     - `MainLoopRequest`: Event requesting execution with optional constraints.
     - `MainLoopCompleted`: Success event published via bus.
@@ -219,21 +269,25 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - Protocol and base classes:
     - `PromptOptimizer`: Protocol for prompt optimization algorithms.
     - `BasePromptOptimizer`: Abstract base class for prompt optimizers.
-    - `OptimizerConfig`: Base configuration dataclass with `accepts_overrides` field.
+    - `OptimizerConfig`: Base configuration dataclass with `accepts_overrides`
+      field.
   - Context and results:
-    - `OptimizationContext`: Immutable context bundle with adapter, event bus, deadline, and overrides.
-    - `OptimizationResult`: Generic result container with response, artifact, and metadata.
+    - `OptimizationContext`: Immutable context bundle with adapter, event bus,
+      deadline, and overrides.
+    - `OptimizationResult`: Generic result container with response, artifact,
+      and metadata.
     - `WorkspaceDigestResult`: Result of workspace digest optimization.
-    - `PersistenceScope`: Enum for artifact storage location (`SESSION`, `GLOBAL`).
+    - `PersistenceScope`: Enum for artifact storage location (`SESSION`,
+      `GLOBAL`).
   - Concrete implementations live in `weakincentives.contrib.optimizers`.
   - Events:
     - `OptimizationStarted`: Event emitted when optimizer begins work.
     - `OptimizationCompleted`: Event emitted on successful completion.
     - `OptimizationFailed`: Event emitted when optimization raises exception.
 - `weakincentives.contrib`: Optional, domain-specific tools and optimizers.
-  - `weakincentives.contrib.tools`: Planning (`PlanningToolsSection`, `Plan`), VFS
-    (`VfsToolsSection`, `VirtualFileSystem`, `HostMount`), workspace digest
-    (`WorkspaceDigestSection`), and (with extras) `AstevalSection` /
+  - `weakincentives.contrib.tools`: Planning (`PlanningToolsSection`, `Plan`),
+    VFS (`VfsToolsSection`, `VirtualFileSystem`, `HostMount`), workspace
+    digest (`WorkspaceDigestSection`), and (with extras) `AstevalSection` /
     `PodmanSandboxSection`.
   - `weakincentives.contrib.optimizers`: Concrete optimizers (currently
     `WorkspaceDigestOptimizer`).
@@ -248,7 +302,8 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - `JSONArrayT`: Type variable for JSON arrays.
   - `JSONObject`: Type alias for JSON objects.
   - `JSONObjectT`: Type variable for JSON objects.
-  - `JSONValue`: Type alias for JSON-compatible primitives, objects, and arrays.
+  - `JSONValue`: Type alias for JSON-compatible primitives, objects, and
+    arrays.
   - `ParseableDataclassT`: Type variable for parseable dataclasses.
 - `weakincentives.dbc`: Design-by-contract utilities.
   - `dbc_active`: Return `True` when DbC checks should run.
@@ -265,17 +320,18 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
 ## Agent-facing operational notes
 
 - WINK does not run unattended background agents by itself. It provides
-  deterministic primitives that research/review/coding agents (or humans) drive
-  explicitly via prompts, tool handlers, and adapters.
+  deterministic primitives that research/review/coding agents (or humans)
+  drive explicitly via prompts, tool handlers, and adapters.
 - Rendering is side-effect-free: `Prompt.render()` produces a typed
   `RenderedPrompt` containing message content, declared tools, and any
-  structured-output schema, but does not contact providers until you pass it to
-  an adapter.
+  structured-output schema, but does not contact providers until you pass it
+  to an adapter.
 - Tool handlers are synchronous callables; use them to gate filesystem or
-  network access and to enforce policy before applying patches. Handlers accept
-  the typed params plus a keyword-only `context` and return `ToolResult`
-  instances (`ToolResult(message=..., value=..., success=True/False)`) to keep
-  session logs consistent.
+  network access and to enforce policy before applying patches. Handlers
+  accept the typed params plus a keyword-only `context` and return
+  `ToolResult` instances
+  (`ToolResult(message=..., value=..., success=True/False)`) to keep session
+  logs consistent.
 - `PromptResponse` carries the prompt name, rendered text, and parsed output
   (when structured output is requested) so you can safely resume after partial
   failures or retries.
@@ -417,7 +473,8 @@ ToolResult(message="...", value=MyResult(...), success=True, exclude_value_from_
 ### Additional components
 
 - **`parse_structured_output`**: Parse model response into typed dataclass
-- **Overrides**: `LocalPromptOverridesStore` for hash-scoped prompt refinements
+- **Overrides**: `LocalPromptOverridesStore` for hash-scoped prompt
+  refinements
 
 ## Adapter Layer (`weakincentives.adapters`)
 
@@ -444,9 +501,10 @@ adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")  # Any LiteLLM model
 
 ### Claude Agent SDK adapter
 
-The Claude Agent SDK adapter provides Claude's full agentic capabilities through
-the official `claude-agent-sdk` package. Unlike OpenAI/LiteLLM adapters, this runs
-Claude Code as a subprocess with native tools (Read, Write, Bash, Glob, Grep).
+The Claude Agent SDK adapter provides Claude's full agentic capabilities
+through the official `claude-agent-sdk` package. Unlike OpenAI/LiteLLM
+adapters, this runs Claude Code as a subprocess with native tools (Read,
+Write, Bash, Glob, Grep).
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
@@ -529,8 +587,9 @@ adapter = ClaudeAgentSDKAdapter(
 
 #### MCP tool bridging
 
-Custom weakincentives tools with handlers are automatically bridged to the SDK via
-MCP servers. The adapter creates an MCP server for tools from prompt sections:
+Custom weakincentives tools with handlers are automatically bridged to the SDK
+via MCP servers. The adapter creates an MCP server for tools from prompt
+sections:
 
 ```python
 from weakincentives.contrib.tools import PlanningToolsSection
@@ -567,7 +626,7 @@ from weakincentives.prompt import (
     VisibilityOverrides,
 )
 
-session.mutate(VisibilityOverrides).dispatch(
+session[VisibilityOverrides].apply(
     SetVisibilityOverride(path=("details",), visibility=SectionVisibility.FULL)
 )
 ```
@@ -595,17 +654,18 @@ except ThrottleError as exc:
 
 ## Runtime & Events (`weakincentives.runtime`)
 
-- **`Session`**: Immutable event ledger with Redux-like reducers. Feed events in
-  with `append(session, event)` or convenience selectors like `replace_latest`
-  and `upsert_by`. `Snapshot`/`SnapshotProtocol` provide persistence helpers.
+- **`Session`**: Immutable event ledger with Redux-like reducers. Feed events
+  in with `append(session, event)` or convenience selectors like
+  `replace_latest` and `upsert_by`. `Snapshot`/`SnapshotProtocol` provide
+  persistence helpers.
 - **Query and mutation APIs**: Use `session.query(T)` for reading and
   `session.mutate(T)` for writing state slices. Both provide fluent APIs.
 - **Reducers**: Use `TypedReducer` with `ReducerContext` to manage typed state
   slices through event-driven mutations.
 - **Events**: `PromptExecuted` and `ToolInvoked` events capture every model
-  exchange. `EventBus`/`InProcessEventBus` publish events to reducers and custom
-  observers. `HandlerFailure` and `PublishResult` offer backpressure and error
-  reporting controls.
+  exchange. `EventBus`/`InProcessEventBus` publish events to reducers and
+  custom observers. `HandlerFailure` and `PublishResult` offer backpressure
+  and error reporting controls.
 - **MainLoop**: Abstract orchestrator for agent workflows with automatic
   visibility expansion handling and budget tracking.
 - **Logging**: `configure_logging()` wires a structured logger; `get_logger`
@@ -635,7 +695,8 @@ from weakincentives.contrib.tools import PlanningToolsSection, PlanningStrategy
 planning = PlanningToolsSection(session=session, strategy=PlanningStrategy.PLAN_ACT_REFLECT)
 ```
 
-Tools: `planning_setup_plan`, `planning_read_plan`, `planning_add_step`, `planning_update_step`
+Tools: `planning_setup_plan`, `planning_read_plan`, `planning_add_step`,
+`planning_update_step`
 
 ### WorkspaceDigestSection
 
@@ -654,6 +715,16 @@ filtered = session.query(MyType).where(lambda x: x.status == "done")
 exists = session.query(MyType).exists()
 ```
 
+### Dispatch API
+
+```python
+# Broadcast dispatch - runs ALL reducers for the event type
+session.apply(AddStep(step="x"))
+
+# Targeted dispatch - runs only reducers for the specified slice
+session[Plan].apply(AddStep(step="x"))
+```
+
 ### Mutation API
 
 ```python
@@ -662,9 +733,6 @@ session.mutate(Plan).seed(initial_plan)
 
 # Append value using default reducer
 session.mutate(Plan).append(new_step)
-
-# Event-driven mutation through reducers
-session.mutate(Plan).dispatch(AddStep(step=new_step))
 
 # Register reducer for custom event types
 session.mutate(Plan).register(AddStep, my_reducer)
@@ -907,8 +975,8 @@ sections (VFS, Planning), event subscription, and prompt overrides.
 - Public APIs are the objects exported from `weakincentives` and the
   submodules documented above.
 - Adapters are optional; include only the extras you need.
-- Keep `StructuredOutputConfig`, tool schemas, and overrides in version control
-  so your agents remain deterministic and auditable.
+- Keep `StructuredOutputConfig`, tool schemas, and overrides in version
+  control so your agents remain deterministic and auditable.
 
 ## License
 
