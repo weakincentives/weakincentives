@@ -263,12 +263,15 @@ Select one rating and explain your reasoning briefly.""",
 def llm_judge(
     adapter: ProviderAdapter[JudgeOutput],
     criterion: str,
+    *,
+    bus: EventBus,
 ) -> Evaluator[str, str]:
     """Create evaluator that uses LLM to judge output.
 
     Args:
         adapter: Provider adapter configured for JudgeOutput
         criterion: What to evaluate (e.g., "factual accuracy", "clarity")
+        bus: EventBus for creating judge sessions
 
     Returns:
         Evaluator function that scores string outputs
@@ -279,7 +282,8 @@ def llm_judge(
             output=output,
             expected=expected,
         )
-        response = adapter.evaluate(prompt)
+        session = Session(bus=bus, tags={"judge_criterion": criterion})
+        response = adapter.evaluate(prompt, session=session)
         rating = response.output.rating
         return Score(
             value=RATING_VALUES[rating],
@@ -294,11 +298,12 @@ def llm_judge(
 ```python
 # Use a smaller/cheaper model for judging
 judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
+judge_bus = InProcessEventBus()
 
 evaluator = all_of(
     contains,  # Must contain expected answer
-    llm_judge(judge_adapter, "Response is helpful and well-formatted"),
-    llm_judge(judge_adapter, "No hallucinated information"),
+    llm_judge(judge_adapter, "Response is helpful and well-formatted", bus=judge_bus),
+    llm_judge(judge_adapter, "No hallucinated information", bus=judge_bus),
 )
 ```
 
@@ -315,7 +320,6 @@ class EvalResult:
     sample_id: str
     score: Score
     latency_ms: int
-    tokens: int
     error: str | None = None
 
     @property
@@ -361,11 +365,6 @@ class EvalReport:
         return sum(r.score.value for r in successful) / len(successful)
 
     @property
-    def total_tokens(self) -> int:
-        """Total tokens consumed."""
-        return sum(r.tokens for r in self.results)
-
-    @property
     def mean_latency_ms(self) -> float:
         """Mean latency per sample."""
         if not self.results:
@@ -392,7 +391,7 @@ def run_eval[I, O, E](
     For each sample in the dataset:
     1. Execute the sample input through MainLoop
     2. Score the output using the evaluator
-    3. Record timing and token usage
+    3. Record timing
 
     Args:
         loop: MainLoop instance to run samples through
@@ -414,7 +413,6 @@ def run_eval[I, O, E](
                 sample_id=sample.id,
                 score=score,
                 latency_ms=latency_ms,
-                tokens=response.usage.total_tokens,
             ))
         except Exception as e:
             latency_ms = int((time.monotonic() - start) * 1000)
@@ -422,7 +420,6 @@ def run_eval[I, O, E](
                 sample_id=sample.id,
                 score=Score(value=0.0, passed=False, reason=str(e)),
                 latency_ms=latency_ms,
-                tokens=0,
                 error=str(e),
             ))
 
@@ -474,7 +471,6 @@ report = run_eval(loop, dataset, exact_match)
 # Inspect results
 print(f"Pass rate: {report.pass_rate:.1%}")
 print(f"Mean score: {report.mean_score:.2f}")
-print(f"Total tokens: {report.total_tokens}")
 print(f"Mean latency: {report.mean_latency_ms:.0f}ms")
 
 # Review failures
@@ -487,14 +483,15 @@ for result in report.failed_samples():
 ```python
 from weakincentives.evals import all_of, llm_judge
 
-# Create judge adapter (can use different model)
+# Create judge adapter and bus
 judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
+judge_bus = InProcessEventBus()
 
 # Compose multiple criteria
 evaluator = all_of(
     contains,  # Must contain expected substring
-    llm_judge(judge_adapter, "Factually accurate"),
-    llm_judge(judge_adapter, "Well-structured response"),
+    llm_judge(judge_adapter, "Factually accurate", bus=judge_bus),
+    llm_judge(judge_adapter, "Well-structured response", bus=judge_bus),
 )
 
 report = run_eval(loop, dataset, evaluator)
