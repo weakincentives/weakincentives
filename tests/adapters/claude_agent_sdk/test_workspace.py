@@ -27,6 +27,7 @@ from weakincentives.adapters.claude_agent_sdk.workspace import (
     WorkspaceBudgetExceededError,
     WorkspaceSecurityError,
 )
+from weakincentives.contrib.tools.filesystem import Filesystem
 from weakincentives.contrib.tools.workspace import WorkspaceSection
 from weakincentives.runtime import InProcessEventBus, Session
 
@@ -155,6 +156,16 @@ class TestClaudeAgentWorkspaceSectionCore:
         section = ClaudeAgentWorkspaceSection(session=session)
         try:
             assert isinstance(section.created_at, datetime)
+        finally:
+            section.cleanup()
+
+    def test_filesystem_property(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            fs = section.filesystem
+            assert isinstance(fs, Filesystem)
+            # Filesystem should be empty by default
+            assert fs.list(".") == []
         finally:
             section.cleanup()
 

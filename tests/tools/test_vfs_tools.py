@@ -22,7 +22,7 @@ from typing import cast
 import pytest
 
 import weakincentives.contrib.tools.vfs as vfs_module
-from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
+from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives import ToolValidationError
 from weakincentives.contrib.tools import (
     DeleteEntry,
@@ -33,17 +33,17 @@ from weakincentives.contrib.tools import (
     GrepMatch,
     GrepParams,
     HostMount,
+    InMemoryFilesystem,
     ListDirectoryParams,
     ReadFileParams,
     ReadFileResult,
     RemoveParams,
-    VfsFile,
     VfsPath,
     VfsToolsSection,
-    VirtualFileSystem,
     WriteFile,
     WriteFileParams,
 )
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 
@@ -158,22 +158,6 @@ def test_format_timestamp_helper_and_write_render() -> None:
     assert "create" in rendered
 
 
-def test_vfs_tools_reject_mismatched_context_session(
-    session_and_bus: tuple[Session, InProcessEventBus],
-) -> None:
-    session, _bus = session_and_bus
-    section = _make_section(session=session)
-    tool = find_tool(section, "ls")
-    handler = tool.handler
-    assert handler is not None
-    other_bus = InProcessEventBus()
-    mismatched_session = Session(bus=other_bus)
-    context = build_tool_context(mismatched_session)
-
-    with pytest.raises(RuntimeError, match="session does not match"):
-        handler(ListDirectoryParams(), context=context)
-
-
 def _write(
     session: Session,
     section: VfsToolsSection,
@@ -186,10 +170,11 @@ def _write(
     invoke_tool(tool, params, session=session)
 
 
-def _snapshot(session: Session) -> VirtualFileSystem:
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is not None
-    return snapshot
+def _get_filesystem(section: VfsToolsSection) -> InMemoryFilesystem:
+    """Get the InMemoryFilesystem from a section."""
+    fs = section.filesystem
+    assert isinstance(fs, InMemoryFilesystem)
+    return fs
 
 
 def test_section_template_mentions_new_surface() -> None:
@@ -295,18 +280,11 @@ def test_write_file_creates_snapshot(
     params = WriteFileParams(file_path="docs/intro.md", content="hello world")
     invoke_tool(write_tool, params, session=session)
 
-    snapshot = _snapshot(session)
-    assert snapshot.files == (
-        VfsFile(
-            path=VfsPath(("docs", "intro.md")),
-            content="hello world",
-            encoding="utf-8",
-            size_bytes=len(b"hello world"),
-            version=1,
-            created_at=timestamp,
-            updated_at=timestamp,
-        ),
-    )
+    # Verify file was written to filesystem
+    fs = _get_filesystem(section)
+    assert fs.exists("docs/intro.md")
+    result = fs.read("docs/intro.md")
+    assert result.content == "hello world"
 
 
 def test_ls_lists_directories_and_files(
@@ -406,10 +384,10 @@ def test_edit_file_replaces_occurrences(
     )
     invoke_tool(edit_tool, params, session=session)
 
-    snapshot = _snapshot(session)
-    file = snapshot.files[0]
-    assert file.content == "print('new')\nprint('new')"
-    assert file.version == 2
+    # Verify edit was applied to filesystem
+    fs = _get_filesystem(section)
+    result = fs.read("src/main.py")
+    assert result.content == "print('new')\nprint('new')"
 
 
 def test_glob_filters_matches(
@@ -449,6 +427,23 @@ def test_grep_reports_invalid_pattern(
     assert "Invalid regular expression" in result.message
 
 
+def test_rm_removes_single_file(
+    session_and_bus: tuple[Session, InProcessEventBus],
+) -> None:
+    session, _bus = session_and_bus
+    section = _make_section(session=session)
+    _write(session, section, path=("myfile.txt",), content="content")
+
+    rm_tool = find_tool(section, "rm")
+    params = RemoveParams(path="myfile.txt")
+    result = invoke_tool(rm_tool, params, session=session)
+
+    # Verify file was deleted
+    fs = _get_filesystem(section)
+    assert not fs.exists("myfile.txt")
+    assert result.success
+
+
 def test_rm_removes_directory_tree(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
@@ -461,9 +456,10 @@ def test_rm_removes_directory_tree(
     params = RemoveParams(path="src/pkg")
     invoke_tool(rm_tool, params, session=session)
 
-    snapshot = session.query(VirtualFileSystem).latest()
-    assert snapshot is not None
-    assert snapshot.files == ()
+    # Verify files were deleted from the filesystem
+    fs = _get_filesystem(section)
+    assert not fs.exists("src/pkg/module.py")
+    assert not fs.exists("src/pkg/util.py")
 
 
 def test_write_file_rejects_existing_target(
@@ -623,8 +619,10 @@ def test_write_file_accepts_leading_slash(
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="/docs/info.txt", content="data")
     invoke_tool(write_tool, params, session=session)
-    snapshot = _snapshot(session)
-    assert snapshot.files[0].path.segments == ("docs", "info.txt")
+
+    # Verify file was written with normalized path
+    fs = _get_filesystem(section)
+    assert fs.exists("docs/info.txt")
 
 
 def test_write_file_rejects_relative_segments(
@@ -729,8 +727,11 @@ def test_edit_file_single_occurrence_replace(
         replace_all=False,
     )
     invoke_tool(edit_tool, params, session=session)
-    snapshot = _snapshot(session)
-    assert snapshot.files[0].content == "value = 'new'"
+
+    # Verify edit was applied to filesystem
+    fs = _get_filesystem(section)
+    result = fs.read("src/file.py")
+    assert result.content == "value = 'new'"
 
 
 def test_edit_file_replacement_length_guard(
@@ -829,25 +830,14 @@ def test_rm_requires_existing_path(
         invoke_tool(rm_tool, params, session=session)
 
 
-def test_write_reducer_supports_append() -> None:
-    initial = VirtualFileSystem(
-        files=(
-            VfsFile(
-                path=VfsPath(("log.txt",)),
-                content="line1",
-                encoding="utf-8",
-                size_bytes=len("line1"),
-                version=1,
-                created_at=datetime(2024, 1, 1, tzinfo=UTC),
-                updated_at=datetime(2024, 1, 1, tzinfo=UTC),
-            ),
-        )
-    )
-    event = WriteFile(path=VfsPath(("log.txt",)), content="\nline2", mode="append")
-    updated = initial.handle_write(event)
-    file = updated.files[0]
-    assert file.content.endswith("line2")
-    assert file.version == 2
+def test_inmemory_filesystem_supports_append() -> None:
+    """Test that InMemoryFilesystem supports append mode."""
+    fs = InMemoryFilesystem()
+    fs.write("log.txt", "line1", mode="create")
+    fs.write("log.txt", "\nline2", mode="append")
+    result = fs.read("log.txt")
+    assert result.content.endswith("line2")
+    assert "line1" in result.content
 
 
 def test_host_mount_requires_allowed_root(tmp_path: Path) -> None:
@@ -983,18 +973,6 @@ def test_normalize_segments_skips_empty_parts() -> None:
     assert result == ("dir", "sub")
 
 
-def test_is_path_prefix_true() -> None:
-    assert vfs_module._is_path_prefix(["a", "b"], ["a"])
-
-
-def test_is_path_prefix_when_lengths_match() -> None:
-    assert vfs_module._is_path_prefix(["a", "b"], ["a", "b"])
-
-
-def test_is_path_prefix_false_when_path_is_shorter() -> None:
-    assert not vfs_module._is_path_prefix(["a"], ["a", "b"])
-
-
 def test_normalize_optional_path_returns_value() -> None:
     result = vfs_module._normalize_optional_path(VfsPath(("docs",)))
     assert result.segments == ("docs",)
@@ -1062,3 +1040,38 @@ def test_resolve_mount_path_returns_candidate(tmp_path: Path) -> None:
 def test_resolve_mount_path_requires_allowed_roots() -> None:
     with pytest.raises(ToolValidationError, match="No allowed host roots"):
         vfs_module._resolve_mount_path("data.txt", ())
+
+
+def test_prompt_filesystem_returns_workspace_section_filesystem() -> None:
+    """Test that Prompt.filesystem() returns filesystem from workspace section."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    template = PromptTemplate(
+        ns="test",
+        key="test-prompt",
+        sections=(section,),
+    )
+    prompt = Prompt(template)
+
+    fs = prompt.filesystem()
+
+    assert fs is not None
+    assert fs is section.filesystem
+
+
+def test_prompt_filesystem_returns_none_when_no_workspace() -> None:
+    """Test that Prompt.filesystem() returns None without workspace section."""
+    section = MarkdownSection(
+        title="Test",
+        template="Test content",
+        key="test",
+    )
+    template = PromptTemplate(
+        ns="test",
+        key="test-prompt",
+        sections=(section,),
+    )
+    prompt = Prompt(template)
+
+    assert prompt.filesystem() is None

@@ -44,8 +44,8 @@ from ._context import ensure_context_uses_session
 from .asteval import (
     EvalParams,
     EvalResult,
-    make_eval_result_reducer,
 )
+from .filesystem import Filesystem, InMemoryFilesystem
 from .vfs import (
     DeleteEntry,
     EditFileParams,
@@ -60,7 +60,6 @@ from .vfs import (
     ReadFileResult,
     RemoveParams,
     VfsPath,
-    VirtualFileSystem,
     WriteFile,
     WriteFileParams,
 )
@@ -643,7 +642,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._resolved_mounts,
             self._mount_previews,
         ) = _resolve_podman_host_mounts(self._mounts, self._allowed_roots)
-        self._mount_snapshot = VirtualFileSystem()
+        self._filesystem = InMemoryFilesystem()
         self._clock = config.clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
@@ -668,10 +667,6 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         )
 
         session.mutate(PodmanWorkspace).register(PodmanWorkspace, replace_latest)
-        self._initialize_vfs_state(session)
-        session.mutate(VirtualFileSystem).register(
-            EvalResult, make_eval_result_reducer()
-        )
 
         self._vfs_suite = _PodmanVfsSuite(section=self)
         self._shell_suite = _PodmanShellSuite(section=self)
@@ -939,13 +934,10 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             raise TypeError(msg)
         return PodmanSandboxSection(session=session, config=self._config)
 
-    def _initialize_vfs_state(self, session: Session) -> None:
-        session.install(VirtualFileSystem, initial=lambda: VirtualFileSystem())
-        session.mutate(VirtualFileSystem).seed(self._mount_snapshot)
-
-    def latest_snapshot(self) -> VirtualFileSystem:
-        snapshot = self._session.query(VirtualFileSystem).latest()
-        return snapshot or self._mount_snapshot
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the filesystem managed by this section."""
+        return self._filesystem
 
     @staticmethod
     def resolve_connection(
@@ -1378,11 +1370,9 @@ class _PodmanVfsSuite:
         _assert_within_overlay(handle.overlay_path, host_path)
         if host_path.exists() and host_path.is_file():
             raise ToolValidationError("Cannot list a file path; provide a directory.")
-        snapshot = self._section.latest_snapshot()
         entries = self._build_directory_entries(
             base=path,
             host_path=host_path,
-            snapshot=snapshot,
             overlay_root=handle.overlay_path,
         )
         message = vfs_module.format_directory_message(path, entries)
@@ -1511,7 +1501,6 @@ class _PodmanVfsSuite:
         host_base = _host_path_for(handle.overlay_path, base)
         _assert_within_overlay(handle.overlay_path, host_base)
         matches: list[GlobMatch] = []
-        snapshot = self._section.latest_snapshot()
         for file_path in _iter_workspace_files(host_base):
             try:
                 relative = file_path.relative_to(host_base)
@@ -1527,7 +1516,6 @@ class _PodmanVfsSuite:
                 match = self._build_glob_match(
                     target=candidate_path,
                     host_path=file_path,
-                    snapshot=snapshot,
                     overlay_root=handle.overlay_path,
                 )
             except ToolValidationError:
@@ -1707,7 +1695,6 @@ class _PodmanVfsSuite:
         *,
         base: VfsPath,
         host_path: Path,
-        snapshot: VirtualFileSystem,
         overlay_root: Path,
     ) -> list[FileInfo]:
         entries: list[FileInfo] = []
@@ -1738,7 +1725,6 @@ class _PodmanVfsSuite:
                 info = self._build_file_info(
                     path=entry_path,
                     host_file=child,
-                    snapshot=snapshot,
                     overlay_root=overlay_root,
                 )
             except ToolValidationError:
@@ -1752,20 +1738,16 @@ class _PodmanVfsSuite:
         *,
         path: VfsPath,
         host_file: Path,
-        snapshot: VirtualFileSystem,
         overlay_root: Path,
     ) -> FileInfo:
         _assert_within_overlay(overlay_root, host_file)
-        snapshot_entry = vfs_module.find_file(snapshot.files, path)
         size_bytes, updated_at = _stat_file(host_file)
-        version = snapshot_entry.version if snapshot_entry else None
-        updated = snapshot_entry.updated_at if snapshot_entry else updated_at
         return FileInfo(
             path=path,
             kind="file",
             size_bytes=size_bytes,
-            version=version,
-            updated_at=updated,
+            version=1,
+            updated_at=updated_at,
         )
 
     @staticmethod
@@ -1773,24 +1755,15 @@ class _PodmanVfsSuite:
         *,
         target: VfsPath,
         host_path: Path,
-        snapshot: VirtualFileSystem,
         overlay_root: Path,
     ) -> GlobMatch:
         _assert_within_overlay(overlay_root, host_path)
-        snapshot_entry = vfs_module.find_file(snapshot.files, target)
         size_bytes, updated_at = _stat_file(host_path)
-        if snapshot_entry is None:
-            return GlobMatch(
-                path=target,
-                size_bytes=size_bytes,
-                version=1,
-                updated_at=updated_at,
-            )
         return GlobMatch(
             path=target,
             size_bytes=size_bytes,
-            version=snapshot_entry.version,
-            updated_at=snapshot_entry.updated_at,
+            version=1,
+            updated_at=updated_at,
         )
 
 

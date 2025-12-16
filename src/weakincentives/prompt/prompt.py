@@ -38,6 +38,7 @@ from .section import Section
 from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:
+    from ..contrib.tools.filesystem import Filesystem
     from ..runtime.session.protocols import SessionProtocol
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
@@ -388,6 +389,25 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         | tuple[type[Section[SupportsDataclass]], ...],
     ) -> Section[SupportsDataclass]:
         return self.template.find_section(selector)
+
+    def filesystem(self) -> Filesystem | None:
+        """Return the filesystem from the workspace section, if present.
+
+        Searches the template's section tree for a section implementing
+        WorkspaceSection and returns its filesystem property.
+
+        Returns None if no workspace section exists in the template.
+        """
+        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
+        if snapshot is None:  # pragma: no cover
+            return None
+
+        for node in snapshot.sections:
+            section = node.section
+            if getattr(section, "_is_workspace_section", False):
+                # Section implements WorkspaceSection protocol
+                return getattr(section, "filesystem", None)
+        return None
 
 
 __all__ = ["Prompt", "PromptTemplate", "RenderedPrompt", "SectionNode"]

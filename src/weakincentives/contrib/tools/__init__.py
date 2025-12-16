@@ -14,6 +14,7 @@
 
 This package provides domain-specific tools that extend the core primitives:
 
+- **Filesystem**: Protocol and backends for workspace file operations
 - **Planning tools**: Session-scoped todo list for background agents
 - **VFS tools**: Virtual filesystem with glob, grep, and file operations
 - **Asteval tools**: Sandboxed Python expression evaluation
@@ -23,6 +24,8 @@ This package provides domain-specific tools that extend the core primitives:
 Example usage::
 
     from weakincentives.contrib.tools import (
+        Filesystem,
+        InMemoryFilesystem,
         PlanningToolsSection,
         VfsToolsSection,
         AstevalSection,
@@ -50,6 +53,16 @@ from .digests import (
     clear_workspace_digest,
     latest_workspace_digest,
     set_workspace_digest,
+)
+from .filesystem import (
+    FileEntry,
+    FileStat,
+    Filesystem,
+    GlobMatch as FilesystemGlobMatch,
+    GrepMatch as FilesystemGrepMatch,
+    InMemoryFilesystem,
+    ReadResult,
+    WriteResult,
 )
 from .planning import (
     AddStep,
@@ -82,7 +95,6 @@ from .vfs import (
     VfsFile,
     VfsPath,
     VfsToolsSection,
-    VirtualFileSystem,
     WriteFile,
     WriteFileParams,
 )
@@ -103,12 +115,18 @@ __all__ = [
     "EvalFileWrite",
     "EvalParams",
     "EvalResult",
+    "FileEntry",
     "FileInfo",
+    "FileStat",
+    "Filesystem",
+    "FilesystemGlobMatch",
+    "FilesystemGrepMatch",
     "GlobMatch",
     "GlobParams",
     "GrepMatch",
     "GrepParams",
     "HostMount",
+    "InMemoryFilesystem",
     "ListDirectory",
     "ListDirectoryParams",
     "ListDirectoryResult",
@@ -126,6 +144,7 @@ __all__ = [
     "ReadFileParams",
     "ReadFileResult",
     "ReadPlan",
+    "ReadResult",
     "RemoveParams",
     "SetupPlan",
     "StepStatus",
@@ -133,12 +152,12 @@ __all__ = [
     "VfsFile",
     "VfsPath",
     "VfsToolsSection",
-    "VirtualFileSystem",
     "WorkspaceDigest",
     "WorkspaceDigestSection",
     "WorkspaceSection",
     "WriteFile",
     "WriteFileParams",
+    "WriteResult",
     "clear_workspace_digest",
     "latest_workspace_digest",
     "set_workspace_digest",
