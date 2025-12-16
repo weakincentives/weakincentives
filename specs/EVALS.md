@@ -7,13 +7,34 @@ this spec adds datasets and scoring.
 
 ## Guiding Principles
 
-- **MainLoop is the runner** - No parallel orchestration; MainLoop already does this
-- **Evaluators are functions** - `(output, expected) -> Score`
-- **Datasets are tuples** - Immutable, typed, simple
+- **MainLoop is the runner** - No parallel orchestration; reuse existing infra
+- **Evaluators are functions** - Pure `(output, expected) -> Score`
+- **Datasets are tuples** - Immutable, typed, serializable
+
+## Architecture
+
+```
+┌─────────────┐     ┌──────────┐     ┌───────────┐     ┌────────────┐
+│   Dataset   │────▶│ run_eval │────▶│ MainLoop  │────▶│  Adapter   │
+│  (samples)  │     │          │     │ .execute()│     │            │
+└─────────────┘     └────┬─────┘     └───────────┘     └────────────┘
+                         │
+                         ▼
+                   ┌───────────┐     ┌────────────┐
+                   │ Evaluator │────▶│ EvalReport │
+                   │ (scoring) │     │ (metrics)  │
+                   └───────────┘     └────────────┘
+```
+
+The eval framework wraps MainLoop: for each sample, it calls `loop.execute()`,
+then passes the output to an evaluator for scoring. Results aggregate into a
+report.
 
 ## Core Types
 
 ### Sample
+
+A single evaluation case pairing an input with its expected output:
 
 ```python
 @dataclass(slots=True, frozen=True)
@@ -24,15 +45,18 @@ class Sample[InputT, ExpectedT]:
     expected: ExpectedT
 ```
 
+The generic parameters allow typed datasets—`Sample[MathProblem, int]` for math
+evals, `Sample[str, str]` for QA, etc.
+
 ### Dataset
 
-A dataset is just a tuple of samples:
+A dataset is a tuple of samples. Using a tuple (not list) ensures immutability:
 
 ```python
 Dataset = tuple[Sample[InputT, ExpectedT], ...]
 ```
 
-Load from JSONL:
+**Loading from JSONL:**
 
 ```python
 def load_jsonl[I, E](
@@ -40,74 +64,190 @@ def load_jsonl[I, E](
     input_type: type[I],
     expected_type: type[E],
 ) -> tuple[Sample[I, E], ...]:
-    """Load samples from JSONL file."""
-    ...
+    """Load samples from JSONL file.
+
+    Each line must be a JSON object with "id", "input", and "expected" keys.
+    The input and expected values are parsed into the specified types using
+    the serde module.
+    """
+    samples: list[Sample[I, E]] = []
+    with path.open() as f:
+        for line in f:
+            obj = json.loads(line)
+            samples.append(Sample(
+                id=obj["id"],
+                input=parse(input_type, obj["input"]),
+                expected=parse(expected_type, obj["expected"]),
+            ))
+    return tuple(samples)
 ```
 
+**JSONL format:**
+
+```jsonl
+{"id": "1", "input": "What is 2+2?", "expected": "4"}
+{"id": "2", "input": "Capital of France?", "expected": "Paris"}
+```
+
+For complex types, input/expected can be nested objects that deserialize into
+dataclasses.
+
 ### Score
+
+The result of evaluating a single output:
 
 ```python
 @dataclass(slots=True, frozen=True)
 class Score:
     """Result of scoring one output."""
-    value: float      # 0.0 to 1.0
-    passed: bool
-    reason: str = ""
+    value: float      # 0.0 to 1.0, normalized
+    passed: bool      # Binary pass/fail
+    reason: str = ""  # Explanation (useful for LLM judges)
 ```
+
+The `value` field enables ranking and aggregation; `passed` provides a binary
+threshold for pass rates.
 
 ### Evaluator
 
-An evaluator is a callable:
+An evaluator is any callable matching this signature:
 
 ```python
 Evaluator = Callable[[OutputT, ExpectedT], Score]
 ```
 
+Evaluators are pure functions—no side effects, no state. This makes them easy
+to test, compose, and reason about.
+
 ## Built-in Evaluators
+
+### exact_match
+
+Strict equality check:
 
 ```python
 def exact_match[T](output: T, expected: T) -> Score:
     """Exact equality check."""
     passed = output == expected
     return Score(value=1.0 if passed else 0.0, passed=passed)
+```
 
+### contains
 
+Substring presence check:
+
+```python
 def contains(output: str, expected: str) -> Score:
-    """Substring check."""
+    """Check if expected appears in output."""
     passed = expected in output
     return Score(value=1.0 if passed else 0.0, passed=passed)
+```
 
+### Combinators
 
+Combine evaluators for multi-criteria scoring:
+
+```python
 def all_of(*evaluators: Evaluator[O, E]) -> Evaluator[O, E]:
-    """Combine evaluators; all must pass."""
+    """All evaluators must pass. Score is the mean."""
     def evaluate(output: O, expected: E) -> Score:
         scores = [e(output, expected) for e in evaluators]
         passed = all(s.passed for s in scores)
         value = sum(s.value for s in scores) / len(scores)
-        return Score(value=value, passed=passed)
+        reasons = [s.reason for s in scores if s.reason]
+        return Score(value=value, passed=passed, reason="; ".join(reasons))
+    return evaluate
+
+
+def any_of(*evaluators: Evaluator[O, E]) -> Evaluator[O, E]:
+    """At least one evaluator must pass. Score is the max."""
+    def evaluate(output: O, expected: E) -> Score:
+        scores = [e(output, expected) for e in evaluators]
+        passed = any(s.passed for s in scores)
+        value = max(s.value for s in scores)
+        reasons = [s.reason for s in scores if s.reason]
+        return Score(value=value, passed=passed, reason="; ".join(reasons))
     return evaluate
 ```
 
-### LLM-as-Judge
+### Custom Evaluators
 
-Creates an evaluator that uses an adapter for scoring:
+Write domain-specific evaluators as simple functions:
+
+```python
+def within_tolerance(tolerance: float) -> Evaluator[float, float]:
+    """Check if output is within tolerance of expected."""
+    def evaluate(output: float, expected: float) -> Score:
+        diff = abs(output - expected)
+        passed = diff <= tolerance
+        value = max(0.0, 1.0 - diff / tolerance) if tolerance > 0 else float(passed)
+        return Score(value=value, passed=passed, reason=f"diff={diff:.4f}")
+    return evaluate
+
+
+def json_subset(output: dict, expected: dict) -> Score:
+    """Check if expected keys/values are present in output."""
+    for key, value in expected.items():
+        if key not in output or output[key] != value:
+            return Score(value=0.0, passed=False, reason=f"missing or wrong: {key}")
+    return Score(value=1.0, passed=True)
+```
+
+## LLM-as-Judge
+
+For subjective criteria, use an LLM to score outputs. The `llm_judge` factory
+creates an evaluator that calls an adapter:
 
 ```python
 @dataclass(slots=True, frozen=True)
 class JudgeOutput:
-    score: float
+    """Structured output from judge prompt."""
+    score: float  # 0.0 to 1.0
     passed: bool
     reason: str
 
 
-JUDGE_TEMPLATE = PromptTemplate[JudgeOutput](...)
+JUDGE_TEMPLATE = PromptTemplate[JudgeOutput](
+    ns="wink.evals",
+    key="llm-judge",
+    name="llm_judge",
+    sections=[
+        MarkdownSection(
+            title="Evaluation Task",
+            template="""You are an evaluation judge. Score the output on the given criterion.
+
+## Criterion
+$criterion
+
+## Output to Evaluate
+$output
+
+## Reference Answer
+$expected
+
+## Instructions
+- Score from 0.0 (completely wrong) to 1.0 (perfect)
+- Set passed=true if score >= 0.7
+- Explain your reasoning briefly""",
+            key="task",
+        ),
+    ],
+)
 
 
 def llm_judge(
     adapter: ProviderAdapter[JudgeOutput],
     criterion: str,
 ) -> Evaluator[str, str]:
-    """Create evaluator that uses LLM to judge output."""
+    """Create evaluator that uses LLM to judge output.
+
+    Args:
+        adapter: Provider adapter configured for JudgeOutput
+        criterion: What to evaluate (e.g., "factual accuracy", "clarity")
+
+    Returns:
+        Evaluator function that scores string outputs
+    """
     def evaluate(output: str, expected: str) -> Score:
         prompt = Prompt(JUDGE_TEMPLATE).bind(
             criterion=criterion,
@@ -123,9 +263,24 @@ def llm_judge(
     return evaluate
 ```
 
+**Usage:**
+
+```python
+# Use a smaller/cheaper model for judging
+judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
+
+evaluator = all_of(
+    contains,  # Must contain expected answer
+    llm_judge(judge_adapter, "Response is helpful and well-formatted"),
+    llm_judge(judge_adapter, "No hallucinated information"),
+)
+```
+
 ## Running Evals
 
 ### EvalResult
+
+Result for a single sample:
 
 ```python
 @dataclass(slots=True, frozen=True)
@@ -136,34 +291,69 @@ class EvalResult:
     latency_ms: int
     tokens: int
     error: str | None = None
+
+    @property
+    def success(self) -> bool:
+        """True if no error occurred."""
+        return self.error is None
 ```
 
 ### EvalReport
 
+Aggregate results with computed metrics:
+
 ```python
 @dataclass(slots=True, frozen=True)
 class EvalReport:
-    """Aggregate results."""
+    """Aggregate evaluation results."""
     results: tuple[EvalResult, ...]
 
     @property
+    def total(self) -> int:
+        """Total number of samples."""
+        return len(self.results)
+
+    @property
+    def successful(self) -> int:
+        """Samples that completed without error."""
+        return sum(1 for r in self.results if r.success)
+
+    @property
     def pass_rate(self) -> float:
-        if not self.results:
+        """Fraction of successful samples that passed."""
+        successful = [r for r in self.results if r.success]
+        if not successful:
             return 0.0
-        return sum(1 for r in self.results if r.score.passed) / len(self.results)
+        return sum(1 for r in successful if r.score.passed) / len(successful)
 
     @property
     def mean_score(self) -> float:
-        if not self.results:
+        """Mean score across successful samples."""
+        successful = [r for r in self.results if r.success]
+        if not successful:
             return 0.0
-        return sum(r.score.value for r in self.results) / len(self.results)
+        return sum(r.score.value for r in successful) / len(successful)
 
     @property
     def total_tokens(self) -> int:
+        """Total tokens consumed."""
         return sum(r.tokens for r in self.results)
+
+    @property
+    def mean_latency_ms(self) -> float:
+        """Mean latency per sample."""
+        if not self.results:
+            return 0.0
+        return sum(r.latency_ms for r in self.results) / len(self.results)
+
+    def failed_samples(self) -> tuple[EvalResult, ...]:
+        """Samples that did not pass."""
+        return tuple(r for r in self.results if r.success and not r.score.passed)
 ```
 
 ### run_eval
+
+The core function that ties everything together:
 
 ```python
 def run_eval[I, O, E](
@@ -171,7 +361,21 @@ def run_eval[I, O, E](
     dataset: tuple[Sample[I, E], ...],
     evaluator: Evaluator[O, E],
 ) -> EvalReport:
-    """Run evaluation using MainLoop."""
+    """Run evaluation using MainLoop.
+
+    For each sample in the dataset:
+    1. Execute the sample input through MainLoop
+    2. Score the output using the evaluator
+    3. Record timing and token usage
+
+    Args:
+        loop: MainLoop instance to run samples through
+        dataset: Tuple of samples to evaluate
+        evaluator: Scoring function for outputs
+
+    Returns:
+        EvalReport with all results and aggregate metrics
+    """
     results: list[EvalResult] = []
 
     for sample in dataset:
@@ -199,50 +403,154 @@ def run_eval[I, O, E](
     return EvalReport(results=tuple(results))
 ```
 
-## Usage
+## Usage Examples
+
+### Basic Evaluation
 
 ```python
-from weakincentives import MainLoop, PromptTemplate, Prompt
+from weakincentives import MainLoop, PromptTemplate, Prompt, Session
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.evals import (
-    Sample, load_jsonl, run_eval, exact_match, llm_judge, all_of,
-)
+from weakincentives.runtime import InProcessEventBus
+from weakincentives.evals import Sample, run_eval, exact_match, load_jsonl
 
 # Define the loop under test
 class QALoop(MainLoop[str, str]):
+    def __init__(self, adapter, bus):
+        super().__init__(adapter=adapter, bus=bus)
+        self._template = PromptTemplate[str](
+            ns="qa",
+            key="answer",
+            name="qa",
+            sections=[
+                MarkdownSection(
+                    title="Question",
+                    template="Answer concisely: $question",
+                    key="q",
+                ),
+            ],
+        )
+
     def create_prompt(self, question: str) -> Prompt[str]:
         return Prompt(self._template).bind(question=question)
 
     def create_session(self) -> Session:
         return Session(bus=self._bus)
 
-# Load dataset
-dataset = load_jsonl("tests/fixtures/qa.jsonl", str, str)
 
-# Create loop
+# Load dataset
+dataset = load_jsonl(Path("tests/fixtures/qa.jsonl"), str, str)
+
+# Run evaluation
 adapter = OpenAIAdapter(model="gpt-4o")
 loop = QALoop(adapter=adapter, bus=InProcessEventBus())
-
-# Run with simple evaluator
 report = run_eval(loop, dataset, exact_match)
-print(f"Pass rate: {report.pass_rate:.1%}")
 
-# Run with LLM judge
-judge_adapter = OpenAIAdapter(model="gpt-4o-mini")
+# Inspect results
+print(f"Pass rate: {report.pass_rate:.1%}")
+print(f"Mean score: {report.mean_score:.2f}")
+print(f"Total tokens: {report.total_tokens}")
+print(f"Mean latency: {report.mean_latency_ms:.0f}ms")
+
+# Review failures
+for result in report.failed_samples():
+    print(f"Failed: {result.sample_id} - {result.score.reason}")
+```
+
+### Multi-Criteria Evaluation
+
+```python
+from weakincentives.evals import all_of, llm_judge
+
+# Create judge adapter (can use different model)
+judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
+
+# Compose multiple criteria
 evaluator = all_of(
-    exact_match,
-    llm_judge(judge_adapter, "Answer is correct and concise"),
+    contains,  # Must contain expected substring
+    llm_judge(judge_adapter, "Factually accurate"),
+    llm_judge(judge_adapter, "Well-structured response"),
 )
+
 report = run_eval(loop, dataset, evaluator)
 ```
 
-## Events
+### Programmatic Dataset
 
-MainLoop already emits `MainLoopCompleted` and `MainLoopFailed`. No additional
-events needed - subscribe to those for observability.
+```python
+# Build dataset in code
+dataset = tuple(
+    Sample(
+        id=str(i),
+        input=f"What is {a} + {b}?",
+        expected=str(a + b),
+    )
+    for i, (a, b) in enumerate([(1, 1), (2, 3), (10, 20)])
+)
+
+report = run_eval(loop, dataset, contains)
+```
+
+## Observability
+
+MainLoop emits events for each execution. Subscribe to track progress:
+
+```python
+def on_complete(event: MainLoopCompleted) -> None:
+    print(f"Completed: {event.request_id}")
+
+def on_failed(event: MainLoopFailed) -> None:
+    print(f"Failed: {event.request_id} - {event.error}")
+
+bus = InProcessEventBus()
+bus.subscribe(MainLoopCompleted, on_complete)
+bus.subscribe(MainLoopFailed, on_failed)
+
+loop = QALoop(adapter=adapter, bus=bus)
+report = run_eval(loop, dataset, evaluator)
+```
+
+With LangSmith enabled, all executions are automatically traced.
+
+## Testing Evaluators
+
+Evaluators are pure functions—test them directly:
+
+```python
+def test_exact_match_pass():
+    score = exact_match("hello", "hello")
+    assert score.passed is True
+    assert score.value == 1.0
+
+
+def test_exact_match_fail():
+    score = exact_match("hello", "world")
+    assert score.passed is False
+    assert score.value == 0.0
+
+
+def test_contains_pass():
+    score = contains("The answer is 42.", "42")
+    assert score.passed is True
+
+
+def test_all_of_requires_all():
+    evaluator = all_of(exact_match, contains)
+    score = evaluator("hello", "hello")
+    assert score.passed is True
+
+    score = evaluator("hello world", "hello")
+    assert score.passed is False  # exact_match fails
+
+
+def test_any_of_requires_one():
+    evaluator = any_of(exact_match, contains)
+    score = evaluator("hello world", "hello")
+    assert score.passed is True  # contains passes
+```
 
 ## Limitations
 
-- Sequential execution (MainLoop is synchronous)
-- No caching of repeated samples
-- No resume from checkpoint
+- **Sequential execution** - MainLoop is synchronous; samples run one at a time
+- **No caching** - Repeated samples re-execute; add caching at adapter level
+- **No checkpoints** - Cannot resume interrupted runs
+- **Single loop** - Cannot compare multiple loops in one `run_eval` call
