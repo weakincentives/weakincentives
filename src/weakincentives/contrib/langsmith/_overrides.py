@@ -142,11 +142,14 @@ class LangSmithPromptOverridesStore:
             return self._client
 
         try:
-            from langsmith import Client  # type: ignore[import-not-found]
+            from langsmith import Client
 
-            self._client = Client(
-                api_key=self._config.resolved_api_key(),
-                api_url=self._config.resolved_api_url(),
+            self._client = cast(
+                LangSmithHubClientProtocol,
+                Client(
+                    api_key=self._config.resolved_api_key(),
+                    api_url=self._config.resolved_api_url(),
+                ),
             )
         except ImportError as error:
             msg = "langsmith package is required for Hub integration"
@@ -166,7 +169,7 @@ class LangSmithPromptOverridesStore:
         if len(tag) != _SHA256_HEX_LEN:
             return False
         try:
-            int(tag, 16)
+            _ = int(tag, 16)
         except ValueError:
             return False
         return True
@@ -205,7 +208,7 @@ class LangSmithPromptOverridesStore:
     def _invalidate_cache(self, ns: str, prompt_key: str, tag: str) -> None:
         """Invalidate cache entry."""
         key = self._cache_key(ns, prompt_key, tag)
-        self._cache.pop(key, None)
+        _ = self._cache.pop(key, None)
 
     @staticmethod
     def _hub_prompt_name(ns: str, prompt_key: str) -> str:

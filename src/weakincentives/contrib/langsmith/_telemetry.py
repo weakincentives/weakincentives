@@ -19,7 +19,7 @@ import random
 from datetime import UTC, datetime
 from queue import Empty, Full, Queue
 from threading import Event, Thread
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import UUID, uuid4
 
 from ...runtime.events import PromptExecuted, PromptRendered, ToolInvoked
@@ -207,11 +207,14 @@ class LangSmithTelemetryHandler:
             return self._client
 
         try:
-            from langsmith import Client  # type: ignore[import-not-found]
+            from langsmith import Client
 
-            self._client = Client(
-                api_key=self._config.resolved_api_key(),
-                api_url=self._config.resolved_api_url(),
+            self._client = cast(
+                LangSmithClientProtocol,
+                Client(
+                    api_key=self._config.resolved_api_key(),
+                    api_url=self._config.resolved_api_url(),
+                ),
             )
         except ImportError as error:
             msg = "langsmith package is required for LangSmith telemetry"
@@ -358,9 +361,9 @@ class LangSmithTelemetryHandler:
         Args:
             bus: The event bus to unsubscribe from.
         """
-        bus.unsubscribe(PromptRendered, self._on_prompt_rendered)
-        bus.unsubscribe(ToolInvoked, self._on_tool_invoked)
-        bus.unsubscribe(PromptExecuted, self._on_prompt_executed)
+        _ = bus.unsubscribe(PromptRendered, self._on_prompt_rendered)
+        _ = bus.unsubscribe(ToolInvoked, self._on_tool_invoked)
+        _ = bus.unsubscribe(PromptExecuted, self._on_prompt_executed)
         if bus in self._attached_buses:
             self._attached_buses.remove(bus)
 
@@ -405,7 +408,7 @@ class LangSmithTelemetryHandler:
             return True
         if rate <= 0.0:
             return False
-        return random.random() < rate
+        return random.random() < rate  # nosec B311 - sampling, not security
 
     def _is_traced_by_native_integration(self, call_id: str | None) -> bool:
         """Check if a tool call was already traced (for deduplication)."""
@@ -469,7 +472,7 @@ class LangSmithTelemetryHandler:
 
         # Publish trace started event
         for bus in self._attached_buses:
-            bus.publish(
+            _ = bus.publish(
                 LangSmithTraceStarted(
                     trace_id=trace_id,
                     session_id=event.session_id,
@@ -575,7 +578,7 @@ class LangSmithTelemetryHandler:
         # Publish trace completed event
         now = datetime.now(UTC)
         for bus in self._attached_buses:
-            bus.publish(
+            _ = bus.publish(
                 LangSmithTraceCompleted(
                     trace_id=context.trace_id,
                     run_count=context.run_count,
@@ -607,7 +610,7 @@ class LangSmithTelemetryHandler:
     def _set_langsmith_parent_context(self, run_id: UUID, trace_id: UUID) -> None:
         """Set LangSmith parent context for SDK integration."""
         try:
-            from langsmith.run_trees import RunTree  # type: ignore[import-not-found]
+            from langsmith.run_trees import RunTree
 
             # Create a RunTree for manual control
             run_tree = RunTree(

@@ -107,12 +107,13 @@ def configure_wink(  # noqa: PLR0913
         _original_init = InProcessEventBus.__init__
 
         def patched_init(self: InProcessEventBus) -> None:
-            assert _original_init is not None
+            if _original_init is None:  # pragma: no cover - defensive check
+                return
             _original_init(self)
             if _configured_handler is not None:
                 _configured_handler.attach(self)
 
-        InProcessEventBus.__init__ = patched_init  # type: ignore[assignment]
+        InProcessEventBus.__init__ = patched_init  # type: ignore[method-assign]
 
         logger.info(
             "LangSmith auto-instrumentation enabled",
@@ -137,7 +138,7 @@ def unconfigure_wink() -> None:
 
     # Restore original init
     if _original_init is not None:
-        InProcessEventBus.__init__ = _original_init  # type: ignore[assignment]
+        InProcessEventBus.__init__ = _original_init  # type: ignore[method-assign]
         _original_init = None
 
     # Shutdown handler

@@ -54,6 +54,9 @@ podman = [
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.15",
 ]
+langsmith = [
+    "langsmith>=0.2.0",
+]
 wink = [
     "fastapi>=0.115.0",
     "markdown-it-py[linkify]>=4.0.0",
@@ -236,11 +239,15 @@ mutate_only_covered_lines = true
 debug = false
 
 [tool.coverage.run]
+omit = [
+    # Optional dependencies with code paths requiring real packages
+    "src/weakincentives/contrib/langsmith/*",
+]
 
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "pyyaml"]
+DEP002 = ["asteval", "claude-agent-sdk", "langsmith", "litellm", "mcp", "openai", "pyyaml"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
@@ -255,6 +262,7 @@ exclude = [
     ".ruff_cache",
     "dist",
     "src/weakincentives/adapters/claude_agent_sdk",
+    "src/weakincentives/contrib/langsmith",
 ]
 deprecateTypingAliases = true
 reportCallInDefaultInitializer = "error"
@@ -293,6 +301,7 @@ ignore_names = [
     "__getattr__",
     "visit_*",
     "expression",  # Protocol method parameter in InterpreterProtocol.eval
+    "include_model",  # Protocol method parameter matching LangSmith SDK API
 ]
 
 [tool.ty]

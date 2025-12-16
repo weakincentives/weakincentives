@@ -237,10 +237,10 @@ sequenceDiagram
 
 1. **Async upload queue**: Events are queued and uploaded in batches to avoid
    blocking the evaluation loop.
-1. **Trace context propagation**: A trace ID generated at `PromptRendered`
-   links all subsequent runs in a single trace.
-1. **Graceful failure**: Queue overflow or upload failures are logged but do
-   not raise to callers.
+1. **Trace context propagation**: A trace ID generated at `PromptRendered` links
+   all subsequent runs in a single trace.
+1. **Graceful failure**: Queue overflow or upload failures are logged but do not
+   raise to callers.
 
 ### Prompt Hub Layer
 

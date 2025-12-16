@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 if TYPE_CHECKING:
-    from langsmith.run_trees import RunTree  # type: ignore[import-not-found]
+    from langsmith.run_trees import RunTree
 
 
 @dataclass(slots=True)
