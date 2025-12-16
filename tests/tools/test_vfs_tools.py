@@ -1075,3 +1075,27 @@ def test_prompt_filesystem_returns_none_when_no_workspace() -> None:
     prompt = Prompt(template)
 
     assert prompt.filesystem() is None
+
+
+def test_clone_preserves_filesystem_state() -> None:
+    """Test that cloning VfsToolsSection preserves filesystem state."""
+    bus1 = InProcessEventBus()
+    session1 = Session(bus=bus1)
+    section1 = VfsToolsSection(session=session1)
+
+    # Write a file to the filesystem
+    fs = section1.filesystem
+    assert isinstance(fs, InMemoryFilesystem)
+    _ = fs.write("myfile.txt", "my content")
+
+    # Clone the section into a new session
+    bus2 = InProcessEventBus()
+    session2 = Session(bus=bus2)
+    section2 = section1.clone(session=session2)
+
+    # Verify the filesystem is preserved (same instance)
+    assert section2.filesystem is section1.filesystem
+
+    # Verify the file content is accessible from the cloned section
+    result = section2.filesystem.read("myfile.txt")
+    assert result.content == "my content"

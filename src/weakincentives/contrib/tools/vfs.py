@@ -611,18 +611,26 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         mounts: Sequence[HostMount] = (),
         allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
         accepts_overrides: bool = False,
+        _filesystem: InMemoryFilesystem | None = None,
+        _mount_previews: tuple[HostMountPreview, ...] | None = None,
     ) -> None:
         allowed_roots = tuple(normalize_host_root(path) for path in allowed_host_roots)
         self._allowed_roots = allowed_roots
         self._mounts = tuple(mounts)
 
-        # Create the InMemoryFilesystem owned by this section
-        self._filesystem = InMemoryFilesystem()
+        # Use provided filesystem or create a new one
+        if _filesystem is not None and _mount_previews is not None:
+            # Cloning path - reuse existing state
+            self._filesystem = _filesystem
+            mount_previews = _mount_previews
+        else:
+            # Fresh initialization
+            self._filesystem = InMemoryFilesystem()
+            mount_previews = _materialize_host_mounts_to_filesystem(
+                self._filesystem, self._mounts, self._allowed_roots
+            )
 
-        # Materialize host mounts into the filesystem
-        mount_previews = _materialize_host_mounts_to_filesystem(
-            self._filesystem, self._mounts, self._allowed_roots
-        )
+        self._mount_previews = mount_previews
         self._session = session
 
         tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
@@ -659,6 +667,8 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             mounts=self._mounts,
             allowed_host_roots=self._allowed_roots,
             accepts_overrides=self.accepts_overrides,
+            _filesystem=self._filesystem,
+            _mount_previews=self._mount_previews,
         )
 
 
