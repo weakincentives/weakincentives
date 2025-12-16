@@ -21,6 +21,7 @@ import pytest
 from weakincentives.prompt import (
     MarkdownSection,
     PromptRenderError,
+    PromptValidationError,
     Section,
     SectionVisibility,
     SetVisibilityOverride,
@@ -240,7 +241,9 @@ def test_text_section_effective_visibility_returns_override() -> None:
     )
 
 
-def test_text_section_effective_visibility_fallback_to_full_without_summary() -> None:
+def test_text_section_effective_visibility_raises_when_summary_without_template() -> (
+    None
+):
     @dataclass
     class ContentParams:
         value: str
@@ -253,11 +256,13 @@ def test_text_section_effective_visibility_fallback_to_full_without_summary() ->
 
     assert section.summary is None
     assert section.effective_visibility() == SectionVisibility.FULL
-    # Falls back to FULL when requesting SUMMARY but no summary is set
-    assert (
+
+    # Raises when requesting SUMMARY but no summary is set
+    with pytest.raises(PromptValidationError) as excinfo:
         section.effective_visibility(override=SectionVisibility.SUMMARY)
-        == SectionVisibility.FULL
-    )
+
+    assert "SUMMARY visibility requested" in str(excinfo.value)
+    assert "no-summary" in str(excinfo.value)
 
 
 def test_text_section_original_summary_template_returns_summary() -> None:
