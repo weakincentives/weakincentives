@@ -356,7 +356,7 @@ def test_execute_handles_visibility_expansion() -> None:
     # Called 3 times: 2 visibility expansions + 1 success
     assert adapter._call_count == 3
     # Final overrides should be in session state
-    overrides = session.query(VisibilityOverrides).latest()
+    overrides = session[VisibilityOverrides].latest()
     assert overrides is not None
     assert overrides.get(("section1",)) == SectionVisibility.FULL
     assert overrides.get(("section2",)) == SectionVisibility.FULL

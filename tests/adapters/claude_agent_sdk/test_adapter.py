@@ -88,7 +88,7 @@ class MockHookMatcher:
 
 
 class MockSDKQuery:
-    """Mock for sdk.query() async generator function."""
+    """Mock for sdk[] async generator function."""
 
     captured_options: ClassVar[list[MockClaudeAgentOptions]] = []
     captured_prompts: ClassVar[list[str]] = []
@@ -120,7 +120,7 @@ class MockSDKQuery:
         prompt: str | AsyncIterable[dict[str, Any]],
         options: MockClaudeAgentOptions,
     ) -> AsyncGenerator[object, None]:
-        """Mock sdk.query() that yields configured results.
+        """Mock sdk[] that yields configured results.
 
         Handles both string prompts (legacy) and AsyncIterable prompts (streaming mode).
         For AsyncIterable prompts, consumes the generator and extracts the user message content.

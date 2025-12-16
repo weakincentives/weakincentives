@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
 from types import MappingProxyType
-from typing import Any, Concatenate, Final, cast, overload, override
+from typing import Any, Concatenate, Final, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
@@ -34,9 +34,7 @@ from ._observer_types import SliceObserver, Subscription
 from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerEvent, TypedReducer
 from .dataclasses import is_dataclass_instance
-from .mutation import GlobalMutationBuilder, MutationBuilder
 from .protocols import SessionProtocol, SnapshotProtocol
-from .query import QueryBuilder
 from .reducers import append_all
 from .slice_accessor import SliceAccessor
 from .snapshots import (
@@ -148,7 +146,34 @@ def _normalize_tags(
     _created_at_is_utc,
 )
 class Session(SessionProtocol):
-    """Collect dataclass payloads from prompt executions and tool invocations."""
+    """Collect dataclass payloads from prompt executions and tool invocations.
+
+    Session provides a Redux-style state container with typed slices, reducers,
+    and event-driven dispatch. Access slices via indexing::
+
+        # Query operations
+        session[Plan].latest()
+        session[Plan].all()
+        session[Plan].where(lambda p: p.active)
+
+        # Targeted dispatch (slice-scoped)
+        session[Plan].apply(AddStep(step="x"))
+
+        # Direct mutations
+        session[Plan].seed(initial_plan)
+        session[Plan].clear()
+        session[Plan].register(AddStep, reducer)
+
+    For broadcast dispatch (event-type routed to all matching reducers)::
+
+        session.apply(AddStep(step="x"))
+
+    Global operations are available directly on the session::
+
+        session.reset()                  # Clear all slices
+        session.rollback(snapshot)       # Restore from snapshot
+
+    """
 
     def __init__(
         self,
@@ -235,7 +260,7 @@ class Session(SessionProtocol):
                 # Skip event types already registered by __init__
                 continue
             for registration in registrations:
-                clone.mutation_register_reducer(
+                clone._mutation_register_reducer(
                     data_type,
                     registration.reducer,
                     slice_type=registration.slice_type,
@@ -252,54 +277,6 @@ class Session(SessionProtocol):
         """Return the tuple slice maintained for the provided type."""
 
         return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
-
-    @override
-    def query[S: SupportsDataclass](self, slice_type: type[S]) -> QueryBuilder[S]:
-        """Return a query builder for fluent slice queries.
-
-        Usage::
-
-            session.query(Plan).latest()
-            session.query(Plan).all()
-            session.query(Plan).where(lambda p: p.active)
-
-        """
-        return QueryBuilder(self, slice_type)
-
-    @overload
-    def mutate[S: SupportsDataclass](
-        self, slice_type: type[S]
-    ) -> MutationBuilder[S]: ...
-
-    @overload
-    def mutate(self) -> GlobalMutationBuilder: ...
-
-    @override
-    def mutate[S: SupportsDataclass](
-        self, slice_type: type[S] | None = None
-    ) -> MutationBuilder[S] | GlobalMutationBuilder:
-        """Return a mutation builder for fluent slice mutations.
-
-        Usage::
-
-            # Slice-specific mutations
-            session.mutate(Plan).seed(initial_plan)
-            session.mutate(Plan).clear()
-            session.mutate(Plan).register(AddStep, add_step_reducer)
-
-            # Session-wide mutations
-            session.mutate().reset()
-            session.mutate().rollback(snapshot)
-
-        For event-driven dispatch, use the explicit APIs::
-
-            session.apply(event)           # Broadcast to all reducers
-            session[Plan].apply(event)     # Targeted to Plan slice
-
-        """
-        if slice_type is None:
-            return GlobalMutationBuilder(self)
-        return MutationBuilder(self, slice_type)
 
     @override
     def observe[S: SupportsDataclass](
@@ -353,9 +330,10 @@ class Session(SessionProtocol):
     def __getitem__[S: SupportsDataclass](
         self, slice_type: type[S]
     ) -> SliceAccessor[S]:
-        """Convenient access to slice for querying and targeted dispatch.
+        """Access a slice for querying, dispatch, and mutation operations.
 
-        Supports declarative state slices with natural syntax.
+        This is the primary API for working with session state. All slice
+        operations are available through the returned accessor.
 
         Usage::
 
@@ -366,6 +344,14 @@ class Session(SessionProtocol):
 
             # Targeted dispatch (slice-scoped)
             session[Plan].apply(AddStep(step="x"))
+
+            # Direct mutations (bypass reducers)
+            session[Plan].seed(initial_plan)
+            session[Plan].clear()
+            session[Plan].append(new_plan)
+
+            # Reducer registration
+            session[Plan].register(AddStep, add_step_reducer)
 
         For broadcast dispatch (event-type routed)::
 
@@ -414,7 +400,7 @@ class Session(SessionProtocol):
         install_state_slice(self, slice_type, initial=initial)
 
     # ──────────────────────────────────────────────────────────────────────
-    # Dispatch API (apply / apply_to_slice)
+    # Dispatch API
     # ──────────────────────────────────────────────────────────────────────
 
     @override
@@ -441,8 +427,7 @@ class Session(SessionProtocol):
         """
         self._dispatch_data_event(type(event), event)
 
-    @override
-    def apply_to_slice(
+    def _apply_to_slice(
         self,
         slice_type: type[SupportsDataclass],
         event: SupportsDataclass,
@@ -453,10 +438,7 @@ class Session(SessionProtocol):
         reducers that handle this event type AND target this slice type
         will be executed.
 
-        This method is used internally by :class:`SliceAccessor`. Prefer
-        using the indexing syntax for clarity::
-
-            session[Plan].apply(AddStep(step="x"))
+        Internal method used by :class:`SliceAccessor`.
 
         Args:
             slice_type: The target slice type to filter reducers.
@@ -466,46 +448,21 @@ class Session(SessionProtocol):
         self._dispatch_data_event(type(event), event, target_slice_type=slice_type)
 
     # ──────────────────────────────────────────────────────────────────────
-    # MutationProvider implementation (used by MutationBuilder)
+    # Global Mutation Operations
     # ──────────────────────────────────────────────────────────────────────
 
+    @override
     @_locked_method
-    def mutation_seed_slice[S: SupportsDataclass](
-        self, slice_type: type[S], values: Iterable[S]
-    ) -> None:
-        """Initialize or replace the stored tuple for the provided type.
-
-        This method implements :class:`MutationProvider` for use by
-        :class:`MutationBuilder`.
-        """
-        self._state[slice_type] = tuple(values)
-
-    @_locked_method
-    def mutation_clear_slice[S: SupportsDataclass](
-        self,
-        slice_type: type[S],
-        predicate: Callable[[S], bool] | None = None,
-    ) -> None:
-        """Remove items from the slice, optionally filtering by predicate.
-
-        This method implements :class:`MutationProvider` for use by
-        :class:`MutationBuilder`.
-        """
-        existing = cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
-        if not existing:
-            return
-        if predicate is None:
-            self._state[slice_type] = EMPTY_SLICE
-            return
-        filtered = tuple(value for value in existing if not predicate(value))
-        self._state[slice_type] = filtered
-
-    @_locked_method
-    def mutation_reset(self) -> None:
+    def reset(self) -> None:
         """Clear all stored slices while preserving reducer registrations.
 
-        This method implements :class:`MutationProvider` for use by
-        :class:`GlobalMutationBuilder`.
+        This is useful for resetting session state between operations while
+        keeping the same reducer configuration.
+
+        Example::
+
+            session.reset()  # All slices are now empty
+
         """
         slice_types: set[SessionSliceType] = set(self._state)
         for registrations in self._reducers.values():
@@ -513,11 +470,24 @@ class Session(SessionProtocol):
                 slice_types.add(registration.slice_type)
         self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
 
-    def mutation_rollback(self, snapshot: SnapshotProtocol) -> None:
+    @override
+    def rollback(self, snapshot: SnapshotProtocol) -> None:
         """Restore session slices from the provided snapshot.
 
-        This method implements :class:`MutationProvider` for use by
-        :class:`GlobalMutationBuilder`.
+        All slice types in the snapshot must be registered in the session.
+
+        Args:
+            snapshot: A snapshot previously captured via ``session.snapshot()``.
+
+        Raises:
+            SnapshotRestoreError: If the snapshot contains unregistered slice types.
+
+        Example::
+
+            snapshot = session.snapshot()
+            # ... operations that modify state ...
+            session.rollback(snapshot)  # Restore previous state
+
         """
         registered_slices = self._registered_slice_types()
         missing = [
@@ -536,19 +506,42 @@ class Session(SessionProtocol):
                 new_state[slice_type] = snapshot.slices.get(slice_type, EMPTY_SLICE)
             self._state = new_state
 
+    # ──────────────────────────────────────────────────────────────────────
+    # Private Mutation Methods (used by SliceAccessor)
+    # ──────────────────────────────────────────────────────────────────────
+
     @_locked_method
-    def mutation_register_reducer[S: SupportsDataclass](
+    def _mutation_seed_slice[S: SupportsDataclass](
+        self, slice_type: type[S], values: Iterable[S]
+    ) -> None:
+        """Initialize or replace the stored tuple for the provided type."""
+        self._state[slice_type] = tuple(values)
+
+    @_locked_method
+    def _mutation_clear_slice[S: SupportsDataclass](
+        self,
+        slice_type: type[S],
+        predicate: Callable[[S], bool] | None = None,
+    ) -> None:
+        """Remove items from the slice, optionally filtering by predicate."""
+        existing = cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
+        if not existing:
+            return
+        if predicate is None:
+            self._state[slice_type] = EMPTY_SLICE
+            return
+        filtered = tuple(value for value in existing if not predicate(value))
+        self._state[slice_type] = filtered
+
+    @_locked_method
+    def _mutation_register_reducer[S: SupportsDataclass](
         self,
         data_type: SessionSliceType,
         reducer: TypedReducer[S],
         *,
         slice_type: type[S] | None = None,
     ) -> None:
-        """Register a reducer for the provided data type.
-
-        This method implements :class:`MutationProvider` for use by
-        :class:`MutationBuilder`.
-        """
+        """Register a reducer for the provided data type."""
         target_slice_type: SessionSliceType = (
             data_type if slice_type is None else slice_type
         )
@@ -560,15 +553,15 @@ class Session(SessionProtocol):
         bucket.append(registration)
         _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
 
-    def mutation_dispatch_event(
+    def _mutation_dispatch_event(
         self, slice_type: SessionSliceType, event: SupportsDataclass
     ) -> None:
-        """Dispatch an event to be processed by registered reducers.
-
-        This method implements :class:`MutationProvider` for use by
-        :class:`MutationBuilder`.
-        """
+        """Dispatch an event to be processed by registered reducers."""
         self._dispatch_data_event(slice_type, event)
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Properties
+    # ──────────────────────────────────────────────────────────────────────
 
     @property
     @override
@@ -621,6 +614,10 @@ class Session(SessionProtocol):
             slices=normalized,
             tags=self.tags,
         )
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Private Methods
+    # ──────────────────────────────────────────────────────────────────────
 
     def _registered_slice_types(self) -> set[SessionSliceType]:
         with self.locked():
@@ -831,9 +828,6 @@ class Session(SessionProtocol):
 
 __all__ = [
     "DataEvent",
-    "GlobalMutationBuilder",
-    "MutationBuilder",
-    "QueryBuilder",
     "Session",
     "SliceAccessor",
     "SliceObserver",

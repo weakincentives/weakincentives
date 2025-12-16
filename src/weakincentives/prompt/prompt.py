@@ -347,7 +347,7 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         provides only metadata and the registry snapshot for rendering.
 
         Visibility overrides are managed exclusively via Session state using
-        the VisibilityOverrides state slice. Use session.mutate(VisibilityOverrides)
+        the VisibilityOverrides state slice. Use session[VisibilityOverrides]
         to set visibility overrides before rendering.
 
         Args:

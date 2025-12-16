@@ -158,7 +158,7 @@ def test_prompt_render_reducer_prints_full_prompt(
     assert "Rendered prompt" in captured.out
     assert "<prompt body>" in captured.out
 
-    stored_events = session.query(PromptRendered).all()
+    stored_events = session[PromptRendered].all()
     assert stored_events
     assert stored_events[-1].rendered_prompt == "<prompt body>"
 

@@ -286,7 +286,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             initial=lambda: Plan(objective="", status="active", steps=()),
         )
         # Register replace_latest for Plan type itself (when returned from tools)
-        session.mutate(Plan).register(Plan, replace_latest)
+        session[Plan].register(Plan, replace_latest)
 
     @override
     def clone(self, **kwargs: object) -> PlanningToolsSection:
@@ -540,7 +540,7 @@ class _PlanningToolSuite:
         ensure_context_uses_session(context=context, session=self._section.session)
         del context
         session = self._section.session
-        plan = session.query(Plan).latest()
+        plan = session[Plan].latest()
         if plan is None:
             message = "No plan is currently initialised."
             raise ToolValidationError(message)
@@ -571,7 +571,7 @@ def _normalize_text(value: str, field_name: str) -> str:
 
 
 def _require_plan(session: Session) -> Plan:
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     if plan is None:
         message = "No plan is currently initialised."
         raise ToolValidationError(message)

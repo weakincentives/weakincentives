@@ -104,7 +104,7 @@ def test_setup_plan_normalizes_payloads() -> None:
     )
     invoke_tool(setup_tool, params, session=session)
 
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     assert plan is not None
     assert plan.objective == "refine onboarding flow"
     assert plan.status == "active"
@@ -183,7 +183,7 @@ def test_add_step_appends_new_steps() -> None:
         session=session,
     )
 
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     assert plan is not None
     assert [step.step_id for step in plan.steps] == [1, 2, 3]
     assert [step.title for step in plan.steps] == ["draft", "review", "release"]
@@ -276,7 +276,7 @@ def test_session_keeps_single_plan_snapshot() -> None:
         session=session,
     )
 
-    snapshots = session.query(Plan).all()
+    snapshots = session[Plan].all()
     assert len(snapshots) == 1
 
 
@@ -319,7 +319,7 @@ def test_update_step_updates_existing_step_title() -> None:
         session=session,
     )
 
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     assert plan is not None
     assert [step.title for step in plan.steps] == [
         "triage requests",
@@ -374,7 +374,7 @@ def test_update_step_updates_status() -> None:
         session=session,
     )
 
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     assert plan is not None
     assert plan.steps[0].status == "done"
     assert plan.status == "active"  # Not all steps done yet
@@ -439,7 +439,7 @@ def test_update_step_sets_plan_completed_when_all_done() -> None:
         session=session,
     )
 
-    plan = session.query(Plan).latest()
+    plan = session[Plan].latest()
     assert plan is not None
     assert plan.status == "completed"
     assert all(step.status == "done" for step in plan.steps)

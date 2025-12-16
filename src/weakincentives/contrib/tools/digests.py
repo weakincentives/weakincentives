@@ -51,10 +51,10 @@ def set_workspace_digest(
     entry = WorkspaceDigest(section_key=normalized_key, body=body.strip())
     existing = tuple(
         digest
-        for digest in session.query(WorkspaceDigest).all()
+        for digest in session[WorkspaceDigest].all()
         if getattr(digest, "section_key", None) != normalized_key
     )
-    session.mutate(WorkspaceDigest).seed((*existing, entry))
+    session[WorkspaceDigest].seed((*existing, entry))
     return entry
 
 
@@ -62,7 +62,7 @@ def clear_workspace_digest(session: SessionProtocol, section_key: str) -> None:
     """Remove cached digests for ``section_key``."""
 
     normalized_key = _normalized_key(section_key)
-    session.mutate(WorkspaceDigest).clear(
+    session[WorkspaceDigest].clear(
         lambda digest: getattr(digest, "section_key", None) == normalized_key
     )
 
@@ -75,7 +75,7 @@ def latest_workspace_digest(
 
     normalized_key = _normalized_key(section_key)
 
-    entries = session.query(WorkspaceDigest).all()
+    entries = session[WorkspaceDigest].all()
     for digest in reversed(entries):
         if getattr(digest, "section_key", None) == normalized_key:
             return digest

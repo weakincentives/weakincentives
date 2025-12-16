@@ -245,7 +245,7 @@ def test_progressive_disclosure_two_level_hierarchy(openai_model: str) -> None:
     )
 
     # Verify that the expected sections were expanded in session state
-    overrides = session.query(VisibilityOverrides).latest()
+    overrides = session[VisibilityOverrides].latest()
     assert overrides is not None, "Expected VisibilityOverrides in session state"
     expected_paths: list[SectionPath] = [
         ("instructions", "guidelines"),
@@ -300,7 +300,7 @@ def test_progressive_disclosure_direct_leaf_expansion(openai_model: str) -> None
     assert final_response.text is not None, "Expected text response from model."
 
     # The leaf section should be expanded to expose the tool
-    overrides = session.query(VisibilityOverrides).latest()
+    overrides = session[VisibilityOverrides].latest()
     leaf_path: SectionPath = ("instructions", "guidelines", "tools-reference")
     assert (
         overrides is not None and overrides.get(leaf_path) == SectionVisibility.FULL

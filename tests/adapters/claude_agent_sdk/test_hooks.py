@@ -701,7 +701,7 @@ class TestNotification:
 class TestSubagentStartHook:
     def test_dispatches_notification_to_session(self, session: Session) -> None:
         # Register reducer for Notification
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -717,7 +717,7 @@ class TestSubagentStartHook:
 
         asyncio.run(hook(input_data, None, context))
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "subagent_start"
@@ -727,7 +727,7 @@ class TestSubagentStartHook:
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
         # Register reducer for Notification
-        hook_context.session.mutate(Notification).register(Notification, append_all)
+        hook_context.session[Notification].register(Notification, append_all)
 
         hook = create_subagent_start_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
@@ -737,7 +737,7 @@ class TestSubagentStartHook:
 
 class TestSubagentStopHook:
     def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -753,14 +753,14 @@ class TestSubagentStopHook:
 
         asyncio.run(hook(input_data, None, context))
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "subagent_stop"
         assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session.mutate(Notification).register(Notification, append_all)
+        hook_context.session[Notification].register(Notification, append_all)
 
         hook = create_subagent_stop_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
@@ -768,7 +768,7 @@ class TestSubagentStopHook:
         assert result == {}
 
     def test_expands_transcript_path(self, session: Session, tmp_path: Path) -> None:
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         # Create a temporary JSONL transcript file
         transcript_file = tmp_path / "transcript.jsonl"
@@ -790,7 +790,7 @@ class TestSubagentStopHook:
 
         asyncio.run(hook(input_data, None, context))
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "subagent_stop"
@@ -803,7 +803,7 @@ class TestSubagentStopHook:
     def test_expands_agent_transcript_path(
         self, session: Session, tmp_path: Path
     ) -> None:
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         # Create a temporary JSONL transcript file
         transcript_file = tmp_path / "agent_transcript.jsonl"
@@ -822,7 +822,7 @@ class TestSubagentStopHook:
 
         asyncio.run(hook(input_data, None, context))
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.payload["agent_transcript_path"] == [
@@ -832,7 +832,7 @@ class TestSubagentStopHook:
     def test_expands_both_transcript_paths(
         self, session: Session, tmp_path: Path
     ) -> None:
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         transcript_file = tmp_path / "transcript.jsonl"
         transcript_file.write_text('{"role": "user", "content": "test"}\n')
@@ -854,7 +854,7 @@ class TestSubagentStopHook:
 
         asyncio.run(hook(input_data, None, context))
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.payload["transcript_path"] == [
@@ -863,7 +863,7 @@ class TestSubagentStopHook:
         assert notif.payload["agent_transcript_path"] == [{"event": "start"}]
 
     def test_handles_nonexistent_transcript_path(self, session: Session) -> None:
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -878,7 +878,7 @@ class TestSubagentStopHook:
 
         asyncio.run(hook(input_data, None, context))
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 1
         notif = notifications[0]
         # Returns empty list for nonexistent file
@@ -993,7 +993,7 @@ class TestExpandTranscriptPaths:
 
 class TestPreCompactHook:
     def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -1009,14 +1009,14 @@ class TestPreCompactHook:
 
         asyncio.run(hook(input_data, None, context))
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "pre_compact"
         assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session.mutate(Notification).register(Notification, append_all)
+        hook_context.session[Notification].register(Notification, append_all)
 
         hook = create_pre_compact_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
@@ -1026,7 +1026,7 @@ class TestPreCompactHook:
 
 class TestNotificationHook:
     def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -1042,14 +1042,14 @@ class TestNotificationHook:
 
         asyncio.run(hook(input_data, None, context))
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 1
         notif = notifications[0]
         assert notif.source == "notification"
         assert notif.payload == input_data
 
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session.mutate(Notification).register(Notification, append_all)
+        hook_context.session[Notification].register(Notification, append_all)
 
         hook = create_notification_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
@@ -1060,7 +1060,7 @@ class TestNotificationHook:
 class TestMultipleNotificationsAccumulate:
     def test_multiple_hooks_accumulate_notifications(self, session: Session) -> None:
         """Test that notifications from different hooks accumulate in session."""
-        session.mutate(Notification).register(Notification, append_all)
+        session[Notification].register(Notification, append_all)
 
         context = HookContext(
             session=session,
@@ -1093,7 +1093,7 @@ class TestMultipleNotificationsAccumulate:
             notification({"session_id": "sess-1", "message": "Done"}, None, context)
         )
 
-        notifications = session.query(Notification).all()
+        notifications = session[Notification].all()
         assert len(notifications) == 4
 
         sources = [n.source for n in notifications]

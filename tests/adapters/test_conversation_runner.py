@@ -256,17 +256,6 @@ class StructuredOutput:
     answer: str
 
 
-class GlobalMutationBuilderStub:
-    def __init__(self, session: SessionStub) -> None:
-        self._session = session
-
-    def rollback(self, snapshot: SnapshotProtocol) -> None:
-        self._session.rollbacks.append(snapshot)
-
-    def reset(self) -> None:
-        pass
-
-
 class SessionStub(SessionProtocol):
     def __init__(self, *, event_bus: EventBus | None = None) -> None:
         self.snapshots: list[SnapshotProtocol] = []
@@ -282,8 +271,11 @@ class SessionStub(SessionProtocol):
         self.snapshots.append(snapshot)
         return snapshot
 
-    def mutate(self) -> GlobalMutationBuilderStub:
-        return GlobalMutationBuilderStub(self)
+    def rollback(self, snapshot: SnapshotProtocol) -> None:
+        self.rollbacks.append(snapshot)
+
+    def reset(self) -> None:
+        pass
 
 
 # Tests for the InnerLoop API

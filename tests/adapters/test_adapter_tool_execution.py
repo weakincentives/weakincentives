@@ -632,8 +632,8 @@ def test_adapter_tool_execution_rolls_back_session(
 
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    session.mutate(ToolPayload).register(ToolPayload, replace_latest)
-    session.mutate(ToolPayload).seed((ToolPayload(answer="baseline"),))
+    session[ToolPayload].register(ToolPayload, replace_latest)
+    session[ToolPayload].seed((ToolPayload(answer="baseline"),))
 
     original_dispatch = session._dispatch_data_event
 
@@ -671,7 +671,7 @@ def test_adapter_tool_execution_rolls_back_session(
     assert invocation.result.success is True
     assert invocation.result.value == ToolPayload(answer="policies")
 
-    latest_payload = session.query(ToolPayload).latest()
+    latest_payload = session[ToolPayload].latest()
     assert latest_payload == ToolPayload(answer="baseline")
 
     tool_message = _second_tool_message(requests)

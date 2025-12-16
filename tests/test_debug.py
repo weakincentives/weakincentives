@@ -30,8 +30,8 @@ class _Slice:
 def test_dump_session_preserves_root_ordering(tmp_path: Path) -> None:
     root = Session()
     child = Session(parent=root)
-    root.mutate(_Slice).seed((_Slice("root"),))
-    child.mutate(_Slice).seed((_Slice("child"),))
+    root[_Slice].seed((_Slice("root"),))
+    child[_Slice].seed((_Slice("child"),))
     target = tmp_path / f"{root.session_id}.jsonl"
 
     output_path = dump_session(root, target)
@@ -45,7 +45,7 @@ def test_dump_session_preserves_root_ordering(tmp_path: Path) -> None:
 
 def test_dump_session_normalizes_target(tmp_path: Path) -> None:
     session = Session()
-    session.mutate(_Slice).seed((_Slice("value"),))
+    session[_Slice].seed((_Slice("value"),))
 
     explicit = tmp_path / "custom.json"
     rewritten = dump_session(session, explicit)
