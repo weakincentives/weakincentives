@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
+from ...contrib.tools.filesystem import Filesystem
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.tool import Tool, ToolContext, ToolResult
@@ -63,6 +64,7 @@ class BridgedTool:
         rendered_prompt: RenderedPromptProtocol[Any] | None,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
+        filesystem: Filesystem | None = None,
         adapter_name: str = "claude_agent_sdk",
         prompt_name: str | None = None,
     ) -> None:
@@ -76,6 +78,7 @@ class BridgedTool:
         self._rendered_prompt = rendered_prompt
         self._deadline = deadline
         self._budget_tracker = budget_tracker
+        self._filesystem = filesystem
         self._adapter_name = adapter_name
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
 
@@ -108,6 +111,7 @@ class BridgedTool:
                 session=self._session,
                 deadline=self._deadline,
                 budget_tracker=self._budget_tracker,
+                filesystem=self._filesystem,
             )
 
             result = handler(params, context=context)
@@ -191,6 +195,7 @@ def create_bridged_tools(
     rendered_prompt: RenderedPromptProtocol[Any] | None,
     deadline: Deadline | None,
     budget_tracker: BudgetTracker | None,
+    filesystem: Filesystem | None = None,
     adapter_name: str = "claude_agent_sdk",
     prompt_name: str | None = None,
 ) -> tuple[BridgedTool, ...]:
@@ -204,6 +209,8 @@ def create_bridged_tools(
         rendered_prompt: Rendered prompt for tool context.
         deadline: Optional deadline for tool context.
         budget_tracker: Optional budget tracker for tool context.
+        filesystem: Optional filesystem for tool context. When set, tools
+            can access the filesystem via context.filesystem.
         adapter_name: Name of the adapter for event publishing.
         prompt_name: Name of the prompt for event publishing.
 
@@ -234,6 +241,7 @@ def create_bridged_tools(
             rendered_prompt=rendered_prompt,
             deadline=deadline,
             budget_tracker=budget_tracker,
+            filesystem=filesystem,
             adapter_name=adapter_name,
             prompt_name=resolved_prompt_name,
         )

@@ -654,3 +654,96 @@ class TestVisibilityExpansionRequiredPropagation:
         # The async wrapper should also propagate the exception
         with pytest.raises(VisibilityExpansionRequired):
             asyncio.run(async_handler({"query": "test"}))
+
+    def test_passes_filesystem_to_tool_context(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that filesystem parameter is passed through to ToolContext."""
+        from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+
+        captured_filesystem: list[object] = []
+
+        def capture_context_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            captured_filesystem.append(context.filesystem)
+            return ToolResult(
+                message=f"Searched for {params.query}",
+                value=SearchResult(matches=3),
+                success=True,
+            )
+
+        capture_tool = Tool[SearchParams, SearchResult](
+            name="capture",
+            description="Tool that captures context",
+            handler=capture_context_handler,
+        )
+
+        test_filesystem = InMemoryFilesystem()
+
+        bridged = BridgedTool(
+            name="capture",
+            description="Tool that captures context",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=capture_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            filesystem=test_filesystem,
+        )
+
+        _ = bridged({"query": "test"})
+
+        assert len(captured_filesystem) == 1
+        assert captured_filesystem[0] is test_filesystem
+
+
+class TestCreateBridgedToolsWithFilesystem:
+    def test_passes_filesystem_to_bridged_tools(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that create_bridged_tools passes filesystem to BridgedTool."""
+        from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+
+        captured_filesystem: list[object] = []
+
+        def capture_context_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            captured_filesystem.append(context.filesystem)
+            return ToolResult(
+                message=f"Searched for {params.query}",
+                value=SearchResult(matches=3),
+                success=True,
+            )
+
+        capture_tool = Tool[SearchParams, SearchResult](
+            name="capture",
+            description="Tool that captures context",
+            handler=capture_context_handler,
+        )
+
+        test_filesystem = InMemoryFilesystem()
+
+        bridged_tools = create_bridged_tools(
+            (capture_tool,),
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            filesystem=test_filesystem,
+        )
+
+        assert len(bridged_tools) == 1
+        _ = bridged_tools[0]({"query": "test"})
+
+        assert len(captured_filesystem) == 1
+        assert captured_filesystem[0] is test_filesystem

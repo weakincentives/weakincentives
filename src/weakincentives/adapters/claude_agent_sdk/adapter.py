@@ -15,9 +15,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, TypeVar, cast, override
 
 from ...budget import Budget, BudgetTracker
+from ...contrib.tools.filesystem import HostFilesystem
 from ...deadlines import Deadline
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
@@ -248,6 +250,11 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             budget_tracker=budget_tracker,
         )
 
+        # Create filesystem for the working directory
+        # If cwd is not set, use current working directory
+        workspace_root = self._client_config.cwd or str(Path.cwd())
+        filesystem = HostFilesystem(_root=workspace_root)
+
         bridged_tools = create_bridged_tools(
             rendered.tools,
             session=session,
@@ -256,6 +263,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             rendered_prompt=rendered,
             deadline=deadline,
             budget_tracker=budget_tracker,
+            filesystem=filesystem,
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
         )
