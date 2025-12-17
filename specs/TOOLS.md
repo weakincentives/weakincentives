@@ -229,7 +229,7 @@ class ReadPlan:
 session = Session(bus=bus)
 section = PlanningToolsSection(session=session, accepts_overrides=False)
 # ... after tool calls ...
-plan = session.query(Plan).latest()
+plan = session[Plan].latest()
 ```
 
 Note: `PlanningToolsSection` automatically registers reducers for `Plan`,

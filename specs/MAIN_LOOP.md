@@ -172,7 +172,7 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 ```python
 def create_session(self) -> Session:
     session = Session(bus=self._bus)
-    session.mutate(Plan).register(SetupPlan, plan_reducer)
+    session[Plan].register(SetupPlan, plan_reducer)
     return session
 ```
 
@@ -214,7 +214,7 @@ optimization runs automatically.
 
 ```python
 def execute(self, request: UserRequestT) -> PromptResponse[OutputT]:
-    if self._session.query(WorkspaceDigest).latest() is None:
+    if self._session[WorkspaceDigest].latest() is None:
         self._run_optimization()
     # ... proceed with evaluation
 ```

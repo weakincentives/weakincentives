@@ -10,6 +10,14 @@ Release highlights for weakincentives.
   local files point to existing targets. Fenced code blocks and inline code
   are skipped to avoid false positives.
 
+### Fixed
+
+- **Documentation: Standardized Session API examples.** All docs and specs now
+  use the canonical `session[SliceType]` indexing API. Removed outdated
+  references to the deprecated `session.query(T)` and `session.mutate(T)` APIs
+  that were documented in the previous changelog entry but not updated in
+  example code.
+
 ### Changed
 
 - **Section base class now provides default `render()` implementation.** Custom

@@ -403,8 +403,8 @@ section = MarkdownSection(
 
 ```python
 response = adapter.evaluate(prompt, session=session)
-session.mutate(TaskResponse).append(response.output)  # Store result
-later = session.query(TaskResponse).latest()  # Retrieve later
+session[TaskResponse].append(response.output)  # Store result
+later = session[TaskResponse].latest()  # Retrieve later
 ```
 
 ### Error handling
@@ -658,8 +658,8 @@ except ThrottleError as exc:
   in with `append(session, event)` or convenience selectors like
   `replace_latest` and `upsert_by`. `Snapshot`/`SnapshotProtocol` provide
   persistence helpers.
-- **Query and mutation APIs**: Use `session.query(T)` for reading and
-  `session.mutate(T)` for writing state slices. Both provide fluent APIs.
+- **Slice accessor API**: Use `session[T]` for reading and writing state
+  slices. Methods include `latest()`, `all()`, `where()`, `seed()`, `clear()`.
 - **Reducers**: Use `TypedReducer` with `ReducerContext` to manage typed state
   slices through event-driven mutations.
 - **Events**: `PromptExecuted` and `ToolInvoked` events capture every model
@@ -709,10 +709,10 @@ digest = WorkspaceDigestSection(session=session)  # Renders workspace summary
 ### Query API
 
 ```python
-latest = session.query(MyType).latest()
-all_items = session.query(MyType).all()
-filtered = session.query(MyType).where(lambda x: x.status == "done")
-exists = session.query(MyType).exists()
+latest = session[MyType].latest()
+all_items = session[MyType].all()
+filtered = session[MyType].where(lambda x: x.status == "done")
+exists = session[MyType].exists()
 ```
 
 ### Dispatch API
@@ -729,21 +729,21 @@ session[Plan].apply(AddStep(step="x"))
 
 ```python
 # Initialize or replace slice values (bypasses reducers)
-session.mutate(Plan).seed(initial_plan)
+session[Plan].seed(initial_plan)
 
 # Append value using default reducer
-session.mutate(Plan).append(new_step)
+session[Plan].append(new_step)
 
 # Register reducer for custom event types
-session.mutate(Plan).register(AddStep, my_reducer)
+session[Plan].register(AddStep, my_reducer)
 
 # Remove items from a slice
-session.mutate(Plan).clear()                        # Clear all
-session.mutate(Plan).clear(lambda p: p.done)        # Clear matching
+session[Plan].clear()                         # Clear all
+session[Plan].clear(lambda p: p.done)         # Clear matching
 
 # Global operations
-session.mutate().reset()                            # Clear all slices
-session.mutate().rollback(snapshot)                 # Restore from snapshot
+session.reset()                               # Clear all slices
+session.rollback(snapshot)                    # Restore from snapshot
 ```
 
 ### Legacy helpers (still available)
@@ -759,7 +759,7 @@ session = replace_latest(session, MyType, updated)
 
 ```python
 def handler(params, *, context: ToolContext) -> ToolResult:
-    plan = context.session.query(Plan).latest()
+    plan = context.session[Plan].latest()
     # Tool handlers can read session; adapters record ToolInvoked events
 ```
 
@@ -851,7 +851,7 @@ session.event_bus.unsubscribe(PromptRendered, handler)
 snapshot = session.snapshot()
 
 # Restore from snapshot
-session.mutate().rollback(snapshot)
+session.rollback(snapshot)
 
 # Serialize for persistence
 snapshot_json = snapshot.to_json()
