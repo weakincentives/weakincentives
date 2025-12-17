@@ -75,8 +75,9 @@ class _MockAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        resources: object = None,
     ) -> PromptResponse[_Output]:
-        del session, deadline, budget, budget_tracker
+        del session, deadline, budget, budget_tracker, resources
         self._call_count += 1
         question = ""
         for param in prompt.params:
@@ -105,8 +106,9 @@ class _ErrorAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        resources: object = None,
     ) -> PromptResponse[_Output]:
-        del session, deadline, budget, budget_tracker
+        del session, deadline, budget, budget_tracker, resources
         question = ""
         for param in prompt.params:
             if isinstance(param, _Params):
@@ -130,8 +132,9 @@ class _NoneOutputAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        resources: object = None,
     ) -> PromptResponse[_Output]:
-        del prompt, session, deadline, budget, budget_tracker
+        del prompt, session, deadline, budget, budget_tracker, resources
         return PromptResponse(prompt_name="test", text=None, output=None)
 
 

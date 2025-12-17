@@ -10,7 +10,9 @@ New `weakincentives.evals` module provides a minimal evaluation framework built
 on MainLoop for testing agent outputs:
 
 ```python
-from weakincentives.evals import Sample, run_eval, exact_match, load_jsonl
+from weakincentives.evals import (
+    EvalLoop, EvalLoopCompleted, Sample, exact_match, load_jsonl
+)
 
 # Build dataset programmatically
 dataset = tuple(
@@ -21,23 +23,15 @@ dataset = tuple(
 # Or load from JSONL
 dataset = load_jsonl(Path("tests/fixtures/qa.jsonl"), str, str)
 
-# Run evaluation
-report = run_eval(loop, dataset, exact_match)
-print(f"Pass rate: {report.pass_rate:.1%}")
-```
-
-Event-driven usage with `EvalLoop` (for cluster deployment):
-
-```python
-from weakincentives.evals import EvalLoop, EvalLoopRequest, EvalLoopCompleted
-
 # Create EvalLoop with MainLoop, evaluator, and bus
 eval_loop = EvalLoop(loop=main_loop, evaluator=exact_match, bus=bus)
 
-# Subscribe to completion events
-bus.subscribe(EvalLoopCompleted, handle_completed)
+# Direct execution
+report = eval_loop.execute(dataset)
+print(f"Pass rate: {report.pass_rate:.1%}")
 
-# Submit evaluation request via bus
+# Or event-driven usage (for cluster deployment)
+bus.subscribe(EvalLoopCompleted, handle_completed)
 bus.publish(EvalLoopRequest(dataset=dataset))
 ```
 
@@ -190,6 +184,7 @@ New error classes for execution state operations:
 
 - **Filesystem protocol with pluggable backends.** New `Filesystem` protocol
   abstracts file operations with three implementations:
+
   - `HostFilesystem`: Direct host access with optional root jail
   - `InMemoryFilesystem`: Pure in-memory for testing
   - `PodmanFilesystem`: Container-isolated operations

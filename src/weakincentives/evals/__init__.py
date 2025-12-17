@@ -15,9 +15,11 @@
 This module provides a minimal evaluation framework built on MainLoop.
 MainLoop handles orchestration; this module adds datasets and scoring.
 
-Basic usage with ``run_eval`` (simple, synchronous)::
+Basic usage::
 
-    from weakincentives.evals import Sample, run_eval, exact_match, load_jsonl
+    from weakincentives.evals import (
+        EvalLoop, EvalLoopCompleted, Sample, exact_match, load_jsonl
+    )
 
     # Build dataset programmatically
     dataset = tuple(
@@ -28,16 +30,14 @@ Basic usage with ``run_eval`` (simple, synchronous)::
     # Or load from JSONL
     dataset = load_jsonl(Path("tests/fixtures/qa.jsonl"), str, str)
 
-    # Run evaluation
-    report = run_eval(loop, dataset, exact_match)
-    print(f"Pass rate: {report.pass_rate:.1%}")
-
-Event-driven usage with ``EvalLoop`` (for cluster deployment)::
-
-    from weakincentives.evals import EvalLoop, EvalLoopRequest, EvalLoopCompleted
-
     # Create EvalLoop with MainLoop, evaluator, and bus
     eval_loop = EvalLoop(loop=main_loop, evaluator=exact_match, bus=bus)
+
+    # Direct execution
+    report = eval_loop.execute(dataset)
+    print(f"Pass rate: {report.pass_rate:.1%}")
+
+Event-driven usage (for cluster deployment)::
 
     # Subscribe to completion events
     bus.subscribe(EvalLoopCompleted, handle_completed)
@@ -53,7 +53,7 @@ LLM-as-judge for subjective criteria::
         contains,
         llm_judge(adapter, "Factually accurate", bus=bus),
     )
-    report = run_eval(loop, dataset, evaluator)
+    report = eval_loop.execute(dataset)
 """
 
 from __future__ import annotations
@@ -87,7 +87,6 @@ from .evaluators import (
     within_tolerance,
 )
 from .judge import JUDGE_TEMPLATE, JudgeParams, llm_judge
-from .runner import run_eval
 
 __all__ = [
     "JUDGE_TEMPLATE",
@@ -114,7 +113,6 @@ __all__ = [
     "json_subset",
     "llm_judge",
     "load_jsonl",
-    "run_eval",
     "within_tolerance",
 ]
 

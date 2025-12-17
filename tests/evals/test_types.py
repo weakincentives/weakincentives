@@ -260,4 +260,4 @@ def test_module_dir() -> None:
     exports = dir(evals_module)
     assert "Sample" in exports
     assert "Score" in exports
-    assert "run_eval" in exports
+    assert "EvalLoop" in exports
