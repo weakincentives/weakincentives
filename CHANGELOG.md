@@ -4,44 +4,141 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-### Breaking: Simplified Dispatch API
+### Breaking: Session Slice Accessors + Explicit Broadcast
 
-The dispatch API has been simplified to a single broadcast method. The targeted
-dispatch method has been removed to eliminate the footgun where `session.apply()`
-and `session[Plan].apply()` had subtly different behaviors.
+Session's query/mutation builders have been replaced by slice accessors via
+indexing (`session[SliceType]`), and event dispatch is now explicit via
+`session.broadcast(event)`.
 
-**Old API (removed):**
+**Removed:**
 
-```python
-session.apply(AddStep(step="x"))           # Broadcast to all reducers
-session[Plan].apply(AddStep(step="x"))     # Targeted to Plan slice only
-```
+- `session.query(T)` / `QueryBuilder`
+- `session.mutate(T)` / `MutationBuilder`
+- `session.mutate()` / `GlobalMutationBuilder`
+- `session.select_all(T)`
 
 **New API:**
 
 ```python
-session.broadcast(AddStep(step="x"))       # Broadcast to all reducers
+# Query
+latest = session[Plan].latest()
+all_plans = session[Plan].all()
+active = session[Plan].where(lambda p: p.active)
+
+# Direct mutations (bypass reducers)
+session[Plan].seed(initial_plan)
+session[Plan].clear()
+
+# Event dispatch (broadcast by event type)
+session.broadcast(AddStep(step="Research"))
+
+# Session-wide operations
+session.reset()
+session.rollback(snapshot)
 ```
+
+This also removes the footgun where `session.mutate(Plan).dispatch(e)` looked
+slice-scoped but actually routed by `type(e)` (broadcast semantics).
 
 **Migration:**
 
-- `session.apply(e)` → `session.broadcast(e)`
-- `session[Plan].apply(e)` → `session.broadcast(e)` (targeted dispatch removed)
+- `session.query(T).latest()` → `session[T].latest()`
+- `session.query(T).all()` → `session[T].all()`
+- `session.mutate(T).seed(x)` → `session[T].seed(x)`
+- `session.mutate(T).clear(...)` → `session[T].clear(...)`
+- `session.mutate(T).dispatch(e)` → `session.broadcast(e)`
+- `session.mutate().reset()` → `session.reset()`
+- `session.mutate().rollback(s)` → `session.rollback(s)`
 
-### Ledger Semantics for Reducers
+### Breaking: Ledger Semantics for Default Reducers
 
 The default reducer now uses ledger semantics with `append_all`, which always
-appends unconditionally. The previous `append` reducer (which deduped by equality)
-has been replaced.
+appends unconditionally. The previous `append` reducer (which deduped by
+equality) has been replaced.
 
-All slices now default to `append_all` for consistent event stream behavior.
+All event types default to `append_all` when no reducers are registered.
+
+**Migration:**
+
+- `append` → `append_all` (import path: `weakincentives.runtime.session`)
 
 ```python
 from weakincentives.runtime.session import append_all
 
-# Event stream - record every invocation (default for all slices)
-session.mutate(ToolInvoked).register(ToolInvoked, append_all)
+# Explicitly register ledger semantics (now also the default)
+session[ToolInvoked].register(ToolInvoked, append_all)
 ```
+
+### Added: Declarative State Slices
+
+State slices can now be defined declaratively with reducers co-located as
+methods on the dataclass itself:
+
+```python
+from dataclasses import dataclass, replace
+from weakincentives.runtime.session import reducer
+
+@dataclass(frozen=True)
+class AddStep:
+    step: str
+
+@dataclass(frozen=True)
+class AgentPlan:
+    steps: tuple[str, ...] = ()
+    current_step: int = 0
+
+    @reducer(on=AddStep)
+    def add_step(self, event: AddStep) -> "AgentPlan":
+        return replace(self, steps=(*self.steps, event.step))
+
+session.install(AgentPlan, initial=AgentPlan)
+session.broadcast(AddStep(step="Research"))
+session[AgentPlan].latest()
+```
+
+### Breaking: Filesystem Protocol + ToolContext Filesystem
+
+Workspace file tools are now backed by a `Filesystem` protocol instead of a
+`VirtualFileSystem` session snapshot.
+
+- New `weakincentives.contrib.tools.filesystem` module with `Filesystem`,
+  `InMemoryFilesystem`, and `HostFilesystem`.
+- `ToolContext` now includes `filesystem: Filesystem | None` for handlers.
+- `Prompt.filesystem()` returns the filesystem exposed by any section
+  implementing `WorkspaceSection`.
+- `VirtualFileSystem` has been removed; VFS tools now operate through a backend.
+
+### Breaking: Prompt Params Type Naming
+
+- `Section.param_type` has been removed; use `Section.params_type`.
+- `PromptTemplate.param_types` and `RegistrySnapshot.param_types` have been
+  renamed to `params_types`.
+
+### Breaking: Typing Exports Consolidated Under `weakincentives.types`
+
+`SupportsDataclass`, `SupportsDataclassOrNone`, and `SupportsToolResult` are no
+longer exported from `weakincentives.prompt`; import them from
+`weakincentives.types` (they remain exported at the package root).
+
+### Claude Agent SDK Adapter: Additional Configuration
+
+The Claude Agent SDK adapter now supports additional configuration options via
+`ClaudeAgentSDKClientConfig` and `ClaudeAgentSDKModelConfig` (e.g. `max_turns`,
+`max_budget_usd`, `betas`, and `max_thinking_tokens`).
+
+### Validation: SUMMARY Requires a Summary Template
+
+Requesting `SectionVisibility.SUMMARY` for a section without a `summary` template
+now raises `PromptValidationError`.
+
+### Typing & Internals
+
+- `PromptTemplateProtocol` no longer advertises a `render()` method (rendering is
+  done via `Prompt.render()`).
+- `ProviderAdapterProtocol.evaluate()` no longer includes a `bus` parameter
+  (telemetry is published via `session.event_bus`).
+- `_ToolExecutionContext` is now internal (previous `ToolExecutionContext` name
+  removed).
 
 ## v0.14.0 - 2025-12-15
 
@@ -72,41 +169,6 @@ Key capabilities:
   `IsolationConfig` + `EphemeralHome`.
 - **Network policy (tools only)**: Restrict tool egress with
   `NetworkPolicy.no_network()` / `NetworkPolicy.with_domains(...)`.
-
-### Declarative State Slices
-
-State slices can now be defined declaratively with reducers co-located as
-methods on the dataclass itself:
-
-```python
-from dataclasses import dataclass, replace
-from weakincentives.runtime.session import reducer
-
-@dataclass(frozen=True)
-class AddStep:
-    step: str
-
-@dataclass(frozen=True)
-class AgentPlan:
-    steps: tuple[str, ...] = ()
-    current_step: int = 0
-
-    @reducer(on=AddStep)
-    def add_step(self, event: AddStep) -> "AgentPlan":
-        return replace(self, steps=(*self.steps, event.step))
-
-# Install once, then use naturally
-session.install(AgentPlan, initial=AgentPlan)
-session.mutate(AgentPlan).dispatch(AddStep(step="Research"))
-session[AgentPlan].latest()  # Convenient indexing access
-```
-
-`session.install()` scans for `@reducer`-decorated methods and auto-registers
-them. An optional `initial` factory enables reducers to handle events even
-when no state exists yet.
-
-Sessions also now support indexing for convenient query access:
-`session[Plan].latest()` is equivalent to `session.query(Plan).latest()`.
 
 ### Session State Observers
 
