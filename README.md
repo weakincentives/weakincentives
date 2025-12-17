@@ -119,6 +119,7 @@ uv add "weakincentives[asteval]"          # safe Python evaluation
 uv add "weakincentives[openai]"           # OpenAI adapter
 uv add "weakincentives[litellm]"          # LiteLLM adapter
 uv add "weakincentives[claude-agent-sdk]" # Claude Agent SDK adapter
+uv add "weakincentives[podman]"           # Podman sandbox
 uv add "weakincentives[wink]"             # debug UI
 ```
 
