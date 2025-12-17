@@ -15,8 +15,9 @@ from __future__ import annotations
 import inspect
 import re
 import types
-from collections.abc import Callable, Sequence as SequenceABC
+from collections.abc import Callable, Mapping, Sequence as SequenceABC
 from dataclasses import dataclass, field, is_dataclass
+from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -29,6 +30,7 @@ from typing import (
     get_args,
     get_origin,
     get_type_hints,
+    overload,
 )
 
 from ..budget import BudgetTracker
@@ -78,6 +80,74 @@ ResultT_runtime = TypeVar("ResultT_runtime", bound=SupportsToolResult)
 type ParamsType = type[SupportsDataclass] | type[None]
 type ResultType = type[SupportsDataclass] | type[None]
 
+_ResourceT = TypeVar("_ResourceT")
+
+
+@dataclass(slots=True, frozen=True)
+class ResourceRegistry:
+    """Typed container for runtime resources available to tool handlers.
+
+    ResourceRegistry provides type-safe access to runtime services like
+    filesystem backends, HTTP clients, or tracers without requiring
+    dedicated fields on ToolContext.
+
+    Resources are stored by their type and retrieved via the ``get`` method:
+
+    .. code-block:: python
+
+        fs = context.resources.get(Filesystem)
+        if fs is not None:
+            content = fs.read("path/to/file")
+
+    This design allows extensibility without bloating the core dataclass.
+    Common resources like ``Filesystem`` have sugar properties on
+    ``ToolContext`` for convenience.
+    """
+
+    _entries: Mapping[type[object], object] = field(
+        default_factory=lambda: MappingProxyType({}),
+    )
+
+    @overload
+    def get(self, resource_type: type[_ResourceT]) -> _ResourceT | None: ...
+
+    @overload
+    def get(
+        self, resource_type: type[_ResourceT], default: _ResourceT
+    ) -> _ResourceT: ...
+
+    def get(
+        self, resource_type: type[_ResourceT], default: _ResourceT | None = None
+    ) -> _ResourceT | None:
+        """Return the resource of the given type, or ``default`` if absent."""
+        value = self._entries.get(resource_type)
+        if value is None:
+            return default
+        return cast(_ResourceT, value)
+
+    def __contains__(self, resource_type: type[object]) -> bool:
+        """Check if a resource of the given type is registered."""
+        return resource_type in self._entries
+
+    @staticmethod
+    def build(mapping: Mapping[type[object], object]) -> ResourceRegistry:
+        """Construct a registry from a type-to-instance mapping.
+
+        Use protocol types as keys to enable protocol-based lookup:
+
+        .. code-block:: python
+
+            registry = ResourceRegistry.build({
+                Filesystem: InMemoryFilesystem(),
+                HTTPClient: MyHTTPClient(),
+            })
+
+            # Now protocol-based lookup works:
+            fs = registry.get(Filesystem)  # Returns the InMemoryFilesystem
+        """
+        filtered = {k: v for k, v in mapping.items() if v is not None}
+        return ResourceRegistry(_entries=MappingProxyType(filtered))
+
 
 @dataclass(slots=True, frozen=True)
 class ToolExample[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
@@ -90,7 +160,26 @@ class ToolExample[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]
 
 @dataclass(slots=True, frozen=True)
 class ToolContext:
-    """Immutable container exposing prompt execution state to handlers."""
+    """Immutable container exposing prompt execution state to handlers.
+
+    ToolContext provides access to prompt metadata, session state, and
+    runtime resources during tool execution.
+
+    Resources are available through the typed ``resources`` registry:
+
+    .. code-block:: python
+
+        fs = context.resources.get(Filesystem)
+        tracer = context.resources.get(Tracer)
+
+    Common resources have sugar properties for convenience:
+
+    .. code-block:: python
+
+        # These are equivalent:
+        context.filesystem
+        context.resources.get(Filesystem)
+    """
 
     prompt: PromptProtocol[Any]
     rendered_prompt: RenderedPromptProtocol[Any] | None
@@ -98,7 +187,18 @@ class ToolContext:
     session: SessionProtocol
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
-    filesystem: Filesystem | None = None
+    resources: ResourceRegistry = field(default_factory=ResourceRegistry)
+
+    @property
+    def filesystem(self) -> Filesystem | None:
+        """Return the filesystem resource, if available.
+
+        This is sugar for ``self.resources.get(Filesystem)``.
+        """
+        # Import here to avoid circular import at module load time
+        from ..contrib.tools.filesystem import Filesystem
+
+        return self.resources.get(Filesystem)
 
 
 def _normalize_specialization(item: object) -> tuple[object, object]:
@@ -788,4 +888,11 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         )
 
 
-__all__ = ["Tool", "ToolContext", "ToolExample", "ToolHandler", "ToolResult"]
+__all__ = [
+    "ResourceRegistry",
+    "Tool",
+    "ToolContext",
+    "ToolExample",
+    "ToolHandler",
+    "ToolResult",
+]

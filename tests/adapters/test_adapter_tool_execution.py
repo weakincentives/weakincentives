@@ -729,3 +729,70 @@ def test_adapter_tool_visibility_expansion_propagates(
     assert exc.section_keys == ("docs",)
     assert exc.reason == "Need documentation details"
     assert ("docs",) in exc.requested_overrides
+
+
+def test_tool_receives_filesystem_from_workspace_section(
+    adapter_harness: AdapterHarness,
+) -> None:
+    """Test that tool handlers receive filesystem from workspace sections."""
+    from weakincentives.contrib.tools.filesystem import Filesystem, InMemoryFilesystem
+    from weakincentives.contrib.tools.vfs import VfsToolsSection
+
+    captured_filesystem: list[Filesystem | None] = []
+
+    def tool_handler(
+        params: ToolParams, *, context: ToolContext
+    ) -> ToolResult[ToolPayload]:
+        captured_filesystem.append(context.filesystem)
+        return ToolResult(
+            message=f"Searched for {params.query}",
+            value=ToolPayload(url="http://example.com", snippet="Found it"),
+        )
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    # Create a workspace section with VFS filesystem
+    workspace_section = VfsToolsSection(session=session)
+
+    prompt_template = PromptTemplate(
+        ns=f"test/{adapter_harness.name}",
+        key="test-filesystem-pass-through",
+        sections=[
+            workspace_section,
+            MarkdownSection(
+                title="Search",
+                key="search",
+                template="Use the search tool.",
+                tools=[tool],
+            ),
+        ],
+    )
+
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "docs"}),
+    )
+    responses = _build_responses(
+        tool_call=tool_call,
+        final_message=DummyMessage(content="Done", tool_calls=None),
+    )
+    adapter, _ = adapter_harness.build(responses)
+
+    prompt = Prompt(prompt_template)
+
+    _ = adapter.evaluate(
+        prompt,
+        session=cast(SessionProtocol, session),
+    )
+
+    assert len(captured_filesystem) == 1
+    assert captured_filesystem[0] is not None
+    assert isinstance(captured_filesystem[0], InMemoryFilesystem)

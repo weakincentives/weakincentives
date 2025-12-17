@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cas
 from uuid import uuid4
 
 from ..budget import BudgetExceededError, BudgetTracker
+from ..contrib.tools.filesystem import Filesystem
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
@@ -39,7 +40,7 @@ from ..prompt.structured_output import (
     parse_dataclass_payload,
     parse_structured_output,
 )
-from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from ..prompt.tool import ResourceRegistry, Tool, ToolContext, ToolHandler, ToolResult
 from ..runtime.events import (
     HandlerFailure,
     PromptExecuted,
@@ -276,6 +277,18 @@ def _details_from_error(
 
 def _sleep_for(delay: timedelta) -> None:
     time.sleep(delay.total_seconds())
+
+
+def _build_resources(*, filesystem: Filesystem | None) -> ResourceRegistry:
+    """Build a ResourceRegistry with the given resources.
+
+    Resources are keyed by their protocol type (e.g., Filesystem) rather than
+    their concrete type (e.g., InMemoryFilesystem) to enable protocol-based
+    lookup in tool handlers.
+    """
+    if filesystem is None:
+        return ResourceRegistry()
+    return ResourceRegistry.build({Filesystem: filesystem})
 
 
 def _jittered_backoff(
@@ -710,6 +723,7 @@ def tool_execution(
         )
         # Get filesystem from workspace section if present
         filesystem = context.prompt.filesystem() if context.prompt else None
+        resources = _build_resources(filesystem=filesystem)
         tool_context = ToolContext(
             prompt=cast(PromptProtocol[Any], context.prompt),
             rendered_prompt=context.rendered_prompt,
@@ -717,7 +731,7 @@ def tool_execution(
             session=context.session,
             deadline=context.deadline,
             budget_tracker=context.budget_tracker,
-            filesystem=filesystem,
+            resources=resources,
         )
         tool_result = _invoke_tool_handler(
             handler=handler,
