@@ -88,6 +88,17 @@ class MarkdownSection(Section[MarkdownParamsT]):
             return self.render_with_template(self.summary, params, depth, number, path)
         return self.render_with_template(self.template, params, depth, number, path)
 
+    @override
+    def render_override(
+        self,
+        override_body: str,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        path: tuple[str, ...] = (),
+    ) -> str:
+        return self.render_with_template(override_body, params, depth, number, path)
+
     def render_with_template(
         self,
         template_text: str,

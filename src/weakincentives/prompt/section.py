@@ -38,7 +38,7 @@ from ._visibility import (
     VisibilitySelector,
     normalize_visibility_selector,
 )
-from .errors import PromptValidationError, SectionPath
+from .errors import PromptRenderError, PromptValidationError, SectionPath
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -136,6 +136,41 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
                 be None, in which case the section should compute effective
                 visibility using its default selector.
         """
+
+    def render_override(
+        self,
+        override_body: str,
+        params: SupportsDataclass | None,
+        depth: int,
+        number: str,
+        path: tuple[str, ...] = (),
+    ) -> str:
+        """Render the section using an override body instead of the default template.
+
+        Called by :class:`PromptRenderer` when an override body is provided for
+        this section. The default implementation raises an error; subclasses that
+        support template-based overrides (like :class:`MarkdownSection`) should
+        override this method.
+
+        Args:
+            override_body: The override template text to render instead of the
+                default body.
+            params: The parameters to use when rendering the override template.
+            depth: The nesting depth of this section (affects heading level).
+            number: The section number prefix (e.g., "1.2.").
+            path: The section path as a tuple of keys.
+
+        Returns:
+            The rendered markdown content.
+
+        Raises:
+            PromptRenderError: When the section does not support override rendering.
+        """
+        msg = (
+            f"Section '{self.key}' does not support override rendering. "
+            "Override render_override() in your section subclass to enable this."
+        )
+        raise PromptRenderError(msg, section_path=path)
 
     def placeholder_names(self) -> set[str]:
         """Return placeholder identifiers used by the section template."""
