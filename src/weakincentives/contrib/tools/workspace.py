@@ -10,53 +10,121 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Workspace section protocol for workspace digest optimization.
+"""Workspace and tool suite section protocols.
 
-This module provides a protocol that all workspace sections
-(VFS, Podman, Claude Agent SDK) should implement. The optimizer
-checks for this protocol to identify valid workspace sections.
+This module provides protocols that all capability sections should implement:
+
+- **ToolSuiteSection**: Base protocol for any section exposing tools. Provides
+  session binding, namespace prefixing for collision-free composition, and
+  standardized accepts_overrides handling.
+
+- **WorkspaceSection**: Extended protocol for sections that manage a filesystem.
+  Used by the WorkspaceDigestOptimizer to identify valid workspace sections.
+
+Both protocols are ``@runtime_checkable``, so use ``isinstance(section,
+ToolSuiteSection)`` or ``isinstance(section, WorkspaceSection)`` to test
+whether a section implements the required functionality.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
 if TYPE_CHECKING:
     from ...runtime.session import Session
     from .filesystem import Filesystem
 
-__all__ = ["WorkspaceSection"]
+__all__ = ["ToolSuiteSection", "WorkspaceSection"]
 
 
 @runtime_checkable
-class WorkspaceSection(Protocol):
-    """Protocol for workspace sections.
+class ToolSuiteSection(Protocol):
+    """Protocol for sections that expose tool suites.
 
-    All workspace sections (VfsToolsSection, PodmanSandboxSection,
-    ClaudeAgentWorkspaceSection) should implement this protocol.
-    This enables the WorkspaceDigestOptimizer to identify valid
-    workspace sections without importing adapter-specific code.
-
-    The protocol is ``@runtime_checkable``, so use ``isinstance(section,
-    WorkspaceSection)`` to test whether a section implements workspace
-    functionality.
+    All tool suite sections (VfsToolsSection, AstevalSection,
+    PlanningToolsSection, PodmanSandboxSection, WorkspaceDigestSection)
+    should implement this protocol. This enables consistent handling
+    of session binding, tool namespacing, and cloning across all
+    capability sections.
 
     The protocol requires:
-    - A session property returning the associated Session
-    - A filesystem property returning the Filesystem managed by this section
-    - A clone() method for creating copies with a new session
+
+    - **session**: Property returning the associated Session
+    - **namespace**: Property returning the tool namespace prefix (or None)
+    - **accepts_overrides**: Property indicating if overrides are accepted
+    - **clone()**: Method for creating copies with a new session
+
+    Example::
+
+        from weakincentives.contrib.tools import VfsToolsSection, VfsConfig
+
+        # Create section with namespace for collision-free composition
+        vfs = VfsToolsSection(
+            session=session,
+            config=VfsConfig(namespace="workspace"),
+        )
+
+        # Tools are prefixed: workspace_ls, workspace_read_file, etc.
+        assert vfs.namespace == "workspace"
+        assert vfs.accepts_overrides is False  # Default
+
+        # Clone preserves configuration
+        cloned = vfs.clone(session=new_session)
+        assert cloned.namespace == "workspace"
     """
 
     @property
     def session(self) -> Session:
-        """Return the session associated with this workspace section."""
+        """Return the session associated with this tool suite section."""
         ...
+
+    @property
+    def namespace(self) -> str | None:
+        """Return the tool namespace prefix, or None if no prefix is applied.
+
+        When a namespace is set, all tool names are prefixed with
+        ``{namespace}_`` to prevent collisions when composing multiple
+        tool suites in the same prompt.
+        """
+        ...
+
+    @property
+    def accepts_overrides(self) -> bool:
+        """Return True if this section accepts parameter overrides."""
+        ...
+
+    def clone(self, **kwargs: object) -> ToolSuiteSection:
+        """Clone the section with new session.
+
+        Args:
+            **kwargs: Must include ``session`` with the new Session instance.
+
+        Returns:
+            A new section instance bound to the provided session.
+        """
+        ...
+
+
+@runtime_checkable
+class WorkspaceSection(ToolSuiteSection, Protocol):
+    """Protocol for workspace sections that manage a filesystem.
+
+    Extends ToolSuiteSection with a filesystem property. All workspace
+    sections (VfsToolsSection, PodmanSandboxSection, ClaudeAgentWorkspaceSection)
+    should implement this protocol. This enables the WorkspaceDigestOptimizer
+    to identify valid workspace sections without importing adapter-specific code.
+
+    Additional requirement beyond ToolSuiteSection:
+
+    - **filesystem**: Property returning the Filesystem managed by this section
+    """
 
     @property
     def filesystem(self) -> Filesystem:
         """Return the filesystem managed by this workspace section."""
         ...
 
+    @override
     def clone(self, **kwargs: object) -> WorkspaceSection:
         """Clone the section with new session/bus."""
         ...

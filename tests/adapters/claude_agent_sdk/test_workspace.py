@@ -93,6 +93,14 @@ class TestClaudeAgentWorkspaceSectionCore:
         finally:
             section.cleanup()
 
+    def test_namespace_returns_none(self, session: Session) -> None:
+        """Verify namespace is always None since SDK uses native tools."""
+        section = ClaudeAgentWorkspaceSection(session=session)
+        try:
+            assert section.namespace is None
+        finally:
+            section.cleanup()
+
     def test_creates_empty_workspace_when_no_mounts(self, session: Session) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         try:

@@ -1311,3 +1311,53 @@ def test_tool_handler_rejects_missing_filesystem() -> None:
 
     with pytest.raises(ToolValidationError, match="No filesystem available"):
         handler(ListDirectoryParams(path="/"), context=context)
+
+
+# -----------------------------------------------------------------------------
+# Namespace and Config Tests
+# -----------------------------------------------------------------------------
+
+
+def test_namespace_property_returns_none_by_default() -> None:
+    """Test that namespace property returns None when not configured."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    assert section.namespace is None
+
+
+def test_namespace_with_config_prefixes_tool_names() -> None:
+    """Test that namespace config prefixes tool names."""
+    from weakincentives.contrib.tools import VfsConfig
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    config = VfsConfig(namespace="workspace")
+    section = VfsToolsSection(session=session, config=config)
+
+    assert section.namespace == "workspace"
+    tool_names = [tool.name for tool in section.tools()]
+    assert "workspace_ls" in tool_names
+    assert "workspace_read_file" in tool_names
+    assert "workspace_write_file" in tool_names
+    assert "workspace_edit_file" in tool_names
+    assert "workspace_glob" in tool_names
+    assert "workspace_grep" in tool_names
+    assert "workspace_rm" in tool_names
+
+
+def test_clone_preserves_namespace() -> None:
+    """Test that cloning preserves the namespace configuration."""
+    from weakincentives.contrib.tools import VfsConfig
+
+    bus = InProcessEventBus()
+    session1 = Session(bus=bus)
+    config = VfsConfig(namespace="workspace")
+    section = VfsToolsSection(session=session1, config=config)
+
+    session2 = Session(bus=bus)
+    cloned = section.clone(session=session2)
+
+    assert cloned.namespace == "workspace"
+    tool_names = [tool.name for tool in cloned.tools()]
+    assert "workspace_ls" in tool_names

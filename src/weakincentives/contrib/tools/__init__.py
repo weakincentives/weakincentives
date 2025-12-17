@@ -41,6 +41,7 @@ from importlib import import_module
 from typing import Any
 
 from .asteval import (
+    AstevalConfig,
     AstevalSection,
     EvalFileRead,
     EvalFileWrite,
@@ -71,6 +72,7 @@ from .filesystem import (
 from .planning import (
     AddStep,
     Plan,
+    PlanningConfig,
     PlanningStrategy,
     PlanningToolsSection,
     PlanStatus,
@@ -96,13 +98,14 @@ from .vfs import (
     ReadFileParams,
     ReadFileResult,
     RemoveParams,
+    VfsConfig,
     VfsFile,
     VfsPath,
     VfsToolsSection,
     WriteFile,
     WriteFileParams,
 )
-from .workspace import WorkspaceSection
+from .workspace import ToolSuiteSection, WorkspaceSection
 
 PodmanSandboxConfig: Any
 PodmanSandboxSection: Any
@@ -113,6 +116,7 @@ PodmanWorkspace: Any
 __all__ = [
     "READ_ENTIRE_FILE",
     "AddStep",
+    "AstevalConfig",
     "AstevalSection",
     "DeleteEntry",
     "EditFileParams",
@@ -140,6 +144,7 @@ __all__ = [
     "Plan",
     "PlanStatus",
     "PlanStep",
+    "PlanningConfig",
     "PlanningStrategy",
     "PlanningToolsSection",
     "PodmanSandboxConfig",
@@ -155,7 +160,9 @@ __all__ = [
     "RemoveParams",
     "SetupPlan",
     "StepStatus",
+    "ToolSuiteSection",
     "UpdateStep",
+    "VfsConfig",
     "VfsFile",
     "VfsPath",
     "VfsToolsSection",

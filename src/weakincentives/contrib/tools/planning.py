@@ -212,6 +212,47 @@ class PlanningStrategy(Enum):
     GOAL_DECOMPOSE_ROUTE_SYNTHESISE = "goal_decompose_route_synthesise"
 
 
+@FrozenDataclass()
+class PlanningConfig:
+    """Configuration for :class:`PlanningToolsSection`.
+
+    All constructor arguments for PlanningToolsSection are consolidated here.
+    This avoids accumulating long argument lists as the section evolves.
+
+    Example::
+
+        from weakincentives.contrib.tools import PlanningConfig, PlanningToolsSection
+
+        config = PlanningConfig(
+            namespace="project",  # Tools become project_planning_setup_plan, etc.
+            strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+        )
+        section = PlanningToolsSection(session=session, config=config)
+    """
+
+    strategy: PlanningStrategy = field(
+        default=PlanningStrategy.REACT,
+        metadata={"description": "Predefined guidance template for planning behavior."},
+    )
+    namespace: str | None = field(
+        default=None,
+        metadata={
+            "description": "Tool namespace prefix for collision-free composition."
+        },
+    )
+    accepts_overrides: bool = field(
+        default=False,
+        metadata={"description": "Whether the section accepts parameter overrides."},
+    )
+
+
+def _prefix_tool_name(name: str, namespace: str | None) -> str:
+    """Prefix a tool name with namespace if provided."""
+    if namespace is None:
+        return name
+    return f"{namespace}_{name}"
+
+
 _PLANNING_SECTION_HEADER: Final[str] = (
     "Use planning tools for multi-step or stateful work.\n"
 )
@@ -250,32 +291,72 @@ def _template_for_strategy(strategy: PlanningStrategy) -> str:
 
 
 class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
-    """Prompt section exposing the planning tool suite."""
+    """Prompt section exposing the planning tool suite.
+
+    Use :class:`PlanningConfig` to consolidate configuration::
+
+        config = PlanningConfig(
+            namespace="project",
+            strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+        )
+        section = PlanningToolsSection(session=session, config=config)
+
+    Individual parameters are still accepted for backward compatibility,
+    but config takes precedence when provided.
+    """
 
     def __init__(
         self,
         *,
         session: Session,
+        config: PlanningConfig | None = None,
         strategy: PlanningStrategy = PlanningStrategy.REACT,
         accepts_overrides: bool = False,
     ) -> None:
-        self._strategy = strategy
+        # Resolve config - explicit config takes precedence
+        if config is not None:
+            resolved_strategy = config.strategy
+            resolved_namespace = config.namespace
+            resolved_accepts_overrides = config.accepts_overrides
+        else:
+            resolved_strategy = strategy
+            resolved_namespace = None
+            resolved_accepts_overrides = accepts_overrides
+
+        self._strategy = resolved_strategy
+        self._namespace = resolved_namespace
         self._session = session
         self._initialize_session(session)
 
-        tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
+        # Store config for cloning
+        self._config = PlanningConfig(
+            strategy=self._strategy,
+            namespace=self._namespace,
+            accepts_overrides=resolved_accepts_overrides,
+        )
+
+        tools = _build_tools(
+            section=self,
+            accepts_overrides=resolved_accepts_overrides,
+            namespace=self._namespace,
+        )
         super().__init__(
             title="Planning Tools",
             key="planning.tools",
-            template=_template_for_strategy(strategy),
+            template=_template_for_strategy(resolved_strategy),
             default_params=_PlanningSectionParams(),
             tools=tools,
-            accepts_overrides=accepts_overrides,
+            accepts_overrides=resolved_accepts_overrides,
         )
 
     @property
     def session(self) -> Session:
         return self._session
+
+    @property
+    def namespace(self) -> str | None:
+        """Return the tool namespace prefix, or None if no prefix is applied."""
+        return self._namespace
 
     @staticmethod
     def _initialize_session(session: Session) -> None:
@@ -296,8 +377,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             raise TypeError(msg)
         return PlanningToolsSection(
             session=session,
-            strategy=self._strategy,
-            accepts_overrides=self.accepts_overrides,
+            config=self._config,
         )
 
     @override
@@ -327,13 +407,14 @@ def _build_tools(
     *,
     section: PlanningToolsSection,
     accepts_overrides: bool,
+    namespace: str | None = None,
 ) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
     suite = _PlanningToolSuite(section=section)
     return cast(
         tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
         (
             Tool[SetupPlan, Plan](
-                name="planning_setup_plan",
+                name=_prefix_tool_name("planning_setup_plan", namespace),
                 description=(
                     "Create or replace the session plan with an objective and "
                     "optional initial steps."
@@ -370,7 +451,7 @@ def _build_tools(
                 ),
             ),
             Tool[AddStep, Plan](
-                name="planning_add_step",
+                name=_prefix_tool_name("planning_add_step", namespace),
                 description="Append one or more steps to the active plan.",
                 handler=suite.add_step,
                 accepts_overrides=accepts_overrides,
@@ -399,7 +480,7 @@ def _build_tools(
                 ),
             ),
             Tool[UpdateStep, Plan](
-                name="planning_update_step",
+                name=_prefix_tool_name("planning_update_step", namespace),
                 description="Update a step's title or status by its ID.",
                 handler=suite.update_step,
                 accepts_overrides=accepts_overrides,
@@ -441,7 +522,7 @@ def _build_tools(
                 ),
             ),
             Tool[ReadPlan, Plan](
-                name="planning_read_plan",
+                name=_prefix_tool_name("planning_read_plan", namespace),
                 description="Return the latest plan snapshot.",
                 handler=suite.read_plan,
                 accepts_overrides=accepts_overrides,
@@ -594,6 +675,7 @@ __all__ = [
     "Plan",
     "PlanStatus",
     "PlanStep",
+    "PlanningConfig",
     "PlanningStrategy",
     "PlanningToolsSection",
     "ReadPlan",

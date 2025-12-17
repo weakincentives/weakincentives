@@ -1079,3 +1079,59 @@ def test_execute_with_timeout_propagates_error(
 def test_merge_globals_combines_mappings() -> None:
     merged = asteval_module._merge_globals({"alpha": 1}, {"beta": 2})
     assert merged == {"alpha": 1, "beta": 2}
+
+
+# -----------------------------------------------------------------------------
+# Namespace and Config Tests
+# -----------------------------------------------------------------------------
+
+
+def test_asteval_namespace_property_returns_none_by_default() -> None:
+    """Test that namespace property returns None when not configured."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = AstevalSection(session=session)
+    assert section.namespace is None
+
+
+def test_asteval_namespace_with_config_prefixes_tool_names() -> None:
+    """Test that namespace config prefixes tool names."""
+    from weakincentives.contrib.tools import AstevalConfig
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    config = AstevalConfig(namespace="sandbox")
+    section = AstevalSection(session=session, config=config)
+
+    assert section.namespace == "sandbox"
+    tool_names = [tool.name for tool in section.tools()]
+    assert "sandbox_evaluate_python" in tool_names
+
+
+def test_asteval_clone_preserves_namespace() -> None:
+    """Test that cloning preserves the namespace configuration."""
+    from weakincentives.contrib.tools import AstevalConfig
+
+    bus = InProcessEventBus()
+    session1 = Session(bus=bus)
+    config = AstevalConfig(namespace="sandbox")
+    section = AstevalSection(session=session1, config=config)
+
+    session2 = Session(bus=bus)
+    cloned = section.clone(session=session2)
+
+    assert cloned.namespace == "sandbox"
+    tool_names = [tool.name for tool in cloned.tools()]
+    assert "sandbox_evaluate_python" in tool_names
+
+
+def test_asteval_filesystem_property_returns_filesystem() -> None:
+    """Test that the filesystem property returns the filesystem instance."""
+    from weakincentives.contrib.tools import Filesystem
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = AstevalSection(session=session)
+
+    fs = section.filesystem
+    assert isinstance(fs, Filesystem)
