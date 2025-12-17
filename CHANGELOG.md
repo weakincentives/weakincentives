@@ -4,6 +4,8 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+## v0.15.0 - 2025-12-17
+
 ### Added
 
 - **ResourceRegistry for typed runtime resources.** `ToolContext` now exposes a
@@ -14,10 +16,15 @@ Release highlights for weakincentives.
   ```python
   # Access via typed registry
   fs = context.resources.get(Filesystem)
+  budget = context.resources.get(BudgetTracker)
 
   # Sugar property for common resources
   fs = context.filesystem  # equivalent
   ```
+
+  `BudgetTracker` is now automatically registered in the `ResourceRegistry`
+  during adapter evaluation, making token/time budget tracking available to
+  all tool handlers.
 
 - Local link checker in `make markdown-check` validates that Markdown links to
   local files point to existing targets. Fenced code blocks and inline code
