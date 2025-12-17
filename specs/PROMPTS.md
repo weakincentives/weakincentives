@@ -222,13 +222,17 @@ template = PromptTemplate[Output](
 Sections can render with `SUMMARY` visibility to reduce token usage. The
 `open_sections` tool lets models request expanded content.
 
-### Section Visibility
+See `specs/PROGRESSIVE_DISCLOSURE.md` for the complete specification covering:
+
+- Visibility management and session state
+- The `open_sections` tool and validation
+- Exception-based expansion for tool-bearing sections
+- Context file writing for content-only sections
+- Summary suffix formatting
+
+### Quick Reference
 
 ```python
-class SectionVisibility(Enum):
-    FULL = auto()
-    SUMMARY = auto()
-
 section = MarkdownSection[Params](
     ...,
     template="Full detailed content...",
@@ -237,54 +241,11 @@ section = MarkdownSection[Params](
 )
 ```
 
-### Automatic Tool Registration
+When any section has `SUMMARY` visibility, the framework injects `open_sections`.
+The tool branches based on section content:
 
-When any section has `SUMMARY` visibility, the framework injects the
-`open_sections` tool:
-
-```python
-@dataclass
-class OpenSectionsParams:
-    section_keys: tuple[str, ...]  # Dot notation for nested sections
-    reason: str                     # Why expansion is needed
-```
-
-### Exception-Based Signaling
-
-The tool raises `VisibilityExpansionRequired` rather than returning a result:
-
-```python
-@dataclass
-class VisibilityExpansionRequired(PromptError):
-    requested_overrides: Mapping[tuple[str, ...], SectionVisibility]
-    reason: str
-    section_keys: tuple[str, ...]
-```
-
-### Caller Pattern
-
-```python
-prompt = Prompt(template).bind(*params)
-
-while True:
-    try:
-        response = adapter.evaluate(prompt, session=session)
-        break
-    except VisibilityExpansionRequired as e:
-        for path, visibility in e.requested_overrides.items():
-            session[VisibilityOverrides].apply(
-                SetVisibilityOverride(path=path, visibility=visibility)
-            )
-```
-
-### Summary Suffix
-
-Summarized sections automatically append:
-
-```
----
-[This section is summarized. To view full content, call `open_sections` with key "context".]
-```
+- **Tool-bearing sections**: Raises `VisibilityExpansionRequired` for re-render
+- **Content-only sections**: Writes to `context/*.md` and returns file paths
 
 ## Cloning
 
@@ -355,5 +316,6 @@ result: TaskResult = parse_structured_output(response_text, rendered)
 - **Dataclass-only inputs**: Non-dataclass params are rejected
 - **Limited templating**: Only `Template.substitute` and boolean `enabled`
 - **No nested prompts**: Use `children` for reuse, not prompt embedding
-- **Single-turn expansion**: Progressive disclosure halts the current turn
 - **No partial expansion**: Sections open fully or remain summarized
+
+See `specs/PROGRESSIVE_DISCLOSURE.md` for progressive disclosure limitations.

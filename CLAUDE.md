@@ -146,6 +146,7 @@ Consult these specs before modifying related code:
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, metrics |
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
+| `specs/PROGRESSIVE_DISCLOSURE.md` | Visibility management, open_sections tool, context files |
 | `specs/PROMPTS.md` | Prompt system, composition, structured output |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
