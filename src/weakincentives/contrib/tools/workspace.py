@@ -15,8 +15,7 @@
 This module provides protocols that all capability sections should implement:
 
 - **ToolSuiteSection**: Base protocol for any section exposing tools. Provides
-  session binding, namespace prefixing for collision-free composition, and
-  standardized accepts_overrides handling.
+  session binding and standardized accepts_overrides handling.
 
 - **WorkspaceSection**: Extended protocol for sections that manage a filesystem.
   Used by the WorkspaceDigestOptimizer to identify valid workspace sections.
@@ -44,8 +43,7 @@ class ToolSuiteSection(Protocol):
     All tool suite sections (VfsToolsSection, AstevalSection,
     PlanningToolsSection, PodmanSandboxSection, WorkspaceDigestSection)
     should implement this protocol. This enables consistent handling
-    of session binding, tool namespacing, and cloning across all
-    capability sections.
+    of session binding and cloning across all capability sections.
 
     The protocol requires:
 
