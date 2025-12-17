@@ -792,582 +792,332 @@ assert fs.exists("src/main.py")  # Hydrated from host mount
 
 ## Filesystem Snapshots
 
-Filesystem snapshots capture the complete state of a workspace at a point in
-time. Snapshots enable rollback, branching exploration, and coordination with
-session state management.
+Filesystem snapshots capture the state of a workspace at a point in time,
+enabling rollback after failed tool invocations or exploratory changes.
 
 ### Guiding Principles
 
-- **Immutable captures**: Snapshots are read-only; modifications create new
-  snapshots.
-- **Backend-appropriate semantics**: Each backend implements snapshots using
-  the most efficient mechanism available.
-- **Copy-on-write where possible**: Minimize memory and storage overhead by
-  sharing unchanged data between snapshots.
-- **Session coordination**: Filesystem snapshots integrate with session
-  snapshots for unified state management.
+- **Session-storable**: Snapshots are frozen dataclasses that can be stored in
+  session state and serialized.
+- **Git-based COW**: Use git's content-addressed storage for copy-on-write
+  semantics on disk-backed filesystems.
+- **Tool-invocation granularity**: Snapshots are taken between tool calls; we
+  do not track sub-operation changes.
 
-### Snapshot Protocol
+### FilesystemSnapshot Dataclass
+
+The snapshot is a frozen dataclass suitable for session storage:
 
 ```python
-from typing import Protocol
-from datetime import datetime
-from uuid import UUID
+@dataclass(slots=True, frozen=True)
+class FilesystemSnapshot:
+    """Immutable capture of filesystem state, storable in session."""
 
-class FilesystemSnapshot(Protocol):
-    """Immutable capture of filesystem state."""
+    snapshot_id: UUID
+    created_at: datetime
+    commit_ref: str  # Git commit hash (for disk) or version ID (for memory)
+    root_path: str   # Filesystem root at snapshot time
+    tag: str | None = None  # Optional human-readable label
+```
 
-    @property
-    def snapshot_id(self) -> UUID:
-        """Unique identifier for this snapshot."""
-        ...
+The `commit_ref` field stores a git commit hash for `HostFilesystem` and
+`PodmanFilesystem`, or an internal version identifier for `InMemoryFilesystem`.
 
-    @property
-    def created_at(self) -> datetime:
-        """Timestamp when the snapshot was captured."""
-        ...
+### SnapshotableFilesystem Protocol
 
-    @property
-    def parent_id(self) -> UUID | None:
-        """ID of the parent snapshot, if created from another snapshot."""
-        ...
-
-    @property
-    def file_count(self) -> int:
-        """Number of files in the snapshot."""
-        ...
-
-    @property
-    def total_bytes(self) -> int:
-        """Total size of all files in bytes."""
-        ...
-
-
+```python
 class SnapshotableFilesystem(Filesystem, Protocol):
-    """Filesystem that supports snapshot operations."""
+    """Filesystem that supports snapshot and restore operations."""
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
-        """Capture the current filesystem state.
+        """Capture current filesystem state.
 
         Args:
             tag: Optional human-readable label for the snapshot.
 
         Returns:
-            Immutable snapshot of the current state.
+            Immutable snapshot that can be stored in session state.
         """
         ...
 
     def restore(self, snapshot: FilesystemSnapshot) -> None:
-        """Restore filesystem to a previous snapshot state.
+        """Restore filesystem to a previous snapshot.
 
         Args:
             snapshot: The snapshot to restore.
 
         Raises:
-            ValueError: Snapshot is incompatible with this filesystem.
-            RuntimeError: Restore operation failed.
+            SnapshotRestoreError: Restore failed (e.g., incompatible snapshot).
         """
-        ...
-
-    def diff(
-        self,
-        base: FilesystemSnapshot,
-        target: FilesystemSnapshot | None = None,
-    ) -> FilesystemDiff:
-        """Compare two snapshots or a snapshot with current state.
-
-        Args:
-            base: The base snapshot for comparison.
-            target: The target snapshot. If None, compares with current state.
-
-        Returns:
-            Diff describing changes between base and target.
-        """
-        ...
-
-    @property
-    def current_snapshot_id(self) -> UUID | None:
-        """ID of the snapshot this filesystem was restored from, if any."""
-        ...
-
-
-class FilesystemDiff(Protocol):
-    """Changes between two filesystem states."""
-
-    @property
-    def added(self) -> tuple[str, ...]:
-        """Paths of files added in target."""
-        ...
-
-    @property
-    def modified(self) -> tuple[str, ...]:
-        """Paths of files modified in target."""
-        ...
-
-    @property
-    def deleted(self) -> tuple[str, ...]:
-        """Paths of files deleted in target."""
-        ...
-
-    @property
-    def unchanged_count(self) -> int:
-        """Number of files unchanged between snapshots."""
         ...
 ```
 
-### Copy-on-Write Semantics
+### Git-Based Copy-on-Write
 
-Copy-on-write (COW) minimizes memory and storage overhead by sharing unchanged
-data between the active filesystem and its snapshots. The feasibility of true
-COW depends on the backend implementation.
+Git provides natural copy-on-write semantics through content-addressed storage.
+When files are unchanged between snapshots, they share the same blob objects.
+This is the unified strategy for all disk-backed filesystems.
 
 ```mermaid
-flowchart TB
-    subgraph COW["Copy-on-Write Model"]
-        Active["Active Filesystem"]
-        Snap1["Snapshot A"]
-        Snap2["Snapshot B"]
-        Shared["Shared Immutable Data"]
-        Delta1["Delta A"]
-        Delta2["Delta B"]
+flowchart LR
+    subgraph Git["Git Object Store"]
+        Blob1["blob: config.py v1"]
+        Blob2["blob: config.py v2"]
+        Blob3["blob: app.py"]
     end
 
-    Active --> Shared
-    Snap1 --> Shared
-    Snap2 --> Shared
-    Active --> Delta1
-    Active --> Delta2
-    Snap1 --> Delta1
-    Snap2 --> Delta2
+    subgraph Commits["Snapshots as Commits"]
+        C1["commit A"] --> Blob1
+        C1 --> Blob3
+        C2["commit B"] --> Blob2
+        C2 --> Blob3
+    end
+
+    Note["app.py shared<br/>between snapshots"]
 ```
 
-#### InMemoryFilesystem: Full COW Support
+**Why Git:**
 
-The in-memory backend achieves COW through immutable data structures and
-structural sharing.
+- **Content-addressed**: Identical files share storage automatically
+- **Portable**: Works on any filesystem without special kernel support
+- **Well-understood**: Standard tooling for inspection and debugging
+- **Atomic commits**: Snapshot creation is atomic
 
-**Implementation Strategy:**
+### InMemoryFilesystem Implementation
+
+For in-memory filesystems, we use Python's structural sharing rather than git:
 
 ```python
-@dataclass(slots=True, frozen=True)
-class _ImmutableFile:
-    """Immutable file content with identity-based sharing."""
-    content: str
-    created_at: datetime
-    modified_at: datetime
+@dataclass(slots=True)
+class InMemoryFilesystem:
+    """In-memory filesystem with snapshot support via structural sharing."""
 
-    def with_content(self, new_content: str, modified_at: datetime) -> "_ImmutableFile":
-        """Create a new file with updated content, preserving created_at."""
-        return _ImmutableFile(
-            content=new_content,
-            created_at=self.created_at,
-            modified_at=modified_at,
+    _files: dict[str, _InMemoryFile]
+    _directories: set[str]
+    _snapshots: dict[str, _InMemoryState]  # commit_ref -> frozen state
+    _version: int = 0
+
+    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
+        """Capture state by freezing current dict references."""
+        self._version += 1
+        commit_ref = f"mem-{self._version}"
+
+        # Freeze current state (O(n) dict copy, but values are shared refs)
+        frozen_state = _InMemoryState(
+            files=types.MappingProxyType(dict(self._files)),
+            directories=frozenset(self._directories),
+        )
+        self._snapshots[commit_ref] = frozen_state
+
+        return FilesystemSnapshot(
+            snapshot_id=uuid4(),
+            created_at=datetime.now(UTC),
+            commit_ref=commit_ref,
+            root_path="/",
+            tag=tag,
         )
 
+    def restore(self, snapshot: FilesystemSnapshot) -> None:
+        """Restore from frozen state."""
+        if snapshot.commit_ref not in self._snapshots:
+            raise SnapshotRestoreError(f"Unknown snapshot: {snapshot.commit_ref}")
 
-@dataclass(slots=True, frozen=True)
-class InMemoryFilesystemSnapshot:
-    """Immutable snapshot sharing data with parent filesystem."""
-
-    snapshot_id: UUID
-    created_at: datetime
-    parent_id: UUID | None
-    tag: str | None
-    # Frozen mappings share references with the active filesystem
-    files: Mapping[str, _ImmutableFile]
-    directories: frozenset[str]
-
-    @property
-    def file_count(self) -> int:
-        return len(self.files)
-
-    @property
-    def total_bytes(self) -> int:
-        return sum(len(f.content.encode("utf-8")) for f in self.files.values())
+        frozen = self._snapshots[snapshot.commit_ref]
+        self._files = dict(frozen.files)  # Mutable copy, shared values
+        self._directories = set(frozen.directories)
 ```
 
-**COW Behavior:**
+File content strings are shared between the active filesystem and snapshots.
+Only modified files allocate new memory.
 
-1. **Snapshot creation**: O(1) - creates frozen view of current dict/set
-2. **Read after snapshot**: O(1) - reads from shared reference
-3. **Write after snapshot**: O(1) amortized - only modified entries are copied
-4. **Memory overhead**: Only delta from snapshot consumes additional memory
+### HostFilesystem Implementation
+
+The host filesystem uses git to manage snapshots:
 
 ```python
-# Example: COW in action
-fs = InMemoryFilesystem()
-fs.write("large_file.txt", "x" * 1_000_000)  # 1MB file
+@dataclass(slots=True)
+class HostFilesystem:
+    """Host filesystem with git-based snapshots."""
 
-snap1 = fs.snapshot()  # O(1), shares reference to large_file
+    _root: str
+    _git_initialized: bool = False
 
-fs.write("small_file.txt", "hello")  # Only new entry allocated
-# large_file.txt still shared between fs and snap1
+    def _ensure_git(self) -> None:
+        """Initialize git repository if needed."""
+        if self._git_initialized:
+            return
+        git_dir = Path(self._root) / ".git"
+        if not git_dir.exists():
+            subprocess.run(
+                ["git", "init"],
+                cwd=self._root,
+                check=True,
+                capture_output=True,
+            )
+            # Configure for snapshot use
+            subprocess.run(
+                ["git", "config", "user.email", "wink@localhost"],
+                cwd=self._root,
+                check=True,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "WINK Snapshots"],
+                cwd=self._root,
+                check=True,
+                capture_output=True,
+            )
+        self._git_initialized = True
 
-snap2 = fs.snapshot()  # O(1), both files shared
-fs.write("large_file.txt", "y" * 1_000_000)  # New allocation for modified file
-# snap1 and snap2 still reference original large_file content
+    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
+        """Create snapshot as a git commit."""
+        self._ensure_git()
+
+        # Stage all changes
+        subprocess.run(
+            ["git", "add", "-A"],
+            cwd=self._root,
+            check=True,
+            capture_output=True,
+        )
+
+        # Commit (allow empty for idempotent snapshots)
+        message = tag or f"snapshot-{datetime.now(UTC).isoformat()}"
+        subprocess.run(
+            ["git", "commit", "-m", message, "--allow-empty"],
+            cwd=self._root,
+            capture_output=True,
+        )
+
+        # Get commit hash
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=self._root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        commit_ref = result.stdout.strip()
+
+        return FilesystemSnapshot(
+            snapshot_id=uuid4(),
+            created_at=datetime.now(UTC),
+            commit_ref=commit_ref,
+            root_path=self._root,
+            tag=tag,
+        )
+
+    def restore(self, snapshot: FilesystemSnapshot) -> None:
+        """Restore to a git commit."""
+        self._ensure_git()
+
+        # Hard reset to the commit
+        result = subprocess.run(
+            ["git", "reset", "--hard", snapshot.commit_ref],
+            cwd=self._root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise SnapshotRestoreError(
+                f"Failed to restore snapshot: {result.stderr}"
+            )
 ```
 
-#### HostFilesystem: Tiered COW Support
+### PodmanFilesystem Implementation
 
-The host filesystem backend offers multiple snapshot strategies with varying
-COW capabilities, selected based on filesystem support and configuration.
-
-**Strategy Hierarchy:**
+The Podman backend uses the same git strategy on its overlay directory. Since
+the overlay directory is bind-mounted into the container, git commits capture
+the workspace state as seen by both the host and container.
 
 ```python
-class SnapshotStrategy(Enum):
-    """Snapshot implementation strategies ordered by preference."""
+class PodmanSandboxSection:
+    """Podman section with git-based overlay snapshots."""
 
-    REFLINK = "reflink"      # Best: True COW via filesystem reflinks
-    GIT = "git"              # Good: Version control with deduplication
-    OVERLAY = "overlay"      # Fair: OverlayFS for Linux with privileges
-    ARCHIVE = "archive"      # Fallback: Tar archives (no COW)
-    COPY = "copy"            # Last resort: Full directory copy (no COW)
+    def __init__(self, ...):
+        # Overlay directory is a HostFilesystem with git snapshots
+        self._overlay_path = self._create_overlay()
+        self._filesystem = HostFilesystem(
+            _root=str(self._overlay_path),
+            _mount_point="/workspace",
+        )
 
+    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
+        """Snapshot the overlay directory via git."""
+        return self._filesystem.snapshot(tag=tag)
 
-@dataclass(slots=True, frozen=True)
-class HostFilesystemConfig:
-    """Configuration for host filesystem snapshots."""
-
-    snapshot_strategy: SnapshotStrategy | None = None  # Auto-detect if None
-    snapshot_dir: str | None = None  # Directory for snapshot storage
-    max_snapshots: int = 10  # Maximum retained snapshots
+    def restore(self, snapshot: FilesystemSnapshot) -> None:
+        """Restore overlay directory from git commit."""
+        self._filesystem.restore(snapshot)
 ```
 
-**Strategy Details:**
-
-| Strategy | COW | Storage | Speed | Requirements |
-|----------|-----|---------|-------|--------------|
-| Reflink | True | Minimal | Fast | btrfs, XFS, APFS |
-| Git | Partial | Efficient | Medium | Git repository |
-| Overlay | True | Minimal | Fast | Linux, root |
-| Archive | No | High | Slow | None |
-| Copy | No | High | Slow | None |
-
-**Reflink Implementation (True COW):**
-
-```python
-def _snapshot_via_reflink(self, dest: Path) -> None:
-    """Create snapshot using copy-on-write reflinks."""
-    import subprocess
-
-    dest.mkdir(parents=True, exist_ok=True)
-    # cp --reflink=always creates COW copies on supported filesystems
-    result = subprocess.run(
-        ["cp", "-a", "--reflink=always", f"{self._root}/.", str(dest)],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"Reflink copy failed: {result.stderr}")
-```
-
-**Git Implementation (Deduplicated):**
-
-```python
-def _snapshot_via_git(self, tag: str | None) -> HostFilesystemSnapshot:
-    """Create snapshot as a git commit."""
-    import subprocess
-
-    # Initialize repo if needed
-    git_dir = Path(self._root) / ".git"
-    if not git_dir.exists():
-        subprocess.run(["git", "init"], cwd=self._root, check=True)
-
-    # Stage and commit all changes
-    subprocess.run(["git", "add", "-A"], cwd=self._root, check=True)
-    message = tag or f"Snapshot {datetime.now(UTC).isoformat()}"
-    result = subprocess.run(
-        ["git", "commit", "-m", message, "--allow-empty"],
-        cwd=self._root,
-        capture_output=True,
-        text=True,
-    )
-
-    # Get commit hash as snapshot ID
-    commit_hash = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        cwd=self._root,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-
-    return HostFilesystemSnapshot(
-        snapshot_id=UUID(int=int(commit_hash[:32], 16)),
-        created_at=datetime.now(UTC),
-        strategy=SnapshotStrategy.GIT,
-        reference=commit_hash,
-        # ...
-    )
-```
-
-#### PodmanFilesystem: Container-Native Snapshots
-
-The Podman backend leverages container and overlay filesystem capabilities
-for efficient snapshots.
-
-**Strategy Options:**
-
-1. **Overlay Directory Snapshot**: Copy-on-write via filesystem
-2. **Container Checkpoint**: Full container state via CRIU
-3. **Container Commit**: Create image from container state
-
-```python
-class PodmanSnapshotStrategy(Enum):
-    """Snapshot strategies for Podman workspaces."""
-
-    OVERLAY_REFLINK = "overlay_reflink"  # Reflink copy of overlay dir
-    OVERLAY_COPY = "overlay_copy"        # Full copy of overlay dir
-    CONTAINER_COMMIT = "container_commit"  # podman commit
-    CONTAINER_CHECKPOINT = "checkpoint"  # CRIU checkpoint (experimental)
-
-
-@dataclass(slots=True, frozen=True)
-class PodmanFilesystemSnapshot:
-    """Snapshot of Podman workspace filesystem state."""
-
-    snapshot_id: UUID
-    created_at: datetime
-    parent_id: UUID | None
-    strategy: PodmanSnapshotStrategy
-    # Strategy-specific reference
-    overlay_path: str | None = None  # For overlay strategies
-    image_id: str | None = None      # For container_commit
-    checkpoint_path: str | None = None  # For checkpoint
-```
-
-**Overlay Directory Snapshot:**
-
-```python
-def _snapshot_overlay(self) -> PodmanFilesystemSnapshot:
-    """Snapshot the overlay directory (workspace files only)."""
-    snapshot_id = uuid4()
-    snapshot_dir = self._snapshot_root / str(snapshot_id)
-
-    # Attempt reflink copy first
-    try:
-        self._copy_overlay_reflink(self._overlay_path, snapshot_dir)
-        strategy = PodmanSnapshotStrategy.OVERLAY_REFLINK
-    except (OSError, subprocess.CalledProcessError):
-        # Fall back to regular copy
-        shutil.copytree(self._overlay_path, snapshot_dir)
-        strategy = PodmanSnapshotStrategy.OVERLAY_COPY
-
-    return PodmanFilesystemSnapshot(
-        snapshot_id=snapshot_id,
-        created_at=datetime.now(UTC),
-        parent_id=self._current_snapshot_id,
-        strategy=strategy,
-        overlay_path=str(snapshot_dir),
-    )
-```
-
-**Container Commit Snapshot:**
-
-```python
-def _snapshot_container_commit(self) -> PodmanFilesystemSnapshot:
-    """Create snapshot by committing container to image."""
-    snapshot_id = uuid4()
-    image_name = f"wink-snapshot-{snapshot_id}"
-
-    # Commit current container state to image
-    result = subprocess.run(
-        ["podman", "commit", self._container_id, image_name],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-
-    return PodmanFilesystemSnapshot(
-        snapshot_id=snapshot_id,
-        created_at=datetime.now(UTC),
-        parent_id=self._current_snapshot_id,
-        strategy=PodmanSnapshotStrategy.CONTAINER_COMMIT,
-        image_id=result.stdout.strip(),
-    )
-```
+**Granularity note**: Container modifications between tool invocations are
+captured when `snapshot()` is called. Changes made during a tool invocation
+are not tracked at finer granularity—this is intentional, as tool-invocation
+boundaries are the meaningful restore points.
 
 ### Session Integration
 
-Filesystem snapshots coordinate with session snapshots to provide unified
-state management. When a session snapshot is created, the associated
-filesystem snapshot ID is recorded.
+`FilesystemSnapshot` is a frozen dataclass designed for session storage:
 
 ```python
-@dataclass(slots=True, frozen=True)
-class FilesystemSnapshotRef:
-    """Reference to a filesystem snapshot stored in session state."""
+# Register reducer for filesystem snapshots
+session[FilesystemSnapshot].register(FilesystemSnapshot, append_all)
 
-    filesystem_key: str  # Key identifying the filesystem (e.g., "vfs.tools")
-    snapshot_id: UUID
-    backend_type: str  # "in_memory", "host", "podman"
+# Create and store snapshot
+fs_snapshot = filesystem.snapshot(tag="before-refactor")
+session[FilesystemSnapshot].append(fs_snapshot)
 
-
-# Session slice for tracking filesystem snapshots
-session[FilesystemSnapshotRef].register(FilesystemSnapshotRef, append_all)
+# Later: retrieve and restore
+snapshots = session[FilesystemSnapshot].all()
+filesystem.restore(snapshots[-1])
 ```
 
-**Coordinated Snapshot Creation:**
+For coordinated session and filesystem restore:
 
 ```python
-def create_unified_snapshot(
+def rollback_to(
     session: Session,
-    filesystem: SnapshotableFilesystem,
-    filesystem_key: str,
-) -> tuple[Snapshot, FilesystemSnapshot]:
-    """Create coordinated session and filesystem snapshots."""
-
-    # Capture filesystem state first
-    fs_snapshot = filesystem.snapshot()
-
-    # Record reference in session
-    ref = FilesystemSnapshotRef(
-        filesystem_key=filesystem_key,
-        snapshot_id=fs_snapshot.snapshot_id,
-        backend_type=type(filesystem).__name__,
-    )
-    session[FilesystemSnapshotRef].append(ref)
-
-    # Create session snapshot (includes the reference)
-    session_snapshot = session.snapshot()
-
-    return session_snapshot, fs_snapshot
-```
-
-**Coordinated Restore:**
-
-```python
-def restore_unified_snapshot(
-    session: Session,
-    filesystem: SnapshotableFilesystem,
     session_snapshot: Snapshot,
-    fs_snapshot: FilesystemSnapshot,
+    filesystem: SnapshotableFilesystem,
 ) -> None:
-    """Restore both session and filesystem from snapshots."""
+    """Restore both session state and filesystem."""
+    # Find the filesystem snapshot from that session state
+    fs_snapshots = session_snapshot.slices.get(FilesystemSnapshot, ())
+    if fs_snapshots:
+        filesystem.restore(fs_snapshots[-1])
 
-    # Restore filesystem first (may fail)
-    filesystem.restore(fs_snapshot)
-
-    # Then restore session state
+    # Restore session state
     session.rollback(session_snapshot)
-```
-
-### Snapshot Lifecycle
-
-```mermaid
-stateDiagram-v2
-    [*] --> Active: Create filesystem
-
-    Active --> Snapshot1: snapshot()
-    Snapshot1 --> Active: Continue working
-
-    Active --> Snapshot2: snapshot()
-    Snapshot2 --> Active: Continue working
-
-    Active --> Restored: restore(Snapshot1)
-    Restored --> Active: Continue from restored state
-
-    Active --> Diff: diff(Snapshot1, Snapshot2)
-    Diff --> Active: Review changes
-
-    Snapshot1 --> Pruned: Retention policy
-    Snapshot2 --> Pruned: Retention policy
-    Pruned --> [*]
-```
-
-### Snapshot Storage and Retention
-
-Backends manage snapshot storage according to configured policies:
-
-```python
-@dataclass(slots=True, frozen=True)
-class SnapshotRetentionPolicy:
-    """Policy for automatic snapshot cleanup."""
-
-    max_count: int = 10          # Maximum snapshots to retain
-    max_age_hours: int | None = None  # Maximum age before pruning
-    keep_tagged: bool = True     # Preserve tagged snapshots
-
-
-class SnapshotStore(Protocol):
-    """Storage backend for filesystem snapshots."""
-
-    def save(self, snapshot: FilesystemSnapshot) -> None:
-        """Persist a snapshot."""
-        ...
-
-    def load(self, snapshot_id: UUID) -> FilesystemSnapshot:
-        """Retrieve a snapshot by ID."""
-        ...
-
-    def list(self) -> Sequence[FilesystemSnapshot]:
-        """List all stored snapshots."""
-        ...
-
-    def delete(self, snapshot_id: UUID) -> None:
-        """Remove a snapshot."""
-        ...
-
-    def prune(self, policy: SnapshotRetentionPolicy) -> int:
-        """Apply retention policy, return count of pruned snapshots."""
-        ...
 ```
 
 ### Error Handling
 
-Snapshot operations can fail due to storage limits, permission issues, or
-backend-specific constraints.
-
 ```python
 class SnapshotError(WinkError, RuntimeError):
-    """Base class for snapshot-related errors."""
-
-
-class SnapshotCreationError(SnapshotError):
-    """Failed to create a snapshot."""
+    """Base class for snapshot errors."""
 
 
 class SnapshotRestoreError(SnapshotError):
-    """Failed to restore from a snapshot."""
-
-
-class SnapshotNotFoundError(SnapshotError):
-    """Requested snapshot does not exist."""
-
-
-class SnapshotIncompatibleError(SnapshotError):
-    """Snapshot is incompatible with the target filesystem."""
+    """Failed to restore from snapshot."""
 ```
 
 ### Usage Example
 
 ```python
-from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+from weakincentives.contrib.tools.filesystem import HostFilesystem
 
 # Create filesystem with snapshot support
-fs = InMemoryFilesystem()
+fs = HostFilesystem(_root="/workspace/project")
 
 # Initial state
 fs.write("config.py", "DEBUG = True")
-fs.write("app.py", "from config import DEBUG")
-
-# Capture initial state
 snapshot_v1 = fs.snapshot(tag="initial")
 
 # Make changes
 fs.write("config.py", "DEBUG = False")
 fs.write("tests.py", "import pytest")
-
-# Capture modified state
 snapshot_v2 = fs.snapshot(tag="with-tests")
-
-# Compare snapshots
-diff = fs.diff(snapshot_v1, snapshot_v2)
-print(f"Added: {diff.added}")      # ("tests.py",)
-print(f"Modified: {diff.modified}")  # ("config.py",)
-print(f"Deleted: {diff.deleted}")    # ()
 
 # Rollback to initial state
 fs.restore(snapshot_v1)
@@ -1380,33 +1130,14 @@ assert fs.read("config.py").content == "DEBUG = False"
 assert fs.exists("tests.py")
 ```
 
-### Implementation Notes
-
-**InMemoryFilesystem:**
-
-- Use `types.MappingProxyType` for frozen dict views
-- Share `_ImmutableFile` references between snapshots
-- Snapshot creation is O(n) for dict copy but O(1) for content (shared refs)
-
-**HostFilesystem:**
-
-- Auto-detect reflink support via `os.copy_file_range` or test copy
-- Git strategy requires `.git` initialization (opt-in)
-- Archive strategy creates `.tar.gz` in snapshot directory
-
-**PodmanFilesystem:**
-
-- Prefer overlay directory snapshots for speed
-- Container commit useful for full environment capture
-- CRIU checkpoints require root and kernel support
-
 ### Limitations
 
-- **InMemoryFilesystem**: Snapshots consume memory for modified files
-- **HostFilesystem**: Reflinks require filesystem support; fallback is expensive
-- **PodmanFilesystem**: Container commits include entire image layer
-- **All backends**: Snapshots are local to the process/machine
-- **No incremental snapshots**: Each snapshot is self-contained
+- **Git dependency**: Disk-backed snapshots require git to be installed
+- **Text files only**: Git works best with UTF-8 text (binary files work but
+  don't benefit from delta compression)
+- **No partial restore**: Restore is all-or-nothing for the entire workspace
+- **Tool-level granularity**: Sub-operation changes within a tool invocation
+  are not tracked
 
 ## Limitations
 
