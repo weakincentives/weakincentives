@@ -790,6 +790,624 @@ assert fs.exists("src/main.py")  # Hydrated from host mount
 # context.filesystem.read("src/main.py") works in tool handlers
 ```
 
+## Filesystem Snapshots
+
+Filesystem snapshots capture the complete state of a workspace at a point in
+time. Snapshots enable rollback, branching exploration, and coordination with
+session state management.
+
+### Guiding Principles
+
+- **Immutable captures**: Snapshots are read-only; modifications create new
+  snapshots.
+- **Backend-appropriate semantics**: Each backend implements snapshots using
+  the most efficient mechanism available.
+- **Copy-on-write where possible**: Minimize memory and storage overhead by
+  sharing unchanged data between snapshots.
+- **Session coordination**: Filesystem snapshots integrate with session
+  snapshots for unified state management.
+
+### Snapshot Protocol
+
+```python
+from typing import Protocol
+from datetime import datetime
+from uuid import UUID
+
+class FilesystemSnapshot(Protocol):
+    """Immutable capture of filesystem state."""
+
+    @property
+    def snapshot_id(self) -> UUID:
+        """Unique identifier for this snapshot."""
+        ...
+
+    @property
+    def created_at(self) -> datetime:
+        """Timestamp when the snapshot was captured."""
+        ...
+
+    @property
+    def parent_id(self) -> UUID | None:
+        """ID of the parent snapshot, if created from another snapshot."""
+        ...
+
+    @property
+    def file_count(self) -> int:
+        """Number of files in the snapshot."""
+        ...
+
+    @property
+    def total_bytes(self) -> int:
+        """Total size of all files in bytes."""
+        ...
+
+
+class SnapshotableFilesystem(Filesystem, Protocol):
+    """Filesystem that supports snapshot operations."""
+
+    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
+        """Capture the current filesystem state.
+
+        Args:
+            tag: Optional human-readable label for the snapshot.
+
+        Returns:
+            Immutable snapshot of the current state.
+        """
+        ...
+
+    def restore(self, snapshot: FilesystemSnapshot) -> None:
+        """Restore filesystem to a previous snapshot state.
+
+        Args:
+            snapshot: The snapshot to restore.
+
+        Raises:
+            ValueError: Snapshot is incompatible with this filesystem.
+            RuntimeError: Restore operation failed.
+        """
+        ...
+
+    def diff(
+        self,
+        base: FilesystemSnapshot,
+        target: FilesystemSnapshot | None = None,
+    ) -> FilesystemDiff:
+        """Compare two snapshots or a snapshot with current state.
+
+        Args:
+            base: The base snapshot for comparison.
+            target: The target snapshot. If None, compares with current state.
+
+        Returns:
+            Diff describing changes between base and target.
+        """
+        ...
+
+    @property
+    def current_snapshot_id(self) -> UUID | None:
+        """ID of the snapshot this filesystem was restored from, if any."""
+        ...
+
+
+class FilesystemDiff(Protocol):
+    """Changes between two filesystem states."""
+
+    @property
+    def added(self) -> tuple[str, ...]:
+        """Paths of files added in target."""
+        ...
+
+    @property
+    def modified(self) -> tuple[str, ...]:
+        """Paths of files modified in target."""
+        ...
+
+    @property
+    def deleted(self) -> tuple[str, ...]:
+        """Paths of files deleted in target."""
+        ...
+
+    @property
+    def unchanged_count(self) -> int:
+        """Number of files unchanged between snapshots."""
+        ...
+```
+
+### Copy-on-Write Semantics
+
+Copy-on-write (COW) minimizes memory and storage overhead by sharing unchanged
+data between the active filesystem and its snapshots. The feasibility of true
+COW depends on the backend implementation.
+
+```mermaid
+flowchart TB
+    subgraph COW["Copy-on-Write Model"]
+        Active["Active Filesystem"]
+        Snap1["Snapshot A"]
+        Snap2["Snapshot B"]
+        Shared["Shared Immutable Data"]
+        Delta1["Delta A"]
+        Delta2["Delta B"]
+    end
+
+    Active --> Shared
+    Snap1 --> Shared
+    Snap2 --> Shared
+    Active --> Delta1
+    Active --> Delta2
+    Snap1 --> Delta1
+    Snap2 --> Delta2
+```
+
+#### InMemoryFilesystem: Full COW Support
+
+The in-memory backend achieves COW through immutable data structures and
+structural sharing.
+
+**Implementation Strategy:**
+
+```python
+@dataclass(slots=True, frozen=True)
+class _ImmutableFile:
+    """Immutable file content with identity-based sharing."""
+    content: str
+    created_at: datetime
+    modified_at: datetime
+
+    def with_content(self, new_content: str, modified_at: datetime) -> "_ImmutableFile":
+        """Create a new file with updated content, preserving created_at."""
+        return _ImmutableFile(
+            content=new_content,
+            created_at=self.created_at,
+            modified_at=modified_at,
+        )
+
+
+@dataclass(slots=True, frozen=True)
+class InMemoryFilesystemSnapshot:
+    """Immutable snapshot sharing data with parent filesystem."""
+
+    snapshot_id: UUID
+    created_at: datetime
+    parent_id: UUID | None
+    tag: str | None
+    # Frozen mappings share references with the active filesystem
+    files: Mapping[str, _ImmutableFile]
+    directories: frozenset[str]
+
+    @property
+    def file_count(self) -> int:
+        return len(self.files)
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(len(f.content.encode("utf-8")) for f in self.files.values())
+```
+
+**COW Behavior:**
+
+1. **Snapshot creation**: O(1) - creates frozen view of current dict/set
+2. **Read after snapshot**: O(1) - reads from shared reference
+3. **Write after snapshot**: O(1) amortized - only modified entries are copied
+4. **Memory overhead**: Only delta from snapshot consumes additional memory
+
+```python
+# Example: COW in action
+fs = InMemoryFilesystem()
+fs.write("large_file.txt", "x" * 1_000_000)  # 1MB file
+
+snap1 = fs.snapshot()  # O(1), shares reference to large_file
+
+fs.write("small_file.txt", "hello")  # Only new entry allocated
+# large_file.txt still shared between fs and snap1
+
+snap2 = fs.snapshot()  # O(1), both files shared
+fs.write("large_file.txt", "y" * 1_000_000)  # New allocation for modified file
+# snap1 and snap2 still reference original large_file content
+```
+
+#### HostFilesystem: Tiered COW Support
+
+The host filesystem backend offers multiple snapshot strategies with varying
+COW capabilities, selected based on filesystem support and configuration.
+
+**Strategy Hierarchy:**
+
+```python
+class SnapshotStrategy(Enum):
+    """Snapshot implementation strategies ordered by preference."""
+
+    REFLINK = "reflink"      # Best: True COW via filesystem reflinks
+    GIT = "git"              # Good: Version control with deduplication
+    OVERLAY = "overlay"      # Fair: OverlayFS for Linux with privileges
+    ARCHIVE = "archive"      # Fallback: Tar archives (no COW)
+    COPY = "copy"            # Last resort: Full directory copy (no COW)
+
+
+@dataclass(slots=True, frozen=True)
+class HostFilesystemConfig:
+    """Configuration for host filesystem snapshots."""
+
+    snapshot_strategy: SnapshotStrategy | None = None  # Auto-detect if None
+    snapshot_dir: str | None = None  # Directory for snapshot storage
+    max_snapshots: int = 10  # Maximum retained snapshots
+```
+
+**Strategy Details:**
+
+| Strategy | COW | Storage | Speed | Requirements |
+|----------|-----|---------|-------|--------------|
+| Reflink | True | Minimal | Fast | btrfs, XFS, APFS |
+| Git | Partial | Efficient | Medium | Git repository |
+| Overlay | True | Minimal | Fast | Linux, root |
+| Archive | No | High | Slow | None |
+| Copy | No | High | Slow | None |
+
+**Reflink Implementation (True COW):**
+
+```python
+def _snapshot_via_reflink(self, dest: Path) -> None:
+    """Create snapshot using copy-on-write reflinks."""
+    import subprocess
+
+    dest.mkdir(parents=True, exist_ok=True)
+    # cp --reflink=always creates COW copies on supported filesystems
+    result = subprocess.run(
+        ["cp", "-a", "--reflink=always", f"{self._root}/.", str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Reflink copy failed: {result.stderr}")
+```
+
+**Git Implementation (Deduplicated):**
+
+```python
+def _snapshot_via_git(self, tag: str | None) -> HostFilesystemSnapshot:
+    """Create snapshot as a git commit."""
+    import subprocess
+
+    # Initialize repo if needed
+    git_dir = Path(self._root) / ".git"
+    if not git_dir.exists():
+        subprocess.run(["git", "init"], cwd=self._root, check=True)
+
+    # Stage and commit all changes
+    subprocess.run(["git", "add", "-A"], cwd=self._root, check=True)
+    message = tag or f"Snapshot {datetime.now(UTC).isoformat()}"
+    result = subprocess.run(
+        ["git", "commit", "-m", message, "--allow-empty"],
+        cwd=self._root,
+        capture_output=True,
+        text=True,
+    )
+
+    # Get commit hash as snapshot ID
+    commit_hash = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=self._root,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    return HostFilesystemSnapshot(
+        snapshot_id=UUID(int=int(commit_hash[:32], 16)),
+        created_at=datetime.now(UTC),
+        strategy=SnapshotStrategy.GIT,
+        reference=commit_hash,
+        # ...
+    )
+```
+
+#### PodmanFilesystem: Container-Native Snapshots
+
+The Podman backend leverages container and overlay filesystem capabilities
+for efficient snapshots.
+
+**Strategy Options:**
+
+1. **Overlay Directory Snapshot**: Copy-on-write via filesystem
+2. **Container Checkpoint**: Full container state via CRIU
+3. **Container Commit**: Create image from container state
+
+```python
+class PodmanSnapshotStrategy(Enum):
+    """Snapshot strategies for Podman workspaces."""
+
+    OVERLAY_REFLINK = "overlay_reflink"  # Reflink copy of overlay dir
+    OVERLAY_COPY = "overlay_copy"        # Full copy of overlay dir
+    CONTAINER_COMMIT = "container_commit"  # podman commit
+    CONTAINER_CHECKPOINT = "checkpoint"  # CRIU checkpoint (experimental)
+
+
+@dataclass(slots=True, frozen=True)
+class PodmanFilesystemSnapshot:
+    """Snapshot of Podman workspace filesystem state."""
+
+    snapshot_id: UUID
+    created_at: datetime
+    parent_id: UUID | None
+    strategy: PodmanSnapshotStrategy
+    # Strategy-specific reference
+    overlay_path: str | None = None  # For overlay strategies
+    image_id: str | None = None      # For container_commit
+    checkpoint_path: str | None = None  # For checkpoint
+```
+
+**Overlay Directory Snapshot:**
+
+```python
+def _snapshot_overlay(self) -> PodmanFilesystemSnapshot:
+    """Snapshot the overlay directory (workspace files only)."""
+    snapshot_id = uuid4()
+    snapshot_dir = self._snapshot_root / str(snapshot_id)
+
+    # Attempt reflink copy first
+    try:
+        self._copy_overlay_reflink(self._overlay_path, snapshot_dir)
+        strategy = PodmanSnapshotStrategy.OVERLAY_REFLINK
+    except (OSError, subprocess.CalledProcessError):
+        # Fall back to regular copy
+        shutil.copytree(self._overlay_path, snapshot_dir)
+        strategy = PodmanSnapshotStrategy.OVERLAY_COPY
+
+    return PodmanFilesystemSnapshot(
+        snapshot_id=snapshot_id,
+        created_at=datetime.now(UTC),
+        parent_id=self._current_snapshot_id,
+        strategy=strategy,
+        overlay_path=str(snapshot_dir),
+    )
+```
+
+**Container Commit Snapshot:**
+
+```python
+def _snapshot_container_commit(self) -> PodmanFilesystemSnapshot:
+    """Create snapshot by committing container to image."""
+    snapshot_id = uuid4()
+    image_name = f"wink-snapshot-{snapshot_id}"
+
+    # Commit current container state to image
+    result = subprocess.run(
+        ["podman", "commit", self._container_id, image_name],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    return PodmanFilesystemSnapshot(
+        snapshot_id=snapshot_id,
+        created_at=datetime.now(UTC),
+        parent_id=self._current_snapshot_id,
+        strategy=PodmanSnapshotStrategy.CONTAINER_COMMIT,
+        image_id=result.stdout.strip(),
+    )
+```
+
+### Session Integration
+
+Filesystem snapshots coordinate with session snapshots to provide unified
+state management. When a session snapshot is created, the associated
+filesystem snapshot ID is recorded.
+
+```python
+@dataclass(slots=True, frozen=True)
+class FilesystemSnapshotRef:
+    """Reference to a filesystem snapshot stored in session state."""
+
+    filesystem_key: str  # Key identifying the filesystem (e.g., "vfs.tools")
+    snapshot_id: UUID
+    backend_type: str  # "in_memory", "host", "podman"
+
+
+# Session slice for tracking filesystem snapshots
+session[FilesystemSnapshotRef].register(FilesystemSnapshotRef, append_all)
+```
+
+**Coordinated Snapshot Creation:**
+
+```python
+def create_unified_snapshot(
+    session: Session,
+    filesystem: SnapshotableFilesystem,
+    filesystem_key: str,
+) -> tuple[Snapshot, FilesystemSnapshot]:
+    """Create coordinated session and filesystem snapshots."""
+
+    # Capture filesystem state first
+    fs_snapshot = filesystem.snapshot()
+
+    # Record reference in session
+    ref = FilesystemSnapshotRef(
+        filesystem_key=filesystem_key,
+        snapshot_id=fs_snapshot.snapshot_id,
+        backend_type=type(filesystem).__name__,
+    )
+    session[FilesystemSnapshotRef].append(ref)
+
+    # Create session snapshot (includes the reference)
+    session_snapshot = session.snapshot()
+
+    return session_snapshot, fs_snapshot
+```
+
+**Coordinated Restore:**
+
+```python
+def restore_unified_snapshot(
+    session: Session,
+    filesystem: SnapshotableFilesystem,
+    session_snapshot: Snapshot,
+    fs_snapshot: FilesystemSnapshot,
+) -> None:
+    """Restore both session and filesystem from snapshots."""
+
+    # Restore filesystem first (may fail)
+    filesystem.restore(fs_snapshot)
+
+    # Then restore session state
+    session.rollback(session_snapshot)
+```
+
+### Snapshot Lifecycle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Active: Create filesystem
+
+    Active --> Snapshot1: snapshot()
+    Snapshot1 --> Active: Continue working
+
+    Active --> Snapshot2: snapshot()
+    Snapshot2 --> Active: Continue working
+
+    Active --> Restored: restore(Snapshot1)
+    Restored --> Active: Continue from restored state
+
+    Active --> Diff: diff(Snapshot1, Snapshot2)
+    Diff --> Active: Review changes
+
+    Snapshot1 --> Pruned: Retention policy
+    Snapshot2 --> Pruned: Retention policy
+    Pruned --> [*]
+```
+
+### Snapshot Storage and Retention
+
+Backends manage snapshot storage according to configured policies:
+
+```python
+@dataclass(slots=True, frozen=True)
+class SnapshotRetentionPolicy:
+    """Policy for automatic snapshot cleanup."""
+
+    max_count: int = 10          # Maximum snapshots to retain
+    max_age_hours: int | None = None  # Maximum age before pruning
+    keep_tagged: bool = True     # Preserve tagged snapshots
+
+
+class SnapshotStore(Protocol):
+    """Storage backend for filesystem snapshots."""
+
+    def save(self, snapshot: FilesystemSnapshot) -> None:
+        """Persist a snapshot."""
+        ...
+
+    def load(self, snapshot_id: UUID) -> FilesystemSnapshot:
+        """Retrieve a snapshot by ID."""
+        ...
+
+    def list(self) -> Sequence[FilesystemSnapshot]:
+        """List all stored snapshots."""
+        ...
+
+    def delete(self, snapshot_id: UUID) -> None:
+        """Remove a snapshot."""
+        ...
+
+    def prune(self, policy: SnapshotRetentionPolicy) -> int:
+        """Apply retention policy, return count of pruned snapshots."""
+        ...
+```
+
+### Error Handling
+
+Snapshot operations can fail due to storage limits, permission issues, or
+backend-specific constraints.
+
+```python
+class SnapshotError(WinkError, RuntimeError):
+    """Base class for snapshot-related errors."""
+
+
+class SnapshotCreationError(SnapshotError):
+    """Failed to create a snapshot."""
+
+
+class SnapshotRestoreError(SnapshotError):
+    """Failed to restore from a snapshot."""
+
+
+class SnapshotNotFoundError(SnapshotError):
+    """Requested snapshot does not exist."""
+
+
+class SnapshotIncompatibleError(SnapshotError):
+    """Snapshot is incompatible with the target filesystem."""
+```
+
+### Usage Example
+
+```python
+from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+
+# Create filesystem with snapshot support
+fs = InMemoryFilesystem()
+
+# Initial state
+fs.write("config.py", "DEBUG = True")
+fs.write("app.py", "from config import DEBUG")
+
+# Capture initial state
+snapshot_v1 = fs.snapshot(tag="initial")
+
+# Make changes
+fs.write("config.py", "DEBUG = False")
+fs.write("tests.py", "import pytest")
+
+# Capture modified state
+snapshot_v2 = fs.snapshot(tag="with-tests")
+
+# Compare snapshots
+diff = fs.diff(snapshot_v1, snapshot_v2)
+print(f"Added: {diff.added}")      # ("tests.py",)
+print(f"Modified: {diff.modified}")  # ("config.py",)
+print(f"Deleted: {diff.deleted}")    # ()
+
+# Rollback to initial state
+fs.restore(snapshot_v1)
+assert fs.read("config.py").content == "DEBUG = True"
+assert not fs.exists("tests.py")
+
+# Restore to modified state
+fs.restore(snapshot_v2)
+assert fs.read("config.py").content == "DEBUG = False"
+assert fs.exists("tests.py")
+```
+
+### Implementation Notes
+
+**InMemoryFilesystem:**
+
+- Use `types.MappingProxyType` for frozen dict views
+- Share `_ImmutableFile` references between snapshots
+- Snapshot creation is O(n) for dict copy but O(1) for content (shared refs)
+
+**HostFilesystem:**
+
+- Auto-detect reflink support via `os.copy_file_range` or test copy
+- Git strategy requires `.git` initialization (opt-in)
+- Archive strategy creates `.tar.gz` in snapshot directory
+
+**PodmanFilesystem:**
+
+- Prefer overlay directory snapshots for speed
+- Container commit useful for full environment capture
+- CRIU checkpoints require root and kernel support
+
+### Limitations
+
+- **InMemoryFilesystem**: Snapshots consume memory for modified files
+- **HostFilesystem**: Reflinks require filesystem support; fallback is expensive
+- **PodmanFilesystem**: Container commits include entire image layer
+- **All backends**: Snapshots are local to the process/machine
+- **No incremental snapshots**: Each snapshot is self-contained
+
 ## Limitations
 
 - **UTF-8 only**: Binary files are not supported.
