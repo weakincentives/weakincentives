@@ -991,7 +991,6 @@ class VfsConfig:
         from weakincentives.contrib.tools import VfsConfig, VfsToolsSection
 
         config = VfsConfig(
-            namespace="workspace",  # Tools become workspace_ls, workspace_read_file, etc.
             mounts=(HostMount(host_path="src"),),
             allowed_host_roots=("/home/user/project",),
         )
@@ -1006,23 +1005,10 @@ class VfsConfig:
         default=(),
         metadata={"description": "Allowed root paths for host mounts."},
     )
-    namespace: str | None = field(
-        default=None,
-        metadata={
-            "description": "Tool namespace prefix for collision-free composition."
-        },
-    )
     accepts_overrides: bool = field(
         default=False,
         metadata={"description": "Whether the section accepts parameter overrides."},
     )
-
-
-def _prefix_tool_name(name: str, namespace: str | None) -> str:
-    """Prefix a tool name with namespace if provided."""
-    if namespace is None:
-        return name
-    return f"{namespace}_{name}"
 
 
 class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
@@ -1030,10 +1016,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 
     Use :class:`VfsConfig` to consolidate configuration::
 
-        config = VfsConfig(
-            namespace="workspace",
-            mounts=(HostMount(host_path="src"),),
-        )
+        config = VfsConfig(mounts=(HostMount(host_path="src"),))
         section = VfsToolsSection(session=session, config=config)
 
     Individual parameters are still accepted for backward compatibility,
@@ -1057,19 +1040,16 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             resolved_roots = tuple(
                 normalize_host_root(path) for path in config.allowed_host_roots
             )
-            resolved_namespace = config.namespace
             resolved_accepts_overrides = config.accepts_overrides
         else:
             resolved_mounts = tuple(mounts)
             resolved_roots = tuple(
                 normalize_host_root(path) for path in allowed_host_roots
             )
-            resolved_namespace = None
             resolved_accepts_overrides = accepts_overrides
 
         self._allowed_roots = resolved_roots
         self._mounts = resolved_mounts
-        self._namespace = resolved_namespace
 
         # Use provided filesystem or create a new one
         if _filesystem is not None and _mount_previews is not None:
@@ -1090,14 +1070,10 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         self._config = VfsConfig(
             mounts=self._mounts,
             allowed_host_roots=self._allowed_roots,
-            namespace=self._namespace,
             accepts_overrides=resolved_accepts_overrides,
         )
 
-        tools = _build_tools(
-            accepts_overrides=resolved_accepts_overrides,
-            namespace=self._namespace,
-        )
+        tools = _build_tools(accepts_overrides=resolved_accepts_overrides)
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
@@ -1110,11 +1086,6 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
     @property
     def session(self) -> Session:
         return self._session
-
-    @property
-    def namespace(self) -> str | None:
-        """Return the tool namespace prefix, or None if no prefix is applied."""
-        return self._namespace
 
     @property
     def filesystem(self) -> Filesystem:
@@ -1147,14 +1118,13 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 def _build_tools(
     *,
     accepts_overrides: bool,
-    namespace: str | None = None,
 ) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
     handlers = FilesystemToolHandlers()
     return cast(
         tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
         (
             Tool[ListDirectoryParams, tuple[FileInfo, ...]](
-                name=_prefix_tool_name("ls", namespace),
+                name="ls",
                 description="List directory entries under a relative path.",
                 handler=handlers.list_directory,
                 accepts_overrides=accepts_overrides,
@@ -1178,7 +1148,7 @@ def _build_tools(
                 ),
             ),
             Tool[ReadFileParams, ReadFileResult](
-                name=_prefix_tool_name("read_file", namespace),
+                name="read_file",
                 description="Read UTF-8 file contents with pagination support.",
                 handler=handlers.read_file,
                 accepts_overrides=accepts_overrides,
@@ -1200,7 +1170,7 @@ def _build_tools(
                 ),
             ),
             Tool[WriteFileParams, WriteFile](
-                name=_prefix_tool_name("write_file", namespace),
+                name="write_file",
                 description="Create a new UTF-8 text file.",
                 handler=handlers.write_file,
                 accepts_overrides=accepts_overrides,
@@ -1220,7 +1190,7 @@ def _build_tools(
                 ),
             ),
             Tool[EditFileParams, WriteFile](
-                name=_prefix_tool_name("edit_file", namespace),
+                name="edit_file",
                 description="Replace occurrences of a string within a file.",
                 handler=handlers.edit_file,
                 accepts_overrides=accepts_overrides,
@@ -1242,7 +1212,7 @@ def _build_tools(
                 ),
             ),
             Tool[GlobParams, tuple[GlobMatch, ...]](
-                name=_prefix_tool_name("glob", namespace),
+                name="glob",
                 description="Match files beneath a directory using shell patterns.",
                 handler=handlers.glob,
                 accepts_overrides=accepts_overrides,
@@ -1262,7 +1232,7 @@ def _build_tools(
                 ),
             ),
             Tool[GrepParams, tuple[GrepMatch, ...]](
-                name=_prefix_tool_name("grep", namespace),
+                name="grep",
                 description="Search files for a regular expression pattern.",
                 handler=handlers.grep,
                 accepts_overrides=accepts_overrides,
@@ -1283,7 +1253,7 @@ def _build_tools(
                 ),
             ),
             Tool[RemoveParams, DeleteEntry](
-                name=_prefix_tool_name("rm", namespace),
+                name="rm",
                 description="Remove files or directories recursively.",
                 handler=handlers.remove,
                 accepts_overrides=accepts_overrides,

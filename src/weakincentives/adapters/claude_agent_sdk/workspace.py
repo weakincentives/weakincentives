@@ -419,15 +419,6 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         """
         return self._filesystem
 
-    @property
-    def namespace(self) -> str | None:
-        """Return the tool namespace prefix, or None if no prefix is applied.
-
-        This section does not expose custom tools (it uses the SDK's native
-        tools), so namespace is always None.
-        """
-        return None
-
     def cleanup(self) -> None:
         """Remove the temporary workspace directory."""
         if self._temp_dir.exists():

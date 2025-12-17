@@ -175,10 +175,7 @@ class PodmanSandboxConfig:
 
         from weakincentives.contrib.tools import PodmanSandboxConfig, PodmanSandboxSection
 
-        config = PodmanSandboxConfig(
-            namespace="container",  # Tools become container_ls, container_shell_execute, etc.
-            mounts=(HostMount(host_path="src"),),
-        )
+        config = PodmanSandboxConfig(mounts=(HostMount(host_path="src"),))
         section = PodmanSandboxSection(session=session, config=config)
     """
 
@@ -193,15 +190,7 @@ class PodmanSandboxConfig:
     clock: Callable[[], datetime] | None = None
     connection_name: str | None = None
     exec_runner: _ExecRunner | None = None
-    namespace: str | None = None
     accepts_overrides: bool = False
-
-
-def _prefix_tool_name(name: str, namespace: str | None) -> str:
-    """Prefix a tool name with namespace if provided."""
-    if namespace is None:
-        return name
-    return f"{namespace}_{name}"  # pragma: no cover - requires container runtime
 
 
 @FrozenDataclass()
@@ -629,10 +618,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
 
     Use :class:`PodmanSandboxConfig` to consolidate configuration::
 
-        config = PodmanSandboxConfig(
-            namespace="container",
-            mounts=(HostMount(host_path="src"),),
-        )
+        config = PodmanSandboxConfig(mounts=(HostMount(host_path="src"),))
         section = PodmanSandboxSection(session=session, config=config)
     """
 
@@ -646,7 +632,6 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     ) -> None:
         config = config or PodmanSandboxConfig()
         self._session = session
-        self._namespace = config.namespace
         self._image = config.image
         self._mounts = tuple(config.mounts)
         base_url, identity_str, connection_name = _resolve_connection_settings(
@@ -717,7 +702,6 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             clock=self._clock,
             connection_name=self._connection_name,
             exec_runner=self._exec_runner,
-            namespace=self._namespace,
             accepts_overrides=config.accepts_overrides,
         )
 
@@ -727,10 +711,9 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         self._shell_suite = _PodmanShellSuite(section=self)
         self._eval_suite = _PodmanEvalSuite(section=self)
         accepts_overrides = config.accepts_overrides
-        namespace = self._namespace
         tools = (
             Tool[ListDirectoryParams, tuple[FileInfo, ...]](
-                name=_prefix_tool_name("ls", namespace),
+                name="ls",
                 description="List directory entries under a relative path.",
                 handler=self._fs_handlers.list_directory,
                 examples=(
@@ -758,7 +741,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
             Tool[ReadFileParams, ReadFileResult](
-                name=_prefix_tool_name("read_file", namespace),
+                name="read_file",
                 description="Read UTF-8 file contents with pagination support.",
                 handler=self._fs_handlers.read_file,
                 examples=(
@@ -783,7 +766,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
             Tool[WriteFileParams, WriteFile](
-                name=_prefix_tool_name("write_file", namespace),
+                name="write_file",
                 description="Create a new UTF-8 text file.",
                 handler=self._fs_handlers.write_file,
                 examples=(
@@ -803,7 +786,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
             Tool[EditFileParams, WriteFile](
-                name=_prefix_tool_name("edit_file", namespace),
+                name="edit_file",
                 description="Replace occurrences of a string within a file.",
                 handler=self._fs_handlers.edit_file,
                 examples=(
@@ -825,7 +808,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
             Tool[GlobParams, tuple[GlobMatch, ...]](
-                name=_prefix_tool_name("glob", namespace),
+                name="glob",
                 description="Match files beneath a directory using shell patterns.",
                 handler=self._fs_handlers.glob,
                 examples=(
@@ -858,7 +841,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
             Tool[GrepParams, tuple[GrepMatch, ...]](
-                name=_prefix_tool_name("grep", namespace),
+                name="grep",
                 description="Search files for a regular expression pattern.",
                 handler=self._fs_handlers.grep,
                 examples=(
@@ -900,7 +883,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
             Tool[RemoveParams, DeleteEntry](
-                name=_prefix_tool_name("rm", namespace),
+                name="rm",
                 description="Remove files or directories recursively.",
                 handler=self._fs_handlers.remove,
                 examples=(
@@ -915,7 +898,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
             Tool[PodmanShellParams, PodmanShellResult](
-                name=_prefix_tool_name("shell_execute", namespace),
+                name="shell_execute",
                 description="Run a short command inside the Podman workspace.",
                 handler=self._shell_suite.run_shell,
                 examples=(
@@ -936,7 +919,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 accepts_overrides=accepts_overrides,
             ),
             Tool[EvalParams, EvalResult](
-                name=_prefix_tool_name("evaluate_python", namespace),
+                name="evaluate_python",
                 description=(
                     "Run a short Python script via `python3 -c` inside the Podman workspace. "
                     "Captures stdout/stderr and reports the exit code."
@@ -977,11 +960,6 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     @property
     def session(self) -> Session:
         return self._session
-
-    @property
-    def namespace(self) -> str | None:  # pragma: no cover - requires container runtime
-        """Return the tool namespace prefix, or None if no prefix is applied."""
-        return self._namespace
 
     @override
     def clone(self, **kwargs: object) -> PodmanSandboxSection:  # pragma: no cover

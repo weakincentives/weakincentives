@@ -50,7 +50,6 @@ class ToolSuiteSection(Protocol):
     The protocol requires:
 
     - **session**: Property returning the associated Session
-    - **namespace**: Property returning the tool namespace prefix (or None)
     - **accepts_overrides**: Property indicating if overrides are accepted
     - **clone()**: Method for creating copies with a new session
 
@@ -58,36 +57,13 @@ class ToolSuiteSection(Protocol):
 
         from weakincentives.contrib.tools import VfsToolsSection, VfsConfig
 
-        # Default: no namespace (most common case)
         vfs = VfsToolsSection(session=session)
-        assert vfs.namespace is None  # No prefix applied
-
-        # With namespace for collision-free composition
-        vfs_namespaced = VfsToolsSection(
-            session=session,
-            config=VfsConfig(namespace="workspace"),
-        )
-        assert vfs_namespaced.namespace == "workspace"
-        # Tools are prefixed: workspace_ls, workspace_read_file, etc.
+        assert vfs.accepts_overrides is False  # Default
     """
 
     @property
     def session(self) -> Session:
         """Return the session associated with this tool suite section."""
-        ...
-
-    @property
-    def namespace(self) -> str | None:
-        """Return the tool namespace prefix, or None if no prefix is applied.
-
-        This property is optional in practice: most sections return ``None``
-        (no prefix). Only set a namespace when composing multiple tool suites
-        in the same prompt to prevent tool name collisions.
-
-        When a namespace is set, all tool names are prefixed with
-        ``{namespace}_``. For example, with ``namespace="workspace"``,
-        the ``ls`` tool becomes ``workspace_ls``.
-        """
         ...
 
     @property

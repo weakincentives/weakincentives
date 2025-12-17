@@ -1082,47 +1082,20 @@ def test_merge_globals_combines_mappings() -> None:
 
 
 # -----------------------------------------------------------------------------
-# Namespace and Config Tests
+# Config Tests
 # -----------------------------------------------------------------------------
 
 
-def test_asteval_namespace_property_returns_none_by_default() -> None:
-    """Test that namespace property returns None when not configured."""
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = AstevalSection(session=session)
-    assert section.namespace is None
-
-
-def test_asteval_namespace_with_config_prefixes_tool_names() -> None:
-    """Test that namespace config prefixes tool names."""
+def test_asteval_config_accepts_overrides() -> None:
+    """Test that config accepts_overrides is respected."""
     from weakincentives.contrib.tools import AstevalConfig
 
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    config = AstevalConfig(namespace="sandbox")
+    config = AstevalConfig(accepts_overrides=True)
     section = AstevalSection(session=session, config=config)
 
-    assert section.namespace == "sandbox"
-    tool_names = [tool.name for tool in section.tools()]
-    assert "sandbox_evaluate_python" in tool_names
-
-
-def test_asteval_clone_preserves_namespace() -> None:
-    """Test that cloning preserves the namespace configuration."""
-    from weakincentives.contrib.tools import AstevalConfig
-
-    bus = InProcessEventBus()
-    session1 = Session(bus=bus)
-    config = AstevalConfig(namespace="sandbox")
-    section = AstevalSection(session=session1, config=config)
-
-    session2 = Session(bus=bus)
-    cloned = section.clone(session=session2)
-
-    assert cloned.namespace == "sandbox"
-    tool_names = [tool.name for tool in cloned.tools()]
-    assert "sandbox_evaluate_python" in tool_names
+    assert section.accepts_overrides is True
 
 
 def test_asteval_filesystem_property_returns_filesystem() -> None:
