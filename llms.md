@@ -16,6 +16,10 @@ This document is the package README published to PyPI. It focuses on the
 supported, public API surface you can depend on when wiring WINK into your own
 agent or orchestration system.
 
+**Doc ownership**: For philosophy, motivation, and extended tutorial, see the
+GitHub `README.md`. This file is the canonical public API reference—keep both
+in sync when updating public interfaces.
+
 ## Architecture Overview
 
 An agent harness in WINK wires together five core components:

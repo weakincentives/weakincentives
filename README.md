@@ -376,6 +376,10 @@ make integration-tests  # skipped without credentials
 - `specs/` — design documents
 - `ROADMAP.md` — upcoming features
 
+**Doc ownership**: For the canonical public API reference and quickstart snippets,
+see `llms.md` (published on PyPI). This README covers philosophy, motivation, and
+extended tutorial—keep both in sync when updating public interfaces.
+
 ## License
 
 Apache 2.0 • Status: Alpha (APIs may change)
