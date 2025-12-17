@@ -114,18 +114,16 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         return self._placeholder
 
     @override
-    def render(
+    def render_body(
         self,
         params: SupportsDataclass | None,
-        depth: int,
-        number: str,
         *,
-        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
+        path: tuple[str, ...] = (),
+        session: object = None,
     ) -> str:
-        del params, visibility
-        body = self._resolve_body()
-        return self._render_block(body, depth, number, path)
+        del params, visibility, path, session
+        return self._resolve_body()
 
     @override
     def render_override(
@@ -137,8 +135,11 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         path: tuple[str, ...] = (),
     ) -> str:
         del params
+        heading = self.format_heading(depth, number, path)
         body = self._resolve_body(override_body=override_body)
-        return self._render_block(body, depth, number, path)
+        if body:
+            return f"{heading}\n\n{body.strip()}"
+        return heading
 
     @override
     def clone(self, **kwargs: object) -> WorkspaceDigestSection:
@@ -165,20 +166,6 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
             context={"section_key": self.key},
         )
         return self._placeholder
-
-    def _render_block(
-        self, body: str, depth: int, number: str, path: tuple[str, ...] = ()
-    ) -> str:
-        heading_level = "#" * (depth + 2)
-        normalized_number = number.rstrip(".")
-        path_str = ".".join(path) if path else ""
-        title_with_path = (
-            f"{self.title.strip()} ({path_str})" if path_str else self.title.strip()
-        )
-        heading = f"{heading_level} {normalized_number}. {title_with_path}"
-        if body:
-            return f"{heading}\n\n{body.strip()}"
-        return heading
 
 
 __all__ = [

@@ -12,23 +12,18 @@
 
 from __future__ import annotations
 
-import json
 import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any, Literal, Self, TypeVar, cast, override
+from typing import Any, Self, TypeVar, cast, override
 
-from ..serde import clone as clone_dataclass, dump
+from ..serde import clone as clone_dataclass
 from ..types.dataclass import (
     SupportsDataclass,
-    SupportsDataclassOrNone,
-    SupportsToolResult,
 )
 from .errors import PromptRenderError
 from .section import Section, SectionVisibility, VisibilitySelector
-from .tool import Tool
-from .tool_result import render_tool_payload
 
 MarkdownParamsT = TypeVar(
     "MarkdownParamsT",
@@ -68,15 +63,15 @@ class MarkdownSection(Section[MarkdownParamsT]):
         )
 
     @override
-    def render(
+    def render_body(
         self,
         params: SupportsDataclass | None,
-        depth: int,
-        number: str,
         *,
-        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
+        path: tuple[str, ...] = (),
+        session: object = None,
     ) -> str:
+        del path, session
         # Use passed visibility directly when provided (already computed by renderer)
         # Fall back to effective_visibility for direct render() calls without renderer
         effective = (
@@ -84,9 +79,12 @@ class MarkdownSection(Section[MarkdownParamsT]):
             if visibility is not None
             else self.effective_visibility(override=None, params=params)
         )
-        if effective == SectionVisibility.SUMMARY and self.summary is not None:
-            return self.render_with_template(self.summary, params, depth, number, path)
-        return self.render_with_template(self.template, params, depth, number, path)
+        template_text = (
+            self.summary
+            if effective == SectionVisibility.SUMMARY and self.summary is not None
+            else self.template
+        )
+        return self._render_template(template_text, params)
 
     @override
     def render_override(
@@ -97,23 +95,35 @@ class MarkdownSection(Section[MarkdownParamsT]):
         number: str,
         path: tuple[str, ...] = (),
     ) -> str:
-        return self.render_with_template(override_body, params, depth, number, path)
+        heading = self.format_heading(depth, number, path)
+        body = self._render_template(override_body, params)
+        rendered_tools = self.render_tool_examples()
 
-    def render_with_template(
+        combined_body = body
+        if rendered_tools:
+            combined_body = f"{body}\n\n{rendered_tools}" if body else rendered_tools
+
+        if combined_body:
+            return f"{heading}\n\n{combined_body}"
+        return heading
+
+    def _render_template(
         self,
         template_text: str,
         params: SupportsDataclass | None,
-        depth: int,
-        number: str,
-        path: tuple[str, ...] = (),
     ) -> str:
-        heading_level = "#" * (depth + 2)
-        normalized_number = number.rstrip(".")
-        path_str = ".".join(path) if path else ""
-        title_with_path = (
-            f"{self.title.strip()} ({path_str})" if path_str else self.title.strip()
-        )
-        heading = f"{heading_level} {normalized_number}. {title_with_path}"
+        """Render template text with parameter substitution.
+
+        Args:
+            template_text: The template string to render.
+            params: The parameters for substitution.
+
+        Returns:
+            The rendered template body (stripped).
+
+        Raises:
+            PromptRenderError: When a placeholder is missing.
+        """
         template = Template(textwrap.dedent(template_text).strip())
         try:
             normalized_params = self._normalize_params(params)
@@ -124,19 +134,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
                 "Missing placeholder during render.",
                 placeholder=str(missing),
             ) from error
-        rendered_tools = _render_tool_examples_block(self.tools())
-        normalized_body = rendered_body.strip()
-        combined_body = normalized_body
-        if rendered_tools:
-            combined_body = (
-                f"{normalized_body}\n\n{rendered_tools}"
-                if normalized_body
-                else rendered_tools
-            )
-
-        if combined_body:
-            return f"{heading}\n\n{combined_body}"
-        return heading
+        return rendered_body.strip()
 
     @override
     def placeholder_names(self) -> set[str]:
@@ -198,87 +196,6 @@ class MarkdownSection(Section[MarkdownParamsT]):
             visibility=self.visibility,
         )
         return cast(Self, clone)
-
-
-def _render_tool_examples_block(
-    tools: Sequence[Tool[SupportsDataclassOrNone, SupportsToolResult]],
-) -> str:
-    rendered: list[str] = []
-    for tool in tools:
-        if not tool.examples:
-            continue
-
-        examples_block = _render_examples_for_tool(tool)
-        rendered.append(
-            "\n".join(
-                [
-                    f"- {tool.name}: {tool.description}",
-                    textwrap.indent(examples_block, "  "),
-                ]
-            )
-        )
-
-    if not rendered:
-        return ""
-
-    return "\n".join(["Tools:", *rendered])
-
-
-def _render_examples_for_tool(
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
-) -> str:
-    lines: list[str] = [f"- {tool.name} examples:"]
-    for example in tool.examples:
-        rendered_output = _render_example_output(
-            example.output, container=tool.result_container
-        )
-        lines.extend(
-            [
-                f"  - description: {example.description}",
-                "    input:",
-                *_render_fenced_block(
-                    _render_example_value(example.input),
-                    indent="      ",
-                    language="json",
-                ),
-                "    output:",
-                *_render_fenced_block(rendered_output, indent="      ", language=None),
-            ]
-        )
-    return "\n".join(lines)
-
-
-def _render_example_value(value: SupportsDataclass | None) -> str:
-    if value is None:
-        return "null"
-
-    serialized_value = dump(value, exclude_none=True)
-
-    return json.dumps(serialized_value, ensure_ascii=False)
-
-
-def _render_example_output(
-    value: SupportsToolResult | None,
-    *,
-    container: Literal["object", "array"],
-) -> str:
-    if container == "array":
-        sequence_value = cast(Sequence[object], value or [])
-        return render_tool_payload(list(sequence_value))
-
-    return render_tool_payload(value)
-
-
-def _render_fenced_block(
-    content: str, *, indent: str, language: str | None
-) -> list[str]:
-    fence = "```" if language is None else f"```{language}"
-    indented_lines = content.splitlines() or [""]
-    return [
-        f"{indent}{fence}",
-        *[f"{indent}{line}" for line in indented_lines],
-        f"{indent}```",
-    ]
 
 
 __all__ = ["MarkdownSection"]

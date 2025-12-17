@@ -27,7 +27,7 @@ from weakincentives.prompt import (
     ToolExample,
     ToolResult,
 )
-from weakincentives.prompt.markdown import _render_example_value
+from weakincentives.prompt._render_tool_examples import _render_example_value
 from weakincentives.types import SupportsDataclass, SupportsDataclassOrNone
 
 

@@ -32,6 +32,7 @@ from ._enabled_predicate import (
 )
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
+from ._render_tool_examples import render_tool_examples_block
 from ._visibility import (
     NormalizedVisibilitySelector,
     SectionVisibility,
@@ -112,7 +113,68 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             return True
         return bool(self._enabled(params, session))
 
-    @abstractmethod
+    def format_heading(
+        self,
+        depth: int,
+        number: str,
+        path: tuple[str, ...] = (),
+    ) -> str:
+        """Format the section heading with depth, number, and path annotation.
+
+        This helper builds consistent markdown headings for all sections:
+        - Root sections (depth 0) get ``##``
+        - Each depth level adds one ``#`` (depth 1 = ``###``, depth 2 = ``####``)
+        - Path annotation is appended in parentheses when provided
+
+        Args:
+            depth: The nesting depth of this section (affects heading level).
+            number: The section number prefix (e.g., "1.2.").
+            path: The section path as a tuple of keys for annotation.
+
+        Returns:
+            Formatted heading string (e.g., ``## 1. Title`` or ``### 1.1. Child (parent.child)``).
+        """
+        heading_level = "#" * (depth + 2)
+        normalized_number = number.rstrip(".")
+        path_str = ".".join(path) if path else ""
+        title_with_path = (
+            f"{self.title.strip()} ({path_str})" if path_str else self.title.strip()
+        )
+        return f"{heading_level} {normalized_number}. {title_with_path}"
+
+    def render_body(
+        self,
+        params: SupportsDataclass | None,
+        *,
+        visibility: SectionVisibility | None = None,
+        path: tuple[str, ...] = (),
+        session: SessionProtocol | None = None,
+    ) -> str:
+        """Produce the body content (without heading) for the section.
+
+        Subclasses should override this method to provide their body content.
+        The base implementation returns an empty string.
+
+        Args:
+            params: The parameters to use when rendering the section body.
+            visibility: The effective visibility for rendering.
+            path: The section path as a tuple of keys.
+            session: Optional session for visibility callables or state access.
+
+        Returns:
+            The rendered body content as a string.
+        """
+        del params, visibility, path, session
+        return ""
+
+    def render_tool_examples(self) -> str:
+        """Render tool examples for this section.
+
+        Returns:
+            Formatted tool examples block, or empty string if no tools/examples.
+        """
+        return render_tool_examples_block(self._tools)
+
     def render(
         self,
         params: SupportsDataclass | None,
@@ -123,6 +185,15 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         visibility: SectionVisibility | None = None,
     ) -> str:
         """Produce markdown output for the section at the supplied depth.
+
+        The default implementation combines:
+        1. Formatted heading via :meth:`format_heading`
+        2. Body content via :meth:`render_body`
+        3. Tool examples via :meth:`render_tool_examples`
+
+        Subclasses can override :meth:`render_body` for custom body rendering
+        while inheriting consistent heading and tool formatting, or override
+        this method entirely for complete control.
 
         Args:
             params: The parameters to use when rendering the section template.
@@ -135,7 +206,21 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
                 and user-provided selectors). When called directly, this may
                 be None, in which case the section should compute effective
                 visibility using its default selector.
+
+        Returns:
+            The complete rendered markdown output.
         """
+        heading = self.format_heading(depth, number, path)
+        body = self.render_body(params, visibility=visibility, path=path)
+        rendered_tools = self.render_tool_examples()
+
+        combined_body = body
+        if rendered_tools:
+            combined_body = f"{body}\n\n{rendered_tools}" if body else rendered_tools
+
+        if combined_body:
+            return f"{heading}\n\n{combined_body}"
+        return heading
 
     def render_override(
         self,
