@@ -119,13 +119,12 @@ class MainLoop[UserRequestT, OutputT](ABC):
             def create_session(self) -> Session:
                 return Session(bus=self._bus, tags={"loop": "code-review"})
 
-        # Bus-driven usage
+        # Bus-driven usage (subscription is automatic in __init__)
         loop = CodeReviewLoop(adapter=adapter, bus=bus)
-        bus.subscribe(MainLoopRequest, loop.handle_request)
         bus.publish(MainLoopRequest(request=ReviewRequest(...)))
 
         # Direct usage
-        response = loop.execute(ReviewRequest(...))
+        response, session = loop.execute(ReviewRequest(...))
     """
 
     _adapter: ProviderAdapter[OutputT]
