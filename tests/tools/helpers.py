@@ -64,7 +64,7 @@ def build_tool_context(
     if filesystem is None:
         resources = ResourceRegistry()
     else:
-        resources = ResourceRegistry.from_mapping({Filesystem: filesystem})
+        resources = ResourceRegistry.build({Filesystem: filesystem})
     return ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=None,

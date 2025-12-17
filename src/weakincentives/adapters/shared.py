@@ -288,7 +288,7 @@ def _build_resources(*, filesystem: Filesystem | None) -> ResourceRegistry:
     """
     if filesystem is None:
         return ResourceRegistry()
-    return ResourceRegistry.from_mapping({Filesystem: filesystem})
+    return ResourceRegistry.build({Filesystem: filesystem})
 
 
 def _jittered_backoff(

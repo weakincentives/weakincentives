@@ -130,14 +130,14 @@ class ResourceRegistry:
         return resource_type in self._entries
 
     @staticmethod
-    def from_mapping(mapping: Mapping[type[object], object]) -> ResourceRegistry:
-        """Construct a registry from an explicit type-to-instance mapping.
+    def build(mapping: Mapping[type[object], object]) -> ResourceRegistry:
+        """Construct a registry from a type-to-instance mapping.
 
         Use protocol types as keys to enable protocol-based lookup:
 
         .. code-block:: python
 
-            registry = ResourceRegistry.from_mapping({
+            registry = ResourceRegistry.build({
                 Filesystem: InMemoryFilesystem(),
                 HTTPClient: MyHTTPClient(),
             })

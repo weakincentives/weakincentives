@@ -39,7 +39,7 @@ class TestResourceRegistryGet:
     def test_get_returns_resource_when_present(self) -> None:
         """Test that get returns the resource when it's registered."""
         resource = MockResource(value="test")
-        registry = ResourceRegistry.from_mapping({MockResource: resource})
+        registry = ResourceRegistry.build({MockResource: resource})
         assert registry.get(MockResource) is resource
 
     def test_get_returns_none_when_absent(self) -> None:
@@ -57,7 +57,7 @@ class TestResourceRegistryGet:
         """Test that get ignores default when resource is present."""
         resource = MockResource(value="actual")
         default = MockResource(value="default")
-        registry = ResourceRegistry.from_mapping({MockResource: resource})
+        registry = ResourceRegistry.build({MockResource: resource})
         assert registry.get(MockResource, default) is resource
 
 
@@ -67,7 +67,7 @@ class TestResourceRegistryContains:
     def test_contains_true_when_present(self) -> None:
         """Test that __contains__ returns True when resource is registered."""
         resource = MockResource(value="test")
-        registry = ResourceRegistry.from_mapping({MockResource: resource})
+        registry = ResourceRegistry.build({MockResource: resource})
         assert MockResource in registry
 
     def test_contains_false_when_absent(self) -> None:
@@ -77,18 +77,18 @@ class TestResourceRegistryContains:
 
 
 class TestResourceRegistryFromMapping:
-    """Tests for ResourceRegistry.from_mapping factory method."""
+    """Tests for ResourceRegistry.build factory method."""
 
-    def test_from_mapping_stores_by_explicit_type(self) -> None:
-        """Test that from_mapping stores by the mapping key type."""
+    def test_build_stores_by_explicit_type(self) -> None:
+        """Test that build stores by the mapping key type."""
         resource = MockResource(value="test")
-        registry = ResourceRegistry.from_mapping({MockResource: resource})
+        registry = ResourceRegistry.build({MockResource: resource})
         assert registry.get(MockResource) is resource
 
-    def test_from_mapping_skips_none_values(self) -> None:
-        """Test that from_mapping filters out None values."""
+    def test_build_skips_none_values(self) -> None:
+        """Test that build filters out None values."""
         resource = MockResource(value="test")
-        registry = ResourceRegistry.from_mapping(
+        registry = ResourceRegistry.build(
             {
                 MockResource: resource,
                 AnotherResource: None,
