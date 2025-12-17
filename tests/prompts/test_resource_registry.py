@@ -76,40 +76,6 @@ class TestResourceRegistryContains:
         assert MockResource not in registry
 
 
-class TestResourceRegistryBuild:
-    """Tests for ResourceRegistry.build factory method."""
-
-    def test_build_with_single_resource(self) -> None:
-        """Test build with a single resource stores by concrete type."""
-        resource = MockResource(value="test")
-        registry = ResourceRegistry.build(my_resource=resource)
-        # build() stores by type(value), so lookup by concrete type works
-        assert registry.get(MockResource) is resource
-
-    def test_build_with_multiple_resources(self) -> None:
-        """Test build with multiple resources."""
-        resource1 = MockResource(value="first")
-        resource2 = AnotherResource(count=42)
-        registry = ResourceRegistry.build(resource1=resource1, resource2=resource2)
-        assert registry.get(MockResource) is resource1
-        assert registry.get(AnotherResource) is resource2
-
-    def test_build_skips_none_values(self) -> None:
-        """Test that build skips None values."""
-        resource = MockResource(value="test")
-        registry = ResourceRegistry.build(
-            present=resource,
-            absent=None,
-        )
-        assert registry.get(MockResource) is resource
-        assert AnotherResource not in registry
-
-    def test_build_with_no_resources(self) -> None:
-        """Test build with no resources creates empty registry."""
-        registry = ResourceRegistry.build()
-        assert MockResource not in registry
-
-
 class TestResourceRegistryFromMapping:
     """Tests for ResourceRegistry.from_mapping factory method."""
 

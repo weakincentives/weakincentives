@@ -130,28 +130,21 @@ class ResourceRegistry:
         return resource_type in self._entries
 
     @staticmethod
-    def build(**resources: object) -> ResourceRegistry:
-        """Construct a registry from keyword arguments.
+    def from_mapping(mapping: Mapping[type[object], object]) -> ResourceRegistry:
+        """Construct a registry from an explicit type-to-instance mapping.
 
-        Each keyword argument should be a resource instance. The registry
-        key is the instance's type.
+        Use protocol types as keys to enable protocol-based lookup:
 
         .. code-block:: python
 
-            registry = ResourceRegistry.build(
-                filesystem=InMemoryFilesystem(),
-                http_client=HTTPClient(),
-            )
-        """
-        entries: dict[type[object], object] = {}
-        for value in resources.values():
-            if value is not None:
-                entries[type(value)] = value
-        return ResourceRegistry(_entries=MappingProxyType(entries))
+            registry = ResourceRegistry.from_mapping({
+                Filesystem: InMemoryFilesystem(),
+                HTTPClient: MyHTTPClient(),
+            })
 
-    @staticmethod
-    def from_mapping(mapping: Mapping[type[object], object]) -> ResourceRegistry:
-        """Construct a registry from an explicit type-to-instance mapping."""
+            # Now protocol-based lookup works:
+            fs = registry.get(Filesystem)  # Returns the InMemoryFilesystem
+        """
         filtered = {k: v for k, v in mapping.items() if v is not None}
         return ResourceRegistry(_entries=MappingProxyType(filtered))
 
