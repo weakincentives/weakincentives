@@ -796,3 +796,67 @@ def test_tool_receives_filesystem_from_workspace_section(
     assert len(captured_filesystem) == 1
     assert captured_filesystem[0] is not None
     assert isinstance(captured_filesystem[0], InMemoryFilesystem)
+
+
+def test_budget_tracker_passed_to_tool_context_via_resources(
+    adapter_harness: AdapterHarness,
+) -> None:
+    """Verify budget_tracker is accessible via context.budget_tracker in tool handlers."""
+    from weakincentives.budget import Budget, BudgetTracker
+
+    captured_tracker: list[BudgetTracker | None] = []
+
+    def tool_handler(
+        params: ToolParams, *, context: ToolContext
+    ) -> ToolResult[ToolPayload]:
+        captured_tracker.append(context.budget_tracker)
+        return ToolResult(
+            message=f"Searched for {params.query}",
+            value=ToolPayload(url="http://example.com", snippet="Found it"),
+        )
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=tool_handler,
+    )
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    prompt_template = PromptTemplate(
+        ns=f"test/{adapter_harness.name}",
+        key="test-budget-tracker-pass-through",
+        sections=[
+            MarkdownSection(
+                title="Search",
+                key="search",
+                template="Use the search tool.",
+                tools=[tool],
+            ),
+        ],
+    )
+
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "docs"}),
+    )
+    responses = _build_responses(
+        tool_call=tool_call,
+        final_message=DummyMessage(content="Done", tool_calls=None),
+    )
+    adapter, _ = adapter_harness.build(responses)
+
+    prompt = Prompt(prompt_template)
+    budget = Budget(max_total_tokens=10000)
+    tracker = BudgetTracker(budget=budget)
+
+    _ = adapter.evaluate(
+        prompt,
+        session=cast(SessionProtocol, session),
+        budget_tracker=tracker,
+    )
+
+    assert len(captured_tracker) == 1
+    assert captured_tracker[0] is tracker

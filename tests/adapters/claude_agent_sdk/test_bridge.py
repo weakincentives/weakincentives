@@ -747,3 +747,98 @@ class TestCreateBridgedToolsWithFilesystem:
 
         assert len(captured_filesystem) == 1
         assert captured_filesystem[0] is test_filesystem
+
+
+class TestBudgetTrackerInResourceRegistry:
+    def test_passes_budget_tracker_to_tool_context_via_resources(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that budget_tracker parameter is accessible via context.resources."""
+        from weakincentives.budget import Budget, BudgetTracker
+
+        captured_budget_tracker: list[BudgetTracker | None] = []
+
+        def capture_context_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            captured_budget_tracker.append(context.budget_tracker)
+            return ToolResult(
+                message=f"Searched for {params.query}",
+                value=SearchResult(matches=3),
+                success=True,
+            )
+
+        capture_tool = Tool[SearchParams, SearchResult](
+            name="capture",
+            description="Tool that captures context",
+            handler=capture_context_handler,
+        )
+
+        test_budget = Budget(max_total_tokens=1000)
+        test_tracker = BudgetTracker(budget=test_budget)
+
+        bridged = BridgedTool(
+            name="capture",
+            description="Tool that captures context",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=capture_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=test_tracker,
+            filesystem=None,
+        )
+
+        _ = bridged({"query": "test"})
+
+        assert len(captured_budget_tracker) == 1
+        assert captured_budget_tracker[0] is test_tracker
+
+    def test_create_bridged_tools_passes_budget_tracker_via_resources(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that create_bridged_tools passes budget_tracker via resources."""
+        from weakincentives.budget import Budget, BudgetTracker
+
+        captured_budget_tracker: list[BudgetTracker | None] = []
+
+        def capture_context_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            captured_budget_tracker.append(context.budget_tracker)
+            return ToolResult(
+                message=f"Searched for {params.query}",
+                value=SearchResult(matches=3),
+                success=True,
+            )
+
+        capture_tool = Tool[SearchParams, SearchResult](
+            name="capture",
+            description="Tool that captures context",
+            handler=capture_context_handler,
+        )
+
+        test_budget = Budget(max_total_tokens=1000)
+        test_tracker = BudgetTracker(budget=test_budget)
+
+        bridged_tools = create_bridged_tools(
+            (capture_tool,),
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=test_tracker,
+            filesystem=None,
+        )
+
+        assert len(bridged_tools) == 1
+        _ = bridged_tools[0]({"query": "test"})
+
+        assert len(captured_budget_tracker) == 1
+        assert captured_budget_tracker[0] is test_tracker

@@ -279,16 +279,25 @@ def _sleep_for(delay: timedelta) -> None:
     time.sleep(delay.total_seconds())
 
 
-def _build_resources(*, filesystem: Filesystem | None) -> ResourceRegistry:
+def _build_resources(
+    *,
+    filesystem: Filesystem | None,
+    budget_tracker: BudgetTracker | None,
+) -> ResourceRegistry:
     """Build a ResourceRegistry with the given resources.
 
     Resources are keyed by their protocol type (e.g., Filesystem) rather than
     their concrete type (e.g., InMemoryFilesystem) to enable protocol-based
     lookup in tool handlers.
     """
-    if filesystem is None:
+    entries: dict[type[object], object] = {}
+    if filesystem is not None:
+        entries[Filesystem] = filesystem
+    if budget_tracker is not None:
+        entries[BudgetTracker] = budget_tracker
+    if not entries:
         return ResourceRegistry()
-    return ResourceRegistry.build({Filesystem: filesystem})
+    return ResourceRegistry.build(entries)
 
 
 def _jittered_backoff(
@@ -723,14 +732,16 @@ def tool_execution(
         )
         # Get filesystem from workspace section if present
         filesystem = context.prompt.filesystem() if context.prompt else None
-        resources = _build_resources(filesystem=filesystem)
+        resources = _build_resources(
+            filesystem=filesystem,
+            budget_tracker=context.budget_tracker,
+        )
         tool_context = ToolContext(
             prompt=cast(PromptProtocol[Any], context.prompt),
             rendered_prompt=context.rendered_prompt,
             adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
             session=context.session,
             deadline=context.deadline,
-            budget_tracker=context.budget_tracker,
             resources=resources,
         )
         tool_result = _invoke_tool_handler(
