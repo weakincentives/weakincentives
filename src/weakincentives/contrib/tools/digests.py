@@ -127,16 +127,17 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         body = self._resolve_body()
         return self._render_block(body, depth, number, path)
 
-    def render_with_template(
+    @override
+    def render_override(
         self,
-        template_text: str,
+        override_body: str,
         params: SupportsDataclass | None,
         depth: int,
         number: str,
         path: tuple[str, ...] = (),
     ) -> str:
         del params
-        body = self._resolve_body(override_body=template_text)
+        body = self._resolve_body(override_body=override_body)
         return self._render_block(body, depth, number, path)
 
     @override

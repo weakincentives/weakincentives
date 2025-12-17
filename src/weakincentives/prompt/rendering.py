@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, MutableMapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from dataclasses import field, is_dataclass, replace
 from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, override
@@ -354,15 +354,8 @@ class PromptRenderer[OutputT]:
     ) -> str:
         params_type = node.section.params_type
         try:
-            render_override = getattr(node.section, "render_with_template", None)
-            if override_body is not None and callable(render_override):
-                override_renderer = cast(
-                    Callable[
-                        [str, SupportsDataclass | None, int, str, tuple[str, ...]], str
-                    ],
-                    render_override,
-                )
-                rendered = override_renderer(
+            if override_body is not None:
+                rendered = node.section.render_override(
                     override_body, section_params, node.depth, node.number, node.path
                 )
             else:

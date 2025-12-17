@@ -22,7 +22,7 @@ from weakincentives.prompt._normalization import (
     COMPONENT_KEY_PATTERN,
     normalize_component_key,
 )
-from weakincentives.prompt.errors import PromptValidationError
+from weakincentives.prompt.errors import PromptRenderError, PromptValidationError
 
 
 @dataclass
@@ -328,3 +328,13 @@ def test_generic_params_specializer_fallbacks_to_component_name() -> None:
         NamelessSpecializer.__class_getitem__(bad_args)
 
     assert str(excinfo.value) == "Component[...] expects a single type argument."
+
+
+def test_section_render_override_default_raises_error() -> None:
+    section = PlainSection(title="Plain", key="plain")
+
+    with pytest.raises(PromptRenderError) as excinfo:
+        section.render_override("override body", None, 0, "1", ("plain",))
+
+    assert "plain" in str(excinfo.value)
+    assert "does not support override rendering" in str(excinfo.value)
