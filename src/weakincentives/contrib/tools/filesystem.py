@@ -17,6 +17,9 @@ workspace backends (in-memory VFS, Podman containers, host filesystem) so
 tool handlers can perform file operations without coupling to a specific
 storage implementation.
 
+The protocol uses simple `str` paths throughout - tool handlers convert these
+to structured result types (with VfsPath) for serialization to the LLM.
+
 Example usage::
 
     from weakincentives.contrib.tools.filesystem import (
@@ -48,15 +51,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal, Protocol, runtime_checkable
 
-from ...dataclasses import FrozenDataclass
-
 _DEFAULT_READ_LIMIT: Final[int] = 2_000
 _MAX_WRITE_LENGTH: Final[int] = 48_000
 _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_SEGMENT_LENGTH: Final[int] = 80
 _MAX_GREP_MATCHES: Final[int] = 1_000
 _ASCII: Final[str] = "ascii"
-_DEFAULT_ENCODING: Final[str] = "utf-8"
 
 #: Pass as `limit` to `Filesystem.read()` to read the entire file without truncation.
 READ_ENTIRE_FILE: Final[int] = -1
@@ -66,39 +66,7 @@ WriteMode = Literal["create", "overwrite", "append"]
 
 
 # ---------------------------------------------------------------------------
-# VfsPath - Structured path representation for tool serialization
-# ---------------------------------------------------------------------------
-
-
-@FrozenDataclass()
-class VfsPath:
-    """Relative POSIX-style path representation."""
-
-    segments: tuple[str, ...] = field(
-        metadata={
-            "description": (
-                "Ordered path segments. Values must be relative, ASCII-only, and "
-                "free of '.' or '..'."
-            )
-        }
-    )
-
-
-def format_path(path: VfsPath) -> str:
-    """Format a VfsPath as a string."""
-    return "/".join(path.segments) or "/"
-
-
-def format_timestamp(value: datetime | None) -> str:
-    """Format a timestamp for display."""
-    if value is None:
-        return "-"
-    aware = value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-    return aware.isoformat()
-
-
-# ---------------------------------------------------------------------------
-# Protocol-level types (simple, used by Filesystem backends)
+# Protocol Result Types
 # ---------------------------------------------------------------------------
 
 
@@ -125,16 +93,16 @@ class FileEntry:
 
 
 @dataclass(slots=True, frozen=True)
-class ProtocolGlobMatch:
-    """Result from glob operations (protocol level with str path)."""
+class GlobMatch:
+    """Result from glob operations."""
 
     path: str
     is_file: bool
 
 
 @dataclass(slots=True, frozen=True)
-class ProtocolGrepMatch:
-    """Result from grep operations (protocol level with str path)."""
+class GrepMatch:
+    """Result from grep operations."""
 
     path: str
     line_number: int
@@ -165,263 +133,16 @@ class WriteResult:
 
 
 # ---------------------------------------------------------------------------
-# Tool result types (rich, used by tool handlers for serialization)
+# Filesystem Protocol
 # ---------------------------------------------------------------------------
-
-
-@FrozenDataclass()
-class FileInfo:
-    """Metadata describing a directory entry (tool result type)."""
-
-    path: VfsPath = field(
-        metadata={"description": "Normalized VFS path referencing the directory entry."}
-    )
-    kind: Literal["file", "directory"] = field(
-        metadata={
-            "description": (
-                "Entry type; directories surface nested paths while files carry metadata."
-            )
-        }
-    )
-    size_bytes: int | None = field(
-        default=None,
-        metadata={
-            "description": (
-                "On-disk size for files. Directories omit sizes to avoid redundant traversal."
-            )
-        },
-    )
-    version: int | None = field(
-        default=None,
-        metadata={
-            "description": (
-                "Monotonic file version propagated from the VFS snapshot. Directories omit versions."
-            )
-        },
-    )
-    updated_at: datetime | None = field(
-        default=None,
-        metadata={
-            "description": (
-                "Timestamp describing the most recent mutation for files; directories omit the value."
-            )
-        },
-    )
-
-    def render(self) -> str:
-        path_label = format_path(self.path)
-        if self.kind == "directory":
-            directory_label = path_label if path_label == "/" else f"{path_label}/"
-            return f"DIR  {directory_label}"
-        size_label = "size ?"
-        if self.size_bytes is not None:
-            size_label = f"{self.size_bytes} B"
-        version_label = "v?" if self.version is None else f"v{self.version}"
-        updated_label = format_timestamp(self.updated_at)
-        return (
-            f"FILE {path_label} ("
-            f"{size_label}, {version_label}, updated {updated_label})"
-        )
-
-
-@FrozenDataclass()
-class GlobMatch:
-    """Match returned by glob operations (tool result type)."""
-
-    path: VfsPath = field(
-        metadata={"description": "Path of the file or directory that matched the glob."}
-    )
-    size_bytes: int = field(
-        metadata={
-            "description": (
-                "File size in bytes captured at snapshot time to help prioritize large assets."
-            )
-        }
-    )
-    version: int = field(
-        metadata={
-            "description": "Monotonic VFS version counter reflecting the latest write to the entry."
-        }
-    )
-    updated_at: datetime = field(
-        metadata={
-            "description": "Timestamp from the snapshot identifying when the entry last changed."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = format_path(self.path)
-        timestamp = format_timestamp(self.updated_at)
-        return (
-            f"{path_label} - {self.size_bytes} B, v{self.version}, updated {timestamp}"
-        )
-
-
-@FrozenDataclass()
-class GrepMatch:
-    """Regex match returned by grep operations (tool result type)."""
-
-    path: VfsPath = field(
-        metadata={
-            "description": "Path of the file containing the regex hit, normalized to the VFS."
-        }
-    )
-    line_number: int = field(
-        metadata={"description": "One-based line number where the regex matched."}
-    )
-    line: str = field(
-        metadata={
-            "description": "Full line content containing the match so callers can review context."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = format_path(self.path)
-        return f"{path_label}:{self.line_number}: {self.line}"
-
-
-@FrozenDataclass()
-class ReadFileResult:
-    """Payload returned from read_file tool."""
-
-    path: VfsPath = field(
-        metadata={"description": "Path of the file that was read inside the VFS."}
-    )
-    content: str = field(
-        metadata={
-            "description": (
-                "Formatted slice of the file contents with line numbers applied for clarity."
-            )
-        }
-    )
-    offset: int = field(
-        metadata={
-            "description": (
-                "Zero-based line offset applied to the read window after normalization."
-            )
-        }
-    )
-    limit: int = field(
-        metadata={
-            "description": (
-                "Maximum number of lines returned in this response after clamping to file length."
-            )
-        }
-    )
-    total_lines: int = field(
-        metadata={
-            "description": "Total line count of the file so callers can paginate follow-up reads."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = format_path(self.path)
-        if self.limit == 0:
-            window = "no lines returned"
-        else:
-            end_line = self.offset + self.limit
-            window = f"lines {self.offset + 1}-{end_line}"
-        header = f"{path_label} - {window} of {self.total_lines}"
-        body = self.content or "<empty>"
-        return f"{header}\n\n{body}"
-
-
-@FrozenDataclass()
-class WriteFile:
-    """Result of a file write operation (tool result type)."""
-
-    path: VfsPath = field(
-        metadata={"description": "Destination file path being written inside the VFS."}
-    )
-    content: str = field(
-        metadata={
-            "description": (
-                "UTF-8 payload that will be persisted to the target file after validation."
-            )
-        }
-    )
-    mode: WriteMode = field(
-        default="create",
-        metadata={
-            "description": (
-                "Write strategy describing whether the file is newly created, overwritten, or appended."
-            )
-        },
-    )
-    encoding: FileEncoding = field(
-        default="utf-8",
-        metadata={
-            "description": (
-                "Codec used to encode the content when persisting it to the virtual filesystem."
-            )
-        },
-    )
-
-    def render(self) -> str:
-        path_label = format_path(self.path)
-        byte_count = len(self.content.encode(self.encoding))
-        header = (
-            f"{path_label} - mode {self.mode}, {byte_count} bytes ({self.encoding})"
-        )
-        body = self.content or "<empty>"
-        return f"{header}\n\n{body}"
-
-
-@FrozenDataclass()
-class DeleteEntry:
-    """Result of a file/directory deletion."""
-
-    path: VfsPath = field(
-        metadata={
-            "description": "Path of the file or directory slated for removal from the VFS."
-        }
-    )
-
-    def render(self) -> str:
-        path_label = format_path(self.path)
-        return f"Removed entries under {path_label}"
-
-
-@FrozenDataclass()
-class VfsFile:
-    """Snapshot of a single file stored in the virtual filesystem."""
-
-    path: VfsPath = field(
-        metadata={"description": "Location of the file within the virtual filesystem."}
-    )
-    content: str = field(
-        metadata={
-            "description": (
-                "UTF-8 text content of the file. Binary data is not supported."
-            )
-        }
-    )
-    encoding: FileEncoding = field(
-        metadata={"description": "Name of the codec used to decode the file contents."}
-    )
-    size_bytes: int = field(
-        metadata={"description": "Size of the encoded file on disk, in bytes."}
-    )
-    version: int = field(
-        metadata={
-            "description": (
-                "Monotonic version counter that increments after each write."
-            )
-        }
-    )
-    created_at: datetime = field(
-        metadata={
-            "description": "Timestamp indicating when the file was first created."
-        }
-    )
-    updated_at: datetime = field(
-        metadata={"description": "Timestamp of the most recent write operation."}
-    )
 
 
 @runtime_checkable
 class Filesystem(Protocol):
-    """Unified filesystem protocol for workspace operations."""
+    """Unified filesystem protocol for workspace operations.
+
+    All paths are relative strings. Backends normalize paths internally.
+    """
 
     # --- Read Operations ---
 
@@ -478,7 +199,7 @@ class Filesystem(Protocol):
         pattern: str,
         *,
         path: str = ".",
-    ) -> Sequence[ProtocolGlobMatch]:
+    ) -> Sequence[GlobMatch]:
         """Match files by glob pattern.
 
         Args:
@@ -497,7 +218,7 @@ class Filesystem(Protocol):
         path: str = ".",
         glob: str | None = None,
         max_matches: int | None = None,
-    ) -> Sequence[ProtocolGrepMatch]:
+    ) -> Sequence[GrepMatch]:
         """Search file contents by regex.
 
         Args:
@@ -592,23 +313,12 @@ class Filesystem(Protocol):
         ...
 
 
-@dataclass(slots=True)
-class _InMemoryFile:
-    """Internal representation of a file in memory."""
-
-    content: str
-    created_at: datetime
-    modified_at: datetime
+# ---------------------------------------------------------------------------
+# Shared Utilities
+# ---------------------------------------------------------------------------
 
 
-def _now() -> datetime:
-    """Return current UTC time truncated to milliseconds."""
-    value = datetime.now(UTC)
-    microsecond = value.microsecond - value.microsecond % 1000
-    return value.replace(microsecond=microsecond, tzinfo=UTC)
-
-
-def _normalize_path(path: str) -> str:
+def normalize_path(path: str) -> str:
     """Normalize a path by removing leading/trailing slashes and cleaning segments."""
     if not path or path in {".", "/"}:
         return ""
@@ -625,7 +335,7 @@ def _normalize_path(path: str) -> str:
     return "/".join(result)
 
 
-def _validate_path(path: str) -> None:
+def validate_path(path: str) -> None:
     """Validate path constraints."""
     if not path:
         return
@@ -642,6 +352,13 @@ def _validate_path(path: str) -> None:
         except UnicodeEncodeError as err:
             msg = "Path segments must be ASCII."
             raise ValueError(msg) from err
+
+
+def _now() -> datetime:
+    """Return current UTC time truncated to milliseconds."""
+    value = datetime.now(UTC)
+    microsecond = value.microsecond - value.microsecond % 1000
+    return value.replace(microsecond=microsecond, tzinfo=UTC)
 
 
 def _is_path_under(path: str, base: str) -> bool:
@@ -668,6 +385,20 @@ def _empty_files_dict() -> dict[str, _InMemoryFile]:
 
 def _empty_directories_set() -> set[str]:
     return set()
+
+
+# ---------------------------------------------------------------------------
+# InMemoryFilesystem Implementation
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _InMemoryFile:
+    """Internal representation of a file in memory."""
+
+    content: str
+    created_at: datetime
+    modified_at: datetime
 
 
 @dataclass(slots=True)
@@ -706,8 +437,8 @@ class InMemoryFilesystem:
     ) -> ReadResult:
         """Read file content with optional pagination."""
         del encoding  # Only UTF-8 is supported
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if normalized in self._directories:
             msg = f"Is a directory: {path}"
@@ -744,13 +475,13 @@ class InMemoryFilesystem:
 
     def exists(self, path: str) -> bool:
         """Check if a path exists."""
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         return normalized in self._files or normalized in self._directories
 
     def stat(self, path: str) -> FileStat:
         """Get metadata for a path."""
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if normalized in self._directories:
             return FileStat(
@@ -778,8 +509,8 @@ class InMemoryFilesystem:
 
     def list(self, path: str = ".") -> Sequence[FileEntry]:
         """List directory contents."""
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if normalized in self._files:
             msg = f"Not a directory: {path}"
@@ -845,13 +576,13 @@ class InMemoryFilesystem:
         pattern: str,
         *,
         path: str = ".",
-    ) -> Sequence[ProtocolGlobMatch]:
+    ) -> Sequence[GlobMatch]:
         """Match files by glob pattern."""
-        normalized_base = _normalize_path(path)
-        _validate_path(normalized_base)
+        normalized_base = normalize_path(path)
+        validate_path(normalized_base)
 
         matches = [
-            ProtocolGlobMatch(path=file_path, is_file=True)
+            GlobMatch(path=file_path, is_file=True)
             for file_path in self._files
             if _glob_match(file_path, pattern, normalized_base)
         ]
@@ -865,10 +596,10 @@ class InMemoryFilesystem:
         path: str = ".",
         glob: str | None = None,
         max_matches: int | None = None,
-    ) -> Sequence[ProtocolGrepMatch]:
+    ) -> Sequence[GrepMatch]:
         """Search file contents by regex."""
-        normalized_base = _normalize_path(path)
-        _validate_path(normalized_base)
+        normalized_base = normalize_path(path)
+        validate_path(normalized_base)
 
         try:
             regex = re.compile(pattern)
@@ -877,7 +608,7 @@ class InMemoryFilesystem:
             raise ValueError(msg) from err
 
         actual_max = max_matches if max_matches is not None else _MAX_GREP_MATCHES
-        matches: list[ProtocolGrepMatch] = []
+        matches: list[GrepMatch] = []
 
         sorted_files = sorted(self._files.items())
         for file_path, file in sorted_files:
@@ -890,7 +621,7 @@ class InMemoryFilesystem:
                 match = regex.search(line)
                 if match:
                     matches.append(
-                        ProtocolGrepMatch(
+                        GrepMatch(
                             path=file_path,
                             line_number=line_num,
                             line_content=line,
@@ -916,12 +647,12 @@ class InMemoryFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if not normalized:
             msg = "Cannot write to root directory"
             raise ValueError(msg)
 
-        _validate_path(normalized)
+        validate_path(normalized)
 
         if len(content) > _MAX_WRITE_LENGTH:
             msg = f"Content exceeds maximum length of {_MAX_WRITE_LENGTH} characters."
@@ -976,8 +707,8 @@ class InMemoryFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if normalized in self._files:
             del self._files[normalized]
@@ -1029,8 +760,8 @@ class InMemoryFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if not normalized:
             return  # Root always exists
@@ -1059,6 +790,11 @@ class InMemoryFilesystem:
             parent_path = "/".join(segments[: i + 1])
             if parent_path and parent_path not in self._directories:
                 self._directories.add(parent_path)
+
+
+# ---------------------------------------------------------------------------
+# HostFilesystem Implementation
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -1144,7 +880,7 @@ class HostFilesystem:
             content = content[:-1]
 
         # Return path relative to root
-        rel_path = _normalize_path(path) or "/"
+        rel_path = normalize_path(path) or "/"
 
         return ReadResult(
             content=content,
@@ -1172,7 +908,7 @@ class HostFilesystem:
 
         st = resolved.stat()
         is_dir = resolved.is_dir()
-        rel_path = _normalize_path(path) or "/"
+        rel_path = normalize_path(path) or "/"
 
         return FileStat(
             path=rel_path,
@@ -1195,7 +931,7 @@ class HostFilesystem:
             raise NotADirectoryError(msg)
 
         entries: list[FileEntry] = []
-        base_path = _normalize_path(path)
+        base_path = normalize_path(path)
 
         for item in resolved.iterdir():
             is_dir = item.is_dir()
@@ -1218,7 +954,7 @@ class HostFilesystem:
         pattern: str,
         *,
         path: str = ".",
-    ) -> Sequence[ProtocolGlobMatch]:
+    ) -> Sequence[GlobMatch]:
         """Match files by glob pattern."""
         resolved_base = self._resolve_path(path)
         root_path = Path(self._root)
@@ -1226,7 +962,7 @@ class HostFilesystem:
         if not resolved_base.exists():
             return []
 
-        matches: list[ProtocolGlobMatch] = []
+        matches: list[GlobMatch] = []
 
         for file_path in resolved_base.rglob("*"):
             if not file_path.is_file():
@@ -1237,7 +973,7 @@ class HostFilesystem:
             rel_to_base = str(file_path.relative_to(resolved_base))
 
             if _glob_match(rel_to_base, pattern, ""):
-                matches.append(ProtocolGlobMatch(path=rel_to_fs_root, is_file=True))
+                matches.append(GlobMatch(path=rel_to_fs_root, is_file=True))
 
         matches.sort(key=lambda m: m.path)
         return matches
@@ -1249,7 +985,7 @@ class HostFilesystem:
         path: str = ".",
         glob: str | None = None,
         max_matches: int | None = None,
-    ) -> Sequence[ProtocolGrepMatch]:
+    ) -> Sequence[GrepMatch]:
         """Search file contents by regex."""
         resolved_base = self._resolve_path(path)
         root_path = Path(self._root)
@@ -1261,7 +997,7 @@ class HostFilesystem:
             raise ValueError(msg) from err
 
         actual_max = max_matches if max_matches is not None else _MAX_GREP_MATCHES
-        matches: list[ProtocolGrepMatch] = []
+        matches: list[GrepMatch] = []
 
         if not resolved_base.exists():
             return []
@@ -1289,9 +1025,9 @@ class HostFilesystem:
     @staticmethod
     def _grep_file(
         file_path: Path, regex: re.Pattern[str], rel_path: str, max_remaining: int
-    ) -> list[ProtocolGrepMatch]:  # ty: ignore[invalid-type-form]  # ty bug: resolves list to class method
+    ) -> list[GrepMatch]:  # ty: ignore[invalid-type-form]  # ty bug: resolves list to class method
         """Search a single file for regex matches."""
-        matches: list[ProtocolGrepMatch] = []
+        matches: list[GrepMatch] = []
         try:
             with file_path.open(encoding="utf-8") as f:
                 for line_num, line in enumerate(f, start=1):
@@ -1299,7 +1035,7 @@ class HostFilesystem:
                     match = regex.search(line)
                     if match:
                         matches.append(
-                            ProtocolGrepMatch(
+                            GrepMatch(
                                 path=rel_path,
                                 line_number=line_num,
                                 line_content=line,
@@ -1327,12 +1063,12 @@ class HostFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if not normalized:
             msg = "Cannot write to root directory"
             raise ValueError(msg)
 
-        _validate_path(normalized)
+        validate_path(normalized)
 
         if len(content) > _MAX_WRITE_LENGTH:
             msg = f"Content exceeds maximum length of {_MAX_WRITE_LENGTH} characters."
@@ -1379,7 +1115,7 @@ class HostFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if not normalized:
             msg = "Cannot delete root directory"
             raise PermissionError(msg)
@@ -1415,11 +1151,11 @@ class HostFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if not normalized:
             return  # Root always exists
 
-        _validate_path(normalized)
+        validate_path(normalized)
         resolved = self._resolve_path(path)
 
         if resolved.exists():
@@ -1441,25 +1177,17 @@ class HostFilesystem:
 
 __all__ = [
     "READ_ENTIRE_FILE",
-    "DeleteEntry",
     "FileEncoding",
     "FileEntry",
-    "FileInfo",
     "FileStat",
     "Filesystem",
     "GlobMatch",
     "GrepMatch",
     "HostFilesystem",
     "InMemoryFilesystem",
-    "ProtocolGlobMatch",
-    "ProtocolGrepMatch",
-    "ReadFileResult",
     "ReadResult",
-    "VfsFile",
-    "VfsPath",
-    "WriteFile",
     "WriteMode",
     "WriteResult",
-    "format_path",
-    "format_timestamp",
+    "normalize_path",
+    "validate_path",
 ]

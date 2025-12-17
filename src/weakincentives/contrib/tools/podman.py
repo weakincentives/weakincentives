@@ -46,24 +46,24 @@ from .asteval import (
     EvalResult,
 )
 from .filesystem import (
-    DeleteEntry,
-    FileInfo,
     Filesystem,
-    GlobMatch,
-    GrepMatch,
     HostFilesystem,
-    ReadFileResult,
-    VfsPath,
-    WriteFile,
 )
 from .vfs import (
+    DeleteEntry,
     EditFileParams,
+    FileInfo,
+    GlobMatch,
     GlobParams,
+    GrepMatch,
     GrepParams,
     HostMount,
     ListDirectoryParams,
     ReadFileParams,
+    ReadFileResult,
     RemoveParams,
+    VfsPath,
+    WriteFile,
     WriteFileParams,
 )
 

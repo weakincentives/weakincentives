@@ -45,7 +45,7 @@ from weakincentives.contrib.tools import (
     WriteFile,
     WriteFileParams,
 )
-from weakincentives.contrib.tools.filesystem import format_timestamp
+from weakincentives.contrib.tools.vfs import format_timestamp, path_from_string
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
@@ -1209,3 +1209,10 @@ def test_edit_file_preserves_content_beyond_default_read_limit() -> None:
     assert "MODIFIED" in result.content
     assert "line2499" in result.content  # Last line should still be present
     assert result.total_lines == 2500
+
+
+def test_path_from_string_returns_empty_for_root() -> None:
+    """Test that path_from_string returns empty VfsPath for root paths."""
+    assert path_from_string("") == VfsPath(())
+    assert path_from_string(".") == VfsPath(())
+    assert path_from_string("/") == VfsPath(())
