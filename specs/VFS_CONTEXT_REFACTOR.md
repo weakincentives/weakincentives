@@ -70,10 +70,13 @@ def _require_filesystem(context: ToolContext) -> Filesystem:
 
 | File | Changes |
 |------|---------|
+| `src/weakincentives/adapters/shared.py` | Add `build_tool_context()` factory, update tool dispatch |
+| `src/weakincentives/adapters/claude_agent_sdk/_bridge.py` | Use shared `build_tool_context()` |
 | `src/weakincentives/contrib/tools/vfs.py` | Remove `FilesystemToolHandlers` class, convert 7 methods to module functions |
 | `src/weakincentives/contrib/tools/vfs.py` | Update `_build_tools` to not instantiate handlers class |
-| `src/weakincentives/contrib/tools/vfs.py` | Update `VfsSection` to pass filesystem via context, not closure |
+| `src/weakincentives/prompt/rendered.py` | Add tool→section mapping or filesystem field |
 | `tests/tools/test_vfs.py` | Update tests to provide `context.filesystem` |
+| `tests/adapters/*.py` | Update adapter tests for unified context |
 
 ### Handlers to Refactor
 
@@ -146,25 +149,85 @@ def _build_tools(
     return (Tool[...](handler=list_directory_handler, ...), ...)
 ```
 
-### 4. Update Section to Provide Filesystem via Context
+### 4. Unify ToolContext Construction (DRY)
 
-The adapter must populate `context.filesystem` when invoking tools from a
-`VfsSection`. This requires verifying the adapter's `_build_tool_context`
-method includes the filesystem.
+**Problem**: `ToolContext` is constructed in two places, neither passes
+`filesystem`:
 
-Check `src/weakincentives/adapters/shared.py` for context construction:
+| Location | Adapter |
+|----------|---------|
+| `shared.py:711` | OpenAI, LiteLLM |
+| `_bridge.py:104` | Claude Agent SDK |
+
+**Solution**: Create a single factory function in `shared.py` used by all
+adapters:
 
 ```python
-def _build_tool_context(..., filesystem: Filesystem | None = None) -> ToolContext:
+# shared.py
+def build_tool_context(
+    *,
+    prompt: PromptProtocol[Any],
+    rendered_prompt: RenderedPromptProtocol[Any] | None,
+    adapter: ProviderAdapterProtocol[Any],
+    session: SessionProtocol,
+    deadline: Deadline | None = None,
+    budget_tracker: BudgetTracker | None = None,
+    filesystem: Filesystem | None = None,
+) -> ToolContext:
+    """Construct ToolContext for handler invocation.
+
+    All adapters must use this function to ensure consistent context.
+    """
     return ToolContext(
         prompt=prompt,
+        rendered_prompt=rendered_prompt,
+        adapter=adapter,
         session=session,
-        filesystem=filesystem,  # Must be passed
-        ...
+        deadline=deadline,
+        budget_tracker=budget_tracker,
+        filesystem=filesystem,
     )
 ```
 
-### 5. Section Filesystem Exposure
+**Files to update**:
+
+| File | Change |
+|------|--------|
+| `src/weakincentives/adapters/shared.py` | Add `build_tool_context()`, update `_execute_tool_call()` to use it |
+| `src/weakincentives/adapters/claude_agent_sdk/_bridge.py` | Import and use `build_tool_context()` in `BridgedTool.__call__` |
+
+### 5. Filesystem Discovery at Dispatch Time
+
+The adapter needs to find the filesystem for a tool. Options:
+
+**Option A**: Tool-to-section mapping (preferred)
+
+Track which section owns each tool during prompt rendering:
+
+```python
+# In RenderedPrompt or adapter state
+tool_section_map: dict[str, Section] = {
+    "ls": vfs_section,
+    "read_file": vfs_section,
+    ...
+}
+
+# At dispatch time
+section = tool_section_map.get(tool_name)
+filesystem = getattr(section, "filesystem", None)
+context = build_tool_context(..., filesystem=filesystem)
+```
+
+**Option B**: Single filesystem per prompt
+
+If a prompt has at most one workspace section, store it on the rendered prompt:
+
+```python
+class RenderedPrompt:
+    filesystem: Filesystem | None = None  # From workspace section if present
+```
+
+### 6. Section Filesystem Exposure
 
 `VfsSection` must expose its filesystem so adapters can include it in context:
 
@@ -203,7 +266,16 @@ def test_list_directory() -> None:
 
 ## Migration Checklist
 
-- [ ] Add `_require_filesystem` helper function
+### Phase 1: Unify Context Construction (DRY adapters)
+
+- [ ] Add `build_tool_context()` factory in `shared.py`
+- [ ] Update `_execute_tool_call()` in `shared.py` to use factory
+- [ ] Update `BridgedTool.__call__` in `_bridge.py` to use factory
+- [ ] Add filesystem discovery (tool→section→filesystem mapping)
+
+### Phase 2: Refactor VFS Handlers
+
+- [ ] Add `_require_filesystem` helper function in `vfs.py`
 - [ ] Convert `FilesystemToolHandlers.list_directory` to `list_directory_handler`
 - [ ] Convert `FilesystemToolHandlers.read_file` to `read_file_handler`
 - [ ] Convert `FilesystemToolHandlers.write_file` to `write_file_handler`
@@ -213,9 +285,11 @@ def test_list_directory() -> None:
 - [ ] Convert `FilesystemToolHandlers.remove` to `remove_handler`
 - [ ] Remove `FilesystemToolHandlers` class
 - [ ] Update `_build_tools` to use module-level handlers
+
+### Phase 3: Validation
+
 - [ ] Verify `VfsSection.filesystem` property exists
-- [ ] Verify adapter passes filesystem to context
-- [ ] Update all VFS tool tests
+- [ ] Update all VFS tool tests to use `context.filesystem`
 - [ ] Run `make check`
 
 ## Out of Scope
