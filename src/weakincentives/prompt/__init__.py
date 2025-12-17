@@ -53,7 +53,7 @@ from .structured_output import (
     parse_structured_output,
 )
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
-from .tool import Tool, ToolContext, ToolExample, ToolHandler
+from .tool import ResourceRegistry, Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 from .visibility_overrides import (
     ClearAllVisibilityOverrides,
@@ -86,6 +86,7 @@ __all__ = [
     "ProviderAdapterProtocol",
     "RenderedPrompt",
     "RenderedPromptProtocol",
+    "ResourceRegistry",
     "Section",
     "SectionDescriptor",
     "SectionNode",

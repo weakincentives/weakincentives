@@ -15,26 +15,24 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
+from typing import Any, Protocol, TypeVar, cast
 
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
 )
+from weakincentives.contrib.tools.filesystem import Filesystem
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
 )
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
-from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+from weakincentives.prompt.tool import ResourceRegistry, Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
-
-if TYPE_CHECKING:
-    from weakincentives.contrib.tools.filesystem import Filesystem
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclassOrNone)
 ResultT = TypeVar("ResultT", bound=SupportsToolResult)
@@ -63,12 +61,16 @@ def build_tool_context(
 ) -> ToolContext:
     prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
     adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
+    if filesystem is None:
+        resources = ResourceRegistry()
+    else:
+        resources = ResourceRegistry.from_mapping({Filesystem: filesystem})
     return ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=None,
         adapter=adapter,
         session=session,
-        filesystem=filesystem,
+        resources=resources,
     )
 
 

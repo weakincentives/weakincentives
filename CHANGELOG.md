@@ -6,6 +6,19 @@ Release highlights for weakincentives.
 
 ### Added
 
+- **ResourceRegistry for typed runtime resources.** `ToolContext` now exposes a
+  `resources` property containing a typed registry for runtime services. This
+  provides clean extensibility for future resources (HTTPClient, KVStore,
+  ArtifactStore, Clock, Tracer) without bloating the core dataclass:
+
+  ```python
+  # Access via typed registry
+  fs = context.resources.get(Filesystem)
+
+  # Sugar property for common resources
+  fs = context.filesystem  # equivalent
+  ```
+
 - Local link checker in `make markdown-check` validates that Markdown links to
   local files point to existing targets. Fenced code blocks and inline code
   are skipped to avoid false positives.

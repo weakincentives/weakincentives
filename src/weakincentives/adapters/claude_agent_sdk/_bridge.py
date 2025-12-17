@@ -22,7 +22,7 @@ from ...budget import BudgetTracker
 from ...contrib.tools.filesystem import Filesystem
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.tool import Tool, ToolContext, ToolResult
+from ...prompt.tool import ResourceRegistry, Tool, ToolContext, ToolResult
 from ...runtime.events import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
@@ -39,6 +39,18 @@ __all__ = [
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
+
+
+def _build_resources(*, filesystem: Filesystem | None) -> ResourceRegistry:
+    """Build a ResourceRegistry with the given resources.
+
+    Resources are keyed by their protocol type (e.g., Filesystem) rather than
+    their concrete type (e.g., InMemoryFilesystem) to enable protocol-based
+    lookup in tool handlers.
+    """
+    if filesystem is None:
+        return ResourceRegistry()
+    return ResourceRegistry.from_mapping({Filesystem: filesystem})
 
 
 class BridgedTool:
@@ -104,6 +116,7 @@ class BridgedTool:
             else:
                 params = parse(self._tool.params_type, args, extra="forbid")
 
+            resources = _build_resources(filesystem=self._filesystem)
             context = ToolContext(
                 prompt=self._prompt,
                 rendered_prompt=self._rendered_prompt,
@@ -111,7 +124,7 @@ class BridgedTool:
                 session=self._session,
                 deadline=self._deadline,
                 budget_tracker=self._budget_tracker,
-                filesystem=self._filesystem,
+                resources=resources,
             )
 
             result = handler(params, context=context)

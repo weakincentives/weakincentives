@@ -102,9 +102,55 @@ class ToolContext:
     session: SessionProtocol
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
+    resources: ResourceRegistry = field(default_factory=ResourceRegistry)
+
+    @property
+    def filesystem(self) -> Filesystem | None: ...
 ```
 
 Tool handlers that need an event bus should publish via `context.session.event_bus`.
+
+### ResourceRegistry
+
+Typed container for runtime resources:
+
+```python
+@dataclass(slots=True, frozen=True)
+class ResourceRegistry:
+    _entries: Mapping[type[object], object]
+
+    def get(self, resource_type: type[T]) -> T | None: ...
+    def get(self, resource_type: type[T], default: T) -> T: ...
+    def __contains__(self, resource_type: type[object]) -> bool: ...
+
+    @staticmethod
+    def build(**resources: object) -> ResourceRegistry: ...
+    @staticmethod
+    def from_mapping(mapping: Mapping[type[object], object]) -> ResourceRegistry: ...
+```
+
+Resources are stored by type and retrieved via the `get` method:
+
+```python
+def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
+    # Access via typed registry
+    fs = context.resources.get(Filesystem)
+    if fs is None:
+        return ToolResult(message="No filesystem", value=None, success=False)
+
+    # Common resources have sugar properties
+    # These are equivalent:
+    fs = context.filesystem
+    fs = context.resources.get(Filesystem)
+```
+
+**Design rationale**: The registry pattern allows future resources (HTTPClient,
+KVStore, ArtifactStore, Clock, Tracer) without bloating ToolContext with
+dedicated fields. Resources come from:
+
+- Workspace sections (protocol-based)
+- Adapter-provided runtime handles
+- Loop-provided services
 
 ### ToolExample
 
