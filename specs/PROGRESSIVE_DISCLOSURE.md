@@ -97,7 +97,7 @@ visibility=lambda: compute_visibility_from_session()
 The effective visibility is resolved in precedence order:
 
 1. **Session state override** via `VisibilityOverrides` slice
-2. **User-provided selector** (constant or callable)
+1. **User-provided selector** (constant or callable)
 
 ```python
 def effective_visibility(
@@ -206,8 +206,8 @@ class OpenSectionsResult:
 The handler validates all requested keys before processing:
 
 1. **Non-empty**: At least one key required
-2. **Exists**: Key must match a section in the registry
-3. **Not expanded**: Section must not already be `FULL`
+1. **Exists**: Key must match a section in the registry
+1. **Not expanded**: Section must not already be `FULL`
 
 ```python
 def _validate_section_keys(
@@ -408,6 +408,7 @@ Summarized sections append an instruction suffix to guide the model.
 The suffix varies based on whether the section has tools:
 
 **With tools:**
+
 ```
 ---
 [This section is summarized. To view full content and access additional tools,
@@ -415,6 +416,7 @@ call `open_sections` with key "reference-docs".]
 ```
 
 **Content-only:**
+
 ```
 ---
 [This section is summarized. To view full content, call `open_sections` with
@@ -475,9 +477,9 @@ def build_summary_suffix(
 When a section renders with `SUMMARY` visibility:
 
 1. Children are skipped (not rendered)
-2. Tools from the section and children are not collected
-3. Summary text is rendered instead of template
-4. Suffix is appended
+1. Tools from the section and children are not collected
+1. Summary text is rendered instead of template
+1. Suffix is appended
 
 ```python
 # In PromptRenderer.render()

@@ -32,6 +32,7 @@ from .progressive_disclosure import (
     build_summary_suffix,
     compute_current_visibility,
     create_open_sections_handler,
+    section_has_tools,
 )
 from .registry import RegistrySnapshot, SectionNode
 from .section import Section
@@ -216,7 +217,10 @@ class PromptRenderer[OutputT]:
             ):
                 section_key = ".".join(node.path)
                 child_keys = self._collect_child_keys(node)
-                suffix = build_summary_suffix(section_key, child_keys)
+                has_tools = section_has_tools(node.path, self._registry)
+                suffix = build_summary_suffix(
+                    section_key, child_keys, has_tools=has_tools
+                )
                 rendered += suffix
 
             # Don't collect tools when rendering with SUMMARY visibility
@@ -241,6 +245,7 @@ class PromptRenderer[OutputT]:
             open_sections_tool = create_open_sections_handler(
                 registry=self._registry,
                 current_visibility=current_visibility,
+                param_lookup=param_lookup,
             )
             collected_tools.append(
                 cast(
