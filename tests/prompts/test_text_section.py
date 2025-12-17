@@ -29,7 +29,7 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.rendering import PromptRenderer
-from weakincentives.prompt.tool import ToolContext, ToolResult
+from weakincentives.prompt.tool import ToolContext, ToolExample, ToolResult
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
@@ -601,3 +601,47 @@ def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
     assert "Parent summary: Parent Title" in rendered.text
     assert "Child content" not in rendered.text  # Child is skipped
     assert "Sibling content: Sibling Info" in rendered.text  # Sibling is rendered
+
+
+def test_markdown_section_render_override_with_empty_body_and_tools() -> None:
+    """render_override handles empty body with tools that have examples."""
+
+    section = MarkdownSection[_SectionParams](
+        title="ToolsOnly",
+        template="Default: ${title}",
+        key="tools-only",
+        tools=[
+            Tool[_ToolParams, _ToolResult](
+                name="override_tool",
+                description="Test tool for override.",
+                handler=_dummy_handler,
+                examples=(
+                    ToolExample[_ToolParams, _ToolResult](
+                        description="Example query",
+                        input=_ToolParams(query="test"),
+                        output=_ToolResult(answer="result"),
+                    ),
+                ),
+            )
+        ],
+    )
+
+    # Override with empty template results in empty body but tools still render
+    rendered = section.render_override("", _SectionParams(title="test"), 0, "1")
+
+    assert rendered.startswith("## 1. ToolsOnly")
+    assert "override_tool" in rendered
+
+
+def test_markdown_section_render_override_with_empty_body_no_tools() -> None:
+    """render_override with empty body and no tools returns heading only."""
+
+    section = MarkdownSection[_SectionParams](
+        title="Empty",
+        template="Default: ${title}",
+        key="empty",
+    )
+
+    rendered = section.render_override("", _SectionParams(title="test"), 0, "1")
+
+    assert rendered == "## 1. Empty"

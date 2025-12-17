@@ -10,6 +10,19 @@ Release highlights for weakincentives.
   local files point to existing targets. Fenced code blocks and inline code
   are skipped to avoid false positives.
 
+### Changed
+
+- **Section base class now provides default `render()` implementation.** Custom
+  sections can override `render_body()` instead of reimplementing heading
+  composition. New helper methods:
+
+  - `format_heading(depth, number, path)` - consistent markdown heading formatting
+  - `render_body(params, *, visibility, path, session)` - override for custom body
+  - `render_tool_examples()` - renders tool examples block
+
+  The default `render()` combines heading + body + tool examples. Existing
+  sections that override `render()` continue to work unchanged.
+
 ### Breaking: Session Slice Accessors + Explicit Broadcast
 
 Session's query/mutation builders have been replaced by slice accessors via

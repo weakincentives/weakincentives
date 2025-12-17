@@ -338,3 +338,46 @@ def test_section_render_override_default_raises_error() -> None:
 
     assert "plain" in str(excinfo.value)
     assert "does not support override rendering" in str(excinfo.value)
+
+
+class MinimalSection(Section):
+    """A minimal section that uses default render() and render_body()."""
+
+    def clone(self, **kwargs: object) -> MinimalSection:
+        return MinimalSection(title=self.title, key=self.key)
+
+
+def test_section_default_render_body_returns_empty_string() -> None:
+    """The default render_body() returns an empty string."""
+    section = MinimalSection(title="Minimal", key="minimal")
+
+    body = section.render_body(None)
+
+    assert body == ""
+
+
+def test_section_default_render_combines_heading_and_body() -> None:
+    """The default render() combines heading with empty body."""
+    section = MinimalSection(title="Minimal", key="minimal")
+
+    rendered = section.render(None, depth=0, number="1")
+
+    assert rendered == "## 1. Minimal"
+
+
+def test_section_format_heading_includes_path_annotation() -> None:
+    """format_heading() appends path annotation in parentheses."""
+    section = MinimalSection(title="Nested", key="nested")
+
+    heading = section.format_heading(depth=1, number="1.2", path=("parent", "nested"))
+
+    assert heading == "### 1.2. Nested (parent.nested)"
+
+
+def test_section_render_tool_examples_returns_empty_without_tools() -> None:
+    """render_tool_examples() returns empty string when no tools."""
+    section = MinimalSection(title="NoTools", key="no-tools")
+
+    examples = section.render_tool_examples()
+
+    assert examples == ""

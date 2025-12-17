@@ -202,32 +202,23 @@ class TaskExample(Section[TaskExampleParamsT]):
         )
 
     @override
-    def render(
+    def render_body(
         self,
         params: SupportsDataclass | None,
-        depth: int,
-        number: str,
         *,
-        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
+        path: tuple[str, ...] = (),
+        session: object = None,
     ) -> str:
+        del path, session
         effective = self.effective_visibility(override=visibility, params=params)
         if effective == SectionVisibility.SUMMARY and self.summary is not None:
-            return self._render_heading(depth, number, path) + f"\n\n{self.summary}"
-        return self._render_full(depth, number, path)
+            return self.summary
+        return self._render_full_body()
 
-    def _render_heading(self, depth: int, number: str, path: tuple[str, ...]) -> str:
-        heading_level = "#" * (depth + 2)
-        normalized_number = number.rstrip(".")
-        path_str = ".".join(path) if path else ""
-        title_with_path = (
-            f"{self.title.strip()} ({path_str})" if path_str else self.title.strip()
-        )
-        return f"{heading_level} {normalized_number}. {title_with_path}"
-
-    def _render_full(self, depth: int, number: str, path: tuple[str, ...]) -> str:
-        lines: list[str] = [self._render_heading(depth, number, path)]
-        lines.append("")
+    def _render_full_body(self) -> str:
+        """Render the full task example body without heading."""
+        lines: list[str] = []
         lines.append(f"**Objective:** {self.objective}")
         lines.append("")
         lines.append("**Steps:**")
@@ -332,29 +323,20 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
         )
 
     @override
-    def render(
+    def render_body(
         self,
         params: SupportsDataclass | None,
-        depth: int,
-        number: str,
         *,
-        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
+        path: tuple[str, ...] = (),
+        session: object = None,
     ) -> str:
+        del path, session
         effective = self.effective_visibility(override=visibility, params=params)
         if effective == SectionVisibility.SUMMARY and self.summary is not None:
-            return self._render_heading(depth, number, path) + f"\n\n{self.summary}"
+            return self.summary
         # Container renders just the heading; children are rendered by the registry
-        return self._render_heading(depth, number, path)
-
-    def _render_heading(self, depth: int, number: str, path: tuple[str, ...]) -> str:
-        heading_level = "#" * (depth + 2)
-        normalized_number = number.rstrip(".")
-        path_str = ".".join(path) if path else ""
-        title_with_path = (
-            f"{self.title.strip()} ({path_str})" if path_str else self.title.strip()
-        )
-        return f"{heading_level} {normalized_number}. {title_with_path}"
+        return ""
 
     @override
     def clone(self, **kwargs: object) -> Self:

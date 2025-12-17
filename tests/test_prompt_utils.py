@@ -76,8 +76,18 @@ def test_workspace_digest_section_in_descriptor() -> None:
         section.clone()
     clone = section.clone(session=Session())
     assert isinstance(clone, WorkspaceDigestSection)
-    heading = section._render_block("", depth=0, number="1.")
+    heading = section.format_heading(depth=0, number="1.")
     assert heading.startswith("## 1. Workspace Digest")
+
+
+def test_workspace_digest_section_render_override_with_empty_body() -> None:
+    """render_override returns heading only when body resolves to empty string."""
+    section = WorkspaceDigestSection(session=Session(), placeholder="")
+
+    # With empty placeholder and no digest, render_override returns heading only
+    rendered = section.render_override("   ", None, 0, "1.")
+
+    assert rendered == "## 1. Workspace Digest"
 
 
 """Coverage tests for prompt utilities and workspace digest plumbing."""

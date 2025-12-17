@@ -301,23 +301,22 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         )
 
     @override
-    def render(
+    def render_body(
         self,
         params: SupportsDataclass | None,
-        depth: int,
-        number: str,
         *,
-        path: tuple[str, ...] = (),
         visibility: SectionVisibility | None = None,
+        path: tuple[str, ...] = (),
+        session: object = None,
     ) -> str:
-        del visibility
+        del visibility, path, session
         if not isinstance(params, _PlanningSectionParams):
             raise PromptRenderError(
                 "Planning tools section requires parameters.",
                 dataclass_type=_PlanningSectionParams,
             )
         template = _template_for_strategy(self._strategy)
-        return self.render_with_template(template, params, depth, number, path)
+        return self._render_template(template, params)
 
     @override
     def original_body_template(self) -> str:
