@@ -105,6 +105,14 @@ a goal at any time.
 - **WORKSPACE.md**: VFS, Podman sandbox, asteval, and workspace digest—when
   editing workspace tooling.
 
+## Guides Index (how-to material)
+
+- **guides/code-review-agent.md**: End-to-end walkthrough of building a code
+  review agent using `MainLoop`, workspace tools, and planning.
+
+Guides cover quickstarts, patterns, recipes, and best practices. Design specs
+(what the system guarantees) live in `specs/`.
+
 ## Quick Reference
 
 - `README.md`: Public overview.

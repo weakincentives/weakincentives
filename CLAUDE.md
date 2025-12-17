@@ -157,6 +157,17 @@ Consult these specs before modifying related code:
 
 Full spec index in `AGENTS.md`.
 
+## Guides
+
+User-facing how-to material lives in `guides/`:
+
+| Guide | Description |
+|-------|-------------|
+| `guides/code-review-agent.md` | End-to-end walkthrough of the code reviewer example |
+
+Guides cover quickstarts, patterns, recipes, and best practices. Design specs
+(what the system guarantees) remain in `specs/`.
+
 ## Key Files
 
 - `README.md` - Public overview and tutorial
