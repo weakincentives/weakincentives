@@ -4,6 +4,12 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Added
+
+- Local link checker in `make markdown-check` validates that Markdown links to
+  local files point to existing targets. Fenced code blocks and inline code
+  are skipped to avoid false positives.
+
 ### Breaking: Session Slice Accessors + Explicit Broadcast
 
 Session's query/mutation builders have been replaced by slice accessors via

@@ -32,9 +32,10 @@ deptry:
 pip-audit:
 	@uv run python build/run_pip_audit.py
 
-# Validate Markdown formatting
+# Validate Markdown formatting and local links
 markdown-check:
 	@uv run python build/run_mdformat.py
+	@uv run python build/check_md_links.py
 
 # Run ty type checker (src only, consistent with pyright scope)
 ty:
