@@ -468,9 +468,9 @@ class Prompt(Generic[OutputT]):
 
     def _find_workspace_section(self) -> WorkspaceSection | None:
         """Locate the workspace section in the template tree."""
-        for section in self.template.sections:
-            if isinstance(section, WorkspaceSection):
-                return section
+        for node in self.template.nodes:
+            if isinstance(node.section, WorkspaceSection):
+                return node.section
             # Recursively search children
             found = self._search_children(section)
             if found is not None:

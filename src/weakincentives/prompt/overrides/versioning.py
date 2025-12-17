@@ -65,7 +65,7 @@ class PromptLike(Protocol):
     key: str
 
     @property
-    def sections(self) -> tuple[SectionNodeLike, ...]: ...
+    def nodes(self) -> tuple[SectionNodeLike, ...]: ...
 
 
 _HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -142,7 +142,7 @@ class PromptDescriptor:
     def from_prompt(cls, prompt: PromptLike) -> PromptDescriptor:
         sections: list[SectionDescriptor] = []
         tools: list[ToolDescriptor] = []
-        for node in prompt.sections:
+        for node in prompt.nodes:
             if getattr(node.section, "accepts_overrides", True):
                 template = node.section.original_body_template()
                 if template is not None:

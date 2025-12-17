@@ -84,7 +84,7 @@ class PromptTemplateProtocol(Protocol[TemplateOutputT]):
     name: str | None
 
     @property
-    def sections(self) -> tuple[Any, ...]: ...
+    def nodes(self) -> tuple[Any, ...]: ...
 
     @property
     def structured_output(
@@ -104,7 +104,7 @@ class PromptProtocol(Protocol[PromptOutputT]):
     name: str | None
 
     @property
-    def sections(self) -> tuple[Any, ...]: ...
+    def nodes(self) -> tuple[Any, ...]: ...
 
     @property
     def params(self) -> tuple[SupportsDataclass, ...]: ...

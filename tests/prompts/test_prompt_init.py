@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -24,7 +24,6 @@ from weakincentives.prompt import (
     PromptDescriptor,
     PromptTemplate,
     PromptValidationError,
-    SectionNode,
 )
 from weakincentives.prompt.section import Section
 from weakincentives.types import SupportsDataclass
@@ -75,7 +74,7 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         sections=[root],
     )
 
-    sections = cast(tuple[SectionNode[Any], ...], prompt.sections)
+    sections = prompt.nodes
     titles = [node.section.title for node in sections]
     depths = [node.depth for node in sections]
     paths = [node.path for node in sections]

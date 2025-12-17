@@ -83,7 +83,7 @@ class _Prompt:
     _section_nodes: tuple[_SectionNode, ...]
 
     @property
-    def sections(self) -> tuple[_SectionNode, ...]:
+    def nodes(self) -> tuple[_SectionNode, ...]:
         return self._section_nodes
 
 

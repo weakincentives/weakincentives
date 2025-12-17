@@ -74,7 +74,7 @@ class _DummyPrompt:
     _sections: tuple[_DummySectionNode, ...]
 
     @property
-    def sections(self) -> tuple[_DummySectionNode, ...]:
+    def nodes(self) -> tuple[_DummySectionNode, ...]:
         return self._sections
 
 

@@ -104,12 +104,11 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
     ns: str
     key: str
     name: str | None = None
-    # Field accepts Section sequence as input and stores SectionNode tuple
-    sections: (
-        Sequence[Section[SupportsDataclass]]
-        | tuple[SectionNode[SupportsDataclass], ...]
-    ) = ()
+    # User-facing input: accepts Section sequence
+    sections: Sequence[Section[SupportsDataclass]] = ()
     allow_extra_keys: bool = False
+    # Internal storage: flattened SectionNode tuple (not exposed via __init__)
+    _nodes: tuple[SectionNode[SupportsDataclass], ...] = field(init=False, default=())
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
     _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
         init=False, default=None
@@ -147,10 +146,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         ns: str | object = MISSING,
         key: str | object = MISSING,
         name: str | object | None = MISSING,
-        sections: Sequence[Section[SupportsDataclass]]
-        | tuple[SectionNode[SupportsDataclass], ...]
-        | object
-        | None = MISSING,
+        sections: Sequence[Section[SupportsDataclass]] | object | None = MISSING,
         allow_extra_keys: bool | object = MISSING,
     ) -> dict[str, Any]:
         """Normalize inputs and derive internal state before construction."""
@@ -193,11 +189,17 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             "ns": stripped_ns,
             "key": stripped_key,
             "name": name_val,
-            "sections": snapshot.sections,
+            "sections": sections_tuple,
             "allow_extra_keys": allow_extra,
+            "_nodes": snapshot.sections,
             "_snapshot": snapshot,
             "_structured_output": structured_output,
         }
+
+    @property
+    def nodes(self) -> tuple[SectionNode[SupportsDataclass], ...]:
+        """Return the flattened section nodes for this prompt."""
+        return self._nodes
 
     @property
     def params_types(self) -> set[type[SupportsDataclass]]:
@@ -281,9 +283,9 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         return self._params
 
     @property
-    def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
-        # sections is always SectionNode tuple after construction
-        return cast(tuple[SectionNode[SupportsDataclass], ...], self.template.sections)
+    def nodes(self) -> tuple[SectionNode[SupportsDataclass], ...]:
+        """Return the flattened section nodes for this prompt."""
+        return self.template.nodes
 
     @property
     def descriptor(self) -> PromptDescriptor:
