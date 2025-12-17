@@ -250,10 +250,13 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             budget_tracker=budget_tracker,
         )
 
-        # Create filesystem for the working directory
-        # If cwd is not set, use current working directory
-        workspace_root = self._client_config.cwd or str(Path.cwd())
-        filesystem = HostFilesystem(_root=workspace_root)
+        # Get filesystem from workspace section if present, otherwise create one
+        # from the working directory. This ensures MCP-bridged tools operate on
+        # the same filesystem as the SDK's native tools.
+        filesystem = prompt.filesystem()
+        if filesystem is None:
+            workspace_root = self._client_config.cwd or str(Path.cwd())
+            filesystem = HostFilesystem(_root=workspace_root)
 
         bridged_tools = create_bridged_tools(
             rendered.tools,
