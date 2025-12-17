@@ -41,16 +41,25 @@ __all__ = [
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
 
 
-def _build_resources(*, filesystem: Filesystem | None) -> ResourceRegistry:
+def _build_resources(
+    *,
+    filesystem: Filesystem | None,
+    budget_tracker: BudgetTracker | None,
+) -> ResourceRegistry:
     """Build a ResourceRegistry with the given resources.
 
     Resources are keyed by their protocol type (e.g., Filesystem) rather than
     their concrete type (e.g., InMemoryFilesystem) to enable protocol-based
     lookup in tool handlers.
     """
-    if filesystem is None:
+    entries: dict[type[object], object] = {}
+    if filesystem is not None:
+        entries[Filesystem] = filesystem
+    if budget_tracker is not None:
+        entries[BudgetTracker] = budget_tracker
+    if not entries:
         return ResourceRegistry()
-    return ResourceRegistry.build({Filesystem: filesystem})
+    return ResourceRegistry.build(entries)
 
 
 class BridgedTool:
@@ -116,14 +125,16 @@ class BridgedTool:
             else:
                 params = parse(self._tool.params_type, args, extra="forbid")
 
-            resources = _build_resources(filesystem=self._filesystem)
+            resources = _build_resources(
+                filesystem=self._filesystem,
+                budget_tracker=self._budget_tracker,
+            )
             context = ToolContext(
                 prompt=self._prompt,
                 rendered_prompt=self._rendered_prompt,
                 adapter=self._adapter,
                 session=self._session,
                 deadline=self._deadline,
-                budget_tracker=self._budget_tracker,
                 resources=resources,
             )
 

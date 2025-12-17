@@ -171,6 +171,7 @@ class ToolContext:
 
         fs = context.resources.get(Filesystem)
         tracer = context.resources.get(Tracer)
+        budget = context.resources.get(BudgetTracker)
 
     Common resources have sugar properties for convenience:
 
@@ -179,6 +180,9 @@ class ToolContext:
         # These are equivalent:
         context.filesystem
         context.resources.get(Filesystem)
+
+        context.budget_tracker
+        context.resources.get(BudgetTracker)
     """
 
     prompt: PromptProtocol[Any]
@@ -186,7 +190,6 @@ class ToolContext:
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     deadline: Deadline | None = None
-    budget_tracker: BudgetTracker | None = None
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
 
     @property
@@ -199,6 +202,14 @@ class ToolContext:
         from ..contrib.tools.filesystem import Filesystem
 
         return self.resources.get(Filesystem)
+
+    @property
+    def budget_tracker(self) -> BudgetTracker | None:
+        """Return the budget tracker resource, if available.
+
+        This is sugar for ``self.resources.get(BudgetTracker)``.
+        """
+        return self.resources.get(BudgetTracker)
 
 
 def _normalize_specialization(item: object) -> tuple[object, object]:
