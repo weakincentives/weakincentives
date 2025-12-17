@@ -536,6 +536,18 @@ def test_ls_rejects_file_path(
         invoke_tool(list_tool, params, session=session, filesystem=section.filesystem)
 
 
+def test_ls_rejects_nonexistent_directory(
+    session_and_bus: tuple[Session, InProcessEventBus],
+) -> None:
+    session, _bus = session_and_bus
+    section = _make_section(session=session)
+
+    list_tool = find_tool(section, "ls")
+    params = ListDirectoryParams(path="does_not_exist")
+    with pytest.raises(ToolValidationError, match="Directory does not exist"):
+        invoke_tool(list_tool, params, session=session, filesystem=section.filesystem)
+
+
 def test_ls_ignores_unrelated_paths(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
@@ -994,6 +1006,41 @@ def test_normalize_string_path_returns_segments() -> None:
         "docs/readme.md", allow_empty=False, field="file_path"
     )
     assert result.segments == ("docs", "readme.md")
+
+
+def test_normalize_string_path_strips_mount_point_prefix() -> None:
+    """Paths like /workspace/sunfish should normalize to sunfish when mount_point is set."""
+    result = vfs_module._normalize_string_path(
+        "/workspace/sunfish/README.md",
+        allow_empty=False,
+        field="file_path",
+        mount_point="/workspace",
+    )
+    assert result.segments == ("sunfish", "README.md")
+
+
+def test_normalize_string_path_strips_mount_point_root() -> None:
+    """Path /workspace should normalize to empty when mount_point is /workspace."""
+    result = vfs_module._normalize_string_path(
+        "/workspace", allow_empty=True, field="path", mount_point="/workspace"
+    )
+    assert result.segments == ()
+
+
+def test_normalize_string_path_strips_mount_point_relative() -> None:
+    """Relative paths like workspace/file.txt should also be stripped."""
+    result = vfs_module._normalize_string_path(
+        "workspace/file.txt", allow_empty=False, field="path", mount_point="workspace"
+    )
+    assert result.segments == ("file.txt",)
+
+
+def test_normalize_string_path_ignores_mount_point_when_none() -> None:
+    """When mount_point is None, no prefix stripping occurs."""
+    result = vfs_module._normalize_string_path(
+        "workspace/file.txt", allow_empty=False, field="path", mount_point=None
+    )
+    assert result.segments == ("workspace", "file.txt")
 
 
 def test_normalize_segments_rejects_absolute() -> None:

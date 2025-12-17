@@ -339,12 +339,17 @@ def test_section_registers_eval_tool(
     assert tool.description.startswith("Run a short Python")
 
 
-def test_host_mount_filesystem_starts_empty(
+def test_host_mount_filesystem_is_populated_at_construction(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
+    """Verify mounts are hydrated eagerly during section construction.
+
+    This enables filesystem operations to work before a container starts,
+    which is required for workspace digest optimization.
+    """
     session, _bus = session_and_bus
     client = _FakePodmanClient()
-    host_root, mount, _file_path = _setup_host_mount(tmp_path)
+    host_root, mount, file_path = _setup_host_mount(tmp_path)
     cache_dir = tmp_path / "cache"
     section = _make_section(
         session=session,
@@ -356,7 +361,14 @@ def test_host_mount_filesystem_starts_empty(
 
     fs = section.filesystem
 
-    assert fs.list(".") == []
+    # Filesystem should now contain the mounted files
+    entries = fs.list(".")
+    assert len(entries) == 1
+    assert entries[0].name == "sunfish"
+    # The mounted file should be readable
+    sunfish_entries = fs.list("sunfish")
+    assert len(sunfish_entries) == 1
+    assert sunfish_entries[0].name == file_path.name
 
 
 def test_host_mount_populates_prompt_copy(
@@ -554,6 +566,12 @@ def test_copy_mount_max_bytes_guard(tmp_path: Path) -> None:
 def test_host_mount_hydration_skips_existing_overlay(
     session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
 ) -> None:
+    """Verify _hydrate_overlay_mounts is a no-op when overlay is non-empty.
+
+    Note: Mounts are now hydrated eagerly during section construction, so
+    this test verifies that re-calling _hydrate_overlay_mounts on an
+    already-populated overlay doesn't duplicate files.
+    """
     session, _bus = session_and_bus
     client = _FakePodmanClient()
     host_root, mount, file_path = _setup_host_mount(tmp_path)
@@ -566,15 +584,23 @@ def test_host_mount_hydration_skips_existing_overlay(
         allowed_host_roots=(host_root,),
     )
     overlay = section._workspace_overlay_path()
-    overlay.mkdir(parents=True, exist_ok=True)
+    # Mounts are now hydrated during __init__, so the file should exist
+    mounted = overlay / "sunfish" / file_path.name
+    assert mounted.exists()
+
+    # Add a placeholder file
     placeholder = overlay / "existing.txt"
     placeholder.write_text("keep", encoding="utf-8")
 
+    # Get the mtime of the mounted file before re-hydration
+    mtime_before = mounted.stat().st_mtime
+
+    # Re-calling _hydrate_overlay_mounts should be a no-op since overlay is non-empty
     section._hydrate_overlay_mounts(overlay)
 
-    mounted = overlay / "sunfish" / file_path.name
-    assert not mounted.exists()
+    # Verify: placeholder preserved, mounted file unchanged
     assert placeholder.read_text(encoding="utf-8") == "keep"
+    assert mounted.stat().st_mtime == mtime_before
 
 
 def test_host_mount_hydration_raises_on_write_error(
@@ -582,19 +608,17 @@ def test_host_mount_hydration_raises_on_write_error(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """Verify hydration raises ToolValidationError on copy failure.
+
+    Note: Mounts are now hydrated eagerly during section construction,
+    so we must patch shutil.copy2 before creating the section.
+    """
     session, _bus = session_and_bus
     client = _FakePodmanClient()
     host_root, mount, file_path = _setup_host_mount(tmp_path)
     cache_dir = tmp_path / "cache"
-    section = _make_section(
-        session=session,
-        client=client,
-        cache_dir=cache_dir,
-        mounts=(mount,),
-        allowed_host_roots=(host_root,),
-    )
-    overlay = section._workspace_overlay_path()
-    overlay.mkdir(parents=True, exist_ok=True)
+    # Compute expected target path before section creation
+    overlay = cache_dir / str(session.session_id)
     target = overlay / "sunfish" / file_path.name
     original_copy = podman_module.shutil.copy2
 
@@ -608,10 +632,17 @@ def test_host_mount_hydration_raises_on_write_error(
             raise OSError("boom")
         return original_copy(src, dst, follow_symlinks=follow_symlinks)
 
+    # Patch before section creation since hydration happens in __init__
     monkeypatch.setattr(podman_module.shutil, "copy2", _fail_on_target)
 
     with pytest.raises(ToolValidationError):
-        section._hydrate_overlay_mounts(overlay)
+        _make_section(
+            session=session,
+            client=client,
+            cache_dir=cache_dir,
+            mounts=(mount,),
+            allowed_host_roots=(host_root,),
+        )
 
 
 def test_section_exposes_new_client(

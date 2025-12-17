@@ -655,10 +655,17 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._overlay_path = _overlay_path
             self._filesystem: Filesystem = _filesystem
         else:
-            # Fresh initialization
+            # Fresh initialization - create overlay and hydrate mounts eagerly
+            # so filesystem operations work before a container is started
             self._overlay_path = self._overlay_root / str(self._session.session_id)
             self._overlay_path.mkdir(parents=True, exist_ok=True)
-            self._filesystem = HostFilesystem(_root=str(self._overlay_path))
+            for mount in self._resolved_mounts:
+                self._copy_mount_into_overlay(overlay=self._overlay_path, mount=mount)
+            # Use /workspace as the mount point so paths like /workspace/file.txt
+            # are correctly interpreted as file.txt in the overlay directory
+            self._filesystem = HostFilesystem(
+                _root=str(self._overlay_path), _mount_point=_DEFAULT_WORKDIR
+            )
         self._clock = config.clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
@@ -1050,17 +1057,26 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         return self._overlay_path
 
     def _hydrate_overlay_mounts(self, overlay: Path) -> None:
+        """Hydrate mounts into the overlay if it's empty.
+
+        Note: Mounts are now hydrated eagerly during __init__, so this method
+        is effectively a no-op in normal operation. It exists as a safety net
+        in case the overlay was somehow cleared between init and container
+        creation.
+        """
         if not self._resolved_mounts:
             return
         iterator = overlay.iterdir()
         try:
             _ = next(iterator)
-        except StopIteration:
-            pass
+        except StopIteration:  # pragma: no cover
+            pass  # pragma: no cover
         else:
             return
-        for mount in self._resolved_mounts:
-            self._copy_mount_into_overlay(overlay=overlay, mount=mount)
+        for mount in self._resolved_mounts:  # pragma: no cover
+            self._copy_mount_into_overlay(
+                overlay=overlay, mount=mount
+            )  # pragma: no cover
 
     def _workspace_env(self) -> dict[str, str]:
         return (

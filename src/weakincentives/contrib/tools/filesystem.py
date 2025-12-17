@@ -144,6 +144,19 @@ class Filesystem(Protocol):
     All paths are relative strings. Backends normalize paths internally.
     """
 
+    @property
+    def mount_point(self) -> str | None:
+        """Virtual mount point prefix for path normalization.
+
+        When set (e.g., "/workspace"), absolute paths like "/workspace/file.txt"
+        are interpreted as "file.txt" relative to the workspace root. This
+        allows models to use absolute paths that match container working
+        directories while the underlying filesystem uses relative paths.
+
+        Returns None if no mount point is configured (default behavior).
+        """
+        ...
+
     # --- Read Operations ---
 
     def read(
@@ -412,6 +425,7 @@ class InMemoryFilesystem:
     _files: dict[str, _InMemoryFile] = field(default_factory=_empty_files_dict)
     _directories: set[str] = field(default_factory=_empty_directories_set)
     _read_only: bool = False
+    _mount_point: str | None = None
 
     def __post_init__(self) -> None:
         # Ensure root directory exists
@@ -426,6 +440,11 @@ class InMemoryFilesystem:
     def read_only(self) -> bool:
         """True if write operations are disabled."""
         return self._read_only
+
+    @property
+    def mount_point(self) -> str | None:
+        """Virtual mount point prefix for path normalization."""
+        return self._mount_point
 
     def read(
         self,
@@ -808,6 +827,7 @@ class HostFilesystem:
 
     _root: str
     _read_only: bool = False
+    _mount_point: str | None = None
 
     @property
     def root(self) -> str:
@@ -818,6 +838,11 @@ class HostFilesystem:
     def read_only(self) -> bool:
         """True if write operations are disabled."""
         return self._read_only
+
+    @property
+    def mount_point(self) -> str | None:
+        """Virtual mount point prefix for path normalization."""
+        return self._mount_point
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve a relative path to an absolute path within root.

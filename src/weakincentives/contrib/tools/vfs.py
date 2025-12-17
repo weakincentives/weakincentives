@@ -696,11 +696,17 @@ class FilesystemToolHandlers:
     ) -> ToolResult[tuple[FileInfo, ...]]:
         """List directory contents."""
         fs = self._get_filesystem(context)
-        path = _normalize_string_path(params.path, allow_empty=True, field="path")
+        path = _normalize_string_path(
+            params.path, allow_empty=True, field="path", mount_point=fs.mount_point
+        )
         path_str = "/".join(path.segments) if path.segments else "."
 
         try:
             entries = fs.list(path_str)
+        except FileNotFoundError:
+            raise ToolValidationError(
+                "Directory does not exist in the filesystem."
+            ) from None
         except NotADirectoryError:
             raise ToolValidationError(
                 "Cannot list a file path; provide a directory."
@@ -732,7 +738,9 @@ class FilesystemToolHandlers:
     ) -> ToolResult[ReadFileResult]:
         """Read file contents with pagination."""
         fs = self._get_filesystem(context)
-        path = _normalize_string_path(params.file_path, field="file_path")
+        path = _normalize_string_path(
+            params.file_path, field="file_path", mount_point=fs.mount_point
+        )
         offset = _normalize_offset(params.offset)
         limit = _normalize_limit(params.limit)
 
@@ -771,7 +779,9 @@ class FilesystemToolHandlers:
     ) -> ToolResult[WriteFile]:
         """Create a new file (fails if file exists)."""
         fs = self._get_filesystem(context)
-        path = _normalize_string_path(params.file_path, field="file_path")
+        path = _normalize_string_path(
+            params.file_path, field="file_path", mount_point=fs.mount_point
+        )
         content = _normalize_content(params.content)
 
         path_str = "/".join(path.segments)
@@ -797,7 +807,9 @@ class FilesystemToolHandlers:
     ) -> ToolResult[WriteFile]:
         """Edit an existing file using string replacement."""
         fs = self._get_filesystem(context)
-        path = _normalize_string_path(params.file_path, field="file_path")
+        path = _normalize_string_path(
+            params.file_path, field="file_path", mount_point=fs.mount_point
+        )
         path_str = "/".join(path.segments)
 
         try:
@@ -852,7 +864,9 @@ class FilesystemToolHandlers:
     ) -> ToolResult[tuple[GlobMatch, ...]]:
         """Search for files matching a glob pattern."""
         fs = self._get_filesystem(context)
-        base = _normalize_string_path(params.path, allow_empty=True, field="path")
+        base = _normalize_string_path(
+            params.path, allow_empty=True, field="path", mount_point=fs.mount_point
+        )
         pattern = params.pattern.strip()
         if not pattern:
             raise ToolValidationError("Pattern must not be empty.")
@@ -896,7 +910,7 @@ class FilesystemToolHandlers:
         base_path: VfsPath | None = None
         if params.path is not None:
             base_path = _normalize_string_path(
-                params.path, allow_empty=True, field="path"
+                params.path, allow_empty=True, field="path", mount_point=fs.mount_point
             )
         glob_pattern = params.glob.strip() if params.glob is not None else None
         if glob_pattern:
@@ -928,7 +942,9 @@ class FilesystemToolHandlers:
     ) -> ToolResult[DeleteEntry]:
         """Remove files or directories recursively."""
         fs = self._get_filesystem(context)
-        path = _normalize_string_path(params.path, field="path")
+        path = _normalize_string_path(
+            params.path, field="path", mount_point=fs.mount_point
+        )
         path_str = "/".join(path.segments)
 
         if not fs.exists(path_str):
@@ -1217,9 +1233,34 @@ def _normalize_limit(limit: int) -> int:
     return min(limit, _MAX_READ_LIMIT)
 
 
+def _strip_mount_point(path: str, mount_point: str | None) -> str:
+    """Strip mount point prefix from a path."""
+    if mount_point is None:
+        return path
+    prefix = mount_point.lstrip("/")
+    if path.startswith(prefix + "/"):
+        return path[len(prefix) + 1 :]
+    if path == prefix:
+        return ""
+    return path
+
+
 def _normalize_string_path(
-    raw: str | None, *, allow_empty: bool = False, field: str
+    raw: str | None,
+    *,
+    allow_empty: bool = False,
+    field: str,
+    mount_point: str | None = None,
 ) -> VfsPath:
+    """Normalize a raw path string to a VfsPath.
+
+    Args:
+        raw: The raw path string from the tool parameters.
+        allow_empty: Whether empty paths are allowed.
+        field: Field name for error messages.
+        mount_point: Optional virtual mount point prefix to strip. For example,
+            if mount_point="/workspace", then "/workspace/sunfish" becomes "sunfish".
+    """
     if raw is None:
         if not allow_empty:
             raise ToolValidationError(f"{field} is required.")
@@ -1233,6 +1274,8 @@ def _normalize_string_path(
 
     if stripped.startswith("/"):
         stripped = stripped.lstrip("/")
+
+    stripped = _strip_mount_point(stripped, mount_point)
 
     segments = _normalize_segments(stripped.split("/"))
     if len(segments) > _MAX_PATH_DEPTH:

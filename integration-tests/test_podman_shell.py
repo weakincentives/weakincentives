@@ -85,11 +85,9 @@ def test_podman_vfs_round_trip(tmp_path: Path) -> None:
     assert connection is not None
     bus = InProcessEventBus()
     session = Session(bus=bus)
-    connection_name = connection.get("connection_name")
     section = PodmanSandboxSection(
         session=session, config=PodmanSandboxConfig(cache_dir=tmp_path)
     )
-    container_name: str | None = None
     try:
         write_tool = find_tool(section, "write_file")
         read_tool = find_tool(section, "read_file")
@@ -100,23 +98,20 @@ def test_podman_vfs_round_trip(tmp_path: Path) -> None:
 
         write_handler(
             WriteFileParams(file_path="notes.txt", content="hello world"),
-            context=build_tool_context(session),
+            context=build_tool_context(session, filesystem=section.filesystem),
         )
         result = read_handler(
             ReadFileParams(file_path="notes.txt"),
-            context=build_tool_context(session),
+            context=build_tool_context(session, filesystem=section.filesystem),
         )
         assert result.success
         assert result.value is not None
         read_value = cast(ReadFileResult, result.value)
         assert "hello world" in read_value.content
-        handle = section._workspace_handle
-        assert handle is not None
-        container_name = handle.descriptor.container_name
+        # With the new architecture, filesystem operations work directly on
+        # the overlay directory without starting a container
     finally:
         section.close()
-        if container_name:
-            _wait_for_container_removal(container_name, connection_name)
 
 
 @pytest.mark.integration
