@@ -212,6 +212,31 @@ class PlanningStrategy(Enum):
     GOAL_DECOMPOSE_ROUTE_SYNTHESISE = "goal_decompose_route_synthesise"
 
 
+@FrozenDataclass()
+class PlanningConfig:
+    """Configuration for :class:`PlanningToolsSection`.
+
+    All constructor arguments for PlanningToolsSection are consolidated here.
+    This avoids accumulating long argument lists as the section evolves.
+
+    Example::
+
+        from weakincentives.contrib.tools import PlanningConfig, PlanningToolsSection
+
+        config = PlanningConfig(strategy=PlanningStrategy.PLAN_ACT_REFLECT)
+        section = PlanningToolsSection(session=session, config=config)
+    """
+
+    strategy: PlanningStrategy = field(
+        default=PlanningStrategy.REACT,
+        metadata={"description": "Predefined guidance template for planning behavior."},
+    )
+    accepts_overrides: bool = field(
+        default=False,
+        metadata={"description": "Whether the section accepts parameter overrides."},
+    )
+
+
 _PLANNING_SECTION_HEADER: Final[str] = (
     "Use planning tools for multi-step or stateful work.\n"
 )
@@ -250,27 +275,54 @@ def _template_for_strategy(strategy: PlanningStrategy) -> str:
 
 
 class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
-    """Prompt section exposing the planning tool suite."""
+    """Prompt section exposing the planning tool suite.
+
+    Use :class:`PlanningConfig` to consolidate configuration::
+
+        config = PlanningConfig(strategy=PlanningStrategy.PLAN_ACT_REFLECT)
+        section = PlanningToolsSection(session=session, config=config)
+
+    Individual parameters are still accepted for backward compatibility,
+    but config takes precedence when provided.
+    """
 
     def __init__(
         self,
         *,
         session: Session,
+        config: PlanningConfig | None = None,
         strategy: PlanningStrategy = PlanningStrategy.REACT,
         accepts_overrides: bool = False,
     ) -> None:
-        self._strategy = strategy
+        # Resolve config - explicit config takes precedence
+        if config is not None:
+            resolved_strategy = config.strategy
+            resolved_accepts_overrides = config.accepts_overrides
+        else:
+            resolved_strategy = strategy
+            resolved_accepts_overrides = accepts_overrides
+
+        self._strategy = resolved_strategy
         self._session = session
         self._initialize_session(session)
 
-        tools = _build_tools(section=self, accepts_overrides=accepts_overrides)
+        # Store config for cloning
+        self._config = PlanningConfig(
+            strategy=self._strategy,
+            accepts_overrides=resolved_accepts_overrides,
+        )
+
+        tools = _build_tools(
+            section=self,
+            accepts_overrides=resolved_accepts_overrides,
+        )
         super().__init__(
             title="Planning Tools",
             key="planning.tools",
-            template=_template_for_strategy(strategy),
+            template=_template_for_strategy(resolved_strategy),
             default_params=_PlanningSectionParams(),
             tools=tools,
-            accepts_overrides=accepts_overrides,
+            accepts_overrides=resolved_accepts_overrides,
         )
 
     @property
@@ -296,8 +348,7 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             raise TypeError(msg)
         return PlanningToolsSection(
             session=session,
-            strategy=self._strategy,
-            accepts_overrides=self.accepts_overrides,
+            config=self._config,
         )
 
     @override
@@ -594,6 +645,7 @@ __all__ = [
     "Plan",
     "PlanStatus",
     "PlanStep",
+    "PlanningConfig",
     "PlanningStrategy",
     "PlanningToolsSection",
     "ReadPlan",

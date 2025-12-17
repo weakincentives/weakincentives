@@ -1311,3 +1311,20 @@ def test_tool_handler_rejects_missing_filesystem() -> None:
 
     with pytest.raises(ToolValidationError, match="No filesystem available"):
         handler(ListDirectoryParams(path="/"), context=context)
+
+
+# -----------------------------------------------------------------------------
+# Config Tests
+# -----------------------------------------------------------------------------
+
+
+def test_config_accepts_overrides() -> None:
+    """Test that config accepts_overrides is respected."""
+    from weakincentives.contrib.tools import VfsConfig
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    config = VfsConfig(accepts_overrides=True)
+    section = VfsToolsSection(session=session, config=config)
+
+    assert section.accepts_overrides is True

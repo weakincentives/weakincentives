@@ -169,7 +169,15 @@ class _PodmanSectionParams:
 
 @FrozenDataclass()
 class PodmanSandboxConfig:
-    """Configuration for :class:`PodmanSandboxSection`."""
+    """Configuration for :class:`PodmanSandboxSection`.
+
+    Example::
+
+        from weakincentives.contrib.tools import PodmanSandboxConfig, PodmanSandboxSection
+
+        config = PodmanSandboxConfig(mounts=(HostMount(host_path="src"),))
+        section = PodmanSandboxSection(session=session, config=config)
+    """
 
     image: str = _DEFAULT_IMAGE
     mounts: Sequence[HostMount] = ()
@@ -606,7 +614,13 @@ def _resolve_connection_settings(
 
 
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
-    """Prompt section exposing the Podman ``shell_execute`` tool."""
+    """Prompt section exposing the Podman ``shell_execute`` tool.
+
+    Use :class:`PodmanSandboxConfig` to consolidate configuration::
+
+        config = PodmanSandboxConfig(mounts=(HostMount(host_path="src"),))
+        section = PodmanSandboxSection(session=session, config=config)
+    """
 
     def __init__(
         self,

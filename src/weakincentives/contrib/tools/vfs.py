@@ -979,22 +979,77 @@ class _VfsSectionParams:
     pass
 
 
+@FrozenDataclass()
+class VfsConfig:
+    """Configuration for :class:`VfsToolsSection`.
+
+    All constructor arguments for VfsToolsSection are consolidated here.
+    This avoids accumulating long argument lists as the section evolves.
+
+    Example::
+
+        from weakincentives.contrib.tools import VfsConfig, VfsToolsSection
+
+        config = VfsConfig(
+            mounts=(HostMount(host_path="src"),),
+            allowed_host_roots=("/home/user/project",),
+        )
+        section = VfsToolsSection(session=session, config=config)
+    """
+
+    mounts: Sequence[HostMount] = field(
+        default=(),
+        metadata={"description": "Host directories to mount into the VFS."},
+    )
+    allowed_host_roots: Sequence[os.PathLike[str] | str] = field(
+        default=(),
+        metadata={"description": "Allowed root paths for host mounts."},
+    )
+    accepts_overrides: bool = field(
+        default=False,
+        metadata={"description": "Whether the section accepts parameter overrides."},
+    )
+
+
 class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
-    """Prompt section exposing the virtual filesystem tool suite."""
+    """Prompt section exposing the virtual filesystem tool suite.
+
+    Use :class:`VfsConfig` to consolidate configuration::
+
+        config = VfsConfig(mounts=(HostMount(host_path="src"),))
+        section = VfsToolsSection(session=session, config=config)
+
+    Individual parameters are still accepted for backward compatibility,
+    but config takes precedence when provided.
+    """
 
     def __init__(
         self,
         *,
         session: Session,
+        config: VfsConfig | None = None,
         mounts: Sequence[HostMount] = (),
         allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
         accepts_overrides: bool = False,
         _filesystem: InMemoryFilesystem | None = None,
         _mount_previews: tuple[HostMountPreview, ...] | None = None,
     ) -> None:
-        allowed_roots = tuple(normalize_host_root(path) for path in allowed_host_roots)
-        self._allowed_roots = allowed_roots
-        self._mounts = tuple(mounts)
+        # Resolve config - explicit config takes precedence
+        if config is not None:
+            resolved_mounts = tuple(config.mounts)
+            resolved_roots = tuple(
+                normalize_host_root(path) for path in config.allowed_host_roots
+            )
+            resolved_accepts_overrides = config.accepts_overrides
+        else:
+            resolved_mounts = tuple(mounts)
+            resolved_roots = tuple(
+                normalize_host_root(path) for path in allowed_host_roots
+            )
+            resolved_accepts_overrides = accepts_overrides
+
+        self._allowed_roots = resolved_roots
+        self._mounts = resolved_mounts
 
         # Use provided filesystem or create a new one
         if _filesystem is not None and _mount_previews is not None:
@@ -1011,14 +1066,21 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         self._mount_previews = mount_previews
         self._session = session
 
-        tools = _build_tools(accepts_overrides=accepts_overrides)
+        # Store config for cloning
+        self._config = VfsConfig(
+            mounts=self._mounts,
+            allowed_host_roots=self._allowed_roots,
+            accepts_overrides=resolved_accepts_overrides,
+        )
+
+        tools = _build_tools(accepts_overrides=resolved_accepts_overrides)
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
             template=_render_section_template(mount_previews),
             default_params=_VfsSectionParams(),
             tools=tools,
-            accepts_overrides=accepts_overrides,
+            accepts_overrides=resolved_accepts_overrides,
         )
 
     @property
@@ -1042,9 +1104,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             raise TypeError(msg)
         return VfsToolsSection(
             session=session_obj,
-            mounts=self._mounts,
-            allowed_host_roots=self._allowed_roots,
-            accepts_overrides=self.accepts_overrides,
+            config=self._config,
             _filesystem=self._filesystem,
             _mount_previews=self._mount_previews,
         )
@@ -1664,6 +1724,7 @@ __all__ = [
     "ReadFileParams",
     "ReadFileResult",
     "RemoveParams",
+    "VfsConfig",
     "VfsFile",
     "VfsPath",
     "VfsToolsSection",

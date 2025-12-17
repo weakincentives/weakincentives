@@ -275,6 +275,27 @@ class _AstevalSectionParams:
     pass
 
 
+@FrozenDataclass()
+class AstevalConfig:
+    """Configuration for :class:`AstevalSection`.
+
+    All constructor arguments for AstevalSection are consolidated here.
+    This avoids accumulating long argument lists as the section evolves.
+
+    Example::
+
+        from weakincentives.contrib.tools import AstevalConfig, AstevalSection
+
+        config = AstevalConfig(accepts_overrides=True)
+        section = AstevalSection(session=session, config=config)
+    """
+
+    accepts_overrides: bool = field(
+        default=False,
+        metadata={"description": "Whether the section accepts parameter overrides."},
+    )
+
+
 def _truncate_stream(text: str) -> str:
     if len(text) <= _MAX_STREAM_LENGTH:
         return text
@@ -964,20 +985,39 @@ def summarize_eval_writes(writes: Sequence[EvalFileWrite]) -> str | None:
 
 
 class AstevalSection(MarkdownSection[_AstevalSectionParams]):
-    """Prompt section exposing the :mod:`asteval` evaluation tool."""
+    """Prompt section exposing the :mod:`asteval` evaluation tool.
+
+    Use :class:`AstevalConfig` to consolidate configuration::
+
+        config = AstevalConfig(accepts_overrides=True)
+        section = AstevalSection(session=session, config=config)
+
+    Individual parameters are still accepted for backward compatibility,
+    but config takes precedence when provided.
+    """
 
     def __init__(
         self,
         *,
         session: Session,
+        config: AstevalConfig | None = None,
         filesystem: Filesystem | None = None,
         accepts_overrides: bool = False,
     ) -> None:
+        # Resolve config - explicit config takes precedence
+        if config is not None:
+            resolved_accepts_overrides = config.accepts_overrides
+        else:
+            resolved_accepts_overrides = accepts_overrides
+
         self._session = session
         # Use provided filesystem or create a new one
         self._filesystem = (
             filesystem if filesystem is not None else InMemoryFilesystem()
         )
+
+        # Store config for cloning
+        self._config = AstevalConfig(accepts_overrides=resolved_accepts_overrides)
 
         tool_suite = _AstevalToolSuite(section=self)
         tool = Tool[EvalParams, EvalResult](
@@ -988,7 +1028,7 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
                 "stdout, stderr, and result data."
             ),
             handler=tool_suite.run,
-            accepts_overrides=accepts_overrides,
+            accepts_overrides=resolved_accepts_overrides,
             examples=(
                 ToolExample(
                     description=(
@@ -1028,12 +1068,17 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             template=_EVAL_TEMPLATE,
             default_params=_AstevalSectionParams(),
             tools=(tool,),
-            accepts_overrides=accepts_overrides,
+            accepts_overrides=resolved_accepts_overrides,
         )
 
     @property
     def session(self) -> Session:
         return self._session
+
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the filesystem managed by this section."""
+        return self._filesystem
 
     @override
     def clone(self, **kwargs: object) -> AstevalSection:
@@ -1043,12 +1088,13 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
             raise TypeError(msg)
         return AstevalSection(
             session=session,
+            config=self._config,
             filesystem=self._filesystem,
-            accepts_overrides=self.accepts_overrides,
         )
 
 
 __all__ = [
+    "AstevalConfig",
     "AstevalSection",
     "EvalFileRead",
     "EvalFileWrite",

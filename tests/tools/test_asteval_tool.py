@@ -1079,3 +1079,32 @@ def test_execute_with_timeout_propagates_error(
 def test_merge_globals_combines_mappings() -> None:
     merged = asteval_module._merge_globals({"alpha": 1}, {"beta": 2})
     assert merged == {"alpha": 1, "beta": 2}
+
+
+# -----------------------------------------------------------------------------
+# Config Tests
+# -----------------------------------------------------------------------------
+
+
+def test_asteval_config_accepts_overrides() -> None:
+    """Test that config accepts_overrides is respected."""
+    from weakincentives.contrib.tools import AstevalConfig
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    config = AstevalConfig(accepts_overrides=True)
+    section = AstevalSection(session=session, config=config)
+
+    assert section.accepts_overrides is True
+
+
+def test_asteval_filesystem_property_returns_filesystem() -> None:
+    """Test that the filesystem property returns the filesystem instance."""
+    from weakincentives.contrib.tools import Filesystem
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = AstevalSection(session=session)
+
+    fs = section.filesystem
+    assert isinstance(fs, Filesystem)

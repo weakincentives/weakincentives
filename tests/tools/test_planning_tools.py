@@ -541,3 +541,20 @@ def test_planning_tools_section_allows_configuring_overrides() -> None:
     assert add_tool.accepts_overrides is True
     assert read_tool.accepts_overrides is True
     assert setup_tool.accepts_overrides is True
+
+
+# -----------------------------------------------------------------------------
+# Config Tests
+# -----------------------------------------------------------------------------
+
+
+def test_planning_config_accepts_overrides() -> None:
+    """Test that config accepts_overrides is respected."""
+    from weakincentives.contrib.tools import PlanningConfig
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    config = PlanningConfig(accepts_overrides=True)
+    section = PlanningToolsSection(session=session, config=config)
+
+    assert section.accepts_overrides is True
