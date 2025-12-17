@@ -1011,7 +1011,7 @@ class HostFilesystem:
         """Restore to a git commit."""
         self._ensure_git()
 
-        # Hard reset to the commit
+        # Hard reset to the commit (restores tracked files)
         result = subprocess.run(
             ["git", "reset", "--hard", snapshot.commit_ref],
             cwd=self._root,
@@ -1022,6 +1022,13 @@ class HostFilesystem:
             raise SnapshotRestoreError(
                 f"Failed to restore snapshot: {result.stderr}"
             )
+
+        # Remove untracked files and directories for strict rollback
+        subprocess.run(
+            ["git", "clean", "-fd"],
+            cwd=self._root,
+            capture_output=True,
+        )
 ```
 
 ### PodmanFilesystem Implementation
