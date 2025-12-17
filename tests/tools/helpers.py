@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Protocol, TypeVar, cast
 
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from weakincentives.adapters.core import (
@@ -32,6 +32,9 @@ from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
+
+if TYPE_CHECKING:
+    from weakincentives.contrib.tools.filesystem import Filesystem
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclassOrNone)
 ResultT = TypeVar("ResultT", bound=SupportsToolResult)
@@ -55,7 +58,9 @@ class _DummyAdapter(ProviderAdapter[Any]):
         raise NotImplementedError
 
 
-def build_tool_context(session: SessionProtocol) -> ToolContext:
+def build_tool_context(
+    session: SessionProtocol, *, filesystem: Filesystem | None = None
+) -> ToolContext:
     prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
     adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
     return ToolContext(
@@ -63,6 +68,7 @@ def build_tool_context(session: SessionProtocol) -> ToolContext:
         rendered_prompt=None,
         adapter=adapter,
         session=session,
+        filesystem=filesystem,
     )
 
 
@@ -84,12 +90,13 @@ def invoke_tool(
     params: ParamsT,
     *,
     session: SessionProtocol,
+    filesystem: Filesystem | None = None,
 ) -> ToolResult[ResultT]:
     """Execute ``tool`` with ``params`` and publish the invocation event."""
 
     handler = tool.handler
     assert handler is not None
-    result = handler(params, context=build_tool_context(session))
+    result = handler(params, context=build_tool_context(session, filesystem=filesystem))
     rendered_output = result.render()
     event = ToolInvoked(
         prompt_name="test",

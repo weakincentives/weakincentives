@@ -668,33 +668,39 @@ class FilesystemToolHandlers:
     This class provides handlers for common filesystem operations (ls, read,
     write, edit, glob, grep, rm) that work with any Filesystem implementation.
 
+    Handlers get the filesystem from ToolContext.filesystem, allowing the same
+    handlers to be shared across workspace implementations.
+
     Handlers convert Filesystem protocol results (str paths) to tool result
     types (VfsPath) for LLM serialization.
     """
 
-    def __init__(
-        self, *, filesystem: Filesystem, clock: Callable[[], datetime] | None = None
-    ) -> None:
-        """Initialize handlers with a filesystem backend.
+    def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
+        """Initialize handlers.
 
         Args:
-            filesystem: The filesystem to operate on.
             clock: Optional callable returning current datetime. Defaults to UTC now.
         """
         super().__init__()
-        self._fs = filesystem
         self._clock = clock or _now
+
+    @staticmethod
+    def _get_filesystem(context: ToolContext) -> Filesystem:
+        """Get the filesystem from context, raising if not available."""
+        if context.filesystem is None:
+            raise ToolValidationError("No filesystem available in this context.")
+        return context.filesystem
 
     def list_directory(
         self, params: ListDirectoryParams, *, context: ToolContext
     ) -> ToolResult[tuple[FileInfo, ...]]:
         """List directory contents."""
-        del context
+        fs = self._get_filesystem(context)
         path = _normalize_string_path(params.path, allow_empty=True, field="path")
         path_str = "/".join(path.segments) if path.segments else "."
 
         try:
-            entries = self._fs.list(path_str)
+            entries = fs.list(path_str)
         except NotADirectoryError:
             raise ToolValidationError(
                 "Cannot list a file path; provide a directory."
@@ -704,7 +710,7 @@ class FilesystemToolHandlers:
         for entry in entries:
             entry_path = path_from_string(entry.path)
             if entry.is_file:
-                stat = self._fs.stat(entry.path)
+                stat = fs.stat(entry.path)
                 result_entries.append(
                     FileInfo(
                         path=entry_path,
@@ -725,7 +731,7 @@ class FilesystemToolHandlers:
         self, params: ReadFileParams, *, context: ToolContext
     ) -> ToolResult[ReadFileResult]:
         """Read file contents with pagination."""
-        del context
+        fs = self._get_filesystem(context)
         path = _normalize_string_path(params.file_path, field="file_path")
         offset = _normalize_offset(params.offset)
         limit = _normalize_limit(params.limit)
@@ -733,11 +739,13 @@ class FilesystemToolHandlers:
         path_str = "/".join(path.segments)
 
         try:
-            read_result = self._fs.read(path_str, offset=offset, limit=limit)
+            read_result = fs.read(path_str, offset=offset, limit=limit)
         except FileNotFoundError:
             raise ToolValidationError(
                 "File does not exist in the filesystem."
             ) from None
+        except ValueError as err:
+            raise ToolValidationError(str(err)) from None
 
         lines = read_result.content.splitlines()
         numbered = [
@@ -762,19 +770,19 @@ class FilesystemToolHandlers:
         self, params: WriteFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
         """Create a new file (fails if file exists)."""
-        del context
+        fs = self._get_filesystem(context)
         path = _normalize_string_path(params.file_path, field="file_path")
         content = _normalize_content(params.content)
 
         path_str = "/".join(path.segments)
 
-        if self._fs.exists(path_str):
+        if fs.exists(path_str):
             raise ToolValidationError(
                 "File already exists; use edit_file to modify existing content."
             )
 
         try:
-            _ = self._fs.write(path_str, content, mode="create")
+            _ = fs.write(path_str, content, mode="create")
         except FileExistsError:  # pragma: no cover
             raise ToolValidationError(  # pragma: no cover
                 "File already exists; use edit_file to modify existing content."
@@ -788,17 +796,19 @@ class FilesystemToolHandlers:
         self, params: EditFileParams, *, context: ToolContext
     ) -> ToolResult[WriteFile]:
         """Edit an existing file using string replacement."""
-        del context
+        fs = self._get_filesystem(context)
         path = _normalize_string_path(params.file_path, field="file_path")
         path_str = "/".join(path.segments)
 
         try:
             # Read entire file to avoid truncation
-            read_result = self._fs.read(path_str, limit=READ_ENTIRE_FILE)
+            read_result = fs.read(path_str, limit=READ_ENTIRE_FILE)
         except FileNotFoundError:
             raise ToolValidationError(
                 "File does not exist in the filesystem."
             ) from None
+        except ValueError as err:
+            raise ToolValidationError(str(err)) from None
 
         file_content = read_result.content
 
@@ -827,7 +837,7 @@ class FilesystemToolHandlers:
             updated = file_content.replace(old, new, 1)
 
         normalized_content = _normalize_content(updated)
-        _ = self._fs.write(path_str, normalized_content, mode="overwrite")
+        _ = fs.write(path_str, normalized_content, mode="overwrite")
 
         normalized = WriteFile(
             path=path,
@@ -841,7 +851,7 @@ class FilesystemToolHandlers:
         self, params: GlobParams, *, context: ToolContext
     ) -> ToolResult[tuple[GlobMatch, ...]]:
         """Search for files matching a glob pattern."""
-        del context
+        fs = self._get_filesystem(context)
         base = _normalize_string_path(params.path, allow_empty=True, field="path")
         pattern = params.pattern.strip()
         if not pattern:
@@ -850,12 +860,12 @@ class FilesystemToolHandlers:
 
         base_str = "/".join(base.segments) if base.segments else "."
 
-        glob_results = self._fs.glob(pattern, path=base_str)
+        glob_results = fs.glob(pattern, path=base_str)
         matches: list[GlobMatch] = []
 
         for match in glob_results:
             if match.is_file:
-                stat = self._fs.stat(match.path)
+                stat = fs.stat(match.path)
                 matches.append(
                     GlobMatch(
                         path=path_from_string(match.path),
@@ -873,7 +883,7 @@ class FilesystemToolHandlers:
         self, params: GrepParams, *, context: ToolContext
     ) -> ToolResult[tuple[GrepMatch, ...]]:
         """Search for a pattern in file contents."""
-        del context
+        fs = self._get_filesystem(context)
         try:
             _ = re.compile(params.pattern)
         except re.error as error:
@@ -891,6 +901,8 @@ class FilesystemToolHandlers:
         glob_pattern = params.glob.strip() if params.glob is not None else None
         if glob_pattern:
             _ensure_ascii(glob_pattern, "glob")
+        else:
+            glob_pattern = None  # Treat empty/blank as no filter
 
         base_str = (
             "/".join(base_path.segments)
@@ -898,7 +910,7 @@ class FilesystemToolHandlers:
             else "."
         )
 
-        grep_results = self._fs.grep(params.pattern, path=base_str, glob=glob_pattern)
+        grep_results = fs.grep(params.pattern, path=base_str, glob=glob_pattern)
         matches = [
             GrepMatch(
                 path=path_from_string(result.path),
@@ -915,26 +927,26 @@ class FilesystemToolHandlers:
         self, params: RemoveParams, *, context: ToolContext
     ) -> ToolResult[DeleteEntry]:
         """Remove files or directories recursively."""
-        del context
+        fs = self._get_filesystem(context)
         path = _normalize_string_path(params.path, field="path")
         path_str = "/".join(path.segments)
 
-        if not self._fs.exists(path_str):
+        if not fs.exists(path_str):
             raise ToolValidationError("No files matched the provided path.")
 
         # Count files being deleted for message
         deleted_count = 0
-        stat = self._fs.stat(path_str)
+        stat = fs.stat(path_str)
         if stat.is_file:
             deleted_count = 1
         else:
             # Count files in directory
-            glob_results = self._fs.glob("**/*", path=path_str)
+            glob_results = fs.glob("**/*", path=path_str)
             deleted_count = len([m for m in glob_results if m.is_file])
             if deleted_count == 0:
                 deleted_count = 1  # At least the directory itself
 
-        self._fs.delete(path_str, recursive=True)
+        fs.delete(path_str, recursive=True)
         normalized = DeleteEntry(path=path)
         message = _format_delete_message_count(path, deleted_count)
         return ToolResult(message=message, value=normalized)
@@ -982,9 +994,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         self._mount_previews = mount_previews
         self._session = session
 
-        tools = _build_tools(
-            filesystem=self._filesystem, accepts_overrides=accepts_overrides
-        )
+        tools = _build_tools(accepts_overrides=accepts_overrides)
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
@@ -1030,10 +1040,9 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 
 def _build_tools(
     *,
-    filesystem: Filesystem,
     accepts_overrides: bool,
 ) -> tuple[Tool[SupportsDataclass, SupportsToolResult], ...]:
-    handlers = FilesystemToolHandlers(filesystem=filesystem)
+    handlers = FilesystemToolHandlers()
     return cast(
         tuple[Tool[SupportsDataclass, SupportsToolResult], ...],
         (

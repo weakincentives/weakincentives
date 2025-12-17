@@ -861,8 +861,12 @@ class HostFilesystem:
             msg = f"Is a directory: {path}"
             raise IsADirectoryError(msg)
 
-        with resolved.open(encoding=encoding) as f:
-            lines = f.readlines()
+        try:
+            with resolved.open(encoding=encoding) as f:
+                lines = f.readlines()
+        except UnicodeDecodeError as err:
+            msg = f"Cannot decode file as {encoding}: {err}"
+            raise ValueError(msg) from err
 
         total_lines = len(lines)
         # READ_ENTIRE_FILE (-1) reads all lines; None uses default window
@@ -1045,7 +1049,7 @@ class HostFilesystem:
                         )
                         if len(matches) >= max_remaining:
                             break
-        except (UnicodeDecodeError, PermissionError):
+        except (OSError, UnicodeDecodeError):
             # Skip binary or inaccessible files
             pass
         return matches

@@ -22,7 +22,7 @@ from typing import cast
 import pytest
 
 import weakincentives.contrib.tools.vfs as vfs_module
-from tests.tools.helpers import find_tool, invoke_tool
+from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives import ToolValidationError
 from weakincentives.contrib.tools import (
     READ_ENTIRE_FILE,
@@ -170,7 +170,7 @@ def _write(
 ) -> None:
     tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="/".join(path), content=content)
-    invoke_tool(tool, params, session=session)
+    invoke_tool(tool, params, session=session, filesystem=section.filesystem)
 
 
 def _get_filesystem(section: VfsToolsSection) -> InMemoryFilesystem:
@@ -281,7 +281,7 @@ def test_write_file_creates_snapshot(
     write_tool = find_tool(section, "write_file")
 
     params = WriteFileParams(file_path="docs/intro.md", content="hello world")
-    invoke_tool(write_tool, params, session=session)
+    invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
     # Verify file was written to filesystem
     fs = _get_filesystem(section)
@@ -301,7 +301,9 @@ def test_ls_lists_directories_and_files(
 
     list_tool = find_tool(section, "ls")
     params = ListDirectoryParams(path="docs")
-    result = invoke_tool(list_tool, params, session=session)
+    result = invoke_tool(
+        list_tool, params, session=session, filesystem=section.filesystem
+    )
 
     raw_entries = result.value
     assert raw_entries is not None
@@ -330,7 +332,9 @@ def test_read_file_supports_pagination(
 
     read_tool = find_tool(section, "read_file")
     params = ReadFileParams(file_path="notes.md", offset=2, limit=3)
-    result = invoke_tool(read_tool, params, session=session)
+    result = invoke_tool(
+        read_tool, params, session=session, filesystem=section.filesystem
+    )
 
     payload = result.value
     assert isinstance(payload, ReadFileResult)
@@ -358,7 +362,9 @@ def test_read_file_limit_reports_returned_slice(
 
     read_tool = find_tool(section, "read_file")
     params = ReadFileParams(file_path="notes.md", offset=0, limit=10)
-    result = invoke_tool(read_tool, params, session=session)
+    result = invoke_tool(
+        read_tool, params, session=session, filesystem=section.filesystem
+    )
 
     payload = result.value
     assert isinstance(payload, ReadFileResult)
@@ -385,7 +391,7 @@ def test_edit_file_replaces_occurrences(
         new_string="new",
         replace_all=True,
     )
-    invoke_tool(edit_tool, params, session=session)
+    invoke_tool(edit_tool, params, session=session, filesystem=section.filesystem)
 
     # Verify edit was applied to filesystem
     fs = _get_filesystem(section)
@@ -403,7 +409,9 @@ def test_glob_filters_matches(
 
     glob_tool = find_tool(section, "glob")
     params = GlobParams(pattern="*.md", path="docs")
-    result = invoke_tool(glob_tool, params, session=session)
+    result = invoke_tool(
+        glob_tool, params, session=session, filesystem=section.filesystem
+    )
 
     raw_matches = result.value
     assert raw_matches is not None
@@ -423,7 +431,9 @@ def test_grep_reports_invalid_pattern(
     grep_tool = find_tool(section, "grep")
 
     params = GrepParams(pattern="[", path=None, glob=None)
-    result = invoke_tool(grep_tool, params, session=session)
+    result = invoke_tool(
+        grep_tool, params, session=session, filesystem=section.filesystem
+    )
 
     assert result.success is False
     assert result.value is None
@@ -439,7 +449,9 @@ def test_rm_removes_single_file(
 
     rm_tool = find_tool(section, "rm")
     params = RemoveParams(path="myfile.txt")
-    result = invoke_tool(rm_tool, params, session=session)
+    result = invoke_tool(
+        rm_tool, params, session=session, filesystem=section.filesystem
+    )
 
     # Verify file was deleted
     fs = _get_filesystem(section)
@@ -457,7 +469,7 @@ def test_rm_removes_directory_tree(
 
     rm_tool = find_tool(section, "rm")
     params = RemoveParams(path="src/pkg")
-    invoke_tool(rm_tool, params, session=session)
+    invoke_tool(rm_tool, params, session=session, filesystem=section.filesystem)
 
     # Verify files were deleted from the filesystem
     fs = _get_filesystem(section)
@@ -476,7 +488,7 @@ def test_write_file_rejects_existing_target(
     params = WriteFileParams(file_path="log.txt", content="again")
 
     with pytest.raises(ToolValidationError, match="File already exists"):
-        invoke_tool(write_tool, params, session=session)
+        invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
@@ -501,7 +513,9 @@ def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
 
     list_tool = find_tool(section, "ls")
     params = ListDirectoryParams(path="workspace")
-    result = invoke_tool(list_tool, params, session=session)
+    result = invoke_tool(
+        list_tool, params, session=session, filesystem=section.filesystem
+    )
 
     raw_entries = result.value
     assert raw_entries is not None
@@ -519,7 +533,7 @@ def test_ls_rejects_file_path(
     list_tool = find_tool(section, "ls")
     params = ListDirectoryParams(path="notes.md")
     with pytest.raises(ToolValidationError, match="Cannot list a file path"):
-        invoke_tool(list_tool, params, session=session)
+        invoke_tool(list_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_ls_ignores_unrelated_paths(
@@ -532,7 +546,9 @@ def test_ls_ignores_unrelated_paths(
 
     list_tool = find_tool(section, "ls")
     params = ListDirectoryParams(path="docs")
-    result = invoke_tool(list_tool, params, session=session)
+    result = invoke_tool(
+        list_tool, params, session=session, filesystem=section.filesystem
+    )
     raw_entries = result.value
     assert raw_entries is not None
     entries = cast(tuple[FileInfo, ...], raw_entries)
@@ -549,7 +565,7 @@ def test_read_file_negative_offset(
     read_tool = find_tool(section, "read_file")
     params = ReadFileParams(file_path="notes.md", offset=-1)
     with pytest.raises(ToolValidationError, match="offset must be non-negative"):
-        invoke_tool(read_tool, params, session=session)
+        invoke_tool(read_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_read_file_invalid_limit(
@@ -562,7 +578,7 @@ def test_read_file_invalid_limit(
     read_tool = find_tool(section, "read_file")
     params = ReadFileParams(file_path="notes.md", limit=0)
     with pytest.raises(ToolValidationError, match="limit must be a positive integer"):
-        invoke_tool(read_tool, params, session=session)
+        invoke_tool(read_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_read_file_returns_empty_slice(
@@ -574,7 +590,9 @@ def test_read_file_returns_empty_slice(
 
     read_tool = find_tool(section, "read_file")
     params = ReadFileParams(file_path="notes.md", offset=5)
-    result = invoke_tool(read_tool, params, session=session)
+    result = invoke_tool(
+        read_tool, params, session=session, filesystem=section.filesystem
+    )
     payload = result.value
     assert isinstance(payload, ReadFileResult)
     assert payload.content == ""
@@ -589,7 +607,7 @@ def test_read_file_missing_path(
     read_tool = find_tool(section, "read_file")
     params = ReadFileParams(file_path="missing.txt")
     with pytest.raises(ToolValidationError, match="File does not exist"):
-        invoke_tool(read_tool, params, session=session)
+        invoke_tool(read_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_write_file_content_length_limit(
@@ -600,7 +618,7 @@ def test_write_file_content_length_limit(
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="docs/big.txt", content="x" * 48_001)
     with pytest.raises(ToolValidationError, match="Content exceeds"):
-        invoke_tool(write_tool, params, session=session)
+        invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_write_file_rejects_empty_path(
@@ -611,7 +629,7 @@ def test_write_file_rejects_empty_path(
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="", content="data")
     with pytest.raises(ToolValidationError, match="file_path must not be empty"):
-        invoke_tool(write_tool, params, session=session)
+        invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_write_file_accepts_leading_slash(
@@ -621,7 +639,7 @@ def test_write_file_accepts_leading_slash(
     section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="/docs/info.txt", content="data")
-    invoke_tool(write_tool, params, session=session)
+    invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
     # Verify file was written with normalized path
     fs = _get_filesystem(section)
@@ -636,7 +654,7 @@ def test_write_file_rejects_relative_segments(
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path="docs/../info.txt", content="data")
     with pytest.raises(ToolValidationError, match=r"may not include '\.' or '\.\.'"):
-        invoke_tool(write_tool, params, session=session)
+        invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_write_file_rejects_long_segment(
@@ -647,7 +665,7 @@ def test_write_file_rejects_long_segment(
     write_tool = find_tool(section, "write_file")
     params = WriteFileParams(file_path=f"{'a' * 81}.txt", content="data")
     with pytest.raises(ToolValidationError, match="80 characters or fewer"):
-        invoke_tool(write_tool, params, session=session)
+        invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_write_file_rejects_excessive_depth(
@@ -659,7 +677,7 @@ def test_write_file_rejects_excessive_depth(
     deep_segments = "/".join(f"dir{index}" for index in range(20))
     params = WriteFileParams(file_path=f"{deep_segments}/file.txt", content="data")
     with pytest.raises(ToolValidationError, match="Path depth exceeds"):
-        invoke_tool(write_tool, params, session=session)
+        invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_edit_file_empty_old_string(
@@ -675,7 +693,7 @@ def test_edit_file_empty_old_string(
         new_string="noop",
     )
     with pytest.raises(ToolValidationError, match="must not be empty"):
-        invoke_tool(edit_tool, params, session=session)
+        invoke_tool(edit_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_edit_file_requires_existing_pattern(
@@ -691,7 +709,7 @@ def test_edit_file_requires_existing_pattern(
         new_string="found",
     )
     with pytest.raises(ToolValidationError, match="not found"):
-        invoke_tool(edit_tool, params, session=session)
+        invoke_tool(edit_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_edit_file_requires_unique_match(
@@ -713,7 +731,7 @@ def test_edit_file_requires_unique_match(
         replace_all=False,
     )
     with pytest.raises(ToolValidationError, match="must match exactly once"):
-        invoke_tool(edit_tool, params, session=session)
+        invoke_tool(edit_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_edit_file_single_occurrence_replace(
@@ -729,7 +747,7 @@ def test_edit_file_single_occurrence_replace(
         new_string="new",
         replace_all=False,
     )
-    invoke_tool(edit_tool, params, session=session)
+    invoke_tool(edit_tool, params, session=session, filesystem=section.filesystem)
 
     # Verify edit was applied to filesystem
     fs = _get_filesystem(section)
@@ -751,7 +769,7 @@ def test_edit_file_replacement_length_guard(
         replace_all=True,
     )
     with pytest.raises(ToolValidationError, match="48,000 characters or fewer"):
-        invoke_tool(edit_tool, params, session=session)
+        invoke_tool(edit_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_glob_requires_pattern(
@@ -762,7 +780,7 @@ def test_glob_requires_pattern(
     glob_tool = find_tool(section, "glob")
     params = GlobParams(pattern="", path="/")
     with pytest.raises(ToolValidationError, match="Pattern must not be empty"):
-        invoke_tool(glob_tool, params, session=session)
+        invoke_tool(glob_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_glob_filters_with_base_path(
@@ -776,7 +794,9 @@ def test_glob_filters_with_base_path(
 
     glob_tool = find_tool(section, "glob")
     params = GlobParams(pattern="*.md", path="docs")
-    result = invoke_tool(glob_tool, params, session=session)
+    result = invoke_tool(
+        glob_tool, params, session=session, filesystem=section.filesystem
+    )
     raw_matches = result.value
     assert raw_matches is not None
     matches = cast(tuple[GrepMatch, ...], raw_matches)
@@ -801,7 +821,9 @@ def test_grep_matches_success(
     _write(session, section, path=("notes.txt",), content="delta")
     grep_tool = find_tool(section, "grep")
     params = GrepParams(pattern="a", path="docs", glob="*.md")
-    result = invoke_tool(grep_tool, params, session=session)
+    result = invoke_tool(
+        grep_tool, params, session=session, filesystem=section.filesystem
+    )
     raw_matches = result.value
     assert raw_matches is not None
     matches = cast(tuple[GlobMatch, ...], raw_matches)
@@ -817,7 +839,9 @@ def test_grep_no_matches_message(
     _write(session, section, path=("docs", "intro.md"), content="alpha")
     grep_tool = find_tool(section, "grep")
     params = GrepParams(pattern="z", path="docs")
-    result = invoke_tool(grep_tool, params, session=session)
+    result = invoke_tool(
+        grep_tool, params, session=session, filesystem=section.filesystem
+    )
     assert result.value == ()
     assert "0 matches" in result.message
 
@@ -830,7 +854,7 @@ def test_rm_requires_existing_path(
     rm_tool = find_tool(section, "rm")
     params = RemoveParams(path="missing")
     with pytest.raises(ToolValidationError, match="No files matched"):
-        invoke_tool(rm_tool, params, session=session)
+        invoke_tool(rm_tool, params, session=session, filesystem=section.filesystem)
 
 
 def test_inmemory_filesystem_supports_append() -> None:
@@ -885,7 +909,9 @@ def test_host_mount_defaults_to_relative_destination(tmp_path: Path) -> None:
         allowed_host_roots=(tmp_path,),
     )
     list_tool = find_tool(section, "ls")
-    result = invoke_tool(list_tool, ListDirectoryParams(), session=session)
+    result = invoke_tool(
+        list_tool, ListDirectoryParams(), session=session, filesystem=section.filesystem
+    )
     raw_entries = result.value
     assert raw_entries is not None
     entries = cast(tuple[FileInfo, ...], raw_entries)
@@ -911,7 +937,9 @@ def test_host_mount_glob_normalization(tmp_path: Path) -> None:
         allowed_host_roots=(tmp_path,),
     )
     list_tool = find_tool(section, "ls")
-    result = invoke_tool(list_tool, ListDirectoryParams(), session=session)
+    result = invoke_tool(
+        list_tool, ListDirectoryParams(), session=session, filesystem=section.filesystem
+    )
     raw_entries = result.value
     assert raw_entries is not None
     entries = cast(tuple[FileInfo, ...], raw_entries)
@@ -936,7 +964,9 @@ def test_host_mount_exclude_glob_filters_matches(tmp_path: Path) -> None:
         allowed_host_roots=(tmp_path,),
     )
     list_tool = find_tool(section, "ls")
-    result = invoke_tool(list_tool, ListDirectoryParams(), session=session)
+    result = invoke_tool(
+        list_tool, ListDirectoryParams(), session=session, filesystem=section.filesystem
+    )
 
     raw_entries = result.value
     assert raw_entries is not None
@@ -1177,6 +1207,7 @@ def test_edit_file_nonexistent_raises_error() -> None:
                 new_string="new",
             ),
             session=session,
+            filesystem=section.filesystem,
         )
 
 
@@ -1202,6 +1233,7 @@ def test_edit_file_preserves_content_beyond_default_read_limit() -> None:
             new_string="MODIFIED",
         ),
         session=session,
+        filesystem=section.filesystem,
     )
 
     # Verify the edit was applied AND the file wasn't truncated
@@ -1216,3 +1248,19 @@ def test_path_from_string_returns_empty_for_root() -> None:
     assert path_from_string("") == VfsPath(())
     assert path_from_string(".") == VfsPath(())
     assert path_from_string("/") == VfsPath(())
+
+
+def test_tool_handler_rejects_missing_filesystem() -> None:
+    """Test that tool handlers raise error when filesystem is not in context."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = VfsToolsSection(session=session)
+    tool = find_tool(section, "ls")
+    handler = tool.handler
+    assert handler is not None
+
+    # Create a context without filesystem
+    context = build_tool_context(session, filesystem=None)
+
+    with pytest.raises(ToolValidationError, match="No filesystem available"):
+        handler(ListDirectoryParams(path="/"), context=context)
