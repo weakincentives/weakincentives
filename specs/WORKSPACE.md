@@ -125,7 +125,7 @@ section = VfsToolsSection(
 )
 
 # Query state
-vfs = session.query(VirtualFileSystem).latest()
+vfs = session[VirtualFileSystem].latest()
 ```
 
 ## Podman Sandbox
@@ -335,8 +335,8 @@ podman_template = PromptTemplate(
 podman_prompt = Prompt(podman_template)
 
 # After tool invocations
-filesystem = session.query(vfs.VirtualFileSystem).latest()
-workspace = session.query(podman.PodmanWorkspace).latest()
+filesystem = session[vfs.VirtualFileSystem].latest()
+workspace = session[podman.PodmanWorkspace].latest()
 ```
 
 ## Cloning

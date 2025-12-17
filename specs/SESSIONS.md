@@ -117,9 +117,9 @@ Built-in reducers:
 ### Query API
 
 ```python
-latest_plan = session.query(Plan).latest()
-all_results = session.query(SearchResult).all()
-filtered = session.query(Issue).where(lambda i: i.severity == "high")
+latest_plan = session[Plan].latest()
+all_results = session[SearchResult].all()
+filtered = session[Issue].where(lambda i: i.severity == "high")
 ```
 
 ### Observer API
@@ -178,25 +178,24 @@ session.broadcast(SetupPlan(objective="Build feature"))
 
 Events are routed by type to all matching reducers across all slices.
 
-### Mutation Builder
+### Mutation API
 
-The `mutate()` method provides a fluent interface for direct mutations and
-reducer registration:
+Slice accessors provide direct mutation methods:
 
 ```python
 # Slice-specific mutations
-session.mutate(Plan).seed(initial_plan)           # Initialize/replace slice
-session.mutate(Plan).clear()                       # Remove all items
-session.mutate(Plan).clear(lambda p: not p.active) # Predicate-based removal
-session.mutate(Plan).append(new_plan)              # Append via default reducer
-session.mutate(Plan).register(SetupPlan, reducer)  # Register reducer
+session[Plan].seed(initial_plan)           # Initialize/replace slice
+session[Plan].clear()                       # Remove all items
+session[Plan].clear(lambda p: not p.active) # Predicate-based removal
+session[Plan].append(new_plan)              # Append via default reducer
+session[Plan].register(SetupPlan, reducer)  # Register reducer
 
 # Session-wide mutations
-session.mutate().reset()               # Clear all slices
-session.mutate().rollback(snapshot)    # Restore from snapshot
+session.reset()               # Clear all slices
+session.rollback(snapshot)    # Restore from snapshot
 ```
 
-**MutationBuilder methods:**
+**SliceAccessor mutation methods:**
 
 - `seed(values)` - Initialize or replace the slice with provided value(s).
   Bypasses reducers. Useful for initial state setup or restoration.
@@ -207,7 +206,7 @@ session.mutate().rollback(snapshot)    # Restore from snapshot
 - `register(data_type, reducer)` - Register a reducer for events of the given
   type.
 
-**GlobalMutationBuilder methods:**
+**Session-wide mutation methods:**
 
 - `reset()` - Clear all stored slices while preserving reducer registrations.
 - `rollback(snapshot)` - Restore session slices from the provided snapshot.
@@ -233,8 +232,8 @@ are co-located as methods on the dataclass itself.
 The traditional pattern requires manual reducer registration:
 
 ```python
-session.mutate(Plan).register(AddStep, add_step_reducer)
-session.mutate(Plan).register(UpdateStep, update_step_reducer)
+session[Plan].register(AddStep, add_step_reducer)
+session[Plan].register(UpdateStep, update_step_reducer)
 ```
 
 The declarative pattern eliminates this boilerplate by auto-registering:
@@ -280,7 +279,7 @@ session = Session(bus=bus)
 session.install(AgentPlan)
 
 # Now use the slice
-session.mutate(AgentPlan).seed(AgentPlan(steps=("Research",)))
+session[AgentPlan].seed(AgentPlan(steps=("Research",)))
 session.broadcast(AddStep(step="Implement"))
 latest = session[AgentPlan].latest()
 ```
@@ -366,10 +365,10 @@ class Plan:
         ...
 
 # Good fit for built-in: event stream / ledger (default for all slices)
-session.mutate(ToolInvoked).register(ToolInvoked, append_all)
+session[ToolInvoked].register(ToolInvoked, append_all)
 
 # Good fit for built-in: latest value only
-session.mutate(PodmanWorkspace).register(PodmanWorkspace, replace_latest)
+session[PodmanWorkspace].register(PodmanWorkspace, replace_latest)
 ```
 
 ### Session Hierarchy
@@ -509,7 +508,7 @@ json_str = snapshot.to_json()
 
 # Restore
 loaded = Snapshot.from_json(json_str)
-session.mutate().rollback(loaded)
+session.rollback(loaded)
 ```
 
 ### Serialization
@@ -658,7 +657,7 @@ bus = InProcessEventBus()
 session = Session(bus=bus)
 
 # Optional: register custom reducers
-session.mutate(ResearchMetrics).register(ResearchSummary, update_metrics_reducer)
+session[ResearchMetrics].register(ResearchSummary, update_metrics_reducer)
 
 # Optional: observe state changes
 def on_metrics_change(old: tuple[ResearchMetrics, ...], new: tuple[ResearchMetrics, ...]) -> None:
@@ -682,8 +681,8 @@ response = adapter.evaluate(
 )
 
 # Query state
-latest_plan = session.query(Plan).latest()
-all_metrics = session.query(ResearchMetrics).all()
+latest_plan = session[Plan].latest()
+all_metrics = session[ResearchMetrics].all()
 
 # Snapshot for persistence
 snapshot = session.snapshot()

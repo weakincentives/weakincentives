@@ -247,7 +247,7 @@ Every action is recorded. Query the session for plans, tool calls, or any slice:
 ```python
 from weakincentives.contrib.tools.planning import Plan
 
-plan = session.query(Plan).latest()
+plan = session[Plan].latest()
 if plan:
     for step in plan.steps:
         print(f"[{step.status}] {step.title}")
