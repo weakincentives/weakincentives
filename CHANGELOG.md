@@ -131,6 +131,15 @@ The Claude Agent SDK adapter now supports additional configuration options via
 Requesting `SectionVisibility.SUMMARY` for a section without a `summary` template
 now raises `PromptValidationError`.
 
+### Documentation: Split Guides from Specs
+
+Documentation has been reorganized to separate user-facing how-to material from
+design specifications:
+
+- New `guides/` folder for quickstarts, patterns, recipes, and best practices
+- `specs/` now exclusively contains design contracts, invariants, and semantics
+- Moved `CODE_REVIEWER_EXAMPLE.md` → `guides/code-review-agent.md`
+
 ### Typing & Internals
 
 - `PromptTemplateProtocol` no longer advertises a `render()` method (rendering is
