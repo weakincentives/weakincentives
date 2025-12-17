@@ -642,7 +642,7 @@ class _AstevalToolSuite:
         self, params: EvalParams, *, context: ToolContext
     ) -> ToolResult[EvalResult]:
         del context  # Filesystem accessed via section
-        fs = self._section.filesystem
+        fs = self._section._filesystem  # pyright: ignore[reportPrivateUsage]
         code = _normalize_code(params.code)
         reads = _normalize_reads(params.reads)
         writes = _normalize_writes(params.writes)
@@ -1034,11 +1034,6 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
     @property
     def session(self) -> Session:
         return self._session
-
-    @property
-    def filesystem(self) -> Filesystem:
-        """Return the filesystem used by this section."""
-        return self._filesystem
 
     @override
     def clone(self, **kwargs: object) -> AstevalSection:

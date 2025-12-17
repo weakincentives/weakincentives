@@ -1937,3 +1937,208 @@ def test_claude_agent_sdk_adapter_workspace_security_check(
             # Only allow current directory
             allowed_host_roots=(str(Path.cwd()),),
         )
+
+
+# ---------------------------------------------------------------------------
+# MCP Tool + Native Tool Integration Test
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class WriteFileRequest:
+    """Input for the MCP file writer tool."""
+
+    filename: str
+    content: str
+
+
+@dataclass(slots=True)
+class WriteFileResponse:
+    """Output from the MCP file writer tool."""
+
+    path: str
+    bytes_written: int
+
+    def render(self) -> str:
+        return f"Wrote {self.bytes_written} bytes to {self.path}"
+
+
+def _build_mcp_file_writer_tool() -> Tool[WriteFileRequest, WriteFileResponse]:
+    """Build a WINK tool that writes files using context.filesystem."""
+
+    def write_file_handler(
+        params: WriteFileRequest, *, context: ToolContext
+    ) -> ToolResult[WriteFileResponse]:
+        if context.filesystem is None:
+            return ToolResult(
+                message="No filesystem available",
+                value=None,
+                success=False,
+            )
+
+        # Write the file using the filesystem from context
+        context.filesystem.write(params.filename, params.content, mode="create")
+        bytes_written = len(params.content.encode("utf-8"))
+
+        return ToolResult(
+            message=f"Successfully wrote {bytes_written} bytes to {params.filename}",
+            value=WriteFileResponse(path=params.filename, bytes_written=bytes_written),
+            success=True,
+        )
+
+    return Tool[WriteFileRequest, WriteFileResponse](
+        name="write_file_to_workspace",
+        description=(
+            "Write content to a file in the workspace. "
+            "Takes a filename and content string."
+        ),
+        handler=write_file_handler,
+    )
+
+
+@dataclass(slots=True)
+class McpWriteAndReadParams:
+    """Parameters for the MCP write and read test."""
+
+    filename: str
+    content: str
+
+
+@dataclass(slots=True)
+class McpWriteAndReadResult:
+    """Structured result for verifying the write+read cycle."""
+
+    write_succeeded: bool
+    read_succeeded: bool
+    content_matches: bool
+    read_content: str | None = None
+    error_message: str | None = None
+
+
+def test_claude_agent_sdk_mcp_tool_writes_file_native_tool_reads(
+    claude_model: str,
+    tmp_path: Path,
+) -> None:
+    """Verify MCP-bridged tools can write files that native SDK tools can read.
+
+    This integration test validates the filesystem bridging between WINK tools
+    (exposed via MCP) and the Claude Agent SDK's native file tools. The test:
+
+    1. Creates a WINK tool that writes files using context.filesystem
+    2. Configures the adapter with cwd pointing to a temp directory
+    3. Has Claude call the MCP tool to write a file
+    4. Has Claude use the native Read tool to read the file back
+    5. Verifies the content matches
+
+    This demonstrates that the HostFilesystem passed to ToolContext is backed
+    by the same directory that the Claude Agent SDK operates in.
+    """
+    # Create the MCP tool that uses context.filesystem
+    write_tool = _build_mcp_file_writer_tool()
+
+    # Build a prompt that instructs Claude to:
+    # 1. Call the MCP tool to write a file
+    # 2. Use the native Read tool to read it back
+    # 3. Return structured output confirming the content matches
+    task_section = MarkdownSection[McpWriteAndReadParams](
+        title="Task",
+        template=(
+            "You have two tasks:\n\n"
+            "1. First, use the `write_file_to_workspace` tool to write a file named "
+            "'${filename}' with the content: '${content}'\n\n"
+            "2. After the file is written, use the Read tool to read the file at "
+            "'${filename}' and verify its contents.\n\n"
+            "Return a structured response indicating:\n"
+            "- write_succeeded: true if the write tool succeeded\n"
+            "- read_succeeded: true if you could read the file\n"
+            "- content_matches: true if the content you read matches '${content}'\n"
+            "- read_content: the actual content you read from the file\n"
+        ),
+        tools=(write_tool,),
+        key="task",
+    )
+
+    prompt_template = PromptTemplate[McpWriteAndReadResult](
+        ns=_PROMPT_NS,
+        key="mcp-write-native-read",
+        name="mcp_filesystem_integration",
+        sections=[task_section],
+    )
+
+    # Configure adapter with cwd pointing to temp directory
+    # This ensures both the MCP tool's filesystem and SDK's native tools
+    # operate on the same directory
+    config = ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        cwd=str(tmp_path),
+    )
+
+    adapter = ClaudeAgentSDKAdapter(
+        model=claude_model,
+        client_config=config,
+        # Allow both the MCP tool and the Read tool
+        allowed_tools=("Read", "mcp__wink__write_file_to_workspace"),
+    )
+
+    # Bind parameters - use a unique filename and recognizable content
+    test_content = "Hello from MCP tool! 🎉 Integration test content."
+    params = McpWriteAndReadParams(
+        filename="mcp_test_output.txt",
+        content=test_content,
+    )
+    prompt = Prompt(prompt_template).bind(params)
+
+    # Track tool invocations to verify both tools were called
+    tool_invoked_events: list[ToolInvoked] = []
+    session = Session()
+    session.event_bus.subscribe(ToolInvoked, tool_invoked_events.append)
+
+    # Execute
+    response = adapter.evaluate(prompt, session=session)
+
+    # Verify structured output
+    assert response.output is not None, (
+        f"Expected structured output, got text: {response.text}"
+    )
+    result = response.output
+
+    print("\nMCP + Native Tool Integration Test Results:")
+    print(f"  write_succeeded: {result.write_succeeded}")
+    print(f"  read_succeeded: {result.read_succeeded}")
+    print(f"  content_matches: {result.content_matches}")
+    print(f"  read_content: {result.read_content!r}")
+    if result.error_message:
+        print(f"  error_message: {result.error_message}")
+
+    # Verify the MCP tool was called
+    tool_names = [e.name for e in tool_invoked_events]
+    assert any("write_file" in n.lower() or "mcp" in n.lower() for n in tool_names), (
+        f"Expected MCP write tool to be called. Tool events: {tool_names}"
+    )
+
+    # Verify the native Read tool was called
+    assert any(n == "Read" for n in tool_names), (
+        f"Expected native Read tool to be called. Tool events: {tool_names}"
+    )
+
+    # Verify the write succeeded
+    assert result.write_succeeded is True, (
+        f"MCP tool write failed: {result.error_message}"
+    )
+
+    # Verify the read succeeded
+    assert result.read_succeeded is True, (
+        f"Native Read tool failed: {result.error_message}"
+    )
+
+    # Verify content matches (the key assertion!)
+    assert result.content_matches is True, (
+        f"Content mismatch! Expected: {test_content!r}, Read: {result.read_content!r}"
+    )
+
+    # Also verify the file actually exists on disk
+    written_file = tmp_path / "mcp_test_output.txt"
+    assert written_file.exists(), f"Expected file to exist at {written_file}"
+    assert written_file.read_text(encoding="utf-8") == test_content, (
+        f"File content on disk doesn't match expected: {test_content!r}"
+    )

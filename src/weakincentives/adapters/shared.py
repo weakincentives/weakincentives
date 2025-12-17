@@ -708,6 +708,8 @@ def tool_execution(
             prompt_name=context.prompt_name,
             tool_name=tool_name,
         )
+        # Get filesystem from workspace section if present
+        filesystem = context.prompt.filesystem() if context.prompt else None
         tool_context = ToolContext(
             prompt=cast(PromptProtocol[Any], context.prompt),
             rendered_prompt=context.rendered_prompt,
@@ -715,6 +717,7 @@ def tool_execution(
             session=context.session,
             deadline=context.deadline,
             budget_tracker=context.budget_tracker,
+            filesystem=filesystem,
         )
         tool_result = _invoke_tool_handler(
             handler=handler,

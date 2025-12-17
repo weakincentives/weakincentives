@@ -19,7 +19,6 @@ import json
 import math
 import os
 import posixpath
-import re
 import shutil
 import subprocess  # nosec: B404
 import tempfile
@@ -45,11 +44,15 @@ from .asteval import (
     EvalParams,
     EvalResult,
 )
-from .filesystem import Filesystem, HostFilesystem
+from .filesystem import (
+    Filesystem,
+    HostFilesystem,
+)
 from .vfs import (
     DeleteEntry,
     EditFileParams,
     FileInfo,
+    FilesystemToolHandlers,
     GlobMatch,
     GlobParams,
     GrepMatch,
@@ -652,10 +655,17 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._overlay_path = _overlay_path
             self._filesystem: Filesystem = _filesystem
         else:
-            # Fresh initialization
+            # Fresh initialization - create overlay and hydrate mounts eagerly
+            # so filesystem operations work before a container is started
             self._overlay_path = self._overlay_root / str(self._session.session_id)
             self._overlay_path.mkdir(parents=True, exist_ok=True)
-            self._filesystem = HostFilesystem(_root=str(self._overlay_path))
+            for mount in self._resolved_mounts:
+                self._copy_mount_into_overlay(overlay=self._overlay_path, mount=mount)
+            # Use /workspace as the mount point so paths like /workspace/file.txt
+            # are correctly interpreted as file.txt in the overlay directory
+            self._filesystem = HostFilesystem(
+                _root=str(self._overlay_path), _mount_point=_DEFAULT_WORKDIR
+            )
         self._clock = config.clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
@@ -683,7 +693,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
 
         session[PodmanWorkspace].register(PodmanWorkspace, replace_latest)
 
-        self._vfs_suite = _PodmanVfsSuite(section=self)
+        self._fs_handlers = FilesystemToolHandlers(clock=self._clock)
         self._shell_suite = _PodmanShellSuite(section=self)
         self._eval_suite = _PodmanEvalSuite(section=self)
         accepts_overrides = config.accepts_overrides
@@ -691,7 +701,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             Tool[ListDirectoryParams, tuple[FileInfo, ...]](
                 name="ls",
                 description="List directory entries under a relative path.",
-                handler=self._vfs_suite.list_directory,
+                handler=self._fs_handlers.list_directory,
                 examples=(
                     ToolExample[ListDirectoryParams, tuple[FileInfo, ...]](
                         description="List the workspace root",
@@ -719,7 +729,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             Tool[ReadFileParams, ReadFileResult](
                 name="read_file",
                 description="Read UTF-8 file contents with pagination support.",
-                handler=self._vfs_suite.read_file,
+                handler=self._fs_handlers.read_file,
                 examples=(
                     ToolExample[ReadFileParams, ReadFileResult](
                         description="Read the top of README.md",
@@ -744,7 +754,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             Tool[WriteFileParams, WriteFile](
                 name="write_file",
                 description="Create a new UTF-8 text file.",
-                handler=self._vfs_suite.write_file,
+                handler=self._fs_handlers.write_file,
                 examples=(
                     ToolExample[WriteFileParams, WriteFile](
                         description="Create a notes file in the container",
@@ -764,7 +774,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             Tool[EditFileParams, WriteFile](
                 name="edit_file",
                 description="Replace occurrences of a string within a file.",
-                handler=self._vfs_suite.edit_file,
+                handler=self._fs_handlers.edit_file,
                 examples=(
                     ToolExample[EditFileParams, WriteFile](
                         description="Update a TODO entry",
@@ -786,7 +796,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             Tool[GlobParams, tuple[GlobMatch, ...]](
                 name="glob",
                 description="Match files beneath a directory using shell patterns.",
-                handler=self._vfs_suite.glob,
+                handler=self._fs_handlers.glob,
                 examples=(
                     ToolExample[GlobParams, tuple[GlobMatch, ...]](
                         description="Find Python files under src",
@@ -819,7 +829,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             Tool[GrepParams, tuple[GrepMatch, ...]](
                 name="grep",
                 description="Search files for a regular expression pattern.",
-                handler=self._vfs_suite.grep,
+                handler=self._fs_handlers.grep,
                 examples=(
                     ToolExample[GrepParams, tuple[GrepMatch, ...]](
                         description="Search for TODO comments",
@@ -861,7 +871,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             Tool[RemoveParams, DeleteEntry](
                 name="rm",
                 description="Remove files or directories recursively.",
-                handler=self._vfs_suite.remove,
+                handler=self._fs_handlers.remove,
                 examples=(
                     ToolExample[RemoveParams, DeleteEntry](
                         description="Delete a stale build artifact",
@@ -1047,17 +1057,26 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         return self._overlay_path
 
     def _hydrate_overlay_mounts(self, overlay: Path) -> None:
+        """Hydrate mounts into the overlay if it's empty.
+
+        Note: Mounts are now hydrated eagerly during __init__, so this method
+        is effectively a no-op in normal operation. It exists as a safety net
+        in case the overlay was somehow cleared between init and container
+        creation.
+        """
         if not self._resolved_mounts:
             return
         iterator = overlay.iterdir()
         try:
             _ = next(iterator)
-        except StopIteration:
-            pass
+        except StopIteration:  # pragma: no cover
+            pass  # pragma: no cover
         else:
             return
-        for mount in self._resolved_mounts:
-            self._copy_mount_into_overlay(overlay=overlay, mount=mount)
+        for mount in self._resolved_mounts:  # pragma: no cover
+            self._copy_mount_into_overlay(
+                overlay=overlay, mount=mount
+            )  # pragma: no cover
 
     def _workspace_env(self) -> dict[str, str]:
         return (
@@ -1319,472 +1338,6 @@ def _assert_within_overlay(root: Path, candidate: Path) -> None:
         _ = resolved.relative_to(root)
     except ValueError as error:
         raise ToolValidationError("Path escapes the workspace boundary.") from error
-
-
-def _compose_child_path(base: VfsPath, name: str) -> VfsPath | None:
-    candidate = VfsPath((*base.segments, name))
-    try:
-        return vfs_module.normalize_path(candidate)
-    except ToolValidationError:
-        return None
-
-
-def _compose_relative_path(base: VfsPath, relative: Path) -> VfsPath | None:
-    segments = (*base.segments, *relative.parts)
-    candidate = VfsPath(segments)
-    try:
-        return vfs_module.normalize_path(candidate)
-    except ToolValidationError:
-        return None
-
-
-def _iter_workspace_files(base: Path) -> Iterator[Path]:
-    if not base.exists():
-        return
-    for dirpath, _, filenames in os.walk(base, followlinks=False):
-        current = Path(dirpath)
-        for name in filenames:
-            yield current / name
-
-
-def _stat_file(path: Path) -> tuple[int, datetime]:
-    try:
-        stat_result = path.stat()
-    except OSError as error:  # pragma: no cover - defensive guard
-        raise ToolValidationError("Failed to stat workspace file.") from error
-    size = stat_result.st_size
-    updated_at = datetime.fromtimestamp(stat_result.st_mtime, tz=UTC)
-    return size, updated_at
-
-
-def _format_remove_message(path: VfsPath, count: int) -> str:
-    path_label = "/".join(path.segments) or "/"
-    label = "entry" if count == 1 else "entries"
-    return f"Deleted {count} {label} under {path_label}."
-
-
-def _format_read_message(path: VfsPath, start: int, end: int) -> str:
-    path_label = "/".join(path.segments) or "/"
-    if start == end:
-        return f"Read file {path_label} (no lines returned)."
-    return f"Read file {path_label} (lines {start + 1}-{end})."
-
-
-class _PodmanVfsSuite:
-    """Filesystem tool handlers bound to a :class:`PodmanSandboxSection`."""
-
-    def __init__(self, *, section: PodmanSandboxSection) -> None:
-        super().__init__()
-        self._section = section
-
-    def list_directory(
-        self, params: ListDirectoryParams, *, context: ToolContext
-    ) -> ToolResult[tuple[FileInfo, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        path = vfs_module.normalize_string_path(
-            params.path, allow_empty=True, field="path"
-        )
-        handle = self._section.ensure_workspace()
-        host_path = _host_path_for(handle.overlay_path, path)
-        _assert_within_overlay(handle.overlay_path, host_path)
-        if host_path.exists() and host_path.is_file():
-            raise ToolValidationError("Cannot list a file path; provide a directory.")
-        entries = self._build_directory_entries(
-            base=path,
-            host_path=host_path,
-            overlay_root=handle.overlay_path,
-        )
-        message = vfs_module.format_directory_message(path, entries)
-        self._section.touch_workspace()
-        return ToolResult(message=message, value=tuple(entries))
-
-    def read_file(
-        self, params: ReadFileParams, *, context: ToolContext
-    ) -> ToolResult[ReadFileResult]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        path = vfs_module.normalize_string_path(params.file_path, field="file_path")
-        offset = vfs_module.normalize_offset(params.offset)
-        limit = vfs_module.normalize_limit(params.limit)
-        handle = self._section.ensure_workspace()
-        host_path = _host_path_for(handle.overlay_path, path)
-        if not host_path.exists() or not host_path.is_file():
-            raise ToolValidationError("File does not exist in the workspace.")
-        _assert_within_overlay(handle.overlay_path, host_path)
-        try:
-            content = host_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError as error:
-            raise ToolValidationError("File is not valid UTF-8.") from error
-        except OSError as error:  # pragma: no cover - defensive guard
-            raise ToolValidationError("Failed to read file contents.") from error
-        lines = content.splitlines()
-        total_lines = len(lines)
-        start = min(offset, total_lines)
-        end = min(start + limit, total_lines)
-        numbered = [
-            f"{index + 1:>4} | {line}"
-            for index, line in enumerate(lines[start:end], start=start)
-        ]
-        formatted = "\n".join(numbered)
-        message = _format_read_message(path, start, end)
-        self._section.touch_workspace()
-        return ToolResult(
-            message=message,
-            value=ReadFileResult(
-                path=path,
-                content=formatted,
-                offset=start,
-                limit=end - start,
-                total_lines=total_lines,
-            ),
-        )
-
-    def write_file(
-        self, params: WriteFileParams, *, context: ToolContext
-    ) -> ToolResult[WriteFile]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        path = vfs_module.normalize_string_path(params.file_path, field="file_path")
-        content = vfs_module.normalize_content(params.content)
-        handle = self._section.ensure_workspace()
-        host_path = _host_path_for(handle.overlay_path, path)
-        if host_path.exists():
-            raise ToolValidationError(
-                "File already exists; use edit_file to modify existing content."
-            )
-        _assert_within_overlay(handle.overlay_path, host_path)
-        self._section.write_via_container(path=path, content=content, mode="create")
-        self._section.touch_workspace()
-        message = vfs_module.format_write_file_message(path, content, "create")
-        return ToolResult(
-            message=message,
-            value=WriteFile(path=path, content=content, mode="create"),
-        )
-
-    def edit_file(
-        self, params: EditFileParams, *, context: ToolContext
-    ) -> ToolResult[WriteFile]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        path = vfs_module.normalize_string_path(params.file_path, field="file_path")
-        if len(params.old_string) > vfs_module.MAX_WRITE_LENGTH:
-            raise ToolValidationError("old_string exceeds the 48,000 character limit.")
-        if len(params.new_string) > vfs_module.MAX_WRITE_LENGTH:
-            raise ToolValidationError("new_string exceeds the 48,000 character limit.")
-        handle = self._section.ensure_workspace()
-        host_path = _host_path_for(handle.overlay_path, path)
-        if not host_path.exists() or not host_path.is_file():
-            raise ToolValidationError("File does not exist in the workspace.")
-        _assert_within_overlay(handle.overlay_path, host_path)
-        try:
-            existing = host_path.read_text(encoding="utf-8")
-        except UnicodeDecodeError as error:
-            raise ToolValidationError("File is not valid UTF-8.") from error
-        occurrences = existing.count(params.old_string)
-        if occurrences == 0:
-            raise ToolValidationError("old_string not found in the target file.")
-        if not params.replace_all and occurrences != 1:
-            raise ToolValidationError(
-                "old_string must match exactly once unless replace_all is true."
-            )
-        if params.replace_all:
-            replacements = occurrences
-            updated = existing.replace(params.old_string, params.new_string)
-        else:
-            replacements = 1
-            updated = existing.replace(params.old_string, params.new_string, 1)
-        normalized = vfs_module.normalize_content(updated)
-        self._section.write_via_container(
-            path=path, content=normalized, mode="overwrite"
-        )
-        self._section.touch_workspace()
-        message = vfs_module.format_edit_message(path, replacements)
-        return ToolResult(
-            message=message,
-            value=WriteFile(path=path, content=normalized, mode="overwrite"),
-        )
-
-    def glob(
-        self, params: GlobParams, *, context: ToolContext
-    ) -> ToolResult[tuple[GlobMatch, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        base = vfs_module.normalize_string_path(
-            params.path, allow_empty=True, field="path"
-        )
-        pattern = params.pattern.strip()
-        if not pattern:
-            raise ToolValidationError("Pattern must not be empty.")
-        _ = vfs_module.ensure_ascii(pattern, "pattern")
-        handle = self._section.ensure_workspace()
-        host_base = _host_path_for(handle.overlay_path, base)
-        _assert_within_overlay(handle.overlay_path, host_base)
-        matches: list[GlobMatch] = []
-        for file_path in _iter_workspace_files(host_base):
-            try:
-                relative = file_path.relative_to(host_base)
-            except ValueError:
-                continue
-            candidate_path = _compose_relative_path(base, relative)
-            if candidate_path is None:
-                continue
-            relative_label = relative.as_posix()
-            if not fnmatch.fnmatchcase(relative_label, pattern):
-                continue
-            try:
-                match = self._build_glob_match(
-                    target=candidate_path,
-                    host_path=file_path,
-                    overlay_root=handle.overlay_path,
-                )
-            except ToolValidationError:
-                continue
-            matches.append(match)
-            if len(matches) >= _MAX_MATCH_RESULTS:
-                break
-        matches.sort(key=lambda match: match.path.segments)
-        message = vfs_module.format_glob_message(base, pattern, matches)
-        self._section.touch_workspace()
-        return ToolResult(message=message, value=tuple(matches))
-
-    def grep(
-        self, params: GrepParams, *, context: ToolContext
-    ) -> ToolResult[tuple[GrepMatch, ...]]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        compiled = self._compile_grep_pattern(params.pattern)
-        if isinstance(compiled, ToolResult):
-            return compiled
-        base_path = self._normalize_grep_base_path(params.path)
-        glob_pattern = self._normalize_glob_pattern(params.glob)
-        handle = self._section.ensure_workspace()
-        host_base = _host_path_for(handle.overlay_path, base_path or VfsPath(()))
-        _assert_within_overlay(handle.overlay_path, host_base)
-        matches = self._collect_grep_matches(
-            pattern=compiled,
-            host_base=host_base,
-            overlay_root=handle.overlay_path,
-            base_path=base_path or VfsPath(()),
-            glob_pattern=glob_pattern,
-        )
-        message = self._format_grep_result(params.pattern, matches)
-        self._section.touch_workspace()
-        return ToolResult(message=message, value=matches)
-
-    @staticmethod
-    def _compile_grep_pattern(
-        pattern: str,
-    ) -> re.Pattern[str] | ToolResult[tuple[GrepMatch, ...]]:
-        try:
-            return re.compile(pattern)
-        except re.error as error:
-            return ToolResult(
-                message=f"Invalid regular expression: {error}",
-                value=None,
-                success=False,
-            )
-
-    @staticmethod
-    def _normalize_grep_base_path(raw_path: str | None) -> VfsPath | None:
-        if raw_path is None:
-            return None
-        return vfs_module.normalize_string_path(
-            raw_path, allow_empty=True, field="path"
-        )
-
-    @staticmethod
-    def _normalize_glob_pattern(raw_glob: str | None) -> str | None:
-        if raw_glob is None:
-            return None
-        glob_pattern = raw_glob.strip()
-        if not glob_pattern:
-            return None
-        _ = vfs_module.ensure_ascii(glob_pattern, "glob")
-        return glob_pattern
-
-    @staticmethod
-    def _iter_grep_targets(
-        *,
-        host_base: Path,
-        overlay_root: Path,
-        base_path: VfsPath,
-        glob_pattern: str | None,
-    ) -> Iterator[tuple[VfsPath, Path]]:
-        for file_path in _iter_workspace_files(host_base):
-            try:
-                relative = file_path.relative_to(host_base)
-            except ValueError:
-                continue
-            relative_label = relative.as_posix()
-            if glob_pattern and not fnmatch.fnmatchcase(relative_label, glob_pattern):
-                continue
-            target_path = _compose_relative_path(base_path, relative)
-            if target_path is None:
-                continue
-            try:
-                _assert_within_overlay(overlay_root, file_path)
-            except ToolValidationError:
-                continue
-            yield target_path, file_path
-
-    @staticmethod
-    def _read_candidate_content(file_path: Path) -> str | None:
-        try:
-            return file_path.read_text(encoding="utf-8")
-        except (UnicodeDecodeError, OSError):
-            return None
-
-    def _collect_grep_matches(
-        self,
-        *,
-        pattern: re.Pattern[str],
-        host_base: Path,
-        overlay_root: Path,
-        base_path: VfsPath,
-        glob_pattern: str | None,
-    ) -> tuple[GrepMatch, ...]:
-        matches: list[GrepMatch] = []
-        for target_path, host_path in self._iter_grep_targets(
-            host_base=host_base,
-            overlay_root=overlay_root,
-            base_path=base_path,
-            glob_pattern=glob_pattern,
-        ):
-            content = self._read_candidate_content(host_path)
-            if content is None:
-                continue
-            for index, line in enumerate(content.splitlines(), start=1):
-                if pattern.search(line):
-                    matches.append(
-                        GrepMatch(
-                            path=target_path,
-                            line_number=index,
-                            line=line,
-                        )
-                    )
-                    if len(matches) >= _MAX_MATCH_RESULTS:
-                        return tuple(matches)
-        return tuple(matches)
-
-    @staticmethod
-    def _format_grep_result(pattern: str, matches: tuple[GrepMatch, ...]) -> str:
-        return vfs_module.format_grep_message(pattern, matches)
-
-    def remove(
-        self, params: RemoveParams, *, context: ToolContext
-    ) -> ToolResult[DeleteEntry]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        path = vfs_module.normalize_string_path(params.path, field="path")
-        if not path.segments:
-            raise ToolValidationError("Cannot remove the workspace root.")
-        handle = self._section.ensure_workspace()
-        host_path = _host_path_for(handle.overlay_path, path)
-        if not host_path.exists():
-            raise ToolValidationError("No files matched the provided path.")
-        _assert_within_overlay(handle.overlay_path, host_path)
-        removed_entries = sum(1 for _ in _iter_workspace_files(host_path))
-        removed_entries = 1 if host_path.is_file() else max(removed_entries, 1)
-        args = (_container_path_for(path),)
-        try:
-            completed = self._section.run_python_script(
-                script=_REMOVE_PATH_SCRIPT,
-                args=args,
-            )
-        except FileNotFoundError as error:
-            raise ToolValidationError(
-                "Podman CLI is required to execute filesystem commands."
-            ) from error
-        if completed.returncode != 0:
-            message = (
-                completed.stderr.strip()
-                or completed.stdout.strip()
-                or "Removal failed."
-            )
-            raise ToolValidationError(message)
-        self._section.touch_workspace()
-        message = _format_remove_message(path, removed_entries)
-        return ToolResult(
-            message=message,
-            value=DeleteEntry(path=path),
-        )
-
-    def _build_directory_entries(
-        self,
-        *,
-        base: VfsPath,
-        host_path: Path,
-        overlay_root: Path,
-    ) -> list[FileInfo]:
-        entries: list[FileInfo] = []
-        if not host_path.exists():
-            return entries
-        try:
-            children = sorted(host_path.iterdir(), key=lambda child: child.name.lower())
-        except OSError as error:
-            raise ToolValidationError(
-                "Failed to inspect directory contents."
-            ) from error
-        for child in children:
-            entry_path = _compose_child_path(base, child.name)
-            if entry_path is None:
-                continue
-            if child.is_dir() and not child.is_symlink():
-                entries.append(
-                    FileInfo(
-                        path=entry_path,
-                        kind="directory",
-                        size_bytes=None,
-                        version=None,
-                        updated_at=None,
-                    )
-                )
-                continue
-            try:
-                info = self._build_file_info(
-                    path=entry_path,
-                    host_file=child,
-                    overlay_root=overlay_root,
-                )
-            except ToolValidationError:
-                continue
-            entries.append(info)
-        entries.sort(key=lambda entry: entry.path.segments)
-        return entries[:_MAX_MATCH_RESULTS]
-
-    @staticmethod
-    def _build_file_info(
-        *,
-        path: VfsPath,
-        host_file: Path,
-        overlay_root: Path,
-    ) -> FileInfo:
-        _assert_within_overlay(overlay_root, host_file)
-        size_bytes, updated_at = _stat_file(host_file)
-        return FileInfo(
-            path=path,
-            kind="file",
-            size_bytes=size_bytes,
-            version=1,
-            updated_at=updated_at,
-        )
-
-    @staticmethod
-    def _build_glob_match(
-        *,
-        target: VfsPath,
-        host_path: Path,
-        overlay_root: Path,
-    ) -> GlobMatch:
-        _assert_within_overlay(overlay_root, host_path)
-        size_bytes, updated_at = _stat_file(host_path)
-        return GlobMatch(
-            path=target,
-            size_bytes=size_bytes,
-            version=1,
-            updated_at=updated_at,
-        )
 
 
 class _PodmanEvalSuite:

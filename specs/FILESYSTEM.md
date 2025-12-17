@@ -335,6 +335,19 @@ class Filesystem(Protocol):
     def read_only(self) -> bool:
         """True if write operations are disabled."""
         ...
+
+    @property
+    def mount_point(self) -> str | None:
+        """Virtual mount point prefix for path normalization.
+
+        When set (e.g., "/workspace"), absolute paths like "/workspace/file.txt"
+        are interpreted as "file.txt" relative to the workspace root. This
+        allows models to use absolute paths that match container working
+        directories while the underlying filesystem uses relative paths.
+
+        Returns None if no mount point is configured (default behavior).
+        """
+        ...
 ```
 
 ## ToolContext Integration
@@ -511,7 +524,9 @@ class InMemoryFilesystem:
     """In-memory filesystem implementation."""
 
     _files: dict[str, _InMemoryFile] = field(default_factory=dict)
+    _directories: set[str] = field(default_factory=set)
     _read_only: bool = False
+    _mount_point: str | None = None
 
     @property
     def root(self) -> str:
@@ -520,6 +535,10 @@ class InMemoryFilesystem:
     @property
     def read_only(self) -> bool:
         return self._read_only
+
+    @property
+    def mount_point(self) -> str | None:
+        return self._mount_point
 
     def read(self, path: str, *, offset: int = 0, limit: int | None = None, encoding: str = "utf-8") -> ReadResult:
         normalized = self._normalize_path(path)
@@ -583,28 +602,47 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
 
 ### HostFilesystem
 
-Provides sandboxed access to host directories.
+Provides sandboxed access to a host directory with path restrictions.
 
 ```python
 @dataclass(slots=True)
 class HostFilesystem:
-    """Filesystem backed by host directories with path restrictions."""
+    """Filesystem backed by a host directory with path restrictions."""
 
-    allowed_roots: tuple[Path, ...]
+    _root: str
     _read_only: bool = False
+    _mount_point: str | None = None
 
-    def _validate_path(self, path: str) -> Path:
-        resolved = Path(path).resolve()
-        for root in self.allowed_roots:
-            try:
-                resolved.relative_to(root)
-                return resolved
-            except ValueError:
-                continue
-        raise PermissionError(f"Path outside allowed roots: {path}")
+    @property
+    def root(self) -> str:
+        return self._root
+
+    @property
+    def read_only(self) -> bool:
+        return self._read_only
+
+    @property
+    def mount_point(self) -> str | None:
+        return self._mount_point
+
+    def _resolve_path(self, path: str) -> Path:
+        """Resolve a relative path to an absolute path within root.
+
+        Raises:
+            PermissionError: If resolved path escapes root directory.
+        """
+        root_path = Path(self._root).resolve()
+        if not path or path in {".", "/"}:
+            return root_path
+        candidate = (root_path / path).resolve()
+        try:
+            _ = candidate.relative_to(root_path)
+        except ValueError:
+            raise PermissionError(f"Path escapes root directory: {path}") from None
+        return candidate
 
     def read(self, path: str, **kwargs) -> ReadResult:
-        validated = self._validate_path(path)
+        resolved = self._resolve_path(path)
         # ... standard file read
         return _HostReadResult(...)
 

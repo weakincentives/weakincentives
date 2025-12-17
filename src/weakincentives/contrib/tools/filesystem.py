@@ -17,6 +17,9 @@ workspace backends (in-memory VFS, Podman containers, host filesystem) so
 tool handlers can perform file operations without coupling to a specific
 storage implementation.
 
+The protocol uses simple `str` paths throughout - tool handlers convert these
+to structured result types (with VfsPath) for serialization to the LLM.
+
 Example usage::
 
     from weakincentives.contrib.tools.filesystem import (
@@ -57,6 +60,14 @@ _ASCII: Final[str] = "ascii"
 
 #: Pass as `limit` to `Filesystem.read()` to read the entire file without truncation.
 READ_ENTIRE_FILE: Final[int] = -1
+
+FileEncoding = Literal["utf-8"]
+WriteMode = Literal["create", "overwrite", "append"]
+
+
+# ---------------------------------------------------------------------------
+# Protocol Result Types
+# ---------------------------------------------------------------------------
 
 
 @dataclass(slots=True, frozen=True)
@@ -118,12 +129,33 @@ class WriteResult:
 
     path: str
     bytes_written: int
-    mode: Literal["create", "overwrite", "append"]
+    mode: WriteMode
+
+
+# ---------------------------------------------------------------------------
+# Filesystem Protocol
+# ---------------------------------------------------------------------------
 
 
 @runtime_checkable
 class Filesystem(Protocol):
-    """Unified filesystem protocol for workspace operations."""
+    """Unified filesystem protocol for workspace operations.
+
+    All paths are relative strings. Backends normalize paths internally.
+    """
+
+    @property
+    def mount_point(self) -> str | None:
+        """Virtual mount point prefix for path normalization.
+
+        When set (e.g., "/workspace"), absolute paths like "/workspace/file.txt"
+        are interpreted as "file.txt" relative to the workspace root. This
+        allows models to use absolute paths that match container working
+        directories while the underlying filesystem uses relative paths.
+
+        Returns None if no mount point is configured (default behavior).
+        """
+        ...
 
     # --- Read Operations ---
 
@@ -294,23 +326,12 @@ class Filesystem(Protocol):
         ...
 
 
-@dataclass(slots=True)
-class _InMemoryFile:
-    """Internal representation of a file in memory."""
-
-    content: str
-    created_at: datetime
-    modified_at: datetime
+# ---------------------------------------------------------------------------
+# Shared Utilities
+# ---------------------------------------------------------------------------
 
 
-def _now() -> datetime:
-    """Return current UTC time truncated to milliseconds."""
-    value = datetime.now(UTC)
-    microsecond = value.microsecond - value.microsecond % 1000
-    return value.replace(microsecond=microsecond, tzinfo=UTC)
-
-
-def _normalize_path(path: str) -> str:
+def normalize_path(path: str) -> str:
     """Normalize a path by removing leading/trailing slashes and cleaning segments."""
     if not path or path in {".", "/"}:
         return ""
@@ -327,7 +348,7 @@ def _normalize_path(path: str) -> str:
     return "/".join(result)
 
 
-def _validate_path(path: str) -> None:
+def validate_path(path: str) -> None:
     """Validate path constraints."""
     if not path:
         return
@@ -344,6 +365,13 @@ def _validate_path(path: str) -> None:
         except UnicodeEncodeError as err:
             msg = "Path segments must be ASCII."
             raise ValueError(msg) from err
+
+
+def _now() -> datetime:
+    """Return current UTC time truncated to milliseconds."""
+    value = datetime.now(UTC)
+    microsecond = value.microsecond - value.microsecond % 1000
+    return value.replace(microsecond=microsecond, tzinfo=UTC)
 
 
 def _is_path_under(path: str, base: str) -> bool:
@@ -372,6 +400,20 @@ def _empty_directories_set() -> set[str]:
     return set()
 
 
+# ---------------------------------------------------------------------------
+# InMemoryFilesystem Implementation
+# ---------------------------------------------------------------------------
+
+
+@dataclass(slots=True)
+class _InMemoryFile:
+    """Internal representation of a file in memory."""
+
+    content: str
+    created_at: datetime
+    modified_at: datetime
+
+
 @dataclass(slots=True)
 class InMemoryFilesystem:
     """In-memory filesystem implementation.
@@ -383,6 +425,7 @@ class InMemoryFilesystem:
     _files: dict[str, _InMemoryFile] = field(default_factory=_empty_files_dict)
     _directories: set[str] = field(default_factory=_empty_directories_set)
     _read_only: bool = False
+    _mount_point: str | None = None
 
     def __post_init__(self) -> None:
         # Ensure root directory exists
@@ -398,6 +441,11 @@ class InMemoryFilesystem:
         """True if write operations are disabled."""
         return self._read_only
 
+    @property
+    def mount_point(self) -> str | None:
+        """Virtual mount point prefix for path normalization."""
+        return self._mount_point
+
     def read(
         self,
         path: str,
@@ -408,8 +456,8 @@ class InMemoryFilesystem:
     ) -> ReadResult:
         """Read file content with optional pagination."""
         del encoding  # Only UTF-8 is supported
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if normalized in self._directories:
             msg = f"Is a directory: {path}"
@@ -446,13 +494,13 @@ class InMemoryFilesystem:
 
     def exists(self, path: str) -> bool:
         """Check if a path exists."""
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         return normalized in self._files or normalized in self._directories
 
     def stat(self, path: str) -> FileStat:
         """Get metadata for a path."""
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if normalized in self._directories:
             return FileStat(
@@ -480,8 +528,8 @@ class InMemoryFilesystem:
 
     def list(self, path: str = ".") -> Sequence[FileEntry]:
         """List directory contents."""
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if normalized in self._files:
             msg = f"Not a directory: {path}"
@@ -549,8 +597,8 @@ class InMemoryFilesystem:
         path: str = ".",
     ) -> Sequence[GlobMatch]:
         """Match files by glob pattern."""
-        normalized_base = _normalize_path(path)
-        _validate_path(normalized_base)
+        normalized_base = normalize_path(path)
+        validate_path(normalized_base)
 
         matches = [
             GlobMatch(path=file_path, is_file=True)
@@ -569,8 +617,8 @@ class InMemoryFilesystem:
         max_matches: int | None = None,
     ) -> Sequence[GrepMatch]:
         """Search file contents by regex."""
-        normalized_base = _normalize_path(path)
-        _validate_path(normalized_base)
+        normalized_base = normalize_path(path)
+        validate_path(normalized_base)
 
         try:
             regex = re.compile(pattern)
@@ -618,12 +666,12 @@ class InMemoryFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if not normalized:
             msg = "Cannot write to root directory"
             raise ValueError(msg)
 
-        _validate_path(normalized)
+        validate_path(normalized)
 
         if len(content) > _MAX_WRITE_LENGTH:
             msg = f"Content exceeds maximum length of {_MAX_WRITE_LENGTH} characters."
@@ -678,8 +726,8 @@ class InMemoryFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if normalized in self._files:
             del self._files[normalized]
@@ -731,8 +779,8 @@ class InMemoryFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
-        _validate_path(normalized)
+        normalized = normalize_path(path)
+        validate_path(normalized)
 
         if not normalized:
             return  # Root always exists
@@ -763,6 +811,11 @@ class InMemoryFilesystem:
                 self._directories.add(parent_path)
 
 
+# ---------------------------------------------------------------------------
+# HostFilesystem Implementation
+# ---------------------------------------------------------------------------
+
+
 @dataclass(slots=True)
 class HostFilesystem:
     """Filesystem backed by a host directory with path restrictions.
@@ -774,6 +827,7 @@ class HostFilesystem:
 
     _root: str
     _read_only: bool = False
+    _mount_point: str | None = None
 
     @property
     def root(self) -> str:
@@ -784,6 +838,11 @@ class HostFilesystem:
     def read_only(self) -> bool:
         """True if write operations are disabled."""
         return self._read_only
+
+    @property
+    def mount_point(self) -> str | None:
+        """Virtual mount point prefix for path normalization."""
+        return self._mount_point
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve a relative path to an absolute path within root.
@@ -827,8 +886,12 @@ class HostFilesystem:
             msg = f"Is a directory: {path}"
             raise IsADirectoryError(msg)
 
-        with resolved.open(encoding=encoding) as f:
-            lines = f.readlines()
+        try:
+            with resolved.open(encoding=encoding) as f:
+                lines = f.readlines()
+        except UnicodeDecodeError as err:
+            msg = f"Cannot decode file as {encoding}: {err}"
+            raise ValueError(msg) from err
 
         total_lines = len(lines)
         # READ_ENTIRE_FILE (-1) reads all lines; None uses default window
@@ -846,7 +909,7 @@ class HostFilesystem:
             content = content[:-1]
 
         # Return path relative to root
-        rel_path = _normalize_path(path) or "/"
+        rel_path = normalize_path(path) or "/"
 
         return ReadResult(
             content=content,
@@ -874,7 +937,7 @@ class HostFilesystem:
 
         st = resolved.stat()
         is_dir = resolved.is_dir()
-        rel_path = _normalize_path(path) or "/"
+        rel_path = normalize_path(path) or "/"
 
         return FileStat(
             path=rel_path,
@@ -897,7 +960,7 @@ class HostFilesystem:
             raise NotADirectoryError(msg)
 
         entries: list[FileEntry] = []
-        base_path = _normalize_path(path)
+        base_path = normalize_path(path)
 
         for item in resolved.iterdir():
             is_dir = item.is_dir()
@@ -1011,7 +1074,7 @@ class HostFilesystem:
                         )
                         if len(matches) >= max_remaining:
                             break
-        except (UnicodeDecodeError, PermissionError):
+        except (OSError, UnicodeDecodeError):
             # Skip binary or inaccessible files
             pass
         return matches
@@ -1029,12 +1092,12 @@ class HostFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if not normalized:
             msg = "Cannot write to root directory"
             raise ValueError(msg)
 
-        _validate_path(normalized)
+        validate_path(normalized)
 
         if len(content) > _MAX_WRITE_LENGTH:
             msg = f"Content exceeds maximum length of {_MAX_WRITE_LENGTH} characters."
@@ -1081,7 +1144,7 @@ class HostFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if not normalized:
             msg = "Cannot delete root directory"
             raise PermissionError(msg)
@@ -1117,11 +1180,11 @@ class HostFilesystem:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
 
-        normalized = _normalize_path(path)
+        normalized = normalize_path(path)
         if not normalized:
             return  # Root always exists
 
-        _validate_path(normalized)
+        validate_path(normalized)
         resolved = self._resolve_path(path)
 
         if resolved.exists():
@@ -1142,6 +1205,8 @@ class HostFilesystem:
 
 
 __all__ = [
+    "READ_ENTIRE_FILE",
+    "FileEncoding",
     "FileEntry",
     "FileStat",
     "Filesystem",
@@ -1150,5 +1215,8 @@ __all__ = [
     "HostFilesystem",
     "InMemoryFilesystem",
     "ReadResult",
+    "WriteMode",
     "WriteResult",
+    "normalize_path",
+    "validate_path",
 ]
