@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -22,13 +23,16 @@ from weakincentives.contrib.tools.filesystem import (
     READ_ENTIRE_FILE,
     FileEntry,
     FileStat,
+    FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
     HostFilesystem,
     InMemoryFilesystem,
     ReadResult,
+    SnapshotableFilesystem,
     WriteResult,
 )
+from weakincentives.errors import SnapshotRestoreError
 
 
 class TestInMemoryFilesystemBasics:
@@ -856,3 +860,334 @@ class TestHostFilesystemEdgeCases:
         fs = HostFilesystem(_root=str(tmp_path))
         fs.mkdir("newdir", parents=False)
         assert (tmp_path / "newdir").is_dir()
+
+
+# Snapshot tests for InMemoryFilesystem
+
+
+class TestInMemoryFilesystemSnapshots:
+    """Tests for InMemoryFilesystem snapshot operations."""
+
+    def test_implements_snapshotable_protocol(self) -> None:
+        """InMemoryFilesystem should implement SnapshotableFilesystem."""
+        fs = InMemoryFilesystem()
+        assert isinstance(fs, SnapshotableFilesystem)
+
+    def test_snapshot_returns_filesystem_snapshot(self) -> None:
+        """snapshot() should return a FilesystemSnapshot."""
+        fs = InMemoryFilesystem()
+        fs.write("file.txt", "content")
+        snapshot = fs.snapshot()
+        assert isinstance(snapshot, FilesystemSnapshot)
+        assert isinstance(snapshot.snapshot_id, UUID)
+        assert snapshot.root_path == "/"
+        assert snapshot.commit_ref.startswith("mem-")
+
+    def test_snapshot_with_tag(self) -> None:
+        """snapshot() should accept an optional tag."""
+        fs = InMemoryFilesystem()
+        fs.write("file.txt", "content")
+        snapshot = fs.snapshot(tag="my-tag")
+        assert snapshot.tag == "my-tag"
+
+    def test_snapshot_and_restore_roundtrip(self) -> None:
+        """Basic snapshot and restore should preserve file contents."""
+        fs = InMemoryFilesystem()
+        fs.write("config.py", "DEBUG = True")
+        snapshot_v1 = fs.snapshot(tag="initial")
+
+        # Modify file
+        fs.write("config.py", "DEBUG = False")
+        assert fs.read("config.py").content == "DEBUG = False"
+
+        # Restore
+        fs.restore(snapshot_v1)
+        assert fs.read("config.py").content == "DEBUG = True"
+
+    def test_restore_removes_new_files(self) -> None:
+        """restore() should remove files created after snapshot."""
+        fs = InMemoryFilesystem()
+        fs.write("original.txt", "original")
+        snapshot = fs.snapshot()
+
+        # Add new file
+        fs.write("new.txt", "new content")
+        assert fs.exists("new.txt")
+
+        # Restore should remove the new file
+        fs.restore(snapshot)
+        assert not fs.exists("new.txt")
+        assert fs.exists("original.txt")
+
+    def test_restore_restores_deleted_files(self) -> None:
+        """restore() should bring back deleted files."""
+        fs = InMemoryFilesystem()
+        fs.write("file.txt", "content")
+        snapshot = fs.snapshot()
+
+        # Delete file
+        fs.delete("file.txt")
+        assert not fs.exists("file.txt")
+
+        # Restore should bring it back
+        fs.restore(snapshot)
+        assert fs.exists("file.txt")
+        assert fs.read("file.txt").content == "content"
+
+    def test_multiple_snapshots(self) -> None:
+        """Multiple snapshots can be restored independently."""
+        fs = InMemoryFilesystem()
+
+        fs.write("file.txt", "v1")
+        snapshot_v1 = fs.snapshot(tag="v1")
+
+        fs.write("file.txt", "v2")
+        snapshot_v2 = fs.snapshot(tag="v2")
+
+        fs.write("file.txt", "v3")
+
+        # Restore to v1
+        fs.restore(snapshot_v1)
+        assert fs.read("file.txt").content == "v1"
+
+        # Restore to v2
+        fs.restore(snapshot_v2)
+        assert fs.read("file.txt").content == "v2"
+
+    def test_restore_unknown_snapshot_raises(self) -> None:
+        """restore() should raise SnapshotRestoreError for unknown snapshot."""
+        from datetime import UTC, datetime
+
+        fs = InMemoryFilesystem()
+        fake_snapshot = FilesystemSnapshot(
+            snapshot_id=UUID("00000000-0000-0000-0000-000000000000"),
+            created_at=datetime.now(UTC),
+            commit_ref="mem-nonexistent",
+            root_path="/",
+        )
+        with pytest.raises(SnapshotRestoreError, match="Unknown snapshot"):
+            fs.restore(fake_snapshot)
+
+    def test_restore_directories(self) -> None:
+        """restore() should restore directory structure."""
+        fs = InMemoryFilesystem()
+        fs.mkdir("a/b/c", parents=True)
+        fs.write("a/b/c/file.txt", "content")
+        snapshot = fs.snapshot()
+
+        # Delete directory
+        fs.delete("a", recursive=True)
+        assert not fs.exists("a/b/c")
+
+        # Restore
+        fs.restore(snapshot)
+        assert fs.exists("a/b/c")
+        assert fs.read("a/b/c/file.txt").content == "content"
+
+
+# Snapshot tests for HostFilesystem
+
+
+class TestHostFilesystemSnapshots:
+    """Tests for HostFilesystem snapshot operations."""
+
+    def test_implements_snapshotable_protocol(self, tmp_path: Path) -> None:
+        """HostFilesystem should implement SnapshotableFilesystem."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        assert isinstance(fs, SnapshotableFilesystem)
+
+    def test_snapshot_returns_filesystem_snapshot(self, tmp_path: Path) -> None:
+        """snapshot() should return a FilesystemSnapshot with git commit."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        (tmp_path / "file.txt").write_text("content")
+        snapshot = fs.snapshot()
+        assert isinstance(snapshot, FilesystemSnapshot)
+        assert isinstance(snapshot.snapshot_id, UUID)
+        assert snapshot.root_path == str(tmp_path)
+        # Git commit hash is 40 hex characters
+        assert len(snapshot.commit_ref) == 40
+        assert all(c in "0123456789abcdef" for c in snapshot.commit_ref)
+
+    def test_snapshot_with_tag(self, tmp_path: Path) -> None:
+        """snapshot() should accept an optional tag."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        (tmp_path / "file.txt").write_text("content")
+        snapshot = fs.snapshot(tag="my-tag")
+        assert snapshot.tag == "my-tag"
+
+    def test_snapshot_and_restore_roundtrip(self, tmp_path: Path) -> None:
+        """Basic snapshot and restore should preserve file contents."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("config.py", "DEBUG = True")
+        snapshot_v1 = fs.snapshot(tag="initial")
+
+        # Modify file
+        fs.write("config.py", "DEBUG = False")
+        assert fs.read("config.py").content == "DEBUG = False"
+
+        # Restore
+        fs.restore(snapshot_v1)
+        assert fs.read("config.py").content == "DEBUG = True"
+
+    def test_restore_removes_new_files(self, tmp_path: Path) -> None:
+        """restore() should remove files created after snapshot."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("original.txt", "original")
+        snapshot = fs.snapshot()
+
+        # Add new file
+        fs.write("new.txt", "new content")
+        assert fs.exists("new.txt")
+
+        # Restore should remove the new file
+        fs.restore(snapshot)
+        assert not fs.exists("new.txt")
+        assert fs.exists("original.txt")
+
+    def test_restore_restores_deleted_files(self, tmp_path: Path) -> None:
+        """restore() should bring back deleted files."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("file.txt", "content")
+        snapshot = fs.snapshot()
+
+        # Delete file
+        fs.delete("file.txt")
+        assert not fs.exists("file.txt")
+
+        # Restore should bring it back
+        fs.restore(snapshot)
+        assert fs.exists("file.txt")
+        assert fs.read("file.txt").content == "content"
+
+    def test_multiple_snapshots(self, tmp_path: Path) -> None:
+        """Multiple snapshots can be restored independently."""
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        fs.write("file.txt", "v1")
+        snapshot_v1 = fs.snapshot(tag="v1")
+
+        fs.write("file.txt", "v2")
+        snapshot_v2 = fs.snapshot(tag="v2")
+
+        fs.write("file.txt", "v3")
+
+        # Restore to v1
+        fs.restore(snapshot_v1)
+        assert fs.read("file.txt").content == "v1"
+
+        # Restore to v2
+        fs.restore(snapshot_v2)
+        assert fs.read("file.txt").content == "v2"
+
+    def test_restore_invalid_commit_raises(self, tmp_path: Path) -> None:
+        """restore() should raise SnapshotRestoreError for invalid commit."""
+        from datetime import UTC, datetime
+
+        fs = HostFilesystem(_root=str(tmp_path))
+        # Need to initialize git first
+        fs.write("file.txt", "content")
+        _ = fs.snapshot()
+
+        fake_snapshot = FilesystemSnapshot(
+            snapshot_id=UUID("00000000-0000-0000-0000-000000000000"),
+            created_at=datetime.now(UTC),
+            commit_ref="0" * 40,  # Invalid commit
+            root_path=str(tmp_path),
+        )
+        with pytest.raises(SnapshotRestoreError, match="Failed to restore"):
+            fs.restore(fake_snapshot)
+
+    def test_restore_directories(self, tmp_path: Path) -> None:
+        """restore() should restore directory structure."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.mkdir("a/b/c", parents=True)
+        fs.write("a/b/c/file.txt", "content")
+        snapshot = fs.snapshot()
+
+        # Delete directory
+        fs.delete("a", recursive=True)
+        assert not fs.exists("a/b/c")
+
+        # Restore
+        fs.restore(snapshot)
+        assert fs.exists("a/b/c")
+        assert fs.read("a/b/c/file.txt").content == "content"
+
+    def test_git_initialized_once(self, tmp_path: Path) -> None:
+        """Git should only be initialized once."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("file.txt", "content")
+
+        # First snapshot initializes git
+        _ = fs.snapshot()
+        assert fs._git_initialized
+        git_dir = tmp_path / ".git"
+        assert git_dir.exists()
+
+        # Second snapshot reuses existing git
+        _ = fs.snapshot()
+        # Still the same git dir
+        assert git_dir.exists()
+
+    def test_idempotent_empty_snapshot(self, tmp_path: Path) -> None:
+        """Creating snapshots without changes should work (allow-empty)."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("file.txt", "content")
+
+        snapshot1 = fs.snapshot()
+        # No changes
+        snapshot2 = fs.snapshot()
+
+        # Both should be valid snapshots (different commit hashes due to timestamp)
+        assert snapshot1.commit_ref != snapshot2.commit_ref
+        assert len(snapshot1.commit_ref) == 40
+        assert len(snapshot2.commit_ref) == 40
+
+    def test_snapshot_empty_repo_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Snapshot should handle edge case where commit fails on empty repo."""
+        import subprocess
+        from unittest.mock import MagicMock
+
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Store original subprocess.run
+        original_run = subprocess.run
+
+        call_count = 0
+
+        def mock_subprocess_run(
+            args: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
+            nonlocal call_count
+            call_count += 1
+
+            # Let git init and config calls through
+            if args[0:2] in (
+                ["git", "init"],
+                ["git", "config"],
+                ["git", "add"],
+                ["git", "rev-parse"],
+            ):
+                return original_run(args, **kwargs)
+
+            # For git commit: fail the first time, succeed the second
+            if args[0:2] == ["git", "commit"]:
+                # First commit call should fail (simulating edge case)
+                if call_count <= 5:  # After init, 2 config, add, first commit
+                    mock_result = MagicMock()
+                    mock_result.returncode = 1
+                    mock_result.stderr = "simulated failure"
+                    return mock_result
+                # Second commit (fallback) should succeed
+                return original_run(args, **kwargs)
+
+            return original_run(args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        # This should trigger the fallback path
+        snapshot = fs.snapshot()
+        assert isinstance(snapshot, FilesystemSnapshot)
+        assert len(snapshot.commit_ref) == 40
