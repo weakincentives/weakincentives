@@ -86,6 +86,10 @@ class ReadSectionResult:
         },
     )
 
+    def render(self) -> str:
+        """Return the canonical textual representation of the result."""
+        return self.content
+
 
 def _parse_section_key(key: str) -> SectionPath:
     """Convert a dot-notation key to a section path tuple."""

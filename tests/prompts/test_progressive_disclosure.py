@@ -31,6 +31,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.progressive_disclosure import (
     OpenSectionsParams,
     ReadSectionParams,
+    ReadSectionResult,
     build_summary_suffix,
     compute_current_visibility,
     create_open_sections_handler,
@@ -471,6 +472,12 @@ def test_read_section_returns_rendered_content() -> None:
     assert result.success is True
     assert "Content: hello" in result.value.content
     assert "Test Section" in result.value.content  # Title should be in output
+
+
+def test_read_section_result_render() -> None:
+    """ReadSectionResult.render returns the content field."""
+    result = ReadSectionResult(content="# Section\n\nHello world")
+    assert result.render() == "# Section\n\nHello world"
 
 
 def test_read_section_rejects_nonexistent_section() -> None:
