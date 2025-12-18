@@ -53,8 +53,56 @@ Notes:
 - `network_policy: NetworkPolicy | None = None` (defaults to no tool network)
 - `sandbox: SandboxConfig | None = None` (defaults to `SandboxConfig()`)
 - `env: Mapping[str, str] | None = None`
-- `api_key: str | None = None`
+- `api_key: str | None = None` (mutually exclusive with `bedrock`)
+- `bedrock: BedrockConfig | None = None` (mutually exclusive with `api_key`)
 - `include_host_env: bool = False` (copies only non-sensitive vars)
+
+### `BedrockConfig`
+
+AWS Bedrock authentication. Mutually exclusive with `api_key` in
+`IsolationConfig`. Supports multiple authentication methods:
+
+**Static credentials:**
+
+- `region: str` (required)
+- `access_key_id: str`
+- `secret_access_key: str`
+- `session_token: str | None = None` (for temporary STS credentials)
+
+**Named profile:**
+
+- `region: str` (required)
+- `profile: str`
+
+**IAM role assumption:**
+
+- `region: str` (required)
+- `role_arn: str`
+- `role_session_name: str | None = None`
+- `external_id: str | None = None` (cross-account access)
+
+**Web identity / OIDC:**
+
+- `region: str` (required)
+- `role_arn: str`
+- `web_identity_token_file: str`
+- `role_session_name: str | None = None`
+
+**Default credential chain:**
+
+- `region: str` (required, all other fields None)
+
+**Optional:**
+
+- `endpoint_url: str | None = None` (VPC endpoints, LocalStack, moto)
+
+Factory methods:
+
+- `BedrockConfig.from_static_credentials(region, access_key_id, secret_access_key, ...)`
+- `BedrockConfig.from_profile(region, profile, ...)`
+- `BedrockConfig.from_role(region, role_arn, ...)`
+- `BedrockConfig.from_web_identity(region, role_arn, web_identity_token_file, ...)`
+- `BedrockConfig.from_environment(region)`
 
 ### `NetworkPolicy`
 
@@ -229,7 +277,141 @@ adapter = ClaudeAgentSDKAdapter(
 )
 ```
 
-### Story 4: Expose an internal `Tool` to Claude via MCP
+### Story 4: AWS Bedrock with static credentials
+
+As a developer, I want to use Claude via AWS Bedrock with explicit IAM
+credentials so I can run in environments without AWS CLI configuration.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    BedrockConfig,
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+
+adapter = ClaudeAgentSDKAdapter(
+    model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            bedrock=BedrockConfig.from_static_credentials(
+                region="us-east-1",
+                access_key_id="AKIAIOSFODNN7EXAMPLE",
+                secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            ),
+        ),
+    ),
+)
+```
+
+### Story 5: AWS Bedrock with named profile
+
+As a developer, I want to use an AWS profile from `~/.aws/credentials` so I can
+reuse existing credential management.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    BedrockConfig,
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+
+adapter = ClaudeAgentSDKAdapter(
+    model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            bedrock=BedrockConfig.from_profile(
+                region="us-west-2",
+                profile="bedrock-prod",
+            ),
+        ),
+    ),
+)
+```
+
+### Story 6: AWS Bedrock with IAM role assumption
+
+As a platform engineer, I want to assume a cross-account IAM role for Bedrock
+access so I can maintain security boundaries.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    BedrockConfig,
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+
+adapter = ClaudeAgentSDKAdapter(
+    model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            bedrock=BedrockConfig.from_role(
+                region="eu-west-1",
+                role_arn="arn:aws:iam::123456789012:role/BedrockAccessRole",
+                role_session_name="weakincentives-session",
+                external_id="my-external-id",  # Optional cross-account security
+            ),
+        ),
+    ),
+)
+```
+
+### Story 7: AWS Bedrock with OIDC/web identity (EKS, GitHub Actions)
+
+As a DevOps engineer, I want to use OIDC federation for Bedrock access so I can
+run securely in Kubernetes or CI/CD without static credentials.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    BedrockConfig,
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+
+adapter = ClaudeAgentSDKAdapter(
+    model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            bedrock=BedrockConfig.from_web_identity(
+                region="us-east-1",
+                role_arn="arn:aws:iam::123456789012:role/EKSPodRole",
+                web_identity_token_file="/var/run/secrets/eks.amazonaws.com/serviceaccount/token",
+            ),
+        ),
+    ),
+)
+```
+
+### Story 8: AWS Bedrock with default credential chain
+
+As a developer, I want Bedrock to use the default AWS credential resolution
+(environment variables, instance profile, etc.) so it works automatically in
+EC2/ECS/Lambda.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    BedrockConfig,
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+
+# Uses AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY from environment,
+# or instance profile, or ECS task role, etc.
+adapter = ClaudeAgentSDKAdapter(
+    model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            bedrock=BedrockConfig.from_environment(region="us-east-1"),
+        ),
+    ),
+)
+```
+
+### Story 9: Expose an internal `Tool` to Claude via MCP
 
 As a platform team, I want the agent to call a typed internal tool so I can keep
 side effects and validation in Python, not in prompt text.
