@@ -14,8 +14,6 @@ no trace in mutable state.
   single root object.
 - **Tool invocation is atomic**: Each tool call is a transaction—on failure,
   all state changes are rolled back.
-- **Rollback targets tool boundaries**: You can restore state to "before tool
-  call X" or "after tool call X" without ad-hoc code.
 - **Consistent semantics across adapters**: OpenAI/LiteLLM and Claude Agent SDK
   execute tools under identical transaction semantics.
 - **State vs. history distinction**: Mutable working state is rolled back by
@@ -41,8 +39,6 @@ flowchart TB
 
 ## ExecutionState
 
-### Definition
-
 `ExecutionState` is the single owner of all mutable state used during prompt
 evaluation:
 
@@ -51,140 +47,6 @@ evaluation:
 class ExecutionState:
     """Unified root for all mutable runtime state during evaluation."""
 
-    session: Session
-    resources: ResourceRegistry
-
-    def snapshot(self, *, tag: str | None = None) -> CompositeSnapshot:
-        """Capture consistent snapshot of session and all snapshotable resources."""
-        ...
-
-    def restore(self, snapshot: CompositeSnapshot) -> None:
-        """Restore session and resources from a composite snapshot."""
-        ...
-```
-
-### Ownership Semantics
-
-- `MainLoop.execute()` creates or receives an `ExecutionState`.
-- Adapters accept `ExecutionState` instead of individual parameters.
-- `ToolContext` carries `ExecutionState` (or a reference to it).
-- Snapshotable resources (filesystem, etc.) are registered in `resources`.
-
-### Resource Registry
-
-The `ResourceRegistry` holds typed runtime resources that may be snapshotable:
-
-```python
-@dataclass(slots=True, frozen=True)
-class ResourceRegistry:
-    """Typed container for runtime resources."""
-
-    _entries: Mapping[type[object], object]
-
-    def get[T](self, resource_type: type[T]) -> T | None: ...
-    def get[T](self, resource_type: type[T], default: T) -> T: ...
-
-    def snapshotable_resources(self) -> Mapping[type[object], Snapshotable[object]]:
-        """Return all resources that implement Snapshotable."""
-        return {
-            k: v for k, v in self._entries.items()
-            if isinstance(v, Snapshotable)
-        }
-```
-
-For this initial version, `Filesystem` is the primary snapshotable resource:
-
-## Snapshotable Protocol
-
-### Definition
-
-Generalizes the snapshot/restore pattern across all state containers:
-
-```python
-class Snapshotable(Protocol[SnapshotT]):
-    """Protocol for state containers that support snapshot and restore."""
-
-    def snapshot(self, *, tag: str | None = None) -> SnapshotT:
-        """Capture current state as an immutable snapshot."""
-        ...
-
-    def restore(self, snapshot: SnapshotT) -> None:
-        """Restore state from a snapshot."""
-        ...
-```
-
-### Implementations
-
-| Component | Snapshot Type | Storage Strategy |
-|-----------|--------------|------------------|
-| `Session` | `Snapshot` | Slice values as frozen tuples |
-| `InMemoryFilesystem` | `FilesystemSnapshot` | Structural sharing of file dicts |
-| `HostFilesystem` | `FilesystemSnapshot` | Git commits |
-
-### Session Implementation
-
-`Session` implements `Snapshotable[Snapshot]` directly by renaming `rollback()`
-to `restore()`:
-
-```python
-class Session(Snapshotable[Snapshot]):
-    """Session implements Snapshotable directly."""
-
-    def snapshot(self, *, tag: str | None = None) -> Snapshot:
-        """Capture current slice state as an immutable snapshot."""
-        ...
-
-    def restore(self, snapshot: Snapshot) -> None:
-        """Restore slice state from a snapshot (was: rollback)."""
-        ...
-```
-
-**Migration note**: The existing `rollback()` method is renamed to `restore()`
-for consistency with the `Snapshotable` protocol. A deprecated alias can be
-retained temporarily.
-
-## Composite Snapshot
-
-### Definition
-
-A composite snapshot captures session and all snapshotable resources atomically:
-
-```python
-@dataclass(slots=True, frozen=True)
-class CompositeSnapshot:
-    """Consistent snapshot of session and snapshotable resources."""
-
-    snapshot_id: UUID
-    created_at: datetime
-    session: Snapshot
-    resources: Mapping[type[object], object]  # Resource type -> snapshot
-    metadata: SnapshotMetadata | None = None
-
-    def to_json(self) -> str:
-        """Serialize to JSON for persistence."""
-        ...
-
-    @classmethod
-    def from_json(cls, raw: str) -> CompositeSnapshot:
-        """Deserialize from JSON."""
-        ...
-
-
-@dataclass(slots=True, frozen=True)
-class SnapshotMetadata:
-    """Context for when and why a snapshot was taken."""
-
-    tag: str | None = None
-    tool_call_id: str | None = None
-    tool_name: str | None = None
-    phase: Literal["pre_tool", "post_tool", "manual"] = "manual"
-```
-
-### ExecutionState Snapshot Operations
-
-```python
-@dataclass(slots=True)
-class ExecutionState:
     session: Session
     resources: ResourceRegistry
 
@@ -213,72 +75,76 @@ class ExecutionState:
                 resource.restore(resource_snapshot)
 ```
 
-## Slice Policies
+### Ownership
 
-### Motivation
+- `MainLoop.execute()` creates an `ExecutionState`.
+- Adapters accept `ExecutionState` instead of individual parameters.
+- `ToolContext` carries `ExecutionState`.
+- Snapshotable resources (filesystem) are registered in `resources`.
 
-Not all session state should be rolled back on tool failure:
-
-- **Working state** (Plan, VisibilityOverrides, workspace digests): should be
-  restored to pre-tool state on failure.
-- **History logs** (ToolInvoked, PromptRendered, PromptExecuted): should be
-  preserved as a truthful record of what happened.
-
-### Policy Enum
+### ResourceRegistry
 
 ```python
-class SlicePolicy(Enum):
-    """Determines rollback behavior for session slices."""
+@dataclass(slots=True, frozen=True)
+class ResourceRegistry:
+    """Typed container for runtime resources."""
 
-    STATE = "state"   # Rolled back on tool failure (default)
-    LOG = "log"       # Preserved during rollback (append-only)
+    _entries: Mapping[type[object], object]
+
+    def get[T](self, resource_type: type[T]) -> T | None: ...
+    def get[T](self, resource_type: type[T], default: T) -> T: ...
+
+    def snapshotable_resources(self) -> Mapping[type[object], Snapshotable[object]]:
+        """Return all resources that implement Snapshotable."""
+        return {
+            k: v for k, v in self._entries.items()
+            if isinstance(v, Snapshotable)
+        }
+
+    @staticmethod
+    def build(entries: Mapping[type[object], object]) -> ResourceRegistry: ...
 ```
 
-### Slice Registration
+## Snapshotable Protocol
 
 ```python
-# Register slice with explicit policy
-session[Plan].register(
-    SetupPlan,
-    plan_reducer,
-    policy=SlicePolicy.STATE,
-)
+class Snapshotable(Protocol[SnapshotT]):
+    """Protocol for state containers that support snapshot and restore."""
 
-# Log slices are preserved during transactions
-session[ToolInvoked].register(
-    ToolInvoked,
-    append_all,
-    policy=SlicePolicy.LOG,
-)
+    def snapshot(self, *, tag: str | None = None) -> SnapshotT:
+        """Capture current state as an immutable snapshot."""
+        ...
+
+    def restore(self, snapshot: SnapshotT) -> None:
+        """Restore state from a snapshot."""
+        ...
 ```
 
-### Default Policies
+### Implementations
 
-| Slice Type | Default Policy | Rationale |
-|------------|---------------|-----------|
-| `Plan` | STATE | Working state, should be restored |
-| `VisibilityOverrides` | STATE | Working state |
-| `WorkspaceDigest` | STATE | Working state, should be restored |
-| `ToolInvoked` | LOG | Historical record |
-| `PromptRendered` | LOG | Historical record |
-| `PromptExecuted` | LOG | Historical record |
-| Custom slices | STATE | Safe default |
+| Component | Snapshot Type | Storage Strategy |
+|-----------|--------------|------------------|
+| `Session` | `Snapshot` | Slice values as frozen tuples |
+| `InMemoryFilesystem` | `FilesystemSnapshot` | Structural sharing of file dicts |
+| `HostFilesystem` | `FilesystemSnapshot` | Git commits |
 
-### Scoped Snapshot
+## Session
 
-`Session.snapshot()` accepts a policy filter:
+`Session` implements `Snapshotable[Snapshot]`:
 
 ```python
-class Session:
+class Session(Snapshotable[Snapshot]):
     def snapshot(
         self,
         *,
+        tag: str | None = None,
         policies: frozenset[SlicePolicy] = frozenset({SlicePolicy.STATE}),
         include_all: bool = False,
     ) -> Snapshot:
         """Capture session state.
 
         Args:
+            tag: Optional label for the snapshot.
             policies: Which slice policies to include (default: STATE only).
             include_all: If True, ignore policies and snapshot everything.
         """
@@ -299,9 +165,84 @@ class Session:
         ...
 ```
 
-## Tool Transaction Semantics
+### Slice Policies
 
-### Transaction Boundary
+Not all session state should be rolled back on tool failure:
+
+```python
+class SlicePolicy(Enum):
+    """Determines restore behavior for session slices."""
+
+    STATE = "state"   # Restored on tool failure (default)
+    LOG = "log"       # Preserved during restore (append-only)
+```
+
+Register slices with explicit policies:
+
+```python
+session[Plan].register(SetupPlan, plan_reducer, policy=SlicePolicy.STATE)
+session[ToolInvoked].register(ToolInvoked, append_all, policy=SlicePolicy.LOG)
+```
+
+Default policies:
+
+| Slice Type | Policy | Rationale |
+|------------|--------|-----------|
+| `Plan` | STATE | Working state |
+| `VisibilityOverrides` | STATE | Working state |
+| `WorkspaceDigest` | STATE | Working state |
+| `ToolInvoked` | LOG | Historical record |
+| `PromptRendered` | LOG | Historical record |
+| `PromptExecuted` | LOG | Historical record |
+| Custom slices | STATE | Safe default |
+
+### Snapshot
+
+```python
+@dataclass(slots=True, frozen=True)
+class Snapshot:
+    """Immutable capture of session slice state."""
+
+    created_at: datetime
+    slices: SnapshotState
+    policies: Mapping[type[object], SlicePolicy]
+
+    def to_json(self) -> str: ...
+
+    @classmethod
+    def from_json(cls, raw: str) -> Snapshot: ...
+```
+
+## Composite Snapshot
+
+```python
+@dataclass(slots=True, frozen=True)
+class CompositeSnapshot:
+    """Consistent snapshot of session and snapshotable resources."""
+
+    snapshot_id: UUID
+    created_at: datetime
+    session: Snapshot
+    resources: Mapping[type[object], object]  # Resource type -> snapshot
+    metadata: SnapshotMetadata | None = None
+
+    def to_json(self) -> str: ...
+
+    @classmethod
+    def from_json(cls, raw: str) -> CompositeSnapshot: ...
+
+
+@dataclass(slots=True, frozen=True)
+class SnapshotMetadata:
+    """Context for when and why a snapshot was taken."""
+
+    tag: str | None = None
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+    phase: Literal["pre_tool", "post_tool", "manual"] = "manual"
+```
+
+## Tool Transaction Semantics
 
 Every tool invocation is wrapped in a transaction:
 
@@ -310,7 +251,6 @@ sequenceDiagram
     participant A as Adapter
     participant E as ExecutionState
     participant T as Tool Handler
-    participant F as Filesystem
 
     A->>E: snapshot(tag="pre:tool_call_id")
     A->>T: Execute handler
@@ -320,70 +260,22 @@ sequenceDiagram
     else Failure
         T-->>A: Exception or success=False
         A->>E: restore(snapshot)
-        E->>F: restore(fs_snapshot)
     end
 ```
 
-### Rollback Triggers
-
-State is restored on any of these conditions:
+### Restore Triggers
 
 | Condition | Behavior |
 |-----------|----------|
-| Handler raises exception | Rollback, wrap in `ToolResult(success=False)` |
-| `ToolResult.success == False` | Rollback, return result |
-| `ToolValidationError` | Rollback, wrap in `ToolResult(success=False)` |
-| `VisibilityExpansionRequired` | Rollback, re-raise for retry |
-| `DeadlineExceededError` | Rollback, convert to `PromptEvaluationError` |
+| Handler raises exception | Restore, wrap in `ToolResult(success=False)` |
+| `ToolResult.success == False` | Restore, return result |
+| `ToolValidationError` | Restore, wrap in `ToolResult(success=False)` |
+| `VisibilityExpansionRequired` | Restore, re-raise for retry |
+| `DeadlineExceededError` | Restore, convert to `PromptEvaluationError` |
 
-### Implementation
+### ToolRunner
 
-The `tool_execution()` context manager in `adapters/shared.py` implements
-transaction semantics:
-
-```python
-@contextmanager
-def tool_execution(
-    *,
-    context: _ToolExecutionContext,
-    tool_call: ProviderToolCall,
-    execution_state: ExecutionState,
-) -> Iterator[ToolExecutionOutcome]:
-    """Context manager that executes a tool call with transaction semantics."""
-
-    # Pre-tool snapshot (STATE slices + snapshotable resources)
-    pre_snapshot = execution_state.snapshot(
-        tag=f"pre:{tool_call.id}",
-        metadata=SnapshotMetadata(
-            tool_call_id=tool_call.id,
-            tool_name=tool_call.name,
-            phase="pre_tool",
-        ),
-    )
-
-    outcome = ToolExecutionOutcome()
-    try:
-        # ... resolve tool, parse params, execute handler
-        yield outcome
-    except VisibilityExpansionRequired:
-        # Rollback and re-raise for visibility expansion retry
-        execution_state.restore(pre_snapshot)
-        raise
-    except (ToolValidationError, DeadlineExceededError, Exception) as e:
-        # Rollback on any failure
-        execution_state.restore(pre_snapshot)
-        outcome.result = _wrap_exception_as_tool_result(e)
-        return
-
-    # Check result success
-    if outcome.result is not None and not outcome.result.success:
-        execution_state.restore(pre_snapshot)
-```
-
-### Adapter Unification
-
-A shared `ToolRunner` component provides identical transaction semantics for
-both adapter paths:
+A shared `ToolRunner` provides identical transaction semantics for all adapters:
 
 ```python
 @dataclass(slots=True)
@@ -401,7 +293,21 @@ class ToolRunner:
         context: ToolContext,
     ) -> ToolResult[Any]:
         """Execute a tool call with transaction semantics."""
-        ...
+        pre_snapshot = self.execution_state.snapshot(tag=f"pre:{tool_call.id}")
+
+        try:
+            result = self._invoke_handler(tool_call, context=context)
+        except VisibilityExpansionRequired:
+            self.execution_state.restore(pre_snapshot)
+            raise
+        except Exception as e:
+            self.execution_state.restore(pre_snapshot)
+            return _wrap_exception_as_tool_result(e)
+
+        if not result.success:
+            self.execution_state.restore(pre_snapshot)
+
+        return result
 ```
 
 Used by:
@@ -409,67 +315,7 @@ Used by:
 - `ToolExecutor` in `adapters/shared.py` (OpenAI/LiteLLM path)
 - `BridgedTool` in `adapters/claude_agent_sdk/_bridge.py` (Claude Agent SDK path)
 
-## Session Snapshot Integration
-
-### Current Behavior
-
-Session already supports snapshot/rollback:
-
-```python
-session = Session(bus=bus)
-session[Plan].seed(initial_plan)
-
-# Capture state
-snapshot = session.snapshot()
-
-# Mutate state
-session.broadcast(UpdateStep(...))
-
-# Restore to captured state
-session.restore(snapshot)
-```
-
-### Enhanced Behavior
-
-With slice policies, snapshots respect the STATE/LOG distinction:
-
-```python
-# Transaction snapshot: STATE slices only (default)
-tx_snapshot = session.snapshot()
-
-# Full snapshot: all slices including logs
-full_snapshot = session.snapshot(include_all=True)
-
-# Restore preserves LOG slices by default
-session.restore(tx_snapshot)  # ToolInvoked entries preserved
-
-# Force full restore (testing/debugging)
-session.restore(full_snapshot, preserve_logs=False)
-```
-
-### Snapshot Serialization
-
-The `Snapshot` dataclass supports JSON serialization with policy metadata:
-
-```python
-@dataclass(slots=True, frozen=True)
-class Snapshot:
-    created_at: datetime
-    slices: SnapshotState
-    policies: Mapping[type[object], SlicePolicy]  # Slice type -> policy
-    parent_id: UUID | None = None
-    children_ids: tuple[UUID, ...] = ()
-    tags: Mapping[str, str] = field(default_factory=dict)
-
-    def to_json(self) -> str: ...
-
-    @classmethod
-    def from_json(cls, raw: str) -> Snapshot: ...
-```
-
-## Filesystem Snapshot Integration
-
-### Current Behavior
+## Filesystem
 
 `SnapshotableFilesystem` provides snapshot/restore for workspace state:
 
@@ -477,7 +323,7 @@ class Snapshot:
 fs = HostFilesystem(_root="/workspace")
 fs.write("config.py", "DEBUG = True")
 
-# Capture filesystem state
+# Capture
 fs_snapshot = fs.snapshot(tag="before-edit")
 
 # Mutate
@@ -487,25 +333,20 @@ fs.write("config.py", "DEBUG = False")
 fs.restore(fs_snapshot)
 ```
 
-### Transaction Integration
-
-Filesystem snapshots are captured as part of `ExecutionState.snapshot()`:
+Filesystem is registered as a snapshotable resource:
 
 ```python
-# Filesystem registered as snapshotable resource
 resources = ResourceRegistry.build({Filesystem: fs})
 state = ExecutionState(session=session, resources=resources)
 
-# Composite snapshot includes session and all snapshotable resources
+# Composite snapshot includes session and filesystem
 composite = state.snapshot(tag="pre:tool_call")
 
-# Restore restores session and all snapshotable resources
+# Restore restores both
 state.restore(composite)
 ```
 
 ## Error Handling
-
-### Exception Types
 
 ```python
 class ExecutionStateError(WinkError, RuntimeError):
@@ -520,99 +361,47 @@ class RestoreFailedError(ExecutionStateError):
     """Failed to restore from snapshot."""
 ```
 
-### Telemetry Isolation
-
-Telemetry publish failures do not trigger rollback:
+Telemetry publish failures do not trigger restore:
 
 ```python
-def _publish_tool_invocation(
-    self,
-    event: ToolInvoked,
-    *,
-    bus: EventBus,
-) -> None:
+def _publish_tool_invocation(self, event: ToolInvoked, *, bus: EventBus) -> None:
     """Publish tool invocation event (best-effort)."""
     try:
         bus.publish(event)
     except Exception:
-        log.warning(
-            "Failed to publish tool invocation event",
-            event="telemetry_publish_failed",
-            exc_info=True,
-        )
+        log.warning("Failed to publish tool invocation event", exc_info=True)
         # State remains committed; telemetry is best-effort
 ```
-
-## Migration Path
-
-### Phase 1: Fix Correctness at Tool Boundaries
-
-Upgrade `tool_execution()` to snapshot/rollback session alongside filesystem:
-
-- Snapshot session before handler
-- Rollback session + filesystem on all failures
-- Rollback on `VisibilityExpansionRequired`
-
-### Phase 2: Unify Tool Execution Across Adapters
-
-Extract `ToolRunner` used by both `ToolExecutor` and Claude Agent SDK bridge.
-Ensure identical rollback semantics everywhere.
-
-### Phase 3: Introduce ExecutionState
-
-- Create `ExecutionState` as the single root
-- Migrate adapters to accept `ExecutionState`
-- Update `MainLoop` to create/manage `ExecutionState`
-
-### Phase 4: Slice Policies
-
-- Implement slice policy registration
-- Mark ToolInvoked/PromptRendered/PromptExecuted as LOG
-- Update snapshot/rollback to respect policies
 
 ## Acceptance Criteria
 
 ### Tool Failure Does Not Change State
 
-A tool that writes to filesystem, broadcasts to session, and returns
-`success=False` leaves state unchanged:
-
 ```python
-def test_tool_failure_rollback(execution_state: ExecutionState):
+def test_tool_failure_restores_state(execution_state: ExecutionState):
     fs = execution_state.resources.get(Filesystem)
     session = execution_state.session
 
-    # Initial state
     fs.write("file.txt", "original")
     session[Plan].seed(Plan(objective="test", status="active"))
 
-    # Tool fails after mutations
-    result = execute_tool(
-        mutating_tool,
-        execution_state=execution_state,
-    )
+    result = execute_tool(mutating_tool, execution_state=execution_state)
 
     assert not result.success
     assert fs.read("file.txt").content == "original"
     assert session[Plan].latest().objective == "test"
 ```
 
-### VisibilityExpansionRequired Is Clean
-
-State is exactly as if the tool never ran:
+### VisibilityExpansionRequired Restores State
 
 ```python
-def test_visibility_expansion_rollback(execution_state: ExecutionState):
+def test_visibility_expansion_restores_state(execution_state: ExecutionState):
     fs = execution_state.resources.get(Filesystem)
-
     fs.write("data.txt", "before")
     snapshot_before = execution_state.snapshot()
 
     with pytest.raises(VisibilityExpansionRequired):
-        execute_tool(
-            expanding_tool,  # Mutates state then raises
-            execution_state=execution_state,
-        )
+        execute_tool(expanding_tool, execution_state=execution_state)
 
     snapshot_after = execution_state.snapshot()
     assert snapshots_equivalent(snapshot_before, snapshot_after)
@@ -620,29 +409,20 @@ def test_visibility_expansion_rollback(execution_state: ExecutionState):
 
 ### Adapter Parity
 
-Same tool under both adapters yields identical state semantics:
-
 ```python
 def test_adapter_parity():
-    # Setup identical states
     state_openai = create_execution_state()
     state_claude = create_execution_state()
 
-    # Same tool, same params
     result_openai = execute_via_openai(tool, state_openai)
     result_claude = execute_via_claude_sdk(tool, state_claude)
 
-    # State changes are identical
-    assert snapshots_equivalent(
-        state_openai.snapshot(),
-        state_claude.snapshot(),
-    )
+    assert snapshots_equivalent(state_openai.snapshot(), state_claude.snapshot())
 ```
 
 ## Limitations
 
 - **Synchronous only**: Transactions assume single-threaded execution.
-- **No partial rollback**: Cannot rollback specific slices independently within
-  a transaction.
+- **No partial restore**: Cannot restore specific slices independently.
 - **Git dependency**: Disk-backed filesystem snapshots require git.
 - **No network rollback**: External API calls cannot be undone.
