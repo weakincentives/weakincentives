@@ -25,9 +25,7 @@ no trace in mutable state.
 flowchart TB
     subgraph ExecutionState["ExecutionState (Single Root)"]
         Session["Session<br/>(typed slices)"]
-        Resources["ResourceRegistry<br/>(filesystem, budget, etc.)"]
-        Transcript["TranscriptState<br/>(messages, provider payload)"]
-        Clock["Clock<br/>(injectable)"]
+        Filesystem["Filesystem<br/>(snapshotable)"]
     end
 
     subgraph Transaction["Tool Transaction"]
@@ -53,47 +51,23 @@ class ExecutionState:
     """Unified root for all mutable runtime state during evaluation."""
 
     session: Session
-    resources: ResourceRegistry
-    clock: Clock = field(default_factory=SystemClock)
-    rng: Random | None = None
+    filesystem: SnapshotableFilesystem | None = None
 
     def snapshot(self, *, tag: str | None = None) -> CompositeSnapshot:
-        """Capture consistent snapshot of all snapshotable state."""
+        """Capture consistent snapshot of session and filesystem."""
         ...
 
     def restore(self, snapshot: CompositeSnapshot) -> None:
-        """Restore all state from a composite snapshot."""
+        """Restore session and filesystem from a composite snapshot."""
         ...
 ```
 
 ### Ownership Semantics
 
 - `MainLoop.execute()` creates or receives an `ExecutionState`.
-- Adapters accept `ExecutionState` instead of individual `(session, budget_tracker, deadline, ...)` parameters.
+- Adapters accept `ExecutionState` instead of individual `(session, filesystem, ...)` parameters.
 - `ToolContext` carries `ExecutionState` (or a reference to it).
-- Section runtime state is registered in `resources`, not hidden in section instances.
-
-### Resource Registry Integration
-
-The `ResourceRegistry` holds typed runtime resources that may be snapshotable:
-
-```python
-@dataclass(slots=True, frozen=True)
-class ResourceRegistry:
-    """Typed container for runtime resources."""
-
-    _entries: Mapping[type[object], object]
-
-    def get[T](self, resource_type: type[T]) -> T | None: ...
-    def get[T](self, resource_type: type[T], default: T) -> T: ...
-
-    def snapshotable_resources(self) -> Mapping[type[object], Snapshotable[object]]:
-        """Return all resources that implement Snapshotable."""
-        return {
-            k: v for k, v in self._entries.items()
-            if isinstance(v, Snapshotable)
-        }
-```
+- Filesystem is owned by the workspace section and registered on `ExecutionState`.
 
 ## Snapshotable Protocol
 
@@ -121,7 +95,6 @@ class Snapshotable(Protocol[SnapshotT]):
 | `Session` | `Snapshot` | Slice values as frozen tuples |
 | `InMemoryFilesystem` | `FilesystemSnapshot` | Structural sharing of file dicts |
 | `HostFilesystem` | `FilesystemSnapshot` | Git commits |
-| `BudgetTracker` | `BudgetSnapshot` | Token counts per evaluation |
 
 ### Session Adapter
 
@@ -146,18 +119,18 @@ class SessionSnapshotAdapter(Snapshotable[Snapshot]):
 
 ### Definition
 
-A composite snapshot captures all snapshotable state atomically:
+A composite snapshot captures session and filesystem state atomically:
 
 ```python
 @dataclass(slots=True, frozen=True)
 class CompositeSnapshot:
-    """Consistent snapshot of all execution state."""
+    """Consistent snapshot of session and filesystem state."""
 
     snapshot_id: UUID
     created_at: datetime
     session: Snapshot
-    resources: Mapping[type[object], object]  # Resource type -> snapshot
-    metadata: SnapshotMetadata
+    filesystem: FilesystemSnapshot | None = None
+    metadata: SnapshotMetadata | None = None
 
     def to_json(self) -> str:
         """Serialize to JSON for persistence."""
@@ -185,32 +158,24 @@ class SnapshotMetadata:
 @dataclass(slots=True)
 class ExecutionState:
     session: Session
-    resources: ResourceRegistry
-    clock: Clock = field(default_factory=SystemClock)
+    filesystem: SnapshotableFilesystem | None = None
 
     def snapshot(self, *, tag: str | None = None) -> CompositeSnapshot:
-        """Capture consistent snapshot of all snapshotable state."""
-        resource_snapshots: dict[type[object], object] = {}
-
-        for resource_type, resource in self.resources.snapshotable_resources().items():
-            resource_snapshots[resource_type] = resource.snapshot(tag=tag)
-
+        """Capture consistent snapshot of session and filesystem."""
         return CompositeSnapshot(
             snapshot_id=uuid4(),
-            created_at=self.clock.now(),
+            created_at=datetime.now(UTC),
             session=self.session.snapshot(),
-            resources=types.MappingProxyType(resource_snapshots),
+            filesystem=self.filesystem.snapshot(tag=tag) if self.filesystem else None,
             metadata=SnapshotMetadata(tag=tag),
         )
 
     def restore(self, snapshot: CompositeSnapshot) -> None:
-        """Restore all state from a composite snapshot."""
+        """Restore session and filesystem from a composite snapshot."""
         self.session.rollback(snapshot.session)
 
-        for resource_type, resource_snapshot in snapshot.resources.items():
-            resource = self.resources.get(resource_type)
-            if resource is not None and isinstance(resource, Snapshotable):
-                resource.restore(resource_snapshot)
+        if self.filesystem is not None and snapshot.filesystem is not None:
+            self.filesystem.restore(snapshot.filesystem)
 ```
 
 ## Slice Policies
@@ -492,64 +457,14 @@ fs.restore(fs_snapshot)
 Filesystem snapshots are captured as part of `ExecutionState.snapshot()`:
 
 ```python
-# Filesystem registered as snapshotable resource
-resources = ResourceRegistry.build({
-    Filesystem: fs,
-    BudgetTracker: tracker,
-})
-state = ExecutionState(session=session, resources=resources)
+# Create execution state with session and filesystem
+state = ExecutionState(session=session, filesystem=fs)
 
-# Composite snapshot includes filesystem
+# Composite snapshot includes both session and filesystem
 composite = state.snapshot(tag="pre:tool_call")
 
-# Restore includes filesystem
+# Restore restores both session and filesystem
 state.restore(composite)
-```
-
-## Determinism Support
-
-### Injected Clock
-
-Replace `datetime.now()` calls with injected clock:
-
-```python
-class Clock(Protocol):
-    """Protocol for time sources."""
-
-    def now(self) -> datetime:
-        """Return current time."""
-        ...
-
-
-@dataclass(slots=True, frozen=True)
-class SystemClock:
-    """Default clock using system time."""
-
-    def now(self) -> datetime:
-        return datetime.now(UTC)
-
-
-@dataclass(slots=True, frozen=True)
-class FixedClock:
-    """Test clock returning a fixed time."""
-
-    time: datetime
-
-    def now(self) -> datetime:
-        return self.time
-```
-
-### Injected RNG
-
-Replace `random` calls with injected RNG:
-
-```python
-# ExecutionState with injected RNG
-state = ExecutionState(
-    session=session,
-    resources=resources,
-    rng=Random(seed=42),  # Deterministic for replay
-)
 ```
 
 ## Error Handling
@@ -628,7 +543,7 @@ A tool that writes to filesystem, broadcasts to session, and returns
 
 ```python
 def test_tool_failure_rollback(execution_state: ExecutionState):
-    fs = execution_state.resources.get(Filesystem)
+    fs = execution_state.filesystem
     session = execution_state.session
 
     # Initial state
@@ -652,7 +567,7 @@ State is exactly as if the tool never ran:
 
 ```python
 def test_visibility_expansion_rollback(execution_state: ExecutionState):
-    fs = execution_state.resources.get(Filesystem)
+    fs = execution_state.filesystem
 
     fs.write("data.txt", "before")
     snapshot_before = execution_state.snapshot()
