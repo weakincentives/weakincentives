@@ -15,6 +15,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -41,7 +42,11 @@ from weakincentives.adapters.shared import (
     parse_tool_arguments,
     tool_to_spec,
 )
-from weakincentives.contrib.tools import InMemoryFilesystem, SnapshotableFilesystem
+from weakincentives.contrib.tools import (
+    HostFilesystem,
+    InMemoryFilesystem,
+    SnapshotableFilesystem,
+)
 from weakincentives.deadlines import Deadline
 from weakincentives.errors import SnapshotRestoreError
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
@@ -1004,3 +1009,634 @@ class TestPublishInvocationFilesystemRestore:
 
         # Restore should NOT have been called since tool.success=False
         assert fs.restore_called is False
+
+
+# ================================================================================
+# Focused integration tests for filesystem snapshot + tool execution
+# ================================================================================
+
+
+@dataclass
+class _MultiFileParams:
+    """Parameters for multi-file operations."""
+
+    files: list[str]
+
+
+@dataclass
+class _InvalidParams:
+    """Parameters that will fail validation."""
+
+    value: int  # Will fail if we pass a string
+
+
+class TestFilesystemSnapshotIntegration:
+    """Focused integration tests for filesystem snapshots with tool execution."""
+
+    def test_multiple_files_restored_on_failure(self) -> None:
+        """Test that all file modifications are restored when tool fails."""
+        fs = InMemoryFilesystem()
+        # Create initial state with multiple files
+        fs.write("/file1.txt", "original1")
+        fs.write("/file2.txt", "original2")
+        fs.write("/subdir/file3.txt", "original3")
+
+        def multi_modify_handler(
+            params: _MultiFileParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            filesystem = context.filesystem
+            if filesystem:
+                # Modify all files
+                filesystem.write("/file1.txt", "modified1")
+                filesystem.write("/file2.txt", "modified2")
+                filesystem.write("/subdir/file3.txt", "modified3")
+                # Also create a new file
+                filesystem.write("/newfile.txt", "new content")
+            return ToolResult(
+                message="failed", value=EchoPayload(value=""), success=False
+            )
+
+        tool = Tool[_MultiFileParams, EchoPayload](
+            name="multi_modify",
+            description="Modify multiple files then fail",
+            handler=multi_modify_handler,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(
+                name="multi_modify",
+                arguments='{"files": ["file1.txt", "file2.txt", "file3.txt"]}',
+            ),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # All files should be restored to original content
+        assert fs.read("/file1.txt").content == "original1"
+        assert fs.read("/file2.txt").content == "original2"
+        assert fs.read("/subdir/file3.txt").content == "original3"
+        # New file should not exist
+        assert not fs.exists("/newfile.txt")
+
+    def test_directory_operations_restored_on_exception(self) -> None:
+        """Test that directory modifications are restored on tool exception."""
+        fs = InMemoryFilesystem()
+        fs.write("/existing/file.txt", "content")
+
+        def dir_modify_handler(
+            params: _FailParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            filesystem = context.filesystem
+            if filesystem:
+                # Create new directory structure
+                filesystem.write("/newdir/nested/file.txt", "nested content")
+                filesystem.write("/existing/file.txt", "modified")
+            raise RuntimeError("Simulated crash after modifications")
+
+        tool = Tool[_FailParams, EchoPayload](
+            name="dir_modify",
+            description="Modify directories then crash",
+            handler=dir_modify_handler,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(name="dir_modify", arguments='{"value": "test"}'),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # Original file should be restored
+        assert fs.read("/existing/file.txt").content == "content"
+        # New directory structure should not exist
+        assert not fs.exists("/newdir/nested/file.txt")
+        assert not fs.exists("/newdir")
+
+    def test_validation_error_does_not_restore_filesystem(self) -> None:
+        """Test that validation errors don't trigger filesystem restore.
+
+        When a tool call fails validation (before the handler is invoked),
+        the filesystem should not be modified or restored since the tool
+        never ran.
+        """
+        fs = InMemoryFilesystem()
+        fs.write("/file.txt", "original")
+
+        # Track if handler was called
+        handler_called = False
+
+        def should_not_run(
+            params: _InvalidParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            nonlocal handler_called
+            handler_called = True
+            filesystem = context.filesystem
+            if filesystem:
+                filesystem.write("/file.txt", "modified")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+
+        tool = Tool[_InvalidParams, EchoPayload](
+            name="invalid_tool",
+            description="Tool that expects int but gets string",
+            handler=should_not_run,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        # Pass a string where int is expected - this should fail validation
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(
+                name="invalid_tool", arguments='{"value": "not_an_int"}'
+            ),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # Handler should not have been called
+        assert handler_called is False
+        # File should remain unchanged (no restore needed since no modification)
+        assert fs.read("/file.txt").content == "original"
+
+    def test_successful_tool_preserves_all_changes(self) -> None:
+        """Test that successful tool execution preserves all filesystem changes."""
+        fs = InMemoryFilesystem()
+        fs.write("/file1.txt", "original1")
+        fs.write("/file2.txt", "original2")
+
+        def success_handler(
+            params: _MultiFileParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            filesystem = context.filesystem
+            if filesystem:
+                filesystem.write("/file1.txt", "modified1")
+                filesystem.write("/file2.txt", "modified2")
+                filesystem.write("/newfile.txt", "new content")
+                filesystem.delete("/file2.txt")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+
+        tool = Tool[_MultiFileParams, EchoPayload](
+            name="success_modify",
+            description="Modify files successfully",
+            handler=success_handler,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(
+                name="success_modify", arguments='{"files": ["file1.txt"]}'
+            ),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # All changes should be preserved
+        assert fs.read("/file1.txt").content == "modified1"
+        assert not fs.exists("/file2.txt")  # Was removed
+        assert fs.read("/newfile.txt").content == "new content"
+
+    def test_file_deletion_restored_on_failure(self) -> None:
+        """Test that deleted files are restored when tool fails."""
+        fs = InMemoryFilesystem()
+        fs.write("/important.txt", "critical data")
+        fs.write("/keep.txt", "keep this")
+
+        def delete_handler(
+            params: _FailParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            filesystem = context.filesystem
+            if filesystem:
+                filesystem.delete("/important.txt")
+                filesystem.write("/keep.txt", "modified")
+            return ToolResult(
+                message="failed", value=EchoPayload(value=""), success=False
+            )
+
+        tool = Tool[_FailParams, EchoPayload](
+            name="delete_tool",
+            description="Delete files then fail",
+            handler=delete_handler,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(name="delete_tool", arguments='{"value": "test"}'),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # Deleted file should be restored
+        assert fs.exists("/important.txt")
+        assert fs.read("/important.txt").content == "critical data"
+        # Modified file should also be restored
+        assert fs.read("/keep.txt").content == "keep this"
+
+    def test_partial_modifications_before_exception(self) -> None:
+        """Test that partial modifications are rolled back on exception."""
+        fs = InMemoryFilesystem()
+        fs.write("/step1.txt", "original1")
+        fs.write("/step2.txt", "original2")
+        fs.write("/step3.txt", "original3")
+
+        def partial_handler(
+            params: _FailParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            filesystem = context.filesystem
+            if filesystem:
+                # First two modifications succeed
+                filesystem.write("/step1.txt", "modified1")
+                filesystem.write("/step2.txt", "modified2")
+                # Then crash before third modification
+                raise RuntimeError("Crash after partial modifications")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+
+        tool = Tool[_FailParams, EchoPayload](
+            name="partial_tool",
+            description="Partially modify then crash",
+            handler=partial_handler,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(
+                name="partial_tool", arguments='{"value": "test"}'
+            ),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # All files should be restored to original state
+        assert fs.read("/step1.txt").content == "original1"
+        assert fs.read("/step2.txt").content == "original2"
+        assert fs.read("/step3.txt").content == "original3"
+
+
+class TestHostFilesystemToolIntegration:
+    """Integration tests for HostFilesystem with tool execution."""
+
+    def test_host_filesystem_restored_on_tool_failure(self, tmp_path: Path) -> None:
+        """Test HostFilesystem restore when tool fails."""
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Create initial files
+        fs.write("file1.txt", "original content 1")
+        fs.write("file2.txt", "original content 2")
+
+        def failing_host_handler(
+            params: _FailParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            filesystem = context.filesystem
+            if filesystem:
+                filesystem.write("file1.txt", "modified content 1")
+                filesystem.write("file2.txt", "modified content 2")
+                filesystem.write("newfile.txt", "new file content")
+            return ToolResult(
+                message="failed", value=EchoPayload(value=""), success=False
+            )
+
+        tool = Tool[_FailParams, EchoPayload](
+            name="host_fail",
+            description="Modify host files then fail",
+            handler=failing_host_handler,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)  # type: ignore[arg-type]
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(name="host_fail", arguments='{"value": "test"}'),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # Files should be restored via git reset
+        assert fs.read("file1.txt").content == "original content 1"
+        assert fs.read("file2.txt").content == "original content 2"
+        # New file should be gone
+        assert not fs.exists("newfile.txt")
+
+    def test_host_filesystem_success_preserves_changes(self, tmp_path: Path) -> None:
+        """Test HostFilesystem preserves changes on success."""
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Create initial file
+        fs.write("file.txt", "original")
+
+        def success_host_handler(
+            params: _FailParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            filesystem = context.filesystem
+            if filesystem:
+                filesystem.write("file.txt", "modified by tool")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+
+        tool = Tool[_FailParams, EchoPayload](
+            name="host_success",
+            description="Modify host files successfully",
+            handler=success_host_handler,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)  # type: ignore[arg-type]
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(
+                name="host_success", arguments='{"value": "test"}'
+            ),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # Changes should be preserved
+        assert fs.read("file.txt").content == "modified by tool"
+
+    def test_host_filesystem_exception_restores_state(self, tmp_path: Path) -> None:
+        """Test HostFilesystem restores state on tool exception."""
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Create initial state
+        fs.write("data.txt", "important data")
+
+        def exception_host_handler(
+            params: _FailParams, *, context: ToolContext
+        ) -> ToolResult[EchoPayload]:
+            filesystem = context.filesystem
+            if filesystem:
+                filesystem.write("data.txt", "corrupted")
+                filesystem.delete("data.txt")
+            raise RuntimeError("Tool crashed!")
+
+        tool = Tool[_FailParams, EchoPayload](
+            name="host_exception",
+            description="Corrupt host files then crash",
+            handler=exception_host_handler,
+        )
+
+        mock_prompt = _MockPromptWithFilesystem(fs)  # type: ignore[arg-type]
+        rendered = RenderedPrompt(
+            text="system",
+            _tools=cast(
+                tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+                (tool,),
+            ),
+        )
+
+        bus = RecordingBus()
+        session = Session(bus=bus)
+        tool_registry = cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: tool},
+        )
+
+        executor = ToolExecutor(
+            adapter_name=TEST_ADAPTER_NAME,
+            adapter=cast(ProviderAdapter[Any], object()),
+            prompt=cast(Prompt[Any], mock_prompt),
+            prompt_name="test",
+            rendered=rendered,
+            session=session,
+            tool_registry=tool_registry,
+            serialize_tool_message_fn=serialize_tool_message,
+            format_publish_failures=lambda x: "",
+            parse_arguments=parse_tool_arguments,
+        )
+
+        tool_call = SimpleNamespace(
+            id="call-1",
+            function=SimpleNamespace(
+                name="host_exception", arguments='{"value": "test"}'
+            ),
+        )
+
+        executor.execute([cast(Any, tool_call)], None)
+
+        # File should be restored
+        assert fs.exists("data.txt")
+        assert fs.read("data.txt").content == "important data"
