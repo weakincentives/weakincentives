@@ -275,7 +275,6 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             rendered_prompt=rendered,
             deadline=deadline,
             budget_tracker=budget_tracker,
-            filesystem=filesystem,
             execution_state=execution_state,
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,

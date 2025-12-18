@@ -658,8 +658,13 @@ class TestVisibilityExpansionRequiredPropagation:
     def test_passes_filesystem_to_tool_context(
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
-        """Test that filesystem parameter is passed through to ToolContext."""
-        from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+        """Test that filesystem is accessed via execution_state resources."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
 
         captured_filesystem: list[object] = []
 
@@ -680,6 +685,8 @@ class TestVisibilityExpansionRequiredPropagation:
         )
 
         test_filesystem = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: test_filesystem})
+        execution_state = ExecutionState(session=session, resources=resources)
 
         bridged = BridgedTool(
             name="capture",
@@ -695,7 +702,7 @@ class TestVisibilityExpansionRequiredPropagation:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            filesystem=test_filesystem,
+            execution_state=execution_state,
         )
 
         _ = bridged({"query": "test"})
@@ -708,8 +715,13 @@ class TestCreateBridgedToolsWithFilesystem:
     def test_passes_filesystem_to_bridged_tools(
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
-        """Test that create_bridged_tools passes filesystem to BridgedTool."""
-        from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+        """Test that create_bridged_tools passes filesystem via execution_state."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
 
         captured_filesystem: list[object] = []
 
@@ -730,6 +742,8 @@ class TestCreateBridgedToolsWithFilesystem:
         )
 
         test_filesystem = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: test_filesystem})
+        execution_state = ExecutionState(session=session, resources=resources)
 
         bridged_tools = create_bridged_tools(
             (capture_tool,),
@@ -739,7 +753,7 @@ class TestCreateBridgedToolsWithFilesystem:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            filesystem=test_filesystem,
+            execution_state=execution_state,
         )
 
         assert len(bridged_tools) == 1
@@ -791,7 +805,6 @@ class TestBudgetTrackerInResourceRegistry:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=test_tracker,
-            filesystem=None,
         )
 
         _ = bridged({"query": "test"})
@@ -834,7 +847,6 @@ class TestBudgetTrackerInResourceRegistry:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=test_tracker,
-            filesystem=None,
         )
 
         assert len(bridged_tools) == 1
@@ -896,7 +908,6 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            filesystem=test_fs,
             execution_state=execution_state,
         )
 
@@ -951,7 +962,6 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            filesystem=test_fs,
             execution_state=execution_state,
         )
 
@@ -992,7 +1002,6 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            filesystem=test_fs,
             execution_state=execution_state,
         )
 
@@ -1055,7 +1064,6 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            filesystem=test_fs,
             execution_state=execution_state,
         )
 
@@ -1065,56 +1073,50 @@ class TestBridgedToolTransactionalExecution:
         # Filesystem should be restored to initial content
         assert test_fs.read("/test.txt").content == "initial content"
 
-    def test_no_restore_without_execution_state(
+    def test_no_filesystem_without_execution_state(
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
-        """Test that tool failure doesn't crash without execution_state."""
-        from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+        """Test that without execution_state, context.filesystem is None."""
+        captured_filesystem: list[object] = []
 
-        test_fs = InMemoryFilesystem()
-        test_fs.write("/test.txt", "initial content")
-
-        def failing_result_handler(
+        def capture_handler(
             params: SearchParams, *, context: ToolContext
         ) -> ToolResult[SearchResult]:
-            # Modify filesystem before returning failure
-            if context.filesystem is not None:
-                context.filesystem.write("/test.txt", "modified content")
+            captured_filesystem.append(context.filesystem)
             return ToolResult(
-                message="Tool failed",
+                message="Tool executed",
                 value=SearchResult(matches=0),
-                success=False,
+                success=True,
             )
 
-        fail_tool = Tool[SearchParams, SearchResult](
-            name="fail_tool",
-            description="Tool that returns failure",
-            handler=failing_result_handler,
+        capture_tool = Tool[SearchParams, SearchResult](
+            name="capture_tool",
+            description="Tool that captures context",
+            handler=capture_handler,
         )
 
         bridged = BridgedTool(
-            name="fail_tool",
-            description="Tool that returns failure",
+            name="capture_tool",
+            description="Tool that captures context",
             input_schema={
                 "type": "object",
                 "properties": {"query": {"type": "string"}},
             },
-            tool=fail_tool,
+            tool=capture_tool,
             session=session,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            filesystem=test_fs,
             # No execution_state
         )
 
         result = bridged({"query": "test"})
 
-        assert result["isError"] is True
-        # Without execution_state, filesystem changes persist
-        assert test_fs.read("/test.txt").content == "modified content"
+        assert result["isError"] is False
+        # Without execution_state, filesystem should be None
+        assert captured_filesystem == [None]
 
 
 class TestCreateBridgedToolsWithExecutionState:
@@ -1162,7 +1164,6 @@ class TestCreateBridgedToolsWithExecutionState:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            filesystem=test_fs,
             execution_state=execution_state,
         )
 

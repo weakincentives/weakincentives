@@ -71,7 +71,8 @@ class BridgedTool:
 
     When ``execution_state`` is provided, tool execution uses transactional
     semantics: a snapshot is taken before execution and restored on failure,
-    ensuring consistent state across failed or aborted tool calls.
+    ensuring consistent state across failed or aborted tool calls. The filesystem
+    is accessed from the execution_state's resource registry.
     """
 
     def __init__(
@@ -87,7 +88,6 @@ class BridgedTool:
         rendered_prompt: RenderedPromptProtocol[Any] | None,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
-        filesystem: Filesystem | None = None,
         execution_state: ExecutionState | None = None,
         adapter_name: str = "claude_agent_sdk",
         prompt_name: str | None = None,
@@ -102,7 +102,6 @@ class BridgedTool:
         self._rendered_prompt = rendered_prompt
         self._deadline = deadline
         self._budget_tracker = budget_tracker
-        self._filesystem = filesystem
         self._execution_state = execution_state
         self._adapter_name = adapter_name
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
@@ -157,8 +156,13 @@ class BridgedTool:
             else:
                 params = parse(self._tool.params_type, args, extra="forbid")
 
+            # Get filesystem from execution_state's resources if available
+            filesystem: Filesystem | None = None
+            if self._execution_state is not None:
+                filesystem = self._execution_state.resources.get(Filesystem)
+
             resources = _build_resources(
-                filesystem=self._filesystem,
+                filesystem=filesystem,
                 budget_tracker=self._budget_tracker,
             )
             context = ToolContext(
@@ -292,7 +296,6 @@ def create_bridged_tools(
     rendered_prompt: RenderedPromptProtocol[Any] | None,
     deadline: Deadline | None,
     budget_tracker: BudgetTracker | None,
-    filesystem: Filesystem | None = None,
     execution_state: ExecutionState | None = None,
     adapter_name: str = "claude_agent_sdk",
     prompt_name: str | None = None,
@@ -307,11 +310,10 @@ def create_bridged_tools(
         rendered_prompt: Rendered prompt for tool context.
         deadline: Optional deadline for tool context.
         budget_tracker: Optional budget tracker for tool context.
-        filesystem: Optional filesystem for tool context. When set, tools
-            can access the filesystem via context.filesystem.
         execution_state: Optional execution state for transactional tool
             execution. When set, tools use snapshot/restore semantics
-            and automatically roll back on failure.
+            and automatically roll back on failure. The filesystem is
+            accessed from execution_state's resource registry.
         adapter_name: Name of the adapter for event publishing.
         prompt_name: Name of the prompt for event publishing.
 
@@ -342,7 +344,6 @@ def create_bridged_tools(
             rendered_prompt=rendered_prompt,
             deadline=deadline,
             budget_tracker=budget_tracker,
-            filesystem=filesystem,
             execution_state=execution_state,
             adapter_name=adapter_name,
             prompt_name=resolved_prompt_name,

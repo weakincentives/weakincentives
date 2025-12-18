@@ -46,14 +46,12 @@ from weakincentives.contrib.tools import (
     InMemoryFilesystem,
     SnapshotableFilesystem,
 )
-from weakincentives.prompt.tool import ResourceRegistry
-from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.deadlines import Deadline
 from weakincentives.errors import SnapshotRestoreError
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
-from weakincentives.prompt.tool import Tool
+from weakincentives.prompt.tool import ResourceRegistry, Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import (
     EventBus,
@@ -62,6 +60,7 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.logging import get_logger
 from weakincentives.runtime.session.session import Session
 from weakincentives.types.dataclass import (
@@ -477,9 +476,7 @@ class _MockPromptWithFilesystem:
         return self._fs
 
 
-def _create_execution_state(
-    session: Session, fs: InMemoryFilesystem
-) -> ExecutionState:
+def _create_execution_state(session: Session, fs: InMemoryFilesystem) -> ExecutionState:
     """Create an ExecutionState with filesystem for transactional tool execution."""
     resources = ResourceRegistry.build({Filesystem: fs})
     return ExecutionState(session=session, resources=resources)
