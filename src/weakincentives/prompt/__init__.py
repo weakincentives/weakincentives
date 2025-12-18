@@ -37,7 +37,11 @@ from .overrides import (
     hash_json,
     hash_text,
 )
-from .progressive_disclosure import OpenSectionsParams
+from .progressive_disclosure import (
+    OpenSectionsParams,
+    ReadSectionParams,
+    ReadSectionResult,
+)
 from .prompt import Prompt, PromptTemplate, SectionNode
 from .protocols import (
     PromptProtocol,
@@ -84,6 +88,8 @@ __all__ = [
     "PromptTemplateProtocol",
     "PromptValidationError",
     "ProviderAdapterProtocol",
+    "ReadSectionParams",
+    "ReadSectionResult",
     "RenderedPrompt",
     "RenderedPromptProtocol",
     "ResourceRegistry",

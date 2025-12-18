@@ -2,9 +2,9 @@
 
 ## Purpose
 
-The `Prompt` abstraction centralizes every string template that flows to an
-LLM so the codebase has a single, inspectable source for system prompts and
-per-turn instructions. This specification covers prompt construction, section
+The `Prompt` abstraction centralizes every string template that flows to an LLM
+so the codebase has a single, inspectable source for system prompts and per-turn
+instructions. This specification covers prompt construction, section
 composition, structured output, and progressive disclosure.
 
 ## Guiding Principles
@@ -55,9 +55,8 @@ flowchart TB
 
 ### PromptTemplate and Prompt
 
-`PromptTemplate` is the configuration blueprint that owns a namespace (`ns`),
-a required `key`, an optional `name`, and an ordered tree of `Section`
-instances:
+`PromptTemplate` is the configuration blueprint that owns a namespace (`ns`), a
+required `key`, an optional `name`, and an ordered tree of `Section` instances:
 
 ```python
 template = PromptTemplate[OutputType](
@@ -138,16 +137,16 @@ depth-first and producing markdown with deterministic headings.
 
 ### Parameter Lookup
 
-The renderer builds a map of dataclass type to instance. When a section lacks
-an override:
+The renderer builds a map of dataclass type to instance. When a section lacks an
+override:
 
 1. Use `default_params` if configured
 1. Else use the first default for that type
 1. Else instantiate with no arguments
 
-Missing required fields raise `PromptRenderError`. Supplying the same
-dataclass type more than once is rejected with `PromptValidationError` (the
-renderer does **not** fan out duplicate param types).
+Missing required fields raise `PromptRenderError`. Supplying the same dataclass
+type more than once is rejected with `PromptValidationError` (the renderer does
+**not** fan out duplicate param types).
 
 ### RenderedPrompt
 
@@ -197,11 +196,10 @@ for structured output to work correctly.
 
 ### Parsing
 
-`parse_structured_output(output_text, rendered)` validates assistant
-responses:
+`parse_structured_output(output_text, rendered)` validates assistant responses:
 
-1. **Extract JSON**: Prefer fenced `json` block, else parse entire message,
-   else scan for `{...}` or `[...]`
+1. **Extract JSON**: Prefer fenced `json` block, else parse entire message, else
+   scan for `{...}` or `[...]`
 1. **Validate container**: Object vs. array must match declaration
 1. **Validate dataclass**: Required fields, no extra keys (unless allowed),
    conservative type coercions
@@ -220,7 +218,11 @@ template = PromptTemplate[Output](
 ## Progressive Disclosure
 
 Sections can render with `SUMMARY` visibility to reduce token usage. The
-`open_sections` tool lets models request expanded content.
+framework provides two tools for accessing summarized content:
+
+- `open_sections` - Permanently expands sections (used for sections with tools)
+- `read_section` - Returns section content without changing state (used for
+  sections without tools)
 
 ### Section Visibility
 
@@ -239,8 +241,10 @@ section = MarkdownSection[Params](
 
 ### Automatic Tool Registration
 
-When any section has `SUMMARY` visibility, the framework injects the
-`open_sections` tool:
+The framework automatically injects the appropriate disclosure tools based on
+whether summarized sections have tools attached:
+
+**For sections WITH tools** - `open_sections` is injected:
 
 ```python
 @dataclass
@@ -249,9 +253,20 @@ class OpenSectionsParams:
     reason: str                     # Why expansion is needed
 ```
 
-### Exception-Based Signaling
+**For sections WITHOUT tools** - `read_section` is injected:
 
-The tool raises `VisibilityExpansionRequired` rather than returning a result:
+```python
+@dataclass
+class ReadSectionParams:
+    section_key: str  # Single section key (dot notation for nested)
+```
+
+When a prompt has both types of summarized sections, both tools are available.
+
+### open_sections: Exception-Based Expansion
+
+The `open_sections` tool raises `VisibilityExpansionRequired` rather than
+returning a result. This permanently changes visibility state:
 
 ```python
 @dataclass
@@ -261,7 +276,23 @@ class VisibilityExpansionRequired(PromptError):
     section_keys: tuple[str, ...]
 ```
 
-### Caller Pattern
+### read_section: Read-Only Access
+
+The `read_section` tool returns the rendered markdown content without changing
+visibility state. The section remains summarized in subsequent turns. Child
+sections are rendered with their current visibility (which may still be
+`SUMMARY`).
+
+```python
+result = read_section_tool.handler(
+    ReadSectionParams(section_key="context"),
+    context=tool_context,
+)
+# result.value contains the markdown content
+# result.success indicates success
+```
+
+### Caller Pattern for open_sections
 
 ```python
 prompt = Prompt(template).bind(*params)
@@ -279,11 +310,21 @@ while True:
 
 ### Summary Suffix
 
-Summarized sections automatically append:
+Summarized sections automatically append a suffix directing the model to the
+appropriate tool:
+
+**For sections with tools:**
 
 ```
 ---
 [This section is summarized. To view full content, call `open_sections` with key "context".]
+```
+
+**For sections without tools:**
+
+```
+---
+[This section is summarized. To view full content, call `read_section` with key "context".]
 ```
 
 ## Cloning
