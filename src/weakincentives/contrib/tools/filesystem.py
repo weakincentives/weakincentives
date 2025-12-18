@@ -1442,7 +1442,7 @@ class HostFilesystem:
         """Restore filesystem to a previous git commit.
 
         Performs a hard reset to the snapshot's commit and removes any
-        untracked files for a strict rollback.
+        untracked files (including ignored files) for a strict rollback.
 
         Args:
             snapshot: The snapshot to restore.
@@ -1464,8 +1464,9 @@ class HostFilesystem:
             raise SnapshotRestoreError(msg)
 
         # Remove untracked files and directories for strict rollback
+        # -x removes ignored files too (e.g., cache, logs) for full restore
         _ = subprocess.run(  # nosec B603 B607
-            ["git", "clean", "-fd"],
+            ["git", "clean", "-xfd"],
             cwd=self._root,
             capture_output=True,
         )

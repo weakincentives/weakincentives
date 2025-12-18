@@ -1044,6 +1044,36 @@ class TestHostFilesystemSnapshots:
         assert not fs.exists("new.txt")
         assert fs.exists("original.txt")
 
+    def test_restore_removes_gitignored_files(self, tmp_path: Path) -> None:
+        """restore() should remove gitignored files for strict rollback."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("src/main.py", "print('hello')")
+        # Create .gitignore to ignore cache files
+        fs.write(".gitignore", "*.pyc\n__pycache__/\n*.log\n")
+        snapshot = fs.snapshot()
+
+        # Simulate tool creating ignored files (cache, logs)
+        (tmp_path / "src" / "main.pyc").write_bytes(b"compiled")
+        (tmp_path / "__pycache__").mkdir()
+        (tmp_path / "__pycache__" / "main.cpython-311.pyc").write_bytes(b"cache")
+        (tmp_path / "debug.log").write_text("log output")
+
+        # Verify ignored files exist
+        assert (tmp_path / "src" / "main.pyc").exists()
+        assert (tmp_path / "__pycache__").exists()
+        assert (tmp_path / "debug.log").exists()
+
+        # Restore should remove ignored files too (strict rollback)
+        fs.restore(snapshot)
+
+        # All ignored files should be gone
+        assert not (tmp_path / "src" / "main.pyc").exists()
+        assert not (tmp_path / "__pycache__").exists()
+        assert not (tmp_path / "debug.log").exists()
+        # Original files remain
+        assert fs.exists("src/main.py")
+        assert fs.exists(".gitignore")
+
     def test_restore_restores_deleted_files(self, tmp_path: Path) -> None:
         """restore() should bring back deleted files."""
         fs = HostFilesystem(_root=str(tmp_path))
