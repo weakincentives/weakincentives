@@ -36,17 +36,18 @@ from weakincentives.adapters.shared import (
     ToolExecutor,
     _parse_tool_params,
     _publish_tool_invocation,
-    _restore_filesystem,
-    _snapshot_filesystem,
     _ToolExecutionContext,
     parse_tool_arguments,
     tool_to_spec,
 )
 from weakincentives.contrib.tools import (
+    Filesystem,
     HostFilesystem,
     InMemoryFilesystem,
     SnapshotableFilesystem,
 )
+from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.deadlines import Deadline
 from weakincentives.errors import SnapshotRestoreError
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
@@ -466,130 +467,6 @@ class _TrackingFilesystem(SnapshotableFilesystem):
         raise NotImplementedError
 
 
-class TestSnapshotFilesystem:
-    """Tests for _snapshot_filesystem helper."""
-
-    def test_returns_none_for_none_filesystem(self) -> None:
-        log = get_logger(__name__)
-        result = _snapshot_filesystem(None, log=log)
-        assert result is None
-
-    def test_returns_none_for_non_snapshotable_filesystem(self) -> None:
-        class NonSnapshotable:
-            """A filesystem that doesn't support snapshots."""
-
-        log = get_logger(__name__)
-        result = _snapshot_filesystem(cast(Any, NonSnapshotable()), log=log)
-        assert result is None
-
-    def test_creates_snapshot_for_snapshotable_filesystem(self) -> None:
-        fs = InMemoryFilesystem()
-        log = get_logger(__name__)
-
-        result = _snapshot_filesystem(fs, log=log, tag="test")
-
-        assert result is not None
-        assert result.tag == "test"
-
-    def test_returns_none_on_snapshot_error(self) -> None:
-        class FailingSnapshotable(SnapshotableFilesystem):
-            """A filesystem that fails to snapshot."""
-
-            @property
-            def root_path(self) -> str:
-                return "/test"
-
-            def snapshot(self, *, tag: str | None = None) -> Any:  # noqa: ANN401
-                raise RuntimeError("Snapshot failed")
-
-            def restore(self, snapshot: Any) -> None:  # noqa: ANN401
-                pass
-
-            def read(self, path: str, **kw: object) -> Any:  # noqa: ANN401
-                raise NotImplementedError
-
-            def write(self, path: str, content: str, **kw: object) -> Any:  # noqa: ANN401
-                raise NotImplementedError
-
-            def remove(self, path: str, **kw: object) -> Any:  # noqa: ANN401
-                raise NotImplementedError
-
-            def stat(self, path: str) -> Any:  # noqa: ANN401
-                raise NotImplementedError
-
-            def glob(self, pattern: str, **kw: object) -> Any:  # noqa: ANN401
-                raise NotImplementedError
-
-            def grep(self, pattern: str, **kw: object) -> Any:  # noqa: ANN401
-                raise NotImplementedError
-
-        log = get_logger(__name__)
-        result = _snapshot_filesystem(cast(Any, FailingSnapshotable()), log=log)
-        assert result is None
-
-
-class TestRestoreFilesystem:
-    """Tests for _restore_filesystem helper."""
-
-    def test_returns_true_for_none_snapshot(self) -> None:
-        fs = InMemoryFilesystem()
-        log = get_logger(__name__)
-
-        result = _restore_filesystem(fs, None, log=log)
-
-        assert result is True
-
-    def test_returns_true_for_none_filesystem(self) -> None:
-        fs = InMemoryFilesystem()
-        log = get_logger(__name__)
-        snapshot = fs.snapshot()
-
-        result = _restore_filesystem(None, snapshot, log=log)
-
-        assert result is True
-
-    def test_returns_true_for_non_snapshotable_filesystem(self) -> None:
-        fs = InMemoryFilesystem()
-        log = get_logger(__name__)
-        snapshot = fs.snapshot()
-
-        class NonSnapshotable:
-            """A filesystem that doesn't support snapshots."""
-
-        result = _restore_filesystem(cast(Any, NonSnapshotable()), snapshot, log=log)
-
-        assert result is True
-
-    def test_restores_successfully(self) -> None:
-        fs = InMemoryFilesystem()
-        log = get_logger(__name__)
-
-        # Create a file and snapshot
-        fs.write("/test.txt", "original")
-        snapshot = fs.snapshot()
-
-        # Modify the file
-        fs.write("/test.txt", "modified")
-        assert fs.read("/test.txt").content == "modified"
-
-        # Restore
-        result = _restore_filesystem(fs, snapshot, log=log)
-
-        assert result is True
-        assert fs.read("/test.txt").content == "original"
-
-    def test_returns_false_on_restore_error(self) -> None:
-        log = get_logger(__name__)
-
-        inner_fs = InMemoryFilesystem()
-        fs = _FailingRestoreFilesystem(inner_fs)
-        snapshot = fs.snapshot()
-
-        result = _restore_filesystem(fs, snapshot, log=log)
-
-        assert result is False
-
-
 class _MockPromptWithFilesystem:
     """Mock prompt that returns a filesystem."""
 
@@ -598,6 +475,14 @@ class _MockPromptWithFilesystem:
 
     def filesystem(self) -> InMemoryFilesystem:
         return self._fs
+
+
+def _create_execution_state(
+    session: Session, fs: InMemoryFilesystem
+) -> ExecutionState:
+    """Create an ExecutionState with filesystem for transactional tool execution."""
+    resources = ResourceRegistry.build({Filesystem: fs})
+    return ExecutionState(session=session, resources=resources)
 
 
 # Parameter classes for filesystem integration tests
@@ -711,6 +596,7 @@ class TestToolExecutionFilesystemIntegration:
             {tool.name: tool},
         )
 
+        execution_state = _create_execution_state(session, fs)
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -722,6 +608,7 @@ class TestToolExecutionFilesystemIntegration:
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
+            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -771,6 +658,7 @@ class TestToolExecutionFilesystemIntegration:
             {tool.name: tool},
         )
 
+        execution_state = _create_execution_state(session, fs)
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -782,6 +670,7 @@ class TestToolExecutionFilesystemIntegration:
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
+            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -862,21 +751,6 @@ class TestPublishInvocationFilesystemRestore:
         """Verify filesystem is restored when event publishing fails."""
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "before_tool")
-        snapshot = fs.snapshot(tag="before_tool")
-
-        # Modify file to simulate what tool did
-        fs.write("/test.txt", "after_tool")
-
-        tool = Tool[EchoParams, EchoPayload](
-            name="echo",
-            description="Echo",
-            handler=echo_handler,
-        )
-        params = EchoParams(value="hello")
-        result = ToolResult(
-            message="echoed", value=EchoPayload(value="hello"), success=True
-        )
-        log = get_logger(__name__)
 
         def dummy_handler(e: object) -> None:
             pass
@@ -900,6 +774,25 @@ class TestPublishInvocationFilesystemRestore:
 
         bus = FailingBus()
         session = Session(bus=bus)
+
+        # Create ExecutionState and take snapshot BEFORE tool modifications
+        execution_state = _create_execution_state(session, fs)
+        composite_snapshot = execution_state.snapshot(tag="before_tool")
+
+        # Modify file to simulate what tool did
+        fs.write("/test.txt", "after_tool")
+
+        tool = Tool[EchoParams, EchoPayload](
+            name="echo",
+            description="Echo",
+            handler=echo_handler,
+        )
+        params = EchoParams(value="hello")
+        result = ToolResult(
+            message="echoed", value=EchoPayload(value="hello"), success=True
+        )
+        log = get_logger(__name__)
+
         typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
         tool_registry: Mapping[
             str, Tool[SupportsDataclassOrNone, SupportsToolResult]
@@ -916,6 +809,7 @@ class TestPublishInvocationFilesystemRestore:
             parse_arguments=parse_tool_arguments,
             format_publish_failures=lambda errors: "publish failed",
             deadline=None,
+            execution_state=execution_state,
         )
 
         outcome = ToolExecutionOutcome(
@@ -925,7 +819,7 @@ class TestPublishInvocationFilesystemRestore:
             call_id="call-publish-fail",
             log=log,
             filesystem=fs,
-            fs_snapshot=snapshot,
+            snapshot=composite_snapshot,
         )
 
         _publish_tool_invocation(context=context, outcome=outcome)
@@ -938,7 +832,34 @@ class TestPublishInvocationFilesystemRestore:
         inner_fs = InMemoryFilesystem()
         inner_fs.write("/test.txt", "original")
         fs = _TrackingFilesystem(inner_fs)
-        snapshot = fs.snapshot(tag="original")
+
+        def dummy_handler(e: object) -> None:
+            pass
+
+        class FailingBus(EventBus):
+            def subscribe(
+                self, event_type: type[object], handler: EventHandler
+            ) -> None:
+                pass
+
+            def publish(self, event: object) -> PublishResult:
+                return PublishResult(
+                    event=event,
+                    handlers_invoked=(),
+                    errors=(
+                        HandlerFailure(
+                            handler=dummy_handler, error=Exception("publish failed")
+                        ),
+                    ),
+                )
+
+        bus = FailingBus()
+        session = Session(bus=bus)
+
+        # Create ExecutionState and take snapshot
+        resources = ResourceRegistry.build({Filesystem: fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+        composite_snapshot = execution_state.snapshot(tag="original")
 
         # File is already restored (simulating what tool_execution did)
         # by keeping original content
@@ -955,28 +876,6 @@ class TestPublishInvocationFilesystemRestore:
         )
         log = get_logger(__name__)
 
-        def dummy_handler(e: object) -> None:
-            pass
-
-        class FailingBus(EventBus):
-            def subscribe(
-                self, event_type: type[object], handler: EventHandler
-            ) -> None:
-                pass
-
-            def publish(self, event: object) -> PublishResult:
-                return PublishResult(
-                    event=event,
-                    handlers_invoked=(),
-                    errors=(
-                        HandlerFailure(
-                            handler=dummy_handler, error=Exception("publish failed")
-                        ),
-                    ),
-                )
-
-        bus = FailingBus()
-        session = Session(bus=bus)
         typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
         tool_registry: Mapping[
             str, Tool[SupportsDataclassOrNone, SupportsToolResult]
@@ -993,6 +892,7 @@ class TestPublishInvocationFilesystemRestore:
             parse_arguments=parse_tool_arguments,
             format_publish_failures=lambda errors: "publish failed",
             deadline=None,
+            execution_state=execution_state,
         )
 
         outcome = ToolExecutionOutcome(
@@ -1002,7 +902,7 @@ class TestPublishInvocationFilesystemRestore:
             call_id="call-already-failed",
             log=log,
             filesystem=fs,
-            fs_snapshot=snapshot,
+            snapshot=composite_snapshot,
         )
 
         _publish_tool_invocation(context=context, outcome=outcome)
@@ -1078,6 +978,7 @@ class TestFilesystemSnapshotIntegration:
             {tool.name: tool},
         )
 
+        execution_state = _create_execution_state(session, fs)
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -1089,6 +990,7 @@ class TestFilesystemSnapshotIntegration:
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
+            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1145,6 +1047,7 @@ class TestFilesystemSnapshotIntegration:
             {tool.name: tool},
         )
 
+        execution_state = _create_execution_state(session, fs)
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -1156,6 +1059,7 @@ class TestFilesystemSnapshotIntegration:
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
+            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1349,6 +1253,7 @@ class TestFilesystemSnapshotIntegration:
             {tool.name: tool},
         )
 
+        execution_state = _create_execution_state(session, fs)
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -1360,6 +1265,7 @@ class TestFilesystemSnapshotIntegration:
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
+            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1416,6 +1322,7 @@ class TestFilesystemSnapshotIntegration:
             {tool.name: tool},
         )
 
+        execution_state = _create_execution_state(session, fs)
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -1427,6 +1334,7 @@ class TestFilesystemSnapshotIntegration:
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
+            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1489,6 +1397,8 @@ class TestHostFilesystemToolIntegration:
             {tool.name: tool},
         )
 
+        resources = ResourceRegistry.build({Filesystem: fs})
+        execution_state = ExecutionState(session=session, resources=resources)
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -1500,6 +1410,7 @@ class TestHostFilesystemToolIntegration:
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
+            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1615,6 +1526,8 @@ class TestHostFilesystemToolIntegration:
             {tool.name: tool},
         )
 
+        resources = ResourceRegistry.build({Filesystem: fs})
+        execution_state = ExecutionState(session=session, resources=resources)
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -1626,6 +1539,7 @@ class TestHostFilesystemToolIntegration:
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
+            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(

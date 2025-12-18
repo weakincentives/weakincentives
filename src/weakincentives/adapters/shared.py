@@ -26,14 +26,10 @@ from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cas
 from uuid import uuid4
 
 from ..budget import BudgetExceededError, BudgetTracker
-from ..contrib.tools.filesystem import (
-    Filesystem,
-    FilesystemSnapshot,
-    SnapshotableFilesystem,
-)
+from ..contrib.tools.filesystem import Filesystem
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
-from ..errors import DeadlineExceededError, SnapshotRestoreError, ToolValidationError
+from ..errors import DeadlineExceededError, ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
@@ -52,6 +48,7 @@ from ..runtime.events import (
     TokenUsage,
     ToolInvoked,
 )
+from ..runtime.execution_state import CompositeSnapshot, ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse, schema
 from ..types import JSONValue
@@ -521,7 +518,7 @@ class ToolExecutionOutcome:
     call_id: str | None
     log: StructuredLogger
     filesystem: Filesystem | None = None
-    fs_snapshot: FilesystemSnapshot | None = None
+    snapshot: CompositeSnapshot | None = None
 
 
 def _resolve_tool_and_handler(
@@ -699,197 +696,164 @@ def _handle_unexpected_tool_error(
     )
 
 
-def _snapshot_filesystem(
-    filesystem: Filesystem | None,
-    *,
-    log: StructuredLogger,
-    tag: str | None = None,
-) -> FilesystemSnapshot | None:
-    """Take a filesystem snapshot if the filesystem supports it.
-
-    Returns the snapshot if successful, None otherwise.
-    """
-    if filesystem is None:
-        return None
-    if not isinstance(filesystem, SnapshotableFilesystem):
-        return None
-    try:
-        snapshot = filesystem.snapshot(tag=tag)
-    except Exception as error:
-        log.warning(
-            "Failed to create filesystem snapshot.",
-            event="filesystem_snapshot_failed",
-            context={"error": str(error)},
-        )
-        return None
-    else:
-        log.debug(
-            "Filesystem snapshot created.",
-            event="filesystem_snapshot_created",
-            context={"snapshot_id": str(snapshot.snapshot_id)},
-        )
-        return snapshot
-
-
-def _restore_filesystem(
-    filesystem: Filesystem | None,
-    snapshot: FilesystemSnapshot | None,
-    *,
-    log: StructuredLogger,
-) -> bool:
-    """Restore a filesystem from a snapshot.
-
-    Returns True if restoration was successful or not needed, False on error.
-    """
-    if snapshot is None or filesystem is None:
-        return True
-    if not isinstance(filesystem, SnapshotableFilesystem):
-        return True
-    try:
-        filesystem.restore(snapshot)
-    except SnapshotRestoreError as error:
-        log.exception(
-            "Failed to restore filesystem from snapshot.",
-            event="filesystem_restore_failed",
-            context={"snapshot_id": str(snapshot.snapshot_id), "error": str(error)},
-        )
-        return False
-    else:
-        log.debug(
-            "Filesystem restored from snapshot.",
-            event="filesystem_snapshot_restored",
-            context={"snapshot_id": str(snapshot.snapshot_id)},
-        )
-        return True
-
-
-def _execute_tool_handler(
-    *,
-    context: _ToolExecutionContext,
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
-    handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
-    tool_params: SupportsDataclass | None,
-    filesystem: Filesystem | None,
-) -> ToolResult[SupportsToolResult]:
-    """Execute the tool handler and build the tool context."""
-    _ensure_deadline_not_expired(
-        deadline=context.deadline,
-        prompt_name=context.prompt_name,
-        tool_name=tool.name,
-    )
-    resources = _build_resources(
-        filesystem=filesystem,
-        budget_tracker=context.budget_tracker,
-    )
-    tool_context = ToolContext(
-        prompt=cast(PromptProtocol[Any], context.prompt),
-        rendered_prompt=context.rendered_prompt,
-        adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
-        session=context.session,
-        deadline=context.deadline,
-        resources=resources,
-    )
-    return _invoke_tool_handler(
-        handler=handler,
-        tool_params=tool_params,
-        context=tool_context,
-    )
-
-
-def _handle_tool_exception(
-    error: Exception,
-    *,
-    context: _ToolExecutionContext,
-    tool_name: str,
-    log: StructuredLogger,
-    fs_state: tuple[Filesystem | None, FilesystemSnapshot | None],
-) -> ToolResult[SupportsToolResult]:
-    """Handle exceptions during tool execution."""
-    filesystem, fs_snapshot = fs_state
-    if isinstance(error, DeadlineExceededError):
-        _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
-        raise _handle_tool_deadline_error(
-            error=error,
-            prompt_name=context.prompt_name,
-            tool_name=tool_name,
-            deadline=context.deadline,
-        ) from error
-    _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
-    return _handle_unexpected_tool_error(
-        log=log,
-        tool_name=tool_name,
-        provider_payload=context.provider_payload,
-        error=error,
-    )
-
-
-def _ensure_tool_params(
-    tool_params: SupportsDataclass | None,
-    arguments_mapping: Mapping[str, Any],
-    error: Exception,
-) -> SupportsDataclass:
-    """Ensure tool_params is set, creating rejected params if needed."""
-    if tool_params is not None:
-        return tool_params
-    return cast(
-        SupportsDataclass,
-        _rejected_params(arguments_mapping=arguments_mapping, error=error),
-    )
-
-
 @contextmanager
 def tool_execution(
     *,
     context: _ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> Iterator[ToolExecutionOutcome]:
-    """Context manager that executes a tool call and standardizes logging."""
+    """Context manager that executes a tool call and standardizes logging.
+
+    Uses ExecutionState for transactional semantics when available. This ensures
+    both session state and filesystem are rolled back on tool failure.
+    """
     tool, handler = _resolve_tool_and_handler(
         tool_call=tool_call,
         tool_registry=context.tool_registry,
         prompt_name=context.prompt_name,
         provider_payload=context.provider_payload,
     )
+    tool_name = tool.name
     arguments_mapping = _parse_tool_call_arguments(
         tool_call=tool_call,
         prompt_name=context.prompt_name,
         provider_payload=context.provider_payload,
         parse_arguments=context.parse_arguments,
     )
-    call_id, log = _build_tool_logger(
-        context=context, tool_name=tool.name, tool_call=tool_call
-    )
-    filesystem = context.prompt.filesystem() if context.prompt else None
-    fs_snapshot = _snapshot_filesystem(filesystem, log=log, tag=f"tool:{tool.name}")
 
+    call_id, log = _build_tool_logger(
+        context=context,
+        tool_name=tool_name,
+        tool_call=tool_call,
+    )
+
+    # Get filesystem for ToolContext
+    filesystem = context.prompt.filesystem() if context.prompt else None
+
+    # Use transactional execution if ExecutionState is available
+    if context.execution_state is not None:
+        with context.execution_state.tool_transaction(
+            tag=f"tool:{tool_name}"
+        ) as snapshot:
+            yield from _execute_tool_with_snapshot(
+                context=context,
+                tool=tool,
+                handler=handler,
+                tool_name=tool_name,
+                arguments_mapping=arguments_mapping,
+                call_id=call_id,
+                log=log,
+                filesystem=filesystem,
+                snapshot=snapshot,
+            )
+    else:
+        yield from _execute_tool_with_snapshot(
+            context=context,
+            tool=tool,
+            handler=handler,
+            tool_name=tool_name,
+            arguments_mapping=arguments_mapping,
+            call_id=call_id,
+            log=log,
+            filesystem=filesystem,
+            snapshot=None,
+        )
+
+
+def _restore_snapshot_if_needed(
+    execution_state: ExecutionState | None,
+    snapshot: CompositeSnapshot | None,
+    log: StructuredLogger,
+    *,
+    reason: str,
+) -> None:
+    """Restore from snapshot if execution state and snapshot are available."""
+    if execution_state is not None and snapshot is not None:
+        execution_state.restore(snapshot)
+        log.debug(
+            f"State restored after {reason}.",
+            event=f"tool.{reason}_restore",
+        )
+
+
+def _execute_tool_with_snapshot(  # noqa: PLR0913
+    *,
+    context: _ToolExecutionContext,
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
+    tool_name: str,
+    arguments_mapping: Mapping[str, Any],
+    call_id: str | None,
+    log: StructuredLogger,
+    filesystem: Filesystem | None,
+    snapshot: CompositeSnapshot | None,
+) -> Iterator[ToolExecutionOutcome]:
+    """Execute tool with optional transactional snapshot restore on failure."""
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsToolResult]
     try:
         tool_params = _parse_tool_params(tool=tool, arguments_mapping=arguments_mapping)
-        tool_result = _execute_tool_handler(
-            context=context,
-            tool=tool,
+        _ensure_deadline_not_expired(
+            deadline=context.deadline,
+            prompt_name=context.prompt_name,
+            tool_name=tool_name,
+        )
+        resources = _build_resources(
+            filesystem=filesystem,
+            budget_tracker=context.budget_tracker,
+        )
+        tool_context = ToolContext(
+            prompt=cast(PromptProtocol[Any], context.prompt),
+            rendered_prompt=context.rendered_prompt,
+            adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
+            session=context.session,
+            deadline=context.deadline,
+            resources=resources,
+        )
+        tool_result = _invoke_tool_handler(
             handler=handler,
             tool_params=tool_params,
-            filesystem=filesystem,
+            context=tool_context,
         )
     except ToolValidationError as error:
-        tool_params = _ensure_tool_params(tool_params, arguments_mapping, error)
+        # Validation errors happen before tool invocation, no restore needed
+        if tool_params is None:
+            tool_params = cast(
+                SupportsDataclass,
+                _rejected_params(arguments_mapping=arguments_mapping, error=error),
+            )
         tool_result = _handle_tool_validation_error(log=log, error=error)
-    except (VisibilityExpansionRequired, PromptEvaluationError):
+    except VisibilityExpansionRequired:
+        # Context manager handles restore; just re-raise
         raise
-    except Exception as error:
-        tool_params = _ensure_tool_params(tool_params, arguments_mapping, error)
-        tool_result = _handle_tool_exception(
-            error,
-            context=context,
-            tool_name=tool.name,
+    except PromptEvaluationError:
+        # Context manager handles restore; just re-raise
+        raise
+    except DeadlineExceededError as error:
+        # Context manager handles restore for re-raised exceptions
+        raise _handle_tool_deadline_error(
+            error=error,
+            prompt_name=context.prompt_name,
+            tool_name=tool_name,
+            deadline=context.deadline,
+        ) from error
+    except Exception as error:  # propagate message via ToolResult
+        # Manually restore since we're catching and returning, not re-raising
+        _restore_snapshot_if_needed(
+            context.execution_state, snapshot, log, reason="exception"
+        )
+        tool_result = _handle_unexpected_tool_error(
             log=log,
-            fs_state=(filesystem, fs_snapshot),
+            tool_name=tool_name,
+            provider_payload=context.provider_payload,
+            error=error,
         )
     else:
+        # Manually restore if tool execution reported failure
         if not tool_result.success:
-            _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
+            _restore_snapshot_if_needed(
+                context.execution_state, snapshot, log, reason="tool_failure"
+            )
         _log_tool_completion(log, tool_result)
 
     if tool_params is None:  # pragma: no cover - defensive
@@ -902,7 +866,7 @@ def tool_execution(
         call_id=call_id,
         log=log,
         filesystem=filesystem,
-        fs_snapshot=fs_snapshot,
+        snapshot=snapshot,
     )
 
 
@@ -911,7 +875,6 @@ def _publish_tool_invocation(
     context: _ToolExecutionContext,
     outcome: ToolExecutionOutcome,
 ) -> ToolInvoked:
-    snapshot = context.session.snapshot()
     session_id = getattr(context.session, "session_id", None)
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
@@ -931,15 +894,17 @@ def _publish_tool_invocation(
     )
     publish_result = context.session.event_bus.publish(invocation)
     if not publish_result.ok:
-        context.session.rollback(snapshot)
-        # Restore filesystem if tool succeeded (not already restored during execution)
-        if outcome.result.success:
-            _ = _restore_filesystem(
-                outcome.filesystem, outcome.fs_snapshot, log=outcome.log
+        # Restore to pre-tool state if tool succeeded (not already restored)
+        if outcome.result.success and outcome.snapshot is not None:
+            _restore_snapshot_if_needed(
+                context.execution_state,
+                outcome.snapshot,
+                outcome.log,
+                reason="publish_failure",
             )
         outcome.log.warning(
-            "Session rollback triggered after publish failure.",
-            event="session_rollback_due_to_publish_failure",
+            "State rollback triggered after publish failure.",
+            event="state_rollback_due_to_publish_failure",
         )
         failure_handlers = [
             getattr(failure.handler, "__qualname__", repr(failure.handler))
@@ -1294,6 +1259,7 @@ class InnerLoopConfig:
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
+    execution_state: ExecutionState | None = None
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> InnerLoopConfig:
         """Fill in optional settings using rendered prompt metadata."""
@@ -1318,6 +1284,7 @@ class ToolExecutor:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
+    execution_state: ExecutionState | None = None
     _log: StructuredLogger = field(init=False)
     _context: _ToolExecutionContext = field(init=False)
     _tool_message_records: list[
@@ -1340,6 +1307,7 @@ class ToolExecutor:
             parse_arguments=self.parse_arguments,
             format_publish_failures=self.format_publish_failures,
             deadline=self.deadline,
+            execution_state=self.execution_state,
             logger_override=self.logger_override,
             budget_tracker=self.budget_tracker,
         )
@@ -1684,6 +1652,7 @@ class InnerLoop[OutputT]:
             logger_override=self.config.logger_override,
             deadline=self._deadline,
             budget_tracker=self.config.budget_tracker,
+            execution_state=self.config.execution_state,
         )
         self._response_parser = ResponseParser[OutputT](
             prompt_name=self.inputs.prompt_name,
@@ -1875,6 +1844,7 @@ class _ToolExecutionContext:
     parse_arguments: ToolArgumentsParser
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
     deadline: Deadline | None
+    execution_state: ExecutionState | None = None
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
     budget_tracker: BudgetTracker | None = None

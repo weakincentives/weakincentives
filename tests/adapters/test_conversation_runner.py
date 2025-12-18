@@ -59,6 +59,7 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import SessionProtocol
 from weakincentives.runtime.session.protocols import SnapshotProtocol
 from weakincentives.runtime.session.session import Session
@@ -168,6 +169,7 @@ def build_inner_loop(
     throttle_policy: ThrottlePolicy | None = None,
     budget_tracker: BudgetTracker | None = None,
     deadline: Deadline | None = None,
+    execution_state: ExecutionState | None = None,
 ) -> InnerLoop[object]:
     """Build an InnerLoop instance using the new API."""
     template = PromptTemplate(ns="tests", key="example")
@@ -193,6 +195,7 @@ def build_inner_loop(
         throttle_policy=throttle_policy or new_throttle_policy(),
         budget_tracker=budget_tracker,
         deadline=deadline,
+        execution_state=execution_state,
     )
     return InnerLoop[object](inputs=inputs, config=config)
 
@@ -583,11 +586,13 @@ def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
     session = SessionStub(event_bus=RecordingBus(fail_tool=True))
+    execution_state = ExecutionState(session=session)
 
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,
         session=session,
+        execution_state=execution_state,
     )
     response = loop.run()
 
