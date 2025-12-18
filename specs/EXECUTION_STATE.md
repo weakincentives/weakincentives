@@ -25,7 +25,8 @@ no trace in mutable state.
 flowchart TB
     subgraph ExecutionState["ExecutionState (Single Root)"]
         Session["Session<br/>(typed slices)"]
-        Filesystem["Filesystem<br/>(snapshotable)"]
+        Resources["ResourceRegistry"]
+        Resources --> Filesystem["Filesystem<br/>(snapshotable)"]
     end
 
     subgraph Transaction["Tool Transaction"]
@@ -51,23 +52,47 @@ class ExecutionState:
     """Unified root for all mutable runtime state during evaluation."""
 
     session: Session
-    filesystem: SnapshotableFilesystem | None = None
+    resources: ResourceRegistry
 
     def snapshot(self, *, tag: str | None = None) -> CompositeSnapshot:
-        """Capture consistent snapshot of session and filesystem."""
+        """Capture consistent snapshot of session and all snapshotable resources."""
         ...
 
     def restore(self, snapshot: CompositeSnapshot) -> None:
-        """Restore session and filesystem from a composite snapshot."""
+        """Restore session and resources from a composite snapshot."""
         ...
 ```
 
 ### Ownership Semantics
 
 - `MainLoop.execute()` creates or receives an `ExecutionState`.
-- Adapters accept `ExecutionState` instead of individual `(session, filesystem, ...)` parameters.
+- Adapters accept `ExecutionState` instead of individual parameters.
 - `ToolContext` carries `ExecutionState` (or a reference to it).
-- Filesystem is owned by the workspace section and registered on `ExecutionState`.
+- Snapshotable resources (filesystem, etc.) are registered in `resources`.
+
+### Resource Registry
+
+The `ResourceRegistry` holds typed runtime resources that may be snapshotable:
+
+```python
+@dataclass(slots=True, frozen=True)
+class ResourceRegistry:
+    """Typed container for runtime resources."""
+
+    _entries: Mapping[type[object], object]
+
+    def get[T](self, resource_type: type[T]) -> T | None: ...
+    def get[T](self, resource_type: type[T], default: T) -> T: ...
+
+    def snapshotable_resources(self) -> Mapping[type[object], Snapshotable[object]]:
+        """Return all resources that implement Snapshotable."""
+        return {
+            k: v for k, v in self._entries.items()
+            if isinstance(v, Snapshotable)
+        }
+```
+
+For this initial version, `Filesystem` is the primary snapshotable resource:
 
 ## Snapshotable Protocol
 
@@ -96,40 +121,43 @@ class Snapshotable(Protocol[SnapshotT]):
 | `InMemoryFilesystem` | `FilesystemSnapshot` | Structural sharing of file dicts |
 | `HostFilesystem` | `FilesystemSnapshot` | Git commits |
 
-### Session Adapter
+### Session Implementation
 
-`Session` already provides `snapshot()` and `rollback()`; we wrap it to fit the
-`Snapshotable` protocol:
+`Session` implements `Snapshotable[Snapshot]` directly by renaming `rollback()`
+to `restore()`:
 
 ```python
-class SessionSnapshotAdapter(Snapshotable[Snapshot]):
-    """Adapts Session to the Snapshotable protocol."""
-
-    def __init__(self, session: Session) -> None:
-        self._session = session
+class Session(Snapshotable[Snapshot]):
+    """Session implements Snapshotable directly."""
 
     def snapshot(self, *, tag: str | None = None) -> Snapshot:
-        return self._session.snapshot()
+        """Capture current slice state as an immutable snapshot."""
+        ...
 
     def restore(self, snapshot: Snapshot) -> None:
-        self._session.rollback(snapshot)
+        """Restore slice state from a snapshot (was: rollback)."""
+        ...
 ```
+
+**Migration note**: The existing `rollback()` method is renamed to `restore()`
+for consistency with the `Snapshotable` protocol. A deprecated alias can be
+retained temporarily.
 
 ## Composite Snapshot
 
 ### Definition
 
-A composite snapshot captures session and filesystem state atomically:
+A composite snapshot captures session and all snapshotable resources atomically:
 
 ```python
 @dataclass(slots=True, frozen=True)
 class CompositeSnapshot:
-    """Consistent snapshot of session and filesystem state."""
+    """Consistent snapshot of session and snapshotable resources."""
 
     snapshot_id: UUID
     created_at: datetime
     session: Snapshot
-    filesystem: FilesystemSnapshot | None = None
+    resources: Mapping[type[object], object]  # Resource type -> snapshot
     metadata: SnapshotMetadata | None = None
 
     def to_json(self) -> str:
@@ -158,24 +186,31 @@ class SnapshotMetadata:
 @dataclass(slots=True)
 class ExecutionState:
     session: Session
-    filesystem: SnapshotableFilesystem | None = None
+    resources: ResourceRegistry
 
     def snapshot(self, *, tag: str | None = None) -> CompositeSnapshot:
-        """Capture consistent snapshot of session and filesystem."""
+        """Capture consistent snapshot of session and all snapshotable resources."""
+        resource_snapshots: dict[type[object], object] = {}
+
+        for resource_type, resource in self.resources.snapshotable_resources().items():
+            resource_snapshots[resource_type] = resource.snapshot(tag=tag)
+
         return CompositeSnapshot(
             snapshot_id=uuid4(),
             created_at=datetime.now(UTC),
             session=self.session.snapshot(),
-            filesystem=self.filesystem.snapshot(tag=tag) if self.filesystem else None,
+            resources=types.MappingProxyType(resource_snapshots),
             metadata=SnapshotMetadata(tag=tag),
         )
 
     def restore(self, snapshot: CompositeSnapshot) -> None:
-        """Restore session and filesystem from a composite snapshot."""
-        self.session.rollback(snapshot.session)
+        """Restore session and all snapshotable resources from a composite snapshot."""
+        self.session.restore(snapshot.session)
 
-        if self.filesystem is not None and snapshot.filesystem is not None:
-            self.filesystem.restore(snapshot.filesystem)
+        for resource_type, resource_snapshot in snapshot.resources.items():
+            resource = self.resources.get(resource_type)
+            if resource is not None and isinstance(resource, Snapshotable):
+                resource.restore(resource_snapshot)
 ```
 
 ## Slice Policies
@@ -249,7 +284,7 @@ class Session:
         """
         ...
 
-    def rollback(
+    def restore(
         self,
         snapshot: Snapshot,
         *,
@@ -391,7 +426,7 @@ snapshot = session.snapshot()
 session.broadcast(UpdateStep(...))
 
 # Restore to captured state
-session.rollback(snapshot)
+session.restore(snapshot)
 ```
 
 ### Enhanced Behavior
@@ -405,11 +440,11 @@ tx_snapshot = session.snapshot()
 # Full snapshot: all slices including logs
 full_snapshot = session.snapshot(include_all=True)
 
-# Rollback preserves LOG slices by default
-session.rollback(tx_snapshot)  # ToolInvoked entries preserved
+# Restore preserves LOG slices by default
+session.restore(tx_snapshot)  # ToolInvoked entries preserved
 
-# Force full rollback (testing/debugging)
-session.rollback(full_snapshot, preserve_logs=False)
+# Force full restore (testing/debugging)
+session.restore(full_snapshot, preserve_logs=False)
 ```
 
 ### Snapshot Serialization
@@ -457,13 +492,14 @@ fs.restore(fs_snapshot)
 Filesystem snapshots are captured as part of `ExecutionState.snapshot()`:
 
 ```python
-# Create execution state with session and filesystem
-state = ExecutionState(session=session, filesystem=fs)
+# Filesystem registered as snapshotable resource
+resources = ResourceRegistry.build({Filesystem: fs})
+state = ExecutionState(session=session, resources=resources)
 
-# Composite snapshot includes both session and filesystem
+# Composite snapshot includes session and all snapshotable resources
 composite = state.snapshot(tag="pre:tool_call")
 
-# Restore restores both session and filesystem
+# Restore restores session and all snapshotable resources
 state.restore(composite)
 ```
 
@@ -543,7 +579,7 @@ A tool that writes to filesystem, broadcasts to session, and returns
 
 ```python
 def test_tool_failure_rollback(execution_state: ExecutionState):
-    fs = execution_state.filesystem
+    fs = execution_state.resources.get(Filesystem)
     session = execution_state.session
 
     # Initial state
@@ -567,7 +603,7 @@ State is exactly as if the tool never ran:
 
 ```python
 def test_visibility_expansion_rollback(execution_state: ExecutionState):
-    fs = execution_state.filesystem
+    fs = execution_state.resources.get(Filesystem)
 
     fs.write("data.txt", "before")
     snapshot_before = execution_state.snapshot()
