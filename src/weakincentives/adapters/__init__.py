@@ -33,6 +33,7 @@ from .core import (
     ProviderAdapter,
 )
 from .shared import ThrottleError, ThrottlePolicy, new_throttle_policy
+from .tool_runner import ToolRunner
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
@@ -49,6 +50,7 @@ __all__ = [
     "ProviderAdapter",
     "ThrottleError",
     "ThrottlePolicy",
+    "ToolRunner",
     "new_throttle_policy",
 ]
 

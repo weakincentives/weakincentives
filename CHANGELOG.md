@@ -4,6 +4,59 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Added
+
+- **ExecutionState: unified runtime state root.** New `ExecutionState` class
+  provides transactional semantics for tool execution by owning both session
+  state and snapshotable resources. Failed or aborted tool calls automatically
+  restore state from composite snapshots:
+
+  ```python
+  from weakincentives.runtime import ExecutionState
+
+  state = ExecutionState(session=session, resources=resources)
+  snapshot = state.snapshot(tag="pre:tool_call")
+
+  # Execute tool...
+  if not result.success:
+      state.restore(snapshot)  # Atomic rollback
+  ```
+
+- **CompositeSnapshot for coordinated state capture.** `CompositeSnapshot`
+  captures session slices and all snapshotable resources (e.g., filesystem)
+  in a single point-in-time snapshot, enabling consistent rollback across
+  multiple state containers.
+
+- **Snapshotable protocol.** New `@runtime_checkable` protocol for objects
+  supporting `snapshot(tag=...)` and `restore(snapshot)` operations. Both
+  `Session` and `SnapshotableFilesystem` satisfy this protocol.
+
+- **SlicePolicy enum.** Classifies session slices for selective rollback:
+
+  - `STATE`: Working state restored on tool failure (Plan, VisibilityOverrides)
+  - `LOG`: Append-only records preserved during restore (ToolInvoked events)
+
+- **ToolRunner for unified tool execution.** New `ToolRunner` provides
+  identical transaction semantics across all adapters - automatic snapshot
+  before execution and restore on failure:
+
+  ```python
+  from weakincentives.adapters import ToolRunner
+
+  runner = ToolRunner(execution_state=state, tool_registry=tools, prompt_name="my_prompt")
+  result = runner.execute(tool_call, context=context)
+  # State automatically restored if result.success is False
+  ```
+
+- **New error classes** for execution state operations:
+
+  - `ExecutionStateError`: Base for execution state errors
+  - `SnapshotMismatchError`: Snapshot incompatible with current state
+  - `RestoreFailedError`: Failed to restore from snapshot
+
+- **ResourceRegistry.snapshotable_resources()** returns all registered
+  resources implementing the `Snapshotable` protocol.
+
 ## v0.15.0 - 2025-12-17
 
 ### Added
