@@ -53,7 +53,8 @@ from __future__ import annotations
 
 import json
 import types
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Literal, cast
@@ -462,6 +463,47 @@ class ExecutionState:
                     raise RestoreFailedError(
                         f"Failed to restore {resource_type.__qualname__}: {error}"
                     ) from error
+
+    @contextmanager
+    def tool_transaction(
+        self,
+        *,
+        tag: str | None = None,
+    ) -> Iterator[CompositeSnapshot]:
+        """Context manager for transactional tool execution.
+
+        Takes a snapshot before the block executes. On any exception, the
+        snapshot is automatically restored before re-raising. For explicit
+        failure handling (e.g., `result.success == False`), the caller can
+        restore manually using the yielded snapshot.
+
+        This context manager provides consistent transaction semantics for
+        synchronous tool execution in adapters like BridgedTool and ToolRunner.
+
+        Example usage::
+
+            with execution_state.tool_transaction(tag="pre:my_tool") as snapshot:
+                result = execute_tool(...)
+                if not result.success:
+                    execution_state.restore(snapshot)
+                    return result
+                return result
+
+        Args:
+            tag: Optional human-readable label for the snapshot.
+
+        Yields:
+            CompositeSnapshot that can be used for manual restoration.
+
+        Raises:
+            Any exception from the block, after state restoration.
+        """
+        snapshot = self.snapshot(tag=tag)
+        try:
+            yield snapshot
+        except Exception:
+            self.restore(snapshot)
+            raise
 
     def _snapshotable_resources(self) -> Mapping[type[object], Snapshotable]:
         """Return all resources that implement Snapshotable."""

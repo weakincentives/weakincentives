@@ -23,9 +23,9 @@ from ...budget import BudgetTracker
 from ...contrib.tools.filesystem import Filesystem
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.tool import ResourceRegistry, Tool, ToolContext, ToolResult
+from ...prompt.tool import ResourceRegistry, Tool, ToolContext, ToolHandler, ToolResult
 from ...runtime.events import ToolInvoked
-from ...runtime.execution_state import ExecutionState
+from ...runtime.execution_state import CompositeSnapshot, ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
 
@@ -127,7 +127,7 @@ class BridgedTool:
         self._adapter_name = adapter_name
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
 
-    def __call__(self, args: dict[str, Any]) -> dict[str, Any]:  # noqa: C901, PLR0912
+    def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
 
         Args:
@@ -146,11 +146,31 @@ class BridgedTool:
                 "isError": True,
             }
 
-        # Take snapshot if execution state available (transactional semantics)
-        pre_snapshot = None
+        # Use transactional context if execution state available
         if self._execution_state is not None:
-            pre_snapshot = self._execution_state.snapshot(tag=f"pre:{self.name}")
+            with self._execution_state.tool_transaction(
+                tag=f"pre:{self.name}"
+            ) as snapshot:
+                return self._execute_handler(handler, args, snapshot=snapshot)
+        return self._execute_handler(handler, args, snapshot=None)
 
+    def _execute_handler(
+        self,
+        handler: ToolHandler[Any, Any],
+        args: dict[str, Any],
+        *,
+        snapshot: CompositeSnapshot | None,
+    ) -> dict[str, Any]:
+        """Execute tool handler with optional transactional semantics.
+
+        Args:
+            handler: The tool handler to execute.
+            args: Tool arguments.
+            snapshot: Pre-execution snapshot for manual restore, or None.
+
+        Returns:
+            MCP-format result dict.
+        """
         try:
             if self._tool.params_type is type(None):
                 params = None
@@ -172,43 +192,14 @@ class BridgedTool:
 
             result = handler(params, context=context)
 
-            # Restore on tool failure if execution state available
-            if not result.success and pre_snapshot is not None:
-                self._execution_state.restore(pre_snapshot)  # type: ignore[union-attr]
-                logger.debug(
-                    "State restored after tool failure.",
-                    event="bridge.failure_restore",
-                    context={"tool_name": self.name},
-                )
+            # Restore on tool failure (manual, since we're returning not raising)
+            if not result.success:
+                self._restore_snapshot(snapshot, reason="tool_failure")
 
-            # Respect exclude_value_from_context to avoid spilling large/sensitive
-            # data into the model context
-            if result.exclude_value_from_context:
-                output_text = result.message
-            else:
-                # Use render() which calls render_tool_payload on the value,
-                # falling back to message if render returns empty
-                rendered = result.render()
-                output_text = rendered if rendered else result.message
-
-            # Publish ToolInvoked event with the actual tool result value
-            # This enables session reducers to dispatch based on the value type
-            self._publish_tool_invoked(args, result, output_text)
-
-            return {
-                "content": [{"type": "text", "text": output_text}],
-                "isError": not result.success,
-            }
+            return self._format_success_result(args, result)
 
         except (TypeError, ValueError) as error:
-            # Restore on validation error
-            if pre_snapshot is not None:
-                self._execution_state.restore(pre_snapshot)  # type: ignore[union-attr]
-                logger.debug(
-                    "State restored after validation error.",
-                    event="bridge.validation_restore",
-                    context={"tool_name": self.name},
-                )
+            self._restore_snapshot(snapshot, reason="validation_error")
             logger.warning(
                 "claude_agent_sdk.bridge.validation_error",
                 event="bridge.validation_error",
@@ -220,25 +211,13 @@ class BridgedTool:
             }
 
         except VisibilityExpansionRequired:
-            # Restore on visibility expansion
-            if pre_snapshot is not None:
-                self._execution_state.restore(pre_snapshot)  # type: ignore[union-attr]
-                logger.debug(
-                    "State restored after visibility expansion required.",
-                    event="bridge.visibility_restore",
-                    context={"tool_name": self.name},
-                )
+            # Context manager handles restore; just re-raise
             raise
 
         except Exception as error:
-            # Restore on any exception
-            if pre_snapshot is not None:
-                self._execution_state.restore(pre_snapshot)  # type: ignore[union-attr]
-                logger.debug(
-                    "State restored after exception.",
-                    event="bridge.exception_restore",
-                    context={"tool_name": self.name},
-                )
+            # Context manager handles restore for propagating exceptions,
+            # but we're catching and returning, so restore manually
+            self._restore_snapshot(snapshot, reason="exception")
             logger.exception(
                 "claude_agent_sdk.bridge.handler_error",
                 event="bridge.handler_error",
@@ -248,6 +227,56 @@ class BridgedTool:
                 "content": [{"type": "text", "text": f"Error: {error}"}],
                 "isError": True,
             }
+
+    def _restore_snapshot(
+        self, snapshot: CompositeSnapshot | None, *, reason: str
+    ) -> None:
+        """Restore from snapshot if available.
+
+        Args:
+            snapshot: CompositeSnapshot to restore, or None.
+            reason: Reason for restore (for logging).
+        """
+        if snapshot is not None and self._execution_state is not None:
+            self._execution_state.restore(snapshot)
+            logger.debug(
+                f"State restored after {reason}.",
+                event=f"bridge.{reason}_restore",
+                context={"tool_name": self.name},
+            )
+
+    def _format_success_result(
+        self,
+        args: dict[str, Any],
+        result: ToolResult[Any],
+    ) -> dict[str, Any]:
+        """Format successful tool result as MCP response.
+
+        Args:
+            args: Original tool arguments.
+            result: Tool execution result.
+
+        Returns:
+            MCP-format result dict.
+        """
+        # Respect exclude_value_from_context to avoid spilling large/sensitive
+        # data into the model context
+        if result.exclude_value_from_context:
+            output_text = result.message
+        else:
+            # Use render() which calls render_tool_payload on the value,
+            # falling back to message if render returns empty
+            rendered = result.render()
+            output_text = rendered if rendered else result.message
+
+        # Publish ToolInvoked event with the actual tool result value
+        # This enables session reducers to dispatch based on the value type
+        self._publish_tool_invoked(args, result, output_text)
+
+        return {
+            "content": [{"type": "text", "text": output_text}],
+            "isError": not result.success,
+        }
 
     def _publish_tool_invoked(
         self,

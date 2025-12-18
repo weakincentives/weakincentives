@@ -1025,3 +1025,92 @@ class TestToolTransactionMethods:
         # Should not be able to modify
         with pytest.raises(TypeError):
             pending["new"] = None  # type: ignore[index]
+
+
+class TestToolTransactionContextManager:
+    """Tests for ExecutionState.tool_transaction context manager."""
+
+    def test_tool_transaction_yields_snapshot(self) -> None:
+        """tool_transaction yields a CompositeSnapshot."""
+        session = Session()
+        state = ExecutionState(session=session)
+
+        with state.tool_transaction(tag="test-tag") as snapshot:
+            assert isinstance(snapshot, CompositeSnapshot)
+            assert snapshot.metadata is not None
+            assert snapshot.metadata.tag == "test-tag"
+
+    def test_tool_transaction_restores_on_exception(self) -> None:
+        """tool_transaction restores state when an exception is raised."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        with pytest.raises(RuntimeError, match="Tool failed"):
+            with state.tool_transaction(tag="pre:tool"):
+                fs.write("/test.txt", "modified")
+                raise RuntimeError("Tool failed")
+
+        # State should be restored after exception
+        assert fs.read("/test.txt").content == "initial"
+
+    def test_tool_transaction_preserves_state_on_success(self) -> None:
+        """tool_transaction preserves state changes on successful exit."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        with state.tool_transaction(tag="pre:tool"):
+            fs.write("/test.txt", "modified")
+
+        # State should be preserved after successful exit
+        assert fs.read("/test.txt").content == "modified"
+
+    def test_tool_transaction_manual_restore_on_failure_result(self) -> None:
+        """tool_transaction allows manual restore for result.success=False."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        with state.tool_transaction(tag="pre:tool") as snapshot:
+            fs.write("/test.txt", "modified")
+            # Simulate tool failure result (not exception)
+            success = False
+            if not success:
+                state.restore(snapshot)
+
+        # State should be restored due to manual restore
+        assert fs.read("/test.txt").content == "initial"
+
+    def test_tool_transaction_reraises_exception(self) -> None:
+        """tool_transaction re-raises the original exception."""
+        session = Session()
+        state = ExecutionState(session=session)
+
+        with pytest.raises(ValueError, match="specific error"):
+            with state.tool_transaction():
+                raise ValueError("specific error")
