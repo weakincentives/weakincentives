@@ -19,12 +19,14 @@ from pathlib import Path
 from typing import Any, TypeVar, cast, override
 
 from ...budget import Budget, BudgetTracker
-from ...contrib.tools.filesystem import HostFilesystem
+from ...contrib.tools.filesystem import Filesystem, HostFilesystem
 from ...deadlines import Deadline
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
+from ...prompt.tool import ResourceRegistry
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
+from ...runtime.execution_state import ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol
@@ -242,14 +244,6 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         # Register Notification reducer if not already registered
         session[Notification].register(Notification, append_all)
 
-        hook_context = HookContext(
-            session=session,
-            adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
-            prompt_name=prompt_name,
-            deadline=deadline,
-            budget_tracker=budget_tracker,
-        )
-
         # Get filesystem from workspace section if present, otherwise create one
         # from the working directory. This ensures MCP-bridged tools operate on
         # the same filesystem as the SDK's native tools.
@@ -257,6 +251,21 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         if filesystem is None:
             workspace_root = self._client_config.cwd or str(Path.cwd())
             filesystem = HostFilesystem(_root=workspace_root)
+
+        # Create ExecutionState for transactional tool execution
+        # Both bridged MCP tools and native SDK tools will use this for rollback
+        resources = ResourceRegistry.build({Filesystem: filesystem})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        # Add execution_state to hook context for native tool transactions
+        hook_context = HookContext(
+            session=session,
+            adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
+            prompt_name=prompt_name,
+            deadline=deadline,
+            budget_tracker=budget_tracker,
+            execution_state=execution_state,
+        )
 
         bridged_tools = create_bridged_tools(
             rendered.tools,
@@ -267,6 +276,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             deadline=deadline,
             budget_tracker=budget_tracker,
             filesystem=filesystem,
+            execution_state=execution_state,
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
         )

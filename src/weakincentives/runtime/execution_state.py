@@ -38,6 +38,15 @@ Example usage::
     # If tool fails, restore from snapshot
     state.restore(snapshot)
 
+For native tool execution with hooks::
+
+    # Before native tool runs (in pre_tool_use hook)
+    state.begin_tool_execution(tool_use_id="123", tool_name="Edit")
+
+    # After native tool completes (in post_tool_use hook)
+    restored = state.end_tool_execution(tool_use_id="123", success=False)
+    # If success=False, state is automatically restored
+
 """
 
 from __future__ import annotations
@@ -66,6 +75,26 @@ from .snapshotable import Snapshotable
 
 # Schema version for composite snapshot serialization
 COMPOSITE_SNAPSHOT_SCHEMA_VERSION = "1"
+
+
+@dataclass(slots=True, frozen=True)
+class PendingToolExecution:
+    """Metadata for an in-flight native tool execution.
+
+    Stored internally by ExecutionState between begin_tool_execution()
+    and end_tool_execution() calls.
+
+    Attributes:
+        tool_use_id: Unique identifier for this tool invocation.
+        tool_name: Name of the tool being executed.
+        snapshot: Composite snapshot taken before tool execution.
+        started_at: Timestamp when tool execution began.
+    """
+
+    tool_use_id: str
+    tool_name: str
+    snapshot: CompositeSnapshot
+    started_at: datetime
 
 
 @FrozenDataclass()
@@ -334,11 +363,15 @@ class ExecutionState:
     evaluation. It provides transactional semantics at tool invocation boundaries
     through composite snapshot and restore operations.
 
+    For bridged MCP tools, transactional semantics are handled directly via
+    snapshot()/restore() calls. For native Claude Agent SDK tools, the
+    begin_tool_execution()/end_tool_execution() methods provide hook integration.
+
     Attributes:
         session: Session state container with typed slices.
         resources: Registry of runtime resources (filesystem, etc.).
 
-    Example usage::
+    Example usage (direct snapshot/restore)::
 
         # Create execution state
         state = ExecutionState(session=session, resources=resources)
@@ -355,10 +388,21 @@ class ExecutionState:
             state.restore(snapshot)
             raise
 
+    Example usage (hook-based for native tools)::
+
+        # In pre_tool_use hook
+        state.begin_tool_execution(tool_use_id="123", tool_name="Edit")
+
+        # In post_tool_use hook
+        restored = state.end_tool_execution(tool_use_id="123", success=False)
+
     """
 
     session: SessionProtocol
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
+    _pending_tools: dict[str, PendingToolExecution] = field(
+        default_factory=lambda: {}, repr=False
+    )
 
     def snapshot(self, *, tag: str | None = None) -> CompositeSnapshot:
         """Capture consistent snapshot of session and all snapshotable resources.
@@ -423,9 +467,90 @@ class ExecutionState:
         """Return all resources that implement Snapshotable."""
         return self.resources.snapshotable_resources()
 
+    # --- Hook-based Tool Transaction Methods ---
+
+    def begin_tool_execution(
+        self,
+        tool_use_id: str,
+        tool_name: str,
+    ) -> None:
+        """Take snapshot before native tool execution.
+
+        Called by pre_tool_use_hook before a native Claude Agent SDK tool runs.
+        Stores the snapshot internally for potential rollback in end_tool_execution.
+
+        Args:
+            tool_use_id: Unique identifier for this tool invocation.
+            tool_name: Name of the tool being executed.
+        """
+        snapshot = self.snapshot(tag=f"pre:{tool_name}:{tool_use_id}")
+        self._pending_tools[tool_use_id] = PendingToolExecution(
+            tool_use_id=tool_use_id,
+            tool_name=tool_name,
+            snapshot=snapshot,
+            started_at=datetime.now(UTC),
+        )
+
+    def end_tool_execution(
+        self,
+        tool_use_id: str,
+        *,
+        success: bool,
+    ) -> bool:
+        """Complete tool execution, restoring on failure.
+
+        Called by post_tool_use_hook after a native Claude Agent SDK tool completes.
+        If success is False, automatically restores state from the pre-execution
+        snapshot.
+
+        Args:
+            tool_use_id: Unique identifier for this tool invocation.
+            success: Whether the tool execution succeeded.
+
+        Returns:
+            True if state was restored (i.e., tool failed), False otherwise.
+        """
+        pending = self._pending_tools.pop(tool_use_id, None)
+        if pending is None:
+            return False
+
+        if not success:
+            self.restore(pending.snapshot)
+            return True
+
+        return False
+
+    def abort_tool_execution(self, tool_use_id: str) -> bool:
+        """Abort tool execution and restore state.
+
+        Used for timeouts, interrupts, or other abnormal termination.
+        Always restores state from the pre-execution snapshot.
+
+        Args:
+            tool_use_id: Unique identifier for this tool invocation.
+
+        Returns:
+            True if a pending execution was found and restored, False otherwise.
+        """
+        pending = self._pending_tools.pop(tool_use_id, None)
+        if pending is None:
+            return False
+
+        self.restore(pending.snapshot)
+        return True
+
+    @property
+    def pending_tool_executions(self) -> Mapping[str, PendingToolExecution]:
+        """Read-only view of pending tool executions.
+
+        Useful for debugging and monitoring in-flight tool calls.
+        """
+        return types.MappingProxyType(self._pending_tools)
+
 
 __all__ = [
     "CompositeSnapshot",
     "ExecutionState",
+    "PendingToolExecution",
     "SnapshotMetadata",
 ]

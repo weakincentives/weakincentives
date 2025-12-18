@@ -884,3 +884,144 @@ class TestCompositeSnapshotToJsonErrors:
             with pytest.raises(SnapshotSerializationError) as exc_info:
                 snapshot.to_json()
             assert "Failed to serialize composite snapshot" in str(exc_info.value)
+
+
+class TestToolTransactionMethods:
+    """Tests for ExecutionState tool transaction methods."""
+
+    def test_begin_tool_execution_creates_snapshot(self) -> None:
+        """begin_tool_execution takes a snapshot and stores pending execution."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        state.begin_tool_execution(tool_use_id="abc123", tool_name="Edit")
+
+        # Check pending execution exists
+        assert "abc123" in state.pending_tool_executions
+        pending = state.pending_tool_executions["abc123"]
+        assert pending.tool_use_id == "abc123"
+        assert pending.tool_name == "Edit"
+        assert pending.snapshot is not None
+
+    def test_end_tool_execution_success_no_restore(self) -> None:
+        """end_tool_execution with success=True doesn't restore state."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        state.begin_tool_execution(tool_use_id="abc123", tool_name="Edit")
+
+        # Modify state after snapshot
+        fs.write("/test.txt", "modified")
+
+        # End with success
+        restored = state.end_tool_execution(tool_use_id="abc123", success=True)
+
+        assert restored is False
+        assert "abc123" not in state.pending_tool_executions
+        # State should NOT be restored
+        assert fs.read("/test.txt").content == "modified"
+
+    def test_end_tool_execution_failure_restores(self) -> None:
+        """end_tool_execution with success=False restores state."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        state.begin_tool_execution(tool_use_id="abc123", tool_name="Edit")
+
+        # Modify state after snapshot
+        fs.write("/test.txt", "modified")
+
+        # End with failure
+        restored = state.end_tool_execution(tool_use_id="abc123", success=False)
+
+        assert restored is True
+        assert "abc123" not in state.pending_tool_executions
+        # State should be restored
+        assert fs.read("/test.txt").content == "initial"
+
+    def test_end_tool_execution_unknown_id_returns_false(self) -> None:
+        """end_tool_execution with unknown ID returns False."""
+        session = Session()
+        state = ExecutionState(session=session)
+
+        restored = state.end_tool_execution(tool_use_id="unknown", success=False)
+
+        assert restored is False
+
+    def test_abort_tool_execution_restores(self) -> None:
+        """abort_tool_execution always restores state."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        state.begin_tool_execution(tool_use_id="abc123", tool_name="Edit")
+
+        # Modify state after snapshot
+        fs.write("/test.txt", "modified")
+
+        # Abort
+        restored = state.abort_tool_execution(tool_use_id="abc123")
+
+        assert restored is True
+        assert "abc123" not in state.pending_tool_executions
+        # State should be restored
+        assert fs.read("/test.txt").content == "initial"
+
+    def test_abort_tool_execution_unknown_id_returns_false(self) -> None:
+        """abort_tool_execution with unknown ID returns False."""
+        session = Session()
+        state = ExecutionState(session=session)
+
+        restored = state.abort_tool_execution(tool_use_id="unknown")
+
+        assert restored is False
+
+    def test_pending_tool_executions_is_read_only(self) -> None:
+        """pending_tool_executions returns read-only mapping."""
+        import types as types_module
+
+        session = Session()
+        state = ExecutionState(session=session)
+
+        state.begin_tool_execution(tool_use_id="abc123", tool_name="Edit")
+
+        pending = state.pending_tool_executions
+        assert isinstance(pending, types_module.MappingProxyType)
+        # Should not be able to modify
+        with pytest.raises(TypeError):
+            pending["new"] = None  # type: ignore[index]

@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...runtime.events._types import ToolInvoked
+from ...runtime.execution_state import ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ._notifications import Notification
 
@@ -110,7 +111,7 @@ AsyncHookCallback = Callable[
 class HookContext:
     """Context passed to hook callbacks for state access."""
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         session: SessionProtocol,
@@ -118,12 +119,14 @@ class HookContext:
         prompt_name: str,
         deadline: Deadline | None = None,
         budget_tracker: BudgetTracker | None = None,
+        execution_state: ExecutionState | None = None,
     ) -> None:
         self.session = session
         self.adapter_name = adapter_name
         self.prompt_name = prompt_name
         self.deadline = deadline
         self.budget_tracker = budget_tracker
+        self.execution_state = execution_state
         self.stop_reason: str | None = None
         self._tool_count = 0
 
@@ -187,13 +190,14 @@ def _expand_transcript_paths(payload: dict[str, Any]) -> dict[str, Any]:
 def create_pre_tool_use_hook(
     hook_context: HookContext,
 ) -> AsyncHookCallback:
-    """Create a PreToolUse hook for constraint enforcement.
+    """Create a PreToolUse hook for constraint enforcement and state snapshots.
 
     The hook checks deadlines and budgets before tool execution, blocking
-    tools that would violate constraints.
+    tools that would violate constraints. It also takes a state snapshot
+    for transactional rollback if execution_state is configured.
 
     Args:
-        hook_context: Context with session, deadline, and budget references.
+        hook_context: Context with session, deadline, budget, and execution_state.
 
     Returns:
         An async hook callback function matching SDK signature.
@@ -204,7 +208,6 @@ def create_pre_tool_use_hook(
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
-        _ = tool_use_id
         _ = sdk_context
 
         tool_name = (
@@ -252,6 +255,23 @@ def create_pre_tool_use_hook(
                     }
                 }
 
+        # Take snapshot for transactional rollback on native tools
+        # Skip MCP-bridged WINK tools - they handle their own transactions
+        if (
+            hook_context.execution_state is not None
+            and tool_use_id is not None
+            and not tool_name.startswith("mcp__wink__")
+        ):
+            hook_context.execution_state.begin_tool_execution(
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+            )
+            logger.debug(
+                "claude_agent_sdk.hook.snapshot_taken",
+                event="hook.snapshot_taken",
+                context={"tool_name": tool_name, "tool_use_id": tool_use_id},
+            )
+
         return {}
 
     return pre_tool_use_hook
@@ -262,14 +282,17 @@ def create_post_tool_use_hook(
     *,
     stop_on_structured_output: bool = True,
 ) -> AsyncHookCallback:
-    """Create a PostToolUse hook for tool result recording.
+    """Create a PostToolUse hook for tool result recording and state rollback.
 
     The hook publishes ToolInvoked events to the session bus. It attempts to
     parse the input data into typed dataclasses (PostToolUseInput, ToolResponse)
     for better type safety, falling back to dict access if parsing fails.
 
+    If execution_state is configured and the tool failed, the hook restores
+    state from the pre-execution snapshot.
+
     Args:
-        hook_context: Context with session and adapter references.
+        hook_context: Context with session, adapter, and execution_state.
         stop_on_structured_output: If True, return ``continue: false`` after
             the StructuredOutput tool to end the turn immediately.
 
@@ -297,8 +320,7 @@ def create_post_tool_use_hook(
             )
         )
         if tool_name_raw.startswith("mcp__wink__"):
-            # Skip logging for MCP-bridged WINK tools - they publish their own
-            # ToolInvoked events via BridgedTool with richer context (typed values).
+            # Skip for MCP-bridged WINK tools - they handle their own transactions
             return {}
 
         if parsed is not None:
@@ -369,6 +391,25 @@ def create_post_tool_use_hook(
             },
         )
 
+        # Complete tool transaction - restore state on failure
+        if hook_context.execution_state is not None and tool_use_id is not None:
+            # Determine success: no stderr and no error indicators
+            success = tool_error is None and not _is_tool_error_response(result_raw)
+            restored = hook_context.execution_state.end_tool_execution(
+                tool_use_id=tool_use_id,
+                success=success,
+            )
+            if restored:
+                logger.info(
+                    "claude_agent_sdk.hook.state_restored",
+                    event="hook.state_restored",
+                    context={
+                        "tool_name": tool_name,
+                        "tool_use_id": tool_use_id,
+                        "reason": "tool_failure",
+                    },
+                )
+
         # Stop execution after StructuredOutput tool to end turn cleanly
         if stop_on_structured_output and tool_name == "StructuredOutput":
             logger.debug(
@@ -381,6 +422,34 @@ def create_post_tool_use_hook(
         return {}
 
     return post_tool_use_hook
+
+
+def _is_tool_error_response(response: Any) -> bool:  # noqa: ANN401
+    """Check if tool response indicates an error.
+
+    Examines the response structure for error indicators like 'is_error' flags
+    or error-related content patterns.
+    """
+    if not isinstance(response, dict):
+        return False
+
+    # Check explicit error flag
+    if response.get("is_error") or response.get("isError"):
+        return True
+
+    # Check for error in content (Claude Agent SDK format)
+    content = response.get("content")
+    if isinstance(content, list) and content:
+        first_item = content[0]
+        if isinstance(first_item, dict):
+            text = first_item.get("text", "")
+            if isinstance(text, str):
+                text_lower = text.lower()
+                # Common error indicators in tool output
+                if text_lower.startswith("error:") or text_lower.startswith("error -"):
+                    return True
+
+    return False
 
 
 def create_user_prompt_submit_hook(
