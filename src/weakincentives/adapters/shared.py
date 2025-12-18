@@ -26,10 +26,14 @@ from typing import TYPE_CHECKING, Any, Literal, NoReturn, Protocol, TypeVar, cas
 from uuid import uuid4
 
 from ..budget import BudgetExceededError, BudgetTracker
-from ..contrib.tools.filesystem import Filesystem
+from ..contrib.tools.filesystem import (
+    Filesystem,
+    FilesystemSnapshot,
+    SnapshotableFilesystem,
+)
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
-from ..errors import DeadlineExceededError, ToolValidationError
+from ..errors import DeadlineExceededError, SnapshotRestoreError, ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
@@ -516,6 +520,8 @@ class ToolExecutionOutcome:
     result: ToolResult[SupportsToolResult]
     call_id: str | None
     log: StructuredLogger
+    filesystem: Filesystem | None = None
+    fs_snapshot: FilesystemSnapshot | None = None
 
 
 def _resolve_tool_and_handler(
@@ -693,6 +699,70 @@ def _handle_unexpected_tool_error(
     )
 
 
+def _snapshot_filesystem(
+    filesystem: Filesystem | None,
+    *,
+    log: StructuredLogger,
+    tag: str | None = None,
+) -> FilesystemSnapshot | None:
+    """Take a filesystem snapshot if the filesystem supports it.
+
+    Returns the snapshot if successful, None otherwise.
+    """
+    if filesystem is None:
+        return None
+    if not isinstance(filesystem, SnapshotableFilesystem):
+        return None
+    try:
+        snapshot = filesystem.snapshot(tag=tag)
+    except Exception as error:
+        log.warning(
+            "Failed to create filesystem snapshot.",
+            event="filesystem_snapshot_failed",
+            context={"error": str(error)},
+        )
+        return None
+    else:
+        log.debug(
+            "Filesystem snapshot created.",
+            event="filesystem_snapshot_created",
+            context={"snapshot_id": str(snapshot.snapshot_id)},
+        )
+        return snapshot
+
+
+def _restore_filesystem(
+    filesystem: Filesystem | None,
+    snapshot: FilesystemSnapshot | None,
+    *,
+    log: StructuredLogger,
+) -> bool:
+    """Restore a filesystem from a snapshot.
+
+    Returns True if restoration was successful or not needed, False on error.
+    """
+    if snapshot is None or filesystem is None:
+        return True
+    if not isinstance(filesystem, SnapshotableFilesystem):
+        return True
+    try:
+        filesystem.restore(snapshot)
+    except SnapshotRestoreError as error:
+        log.exception(
+            "Failed to restore filesystem from snapshot.",
+            event="filesystem_restore_failed",
+            context={"snapshot_id": str(snapshot.snapshot_id), "error": str(error)},
+        )
+        return False
+    else:
+        log.debug(
+            "Filesystem restored from snapshot.",
+            event="filesystem_snapshot_restored",
+            context={"snapshot_id": str(snapshot.snapshot_id)},
+        )
+        return True
+
+
 @contextmanager
 def tool_execution(
     *,
@@ -721,6 +791,10 @@ def tool_execution(
         tool_call=tool_call,
     )
 
+    # Get filesystem early so we can snapshot before tool invocation
+    filesystem = context.prompt.filesystem() if context.prompt else None
+    fs_snapshot = _snapshot_filesystem(filesystem, log=log, tag=f"tool:{tool_name}")
+
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsToolResult]
     try:
@@ -730,8 +804,6 @@ def tool_execution(
             prompt_name=context.prompt_name,
             tool_name=tool_name,
         )
-        # Get filesystem from workspace section if present
-        filesystem = context.prompt.filesystem() if context.prompt else None
         resources = _build_resources(
             filesystem=filesystem,
             budget_tracker=context.budget_tracker,
@@ -750,6 +822,7 @@ def tool_execution(
             context=tool_context,
         )
     except ToolValidationError as error:
+        # Validation errors happen before tool invocation, no restore needed
         if tool_params is None:
             tool_params = cast(
                 SupportsDataclass,
@@ -762,6 +835,8 @@ def tool_execution(
     except PromptEvaluationError:
         raise
     except DeadlineExceededError as error:
+        # Restore filesystem on deadline exceeded
+        _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
         raise _handle_tool_deadline_error(
             error=error,
             prompt_name=context.prompt_name,
@@ -769,6 +844,8 @@ def tool_execution(
             deadline=context.deadline,
         ) from error
     except Exception as error:  # propagate message via ToolResult
+        # Restore filesystem on unexpected tool error
+        _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
         tool_result = _handle_unexpected_tool_error(
             log=log,
             tool_name=tool_name,
@@ -776,6 +853,9 @@ def tool_execution(
             error=error,
         )
     else:
+        # Restore filesystem if tool execution reported failure
+        if not tool_result.success:
+            _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
         _log_tool_completion(log, tool_result)
 
     if tool_params is None:  # pragma: no cover - defensive
@@ -787,6 +867,8 @@ def tool_execution(
         result=tool_result,
         call_id=call_id,
         log=log,
+        filesystem=filesystem,
+        fs_snapshot=fs_snapshot,
     )
 
 
@@ -816,6 +898,11 @@ def _publish_tool_invocation(
     publish_result = context.session.event_bus.publish(invocation)
     if not publish_result.ok:
         context.session.rollback(snapshot)
+        # Restore filesystem if tool succeeded (not already restored during execution)
+        if outcome.result.success:
+            _ = _restore_filesystem(
+                outcome.filesystem, outcome.fs_snapshot, log=outcome.log
+            )
         outcome.log.warning(
             "Session rollback triggered after publish failure.",
             event="session_rollback_due_to_publish_failure",
