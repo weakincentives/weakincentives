@@ -36,4 +36,18 @@ class DeadlineExceededError(WinkError, RuntimeError):
     """Raised when tool execution cannot finish before the deadline."""
 
 
-__all__ = ["DeadlineExceededError", "ToolValidationError", "WinkError"]
+class SnapshotError(WinkError, RuntimeError):
+    """Base class for snapshot-related errors."""
+
+
+class SnapshotRestoreError(SnapshotError):
+    """Raised when restoring from a snapshot fails."""
+
+
+__all__ = [
+    "DeadlineExceededError",
+    "SnapshotError",
+    "SnapshotRestoreError",
+    "ToolValidationError",
+    "WinkError",
+]

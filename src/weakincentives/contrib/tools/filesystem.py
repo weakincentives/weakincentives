@@ -45,11 +45,16 @@ from __future__ import annotations
 import fnmatch
 import re
 import shutil
-from collections.abc import Sequence
+import subprocess  # nosec: B404
+import types
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Literal, Protocol, runtime_checkable
+from uuid import UUID, uuid4
+
+from weakincentives.errors import SnapshotRestoreError
 
 _DEFAULT_READ_LIMIT: Final[int] = 2_000
 _MAX_WRITE_LENGTH: Final[int] = 48_000
@@ -130,6 +135,25 @@ class WriteResult:
     path: str
     bytes_written: int
     mode: WriteMode
+
+
+@dataclass(slots=True, frozen=True)
+class FilesystemSnapshot:
+    """Immutable capture of filesystem state, storable in session.
+
+    Snapshots capture the state of a workspace at a point in time, enabling
+    rollback after failed tool invocations or exploratory changes.
+
+    The ``commit_ref`` field stores a git commit hash for disk-backed
+    filesystems (HostFilesystem) or an internal version identifier for
+    in-memory filesystems (InMemoryFilesystem).
+    """
+
+    snapshot_id: UUID
+    created_at: datetime
+    commit_ref: str
+    root_path: str
+    tag: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +350,45 @@ class Filesystem(Protocol):
         ...
 
 
+@runtime_checkable
+class SnapshotableFilesystem(Filesystem, Protocol):
+    """Filesystem that supports snapshot and restore operations.
+
+    This protocol extends ``Filesystem`` with methods for capturing and
+    restoring filesystem state. Snapshots are immutable and can be stored
+    in session state for later rollback.
+    """
+
+    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
+        """Capture current filesystem state.
+
+        Creates an immutable snapshot of the filesystem that can be stored
+        in session state and used for later rollback.
+
+        Args:
+            tag: Optional human-readable label for the snapshot.
+
+        Returns:
+            Immutable snapshot that can be stored in session state.
+        """
+        ...
+
+    def restore(self, snapshot: FilesystemSnapshot) -> None:
+        """Restore filesystem to a previous snapshot.
+
+        Restores the filesystem state to match the given snapshot. This is
+        an all-or-nothing operation - partial restores are not supported.
+
+        Args:
+            snapshot: The snapshot to restore.
+
+        Raises:
+            SnapshotRestoreError: Restore failed (e.g., incompatible snapshot,
+                unknown commit reference, or git operation failure).
+        """
+        ...
+
+
 # ---------------------------------------------------------------------------
 # Shared Utilities
 # ---------------------------------------------------------------------------
@@ -414,18 +477,33 @@ class _InMemoryFile:
     modified_at: datetime
 
 
+@dataclass(slots=True, frozen=True)
+class _InMemoryState:
+    """Frozen snapshot of in-memory filesystem state."""
+
+    files: Mapping[str, _InMemoryFile]
+    directories: frozenset[str]
+
+
+def _empty_snapshots_dict() -> dict[str, _InMemoryState]:
+    return {}
+
+
 @dataclass(slots=True)
 class InMemoryFilesystem:
     """In-memory filesystem implementation.
 
     Provides a session-scoped in-memory storage that implements the
     Filesystem protocol. State is managed internally by the backend.
+    Supports snapshot and restore operations via structural sharing.
     """
 
     _files: dict[str, _InMemoryFile] = field(default_factory=_empty_files_dict)
     _directories: set[str] = field(default_factory=_empty_directories_set)
     _read_only: bool = False
     _mount_point: str | None = None
+    _snapshots: dict[str, _InMemoryState] = field(default_factory=_empty_snapshots_dict)
+    _version: int = 0
 
     def __post_init__(self) -> None:
         # Ensure root directory exists
@@ -810,6 +888,62 @@ class InMemoryFilesystem:
             if parent_path and parent_path not in self._directories:
                 self._directories.add(parent_path)
 
+    # --- Snapshot Operations ---
+
+    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
+        """Capture current filesystem state via structural sharing.
+
+        Creates an immutable snapshot by freezing references to the current
+        file and directory state. File content strings are shared between
+        the active filesystem and snapshots - only modified files allocate
+        new memory.
+
+        Args:
+            tag: Optional human-readable label for the snapshot.
+
+        Returns:
+            Immutable snapshot that can be stored in session state.
+        """
+        self._version += 1
+        commit_ref = f"mem-{self._version}"
+
+        # Freeze current state (O(n) dict copy, but values are shared refs)
+        frozen_state = _InMemoryState(
+            files=types.MappingProxyType(dict(self._files)),
+            directories=frozenset(self._directories),
+        )
+        self._snapshots[commit_ref] = frozen_state
+
+        return FilesystemSnapshot(
+            snapshot_id=uuid4(),
+            created_at=datetime.now(UTC),
+            commit_ref=commit_ref,
+            root_path="/",
+            tag=tag,
+        )
+
+    def restore(self, snapshot: FilesystemSnapshot) -> None:
+        """Restore filesystem state from a snapshot.
+
+        Restores the filesystem state by copying the frozen references
+        back to mutable containers. File content strings remain shared.
+
+        Args:
+            snapshot: The snapshot to restore.
+
+        Raises:
+            SnapshotRestoreError: If the snapshot's commit_ref is not found.
+        """
+        if snapshot.commit_ref not in self._snapshots:
+            msg = f"Unknown snapshot: {snapshot.commit_ref}"
+            raise SnapshotRestoreError(msg)
+
+        frozen = self._snapshots[snapshot.commit_ref]
+        self._files = dict(frozen.files)  # Mutable copy, shared values
+        self._directories = set(frozen.directories)
+        # Ensure root directory exists
+        self._directories.add("")
+
 
 # ---------------------------------------------------------------------------
 # HostFilesystem Implementation
@@ -823,11 +957,13 @@ class HostFilesystem:
     Provides sandboxed access to a root directory on the host filesystem.
     All paths are resolved relative to the root and validated to ensure
     they cannot escape the sandbox via symlinks or path traversal.
+    Supports snapshot and restore operations via git commits.
     """
 
     _root: str
     _read_only: bool = False
     _mount_point: str | None = None
+    _git_initialized: bool = False
 
     @property
     def root(self) -> str:
@@ -1203,6 +1339,138 @@ class HostFilesystem:
                 )
             resolved.mkdir()
 
+    # --- Snapshot Operations ---
+
+    def _ensure_git(self) -> None:
+        """Initialize git repository if needed for snapshot support."""
+        if self._git_initialized:
+            return
+
+        git_dir = Path(self._root) / ".git"
+        if not git_dir.exists():
+            _ = subprocess.run(  # nosec B603 B607
+                ["git", "init"],
+                cwd=self._root,
+                check=True,
+                capture_output=True,
+            )
+            # Configure for snapshot use (local config only)
+            _ = subprocess.run(  # nosec B603 B607
+                ["git", "config", "user.email", "wink@localhost"],
+                cwd=self._root,
+                check=True,
+                capture_output=True,
+            )
+            _ = subprocess.run(  # nosec B603 B607
+                ["git", "config", "user.name", "WINK Snapshots"],
+                cwd=self._root,
+                check=True,
+                capture_output=True,
+            )
+        self._git_initialized = True
+
+    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
+        """Capture current filesystem state as a git commit.
+
+        Uses git's content-addressed storage for copy-on-write semantics.
+        Identical files share storage automatically between snapshots.
+
+        Args:
+            tag: Optional human-readable label for the snapshot.
+
+        Returns:
+            Immutable snapshot that can be stored in session state.
+        """
+        self._ensure_git()
+
+        # Stage all changes (including new and deleted files)
+        _ = subprocess.run(  # nosec B603 B607
+            ["git", "add", "-A"],
+            cwd=self._root,
+            check=True,
+            capture_output=True,
+        )
+
+        # Commit (allow empty for idempotent snapshots)
+        # Use --no-gpg-sign to avoid issues in environments with signing hooks
+        message = tag or f"snapshot-{datetime.now(UTC).isoformat()}"
+        commit_result = subprocess.run(  # nosec B603 B607
+            ["git", "commit", "-m", message, "--allow-empty", "--no-gpg-sign"],
+            cwd=self._root,
+            capture_output=True,
+            text=True,
+        )
+
+        # If commit failed and we don't have any commits yet, we may need
+        # to check for empty repo scenario
+        if commit_result.returncode != 0:
+            # Check if this is because there's nothing to commit
+            # and no prior commits exist (empty repo)
+            head_check = subprocess.run(  # nosec B603 B607
+                ["git", "rev-parse", "--verify", "HEAD"],
+                cwd=self._root,
+                capture_output=True,
+            )
+            if head_check.returncode != 0:
+                # No HEAD commit exists - create an initial empty commit
+                _ = subprocess.run(  # nosec B603 B607
+                    ["git", "commit", "--allow-empty", "--no-gpg-sign", "-m", message],
+                    cwd=self._root,
+                    check=True,
+                    capture_output=True,
+                )
+
+        # Get commit hash
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "rev-parse", "HEAD"],
+            cwd=self._root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        commit_ref = result.stdout.strip()
+
+        return FilesystemSnapshot(
+            snapshot_id=uuid4(),
+            created_at=datetime.now(UTC),
+            commit_ref=commit_ref,
+            root_path=self._root,
+            tag=tag,
+        )
+
+    def restore(self, snapshot: FilesystemSnapshot) -> None:
+        """Restore filesystem to a previous git commit.
+
+        Performs a hard reset to the snapshot's commit and removes any
+        untracked files (including ignored files) for a strict rollback.
+
+        Args:
+            snapshot: The snapshot to restore.
+
+        Raises:
+            SnapshotRestoreError: If git reset fails (e.g., invalid commit).
+        """
+        self._ensure_git()
+
+        # Hard reset to the commit (restores tracked files)
+        result = subprocess.run(  # nosec B603 B607
+            ["git", "reset", "--hard", snapshot.commit_ref],
+            cwd=self._root,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            msg = f"Failed to restore snapshot: {result.stderr}"
+            raise SnapshotRestoreError(msg)
+
+        # Remove untracked files and directories for strict rollback
+        # -x removes ignored files too (e.g., cache, logs) for full restore
+        _ = subprocess.run(  # nosec B603 B607
+            ["git", "clean", "-xfd"],
+            cwd=self._root,
+            capture_output=True,
+        )
+
 
 __all__ = [
     "READ_ENTIRE_FILE",
@@ -1210,11 +1478,13 @@ __all__ = [
     "FileEntry",
     "FileStat",
     "Filesystem",
+    "FilesystemSnapshot",
     "GlobMatch",
     "GrepMatch",
     "HostFilesystem",
     "InMemoryFilesystem",
     "ReadResult",
+    "SnapshotableFilesystem",
     "WriteMode",
     "WriteResult",
     "normalize_path",

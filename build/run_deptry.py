@@ -21,14 +21,14 @@ from pathlib import Path
 
 def main() -> int:
     project_root = Path(__file__).resolve().parent.parent
-    package_path = project_root / "src" / "weakincentives"
+    src_path = project_root / "src"
 
     command = [
         sys.executable,
         "-m",
         "deptry",
         "--no-ansi",
-        str(package_path),
+        str(src_path),
     ]
 
     result = subprocess.run(command, capture_output=True, text=True)
