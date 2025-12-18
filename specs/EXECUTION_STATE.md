@@ -56,7 +56,6 @@ class ExecutionState:
     resources: ResourceRegistry
     clock: Clock = field(default_factory=SystemClock)
     rng: Random | None = None
-    checkpoints: CheckpointStore | None = None
 
     def snapshot(self, *, tag: str | None = None) -> CompositeSnapshot:
         """Capture consistent snapshot of all snapshotable state."""
@@ -177,7 +176,7 @@ class SnapshotMetadata:
     tag: str | None = None
     tool_call_id: str | None = None
     tool_name: str | None = None
-    phase: Literal["pre_tool", "post_tool", "checkpoint", "manual"] = "manual"
+    phase: Literal["pre_tool", "post_tool", "manual"] = "manual"
 ```
 
 ### ExecutionState Snapshot Operations
@@ -224,7 +223,6 @@ Not all session state should be rolled back on tool failure:
   restored to pre-tool state on failure.
 - **History logs** (ToolInvoked, PromptRendered, PromptExecuted): should be
   preserved as a truthful record of what happened.
-- **Caches** (computed digests, previews): can be rolled back or recomputed.
 
 ### Policy Enum
 
@@ -234,7 +232,6 @@ class SlicePolicy(Enum):
 
     STATE = "state"   # Rolled back on tool failure (default)
     LOG = "log"       # Preserved during rollback (append-only)
-    CACHE = "cache"   # Can be rolled back, can be recomputed
 ```
 
 ### Slice Registration
@@ -261,7 +258,7 @@ session[ToolInvoked].register(
 |------------|---------------|-----------|
 | `Plan` | STATE | Working state, should be restored |
 | `VisibilityOverrides` | STATE | Working state |
-| `WorkspaceDigest` | CACHE | Can be recomputed |
+| `WorkspaceDigest` | STATE | Working state, should be restored |
 | `ToolInvoked` | LOG | Historical record |
 | `PromptRendered` | LOG | Historical record |
 | `PromptExecuted` | LOG | Historical record |
@@ -509,98 +506,6 @@ composite = state.snapshot(tag="pre:tool_call")
 state.restore(composite)
 ```
 
-### Coordinated Rollback
-
-For explicit rollback to a specific point:
-
-```python
-def rollback_to_tool(
-    execution_state: ExecutionState,
-    checkpoints: CheckpointStore,
-    tool_call_id: str,
-) -> None:
-    """Restore state to before a specific tool call."""
-    snapshot = checkpoints.get_pre_snapshot(tool_call_id)
-    if snapshot is None:
-        raise ValueError(f"No checkpoint for tool call: {tool_call_id}")
-    execution_state.restore(snapshot)
-```
-
-## Checkpoint Store
-
-### Definition
-
-Optional component for recording snapshots at tool boundaries:
-
-```python
-@dataclass(slots=True)
-class CheckpointStore:
-    """Stores snapshots at tool invocation boundaries."""
-
-    _checkpoints: dict[str, ToolCheckpoint] = field(default_factory=dict)
-    _ring_buffer: deque[str] = field(default_factory=lambda: deque(maxlen=100))
-
-    def record(
-        self,
-        tool_call_id: str,
-        *,
-        pre: CompositeSnapshot,
-        post: CompositeSnapshot | None = None,
-        result: ToolResult[Any] | None = None,
-        elapsed: timedelta | None = None,
-    ) -> None:
-        """Record checkpoint for a tool invocation."""
-        ...
-
-    def get_pre_snapshot(self, tool_call_id: str) -> CompositeSnapshot | None:
-        """Get pre-invocation snapshot for a tool call."""
-        ...
-
-    def get_post_snapshot(self, tool_call_id: str) -> CompositeSnapshot | None:
-        """Get post-invocation snapshot for a tool call."""
-        ...
-
-    def list_checkpoints(self) -> Sequence[ToolCheckpoint]:
-        """List all recorded checkpoints in order."""
-        ...
-
-
-@dataclass(slots=True, frozen=True)
-class ToolCheckpoint:
-    """Record of a tool invocation with snapshots."""
-
-    tool_call_id: str
-    tool_name: str
-    pre_snapshot: CompositeSnapshot
-    post_snapshot: CompositeSnapshot | None
-    result_summary: str | None
-    success: bool
-    elapsed: timedelta | None
-    recorded_at: datetime
-```
-
-### Usage
-
-```python
-# Enable checkpointing
-checkpoints = CheckpointStore()
-state = ExecutionState(
-    session=session,
-    resources=resources,
-    checkpoints=checkpoints,
-)
-
-# After tool execution, checkpoints are recorded automatically
-# by the tool execution context manager
-
-# Query checkpoint history
-for checkpoint in checkpoints.list_checkpoints():
-    print(f"{checkpoint.tool_name}: {checkpoint.result_summary}")
-
-# Rollback to specific tool boundary
-state.restore(checkpoints.get_pre_snapshot("call_abc123"))
-```
-
 ## Determinism Support
 
 ### Injected Clock
@@ -714,12 +619,6 @@ Ensure identical rollback semantics everywhere.
 - Mark ToolInvoked/PromptRendered/PromptExecuted as LOG
 - Update snapshot/rollback to respect policies
 
-### Phase 5: Checkpointing
-
-- Implement `CheckpointStore`
-- Record checkpoints per tool invocation
-- Expose rollback/fork APIs
-
 ## Acceptance Criteria
 
 ### Tool Failure Does Not Change State
@@ -789,32 +688,10 @@ def test_adapter_parity():
     )
 ```
 
-### Rollback to Tool Boundary Works
-
-```python
-def test_rollback_to_tool_boundary(execution_state: ExecutionState):
-    checkpoints = execution_state.checkpoints
-
-    # Run several tools
-    execute_tool(tool_a, execution_state)  # call_a
-    execute_tool(tool_b, execution_state)  # call_b
-    execute_tool(tool_c, execution_state)  # call_c
-
-    # Rollback to before tool_b
-    pre_b = checkpoints.get_pre_snapshot("call_b")
-    execution_state.restore(pre_b)
-
-    # State matches exactly pre-tool_b
-    assert execution_state.session[...] == ...
-    assert execution_state.resources.get(Filesystem).read(...) == ...
-```
-
 ## Limitations
 
 - **Synchronous only**: Transactions assume single-threaded execution.
 - **No partial rollback**: Cannot rollback specific slices independently within
   a transaction.
 - **Git dependency**: Disk-backed filesystem snapshots require git.
-- **Memory overhead**: Checkpointing increases memory usage proportional to
-  state size and checkpoint count.
 - **No network rollback**: External API calls cannot be undone.
