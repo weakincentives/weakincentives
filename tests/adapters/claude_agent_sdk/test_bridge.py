@@ -29,6 +29,7 @@ from weakincentives.adapters.claude_agent_sdk._bridge import (
 from weakincentives.prompt import SectionVisibility, Tool, ToolContext, ToolResult
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session
 
 
@@ -97,6 +98,12 @@ def session() -> Session:
 
 
 @pytest.fixture
+def execution_state(session: Session) -> ExecutionState:
+    """Create an ExecutionState with the session."""
+    return ExecutionState(session=session)
+
+
+@pytest.fixture
 def mock_adapter() -> MagicMock:
     return MagicMock()
 
@@ -108,7 +115,10 @@ def mock_prompt() -> MagicMock:
 
 class TestBridgedTool:
     def test_executes_handler_successfully(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         bridged = BridgedTool(
             name="search",
@@ -118,7 +128,7 @@ class TestBridgedTool:
                 "properties": {"query": {"type": "string"}},
             },
             tool=search_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -133,14 +143,17 @@ class TestBridgedTool:
         assert "Found 5 matches" in result["content"][0]["text"]
 
     def test_returns_error_for_no_handler(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         bridged = BridgedTool(
             name="no_handler",
             description="No handler",
             input_schema={},
             tool=no_handler_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -154,7 +167,10 @@ class TestBridgedTool:
         assert "no handler" in result["content"][0]["text"]
 
     def test_returns_validation_error(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         bridged = BridgedTool(
             name="search",
@@ -164,7 +180,7 @@ class TestBridgedTool:
                 "properties": {"query": {"type": "string"}},
             },
             tool=search_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -178,7 +194,10 @@ class TestBridgedTool:
         assert "error" in result["content"][0]["text"].lower()
 
     def test_catches_handler_exception(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         bridged = BridgedTool(
             name="failing",
@@ -188,7 +207,7 @@ class TestBridgedTool:
                 "properties": {"query": {"type": "string"}},
             },
             tool=failing_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -202,7 +221,10 @@ class TestBridgedTool:
         assert "Error" in result["content"][0]["text"]
 
     def test_uses_render_method_on_result_value(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that bridged tool uses render() on result value when available."""
         bridged = BridgedTool(
@@ -213,7 +235,7 @@ class TestBridgedTool:
                 "properties": {"query": {"type": "string"}},
             },
             tool=search_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -227,7 +249,10 @@ class TestBridgedTool:
         assert result["content"][0]["text"] == "Found 5 matches"
 
     def test_falls_back_to_message_when_render_empty(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that bridged tool falls back to message when render() returns empty."""
 
@@ -255,7 +280,7 @@ class TestBridgedTool:
                 "properties": {"query": {"type": "string"}},
             },
             tool=empty_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -269,7 +294,10 @@ class TestBridgedTool:
         assert result["content"][0]["text"] == "Searched for test"
 
     def test_exclude_value_from_context_uses_message_only(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that exclude_value_from_context skips value rendering."""
 
@@ -298,7 +326,7 @@ class TestBridgedTool:
                 "properties": {"query": {"type": "string"}},
             },
             tool=data_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -315,13 +343,16 @@ class TestBridgedTool:
 
 class TestCreateBridgedTools:
     def test_creates_bridged_tools(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         tools = (search_tool,)
 
         bridged = create_bridged_tools(
             tools,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -334,13 +365,16 @@ class TestCreateBridgedTools:
         assert bridged[0].description == "Search for content"
 
     def test_skips_tools_without_handlers(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         tools = (search_tool, no_handler_tool)
 
         bridged = create_bridged_tools(
             tools,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -352,13 +386,16 @@ class TestCreateBridgedTools:
         assert bridged[0].name == "search"
 
     def test_generates_input_schema(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         tools = (search_tool,)
 
         bridged = create_bridged_tools(
             tools,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -371,7 +408,10 @@ class TestCreateBridgedTools:
         assert "query" in schema["properties"]
 
     def test_handles_none_params_type(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         def null_handler(params: None, *, context: ToolContext) -> ToolResult[None]:
             del params, context
@@ -385,7 +425,7 @@ class TestCreateBridgedTools:
 
         bridged = create_bridged_tools(
             (null_tool,),
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -397,7 +437,10 @@ class TestCreateBridgedTools:
         assert bridged[0].input_schema == {"type": "object", "properties": {}}
 
     def test_executes_tool_with_none_params_type(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that calling a bridged tool with None params works."""
 
@@ -416,7 +459,7 @@ class TestCreateBridgedTools:
             description="A tool with no params",
             input_schema={"type": "object", "properties": {}},
             tool=null_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -430,11 +473,14 @@ class TestCreateBridgedTools:
         assert "executed" in result["content"][0]["text"]
 
     def test_empty_tools_returns_empty(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         bridged = create_bridged_tools(
             (),
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -449,7 +495,10 @@ class TestMakeAsyncHandler:
     """Tests for _make_async_handler function."""
 
     def test_creates_async_wrapper(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that _make_async_handler creates an async wrapper."""
         bridged = BridgedTool(
@@ -460,7 +509,7 @@ class TestMakeAsyncHandler:
                 "properties": {"query": {"type": "string"}},
             },
             tool=search_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -474,7 +523,10 @@ class TestMakeAsyncHandler:
         assert asyncio.iscoroutinefunction(async_handler)
 
     def test_async_handler_returns_result(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that async handler executes and returns result."""
         bridged = BridgedTool(
@@ -485,7 +537,7 @@ class TestMakeAsyncHandler:
                 "properties": {"query": {"type": "string"}},
             },
             tool=search_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -505,7 +557,10 @@ class TestCreateMcpServer:
     """Tests for create_mcp_server function."""
 
     def test_creates_mcp_server_config(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that create_mcp_server creates an MCP server config."""
         bridged = BridgedTool(
@@ -516,7 +571,7 @@ class TestCreateMcpServer:
                 "properties": {"query": {"type": "string"}},
             },
             tool=search_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -563,7 +618,10 @@ class TestVisibilityExpansionRequiredPropagation:
     """Tests for VisibilityExpansionRequired exception propagation."""
 
     def test_bridged_tool_propagates_visibility_expansion_required(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that BridgedTool re-raises VisibilityExpansionRequired."""
 
@@ -592,7 +650,7 @@ class TestVisibilityExpansionRequiredPropagation:
                 "properties": {"query": {"type": "string"}},
             },
             tool=expanding_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -612,7 +670,10 @@ class TestVisibilityExpansionRequiredPropagation:
         assert exc.reason == "Need more details"
 
     def test_async_handler_propagates_visibility_expansion_required(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that async handler wrapper propagates VisibilityExpansionRequired."""
 
@@ -641,7 +702,7 @@ class TestVisibilityExpansionRequiredPropagation:
                 "properties": {"query": {"type": "string"}},
             },
             tool=expanding_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -696,13 +757,12 @@ class TestVisibilityExpansionRequiredPropagation:
                 "properties": {"query": {"type": "string"}},
             },
             tool=capture_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            execution_state=execution_state,
         )
 
         _ = bridged({"query": "test"})
@@ -721,7 +781,6 @@ class TestCreateBridgedToolsWithFilesystem:
             InMemoryFilesystem,
         )
         from weakincentives.prompt.tool import ResourceRegistry
-        from weakincentives.runtime.execution_state import ExecutionState
 
         captured_filesystem: list[object] = []
 
@@ -747,13 +806,12 @@ class TestCreateBridgedToolsWithFilesystem:
 
         bridged_tools = create_bridged_tools(
             (capture_tool,),
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            execution_state=execution_state,
         )
 
         assert len(bridged_tools) == 1
@@ -765,7 +823,10 @@ class TestCreateBridgedToolsWithFilesystem:
 
 class TestBudgetTrackerInResourceRegistry:
     def test_passes_budget_tracker_to_tool_context_via_resources(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that budget_tracker parameter is accessible via context.resources."""
         from weakincentives.budget import Budget, BudgetTracker
@@ -799,7 +860,7 @@ class TestBudgetTrackerInResourceRegistry:
                 "properties": {"query": {"type": "string"}},
             },
             tool=capture_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -813,7 +874,10 @@ class TestBudgetTrackerInResourceRegistry:
         assert captured_budget_tracker[0] is test_tracker
 
     def test_create_bridged_tools_passes_budget_tracker_via_resources(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that create_bridged_tools passes budget_tracker via resources."""
         from weakincentives.budget import Budget, BudgetTracker
@@ -841,7 +905,7 @@ class TestBudgetTrackerInResourceRegistry:
 
         bridged_tools = create_bridged_tools(
             (capture_tool,),
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -902,13 +966,12 @@ class TestBridgedToolTransactionalExecution:
                 "properties": {"query": {"type": "string"}},
             },
             tool=fail_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            execution_state=execution_state,
         )
 
         result = bridged({"query": "test"})
@@ -956,13 +1019,12 @@ class TestBridgedToolTransactionalExecution:
                 "properties": {"query": {"type": "string"}},
             },
             tool=exception_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            execution_state=execution_state,
         )
 
         result = bridged({"query": "test"})
@@ -996,13 +1058,12 @@ class TestBridgedToolTransactionalExecution:
                 "properties": {"query": {"type": "string"}},
             },
             tool=search_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            execution_state=execution_state,
         )
 
         # Pass invalid args to trigger validation error
@@ -1058,13 +1119,12 @@ class TestBridgedToolTransactionalExecution:
                 "properties": {"query": {"type": "string"}},
             },
             tool=visibility_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            execution_state=execution_state,
         )
 
         with pytest.raises(VisibilityExpansionRequired):
@@ -1074,7 +1134,10 @@ class TestBridgedToolTransactionalExecution:
         assert test_fs.read("/test.txt").content == "initial content"
 
     def test_no_filesystem_without_execution_state(
-        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+        self,
+        execution_state: ExecutionState,
+        mock_adapter: MagicMock,
+        mock_prompt: MagicMock,
     ) -> None:
         """Test that without execution_state, context.filesystem is None."""
         captured_filesystem: list[object] = []
@@ -1103,7 +1166,7 @@ class TestBridgedToolTransactionalExecution:
                 "properties": {"query": {"type": "string"}},
             },
             tool=capture_tool,
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -1158,13 +1221,12 @@ class TestCreateBridgedToolsWithExecutionState:
 
         bridged_tools = create_bridged_tools(
             (fail_tool,),
-            session=session,
+            execution_state=execution_state,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
-            execution_state=execution_state,
         )
 
         assert len(bridged_tools) == 1

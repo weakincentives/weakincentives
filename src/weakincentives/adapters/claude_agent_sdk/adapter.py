@@ -269,13 +269,12 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         bridged_tools = create_bridged_tools(
             rendered.tools,
-            session=session,
+            execution_state=execution_state,
             adapter=self,
             prompt=cast(Any, prompt),
             rendered_prompt=rendered,
             deadline=deadline,
             budget_tracker=budget_tracker,
-            execution_state=execution_state,
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
         )
