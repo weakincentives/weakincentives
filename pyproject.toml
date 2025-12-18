@@ -241,7 +241,6 @@ debug = false
 
 [tool.deptry.per_rule_ignores]
 DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "pyyaml"]
-DEP003 = ["weakincentives"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
