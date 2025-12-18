@@ -818,7 +818,6 @@ class TestPublishInvocationFilesystemRestore:
             result=cast(ToolResult[SupportsToolResult], result),
             call_id="call-publish-fail",
             log=log,
-            filesystem=fs,
             snapshot=composite_snapshot,
         )
 
@@ -901,7 +900,6 @@ class TestPublishInvocationFilesystemRestore:
             result=cast(ToolResult[SupportsToolResult], result),
             call_id="call-already-failed",
             log=log,
-            filesystem=fs,
             snapshot=composite_snapshot,
         )
 

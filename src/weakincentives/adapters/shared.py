@@ -517,7 +517,6 @@ class ToolExecutionOutcome:
     result: ToolResult[SupportsToolResult]
     call_id: str | None
     log: StructuredLogger
-    filesystem: Filesystem | None = None
     snapshot: CompositeSnapshot | None = None
 
 
@@ -865,7 +864,6 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
         result=tool_result,
         call_id=call_id,
         log=log,
-        filesystem=filesystem,
         snapshot=snapshot,
     )
 

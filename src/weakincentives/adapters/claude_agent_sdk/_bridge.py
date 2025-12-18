@@ -23,11 +23,12 @@ from ...budget import BudgetTracker
 from ...contrib.tools.filesystem import Filesystem
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.tool import ResourceRegistry, Tool, ToolContext, ToolHandler, ToolResult
+from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ...runtime.events import ToolInvoked
 from ...runtime.execution_state import CompositeSnapshot, ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
+from ..shared import _build_resources
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
@@ -41,27 +42,6 @@ __all__ = [
 ]
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
-
-
-def _build_resources(
-    *,
-    filesystem: Filesystem | None,
-    budget_tracker: BudgetTracker | None,
-) -> ResourceRegistry:
-    """Build a ResourceRegistry with the given resources.
-
-    Resources are keyed by their protocol type (e.g., Filesystem) rather than
-    their concrete type (e.g., InMemoryFilesystem) to enable protocol-based
-    lookup in tool handlers.
-    """
-    entries: dict[type[object], object] = {}
-    if filesystem is not None:
-        entries[Filesystem] = filesystem
-    if budget_tracker is not None:
-        entries[BudgetTracker] = budget_tracker
-    if not entries:
-        return ResourceRegistry()
-    return ResourceRegistry.build(entries)
 
 
 @dataclass(slots=True, frozen=True)
@@ -149,7 +129,7 @@ class BridgedTool:
         # Use transactional context if execution state available
         if self._execution_state is not None:
             with self._execution_state.tool_transaction(
-                tag=f"pre:{self.name}"
+                tag=f"tool:{self.name}"
             ) as snapshot:
                 return self._execute_handler(handler, args, snapshot=snapshot)
         return self._execute_handler(handler, args, snapshot=None)
