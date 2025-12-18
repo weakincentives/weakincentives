@@ -517,7 +517,7 @@ class ToolExecutionOutcome:
     result: ToolResult[SupportsToolResult]
     call_id: str | None
     log: StructuredLogger
-    snapshot: CompositeSnapshot | None = None
+    snapshot: CompositeSnapshot
 
 
 def _resolve_tool_and_handler(
@@ -703,8 +703,8 @@ def tool_execution(
 ) -> Iterator[ToolExecutionOutcome]:
     """Context manager that executes a tool call and standardizes logging.
 
-    Uses ExecutionState for transactional semantics when available. This ensures
-    both session state and filesystem are rolled back on tool failure.
+    Uses ExecutionState for transactional semantics. This ensures both session
+    state and filesystem are rolled back on tool failure.
     """
     tool, handler = _resolve_tool_and_handler(
         tool_call=tool_call,
@@ -729,23 +729,8 @@ def tool_execution(
     # Get filesystem for ToolContext
     filesystem = context.prompt.filesystem() if context.prompt else None
 
-    # Use transactional execution if ExecutionState is available
-    if context.execution_state is not None:
-        with context.execution_state.tool_transaction(
-            tag=f"tool:{tool_name}"
-        ) as snapshot:
-            yield from _execute_tool_with_snapshot(
-                context=context,
-                tool=tool,
-                handler=handler,
-                tool_name=tool_name,
-                arguments_mapping=arguments_mapping,
-                call_id=call_id,
-                log=log,
-                filesystem=filesystem,
-                snapshot=snapshot,
-            )
-    else:
+    # Use transactional execution
+    with context.execution_state.tool_transaction(tag=f"tool:{tool_name}") as snapshot:
         yield from _execute_tool_with_snapshot(
             context=context,
             tool=tool,
@@ -755,24 +740,23 @@ def tool_execution(
             call_id=call_id,
             log=log,
             filesystem=filesystem,
-            snapshot=None,
+            snapshot=snapshot,
         )
 
 
 def _restore_snapshot_if_needed(
-    execution_state: ExecutionState | None,
-    snapshot: CompositeSnapshot | None,
+    execution_state: ExecutionState,
+    snapshot: CompositeSnapshot,
     log: StructuredLogger,
     *,
     reason: str,
 ) -> None:
-    """Restore from snapshot if execution state and snapshot are available."""
-    if execution_state is not None and snapshot is not None:
-        execution_state.restore(snapshot)
-        log.debug(
-            f"State restored after {reason}.",
-            event=f"tool.{reason}_restore",
-        )
+    """Restore from snapshot."""
+    execution_state.restore(snapshot)
+    log.debug(
+        f"State restored after {reason}.",
+        event=f"tool.{reason}_restore",
+    )
 
 
 def _execute_tool_with_snapshot(  # noqa: PLR0913
@@ -785,9 +769,9 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
     call_id: str | None,
     log: StructuredLogger,
     filesystem: Filesystem | None,
-    snapshot: CompositeSnapshot | None,
+    snapshot: CompositeSnapshot,
 ) -> Iterator[ToolExecutionOutcome]:
-    """Execute tool with optional transactional snapshot restore on failure."""
+    """Execute tool with transactional snapshot restore on failure."""
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsToolResult]
     try:
@@ -893,7 +877,7 @@ def _publish_tool_invocation(
     publish_result = context.session.event_bus.publish(invocation)
     if not publish_result.ok:
         # Restore to pre-tool state if tool succeeded (not already restored)
-        if outcome.result.success and outcome.snapshot is not None:
+        if outcome.result.success:
             _restore_snapshot_if_needed(
                 context.execution_state,
                 outcome.snapshot,
@@ -1240,9 +1224,13 @@ class ToolMessageSerializer(Protocol):
 
 @FrozenDataclass()
 class InnerLoopConfig:
-    """Configuration and collaborators required to run the inner loop."""
+    """Configuration and collaborators required to run the inner loop.
 
-    session: SessionProtocol
+    The execution_state provides unified access to session and resources.
+    Session is accessed via execution_state.session.
+    """
+
+    execution_state: ExecutionState
     tool_choice: ToolChoice
     response_format: Mapping[str, Any] | None
     require_structured_output_text: bool
@@ -1257,7 +1245,11 @@ class InnerLoopConfig:
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
-    execution_state: ExecutionState | None = None
+
+    @property
+    def session(self) -> SessionProtocol:
+        """Get session from execution state."""
+        return self.execution_state.session
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> InnerLoopConfig:
         """Fill in optional settings using rendered prompt metadata."""
@@ -1267,14 +1259,18 @@ class InnerLoopConfig:
 
 @dataclass(slots=True)
 class ToolExecutor:
-    """Handles execution of tool calls and event publishing."""
+    """Handles execution of tool calls and event publishing.
+
+    The execution_state provides unified access to session and resources.
+    Session is accessed via execution_state.session.
+    """
 
     adapter_name: AdapterName
     adapter: ProviderAdapter[Any]
     prompt: Prompt[Any]
     prompt_name: str
     rendered: RenderedPrompt[Any]
-    session: SessionProtocol
+    execution_state: ExecutionState
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
     serialize_tool_message_fn: ToolMessageSerializer
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
@@ -1282,7 +1278,6 @@ class ToolExecutor:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
-    execution_state: ExecutionState | None = None
     _log: StructuredLogger = field(init=False)
     _context: _ToolExecutionContext = field(init=False)
     _tool_message_records: list[
@@ -1300,12 +1295,11 @@ class ToolExecutor:
             prompt=self.prompt,
             rendered_prompt=self.rendered,
             tool_registry=self.tool_registry,
-            session=self.session,
+            execution_state=self.execution_state,
             prompt_name=self.prompt_name,
             parse_arguments=self.parse_arguments,
             format_publish_failures=self.format_publish_failures,
             deadline=self.deadline,
-            execution_state=self.execution_state,
             logger_override=self.logger_override,
             budget_tracker=self.budget_tracker,
         )
@@ -1642,7 +1636,7 @@ class InnerLoop[OutputT]:
             prompt=self.inputs.prompt,
             prompt_name=self.inputs.prompt_name,
             rendered=self._rendered,
-            session=self.config.session,
+            execution_state=self.config.execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=self.config.serialize_tool_message_fn,
             format_publish_failures=self.config.format_publish_failures,
@@ -1650,7 +1644,6 @@ class InnerLoop[OutputT]:
             logger_override=self.config.logger_override,
             deadline=self._deadline,
             budget_tracker=self.config.budget_tracker,
-            execution_state=self.config.execution_state,
         )
         self._response_parser = ResponseParser[OutputT](
             prompt_name=self.inputs.prompt_name,
@@ -1830,22 +1823,30 @@ def run_inner_loop[
 
 @dataclass(slots=True)
 class _ToolExecutionContext:
-    """Inputs and collaborators required to execute a provider tool call."""
+    """Inputs and collaborators required to execute a provider tool call.
+
+    The execution_state provides unified access to session and resources.
+    Session is accessed via execution_state.session.
+    """
 
     adapter_name: AdapterName
     adapter: ProviderAdapter[Any]
     prompt: Prompt[Any]
     rendered_prompt: RenderedPrompt[Any] | None
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
-    session: SessionProtocol
+    execution_state: ExecutionState
     prompt_name: str
     parse_arguments: ToolArgumentsParser
     format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
     deadline: Deadline | None
-    execution_state: ExecutionState | None = None
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
     budget_tracker: BudgetTracker | None = None
+
+    @property
+    def session(self) -> SessionProtocol:
+        """Get session from execution state."""
+        return self.execution_state.session
 
     def with_provider_payload(
         self, provider_payload: dict[str, Any] | None

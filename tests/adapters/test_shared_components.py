@@ -173,6 +173,7 @@ def test_tool_executor_success() -> None:
     )
     bus = RecordingBus()
     session = Session(bus=bus)
+    execution_state = ExecutionState(session=session)
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
         {tool.name: tool},
@@ -184,7 +185,7 @@ def test_tool_executor_success() -> None:
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         prompt_name="test",
         rendered=rendered,
-        session=session,
+        execution_state=execution_state,
         tool_registry=tool_registry,
         serialize_tool_message_fn=serialize_tool_message,
         format_publish_failures=lambda x: "",
@@ -220,6 +221,7 @@ def test_publish_tool_invocation_attaches_usage() -> None:
 
     bus = RecordingBus()
     session = Session(bus=bus)
+    execution_state = ExecutionState(session=session)
     typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]] = {
         tool.name: typed_tool
@@ -231,7 +233,7 @@ def test_publish_tool_invocation_attaches_usage() -> None:
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         rendered_prompt=None,
         tool_registry=tool_registry,
-        session=session,
+        execution_state=execution_state,
         prompt_name="test",
         parse_arguments=parse_tool_arguments,
         format_publish_failures=lambda errors: "",
@@ -246,12 +248,14 @@ def test_publish_tool_invocation_attaches_usage() -> None:
         }
     )
 
+    snapshot = execution_state.snapshot(tag="test")
     outcome = ToolExecutionOutcome(
         tool=typed_tool,
         params=cast(SupportsDataclass, params),
         result=cast(ToolResult[SupportsToolResult], result),
         call_id="call-usage",
         log=log,
+        snapshot=snapshot,
     )
 
     invocation = _publish_tool_invocation(context=context, outcome=outcome)
@@ -349,6 +353,7 @@ def test_tool_executor_raises_when_deadline_expired(
     )
     bus = RecordingBus()
     session = Session(bus=bus)
+    execution_state = ExecutionState(session=session)
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
         {tool.name: tool},
@@ -365,7 +370,7 @@ def test_tool_executor_raises_when_deadline_expired(
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         prompt_name="test",
         rendered=rendered,
-        session=session,
+        execution_state=execution_state,
         tool_registry=tool_registry,
         serialize_tool_message_fn=serialize_tool_message,
         format_publish_failures=lambda x: "",
@@ -525,6 +530,7 @@ class TestToolExecutionFilesystemIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
+        execution_state = ExecutionState(session=session)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -536,7 +542,7 @@ class TestToolExecutionFilesystemIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
@@ -600,12 +606,11 @@ class TestToolExecutionFilesystemIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
-            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -662,12 +667,11 @@ class TestToolExecutionFilesystemIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
-            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -712,6 +716,7 @@ class TestToolExecutionFilesystemIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
+        execution_state = _create_execution_state(session, fs)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -723,7 +728,7 @@ class TestToolExecutionFilesystemIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
@@ -801,12 +806,11 @@ class TestPublishInvocationFilesystemRestore:
             prompt=Prompt(PromptTemplate(ns="test", key="tool")),
             rendered_prompt=None,
             tool_registry=tool_registry,
-            session=session,
+            execution_state=execution_state,
             prompt_name="test",
             parse_arguments=parse_tool_arguments,
             format_publish_failures=lambda errors: "publish failed",
             deadline=None,
-            execution_state=execution_state,
         )
 
         outcome = ToolExecutionOutcome(
@@ -883,12 +887,11 @@ class TestPublishInvocationFilesystemRestore:
             prompt=Prompt(PromptTemplate(ns="test", key="tool")),
             rendered_prompt=None,
             tool_registry=tool_registry,
-            session=session,
+            execution_state=execution_state,
             prompt_name="test",
             parse_arguments=parse_tool_arguments,
             format_publish_failures=lambda errors: "publish failed",
             deadline=None,
-            execution_state=execution_state,
         )
 
         outcome = ToolExecutionOutcome(
@@ -980,12 +983,11 @@ class TestFilesystemSnapshotIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
-            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1049,12 +1051,11 @@ class TestFilesystemSnapshotIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
-            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1110,6 +1111,7 @@ class TestFilesystemSnapshotIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
+        execution_state = _create_execution_state(session, fs)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1121,7 +1123,7 @@ class TestFilesystemSnapshotIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
@@ -1177,6 +1179,7 @@ class TestFilesystemSnapshotIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
+        execution_state = _create_execution_state(session, fs)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1188,7 +1191,7 @@ class TestFilesystemSnapshotIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
@@ -1255,12 +1258,11 @@ class TestFilesystemSnapshotIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
-            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1324,12 +1326,11 @@ class TestFilesystemSnapshotIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
-            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1400,12 +1401,11 @@ class TestHostFilesystemToolIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
-            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(
@@ -1453,6 +1453,7 @@ class TestHostFilesystemToolIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
+        execution_state = _create_execution_state(session, fs)  # type: ignore[arg-type]
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1464,7 +1465,7 @@ class TestHostFilesystemToolIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
@@ -1529,12 +1530,11 @@ class TestHostFilesystemToolIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            session=session,
+            execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
-            execution_state=execution_state,
         )
 
         tool_call = SimpleNamespace(

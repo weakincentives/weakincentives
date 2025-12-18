@@ -185,7 +185,7 @@ def build_inner_loop(
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        session=session,
+        execution_state=execution_state or ExecutionState(session=session),
         tool_choice=tool_choice,
         response_format=response_format,
         require_structured_output_text=False,
@@ -195,7 +195,6 @@ def build_inner_loop(
         throttle_policy=throttle_policy or new_throttle_policy(),
         budget_tracker=budget_tracker,
         deadline=deadline,
-        execution_state=execution_state,
     )
     return InnerLoop[object](inputs=inputs, config=config)
 
@@ -434,7 +433,7 @@ def test_run_inner_loop_function() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        session=session,
+        execution_state=ExecutionState(session=session),
         tool_choice="auto",
         response_format=None,
         require_structured_output_text=False,

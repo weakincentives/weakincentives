@@ -42,6 +42,7 @@ from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.events._types import TokenUsage, ToolInvoked
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, append_all
 
 
@@ -54,7 +55,7 @@ def session() -> Session:
 @pytest.fixture
 def hook_context(session: Session) -> HookContext:
     return HookContext(
-        session=session,
+        execution_state=ExecutionState(session=session),
         adapter_name="claude_agent_sdk",
         prompt_name="test_prompt",
     )
@@ -63,7 +64,7 @@ def hook_context(session: Session) -> HookContext:
 class TestHookContext:
     def test_basic_construction(self, session: Session) -> None:
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -85,7 +86,7 @@ class TestHookContext:
         tracker = BudgetTracker(budget)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             deadline=deadline,
@@ -113,7 +114,7 @@ class TestPreToolUseHook:
         frozen_utcnow.advance(timedelta(seconds=10))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             deadline=deadline,
@@ -136,7 +137,7 @@ class TestPreToolUseHook:
         )
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             budget_tracker=tracker,
@@ -159,7 +160,7 @@ class TestPreToolUseHook:
         )
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             budget_tracker=tracker,
@@ -178,7 +179,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -228,7 +229,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -251,7 +252,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -275,7 +276,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -294,7 +295,7 @@ class TestPostToolUseHook:
 
     def test_stops_on_structured_output_by_default(self, session: Session) -> None:
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -313,7 +314,7 @@ class TestPostToolUseHook:
         self, session: Session
     ) -> None:
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -334,7 +335,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -359,7 +360,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -563,7 +564,7 @@ class TestPostToolUseHookWithTypedParsing:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -602,7 +603,7 @@ class TestPostToolUseHookWithTypedParsing:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -626,7 +627,7 @@ class TestPostToolUseHookWithTypedParsing:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -650,7 +651,7 @@ class TestPostToolUseHookWithTypedParsing:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -704,7 +705,7 @@ class TestSubagentStartHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -740,7 +741,7 @@ class TestSubagentStopHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -778,7 +779,7 @@ class TestSubagentStopHook:
         )
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -810,7 +811,7 @@ class TestSubagentStopHook:
         transcript_file.write_text('{"event": "tool_call", "name": "Read"}\n')
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -841,7 +842,7 @@ class TestSubagentStopHook:
         agent_transcript_file.write_text('{"event": "start"}\n')
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -866,7 +867,7 @@ class TestSubagentStopHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -996,7 +997,7 @@ class TestPreCompactHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1029,7 +1030,7 @@ class TestNotificationHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1063,7 +1064,7 @@ class TestMultipleNotificationsAccumulate:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1121,10 +1122,9 @@ class TestPreToolUseHookTransactional:
         execution_state = ExecutionState(session=session, resources=resources)
 
         context = HookContext(
-            session=session,
+            execution_state=execution_state,
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
-            execution_state=execution_state,
         )
 
         hook = create_pre_tool_use_hook(context)
@@ -1149,10 +1149,9 @@ class TestPreToolUseHookTransactional:
         execution_state = ExecutionState(session=session, resources=resources)
 
         context = HookContext(
-            session=session,
+            execution_state=execution_state,
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
-            execution_state=execution_state,
         )
 
         hook = create_pre_tool_use_hook(context)
@@ -1180,10 +1179,9 @@ class TestPostToolUseHookTransactional:
         execution_state = ExecutionState(session=session, resources=resources)
 
         context = HookContext(
-            session=session,
+            execution_state=execution_state,
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
-            execution_state=execution_state,
         )
 
         # Take snapshot via pre-tool hook
@@ -1226,10 +1224,9 @@ class TestPostToolUseHookTransactional:
         execution_state = ExecutionState(session=session, resources=resources)
 
         context = HookContext(
-            session=session,
+            execution_state=execution_state,
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
-            execution_state=execution_state,
         )
 
         # Take snapshot via pre-tool hook

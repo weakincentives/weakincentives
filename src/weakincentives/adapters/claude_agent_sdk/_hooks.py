@@ -19,17 +19,15 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...runtime.events._types import ToolInvoked
 from ...runtime.execution_state import ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.session.protocols import SessionProtocol
 from ._notifications import Notification
-
-if TYPE_CHECKING:
-    from ...runtime.session.protocols import SessionProtocol
 
 __all__ = [
     "AsyncHookCallback",
@@ -109,26 +107,33 @@ AsyncHookCallback = Callable[
 
 
 class HookContext:
-    """Context passed to hook callbacks for state access."""
+    """Context passed to hook callbacks for state access.
 
-    def __init__(  # noqa: PLR0913
+    The execution_state provides unified access to session and resources.
+    Session is accessed via execution_state.session.
+    """
+
+    def __init__(
         self,
         *,
-        session: SessionProtocol,
+        execution_state: ExecutionState,
         adapter_name: str,
         prompt_name: str,
         deadline: Deadline | None = None,
         budget_tracker: BudgetTracker | None = None,
-        execution_state: ExecutionState | None = None,
     ) -> None:
-        self.session = session
+        self.execution_state = execution_state
         self.adapter_name = adapter_name
         self.prompt_name = prompt_name
         self.deadline = deadline
         self.budget_tracker = budget_tracker
-        self.execution_state = execution_state
         self.stop_reason: str | None = None
         self._tool_count = 0
+
+    @property
+    def session(self) -> SessionProtocol:
+        """Get session from execution state."""
+        return self.execution_state.session
 
 
 def _utcnow() -> datetime:
@@ -257,11 +262,7 @@ def create_pre_tool_use_hook(
 
         # Take snapshot for transactional rollback on native tools
         # Skip MCP-bridged WINK tools - they handle their own transactions
-        if (
-            hook_context.execution_state is not None
-            and tool_use_id is not None
-            and not tool_name.startswith("mcp__wink__")
-        ):
+        if tool_use_id is not None and not tool_name.startswith("mcp__wink__"):
             hook_context.execution_state.begin_tool_execution(
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
@@ -392,7 +393,7 @@ def create_post_tool_use_hook(
         )
 
         # Complete tool transaction - restore state on failure
-        if hook_context.execution_state is not None and tool_use_id is not None:
+        if tool_use_id is not None:
             # Determine success: no stderr and no error indicators
             success = tool_error is None and not _is_tool_error_response(result_raw)
             restored = hook_context.execution_state.end_tool_execution(

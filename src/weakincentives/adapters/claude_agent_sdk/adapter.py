@@ -259,12 +259,11 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         # Add execution_state to hook context for native tool transactions
         hook_context = HookContext(
-            session=session,
+            execution_state=execution_state,
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
             deadline=deadline,
             budget_tracker=budget_tracker,
-            execution_state=execution_state,
         )
 
         bridged_tools = create_bridged_tools(

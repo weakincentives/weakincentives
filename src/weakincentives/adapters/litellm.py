@@ -328,7 +328,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         execution_state = ExecutionState(session=session, resources=resources)
 
         config = InnerLoopConfig(
-            session=session,
+            execution_state=execution_state,
             tool_choice=self._tool_choice,
             response_format=response_format,
             require_structured_output_text=True,
@@ -340,7 +340,6 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             logger_override=logger,
             deadline=deadline,
             budget_tracker=effective_tracker,
-            execution_state=execution_state,
         )
 
         inputs = InnerLoopInputs[OutputT](

@@ -30,6 +30,7 @@ from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.events import EventBus
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session
 
 
@@ -114,7 +115,7 @@ def test_run_inner_loop_requires_message_payload() -> None:
     session = Session(bus=bus)
 
     config = shared.InnerLoopConfig(
-        session=session,
+        execution_state=ExecutionState(session=session),
         tool_choice="auto",
         response_format=None,
         require_structured_output_text=False,
