@@ -842,3 +842,333 @@ class TestBudgetTrackerInResourceRegistry:
 
         assert len(captured_budget_tracker) == 1
         assert captured_budget_tracker[0] is test_tracker
+
+
+class TestBridgedToolTransactionalExecution:
+    """Tests for BridgedTool transactional execution with ExecutionState."""
+
+    def test_restores_state_on_tool_failure(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that state is restored when tool returns success=False."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        test_fs = InMemoryFilesystem()
+        test_fs.write("/test.txt", "initial content")
+
+        resources = ResourceRegistry.build({Filesystem: test_fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        def failing_result_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            # Modify filesystem before returning failure
+            if context.filesystem is not None:
+                context.filesystem.write("/test.txt", "modified content")
+            return ToolResult(
+                message="Tool failed",
+                value=SearchResult(matches=0),
+                success=False,
+            )
+
+        fail_tool = Tool[SearchParams, SearchResult](
+            name="fail_tool",
+            description="Tool that returns failure",
+            handler=failing_result_handler,
+        )
+
+        bridged = BridgedTool(
+            name="fail_tool",
+            description="Tool that returns failure",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=fail_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            filesystem=test_fs,
+            execution_state=execution_state,
+        )
+
+        result = bridged({"query": "test"})
+
+        assert result["isError"] is True
+        # Filesystem should be restored to initial content
+        assert test_fs.read("/test.txt").content == "initial content"
+
+    def test_restores_state_on_exception(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that state is restored when tool raises exception."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        test_fs = InMemoryFilesystem()
+        test_fs.write("/test.txt", "initial content")
+
+        resources = ResourceRegistry.build({Filesystem: test_fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        def exception_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            # Modify filesystem before raising exception
+            if context.filesystem is not None:
+                context.filesystem.write("/test.txt", "modified content")
+            raise RuntimeError("Handler exploded")
+
+        exception_tool = Tool[SearchParams, SearchResult](
+            name="exception_tool",
+            description="Tool that raises exception",
+            handler=exception_handler,
+        )
+
+        bridged = BridgedTool(
+            name="exception_tool",
+            description="Tool that raises exception",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=exception_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            filesystem=test_fs,
+            execution_state=execution_state,
+        )
+
+        result = bridged({"query": "test"})
+
+        assert result["isError"] is True
+        # Filesystem should be restored to initial content
+        assert test_fs.read("/test.txt").content == "initial content"
+
+    def test_restores_state_on_validation_error(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that state is restored when validation fails."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        test_fs = InMemoryFilesystem()
+        test_fs.write("/test.txt", "initial content")
+
+        resources = ResourceRegistry.build({Filesystem: test_fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        bridged = BridgedTool(
+            name="search",
+            description="Search tool",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=search_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            filesystem=test_fs,
+            execution_state=execution_state,
+        )
+
+        # Pass invalid args to trigger validation error
+        result = bridged({"wrong_field": "value"})
+
+        assert result["isError"] is True
+        assert "error" in result["content"][0]["text"].lower()
+        # Filesystem should remain at initial content (no restore needed since
+        # validation fails before handler runs, but state is restored)
+        assert test_fs.read("/test.txt").content == "initial content"
+
+    def test_restores_state_on_visibility_expansion(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that state is restored when VisibilityExpansionRequired is raised."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        test_fs = InMemoryFilesystem()
+        test_fs.write("/test.txt", "initial content")
+
+        resources = ResourceRegistry.build({Filesystem: test_fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        def visibility_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            # Modify filesystem before raising visibility expansion
+            if context.filesystem is not None:
+                context.filesystem.write("/test.txt", "modified content")
+            raise VisibilityExpansionRequired(
+                "Need more context",
+                requested_overrides={("section", "key"): SectionVisibility.FULL},
+                reason="More details needed",
+                section_keys=("section.key",),
+            )
+
+        visibility_tool = Tool[SearchParams, SearchResult](
+            name="visibility_tool",
+            description="Tool that requests visibility expansion",
+            handler=visibility_handler,
+        )
+
+        bridged = BridgedTool(
+            name="visibility_tool",
+            description="Tool that requests visibility expansion",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=visibility_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            filesystem=test_fs,
+            execution_state=execution_state,
+        )
+
+        with pytest.raises(VisibilityExpansionRequired):
+            bridged({"query": "test"})
+
+        # Filesystem should be restored to initial content
+        assert test_fs.read("/test.txt").content == "initial content"
+
+    def test_no_restore_without_execution_state(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that tool failure doesn't crash without execution_state."""
+        from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+
+        test_fs = InMemoryFilesystem()
+        test_fs.write("/test.txt", "initial content")
+
+        def failing_result_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            # Modify filesystem before returning failure
+            if context.filesystem is not None:
+                context.filesystem.write("/test.txt", "modified content")
+            return ToolResult(
+                message="Tool failed",
+                value=SearchResult(matches=0),
+                success=False,
+            )
+
+        fail_tool = Tool[SearchParams, SearchResult](
+            name="fail_tool",
+            description="Tool that returns failure",
+            handler=failing_result_handler,
+        )
+
+        bridged = BridgedTool(
+            name="fail_tool",
+            description="Tool that returns failure",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=fail_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            filesystem=test_fs,
+            # No execution_state
+        )
+
+        result = bridged({"query": "test"})
+
+        assert result["isError"] is True
+        # Without execution_state, filesystem changes persist
+        assert test_fs.read("/test.txt").content == "modified content"
+
+
+class TestCreateBridgedToolsWithExecutionState:
+    """Tests for create_bridged_tools with execution_state parameter."""
+
+    def test_passes_execution_state_to_bridged_tools(
+        self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
+    ) -> None:
+        """Test that create_bridged_tools passes execution_state to BridgedTool."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        test_fs = InMemoryFilesystem()
+        test_fs.write("/test.txt", "initial content")
+
+        resources = ResourceRegistry.build({Filesystem: test_fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        def failing_result_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            if context.filesystem is not None:
+                context.filesystem.write("/test.txt", "modified content")
+            return ToolResult(
+                message="Tool failed",
+                value=SearchResult(matches=0),
+                success=False,
+            )
+
+        fail_tool = Tool[SearchParams, SearchResult](
+            name="fail_tool",
+            description="Tool that returns failure",
+            handler=failing_result_handler,
+        )
+
+        bridged_tools = create_bridged_tools(
+            (fail_tool,),
+            session=session,
+            adapter=mock_adapter,
+            prompt=mock_prompt,
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            filesystem=test_fs,
+            execution_state=execution_state,
+        )
+
+        assert len(bridged_tools) == 1
+        result = bridged_tools[0]({"query": "test"})
+
+        assert result["isError"] is True
+        # Filesystem should be restored to initial content
+        assert test_fs.read("/test.txt").content == "initial content"
