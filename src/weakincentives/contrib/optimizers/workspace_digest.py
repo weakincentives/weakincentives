@@ -139,8 +139,8 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                     strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
                     accepts_overrides=self._config.accepts_overrides,
                 ),
-                *safe_tools,
                 safe_workspace,
+                *safe_tools,
             ),
         )
 
