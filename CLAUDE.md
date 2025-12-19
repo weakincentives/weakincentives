@@ -144,6 +144,7 @@ Consult these specs before modifying related code:
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, metrics |
+| `specs/EXPERIMENTS.md` | Experiment data model, feature flags, optimizer options, MainLoop integration |
 | `specs/EXECUTION_STATE.md` | ExecutionState root, transactional tool execution, snapshot/rollback |
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, MainLoop integration |

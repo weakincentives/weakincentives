@@ -4,6 +4,7 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+<<<<<<< HEAD
 ### Mailbox Message Queue Abstraction
 
 A new `Mailbox` protocol provides SQS-compatible semantics for durable,
@@ -125,6 +126,12 @@ response, session = loop.execute(request)
 
 - **Generic filesystem validation suite.** A reusable test suite validates
   filesystem implementations against the protocol contract.
+
+- **EXPERIMENTS.md spec for experiment data model.** Defines `Experiment`,
+  `FeatureFlag`, `OptimizerOption`, `ExperimentVariant`, and `ExperimentContext`
+  types for systematic A/B testing and optimizer tuning. Experiments attach to
+  `MainLoopRequest` via `experiment_ctx` field, enabling feature flags in
+  prompts/tools and configuration options for optimizers during eval runs.
 
 ### Changed
 
