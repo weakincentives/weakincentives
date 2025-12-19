@@ -1594,13 +1594,11 @@ def _read_mount_entry_to_filesystem(
     )
     relative_posix = relative.as_posix()
     if context.include_patterns and not any(
-        fnmatch.fnmatchcase(relative_posix, pattern)
-        for pattern in context.include_patterns
+        _match_glob(relative_posix, pattern) for pattern in context.include_patterns
     ):
         return consumed_bytes
     if any(
-        fnmatch.fnmatchcase(relative_posix, pattern)
-        for pattern in context.exclude_patterns
+        _match_glob(relative_posix, pattern) for pattern in context.exclude_patterns
     ):
         return consumed_bytes
 
@@ -1663,6 +1661,24 @@ def _normalize_globs(patterns: Sequence[str], field: str) -> tuple[str, ...]:
         _ensure_ascii(stripped, field)
         normalized.append(stripped)
     return tuple(normalized)
+
+
+def _match_glob(path: str, pattern: str) -> bool:
+    """Match a path against a glob pattern with proper ** support.
+
+    The standard fnmatch module doesn't treat ** as "zero or more directories".
+    This function handles that case: **/*.py should match both "foo.py" (zero
+    directories) and "bar/baz.py" (one+ directories).
+    """
+    if "**/" in pattern:
+        # Extract suffix after **/ (e.g., "**/*.py" -> "*.py")
+        suffix = pattern.split("**/")[-1]
+        # Match just the suffix (handles zero directories case)
+        if fnmatch.fnmatchcase(path, suffix):
+            return True
+        # Match the full pattern (handles one+ directories case)
+        return fnmatch.fnmatchcase(path, pattern)
+    return fnmatch.fnmatchcase(path, pattern)
 
 
 def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
