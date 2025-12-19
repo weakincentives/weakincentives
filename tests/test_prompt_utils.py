@@ -93,12 +93,10 @@ def test_workspace_digest_section_render_override_with_empty_body() -> None:
 
 
 def test_workspace_digest_section_original_summary_template() -> None:
-    """original_summary_template returns the summary placeholder."""
-    section = WorkspaceDigestSection(
-        session=Session(), summary_placeholder="Custom summary placeholder"
-    )
+    """original_summary_template returns a static placeholder for hashing."""
+    section = WorkspaceDigestSection(session=Session())
 
-    assert section.original_summary_template() == "Custom summary placeholder"
+    assert section.original_summary_template() == "Workspace digest summary."
 
 
 def test_workspace_digest_section_render_body_with_full_visibility() -> None:
@@ -127,6 +125,34 @@ def test_workspace_digest_section_render_body_with_summary_visibility() -> None:
     body = section.render_body(None, visibility=SectionVisibility.SUMMARY)
 
     assert body == "Short summary"
+
+
+def test_workspace_digest_section_no_digest_renders_placeholder() -> None:
+    """When no digest exists, render_body returns placeholder regardless of visibility."""
+    session = Session()
+    section = WorkspaceDigestSection(session=session)
+
+    # No digest exists - should return placeholder
+    body = section.render_body(None, visibility=SectionVisibility.FULL)
+
+    assert "Workspace digest unavailable" in body
+
+
+def test_workspace_digest_section_dynamic_visibility() -> None:
+    """Visibility is FULL when no digest, SUMMARY when digest exists."""
+    session = Session()
+    section = WorkspaceDigestSection(session=session)
+
+    # No digest - visibility should be FULL, summary should be None
+    assert section._visibility_selector() == SectionVisibility.FULL
+    assert section.summary is None
+
+    # Add a digest
+    set_workspace_digest(session, "workspace-digest", "body", summary="summary")
+
+    # Now visibility should be SUMMARY, summary should exist
+    assert section._visibility_selector() == SectionVisibility.SUMMARY
+    assert section.summary == "summary"
 
 
 """Coverage tests for prompt utilities and workspace digest plumbing."""
