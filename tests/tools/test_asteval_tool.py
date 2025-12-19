@@ -1108,3 +1108,14 @@ def test_asteval_filesystem_property_returns_filesystem() -> None:
 
     fs = section.filesystem
     assert isinstance(fs, Filesystem)
+
+
+def test_asteval_clone_rejects_invalid_filesystem_type() -> None:
+    """Test that clone raises TypeError for invalid filesystem argument."""
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = AstevalSection(session=session)
+
+    new_session = Session(bus=bus)
+    with pytest.raises(TypeError, match="filesystem must be a Filesystem instance"):
+        section.clone(session=new_session, filesystem="not a filesystem")
