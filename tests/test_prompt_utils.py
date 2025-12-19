@@ -19,8 +19,10 @@ import pytest
 from weakincentives.contrib.tools.digests import (
     WorkspaceDigest,
     WorkspaceDigestSection,
+    set_workspace_digest,
 )
 from weakincentives.prompt import MarkdownSection, PromptTemplate
+from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
     PromptOverridesError,
@@ -71,7 +73,7 @@ def test_workspace_digest_section_in_descriptor() -> None:
 
     assert section.original_body_template() == section._placeholder
     assert ("workspace-digest",) in {entry.path for entry in descriptor.sections}
-    assert WorkspaceDigest(section_key="a", body="b").section_key == "a"
+    assert WorkspaceDigest(section_key="a", summary="s", body="b").section_key == "a"
     with pytest.raises(TypeError):
         section.clone()
     clone = section.clone(session=Session())
@@ -88,6 +90,43 @@ def test_workspace_digest_section_render_override_with_empty_body() -> None:
     rendered = section.render_override("   ", None, 0, "1.")
 
     assert rendered == "## 1. Workspace Digest"
+
+
+def test_workspace_digest_section_original_summary_template() -> None:
+    """original_summary_template returns the summary placeholder."""
+    section = WorkspaceDigestSection(
+        session=Session(), summary_placeholder="Custom summary placeholder"
+    )
+
+    assert section.original_summary_template() == "Custom summary placeholder"
+
+
+def test_workspace_digest_section_render_body_with_full_visibility() -> None:
+    """render_body returns full body content when visibility is FULL."""
+    session = Session()
+    set_workspace_digest(
+        session, "workspace-digest", "Full body content", summary="Short summary"
+    )
+    section = WorkspaceDigestSection(session=session)
+
+    # render_body with FULL visibility returns the full body
+    body = section.render_body(None, visibility=SectionVisibility.FULL)
+
+    assert body == "Full body content"
+
+
+def test_workspace_digest_section_render_body_with_summary_visibility() -> None:
+    """render_body returns summary content when visibility is SUMMARY."""
+    session = Session()
+    set_workspace_digest(
+        session, "workspace-digest", "Full body content", summary="Short summary"
+    )
+    section = WorkspaceDigestSection(session=session)
+
+    # render_body with SUMMARY visibility returns the summary
+    body = section.render_body(None, visibility=SectionVisibility.SUMMARY)
+
+    assert body == "Short summary"
 
 
 """Coverage tests for prompt utilities and workspace digest plumbing."""

@@ -48,6 +48,7 @@ from ..tools.workspace import WorkspaceSection
 class _OptimizationResponse:
     """Structured response emitted by the workspace digest optimization prompt."""
 
+    summary: str
     digest: str
 
 
@@ -142,6 +143,12 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                         dependency managers, and watchouts. Keep the digest task agnostic.
                         Capture command exec tools (asteval, Podman exec) plus env caps/
                         versions/libs. Keep it dense.
+
+                        Your output must include:
+                        - **summary**: A single paragraph (2-3 sentences) overview of the
+                          workspace purpose, primary language/framework, and key capabilities.
+                        - **digest**: The full detailed digest with build commands, dependencies,
+                          testing instructions, and other technical details.
                         """
                     ).strip(),
                     key="optimization-expectations",
@@ -180,10 +187,14 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             deadline=self._context.deadline,
         )
 
-        digest = self._extract_digest(response=response, prompt_name=prompt_name)
+        summary, digest = self._extract_summary_and_digest(
+            response=response, prompt_name=prompt_name
+        )
 
         if self._store_scope is PersistenceScope.SESSION:
-            _ = set_workspace_digest(outer_session, digest_section.key, digest)
+            _ = set_workspace_digest(
+                outer_session, digest_section.key, digest, summary=summary
+            )
 
         if self._store_scope is PersistenceScope.GLOBAL:
             global_store = effective_store
@@ -273,25 +284,47 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
         )
 
-    def _extract_digest(  # noqa: PLR6301
+    def _extract_summary_and_digest(  # noqa: PLR6301
         self, *, response: PromptResponse[Any], prompt_name: str
-    ) -> str:
+    ) -> tuple[str, str]:
+        """Extract summary and digest from the optimization response.
+
+        Returns:
+            Tuple of (summary, digest) strings.
+        """
+        summary: str | None = None
         digest: str | None = None
+
         if isinstance(response.output, str):
+            # Plain string output - use as digest, generate default summary
             digest = response.output
         elif response.output is not None:
-            candidate = getattr(response.output, "digest", None)
-            if isinstance(candidate, str):
-                digest = candidate
+            # Structured output - extract both fields
+            summary_candidate = getattr(response.output, "summary", None)
+            if isinstance(summary_candidate, str):
+                summary = summary_candidate
+            digest_candidate = getattr(response.output, "digest", None)
+            if isinstance(digest_candidate, str):
+                digest = digest_candidate
+
+        # Fall back to response text if no digest extracted
         if digest is None and response.text:
             digest = response.text
+
         if digest is None:
             raise PromptEvaluationError(
                 "Optimization did not return digest content.",
                 prompt_name=prompt_name,
                 phase=PROMPT_EVALUATION_PHASE_RESPONSE,
             )
-        return digest.strip()
+
+        # Use default summary if not provided
+        if summary is None:
+            summary = (
+                "Workspace digest available. Use read_section to view the full details."
+            )
+
+        return summary.strip(), digest.strip()
 
 
 __all__ = ["WorkspaceDigestOptimizer"]
