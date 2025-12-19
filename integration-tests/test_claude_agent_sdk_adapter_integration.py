@@ -383,6 +383,7 @@ def _build_file_read_prompt() -> PromptTemplate[object]:
 
 def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     claude_model: str,
+    isolated_workspace: Path,
 ) -> None:
     """Verify that adapter hooks publish ToolInvoked events for SDK native tools.
 
@@ -391,10 +392,10 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     This is a key integration point between the SDK's execution and weakincentives'
     event-driven architecture.
     """
-    # Use a fresh client config with permissions that allow the Read tool
+    # Use isolated workspace to avoid operations on the actual repository
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
-        cwd=str(Path.cwd()),  # Set working directory to current repo
+        cwd=str(isolated_workspace),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -405,7 +406,7 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     )
 
     prompt_template = _build_file_read_prompt()
-    # Use README.md as it's guaranteed to exist in the repo
+    # Use README.md from the isolated workspace
     params = ReadFileParams(file_path="README.md")
     prompt = Prompt(prompt_template).bind(params)
 
@@ -608,6 +609,7 @@ def _build_multi_tool_prompt() -> PromptTemplate[object]:
 
 def test_claude_agent_sdk_adapter_multiple_tool_invocations(
     claude_model: str,
+    isolated_project: Path,
 ) -> None:
     """Verify adapter tracks multiple sequential tool invocations.
 
@@ -617,7 +619,7 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(
     """
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
-        cwd=str(Path.cwd()),
+        cwd=str(isolated_project),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -628,7 +630,8 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(
     )
 
     prompt_template = _build_multi_tool_prompt()
-    params = MultiStepParams(target_dir="src/weakincentives")
+    # Use the src directory in isolated_project (created by fixture)
+    params = MultiStepParams(target_dir="src")
     prompt = Prompt(prompt_template).bind(params)
 
     tool_invoked_events: list[ToolInvoked] = []
@@ -660,6 +663,7 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(
 
 def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
     claude_model: str,
+    isolated_workspace: Path,
 ) -> None:
     """Verify adapter accumulates token usage across multi-turn execution.
 
@@ -669,7 +673,7 @@ def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
     """
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
-        cwd=str(Path.cwd()),
+        cwd=str(isolated_workspace),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -679,6 +683,7 @@ def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
     )
 
     prompt_template = _build_file_read_prompt()
+    # Use README.md in isolated_workspace (created by fixture)
     params = ReadFileParams(file_path="README.md")
     prompt = Prompt(prompt_template).bind(params)
 
@@ -1791,6 +1796,7 @@ def test_claude_agent_sdk_adapter_sandbox_excluded_commands(
 
 def test_claude_agent_sdk_adapter_with_workspace_section(
     claude_model: str,
+    isolated_workspace: Path,
 ) -> None:
     """Verify ClaudeAgentWorkspaceSection works with the adapter.
 
@@ -1805,7 +1811,7 @@ def test_claude_agent_sdk_adapter_with_workspace_section(
     # Create session and workspace
     session = Session()
 
-    # Mount the current directory's README.md
+    # Mount the isolated workspace's README.md (avoids touching actual repo)
     workspace = ClaudeAgentWorkspaceSection(
         session=session,
         mounts=(
@@ -1814,7 +1820,7 @@ def test_claude_agent_sdk_adapter_with_workspace_section(
                 mount_path="readme.md",
             ),
         ),
-        allowed_host_roots=(str(Path.cwd()),),
+        allowed_host_roots=(str(isolated_workspace),),
     )
 
     try:
@@ -1879,6 +1885,7 @@ def test_claude_agent_sdk_adapter_with_workspace_section(
 
 def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(
     claude_model: str,
+    isolated_workspace: Path,
 ) -> None:
     """Verify HostMount.max_bytes is enforced during workspace creation.
 
@@ -1893,7 +1900,7 @@ def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(
 
     session = Session()
 
-    # Try to mount README.md with a very small byte limit
+    # Try to mount README.md with a very small byte limit (uses isolated workspace)
     with pytest.raises(WorkspaceBudgetExceededError):
         ClaudeAgentWorkspaceSection(
             session=session,
@@ -1904,12 +1911,13 @@ def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(
                     max_bytes=10,  # Very small - should fail
                 ),
             ),
-            allowed_host_roots=(str(Path.cwd()),),
+            allowed_host_roots=(str(isolated_workspace),),
         )
 
 
 def test_claude_agent_sdk_adapter_workspace_security_check(
     claude_model: str,
+    isolated_workspace: Path,
 ) -> None:
     """Verify allowed_host_roots security boundary is enforced.
 
@@ -1934,8 +1942,8 @@ def test_claude_agent_sdk_adapter_workspace_security_check(
                     mount_path="hosts",
                 ),
             ),
-            # Only allow current directory
-            allowed_host_roots=(str(Path.cwd()),),
+            # Only allow isolated workspace directory
+            allowed_host_roots=(str(isolated_workspace),),
         )
 
 
