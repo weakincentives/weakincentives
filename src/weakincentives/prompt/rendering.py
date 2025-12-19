@@ -32,6 +32,7 @@ from .progressive_disclosure import (
     build_summary_suffix,
     compute_current_visibility,
     create_open_sections_handler,
+    create_read_section_handler,
 )
 from .registry import RegistrySnapshot, SectionNode
 from .section import Section
@@ -162,7 +163,7 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: PLR0914
+    def render(  # noqa: PLR0914, C901
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,
@@ -177,7 +178,8 @@ class PromptRenderer[OutputT]:
         tool_override_lookup = dict(tool_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
         summary_skip_depth: int | None = None
-        has_summarized = False
+        has_summarized_with_tools = False
+        has_summarized_without_tools = False
 
         for node, section_params in self._iter_enabled_sections(
             dict(param_lookup), session=session
@@ -202,7 +204,11 @@ class PromptRenderer[OutputT]:
             # When rendering with SUMMARY visibility, skip children
             if effective_visibility == SectionVisibility.SUMMARY:
                 summary_skip_depth = node.depth
-                has_summarized = True
+                # Track whether summarized section (or its descendants) has tools
+                if self._section_or_descendants_have_tools(node):
+                    has_summarized_with_tools = True
+                else:
+                    has_summarized_without_tools = True
 
             rendered = self._render_section(
                 node, section_params, override_body, effective_visibility
@@ -216,7 +222,10 @@ class PromptRenderer[OutputT]:
             ):
                 section_key = ".".join(node.path)
                 child_keys = self._collect_child_keys(node)
-                suffix = build_summary_suffix(section_key, child_keys)
+                has_tools = self._section_or_descendants_have_tools(node)
+                suffix = build_summary_suffix(
+                    section_key, child_keys, has_tools=has_tools
+                )
                 rendered += suffix
 
             # Don't collect tools when rendering with SUMMARY visibility
@@ -231,13 +240,17 @@ class PromptRenderer[OutputT]:
             if rendered:
                 rendered_sections.append(rendered)
 
-        # Inject open_sections tool when there are summarized sections
-        if has_summarized:
+        # Compute current visibility once for tool injection
+        current_visibility: dict[SectionPath, SectionVisibility] | None = None
+        if has_summarized_with_tools or has_summarized_without_tools:
             current_visibility = compute_current_visibility(
                 self._registry,
                 param_lookup,
                 session=session,
             )
+
+        # Inject open_sections tool when there are summarized sections with tools
+        if has_summarized_with_tools and current_visibility is not None:
             open_sections_tool = create_open_sections_handler(
                 registry=self._registry,
                 current_visibility=current_visibility,
@@ -246,6 +259,21 @@ class PromptRenderer[OutputT]:
                 cast(
                     Tool[SupportsDataclassOrNone, SupportsToolResult],
                     open_sections_tool,
+                )
+            )
+
+        # Inject read_section tool when there are summarized sections without tools
+        if has_summarized_without_tools and current_visibility is not None:
+            read_section_tool = create_read_section_handler(
+                registry=self._registry,
+                current_visibility=current_visibility,
+                param_lookup=param_lookup,
+                session=session,
+            )
+            collected_tools.append(
+                cast(
+                    Tool[SupportsDataclassOrNone, SupportsToolResult],
+                    read_section_tool,
                 )
             )
 
@@ -260,6 +288,34 @@ class PromptRenderer[OutputT]:
                 field_description_patches
             ),
         )
+
+    def _section_or_descendants_have_tools(
+        self, parent_node: SectionNode[SupportsDataclass]
+    ) -> bool:
+        """Check if section or any descendant has tools attached."""
+        # Check the section itself
+        if parent_node.section.tools():
+            return True
+
+        # Check descendants
+        parent_depth = parent_node.depth
+        in_parent = False
+
+        for node in self._registry.sections:
+            if node is parent_node:
+                in_parent = True
+                continue
+
+            if in_parent:
+                # Descendants have depth > parent_depth
+                if node.depth > parent_depth:
+                    if node.section.tools():
+                        return True
+                else:
+                    # We've left the parent's subtree
+                    break
+
+        return False
 
     def _collect_child_keys(
         self, parent_node: SectionNode[SupportsDataclass]

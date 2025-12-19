@@ -35,7 +35,7 @@ if TYPE_CHECKING:
 
     from ..runtime.session.protocols import SessionProtocol
     from ._types import SupportsDataclass
-    from .registry import RegistrySnapshot
+    from .registry import RegistrySnapshot, SectionNode
 
 
 @dataclass(slots=True, frozen=True)
@@ -59,6 +59,36 @@ class OpenSectionsParams:
             ),
         },
     )
+
+
+@dataclass(slots=True, frozen=True)
+class ReadSectionParams:
+    """Parameters for the read_section tool."""
+
+    section_key: str = field(
+        metadata={
+            "description": (
+                "The key of the summarized section to read. "
+                "Use the key shown in the section summary. Nested sections use "
+                "dot notation (e.g., 'parent.child')."
+            ),
+        },
+    )
+
+
+@dataclass(slots=True, frozen=True)
+class ReadSectionResult:
+    """Result of the read_section tool."""
+
+    content: str = field(
+        metadata={
+            "description": "The rendered markdown content of the section.",
+        },
+    )
+
+    def render(self) -> str:
+        """Return the canonical textual representation of the result."""
+        return self.content
 
 
 def _parse_section_key(key: str) -> SectionPath:
@@ -156,27 +186,243 @@ def create_open_sections_handler(
     )
 
 
-def build_summary_suffix(section_key: str, child_keys: tuple[str, ...]) -> str:
+def create_read_section_handler(
+    *,
+    registry: RegistrySnapshot,
+    current_visibility: Mapping[SectionPath, SectionVisibility],
+    param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass] | None = None,
+    session: SessionProtocol | None = None,
+) -> Tool[ReadSectionParams, ReadSectionResult]:
+    """Create a read_section tool bound to the current prompt state.
+
+    The read_section tool allows models to retrieve the full markdown content
+    of a summarized section without permanently changing visibility state.
+    Unlike open_sections, this is a read-only operation - the section remains
+    summarized in subsequent turns.
+
+    Args:
+        registry: The prompt's section registry snapshot.
+        current_visibility: Current visibility state for all sections.
+        param_lookup: Optional parameter lookup for section rendering.
+        session: Optional session for visibility callables that inspect state.
+
+    Returns:
+        A Tool instance configured for reading section content.
+    """
+    section_params_lookup = dict(param_lookup or {})
+
+    def handler(
+        params: ReadSectionParams, *, context: ToolContext
+    ) -> ToolResult[ReadSectionResult]:
+        """Handle read_section requests by rendering and returning section content."""
+        section_key = params.section_key
+        path = _parse_section_key(section_key)
+
+        # Validate section exists
+        valid_paths: Set[SectionPath] = set(registry.section_paths)
+        if path not in valid_paths:
+            raise PromptValidationError(
+                f"Section '{section_key}' does not exist in this prompt."
+            )
+
+        # Find the section node
+        target_node = None
+        for node in registry.sections:
+            if node.path == path:
+                target_node = node
+                break
+
+        if target_node is None:  # pragma: no cover - defensive
+            raise PromptValidationError(
+                f"Section '{section_key}' not found in registry."
+            )
+
+        # Check section is actually summarized
+        effective_visibility = current_visibility.get(path)
+        if effective_visibility == SectionVisibility.FULL:
+            raise PromptValidationError(f"Section '{section_key}' is not summarized.")
+
+        # Resolve section parameters
+        section_params = registry.resolve_section_params(
+            target_node, dict(section_params_lookup)
+        )
+
+        # Render the section with FULL visibility (but children keep their visibility)
+        rendered = target_node.section.render(
+            section_params,
+            target_node.depth,
+            target_node.number,
+            path=target_node.path,
+            visibility=SectionVisibility.FULL,
+        )
+
+        # If the section has children, render them with their current visibility
+        child_content = _render_children_for_read(
+            target_node,
+            registry,
+            section_params_lookup,
+            current_visibility,
+            session,
+        )
+
+        if child_content:
+            rendered = f"{rendered}\n\n{child_content}"
+
+        return ToolResult(
+            message=f"Content of section '{section_key}':",
+            value=ReadSectionResult(content=rendered),
+            success=True,
+        )
+
+    return Tool[ReadSectionParams, ReadSectionResult](
+        name="read_section",
+        description=(
+            "Read the full content of a summarized section without expanding it. "
+            "Returns the section's markdown content. Child sections may still be "
+            "summarized in the output."
+        ),
+        handler=handler,
+        accepts_overrides=False,
+    )
+
+
+def _render_children_for_read(
+    parent_node: SectionNode[SupportsDataclass],
+    registry: RegistrySnapshot,
+    param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
+    current_visibility: Mapping[SectionPath, SectionVisibility],
+    session: SessionProtocol | None,
+) -> str:
+    """Render child sections for read_section, respecting their visibility."""
+    rendered_children: list[str] = []
+    parent_depth = parent_node.depth
+    in_children = False
+    skip_depth: int | None = None
+
+    for node in registry.sections:
+        if node is parent_node:
+            in_children = True
+            continue
+
+        if not in_children:
+            continue
+
+        # Stop when we leave the parent's subtree
+        if node.depth <= parent_depth:
+            break
+
+        # Handle skip depth for summarized sections
+        if skip_depth is not None:
+            if node.depth > skip_depth:
+                continue
+            skip_depth = None
+
+        # Get effective visibility for this child
+        effective = current_visibility.get(node.path, SectionVisibility.FULL)
+
+        # Resolve parameters
+        section_params = registry.resolve_section_params(node, dict(param_lookup))
+
+        # Check if section is enabled
+        if not node.section.is_enabled(section_params, session=session):
+            skip_depth = node.depth
+            continue
+
+        # Render the section
+        rendered = node.section.render(
+            section_params,
+            node.depth,
+            node.number,
+            path=node.path,
+            visibility=effective,
+        )
+
+        # Add summary suffix for summarized children
+        if (
+            effective == SectionVisibility.SUMMARY
+            and node.section.summary is not None
+            and rendered
+        ):
+            section_key = ".".join(node.path)
+            child_keys = _collect_child_keys_for_node(node, registry)
+            has_tools = bool(node.section.tools())
+            suffix = build_summary_suffix(section_key, child_keys, has_tools=has_tools)
+            rendered += suffix
+            skip_depth = node.depth
+
+        if rendered:
+            rendered_children.append(rendered)
+
+    return "\n\n".join(rendered_children)
+
+
+def _collect_child_keys_for_node(
+    parent_node: SectionNode[SupportsDataclass],
+    registry: RegistrySnapshot,
+) -> tuple[str, ...]:
+    """Collect the keys of direct child sections for a parent node."""
+    child_keys: list[str] = []
+    parent_depth = parent_node.depth
+    parent_path = parent_node.path
+    in_parent = False
+
+    for node in registry.sections:
+        if node is parent_node:
+            in_parent = True
+            continue
+
+        if in_parent:
+            if node.depth == parent_depth + 1 and node.path[:-1] == parent_path:
+                child_keys.append(node.section.key)
+            elif node.depth <= parent_depth:
+                break
+
+    return tuple(child_keys)
+
+
+def build_summary_suffix(
+    section_key: str,
+    child_keys: tuple[str, ...],
+    *,
+    has_tools: bool = True,
+) -> str:
     """Build the instruction suffix appended to summarized sections.
 
     Args:
         section_key: The dot-notation key for the summarized section.
         child_keys: Keys of child sections that would be revealed on expansion.
+        has_tools: Whether the section has tools attached. When False, the suffix
+            directs the model to use read_section instead of open_sections.
 
     Returns:
         Formatted instruction text for the model.
     """
-    base_instruction = (
-        f"[This section is summarized. To view full content, "
-        f'call `open_sections` with key "{section_key}".]'
-    )
-
-    if child_keys:
-        children_str = ", ".join(child_keys)
+    if has_tools:
+        # Section has tools - use open_sections to expand and access tools
         base_instruction = (
-            f"[This section is summarized. Call `open_sections` with key "
-            f'"{section_key}" to view full content including subsections: {children_str}.]'
+            f"[This section is summarized. To view full content, "
+            f'call `open_sections` with key "{section_key}".]'
         )
+
+        if child_keys:
+            children_str = ", ".join(child_keys)
+            base_instruction = (
+                f"[This section is summarized. Call `open_sections` with key "
+                f'"{section_key}" to view full content including subsections: {children_str}.]'
+            )
+    else:
+        # Section has no tools - use read_section for read-only access
+        base_instruction = (
+            f"[This section is summarized. To view full content, "
+            f'call `read_section` with key "{section_key}".]'
+        )
+
+        if child_keys:
+            children_str = ", ".join(child_keys)
+            base_instruction = (
+                f"[This section is summarized. Call `read_section` with key "
+                f'"{section_key}" to view full content including subsections: {children_str}.]'
+            )
 
     return f"\n\n---\n{base_instruction}"
 
@@ -257,9 +503,12 @@ def compute_current_visibility(
 
 __all__ = [
     "OpenSectionsParams",
+    "ReadSectionParams",
+    "ReadSectionResult",
     "VisibilityExpansionRequired",
     "build_summary_suffix",
     "compute_current_visibility",
     "create_open_sections_handler",
+    "create_read_section_handler",
     "has_summarized_sections",
 ]

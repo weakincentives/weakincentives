@@ -645,3 +645,119 @@ def test_markdown_section_render_override_with_empty_body_no_tools() -> None:
     rendered = section.render_override("", _SectionParams(title="test"), 0, "1")
 
     assert rendered == "## 1. Empty"
+
+
+def test_summary_visibility_without_tools_injects_read_section() -> None:
+    """Summarized section without tools gets read_section tool instead of open_sections."""
+    section = MarkdownSection[_SectionParams](
+        title="NoTools",
+        template="Full: ${title}",
+        key="no-tools-section",
+        summary="Summary: ${title}",
+        visibility=SectionVisibility.SUMMARY,
+        # No tools attached
+    )
+
+    registry = PromptRegistry()
+    registry.register_section(
+        cast(Section[SupportsDataclass], section), path=(section.key,), depth=0
+    )
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+    )
+
+    params_lookup = renderer.build_param_lookup((_SectionParams(title="Test"),))
+    rendered = renderer.render(params_lookup)
+
+    # read_section tool should be injected (not open_sections)
+    assert len(rendered.tools) == 1
+    assert rendered.tools[0].name == "read_section"
+    # Summary suffix should point to read_section
+    assert "read_section" in rendered.text
+    assert "open_sections" not in rendered.text
+
+
+def test_summary_visibility_with_tools_injects_open_sections() -> None:
+    """Summarized section with tools gets open_sections tool."""
+    section = MarkdownSection[_SectionParams](
+        title="WithTools",
+        template="Full: ${title}",
+        key="with-tools-section",
+        summary="Summary: ${title}",
+        visibility=SectionVisibility.SUMMARY,
+        tools=[
+            Tool[_ToolParams, _ToolResult](
+                name="section_tool",
+                description="Tool in section.",
+                handler=_dummy_handler,
+            )
+        ],
+    )
+
+    registry = PromptRegistry()
+    registry.register_section(
+        cast(Section[SupportsDataclass], section), path=(section.key,), depth=0
+    )
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+    )
+
+    params_lookup = renderer.build_param_lookup((_SectionParams(title="Test"),))
+    rendered = renderer.render(params_lookup)
+
+    # open_sections tool should be injected (not read_section)
+    assert len(rendered.tools) == 1
+    assert rendered.tools[0].name == "open_sections"
+    # Summary suffix should point to open_sections
+    assert "open_sections" in rendered.text
+
+
+def test_summary_visibility_mixed_injects_both_tools() -> None:
+    """Prompt with both tooled and tool-less summarized sections gets both tools."""
+    section_with_tools = MarkdownSection[_SectionParams](
+        title="WithTools",
+        template="Full with tools: ${title}",
+        key="with-tools",
+        summary="Summary with tools: ${title}",
+        visibility=SectionVisibility.SUMMARY,
+        tools=[
+            Tool[_ToolParams, _ToolResult](
+                name="tooled_section_tool",
+                description="Tool in section.",
+                handler=_dummy_handler,
+            )
+        ],
+    )
+
+    section_without_tools = MarkdownSection[_SectionParams](
+        title="NoTools",
+        template="Full no tools: ${title}",
+        key="no-tools",
+        summary="Summary no tools: ${title}",
+        visibility=SectionVisibility.SUMMARY,
+        # No tools attached
+    )
+
+    registry = PromptRegistry()
+    registry.register_sections(
+        (
+            cast(Section[SupportsDataclass], section_with_tools),
+            cast(Section[SupportsDataclass], section_without_tools),
+        )
+    )
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+    )
+
+    params_lookup = renderer.build_param_lookup((_SectionParams(title="Test"),))
+    rendered = renderer.render(params_lookup)
+
+    # Both tools should be injected
+    tool_names = {tool.name for tool in rendered.tools}
+    assert tool_names == {"open_sections", "read_section"}
