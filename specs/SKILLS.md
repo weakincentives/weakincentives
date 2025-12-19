@@ -9,11 +9,13 @@ practices—into reusable units that extend Claude's capabilities. This
 specification defines:
 
 - `Skill` - A section type wrapping procedural knowledge with optional tools
+- `SkillRef` - A reference to an existing skill directory on the filesystem
 - `SkillsSection` - A container that manages skill installation and disclosure
 
 Skills without custom tools are automatically installed as native Claude skills
 in the isolated home directory. Skills with custom tools remain in the prompt
-and participate in progressive disclosure.
+and participate in progressive disclosure. Filesystem-based skills referenced
+via `SkillRef` are copied to the hermetic environment during setup.
 
 ## Guiding Principles
 
@@ -90,12 +92,97 @@ description:
 [Skill: {name}] {description}
 ```
 
-### SkillsSection
+### SkillRef
 
-`SkillsSection` is a container that holds multiple `Skill` instances and
-orchestrates their installation or disclosure.
+`SkillRef` references an existing skill directory on the filesystem. During
+hermetic setup, the entire skill directory is copied to the ephemeral home,
+preserving any bundled resources (scripts, reference docs, templates).
 
 ```python
+from pathlib import Path
+
+@dataclass(slots=True, frozen=True)
+class SkillRef:
+    """Reference to an existing skill directory on the filesystem."""
+
+    path: Path | str            # Absolute path or relative to base_path
+    base_path: Path | None = None  # Base for relative paths (defaults to cwd)
+    enabled: Callable[[], bool] | None = None  # Conditional inclusion
+
+    @property
+    def resolved_path(self) -> Path:
+        """Resolve to absolute path."""
+        p = Path(self.path)
+        if p.is_absolute():
+            return p
+        base = self.base_path or Path.cwd()
+        return (base / p).resolve()
+
+    @property
+    def skill_md_path(self) -> Path:
+        """Path to SKILL.md within the skill directory."""
+        return self.resolved_path / "SKILL.md"
+
+    @property
+    def name(self) -> str:
+        """Extract skill name from SKILL.md frontmatter."""
+        ...
+
+    @property
+    def description(self) -> str:
+        """Extract skill description from SKILL.md frontmatter."""
+        ...
+
+    def is_enabled(self) -> bool:
+        """Check if this skill reference is enabled."""
+        return self.enabled() if self.enabled else True
+
+    def validate(self) -> None:
+        """Validate the skill directory exists and contains valid SKILL.md."""
+        ...
+```
+
+**Path Resolution:**
+
+- Absolute paths are used as-is
+- Relative paths resolve against `base_path` (defaults to current working
+  directory)
+- Common pattern: `base_path=Path(__file__).parent` for paths relative to the
+  module
+
+**Validation:**
+
+- `resolved_path` must exist and be a directory
+- `SKILL.md` must exist within the directory
+- `SKILL.md` must contain valid YAML frontmatter with `name` and `description`
+- Validation runs at construction time; invalid refs raise `SkillRefError`
+
+**Supported Directory Structure:**
+
+```
+my-skill/
+├── SKILL.md              # Required: frontmatter + body
+├── scripts/              # Optional: executable scripts
+│   └── analyze.sh
+├── templates/            # Optional: reference templates
+│   └── report.md
+└── data/                 # Optional: reference data
+    └── patterns.json
+```
+
+The entire directory tree is copied during installation, preserving the
+structure Claude expects for resource access.
+
+### SkillsSection
+
+`SkillsSection` is a container that holds multiple `Skill` and `SkillRef`
+instances, orchestrating their installation or disclosure.
+
+```python
+# Type alias for skill sources
+SkillSource = Skill | SkillRef
+
+
 class SkillsSection(Section[SkillsSectionParams]):
     """Container for skill management and installation."""
 
@@ -104,30 +191,53 @@ class SkillsSection(Section[SkillsSectionParams]):
         *,
         title: str = "Skills",
         key: str = "skills",
-        skills: Sequence[Skill] = (),
+        skills: Sequence[SkillSource] = (),
+        skill_refs: Sequence[SkillRef] = (),  # Convenience for refs-only
         enabled: Callable[[SkillsSectionParams], bool] | None = None,
         accepts_overrides: bool = True,
     ) -> None: ...
 
     @property
+    def all_skills(self) -> tuple[SkillSource, ...]:
+        """All skill sources (inline + refs)."""
+        return tuple(self.skills) + tuple(self.skill_refs)
+
+    @property
+    def inline_skills(self) -> tuple[Skill, ...]:
+        """Code-defined skills."""
+        return tuple(s for s in self.skills if isinstance(s, Skill))
+
+    @property
+    def referenced_skills(self) -> tuple[SkillRef, ...]:
+        """Filesystem-referenced skills."""
+        refs_in_skills = tuple(s for s in self.skills if isinstance(s, SkillRef))
+        return refs_in_skills + tuple(self.skill_refs)
+
+    @property
     def native_skills(self) -> tuple[Skill, ...]:
-        """Skills without custom tools (installed natively)."""
-        return tuple(s for s in self.skills if not s.has_tools)
+        """Inline skills without custom tools (installed natively)."""
+        return tuple(s for s in self.inline_skills if not s.has_tools)
 
     @property
     def prompt_skills(self) -> tuple[Skill, ...]:
-        """Skills with custom tools (kept in prompt)."""
-        return tuple(s for s in self.skills if s.has_tools)
+        """Inline skills with custom tools (kept in prompt)."""
+        return tuple(s for s in self.inline_skills if s.has_tools)
 
-    def install_native_skills(
+    def install_skills(
         self,
         *,
         skills_dir: Path,
         params_lookup: Mapping[type, SupportsDataclass],
     ) -> tuple[Path, ...]:
-        """Write SKILL.md files to the skills directory."""
+        """Install all native skills and copy all skill refs to skills_dir."""
         ...
 ```
+
+**Skill Sources:**
+
+- `skills` accepts mixed `Skill` and `SkillRef` instances
+- `skill_refs` is a convenience parameter for ref-only configurations
+- Both are combined via `all_skills` for unified processing
 
 ## Skill File Format
 
@@ -168,13 +278,15 @@ flowchart TB
     subgraph Render["Prompt Rendering"]
         Skills["SkillsSection"]
         Native["Native Skills<br/>(no tools)"]
+        Refs["Skill Refs<br/>(filesystem)"]
         Prompt["Prompt Skills<br/>(with tools)"]
     end
 
     subgraph Install["Native Installation"]
         Check["IsolationConfig?"]
         Dir["Create ~/.claude/skills/"]
-        Write["Write SKILL.md files"]
+        WriteInline["Write inline SKILL.md"]
+        CopyRefs["Copy ref directories"]
     end
 
     subgraph Disclose["Progressive Disclosure"]
@@ -184,9 +296,13 @@ flowchart TB
     end
 
     Skills --> Native
+    Skills --> Refs
     Skills --> Prompt
     Native --> Check
-    Check -->|Yes| Dir --> Write
+    Refs --> Check
+    Check -->|Yes| Dir
+    Dir --> WriteInline
+    Dir --> CopyRefs
     Check -->|No| Summary
     Prompt --> Summary
     Summary --> Open --> Full
@@ -197,14 +313,20 @@ flowchart TB
 When `ClaudeAgentSDKAdapter` evaluates a prompt containing `SkillsSection`:
 
 1. **Detect Skills**: Locate `SkillsSection` in rendered sections
-2. **Partition**: Split into `native_skills` and `prompt_skills`
+2. **Partition**: Split into `native_skills`, `prompt_skills`, and
+   `referenced_skills`
 3. **Check Isolation**: Verify `IsolationConfig` is set (hermetic requirement)
 4. **Create Directory**: Ensure `{ephemeral_home}/.claude/skills/` exists
-5. **Install Native Skills**:
+5. **Install Native Skills** (inline, no tools):
    - For each skill without tools, call `skill.to_skill_md(params)`
    - Write to `{skills_dir}/{skill.name}/SKILL.md`
-6. **Exclude from Prompt**: Native skills are not rendered into prompt text
-7. **Render Prompt Skills**: Skills with tools render with their default
+6. **Copy Referenced Skills** (filesystem):
+   - For each `SkillRef`, validate the source directory
+   - Copy entire directory tree to `{skills_dir}/{ref.name}/`
+   - Preserve file permissions for executable scripts
+7. **Exclude from Prompt**: Native and referenced skills are not rendered into
+   prompt text
+8. **Render Prompt Skills**: Skills with tools render with their default
    `SUMMARY` visibility
 
 ### Without Isolation (Non-Hermetic)
@@ -266,18 +388,24 @@ whether they have tools.
 
 ### SkillsInstalled
 
-Published after native skills are written to disk:
+Published after skills are installed to disk (both inline and referenced):
 
 ```python
 @FrozenDataclass()
 class SkillsInstalled:
     prompt_ns: str
     prompt_key: str
-    skills: tuple[str, ...]           # Installed skill names
+    inline_skills: tuple[str, ...]     # Inline skill names (generated)
+    referenced_skills: tuple[str, ...] # Referenced skill names (copied)
     skills_dir: str                    # Installation path
     session_id: UUID | None
     created_at: datetime
     event_id: UUID = field(default_factory=uuid4)
+
+    @property
+    def skills(self) -> tuple[str, ...]:
+        """All installed skill names."""
+        return self.inline_skills + self.referenced_skills
 ```
 
 ### SkillExpanded
@@ -472,7 +600,98 @@ skills_section = SkillsSection(
 # testing → rendered in prompt with SUMMARY, tools bridged via MCP
 ```
 
-### Story 4: Conditional skill enablement
+### Story 4: Filesystem-based skills (SkillRef)
+
+As a team lead, I want to reference pre-existing skill directories that are
+maintained separately from my codebase.
+
+```python
+from pathlib import Path
+from weakincentives.prompt.skills import SkillRef, SkillsSection
+
+# Reference skills from the filesystem
+skills_section = SkillsSection(
+    skill_refs=[
+        # Absolute path to shared team skills
+        SkillRef(path="/opt/company/skills/security-review"),
+
+        # Relative to project root
+        SkillRef(
+            path="skills/code-style",
+            base_path=Path(__file__).parent.parent,  # project root
+        ),
+
+        # Conditionally include based on environment
+        SkillRef(
+            path="/opt/skills/compliance",
+            enabled=lambda: os.getenv("ENABLE_COMPLIANCE") == "1",
+        ),
+    ],
+)
+
+# The entire skill directory is copied to ~/.claude/skills/{name}/
+# Including any scripts/, templates/, or data/ subdirectories
+```
+
+**Directory structure example:**
+
+```
+/opt/company/skills/security-review/
+├── SKILL.md                    # Required
+├── scripts/
+│   ├── scan-secrets.sh         # Executable script
+│   └── check-dependencies.py
+├── checklists/
+│   ├── owasp-top-10.md
+│   └── code-injection.md
+└── patterns/
+    └── vulnerable-patterns.json
+```
+
+All files are copied to the hermetic environment, making them accessible to
+Claude via bash commands during skill execution.
+
+### Story 5: Mixed inline and filesystem skills
+
+As an architect, I want to combine code-defined skills with filesystem skills
+in a single section.
+
+```python
+from weakincentives.prompt.skills import Skill, SkillRef, SkillsSection
+
+skills_section = SkillsSection(
+    skills=[
+        # Inline skill with custom tool
+        Skill(
+            name="testing",
+            description="Testing workflows with execution tools.",
+            title="Testing",
+            key="testing",
+            template="...",
+            tools=[run_tests_tool],  # Stays in prompt
+        ),
+
+        # Filesystem skill (copied to hermetic env)
+        SkillRef(path="/shared/skills/documentation"),
+
+        # Another inline skill (no tools, installed natively)
+        Skill(
+            name="naming",
+            description="Naming conventions guide.",
+            title="Naming",
+            key="naming",
+            template="...",
+        ),
+    ],
+)
+
+# Result:
+# - testing → prompt (has tools)
+# - documentation → copied from /shared/skills/documentation/
+# - naming → generated SKILL.md written to ~/.claude/skills/naming/
+```
+
+### Story 6: Conditional skill enablement
 
 As an operator, I want to enable only specific skills based on runtime context.
 
@@ -501,11 +720,19 @@ skills_section = SkillsSection(
             enabled=lambda p: p.language == "typescript",
         ),
     ],
+    skill_refs=[
+        # SkillRef uses zero-arg enabled predicate
+        SkillRef(
+            path="/skills/security",
+            enabled=lambda: os.getenv("SECURITY_REVIEW") == "1",
+        ),
+    ],
 )
 
 # Bind params to control which skills are active
 prompt = Prompt(template).bind(ReviewParams(language="python"))
-# Only python-review skill is enabled
+# Only python-review skill is enabled (typescript-review disabled)
+# security skill depends on environment variable
 ```
 
 ## Validation Rules
@@ -518,46 +745,83 @@ prompt = Prompt(template).bind(ReviewParams(language="python"))
 - `template` must be non-empty
 - Duplicate skill names within a `SkillsSection` raise `PromptValidationError`
 
+### SkillRef Validation
+
+- `resolved_path` must exist and be a directory
+- `SKILL.md` must exist within the directory
+- `SKILL.md` must contain valid YAML frontmatter with `name` and `description`
+- `name` in frontmatter must match skill naming rules
+- Validation runs at construction time; failures raise `SkillRefError`
+- Disabled refs (via `enabled` predicate) skip validation until enabled
+
 ### Installation Validation
 
 - Without `IsolationConfig`, skill installation logs a warning and skips
 - Skills directory must be writable (or isolation setup fails)
 - Invalid skill names fail at construction, not installation
+- Duplicate names across inline and referenced skills raise
+  `PromptValidationError`
 
 ## Error Handling
 
 ### Exception Types
 
 - `PromptValidationError` - Invalid skill name, description, or duplicates
-- `SkillInstallationError` - Filesystem write failures during installation
+- `SkillRefError` - Invalid skill reference (missing directory, invalid SKILL.md)
+- `SkillInstallationError` - Filesystem write/copy failures during installation
 - `VisibilityExpansionRequired` - Model requests skill expansion (handled by
   adapter)
 
 ```python
+@FrozenDataclass()
+class SkillRefError(WinkError, ValueError):
+    """Invalid skill reference."""
+    path: Path
+    reason: str  # "not_found", "not_directory", "missing_skill_md", "invalid_frontmatter"
+    details: str | None = None
+
+
+@FrozenDataclass()
 class SkillInstallationError(WinkError, RuntimeError):
     """Failed to install skill to filesystem."""
     skill_name: str
     skills_dir: Path
+    source: Literal["inline", "ref"]
     cause: Exception
 ```
 
 ## Filesystem Layout
 
-Native skills are written to the ephemeral home's skill directory:
+Skills are installed to the ephemeral home's skill directory:
 
 ```
 {ephemeral_home}/
 └── .claude/
     ├── settings.json          # Sandbox/network config
     └── skills/
-        ├── code-review/
+        ├── code-review/       # Inline skill (generated)
         │   └── SKILL.md
-        └── refactoring/
-            └── SKILL.md
+        ├── refactoring/       # Inline skill (generated)
+        │   └── SKILL.md
+        └── security-review/   # Referenced skill (copied)
+            ├── SKILL.md
+            ├── scripts/
+            │   ├── scan-secrets.sh
+            │   └── check-dependencies.py
+            ├── checklists/
+            │   └── owasp-top-10.md
+            └── patterns/
+                └── vulnerable-patterns.json
 ```
 
-Each skill gets its own directory to support future resource bundling (scripts,
-reference docs, templates).
+**Inline skills** (generated from `Skill` instances):
+- Only `SKILL.md` is created
+- No bundled resources
+
+**Referenced skills** (copied from `SkillRef` sources):
+- Entire directory tree is copied
+- File permissions preserved (important for executable scripts)
+- Symlinks are followed and copied as regular files
 
 ## Operational Notes
 
@@ -567,13 +831,21 @@ reference docs, templates).
 - Skill expansion is logged via `SkillExpanded` events for observability
 - Use `enabled_skills` filter to reduce installed skills in constrained
   environments
+- Referenced skills with large resource bundles increase setup time; consider
+  lazy copying for large assets
+- Skill refs are validated at construction; invalid paths fail fast before
+  prompt evaluation
 
 ## Limitations
 
 - **Native skills are read-only**: Claude cannot modify installed skills
 - **No dynamic skill discovery**: Skills must be declared in the prompt template
-- **Single-level resources**: Skill directories support only SKILL.md (no nested
-  resources yet)
+- **Inline skills have no resources**: Only `SkillRef` supports bundled scripts,
+  templates, and data files
 - **Isolation required**: Native installation needs hermetic setup; otherwise
   all skills go to prompt
 - **No skill dependencies**: Skills cannot declare dependencies on other skills
+- **No partial ref copying**: Entire skill directory is copied; cannot exclude
+  specific files
+- **Path security**: `SkillRef` paths are not sandboxed; callers must ensure
+  paths are trusted
