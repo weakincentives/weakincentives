@@ -42,6 +42,7 @@ Example usage::
 
 from __future__ import annotations
 
+import builtins
 import fnmatch
 import re
 import shutil
@@ -604,29 +605,16 @@ class InMemoryFilesystem:
             modified_at=file.modified_at,
         )
 
-    def list(self, path: str = ".") -> Sequence[FileEntry]:
-        """List directory contents."""
-        normalized = normalize_path(path)
-        validate_path(normalized)
-
-        if normalized in self._files:
-            msg = f"Not a directory: {path}"
-            raise NotADirectoryError(msg)
-
-        if normalized not in self._directories:
-            raise FileNotFoundError(path)
-
-        entries: list[FileEntry] = []
-        seen: set[str] = set()
-        prefix = f"{normalized}/" if normalized else ""
-
-        # Find immediate children
+    def _collect_file_entries(
+        self, normalized: str, prefix: str, seen: set[str]
+    ) -> builtins.list[FileEntry]:
+        """Collect file entries and implicit directories from files."""
+        entries: builtins.list[FileEntry] = []
         for file_path in self._files:
             if not _is_path_under(file_path, normalized):
                 continue
             relative = file_path[len(prefix) :] if prefix else file_path
             if "/" in relative:
-                # It's in a subdirectory
                 child_dir = relative.split("/")[0]
                 if child_dir not in seen:
                     seen.add(child_dir)
@@ -639,17 +627,18 @@ class InMemoryFilesystem:
                         )
                     )
             else:
-                # Direct child file
                 entries.append(
                     FileEntry(
-                        name=relative,
-                        path=file_path,
-                        is_file=True,
-                        is_directory=False,
+                        name=relative, path=file_path, is_file=True, is_directory=False
                     )
                 )
+        return entries
 
-        # Also check explicit directories
+    def _collect_explicit_dir_entries(
+        self, normalized: str, prefix: str, seen: set[str]
+    ) -> builtins.list[FileEntry]:
+        """Collect explicit directory entries not already seen."""
+        entries: builtins.list[FileEntry] = []
         for dir_path in self._directories:
             if not _is_path_under(dir_path, normalized) or dir_path == normalized:
                 continue
@@ -658,13 +647,27 @@ class InMemoryFilesystem:
                 seen.add(relative)
                 entries.append(
                     FileEntry(
-                        name=relative,
-                        path=dir_path,
-                        is_file=False,
-                        is_directory=True,
+                        name=relative, path=dir_path, is_file=False, is_directory=True
                     )
                 )
+        return entries
 
+    def list(self, path: str = ".") -> Sequence[FileEntry]:
+        """List directory contents."""
+        normalized = normalize_path(path)
+        validate_path(normalized)
+
+        if normalized in self._files:
+            msg = f"Not a directory: {path}"
+            raise NotADirectoryError(msg)
+
+        if normalized not in self._directories:
+            raise FileNotFoundError(path)
+
+        seen: set[str] = set()
+        prefix = f"{normalized}/" if normalized else ""
+        entries = self._collect_file_entries(normalized, prefix, seen)
+        entries.extend(self._collect_explicit_dir_entries(normalized, prefix, seen))
         entries.sort(key=lambda e: e.name)
         return entries
 
@@ -731,6 +734,23 @@ class InMemoryFilesystem:
 
         return matches
 
+    def _resolve_write_content(
+        self,
+        normalized: str,
+        content: str,
+        mode: Literal["create", "overwrite", "append"],
+        timestamp: datetime,
+    ) -> tuple[str, datetime]:
+        """Resolve final content and created_at timestamp for a write."""
+        exists = normalized in self._files
+        if mode == "append" and exists:
+            existing = self._files[normalized]
+            return existing.content + content, existing.created_at
+        if mode == "append":
+            return content, timestamp
+        created_at = self._files[normalized].created_at if exists else timestamp
+        return content, created_at
+
     def write(
         self,
         path: str,
@@ -755,31 +775,19 @@ class InMemoryFilesystem:
             msg = f"Content exceeds maximum length of {_MAX_WRITE_LENGTH} characters."
             raise ValueError(msg)
 
-        # Check parent directory
         parent = "/".join(normalized.split("/")[:-1])
         if parent and parent not in self._directories:
             if not create_parents:
                 raise FileNotFoundError(f"Parent directory does not exist: {parent}")
-            # Create parent directories
             self._ensure_parents(parent)
 
-        exists = normalized in self._files
-        timestamp = _now()
-
-        if mode == "create" and exists:
+        if mode == "create" and normalized in self._files:
             raise FileExistsError(f"File already exists: {path}")
 
-        if mode == "append":
-            if exists:
-                existing = self._files[normalized]
-                final_content = existing.content + content
-                created_at = existing.created_at
-            else:
-                final_content = content
-                created_at = timestamp
-        else:
-            final_content = content
-            created_at = self._files[normalized].created_at if exists else timestamp
+        timestamp = _now()
+        final_content, created_at = self._resolve_write_content(
+            normalized, content, mode, timestamp
+        )
 
         self._files[normalized] = _InMemoryFile(
             content=final_content,
@@ -792,6 +800,29 @@ class InMemoryFilesystem:
             bytes_written=len(final_content.encode("utf-8")),
             mode=mode,
         )
+
+    def _delete_directory_contents(self, normalized: str) -> None:
+        """Delete all files and subdirectories under a directory."""
+        to_delete = [f for f in self._files if _is_path_under(f, normalized)]
+        for f in to_delete:
+            del self._files[f]
+        to_delete_dirs = [
+            d
+            for d in self._directories
+            if _is_path_under(d, normalized) and d != normalized
+        ]
+        for d in to_delete_dirs:
+            self._directories.remove(d)
+
+    def _directory_has_contents(self, normalized: str) -> bool:
+        """Check if directory has any files or subdirectories."""
+        has_files = any(
+            _is_path_under(f, normalized) and f != normalized for f in self._files
+        )
+        has_subdirs = any(
+            _is_path_under(d, normalized) and d != normalized for d in self._directories
+        )
+        return has_files or has_subdirs
 
     def delete(
         self,
@@ -811,39 +842,18 @@ class InMemoryFilesystem:
             del self._files[normalized]
             return
 
-        if normalized in self._directories:
-            # Check if directory has contents
-            has_files = any(
-                _is_path_under(f, normalized) and f != normalized for f in self._files
-            )
-            has_subdirs = any(
-                _is_path_under(d, normalized) and d != normalized
-                for d in self._directories
-            )
+        if normalized not in self._directories:
+            raise FileNotFoundError(path)
 
-            if (has_files or has_subdirs) and not recursive:
-                msg = f"Directory not empty: {path}"
-                raise IsADirectoryError(msg)
+        if self._directory_has_contents(normalized) and not recursive:
+            msg = f"Directory not empty: {path}"
+            raise IsADirectoryError(msg)
 
-            if recursive:
-                # Delete all files under this directory
-                to_delete = [f for f in self._files if _is_path_under(f, normalized)]
-                for f in to_delete:
-                    del self._files[f]
-                # Delete all subdirectories
-                to_delete_dirs = [
-                    d
-                    for d in self._directories
-                    if _is_path_under(d, normalized) and d != normalized
-                ]
-                for d in to_delete_dirs:
-                    self._directories.remove(d)
+        if recursive:
+            self._delete_directory_contents(normalized)
 
-            if normalized:  # Don't delete root
-                self._directories.discard(normalized)
-            return
-
-        raise FileNotFoundError(path)
+        if normalized:  # Don't delete root
+            self._directories.discard(normalized)
 
     def mkdir(
         self,

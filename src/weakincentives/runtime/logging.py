@@ -76,48 +76,56 @@ class StructuredLogger(logging.LoggerAdapter[logging.Logger]):
         merged: dict[str, JSONValue] = {**dict(self._context), **context}
         return type(self)(self.logger, context=merged)
 
-    @override
-    def process(
-        self, msg: SupportsLogMessage, kwargs: MutableMapping[str, object]
-    ) -> tuple[SupportsLogMessage, MutableMapping[str, object]]:
+    @staticmethod
+    def _get_extra_mapping(
+        kwargs: MutableMapping[str, object],
+    ) -> MutableMapping[str, JSONValue]:
+        """Extract or create the extra mapping from kwargs."""
         extra_value = kwargs.setdefault("extra", {})
         if extra_value is None:
             extra_mapping: MutableMapping[str, JSONValue] = {}
             kwargs["extra"] = extra_mapping
-        elif isinstance(extra_value, MutableMapping):
-            extra_mapping = cast(MutableMapping[str, JSONValue], extra_value)
-        else:  # pragma: no cover - defensive guard
-            raise TypeError(
-                "Structured logs require a mutable mapping for extra context."
-            )
+            return extra_mapping
+        if isinstance(extra_value, MutableMapping):
+            return cast(MutableMapping[str, JSONValue], extra_value)
+        raise TypeError(  # pragma: no cover - defensive guard
+            "Structured logs require a mutable mapping for extra context."
+        )
 
-        context_payload: dict[str, JSONValue] = dict(self._context)
-
-        inline_context = kwargs.pop("context", None)
-        if inline_context is not None:
-            if isinstance(inline_context, Mapping):
-                context_payload.update(cast(StructuredLogPayload, inline_context))
-            else:  # pragma: no cover - defensive guard
-                raise TypeError("context must be a mapping when provided.")
-
-        for key in tuple(extra_mapping.keys()):
-            if key == "event":
-                continue
-            context_payload[key] = extra_mapping.pop(key)
-
+    @staticmethod
+    def _extract_event(
+        kwargs: MutableMapping[str, object],
+        extra_mapping: MutableMapping[str, JSONValue],
+    ) -> str:
+        """Extract the event field from kwargs or extra_mapping."""
         event_obj = kwargs.pop("event", None)
         if event_obj is None:
             event_obj = extra_mapping.pop("event", None)
         if not isinstance(event_obj, str):
             raise TypeError("Structured logs require an 'event' field.")
+        return event_obj
+
+    @override
+    def process(
+        self, msg: SupportsLogMessage, kwargs: MutableMapping[str, object]
+    ) -> tuple[SupportsLogMessage, MutableMapping[str, object]]:
+        extra_mapping = self._get_extra_mapping(kwargs)
+        context_payload: dict[str, JSONValue] = dict(self._context)
+
+        inline_context = kwargs.pop("context", None)
+        if inline_context is not None:
+            if not isinstance(inline_context, Mapping):  # pragma: no cover - defensive
+                raise TypeError("context must be a mapping when provided.")
+            context_payload.update(cast(StructuredLogPayload, inline_context))
+
+        for key in tuple(extra_mapping.keys()):
+            if key != "event":
+                context_payload[key] = extra_mapping.pop(key)
+
+        event_obj = self._extract_event(kwargs, extra_mapping)
 
         extra_mapping.clear()
-        extra_mapping.update(
-            {
-                "event": event_obj,
-                "context": context_payload,
-            }
-        )
+        extra_mapping.update({"event": event_obj, "context": context_payload})
         return msg, kwargs
 
 

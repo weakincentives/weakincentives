@@ -221,6 +221,64 @@ class Session(SessionProtocol):
         with self._lock:
             yield
 
+    @staticmethod
+    def _copy_reducers_to_clone(
+        clone: Session,
+        reducer_snapshot: list[
+            tuple[SessionSliceType, tuple[_ReducerRegistration, ...]]
+        ],
+    ) -> None:
+        """Copy non-builtin reducers from snapshot to clone."""
+        for data_type, registrations in reducer_snapshot:
+            if data_type in clone._reducers:
+                continue
+            for registration in registrations:
+                clone._mutation_register_reducer(
+                    data_type,
+                    registration.reducer,
+                    slice_type=registration.slice_type,
+                )
+
+    def _snapshot_reducers_and_state(
+        self,
+    ) -> tuple[
+        list[tuple[SessionSliceType, tuple[_ReducerRegistration, ...]]],
+        dict[SessionSliceType, SessionSlice],
+    ]:
+        """Create a snapshot of reducers and state while holding the lock."""
+        with self.locked():
+            reducer_snapshot = [
+                (data_type, tuple(registrations))
+                for data_type, registrations in self._reducers.items()
+            ]
+            state_snapshot = dict(self._state)
+        return reducer_snapshot, state_snapshot
+
+    def _resolve_clone_parent(self, parent: Session | None) -> Session | None:
+        return self._parent if parent is None else parent
+
+    def _resolve_clone_id(self, session_id: UUID | None) -> UUID:
+        return session_id if session_id is not None else self.session_id
+
+    def _resolve_clone_created(self, created_at: datetime | None) -> datetime:
+        return created_at if created_at is not None else self.created_at
+
+    def _resolve_clone_tags(
+        self, tags: Mapping[object, object] | None
+    ) -> Mapping[object, object] | None:
+        if tags is None:
+            return cast(Mapping[object, object], self.tags)
+        return tags  # pragma: no cover - covered by test_clone_with_custom_tags
+
+    @staticmethod
+    def _apply_state_to_clone(
+        clone: Session,
+        state_snapshot: dict[SessionSliceType, SessionSlice],
+    ) -> None:
+        """Apply state snapshot to cloned session."""
+        with clone.locked():
+            clone._state = state_snapshot
+
     def clone(
         self,
         *,
@@ -231,41 +289,16 @@ class Session(SessionProtocol):
         tags: Mapping[object, object] | None = None,
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
-
-        with self.locked():
-            reducer_snapshot = [
-                (data_type, tuple(registrations))
-                for data_type, registrations in self._reducers.items()
-            ]
-            state_snapshot = dict(self._state)
-
+        reducer_snapshot, state_snapshot = self._snapshot_reducers_and_state()
         clone = Session(
             bus=bus,
-            parent=self._parent if parent is None else parent,
-            session_id=session_id if session_id is not None else self.session_id,
-            created_at=created_at if created_at is not None else self.created_at,
-            tags=cast(
-                Mapping[object, object] | None,
-                self.tags if tags is None else tags,
-            ),
+            parent=self._resolve_clone_parent(parent),
+            session_id=self._resolve_clone_id(session_id),
+            created_at=self._resolve_clone_created(created_at),
+            tags=self._resolve_clone_tags(tags),
         )
-
-        # Copy non-builtin reducers from original session.
-        # Builtin reducers (visibility overrides) are already registered by __init__.
-        for data_type, registrations in reducer_snapshot:
-            if data_type in clone._reducers:
-                # Skip event types already registered by __init__
-                continue
-            for registration in registrations:
-                clone._mutation_register_reducer(
-                    data_type,
-                    registration.reducer,
-                    slice_type=registration.slice_type,
-                )
-
-        with clone.locked():
-            clone._state = state_snapshot
-
+        self._copy_reducers_to_clone(clone, reducer_snapshot)
+        self._apply_state_to_clone(clone, state_snapshot)
         return clone
 
     @_locked_method

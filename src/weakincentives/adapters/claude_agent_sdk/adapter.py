@@ -480,6 +480,27 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             "schema": schema(output_type),
         }
 
+    def _try_parse_structured_output(
+        self,
+        message: Any,
+        rendered: RenderedPrompt[OutputT],
+    ) -> OutputT | None:
+        """Attempt to parse structured output from a message."""
+        if not (hasattr(message, "structured_output") and message.structured_output):
+            return None
+        output_type = rendered.output_type
+        if not output_type or output_type is type(None):
+            return None  # pragma: no cover - defensive for prompts without output type
+        try:
+            return parse(output_type, message.structured_output, extra="ignore")
+        except (TypeError, ValueError) as error:
+            logger.warning(
+                "claude_agent_sdk.parse.structured_output_error",
+                event="parse.structured_output_error",
+                context={"error": str(error)},
+            )
+            return None
+
     def _extract_result(
         self,
         messages: list[Any],
@@ -488,7 +509,6 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         prompt_name: str,
     ) -> tuple[str | None, OutputT | None, TokenUsage | None]:
         """Extract text, structured output, and usage from SDK messages."""
-        # Import SDK types for isinstance checks
         from claude_agent_sdk.types import ResultMessage
 
         result_text: str | None = None
@@ -497,27 +517,10 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         total_output_tokens = 0
 
         for message in reversed(messages):
-            # Check for ResultMessage using isinstance
             if isinstance(message, ResultMessage):
-                # ResultMessage has 'result' attribute, not 'text'
                 if hasattr(message, "result") and message.result:
                     result_text = message.result
-
-                if hasattr(message, "structured_output") and message.structured_output:
-                    output_type = rendered.output_type
-                    if output_type and output_type is not type(None):
-                        try:
-                            structured_output = parse(
-                                output_type,
-                                message.structured_output,
-                                extra="ignore",
-                            )
-                        except (TypeError, ValueError) as error:
-                            logger.warning(
-                                "claude_agent_sdk.parse.structured_output_error",
-                                event="parse.structured_output_error",
-                                context={"error": str(error)},
-                            )
+                structured_output = self._try_parse_structured_output(message, rendered)
 
             if hasattr(message, "usage") and message.usage:
                 usage_dict = message.usage
@@ -532,9 +535,6 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         )
 
         if budget_tracker and (total_input_tokens or total_output_tokens):
-            budget_tracker.record_cumulative(
-                prompt_name,
-                usage,
-            )
+            budget_tracker.record_cumulative(prompt_name, usage)
 
         return result_text, structured_output, usage

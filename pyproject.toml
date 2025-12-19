@@ -134,7 +134,10 @@ combine-as-imports = true
 
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
-"tests/**" = ["PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
+# C901 is ignored because test functions can legitimately have higher complexity.
+"tests/**" = ["C901", "PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
+# Examples may use higher complexity for illustration purposes.
+"examples/**" = ["C901"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
@@ -157,7 +160,7 @@ combine-as-imports = true
 "src/weakincentives/runtime/session/session.py" = ["PLR0904"]
 
 [tool.ruff.lint.mccabe]
-max-complexity = 10
+max-complexity = 8
 
 [tool.ruff.lint.flake8-copyright]
 notice-rgx = '''(?s)\A(?:#!/[^\n]+\n)?# Licensed under the Apache License, Version 2.0 \(the "License"\);

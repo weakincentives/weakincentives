@@ -132,6 +132,22 @@ def _extract_json_payload(
     )
 
 
+def _unwrap_array_payload(
+    payload: JSONValue, config: PayloadParsingConfig
+) -> Sequence[JSONValue]:
+    """Unwrap array payload from possible wrapper object."""
+    if isinstance(payload, Mapping):
+        mapping_payload = cast(Mapping[str, JSONValue], payload)
+        if ARRAY_WRAPPER_KEY not in mapping_payload:
+            raise TypeError(config.array_error)
+        payload = mapping_payload[ARRAY_WRAPPER_KEY]
+    if not isinstance(payload, Sequence) or isinstance(
+        payload, (str, bytes, bytearray)
+    ):
+        raise TypeError(config.array_error)
+    return cast(Sequence[JSONValue], payload)
+
+
 def parse_dataclass_payload(
     dataclass_type: type[ParseableDataclassT],
     payload: JSONValue,
@@ -150,25 +166,13 @@ def parse_dataclass_payload(
         mapping_payload = cast(Mapping[str, JSONValue], payload)
         return parse_dataclass(dataclass_type, mapping_payload, extra=extra_mode)
 
-    if isinstance(payload, Mapping):
-        mapping_payload = cast(Mapping[str, JSONValue], payload)
-        if ARRAY_WRAPPER_KEY not in mapping_payload:
-            raise TypeError(config.array_error)
-        payload = mapping_payload[ARRAY_WRAPPER_KEY]
-    if not isinstance(payload, Sequence) or isinstance(
-        payload, (str, bytes, bytearray)
-    ):
-        raise TypeError(config.array_error)
-    sequence_payload = cast(Sequence[JSONValue], payload)
+    sequence_payload = _unwrap_array_payload(payload, config)
     parsed_items: list[ParseableDataclassT] = []
     for index, item in enumerate(sequence_payload):
         if not isinstance(item, Mapping):
             raise TypeError(config.array_item_error.format(index=index))
         mapping_item = cast(Mapping[str, JSONValue], item)
-        parsed_item = parse_dataclass(
-            dataclass_type,
-            mapping_item,
-            extra=extra_mode,
+        parsed_items.append(
+            parse_dataclass(dataclass_type, mapping_item, extra=extra_mode)
         )
-        parsed_items.append(parsed_item)
     return parsed_items
