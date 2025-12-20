@@ -306,10 +306,9 @@ def test_claude_agent_sdk_adapter_with_model_config(tmp_path: Path) -> None:
 
 def test_claude_agent_sdk_adapter_with_max_turns(tmp_path: Path) -> None:
     """Verify adapter respects max_turns configuration."""
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         max_turns=1,
-        cwd=str(tmp_path),
     )
 
     adapter = _make_adapter(
@@ -799,10 +798,9 @@ def test_claude_agent_sdk_adapter_with_isolation_returns_text(tmp_path: Path) ->
         sandbox=SandboxConfig(enabled=True),
     )
 
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=isolation,
-        cwd=str(tmp_path),
     )
 
     adapter = _make_adapter(
@@ -835,10 +833,9 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_tools(tmp_path: Path) ->
         sandbox=SandboxConfig(enabled=True),
     )
 
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=isolation,
-        cwd=str(tmp_path),
     )
 
     tool = _build_uppercase_tool()
@@ -874,10 +871,9 @@ def test_claude_agent_sdk_adapter_isolation_with_structured_output(
         network_policy=NetworkPolicy.no_network(),
     )
 
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=isolation,
-        cwd=str(tmp_path),
     )
 
     adapter = _make_adapter(
@@ -932,8 +928,8 @@ def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
             # potentially inherit HOME from the test environment
         )
 
-        config = ClaudeAgentSDKClientConfig(
-            permission_mode="bypassPermissions",
+        config = _make_config(
+            tmp_path,
             isolation=isolation,
             cwd=fake_home,  # Use the temp directory as cwd
         )
@@ -980,10 +976,9 @@ def test_claude_agent_sdk_adapter_isolation_network_policy_no_network(
         sandbox=SandboxConfig(enabled=True),
     )
 
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=isolation,
-        cwd=str(tmp_path),
     )
 
     adapter = _make_adapter(
@@ -1018,10 +1013,9 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_env(tmp_path: Path) -> N
         },
     )
 
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=isolation,
-        cwd=str(tmp_path),
     )
 
     adapter = _make_adapter(
@@ -1055,10 +1049,9 @@ def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(tmp_path: Path) -
         network_policy=NetworkPolicy.no_network(),
     )
 
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=isolation,
-        cwd=str(tmp_path),
     )
 
     adapter = _make_adapter(
@@ -1210,15 +1203,14 @@ def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
     This test validates that when a domain IS in allowed_domains, tools
     running in the sandbox can successfully reach it.
     """
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=IsolationConfig(
             network_policy=NetworkPolicy(
                 allowed_domains=("api.anthropic.com", "example.com"),
             ),
             sandbox=SandboxConfig(enabled=True),
         ),
-        cwd=str(tmp_path),
     )
     adapter = _make_adapter(
         tmp_path,
@@ -1258,13 +1250,12 @@ def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
 
     See: https://github.com/anthropic-experimental/sandbox-runtime
     """
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=IsolationConfig(
             network_policy=NetworkPolicy.no_network(),  # Block all tool network
             sandbox=SandboxConfig(enabled=True),
         ),
-        cwd=str(tmp_path),
     )
     adapter = _make_adapter(
         tmp_path,
@@ -1303,13 +1294,12 @@ def test_claude_agent_sdk_adapter_no_network_blocks_all_tool_access(
     reach the API (it runs outside the tool sandbox), but tools like Bash
     cannot make network requests.
     """
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=IsolationConfig(
             network_policy=NetworkPolicy.no_network(),  # Block all tool network
             sandbox=SandboxConfig(enabled=True),
         ),
-        cwd=str(tmp_path),
     )
     adapter = _make_adapter(
         tmp_path,
@@ -1396,14 +1386,13 @@ def test_claude_agent_sdk_adapter_include_host_env_false(tmp_path: Path) -> None
     from the Claude Code CLI process itself. This test validates that
     custom env vars are correctly passed through our isolation layer.
     """
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=IsolationConfig(
             network_policy=NetworkPolicy.no_network(),
             include_host_env=False,  # Explicitly false
             env={"WINK_CUSTOM_TEST_VAR": "custom_value"},
         ),
-        cwd=str(tmp_path),
     )
     adapter = _make_adapter(
         tmp_path,
@@ -1440,13 +1429,12 @@ def test_claude_agent_sdk_adapter_include_host_env_true(tmp_path: Path) -> None:
     """
     import os as test_os
 
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=IsolationConfig(
             network_policy=NetworkPolicy.no_network(),
             include_host_env=True,  # Inherit host env
         ),
-        cwd=str(tmp_path),
     )
     adapter = _make_adapter(
         tmp_path,
@@ -1525,8 +1513,8 @@ def test_claude_agent_sdk_adapter_sandbox_writable_paths(tmp_path: Path) -> None
     with tempfile.TemporaryDirectory(prefix="wink-writable-") as writable_dir:
         test_file = f"{writable_dir}/test-writable.txt"
 
-        config = ClaudeAgentSDKClientConfig(
-            permission_mode="bypassPermissions",
+        config = _make_config(
+            tmp_path,
             isolation=IsolationConfig(
                 network_policy=NetworkPolicy.no_network(),
                 sandbox=SandboxConfig(
@@ -1608,8 +1596,8 @@ def test_claude_agent_sdk_adapter_sandbox_readable_paths(tmp_path: Path) -> None
         test_file = f"{readable_dir}/test-readable.txt"
         Path(test_file).write_text("readable test content")
 
-        config = ClaudeAgentSDKClientConfig(
-            permission_mode="bypassPermissions",
+        config = _make_config(
+            tmp_path,
             isolation=IsolationConfig(
                 network_policy=NetworkPolicy.no_network(),
                 sandbox=SandboxConfig(
@@ -1654,13 +1642,12 @@ def test_claude_agent_sdk_adapter_sandbox_disabled(tmp_path: Path) -> None:
     This test validates that SandboxConfig(enabled=False) disables
     OS-level sandboxing, allowing full filesystem access.
     """
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=IsolationConfig(
             network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(enabled=False),
         ),
-        cwd=str(tmp_path),
     )
     adapter = _make_adapter(
         tmp_path,
@@ -1728,8 +1715,8 @@ def test_claude_agent_sdk_adapter_sandbox_excluded_commands(tmp_path: Path) -> N
     This test validates that SandboxConfig.excluded_commands correctly
     allows specific commands to run outside the sandbox.
     """
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
+    config = _make_config(
+        tmp_path,
         isolation=IsolationConfig(
             network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(
@@ -1738,7 +1725,6 @@ def test_claude_agent_sdk_adapter_sandbox_excluded_commands(tmp_path: Path) -> N
                 allow_unsandboxed_commands=True,
             ),
         ),
-        cwd=str(tmp_path),
     )
     adapter = _make_adapter(
         tmp_path,
@@ -1805,8 +1791,8 @@ def test_claude_agent_sdk_adapter_with_workspace_section(tmp_path: Path) -> None
     )
 
     try:
-        config = ClaudeAgentSDKClientConfig(
-            permission_mode="bypassPermissions",
+        config = _make_config(
+            tmp_path,
             cwd=str(workspace.temp_dir),
             isolation=IsolationConfig(
                 network_policy=NetworkPolicy.no_network(),
@@ -2056,10 +2042,7 @@ def test_claude_agent_sdk_mcp_tool_writes_file_native_tool_reads(
     # Configure adapter with cwd pointing to temp directory
     # This ensures both the MCP tool's filesystem and SDK's native tools
     # operate on the same directory
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
-        cwd=str(tmp_path),
-    )
+    config = _make_config(tmp_path)
 
     adapter = _make_adapter(
         tmp_path,
