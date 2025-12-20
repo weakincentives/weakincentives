@@ -380,6 +380,12 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     This is a key integration point between the SDK's execution and weakincentives'
     event-driven architecture.
     """
+    # Create a README.md file for the SDK to read
+    readme_file = tmp_path / "README.md"
+    readme_file.write_text(
+        "# Test Project\n\nThis is a test README for integration tests."
+    )
+
     # Use isolated workspace to avoid operations on the actual repository
     config = _make_config(tmp_path)
 
@@ -645,6 +651,12 @@ def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
     even when the SDK performs multiple tool calls, which may span multiple
     API interactions.
     """
+    # Create a README.md file for the SDK to read
+    readme_file = tmp_path / "README.md"
+    readme_file.write_text(
+        "# Test Project\n\nThis is a test README for integration tests."
+    )
+
     config = _make_config(tmp_path)
 
     adapter = _make_adapter(
@@ -654,7 +666,7 @@ def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
     )
 
     prompt_template = _build_file_read_prompt()
-    # Use README.md in tmp_path (created by fixture)
+    # Use README.md in tmp_path (created above)
     params = ReadFileParams(file_path="README.md")
     prompt = Prompt(prompt_template).bind(params)
 
@@ -1763,10 +1775,16 @@ def test_claude_agent_sdk_adapter_with_workspace_section(tmp_path: Path) -> None
         HostMount,
     )
 
+    # Create a README.md file for the workspace to mount
+    readme_file = tmp_path / "README.md"
+    readme_file.write_text(
+        "# Test Project\n\nThis is a test README for integration tests."
+    )
+
     # Create session and workspace
     session = Session()
 
-    # Mount the isolated workspace's README.md (avoids touching actual repo)
+    # Mount the README.md (avoids touching actual repo)
     workspace = ClaudeAgentWorkspaceSection(
         session=session,
         mounts=(
@@ -1850,9 +1868,15 @@ def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(tmp_path: Path) 
         WorkspaceBudgetExceededError,
     )
 
+    # Create a README.md file for the workspace to mount
+    readme_file = tmp_path / "README.md"
+    readme_file.write_text(
+        "# Test Project\n\nThis is a test README for integration tests."
+    )
+
     session = Session()
 
-    # Try to mount README.md with a very small byte limit (uses isolated workspace)
+    # Try to mount README.md with a very small byte limit
     with pytest.raises(WorkspaceBudgetExceededError):
         ClaudeAgentWorkspaceSection(
             session=session,
