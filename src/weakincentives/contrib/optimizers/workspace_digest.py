@@ -39,6 +39,7 @@ from ..tools.digests import (
     clear_workspace_digest,
     set_workspace_digest,
 )
+from ..tools.filesystem import Filesystem
 from ..tools.planning import PlanningStrategy, PlanningToolsSection
 from ..tools.workspace import WorkspaceSection
 
@@ -96,10 +97,21 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         )
         workspace_section = self._resolve_workspace_section(prompt, prompt_name)
 
-        safe_workspace = self._clone_section(workspace_section, session=inner_session)
+        safe_workspace = self._clone_section(
+            cast(Section[SupportsDataclass], workspace_section), session=inner_session
+        )
         tool_sections = self._resolve_tool_sections(prompt)
+        # Pass the workspace filesystem to tool sections so they share the same
+        # filesystem instance. This ensures asteval can read/write the same files
+        # that VFS tools expose. We use workspace_section.filesystem directly since
+        # cloning preserves the same filesystem reference.
+        shared_filesystem = workspace_section.filesystem
         safe_tools = tuple(
-            self._clone_section(section, session=inner_session)
+            self._clone_section(
+                section,
+                session=inner_session,
+                filesystem=shared_filesystem,
+            )
             for section in tool_sections
         )
 
@@ -139,8 +151,8 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                     strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
                     accepts_overrides=self._config.accepts_overrides,
                 ),
-                *safe_tools,
                 safe_workspace,
+                *safe_tools,
             ),
         )
 
@@ -201,7 +213,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
 
     def _resolve_workspace_section(  # noqa: PLR6301
         self, prompt: Prompt[object], prompt_name: str
-    ) -> Section[SupportsDataclass]:
+    ) -> WorkspaceSection:
         """Find a section implementing the WorkspaceSection protocol."""
         for node in prompt.sections:
             if isinstance(node.section, WorkspaceSection):
@@ -224,9 +236,16 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         return tuple(sections)
 
     def _clone_section(  # noqa: PLR6301
-        self, section: Section[SupportsDataclass], *, session: Session
+        self,
+        section: Section[SupportsDataclass],
+        *,
+        session: Session,
+        filesystem: Filesystem | None = None,
     ) -> Section[SupportsDataclass]:
-        return section.clone(session=session, bus=session.event_bus)
+        kwargs: dict[str, object] = {"session": session, "bus": session.event_bus}
+        if filesystem is not None:
+            kwargs["filesystem"] = filesystem
+        return section.clone(**kwargs)
 
     def _require_workspace_digest_section(  # noqa: PLR6301
         self, prompt: Prompt[object], *, prompt_name: str

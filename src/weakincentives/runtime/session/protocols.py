@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Protocol, Self
 from ...types.dataclass import SupportsDataclass
 from ..events._types import TelemetryBus
 from ._observer_types import SliceObserver, Subscription
+from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import Snapshot
 
 if TYPE_CHECKING:
@@ -53,11 +54,17 @@ class SessionProtocol(Protocol):
     Global operations are available directly on the session::
 
         session.reset()                  # Clear all slices
-        session.rollback(snapshot)       # Restore from snapshot
+        session.restore(snapshot)        # Restore from snapshot
 
     """
 
-    def snapshot(self) -> SnapshotProtocol: ...
+    def snapshot(
+        self,
+        *,
+        tag: str | None = None,
+        policies: frozenset[SlicePolicy] = DEFAULT_SNAPSHOT_POLICIES,
+        include_all: bool = False,
+    ) -> SnapshotProtocol: ...
 
     @property
     def event_bus(self) -> TelemetryBus: ...
@@ -87,7 +94,9 @@ class SessionProtocol(Protocol):
         """Clear all stored slices while preserving reducer registrations."""
         ...
 
-    def rollback(self, snapshot: SnapshotProtocol) -> None:
+    def restore(
+        self, snapshot: SnapshotProtocol, *, preserve_logs: bool = True
+    ) -> None:
         """Restore session slices from the provided snapshot."""
         ...
 

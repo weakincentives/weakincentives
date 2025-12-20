@@ -44,9 +44,24 @@ class SnapshotRestoreError(SnapshotError):
     """Raised when restoring from a snapshot fails."""
 
 
+class ExecutionStateError(WinkError, RuntimeError):
+    """Base class for execution state errors."""
+
+
+class SnapshotMismatchError(ExecutionStateError):
+    """Snapshot does not match current state structure."""
+
+
+class RestoreFailedError(ExecutionStateError):
+    """Failed to restore from snapshot."""
+
+
 __all__ = [
     "DeadlineExceededError",
+    "ExecutionStateError",
+    "RestoreFailedError",
     "SnapshotError",
+    "SnapshotMismatchError",
     "SnapshotRestoreError",
     "ToolValidationError",
     "WinkError",

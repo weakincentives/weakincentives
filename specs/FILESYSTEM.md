@@ -1095,7 +1095,7 @@ def rollback_to(
         filesystem.restore(fs_snapshots[-1])
 
     # Restore session state
-    session.rollback(session_snapshot)
+    session.restore(session_snapshot)
 ```
 
 ### Error Handling

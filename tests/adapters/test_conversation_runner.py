@@ -59,7 +59,12 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
-from weakincentives.runtime.session import SessionProtocol
+from weakincentives.runtime.execution_state import ExecutionState
+from weakincentives.runtime.session import (
+    DEFAULT_SNAPSHOT_POLICIES,
+    SessionProtocol,
+    SlicePolicy,
+)
 from weakincentives.runtime.session.protocols import SnapshotProtocol
 from weakincentives.runtime.session.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
@@ -168,6 +173,7 @@ def build_inner_loop(
     throttle_policy: ThrottlePolicy | None = None,
     budget_tracker: BudgetTracker | None = None,
     deadline: Deadline | None = None,
+    execution_state: ExecutionState | None = None,
 ) -> InnerLoop[object]:
     """Build an InnerLoop instance using the new API."""
     template = PromptTemplate(ns="tests", key="example")
@@ -183,7 +189,7 @@ def build_inner_loop(
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        session=session,
+        execution_state=execution_state or ExecutionState(session=session),
         tool_choice=tool_choice,
         response_format=response_format,
         require_structured_output_text=False,
@@ -259,20 +265,30 @@ class StructuredOutput:
 class SessionStub(SessionProtocol):
     def __init__(self, *, event_bus: EventBus | None = None) -> None:
         self.snapshots: list[SnapshotProtocol] = []
-        self.rollbacks: list[SnapshotProtocol] = []
+        self.restores: list[SnapshotProtocol] = []
         self._event_bus = event_bus or RecordingBus()
 
     @property
     def event_bus(self) -> EventBus:
         return self._event_bus
 
-    def snapshot(self) -> SnapshotProtocol:
+    def snapshot(
+        self,
+        *,
+        tag: str | None = None,
+        policies: frozenset[SlicePolicy] = DEFAULT_SNAPSHOT_POLICIES,
+        include_all: bool = False,
+    ) -> SnapshotProtocol:
+        del tag, policies, include_all
         snapshot = Snapshot(created_at=datetime.now(UTC))
         self.snapshots.append(snapshot)
         return snapshot
 
-    def rollback(self, snapshot: SnapshotProtocol) -> None:
-        self.rollbacks.append(snapshot)
+    def restore(
+        self, snapshot: SnapshotProtocol, *, preserve_logs: bool = True
+    ) -> None:
+        del preserve_logs
+        self.restores.append(snapshot)
 
     def reset(self) -> None:
         pass
@@ -431,7 +447,7 @@ def test_run_inner_loop_function() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        session=session,
+        execution_state=ExecutionState(session=session),
         tool_choice="auto",
         response_format=None,
         require_structured_output_text=False,
@@ -583,17 +599,19 @@ def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
     session = SessionStub(event_bus=RecordingBus(fail_tool=True))
+    execution_state = ExecutionState(session=session)
 
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,
         session=session,
+        execution_state=execution_state,
     )
     response = loop.run()
 
     assert response.text == "All done"
-    assert session.snapshots and session.rollbacks
-    assert session.rollbacks == session.snapshots
+    assert session.snapshots and session.restores
+    assert session.restores == session.snapshots
 
 
 def test_inner_loop_includes_prompt_descriptor_in_event() -> None:

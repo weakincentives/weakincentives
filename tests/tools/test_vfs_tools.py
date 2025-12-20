@@ -986,6 +986,75 @@ def test_host_mount_exclude_glob_filters_matches(tmp_path: Path) -> None:
     assert [entry.path.segments for entry in entries] == [("keep.txt",)]
 
 
+def test_host_mount_double_star_glob_includes_root_files(tmp_path: Path) -> None:
+    """Test that **/*.ext patterns match files at the mount root (zero directories).
+
+    This verifies the _match_glob fix: fnmatch doesn't treat ** as zero-or-more
+    directories, so **/*.py should match both 'foo.py' (root) and 'sub/bar.py'.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "root.py").write_text("at root", encoding="utf-8")
+    (repo / "README.md").write_text("readme", encoding="utf-8")
+    subdir = repo / "pkg"
+    subdir.mkdir()
+    (subdir / "nested.py").write_text("nested", encoding="utf-8")
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = _make_section(
+        session=session,
+        mounts=(
+            HostMount(
+                host_path="repo",
+                include_glob=("**/*.py", "**/*.md"),
+            ),
+        ),
+        allowed_host_roots=(tmp_path,),
+    )
+
+    # Verify root-level files are included
+    fs = section.filesystem
+    assert fs.exists("root.py"), "Root-level .py file should be included"
+    assert fs.exists("README.md"), "Root-level .md file should be included"
+    assert fs.exists("pkg/nested.py"), "Nested .py file should be included"
+
+
+def test_host_mount_double_star_glob_preserves_prefix(tmp_path: Path) -> None:
+    """Ensure ** patterns do not drop path prefixes when matching zero directories."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "test_root.py").write_text("root", encoding="utf-8")
+    src = repo / "src"
+    src.mkdir()
+    (src / "test_match.py").write_text("match", encoding="utf-8")
+    nested = src / "pkg"
+    nested.mkdir()
+    (nested / "test_nested.py").write_text("nested", encoding="utf-8")
+    other = repo / "other"
+    other.mkdir()
+    (other / "test_other.py").write_text("other", encoding="utf-8")
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = _make_section(
+        session=session,
+        mounts=(
+            HostMount(
+                host_path="repo",
+                include_glob=("src/**/test_*.py",),
+            ),
+        ),
+        allowed_host_roots=(tmp_path,),
+    )
+
+    fs = section.filesystem
+    assert fs.exists("src/test_match.py")
+    assert fs.exists("src/pkg/test_nested.py")
+    assert not fs.exists("test_root.py")
+    assert not fs.exists("other/test_other.py")
+
+
 def test_normalize_string_path_requires_value() -> None:
     with pytest.raises(ToolValidationError, match="test is required"):
         vfs_module._normalize_string_path(None, allow_empty=False, field="test")

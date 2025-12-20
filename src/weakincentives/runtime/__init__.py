@@ -27,6 +27,11 @@ from .events import (
     TokenUsage,
     ToolInvoked,
 )
+from .execution_state import (
+    CompositeSnapshot,
+    ExecutionState,
+    SnapshotMetadata,
+)
 from .logging import StructuredLogger, configure_logging, get_logger
 from .main_loop import (
     MainLoop,
@@ -36,12 +41,14 @@ from .main_loop import (
     MainLoopRequest,
 )
 from .session import (
+    DEFAULT_SNAPSHOT_POLICIES,
     DataEvent,
     ReducerContext,
     ReducerContextProtocol,
     ReducerEvent,
     Session,
     SessionProtocol,
+    SlicePolicy,
     Snapshot,
     SnapshotProtocol,
     SnapshotRestoreError,
@@ -54,11 +61,15 @@ from .session import (
     replace_latest_by,
     upsert_by,
 )
+from .snapshotable import Snapshotable
 
 __all__ = [
+    "DEFAULT_SNAPSHOT_POLICIES",
+    "CompositeSnapshot",
     "ControlBus",
     "DataEvent",
     "EventBus",
+    "ExecutionState",
     "HandlerFailure",
     "InProcessEventBus",
     "MainLoop",
@@ -74,10 +85,13 @@ __all__ = [
     "ReducerEvent",
     "Session",
     "SessionProtocol",
+    "SlicePolicy",
     "Snapshot",
+    "SnapshotMetadata",
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
+    "Snapshotable",
     "StructuredLogger",
     "TelemetryBus",
     "TokenUsage",

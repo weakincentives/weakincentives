@@ -1105,10 +1105,16 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         if not isinstance(session, Session):
             msg = "session is required to clone AstevalSection."
             raise TypeError(msg)
+        # Use provided filesystem if given, otherwise keep the current one.
+        # This allows sharing a filesystem across sections (e.g., with VfsToolsSection).
+        filesystem = kwargs.get("filesystem")
+        if filesystem is not None and not isinstance(filesystem, Filesystem):
+            msg = "filesystem must be a Filesystem instance."
+            raise TypeError(msg)
         return AstevalSection(
             session=session,
             config=self._config,
-            filesystem=self._filesystem,
+            filesystem=filesystem if filesystem is not None else self._filesystem,
         )
 
 

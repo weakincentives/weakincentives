@@ -23,9 +23,12 @@ from importlib import import_module
 from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
+from ..contrib.tools.filesystem import Filesystem
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
+from ..prompt.tool import ResourceRegistry
+from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import SupportsDataclass
 from . import shared as _shared
@@ -620,8 +623,13 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         if effective_tracker is None and budget is not None:
             effective_tracker = BudgetTracker(budget=budget)
 
+        # Create ExecutionState for transactional tool execution
+        filesystem = prompt.filesystem()
+        resources = ResourceRegistry.build({Filesystem: filesystem})
+        execution_state = ExecutionState(session=session, resources=resources)
+
         config = InnerLoopConfig(
-            session=session,
+            execution_state=execution_state,
             tool_choice=self._tool_choice,
             response_format=context.response_format,
             require_structured_output_text=False,

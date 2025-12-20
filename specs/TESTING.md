@@ -47,8 +47,8 @@ paths_to_mutate = [
 Every bug fix requires a regression test:
 
 1. Test MUST fail before the fix, pass after
-2. Test MUST be named `test_regression_<issue>_<description>`
-3. Test MUST include docstring linking to the issue
+1. Test MUST be named `test_regression_<issue>_<description>`
+1. Test MUST include docstring linking to the issue
 
 ```python
 # tests/regression/test_issue_42.py
@@ -66,8 +66,8 @@ def test_regression_42_session_deadlock():
 Snapshots are critical for rollback correctness. Test:
 
 1. **Round-trip integrity**: `snapshot() → rollback() → snapshot()` produces identical state
-2. **Corruption detection**: Tampered snapshots raise `SnapshotCorruptionError`
-3. **Partial rollback**: Interrupted rollback leaves session in recoverable state
+1. **Corruption detection**: Tampered snapshots raise `SnapshotCorruptionError`
+1. **Partial rollback**: Interrupted rollback leaves session in recoverable state
 
 ```python
 def test_snapshot_roundtrip_integrity(session_factory):
@@ -77,7 +77,7 @@ def test_snapshot_roundtrip_integrity(session_factory):
 
     snapshot1 = session.snapshot()
     session.broadcast(AnotherEvent(...))
-    session.rollback(snapshot1)
+    session.restore(snapshot1)
     snapshot2 = session.snapshot()
 
     assert snapshot1 == snapshot2

@@ -225,7 +225,7 @@ session[Plan].clear()                             # Clear slice
 
 # Global mutations
 session.reset()                                   # Clear all slices
-session.rollback(snapshot)                        # Restore from snapshot
+session.restore(snapshot)                         # Restore from snapshot
 ```
 
 ### Provider Adapter

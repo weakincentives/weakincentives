@@ -166,7 +166,9 @@ def test_session_snapshots_restore_across_threads(
         (lambda idx=index: _publish_tool_event(bus, idx))
         for index in range(total_events)
     ]
-    snapshot_tasks = [session.snapshot for _ in range(snapshot_requests)]
+    snapshot_tasks = [
+        (lambda: session.snapshot(include_all=True)) for _ in range(snapshot_requests)
+    ]
     tasks: list[Callable[[], Snapshot | None]] = [
         *mutation_tasks,
         *snapshot_tasks,
@@ -183,7 +185,7 @@ def test_session_snapshots_restore_across_threads(
             snapshots.append(result)
 
     assert len(snapshots) == snapshot_requests
-    snapshots.append(session.snapshot())
+    snapshots.append(session.snapshot(include_all=True))
 
     for snapshot in snapshots:
         expected_tool_events = snapshot.slices.get(ToolInvoked, ())
@@ -192,7 +194,7 @@ def test_session_snapshots_restore_across_threads(
         restored = Session(bus=InProcessEventBus())
         restored[ToolInvoked].seed(())
         restored[ExampleResult].seed(())
-        restored.rollback(snapshot)
+        restored.restore(snapshot, preserve_logs=False)
 
         restored_tool_events = restored[ToolInvoked].all()
         restored_results = restored[ExampleResult].all()

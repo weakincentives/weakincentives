@@ -49,6 +49,7 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
 
@@ -78,6 +79,8 @@ def _base_context(
     bus = InProcessEventBus()
     prompt_template = _build_prompt(tool)
     prompt = Prompt(prompt_template)
+    effective_session = session or Session(bus=bus)
+    execution_state = ExecutionState(session=effective_session)
     return _ToolExecutionContext(
         adapter_name="adapter",
         adapter=cast(Any, object()),
@@ -87,7 +90,7 @@ def _base_context(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)},
         ),
-        session=cast(SessionProtocol, session or Session(bus=bus)),
+        execution_state=execution_state,
         prompt_name=cast(str, prompt.name),
         parse_arguments=parse_tool_arguments,
         format_publish_failures=format_publish_failures,

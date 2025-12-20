@@ -35,6 +35,7 @@ from typing import (
 
 from ..budget import BudgetTracker
 from ..deadlines import Deadline
+from ..runtime.snapshotable import Snapshotable
 from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
@@ -128,6 +129,15 @@ class ResourceRegistry:
     def __contains__(self, resource_type: type[object]) -> bool:
         """Check if a resource of the given type is registered."""
         return resource_type in self._entries
+
+    def snapshotable_resources(self) -> Mapping[type[object], Snapshotable]:
+        """Return all resources that implement Snapshotable.
+
+        Returns:
+            Mapping from resource type to snapshotable resource instance.
+            Only resources that implement the Snapshotable protocol are included.
+        """
+        return {k: v for k, v in self._entries.items() if isinstance(v, Snapshotable)}
 
     @staticmethod
     def build(mapping: Mapping[type[object], object]) -> ResourceRegistry:

@@ -42,6 +42,7 @@ from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.events._types import TokenUsage, ToolInvoked
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, append_all
 
 
@@ -54,7 +55,7 @@ def session() -> Session:
 @pytest.fixture
 def hook_context(session: Session) -> HookContext:
     return HookContext(
-        session=session,
+        execution_state=ExecutionState(session=session),
         adapter_name="claude_agent_sdk",
         prompt_name="test_prompt",
     )
@@ -63,7 +64,7 @@ def hook_context(session: Session) -> HookContext:
 class TestHookContext:
     def test_basic_construction(self, session: Session) -> None:
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -85,7 +86,7 @@ class TestHookContext:
         tracker = BudgetTracker(budget)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             deadline=deadline,
@@ -113,7 +114,7 @@ class TestPreToolUseHook:
         frozen_utcnow.advance(timedelta(seconds=10))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             deadline=deadline,
@@ -136,7 +137,7 @@ class TestPreToolUseHook:
         )
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             budget_tracker=tracker,
@@ -159,7 +160,7 @@ class TestPreToolUseHook:
         )
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             budget_tracker=tracker,
@@ -178,7 +179,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -228,7 +229,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -251,7 +252,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -275,7 +276,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -294,7 +295,7 @@ class TestPostToolUseHook:
 
     def test_stops_on_structured_output_by_default(self, session: Session) -> None:
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -313,7 +314,7 @@ class TestPostToolUseHook:
         self, session: Session
     ) -> None:
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -334,7 +335,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -359,7 +360,7 @@ class TestPostToolUseHook:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -563,7 +564,7 @@ class TestPostToolUseHookWithTypedParsing:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -602,7 +603,7 @@ class TestPostToolUseHookWithTypedParsing:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -626,7 +627,7 @@ class TestPostToolUseHookWithTypedParsing:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -650,7 +651,7 @@ class TestPostToolUseHookWithTypedParsing:
         session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -704,7 +705,7 @@ class TestSubagentStartHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -740,7 +741,7 @@ class TestSubagentStopHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -778,7 +779,7 @@ class TestSubagentStopHook:
         )
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -810,7 +811,7 @@ class TestSubagentStopHook:
         transcript_file.write_text('{"event": "tool_call", "name": "Read"}\n')
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -841,7 +842,7 @@ class TestSubagentStopHook:
         agent_transcript_file.write_text('{"event": "start"}\n')
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -866,7 +867,7 @@ class TestSubagentStopHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -996,7 +997,7 @@ class TestPreCompactHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1029,7 +1030,7 @@ class TestNotificationHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1063,7 +1064,7 @@ class TestMultipleNotificationsAccumulate:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            session=session,
+            execution_state=ExecutionState(session=session),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1101,3 +1102,222 @@ class TestMultipleNotificationsAccumulate:
         assert "pre_compact" in sources
         assert "subagent_stop" in sources
         assert "notification" in sources
+
+
+class TestPreToolUseHookTransactional:
+    """Tests for pre-tool hook transactional snapshot functionality."""
+
+    def test_takes_snapshot_with_execution_state(self, session: Session) -> None:
+        """Pre-tool hook takes snapshot when execution_state is present."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        context = HookContext(
+            execution_state=execution_state,
+            adapter_name="claude_agent_sdk",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_pre_tool_use_hook(context)
+        result = asyncio.run(hook({"tool_name": "Edit"}, "tool-123", None))
+
+        assert result == {}
+        assert "tool-123" in execution_state.pending_tool_executions
+        pending = execution_state.pending_tool_executions["tool-123"]
+        assert pending.tool_name == "Edit"
+
+    def test_skips_snapshot_for_mcp_wink_tools(self, session: Session) -> None:
+        """Pre-tool hook skips snapshot for MCP WINK tools."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        fs = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        context = HookContext(
+            execution_state=execution_state,
+            adapter_name="claude_agent_sdk",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_pre_tool_use_hook(context)
+        asyncio.run(hook({"tool_name": "mcp__wink__search"}, "tool-123", None))
+
+        # Should NOT have pending execution for MCP tools
+        assert "tool-123" not in execution_state.pending_tool_executions
+
+
+class TestPostToolUseHookTransactional:
+    """Tests for post-tool hook transactional restore functionality."""
+
+    def test_restores_state_on_tool_failure(self, session: Session) -> None:
+        """Post-tool hook restores state when tool fails."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        context = HookContext(
+            execution_state=execution_state,
+            adapter_name="claude_agent_sdk",
+            prompt_name="test_prompt",
+        )
+
+        # Take snapshot via pre-tool hook
+        pre_hook = create_pre_tool_use_hook(context)
+        asyncio.run(pre_hook({"tool_name": "Edit"}, "tool-123", None))
+
+        # Modify state (simulates tool making changes)
+        fs.write("/test.txt", "modified")
+
+        # Post-tool hook with failure (stderr indicates error)
+        post_hook = create_post_tool_use_hook(context)
+        asyncio.run(
+            post_hook(
+                {
+                    "tool_name": "Edit",
+                    "tool_input": {},
+                    "tool_response": {"stderr": "Error: file not found"},
+                },
+                "tool-123",
+                None,
+            )
+        )
+
+        # State should be restored
+        assert fs.read("/test.txt").content == "initial"
+        assert "tool-123" not in execution_state.pending_tool_executions
+
+    def test_no_restore_on_success(self, session: Session) -> None:
+        """Post-tool hook doesn't restore state on success."""
+        from weakincentives.contrib.tools.filesystem import (
+            Filesystem,
+            InMemoryFilesystem,
+        )
+        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.runtime.execution_state import ExecutionState
+
+        fs = InMemoryFilesystem()
+        fs.write("/test.txt", "initial")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        execution_state = ExecutionState(session=session, resources=resources)
+
+        context = HookContext(
+            execution_state=execution_state,
+            adapter_name="claude_agent_sdk",
+            prompt_name="test_prompt",
+        )
+
+        # Take snapshot via pre-tool hook
+        pre_hook = create_pre_tool_use_hook(context)
+        asyncio.run(pre_hook({"tool_name": "Edit"}, "tool-123", None))
+
+        # Modify state (simulates tool making changes)
+        fs.write("/test.txt", "modified")
+
+        # Post-tool hook with success
+        post_hook = create_post_tool_use_hook(context)
+        asyncio.run(
+            post_hook(
+                {
+                    "tool_name": "Edit",
+                    "tool_input": {},
+                    "tool_response": {"stdout": "File edited successfully"},
+                },
+                "tool-123",
+                None,
+            )
+        )
+
+        # State should NOT be restored
+        assert fs.read("/test.txt").content == "modified"
+
+
+class TestIsToolErrorResponse:
+    """Tests for _is_tool_error_response helper function."""
+
+    def test_non_dict_returns_false(self) -> None:
+        """Non-dict responses are not considered errors."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            _is_tool_error_response,
+        )
+
+        assert _is_tool_error_response("string") is False
+        assert _is_tool_error_response(123) is False
+        assert _is_tool_error_response(None) is False
+
+    def test_is_error_flag(self) -> None:
+        """is_error flag indicates error."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            _is_tool_error_response,
+        )
+
+        assert _is_tool_error_response({"is_error": True}) is True
+        assert _is_tool_error_response({"is_error": False}) is False
+
+    def test_isError_flag(self) -> None:
+        """isError flag indicates error."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            _is_tool_error_response,
+        )
+
+        assert _is_tool_error_response({"isError": True}) is True
+        assert _is_tool_error_response({"isError": False}) is False
+
+    def test_error_in_content(self) -> None:
+        """Error text in content indicates error."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            _is_tool_error_response,
+        )
+
+        assert (
+            _is_tool_error_response(
+                {"content": [{"type": "text", "text": "Error: something went wrong"}]}
+            )
+            is True
+        )
+
+        assert (
+            _is_tool_error_response(
+                {"content": [{"type": "text", "text": "error - file not found"}]}
+            )
+            is True
+        )
+
+        # Normal content is not an error
+        assert (
+            _is_tool_error_response(
+                {"content": [{"type": "text", "text": "File created successfully"}]}
+            )
+            is False
+        )
+
+    def test_empty_content(self) -> None:
+        """Empty content is not an error."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            _is_tool_error_response,
+        )
+
+        assert _is_tool_error_response({"content": []}) is False
+        assert _is_tool_error_response({}) is False

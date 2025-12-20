@@ -24,6 +24,7 @@ from uuid import uuid4
 import pytest
 
 from weakincentives.runtime.session import snapshots
+from weakincentives.runtime.session.slice_policy import SlicePolicy
 from weakincentives.runtime.session.snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -138,6 +139,24 @@ def test_snapshot_normalizes_state_and_is_hashable() -> None:
     assert hash(snapshot)
 
 
+def test_snapshot_rejects_non_dataclass_policy_keys() -> None:
+    with pytest.raises(TypeError):
+        Snapshot(
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+            slices={SnapshotItem: (SnapshotItem(1),)},
+            policies=cast(Mapping[object, object], {"not-a-type": SlicePolicy.STATE}),
+        )
+
+
+def test_snapshot_rejects_invalid_policy_values() -> None:
+    with pytest.raises(TypeError):
+        Snapshot(
+            created_at=datetime(2024, 1, 1, tzinfo=UTC),
+            slices={SnapshotItem: (SnapshotItem(1),)},
+            policies=cast(Mapping[object, object], {SnapshotItem: "state"}),
+        )
+
+
 def test_snapshot_serializes_relationship_metadata() -> None:
     parent_id = uuid4()
     child_one = uuid4()
@@ -206,6 +225,19 @@ def test_snapshot_serializes_type_references() -> None:
         make_snapshot_payload_with(children_ids=["not-a-uuid"]),
         make_snapshot_payload_with(slices={}),
         make_snapshot_payload_with(slices=[1]),
+        make_snapshot_payload_with(policies="not-a-mapping"),
+        make_snapshot_payload_with(
+            policies={
+                f"{SnapshotItem.__module__}:{SnapshotItem.__qualname__}": "invalid"
+            }
+        ),
+        make_snapshot_payload_with(
+            policies={f"{SnapshotItem.__module__}:{SnapshotItem.__qualname__}": 123}
+        ),
+        make_snapshot_payload_with(policies={"builtins:int": "state"}),
+        make_snapshot_payload_with(
+            policies={"weakincentives.runtime.session.snapshots:MissingType": "state"}
+        ),
         make_snapshot_payload_with_slice_mutation(slice_type=1),
         make_snapshot_payload_with_slice_mutation(
             slice_type="builtins:int",
@@ -231,3 +263,27 @@ def test_snapshot_from_json_success_sets_timezone() -> None:
     assert restored.slices[SnapshotItem] == (SnapshotItem(1),)
     assert restored.parent_id is None
     assert restored.children_ids == ()
+
+
+def test_snapshot_policies_roundtrip() -> None:
+    snapshot = Snapshot(
+        created_at=datetime(2024, 1, 1, tzinfo=UTC),
+        slices={SnapshotItem: (SnapshotItem(1),)},
+        policies={SnapshotItem: SlicePolicy.LOG},
+    )
+
+    payload = json.loads(snapshot.to_json())
+    type_ref = f"{SnapshotItem.__module__}:{SnapshotItem.__qualname__}"
+    assert payload["policies"][type_ref] == SlicePolicy.LOG.value
+
+    restored = Snapshot.from_json(json.dumps(payload))
+    assert restored.policies[SnapshotItem] is SlicePolicy.LOG
+
+
+def test_snapshot_from_json_defaults_missing_policies() -> None:
+    payload = make_snapshot_payload()
+    payload.pop("policies", None)
+
+    restored = Snapshot.from_json(json.dumps(payload))
+
+    assert restored.policies == {}

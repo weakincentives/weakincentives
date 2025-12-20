@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
@@ -22,10 +23,12 @@ from ...budget import BudgetTracker
 from ...contrib.tools.filesystem import Filesystem
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.tool import ResourceRegistry, Tool, ToolContext, ToolResult
+from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ...runtime.events import ToolInvoked
+from ...runtime.execution_state import CompositeSnapshot, ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
+from ..shared import _build_resources
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
@@ -41,25 +44,20 @@ __all__ = [
 logger: StructuredLogger = get_logger(__name__, context={"component": "mcp_bridge"})
 
 
-def _build_resources(
-    *,
-    filesystem: Filesystem | None,
-    budget_tracker: BudgetTracker | None,
-) -> ResourceRegistry:
-    """Build a ResourceRegistry with the given resources.
+@dataclass(slots=True, frozen=True)
+class _MCPToolCallFunction:
+    """Adapter for MCP tool call function to ProviderToolCallFunction."""
 
-    Resources are keyed by their protocol type (e.g., Filesystem) rather than
-    their concrete type (e.g., InMemoryFilesystem) to enable protocol-based
-    lookup in tool handlers.
-    """
-    entries: dict[type[object], object] = {}
-    if filesystem is not None:
-        entries[Filesystem] = filesystem
-    if budget_tracker is not None:
-        entries[BudgetTracker] = budget_tracker
-    if not entries:
-        return ResourceRegistry()
-    return ResourceRegistry.build(entries)
+    name: str
+    arguments: str | None
+
+
+@dataclass(slots=True, frozen=True)
+class _MCPToolCall:
+    """Adapter for MCP tool call to ProviderToolCall."""
+
+    id: str
+    function: _MCPToolCallFunction
 
 
 class BridgedTool:
@@ -70,6 +68,11 @@ class BridgedTool:
         description: Tool description for MCP schema.
         input_schema: JSON schema for tool parameters.
         handler: Callable that executes the tool and returns MCP-format result.
+
+    The execution_state provides transactional semantics: a snapshot is taken
+    before execution and restored on failure, ensuring consistent state across
+    failed or aborted tool calls. Session and filesystem are accessed from
+    the execution_state.
     """
 
     def __init__(
@@ -79,13 +82,12 @@ class BridgedTool:
         description: str,
         input_schema: dict[str, Any],
         tool: Tool[Any, Any],
-        session: SessionProtocol,
+        execution_state: ExecutionState,
         adapter: ProviderAdapter[Any],
         prompt: PromptProtocol[Any],
         rendered_prompt: RenderedPromptProtocol[Any] | None,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
-        filesystem: Filesystem | None = None,
         adapter_name: str = "claude_agent_sdk",
         prompt_name: str | None = None,
     ) -> None:
@@ -93,15 +95,19 @@ class BridgedTool:
         self.description = description
         self.input_schema = input_schema
         self._tool = tool
-        self._session = session
+        self._execution_state = execution_state
         self._adapter = adapter
         self._prompt = prompt
         self._rendered_prompt = rendered_prompt
         self._deadline = deadline
         self._budget_tracker = budget_tracker
-        self._filesystem = filesystem
         self._adapter_name = adapter_name
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
+
+    @property
+    def _session(self) -> SessionProtocol:
+        """Get session from execution state."""
+        return self._execution_state.session
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -111,6 +117,9 @@ class BridgedTool:
 
         Returns:
             MCP-format result dict with content and isError fields.
+
+        Uses transactional semantics via execution_state: snapshot before
+        execution, restore on failure.
         """
         handler = self._tool.handler
         if handler is None:
@@ -119,14 +128,37 @@ class BridgedTool:
                 "isError": True,
             }
 
+        with self._execution_state.tool_transaction(
+            tag=f"tool:{self.name}"
+        ) as snapshot:
+            return self._execute_handler(handler, args, snapshot=snapshot)
+
+    def _execute_handler(
+        self,
+        handler: ToolHandler[Any, Any],
+        args: dict[str, Any],
+        *,
+        snapshot: CompositeSnapshot,
+    ) -> dict[str, Any]:
+        """Execute tool handler with transactional semantics.
+
+        Args:
+            handler: The tool handler to execute.
+            args: Tool arguments.
+            snapshot: Pre-execution snapshot for restore on failure.
+
+        Returns:
+            MCP-format result dict.
+        """
         try:
             if self._tool.params_type is type(None):
                 params = None
             else:
                 params = parse(self._tool.params_type, args, extra="forbid")
 
+            filesystem = self._execution_state.resources.get(Filesystem)
             resources = _build_resources(
-                filesystem=self._filesystem,
+                filesystem=filesystem,
                 budget_tracker=self._budget_tracker,
             )
             context = ToolContext(
@@ -140,26 +172,14 @@ class BridgedTool:
 
             result = handler(params, context=context)
 
-            # Respect exclude_value_from_context to avoid spilling large/sensitive
-            # data into the model context
-            if result.exclude_value_from_context:
-                output_text = result.message
-            else:
-                # Use render() which calls render_tool_payload on the value,
-                # falling back to message if render returns empty
-                rendered = result.render()
-                output_text = rendered if rendered else result.message
+            # Restore on tool failure (manual, since we're returning not raising)
+            if not result.success:
+                self._restore_snapshot(snapshot, reason="tool_failure")
 
-            # Publish ToolInvoked event with the actual tool result value
-            # This enables session reducers to dispatch based on the value type
-            self._publish_tool_invoked(args, result, output_text)
-
-            return {
-                "content": [{"type": "text", "text": output_text}],
-                "isError": not result.success,
-            }
+            return self._format_success_result(args, result)
 
         except (TypeError, ValueError) as error:
+            self._restore_snapshot(snapshot, reason="validation_error")
             logger.warning(
                 "claude_agent_sdk.bridge.validation_error",
                 event="bridge.validation_error",
@@ -171,10 +191,13 @@ class BridgedTool:
             }
 
         except VisibilityExpansionRequired:
-            # Progressive disclosure: let this propagate to the caller
+            # Context manager handles restore; just re-raise
             raise
 
         except Exception as error:
+            # Context manager handles restore for propagating exceptions,
+            # but we're catching and returning, so restore manually
+            self._restore_snapshot(snapshot, reason="exception")
             logger.exception(
                 "claude_agent_sdk.bridge.handler_error",
                 event="bridge.handler_error",
@@ -184,6 +207,53 @@ class BridgedTool:
                 "content": [{"type": "text", "text": f"Error: {error}"}],
                 "isError": True,
             }
+
+    def _restore_snapshot(self, snapshot: CompositeSnapshot, *, reason: str) -> None:
+        """Restore from snapshot.
+
+        Args:
+            snapshot: CompositeSnapshot to restore.
+            reason: Reason for restore (for logging).
+        """
+        self._execution_state.restore(snapshot)
+        logger.debug(
+            f"State restored after {reason}.",
+            event=f"bridge.{reason}_restore",
+            context={"tool_name": self.name},
+        )
+
+    def _format_success_result(
+        self,
+        args: dict[str, Any],
+        result: ToolResult[Any],
+    ) -> dict[str, Any]:
+        """Format successful tool result as MCP response.
+
+        Args:
+            args: Original tool arguments.
+            result: Tool execution result.
+
+        Returns:
+            MCP-format result dict.
+        """
+        # Respect exclude_value_from_context to avoid spilling large/sensitive
+        # data into the model context
+        if result.exclude_value_from_context:
+            output_text = result.message
+        else:
+            # Use render() which calls render_tool_payload on the value,
+            # falling back to message if render returns empty
+            rendered = result.render()
+            output_text = rendered if rendered else result.message
+
+        # Publish ToolInvoked event with the actual tool result value
+        # This enables session reducers to dispatch based on the value type
+        self._publish_tool_invoked(args, result, output_text)
+
+        return {
+            "content": [{"type": "text", "text": output_text}],
+            "isError": not result.success,
+        }
 
     def _publish_tool_invoked(
         self,
@@ -213,13 +283,12 @@ class BridgedTool:
 def create_bridged_tools(
     tools: tuple[Tool[Any, Any], ...],
     *,
-    session: SessionProtocol,
+    execution_state: ExecutionState,
     adapter: ProviderAdapter[Any],
     prompt: PromptProtocol[Any],
     rendered_prompt: RenderedPromptProtocol[Any] | None,
     deadline: Deadline | None,
     budget_tracker: BudgetTracker | None,
-    filesystem: Filesystem | None = None,
     adapter_name: str = "claude_agent_sdk",
     prompt_name: str | None = None,
 ) -> tuple[BridgedTool, ...]:
@@ -227,14 +296,13 @@ def create_bridged_tools(
 
     Args:
         tools: Tuple of weakincentives Tool instances.
-        session: Session for tool context.
+        execution_state: ExecutionState for transactional tool execution.
+            Session and filesystem are accessed from this state container.
         adapter: Adapter for tool context.
         prompt: Prompt for tool context.
         rendered_prompt: Rendered prompt for tool context.
         deadline: Optional deadline for tool context.
         budget_tracker: Optional budget tracker for tool context.
-        filesystem: Optional filesystem for tool context. When set, tools
-            can access the filesystem via context.filesystem.
         adapter_name: Name of the adapter for event publishing.
         prompt_name: Name of the prompt for event publishing.
 
@@ -259,13 +327,12 @@ def create_bridged_tools(
             description=tool.description,
             input_schema=input_schema,
             tool=tool,
-            session=session,
+            execution_state=execution_state,
             adapter=adapter,
             prompt=prompt,
             rendered_prompt=rendered_prompt,
             deadline=deadline,
             budget_tracker=budget_tracker,
-            filesystem=filesystem,
             adapter_name=adapter_name,
             prompt_name=resolved_prompt_name,
         )

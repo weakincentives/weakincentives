@@ -34,11 +34,13 @@ from ...types import JSONValue
 from ...types.dataclass import SupportsDataclass
 from ._slice_types import SessionSlice, SessionSliceType
 from .dataclasses import is_dataclass_instance
+from .slice_policy import SlicePolicy
 
 SNAPSHOT_SCHEMA_VERSION = "1"
 
 
 type SnapshotState = Mapping[SessionSliceType, SessionSlice]
+type SnapshotPolicies = Mapping[SessionSliceType, SlicePolicy]
 
 
 class SnapshotSerializationError(WinkError, RuntimeError):
@@ -100,6 +102,20 @@ def normalize_snapshot_state(
         normalized[slice_type] = tuple(items)
 
     return cast(SnapshotState, types.MappingProxyType(normalized))
+
+
+def normalize_snapshot_policies(
+    policies: Mapping[SessionSliceType, object],
+) -> SnapshotPolicies:
+    """Validate snapshot policies and return an immutable copy."""
+    normalized: dict[SessionSliceType, SlicePolicy] = {}
+    for slice_key, policy in policies.items():
+        if not _is_dataclass_type(slice_key):
+            raise TypeError("Policy keys must be dataclass types")
+        if not isinstance(policy, SlicePolicy):
+            raise TypeError("Policy values must be SlicePolicy instances")
+        normalized[slice_key] = policy
+    return cast(SnapshotPolicies, types.MappingProxyType(normalized))
 
 
 def _type_identifier(cls: SessionSliceType) -> str:
@@ -194,6 +210,27 @@ def _validate_tags(payload: Mapping[str, JSONValue]) -> Mapping[str, str]:
     )
 
 
+def _validate_policies(payload: Mapping[str, JSONValue]) -> SnapshotPolicies:
+    policies_obj = payload.get("policies", {})
+    if not isinstance(policies_obj, Mapping):
+        raise SnapshotRestoreError("Snapshot policies must be an object")
+
+    normalized: dict[SessionSliceType, SlicePolicy] = {}
+    for key, value in policies_obj.items():
+        if not isinstance(value, str):
+            raise SnapshotRestoreError("Snapshot policy values must be strings")
+        try:
+            policy = SlicePolicy(value)
+        except ValueError as error:
+            raise SnapshotRestoreError("Snapshot policy value is invalid") from error
+        slice_type = _resolve_type(key)
+        if not _is_dataclass_type(slice_type):
+            raise SnapshotRestoreError("Snapshot policy keys must be dataclass types")
+        normalized[slice_type] = policy
+
+    return cast(SnapshotPolicies, types.MappingProxyType(normalized))
+
+
 def _construct_snapshot_payload(
     cls: type[SnapshotPayload],
     payload: Mapping[str, JSONValue],
@@ -202,6 +239,7 @@ def _construct_snapshot_payload(
     children_ids = _validate_children_ids(payload)
     slices = _validate_slices(payload)
     tags = _validate_tags(payload)
+    policies = _validate_policies(payload)
 
     return cls(
         version=version,
@@ -210,6 +248,7 @@ def _construct_snapshot_payload(
         parent_id=parent_id,
         children_ids=children_ids,
         tags=tags,
+        policies=policies,
     )
 
 
@@ -286,6 +325,12 @@ class SnapshotPayload:
     tags: Mapping[str, str] = field(
         default_factory=lambda: cast(Mapping[str, str], types.MappingProxyType({}))
     )
+    policies: SnapshotPolicies = field(
+        default_factory=lambda: cast(
+            SnapshotPolicies,
+            types.MappingProxyType({}),
+        )
+    )
 
     @classmethod
     def from_json(cls, raw: str) -> SnapshotPayload:
@@ -309,6 +354,12 @@ class Snapshot:
     tags: Mapping[str, str] = field(
         default_factory=lambda: cast(Mapping[str, str], types.MappingProxyType({}))
     )
+    policies: SnapshotPolicies = field(
+        default_factory=lambda: cast(
+            SnapshotPolicies,
+            types.MappingProxyType({}),
+        )
+    )
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "created_at", _ensure_timezone(self.created_at))
@@ -322,6 +373,11 @@ class Snapshot:
             "tags",
             cast(Mapping[str, str], types.MappingProxyType(dict(self.tags))),
         )
+        object.__setattr__(
+            self,
+            "policies",
+            normalize_snapshot_policies(dict(self.policies)),
+        )
 
     @override
     def __hash__(self) -> int:
@@ -331,9 +387,22 @@ class Snapshot:
                 key=lambda item: _type_identifier(item[0]),
             )
         )
+        ordered_policies = tuple(
+            sorted(
+                self.policies.items(),
+                key=lambda item: _type_identifier(item[0]),
+            )
+        )
         ordered_tags = tuple(sorted(self.tags.items()))
         return hash(
-            (self.created_at, ordered, self.parent_id, self.children_ids, ordered_tags)
+            (
+                self.created_at,
+                ordered,
+                self.parent_id,
+                self.children_ids,
+                ordered_tags,
+                ordered_policies,
+            )
         )
 
     def to_json(self) -> str:
@@ -375,6 +444,13 @@ class Snapshot:
             "children_ids": [str(child) for child in self.children_ids],
             "slices": payload_slices,
             "tags": dict(sorted(self.tags.items())),
+            "policies": {
+                _type_identifier(slice_type): policy.value
+                for slice_type, policy in sorted(
+                    self.policies.items(),
+                    key=lambda item: _type_identifier(item[0]),
+                )
+            },
         }
         return json.dumps(payload, sort_keys=True)
 
@@ -446,4 +522,5 @@ class Snapshot:
             children_ids=children_ids,
             slices=restored,
             tags=payload.tags,
+            policies=payload.policies,
         )
