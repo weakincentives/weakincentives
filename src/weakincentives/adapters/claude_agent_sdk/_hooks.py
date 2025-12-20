@@ -278,6 +278,69 @@ def create_pre_tool_use_hook(
     return pre_tool_use_hook
 
 
+@dataclass(slots=True, frozen=True)
+class _ParsedToolData:
+    """Parsed tool data from PostToolUse hook input."""
+
+    tool_name: str
+    tool_input: dict[str, Any]
+    tool_error: str | None
+    output_text: str
+    result_raw: Any
+
+
+def _parse_tool_data(input_data: Any) -> _ParsedToolData:  # noqa: ANN401
+    """Parse tool data from PostToolUse hook input.
+
+    Attempts typed parsing first, falling back to dict access.
+    """
+    parsed = PostToolUseInput.from_dict(input_data)
+
+    if parsed is not None:
+        response = parsed.tool_response
+        if isinstance(response, dict):
+            tool_error = response.get("stderr") if response.get("stderr") else None
+            output_text = response.get("stdout", "") or str(response)
+        else:
+            tool_error = None
+            output_text = response
+        return _ParsedToolData(
+            tool_name=parsed.tool_name,
+            tool_input=parsed.tool_input,
+            tool_error=tool_error,
+            output_text=output_text,
+            result_raw=response,
+        )
+
+    # Fallback to dict access for malformed input
+    tool_name = input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
+    tool_input = (
+        input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
+    )
+    tool_response_raw = (
+        input_data.get("tool_response", {}) if isinstance(input_data, dict) else {}
+    )
+    tool_error = (
+        tool_response_raw.get("stderr")
+        if isinstance(tool_response_raw, dict) and tool_response_raw.get("stderr")
+        else None
+    )
+    if isinstance(tool_response_raw, dict):
+        output_text = tool_response_raw.get("stdout", "") or str(tool_response_raw)
+    elif tool_response_raw is not None:
+        output_text = str(tool_response_raw)
+    else:
+        output_text = ""
+
+    return _ParsedToolData(
+        tool_name=tool_name,
+        tool_input=tool_input,
+        tool_error=tool_error,
+        output_text=output_text,
+        result_raw=tool_response_raw,
+    )
+
+
 def create_post_tool_use_hook(
     hook_context: HookContext,
     *,
@@ -307,77 +370,25 @@ def create_post_tool_use_hook(
         sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         _ = sdk_context
-
-        # Attempt to parse into typed dataclass
-        parsed = PostToolUseInput.from_dict(input_data)
+        data = _parse_tool_data(input_data)
 
         # Skip logging for MCP-bridged WINK tools - they publish their own
         # ToolInvoked events via BridgedTool with richer context (typed values).
-        tool_name_raw = (
-            parsed.tool_name
-            if parsed is not None
-            else (
-                input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
-            )
-        )
-        if tool_name_raw.startswith("mcp__wink__"):
-            # Skip for MCP-bridged WINK tools - they handle their own transactions
+        if data.tool_name.startswith("mcp__wink__"):
             return {}
-
-        if parsed is not None:
-            # Use typed access
-            tool_name = parsed.tool_name
-            tool_input = parsed.tool_input
-            response = parsed.tool_response
-            # Extract stdout/stderr from dict response, or use string directly
-            if isinstance(response, dict):
-                tool_error = response.get("stderr") if response.get("stderr") else None
-                output_text = response.get("stdout", "") or str(response)
-            else:
-                tool_error = None
-                output_text = response
-            result_raw: Any = response
-        else:
-            # Fallback to dict access for malformed input
-            tool_name = (
-                input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
-            )
-            tool_input = (
-                input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
-            )
-            tool_response_raw = (
-                input_data.get("tool_response", {})
-                if isinstance(input_data, dict)
-                else {}
-            )
-            tool_error = (
-                tool_response_raw.get("stderr")
-                if isinstance(tool_response_raw, dict)
-                and tool_response_raw.get("stderr")
-                else None
-            )
-            if isinstance(tool_response_raw, dict):
-                output_text = tool_response_raw.get("stdout", "") or str(
-                    tool_response_raw
-                )
-            elif tool_response_raw is not None:
-                output_text = str(tool_response_raw)
-            else:
-                output_text = ""
-            result_raw = tool_response_raw
 
         hook_context._tool_count += 1
 
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
-            name=tool_name,
-            params=tool_input,
-            result=result_raw,
+            name=data.tool_name,
+            params=data.tool_input,
+            result=data.result_raw,
             session_id=None,
             created_at=_utcnow(),
             usage=None,
-            rendered_output=output_text[:1000] if output_text else "",
+            rendered_output=data.output_text[:1000] if data.output_text else "",
             call_id=tool_use_id,
         )
         hook_context.session.event_bus.publish(event)
@@ -386,16 +397,17 @@ def create_post_tool_use_hook(
             "claude_agent_sdk.hook.tool_invoked",
             event="hook.tool_invoked",
             context={
-                "tool_name": tool_name,
-                "success": tool_error is None,
+                "tool_name": data.tool_name,
+                "success": data.tool_error is None,
                 "call_id": tool_use_id,
             },
         )
 
         # Complete tool transaction - restore state on failure
         if tool_use_id is not None:
-            # Determine success: no stderr and no error indicators
-            success = tool_error is None and not _is_tool_error_response(result_raw)
+            success = data.tool_error is None and not _is_tool_error_response(
+                data.result_raw
+            )
             restored = hook_context.execution_state.end_tool_execution(
                 tool_use_id=tool_use_id,
                 success=success,
@@ -405,18 +417,18 @@ def create_post_tool_use_hook(
                     "claude_agent_sdk.hook.state_restored",
                     event="hook.state_restored",
                     context={
-                        "tool_name": tool_name,
+                        "tool_name": data.tool_name,
                         "tool_use_id": tool_use_id,
                         "reason": "tool_failure",
                     },
                 )
 
         # Stop execution after StructuredOutput tool to end turn cleanly
-        if stop_on_structured_output and tool_name == "StructuredOutput":
+        if stop_on_structured_output and data.tool_name == "StructuredOutput":
             logger.debug(
                 "claude_agent_sdk.hook.structured_output_stop",
                 event="hook.structured_output_stop",
-                context={"tool_name": tool_name},
+                context={"tool_name": data.tool_name},
             )
             return {"continue": False}
 

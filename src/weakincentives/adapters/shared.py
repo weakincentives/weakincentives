@@ -759,6 +759,74 @@ def _restore_snapshot_if_needed(
     )
 
 
+def _execute_tool_handler(  # noqa: PLR0913
+    *,
+    context: _ToolExecutionContext,
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
+    tool_name: str,
+    tool_params: SupportsDataclass | None,
+    filesystem: Filesystem | None,
+) -> ToolResult[SupportsToolResult]:
+    """Execute the tool handler and build the tool context."""
+    _ensure_deadline_not_expired(
+        deadline=context.deadline,
+        prompt_name=context.prompt_name,
+        tool_name=tool_name,
+    )
+    resources = _build_resources(
+        filesystem=filesystem,
+        budget_tracker=context.budget_tracker,
+    )
+    tool_context = ToolContext(
+        prompt=cast(PromptProtocol[Any], context.prompt),
+        rendered_prompt=context.rendered_prompt,
+        adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
+        session=context.session,
+        deadline=context.deadline,
+        resources=resources,
+    )
+    return _invoke_tool_handler(
+        handler=handler,
+        tool_params=tool_params,
+        context=tool_context,
+    )
+
+
+def _handle_tool_exception(  # noqa: PLR0913
+    error: Exception,
+    *,
+    context: _ToolExecutionContext,
+    tool_name: str,
+    log: StructuredLogger,
+    snapshot: CompositeSnapshot,
+    tool_params: SupportsDataclass | None,
+    arguments_mapping: Mapping[str, Any],
+) -> ToolResult[SupportsToolResult]:
+    """Handle exceptions during tool execution, restoring snapshot as needed."""
+    if isinstance(error, ToolValidationError):
+        # Validation errors happen before tool invocation, no restore needed
+        return _handle_tool_validation_error(log=log, error=error)
+    if isinstance(error, DeadlineExceededError):
+        # Context manager handles restore for re-raised exceptions
+        raise _handle_tool_deadline_error(
+            error=error,
+            prompt_name=context.prompt_name,
+            tool_name=tool_name,
+            deadline=context.deadline,
+        ) from error
+    # Unexpected exception - manually restore since we're catching and returning
+    _restore_snapshot_if_needed(
+        context.execution_state, snapshot, log, reason="exception"
+    )
+    return _handle_unexpected_tool_error(
+        log=log,
+        tool_name=tool_name,
+        provider_payload=context.provider_payload,
+        error=error,
+    )
+
+
 def _execute_tool_with_snapshot(  # noqa: PLR0913
     *,
     context: _ToolExecutionContext,
@@ -776,60 +844,31 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
     tool_result: ToolResult[SupportsToolResult]
     try:
         tool_params = _parse_tool_params(tool=tool, arguments_mapping=arguments_mapping)
-        _ensure_deadline_not_expired(
-            deadline=context.deadline,
-            prompt_name=context.prompt_name,
-            tool_name=tool_name,
-        )
-        resources = _build_resources(
-            filesystem=filesystem,
-            budget_tracker=context.budget_tracker,
-        )
-        tool_context = ToolContext(
-            prompt=cast(PromptProtocol[Any], context.prompt),
-            rendered_prompt=context.rendered_prompt,
-            adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
-            session=context.session,
-            deadline=context.deadline,
-            resources=resources,
-        )
-        tool_result = _invoke_tool_handler(
+        tool_result = _execute_tool_handler(
+            context=context,
+            tool=tool,
             handler=handler,
+            tool_name=tool_name,
             tool_params=tool_params,
-            context=tool_context,
+            filesystem=filesystem,
         )
-    except ToolValidationError as error:
-        # Validation errors happen before tool invocation, no restore needed
+    except (VisibilityExpansionRequired, PromptEvaluationError):
+        # Context manager handles restore; just re-raise
+        raise
+    except Exception as error:
         if tool_params is None:
             tool_params = cast(
                 SupportsDataclass,
                 _rejected_params(arguments_mapping=arguments_mapping, error=error),
             )
-        tool_result = _handle_tool_validation_error(log=log, error=error)
-    except VisibilityExpansionRequired:
-        # Context manager handles restore; just re-raise
-        raise
-    except PromptEvaluationError:
-        # Context manager handles restore; just re-raise
-        raise
-    except DeadlineExceededError as error:
-        # Context manager handles restore for re-raised exceptions
-        raise _handle_tool_deadline_error(
-            error=error,
-            prompt_name=context.prompt_name,
+        tool_result = _handle_tool_exception(
+            error,
+            context=context,
             tool_name=tool_name,
-            deadline=context.deadline,
-        ) from error
-    except Exception as error:  # propagate message via ToolResult
-        # Manually restore since we're catching and returning, not re-raising
-        _restore_snapshot_if_needed(
-            context.execution_state, snapshot, log, reason="exception"
-        )
-        tool_result = _handle_unexpected_tool_error(
             log=log,
-            tool_name=tool_name,
-            provider_payload=context.provider_payload,
-            error=error,
+            snapshot=snapshot,
+            tool_params=tool_params,
+            arguments_mapping=arguments_mapping,
         )
     else:
         # Manually restore if tool execution reported failure
