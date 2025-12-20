@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -37,6 +36,7 @@ class MutationConfig:
     runner: str
     use_coverage: bool
     minimum_score: float
+    score_gates: dict[str, float]
 
 
 def main() -> int:
@@ -60,17 +60,37 @@ def main() -> int:
     if run_code != 0:
         return run_code
 
-    stats = _load_results()
+    stats, module_stats = _load_results()
     score = _mutation_score(stats)
     summary = _format_summary(stats, score)
     print(summary)
 
-    if args.check and score < threshold:
-        message = (
-            f"Mutation score {score:.1f}% is below the required threshold of "
-            f"{threshold:.1f}%."
-        )
-        print(message, file=sys.stderr)
+    gate_failures: list[str] = []
+
+    if args.check:
+        # Check global threshold
+        if score < threshold:
+            gate_failures.append(
+                f"Overall score {score:.1f}% is below the required threshold of "
+                f"{threshold:.1f}%."
+            )
+
+        # Check per-module gates
+        for gate_pattern, gate_threshold in config.score_gates.items():
+            gate_stats = _aggregate_module_stats(module_stats, gate_pattern)
+            gate_score = _mutation_score(gate_stats)
+            total_mutants = sum(
+                v for v in gate_stats.values() if isinstance(v, int)
+            )
+            if total_mutants > 0 and gate_score < gate_threshold:
+                gate_failures.append(
+                    f"Module '{gate_pattern}' score {gate_score:.1f}% is below "
+                    f"the required threshold of {gate_threshold:.1f}%."
+                )
+
+    if gate_failures:
+        for failure in gate_failures:
+            print(failure, file=sys.stderr)
         return 1
 
     return 0
@@ -82,6 +102,8 @@ def _load_config() -> MutationConfig:
         raise FileNotFoundError(message)
 
     data = tomllib.loads(CONFIG_PATH.read_text()).get("mutation", {})
+    score_gates_raw = data.get("score_gates", {})
+    score_gates = {str(k): float(v) for k, v in score_gates_raw.items()}
     return MutationConfig(
         paths_to_mutate=list(data.get("paths_to_mutate", [])),
         tests_dir=str(data.get("tests_dir", "tests")),
@@ -90,6 +112,7 @@ def _load_config() -> MutationConfig:
         runner=str(data.get("runner", "python -m pytest -q")),
         use_coverage=bool(data.get("use_coverage", True)),
         minimum_score=float(data.get("minimum_score", 0.0)),
+        score_gates=score_gates,
     )
 
 
@@ -101,15 +124,8 @@ def _run_mutmut(config: MutationConfig, extra_args: list[str]) -> int:
     return result.returncode
 
 
-def _load_results() -> dict[str, Any]:
-    result = subprocess.run(
-        ["mutmut", "results", "--all", "true"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-
-    stats: dict[str, int] = {
+def _empty_stats() -> dict[str, int]:
+    return {
         "killed": 0,
         "survived": 0,
         "timeout": 0,
@@ -118,16 +134,58 @@ def _load_results() -> dict[str, Any]:
         "skipped": 0,
     }
 
+
+def _load_results() -> tuple[dict[str, Any], dict[str, dict[str, int]]]:
+    """Load mutation results with per-module breakdown.
+
+    Returns:
+        Tuple of (global_stats, per_module_stats) where per_module_stats maps
+        module path patterns to their individual statistics.
+    """
+    result = subprocess.run(
+        ["mutmut", "results", "--all", "true"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    stats: dict[str, int] = _empty_stats()
+    module_stats: dict[str, dict[str, int]] = {}
+
     for line in result.stdout.splitlines():
         if ":" not in line:
             continue
 
-        *_, status_part = line.rsplit(":", maxsplit=1)
-        status = status_part.strip().split()[0]
-        if status in stats:
-            stats[status] += 1
+        # Parse file path and status from line format: "path/to/file.py:line: status ..."
+        parts = line.split(":")
+        if len(parts) < 3:
+            continue
 
-    return stats
+        file_path = parts[0].strip()
+        status_part = parts[-1].strip().split()[0]
+
+        if status_part in stats:
+            stats[status_part] += 1
+
+            # Track per-module stats
+            if file_path not in module_stats:
+                module_stats[file_path] = _empty_stats()
+            module_stats[file_path][status_part] += 1
+
+    return stats, module_stats
+
+
+def _aggregate_module_stats(
+    module_stats: dict[str, dict[str, int]],
+    gate_pattern: str,
+) -> dict[str, int]:
+    """Aggregate stats for all files matching a gate pattern."""
+    aggregated = _empty_stats()
+    for file_path, file_stats in module_stats.items():
+        if gate_pattern in file_path:
+            for key, value in file_stats.items():
+                aggregated[key] += value
+    return aggregated
 
 
 def _mutation_score(stats: dict[str, Any]) -> float:

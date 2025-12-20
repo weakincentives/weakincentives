@@ -20,6 +20,7 @@ from weakincentives.runtime.session._types import ReducerContextProtocol
 from weakincentives.runtime.session.reducers import (
     append_all,
     replace_latest_by,
+    upsert_by,
 )
 
 
@@ -76,3 +77,79 @@ def test_append_all_appends_to_empty_slice() -> None:
 
     assert len(updated) == 1
     assert updated[0] == _Sample("a", "first")
+
+
+def test_replace_latest_by_handles_duplicate_keys() -> None:
+    """replace_latest_by removes duplicates when replacing."""
+    reducer = replace_latest_by(lambda item: item.key)
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+    # Multiple items with the same key "a"
+    initial = (_Sample("a", "first"), _Sample("a", "duplicate"), _Sample("b", "other"))
+
+    updated = reducer(
+        initial,
+        _Sample("a", "replaced"),
+        context=context,
+    )
+
+    # Should replace first "a", skip duplicate "a", keep "b"
+    assert len(updated) == 2
+    assert any(item.key == "a" and item.data == "replaced" for item in updated)
+    assert any(item.key == "b" for item in updated)
+
+
+def test_upsert_by_replaces_first_matching_key() -> None:
+    """upsert_by replaces first matching entry and removes duplicates."""
+    reducer = upsert_by(lambda item: item.key)
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+    initial = (_Sample("a", "first"), _Sample("b", "second"))
+
+    updated = reducer(
+        initial,
+        _Sample("a", "updated"),
+        context=context,
+    )
+
+    assert len(updated) == 2
+    assert updated[0] == _Sample("a", "updated")
+    assert updated[1] == _Sample("b", "second")
+
+
+def test_upsert_by_appends_when_no_match() -> None:
+    """upsert_by appends when key not found."""
+    reducer = upsert_by(lambda item: item.key)
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+    initial = (_Sample("a", "first"),)
+
+    updated = reducer(
+        initial,
+        _Sample("b", "new"),
+        context=context,
+    )
+
+    assert len(updated) == 2
+    assert updated[0] == _Sample("a", "first")
+    assert updated[1] == _Sample("b", "new")
+
+
+def test_upsert_by_removes_duplicates() -> None:
+    """upsert_by removes duplicate keys when upserting."""
+    reducer = upsert_by(lambda item: item.key)
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+    # Multiple items with the same key "a"
+    initial = (_Sample("a", "first"), _Sample("a", "duplicate"), _Sample("b", "other"))
+
+    updated = reducer(
+        initial,
+        _Sample("a", "replaced"),
+        context=context,
+    )
+
+    # Should upsert first "a", skip duplicate "a", keep "b"
+    assert len(updated) == 2
+    assert updated[0] == _Sample("a", "replaced")
+    assert updated[1] == _Sample("b", "other")

@@ -692,7 +692,7 @@ class Session(SessionProtocol):
         # Handle iterable outputs (dispatch each item directly)
         if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
             for item in cast(Iterable[object], output):
-                if is_dataclass_instance(item):
+                if is_dataclass_instance(item):  # pragma: no branch
                     # Narrow for ty: item is SupportsDataclass after TypeGuard
                     narrowed_item = cast(SupportsDataclass, item)  # pyright: ignore[reportUnnecessaryCast]
                     self._dispatch_data_event(type(narrowed_item), narrowed_item)

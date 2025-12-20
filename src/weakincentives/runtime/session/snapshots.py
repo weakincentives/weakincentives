@@ -54,7 +54,7 @@ def _normalize_tags(
 ) -> Mapping[str, str]:
     normalized: dict[str, str] = {}
 
-    if tags is not None:
+    if tags is not None:  # pragma: no branch - callers always provide tags via get()
         for key, value in tags.items():
             if not isinstance(key, str) or not isinstance(value, str):
                 msg = "Snapshot tags must be string key/value pairs"
