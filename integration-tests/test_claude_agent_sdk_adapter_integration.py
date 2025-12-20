@@ -55,33 +55,34 @@ _DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
 _PROMPT_NS = "integration/claude-agent-sdk"
 
 
-@pytest.fixture(scope="module")
-def claude_model() -> str:
+def _get_model() -> str:
     """Return the model name used for integration tests."""
     return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
 
 
-@pytest.fixture(scope="module")
-def client_config(module_workspace: Path) -> ClaudeAgentSDKClientConfig:
-    """Build a typed ClaudeAgentSDKClientConfig with isolated workspace.
+def _make_config(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig:
+    """Build a ClaudeAgentSDKClientConfig with explicit cwd.
 
-    Uses module_workspace to ensure all tests operate in an isolated directory,
-    preventing snapshot operations from creating commits in the actual repository.
+    All tests MUST use this helper to ensure cwd points to a temporary
+    directory, preventing snapshot operations from creating commits in
+    the actual repository.
     """
-    return ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
-        cwd=str(module_workspace),
-    )
+    config_kwargs: dict[str, object] = {
+        "permission_mode": "bypassPermissions",
+        "cwd": str(tmp_path),
+    }
+    config_kwargs.update(kwargs)
+    return ClaudeAgentSDKClientConfig(**config_kwargs)  # type: ignore[arg-type]
 
 
-@pytest.fixture(scope="module")
-def adapter(
-    claude_model: str, client_config: ClaudeAgentSDKClientConfig
-) -> ClaudeAgentSDKAdapter:
-    """Create a Claude Agent SDK adapter instance for basic evaluations."""
+def _make_adapter(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKAdapter:
+    """Create an adapter with explicit cwd pointing to tmp_path."""
+    model = kwargs.pop("model", None) or _get_model()
+    client_config = kwargs.pop("client_config", None) or _make_config(tmp_path)
     return ClaudeAgentSDKAdapter(
-        model=claude_model,
-        client_config=client_config,
+        model=model,  # type: ignore[arg-type]
+        client_config=client_config,  # type: ignore[arg-type]
+        **kwargs,  # type: ignore[arg-type]
     )
 
 
@@ -205,8 +206,9 @@ def _assert_prompt_usage(session: Session) -> None:
     assert usage.total_tokens is not None and usage.total_tokens > 0
 
 
-def test_claude_agent_sdk_adapter_returns_text(adapter: ClaudeAgentSDKAdapter) -> None:
+def test_claude_agent_sdk_adapter_returns_text(tmp_path: Path) -> None:
     """Test that the adapter returns text from a simple prompt."""
+    adapter = _make_adapter(tmp_path)
     prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="integration tests")
     prompt = Prompt(prompt_template).bind(params)
@@ -220,9 +222,7 @@ def test_claude_agent_sdk_adapter_returns_text(adapter: ClaudeAgentSDKAdapter) -
     _assert_prompt_usage(session)
 
 
-def test_claude_agent_sdk_adapter_processes_tool_invocation(
-    claude_model: str, client_config: ClaudeAgentSDKClientConfig
-) -> None:
+def test_claude_agent_sdk_adapter_processes_tool_invocation(tmp_path: Path) -> None:
     """Test that the adapter processes custom tool invocations via MCP bridge.
 
     This test validates that weakincentives tools are correctly bridged to the
@@ -233,10 +233,7 @@ def test_claude_agent_sdk_adapter_processes_tool_invocation(
     prompt_template = _build_tool_prompt(tool)
     params = TransformRequest(text="integration tests")
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
-        client_config=client_config,
-    )
+    adapter = _make_adapter(tmp_path)
 
     prompt = Prompt(prompt_template).bind(params)
 
@@ -250,10 +247,9 @@ def test_claude_agent_sdk_adapter_processes_tool_invocation(
     _assert_prompt_usage(session)
 
 
-def test_claude_agent_sdk_adapter_parses_structured_output(
-    adapter: ClaudeAgentSDKAdapter,
-) -> None:
+def test_claude_agent_sdk_adapter_parses_structured_output(tmp_path: Path) -> None:
     """Test that the adapter parses structured output correctly."""
+    adapter = _make_adapter(tmp_path)
     prompt_template = _build_structured_prompt()
     sample = ReviewParams(
         text=(
@@ -275,9 +271,7 @@ def test_claude_agent_sdk_adapter_parses_structured_output(
     _assert_prompt_usage(session)
 
 
-def test_claude_agent_sdk_adapter_with_model_config(
-    claude_model: str, client_config: ClaudeAgentSDKClientConfig
-) -> None:
+def test_claude_agent_sdk_adapter_with_model_config(tmp_path: Path) -> None:
     """Verify adapter works with ClaudeAgentSDKModelConfig.
 
     Note: The Claude Agent SDK does not expose max_tokens or temperature
@@ -285,17 +279,14 @@ def test_claude_agent_sdk_adapter_with_model_config(
     verifies that the adapter handles a model config gracefully even though
     these parameters are not applied to SDK options.
     """
+    model = _get_model()
     model_config = ClaudeAgentSDKModelConfig(
-        model=claude_model,
+        model=model,
         temperature=0.3,  # Ignored by SDK - no direct equivalent
         max_tokens=150,  # Ignored by SDK - no direct equivalent
     )
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
-        client_config=client_config,
-        model_config=model_config,
-    )
+    adapter = _make_adapter(tmp_path, model_config=model_config)
 
     prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="model config tests")
@@ -313,9 +304,7 @@ def test_claude_agent_sdk_adapter_with_model_config(
     _assert_prompt_usage(session)
 
 
-def test_claude_agent_sdk_adapter_with_max_turns(
-    claude_model: str, client_config: ClaudeAgentSDKClientConfig, tmp_path: Path
-) -> None:
+def test_claude_agent_sdk_adapter_with_max_turns(tmp_path: Path) -> None:
     """Verify adapter respects max_turns configuration."""
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
@@ -323,8 +312,8 @@ def test_claude_agent_sdk_adapter_with_max_turns(
         cwd=str(tmp_path),
     )
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
     )
 
@@ -340,15 +329,9 @@ def test_claude_agent_sdk_adapter_with_max_turns(
     _assert_prompt_usage(session)
 
 
-def test_claude_agent_sdk_adapter_with_disallowed_tools(
-    claude_model: str, client_config: ClaudeAgentSDKClientConfig
-) -> None:
+def test_claude_agent_sdk_adapter_with_disallowed_tools(tmp_path: Path) -> None:
     """Verify adapter can be configured with disallowed tools."""
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
-        client_config=client_config,
-        disallowed_tools=("Bash", "Write"),
-    )
+    adapter = _make_adapter(tmp_path, disallowed_tools=("Bash", "Write"))
 
     prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="disallowed tools test")
@@ -388,8 +371,7 @@ def _build_file_read_prompt() -> PromptTemplate[object]:
 
 
 def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
-    claude_model: str,
-    isolated_workspace: Path,
+    tmp_path: Path,
 ) -> None:
     """Verify that adapter hooks publish ToolInvoked events for SDK native tools.
 
@@ -399,13 +381,10 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     event-driven architecture.
     """
     # Use isolated workspace to avoid operations on the actual repository
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
-        cwd=str(isolated_workspace),
-    )
+    config = _make_config(tmp_path)
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         # Only allow the Read tool to ensure we get a predictable tool call
         allowed_tools=("Read",),
@@ -460,7 +439,7 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
 
 
 def test_claude_agent_sdk_adapter_publishes_prompt_rendered_event(
-    adapter: ClaudeAgentSDKAdapter,
+    tmp_path: Path,
 ) -> None:
     """Verify that PromptRendered event is published before SDK execution.
 
@@ -468,6 +447,7 @@ def test_claude_agent_sdk_adapter_publishes_prompt_rendered_event(
     containing the rendered prompt text, which is useful for debugging and
     observability.
     """
+    adapter = _make_adapter(tmp_path)
     prompt_template = _build_greeting_prompt()
     params = GreetingParams(audience="prompt rendered test")
     prompt = Prompt(prompt_template).bind(params)
@@ -553,9 +533,7 @@ def _build_renderable_tool_prompt(
     )
 
 
-def test_claude_agent_sdk_adapter_mcp_tool_uses_render(
-    claude_model: str, client_config: ClaudeAgentSDKClientConfig
-) -> None:
+def test_claude_agent_sdk_adapter_mcp_tool_uses_render(tmp_path: Path) -> None:
     """Verify that MCP bridged tools call render() on result values.
 
     This test validates that when a custom weakincentives tool returns a
@@ -566,10 +544,7 @@ def test_claude_agent_sdk_adapter_mcp_tool_uses_render(
     prompt_template = _build_renderable_tool_prompt(tool)
     params = ComputeParams(x=7, y=13)
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
-        client_config=client_config,
-    )
+    adapter = _make_adapter(tmp_path)
 
     prompt = Prompt(prompt_template).bind(params)
 
@@ -613,30 +588,24 @@ def _build_multi_tool_prompt() -> PromptTemplate[object]:
     )
 
 
-def test_claude_agent_sdk_adapter_multiple_tool_invocations(
-    claude_model: str,
-    isolated_project: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_multiple_tool_invocations(tmp_path: Path) -> None:
     """Verify adapter tracks multiple sequential tool invocations.
 
     This test validates that when the SDK uses multiple tools in sequence,
     each tool invocation is captured via the PostToolUse hook and published
     as a ToolInvoked event.
     """
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
-        cwd=str(isolated_project),
-    )
+    config = _make_config(tmp_path)
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         # Allow Glob and Read for this multi-step task
         allowed_tools=("Glob", "Read"),
     )
 
     prompt_template = _build_multi_tool_prompt()
-    # Use the src directory in isolated_project (created by fixture)
+    # Use the src directory in tmp_path (created by fixture)
     params = MultiStepParams(target_dir="src")
     prompt = Prompt(prompt_template).bind(params)
 
@@ -668,8 +637,7 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(
 
 
 def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
-    claude_model: str,
-    isolated_workspace: Path,
+    tmp_path: Path,
 ) -> None:
     """Verify adapter accumulates token usage across multi-turn execution.
 
@@ -677,19 +645,16 @@ def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
     even when the SDK performs multiple tool calls, which may span multiple
     API interactions.
     """
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
-        cwd=str(isolated_workspace),
-    )
+    config = _make_config(tmp_path)
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         allowed_tools=("Read",),
     )
 
     prompt_template = _build_file_read_prompt()
-    # Use README.md in isolated_workspace (created by fixture)
+    # Use README.md in tmp_path (created by fixture)
     params = ReadFileParams(file_path="README.md")
     prompt = Prompt(prompt_template).bind(params)
 
@@ -766,9 +731,7 @@ def _build_echo_prompt(tool: Tool[EchoParams, EchoResult]) -> PromptTemplate[obj
     )
 
 
-def test_claude_agent_sdk_adapter_custom_tool_without_render(
-    claude_model: str, client_config: ClaudeAgentSDKClientConfig
-) -> None:
+def test_claude_agent_sdk_adapter_custom_tool_without_render(tmp_path: Path) -> None:
     """Verify MCP bridged tools work when result has no render() method.
 
     This test validates that custom tools without a render() method on
@@ -778,10 +741,7 @@ def test_claude_agent_sdk_adapter_custom_tool_without_render(
     prompt_template = _build_echo_prompt(tool)
     params = EchoParams(text="hello from integration test")
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
-        client_config=client_config,
-    )
+    adapter = _make_adapter(tmp_path)
 
     prompt = Prompt(prompt_template).bind(params)
 
@@ -805,10 +765,7 @@ def test_claude_agent_sdk_adapter_custom_tool_without_render(
 # =============================================================================
 
 
-def test_claude_agent_sdk_adapter_with_isolation_returns_text(
-    claude_model: str,
-    tmp_path: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_with_isolation_returns_text(tmp_path: Path) -> None:
     """Verify adapter works correctly with IsolationConfig enabled.
 
     This test validates that:
@@ -828,8 +785,8 @@ def test_claude_agent_sdk_adapter_with_isolation_returns_text(
         cwd=str(tmp_path),
     )
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
     )
 
@@ -846,10 +803,7 @@ def test_claude_agent_sdk_adapter_with_isolation_returns_text(
     _assert_prompt_usage(session)
 
 
-def test_claude_agent_sdk_adapter_isolation_with_custom_tools(
-    claude_model: str,
-    tmp_path: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_isolation_with_custom_tools(tmp_path: Path) -> None:
     """Verify custom tools work correctly in isolated mode.
 
     This test validates that MCP-bridged tools function correctly when
@@ -871,8 +825,8 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_tools(
     prompt_template = _build_tool_prompt(tool)
     params = TransformRequest(text="isolation mode")
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
     )
 
@@ -889,7 +843,6 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_tools(
 
 
 def test_claude_agent_sdk_adapter_isolation_with_structured_output(
-    claude_model: str,
     tmp_path: Path,
 ) -> None:
     """Verify structured output works in isolated mode.
@@ -907,8 +860,8 @@ def test_claude_agent_sdk_adapter_isolation_with_structured_output(
         cwd=str(tmp_path),
     )
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
     )
 
@@ -931,7 +884,7 @@ def test_claude_agent_sdk_adapter_isolation_with_structured_output(
 
 
 def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
-    claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify isolation prevents modification of host ~/.claude directory.
 
@@ -965,8 +918,8 @@ def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
             cwd=fake_home,  # Use the temp directory as cwd
         )
 
-        adapter = ClaudeAgentSDKAdapter(
-            model=claude_model,
+        adapter = _make_adapter(
+            tmp_path,
             client_config=config,
         )
 
@@ -993,7 +946,6 @@ def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
 
 
 def test_claude_agent_sdk_adapter_isolation_network_policy_no_network(
-    claude_model: str,
     tmp_path: Path,
 ) -> None:
     """Verify NetworkPolicy.no_network() still allows Claude API access.
@@ -1014,8 +966,8 @@ def test_claude_agent_sdk_adapter_isolation_network_policy_no_network(
         cwd=str(tmp_path),
     )
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
     )
 
@@ -1033,10 +985,7 @@ def test_claude_agent_sdk_adapter_isolation_network_policy_no_network(
     _assert_prompt_usage(session)
 
 
-def test_claude_agent_sdk_adapter_isolation_with_custom_env(
-    claude_model: str,
-    tmp_path: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_isolation_with_custom_env(tmp_path: Path) -> None:
     """Verify custom environment variables are passed to SDK subprocess.
 
     This test validates that the env parameter in IsolationConfig correctly
@@ -1055,8 +1004,8 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_env(
         cwd=str(tmp_path),
     )
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
     )
 
@@ -1071,10 +1020,7 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_env(
     _assert_prompt_usage(session)
 
 
-def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
-    claude_model: str,
-    tmp_path: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(tmp_path: Path) -> None:
     """Verify ephemeral home is cleaned up after successful execution.
 
     This test validates that the ephemeral home directory created for
@@ -1095,8 +1041,8 @@ def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
         cwd=str(tmp_path),
     )
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
     )
 
@@ -1121,7 +1067,6 @@ def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
 
 
 def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
-    claude_model: str,
     tmp_path: Path,
 ) -> None:
     """Verify files are created in the ephemeral home directory during execution.
@@ -1156,15 +1101,12 @@ def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
             captured[home_path] = (env_home, settings)
         original_cleanup(self)
 
-    config = ClaudeAgentSDKClientConfig(
-        permission_mode="bypassPermissions",
-        isolation=IsolationConfig(
-            network_policy=NetworkPolicy.no_network(),
-            sandbox=SandboxConfig(enabled=True),
-        ),
-        cwd=str(tmp_path),
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy.no_network(),
+        sandbox=SandboxConfig(enabled=True),
     )
-    adapter = ClaudeAgentSDKAdapter(model=claude_model, client_config=config)
+    config = _make_config(tmp_path, isolation=isolation)
+    adapter = _make_adapter(tmp_path, client_config=config)
     prompt = Prompt(_build_greeting_prompt()).bind(
         GreetingParams(audience="ephemeral home verification")
     )
@@ -1241,7 +1183,6 @@ def _build_network_test_prompt() -> PromptTemplate[NetworkTestResult]:
 
 
 def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
-    claude_model: str,
     tmp_path: Path,
 ) -> None:
     """Verify network policy allows access to explicitly listed domains.
@@ -1259,8 +1200,8 @@ def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
         ),
         cwd=str(tmp_path),
     )
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         allowed_tools=("Bash",),
     )
@@ -1288,7 +1229,6 @@ def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
 
 
 def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
-    claude_model: str,
     tmp_path: Path,
 ) -> None:
     """Verify network policy blocks access to domains not in the allowed list.
@@ -1306,8 +1246,8 @@ def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
         ),
         cwd=str(tmp_path),
     )
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         allowed_tools=("Bash",),
     )
@@ -1334,7 +1274,6 @@ def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
 
 
 def test_claude_agent_sdk_adapter_no_network_blocks_all_tool_access(
-    claude_model: str,
     tmp_path: Path,
 ) -> None:
     """Verify no_network() blocks all network access for tools.
@@ -1352,8 +1291,8 @@ def test_claude_agent_sdk_adapter_no_network_blocks_all_tool_access(
         ),
         cwd=str(tmp_path),
     )
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         allowed_tools=("Bash",),
     )
@@ -1427,10 +1366,7 @@ def _build_env_test_prompt() -> PromptTemplate[EnvTestResult]:
     )
 
 
-def test_claude_agent_sdk_adapter_include_host_env_false(
-    claude_model: str,
-    tmp_path: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_include_host_env_false(tmp_path: Path) -> None:
     """Verify include_host_env=False limits environment passed to SDK.
 
     This test validates that when include_host_env=False (the default),
@@ -1449,8 +1385,8 @@ def test_claude_agent_sdk_adapter_include_host_env_false(
         ),
         cwd=str(tmp_path),
     )
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         allowed_tools=("Bash",),
     )
@@ -1475,10 +1411,7 @@ def test_claude_agent_sdk_adapter_include_host_env_false(
     )
 
 
-def test_claude_agent_sdk_adapter_include_host_env_true(
-    claude_model: str,
-    tmp_path: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_include_host_env_true(tmp_path: Path) -> None:
     """Verify include_host_env=True inherits non-sensitive host environment.
 
     This test validates that when include_host_env=True, safe host
@@ -1495,8 +1428,8 @@ def test_claude_agent_sdk_adapter_include_host_env_true(
         ),
         cwd=str(tmp_path),
     )
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         allowed_tools=("Bash",),
     )
@@ -1560,9 +1493,7 @@ def _build_file_write_test_prompt() -> PromptTemplate[FileWriteTestResult]:
     )
 
 
-def test_claude_agent_sdk_adapter_sandbox_writable_paths(
-    claude_model: str,
-) -> None:
+def test_claude_agent_sdk_adapter_sandbox_writable_paths(tmp_path: Path) -> None:
     """Verify writable_paths allows writing to extra directories.
 
     This test validates that SandboxConfig.writable_paths correctly
@@ -1584,8 +1515,8 @@ def test_claude_agent_sdk_adapter_sandbox_writable_paths(
                 ),
             ),
         )
-        adapter = ClaudeAgentSDKAdapter(
-            model=claude_model,
+        adapter = _make_adapter(
+            tmp_path,
             client_config=config,
             allowed_tools=("Bash",),
         )
@@ -1644,9 +1575,7 @@ def _build_file_read_test_prompt() -> PromptTemplate[FileReadTestResult]:
     )
 
 
-def test_claude_agent_sdk_adapter_sandbox_readable_paths(
-    claude_model: str,
-) -> None:
+def test_claude_agent_sdk_adapter_sandbox_readable_paths(tmp_path: Path) -> None:
     """Verify readable_paths allows reading extra directories.
 
     This test validates that SandboxConfig.readable_paths correctly
@@ -1669,8 +1598,8 @@ def test_claude_agent_sdk_adapter_sandbox_readable_paths(
                 ),
             ),
         )
-        adapter = ClaudeAgentSDKAdapter(
-            model=claude_model,
+        adapter = _make_adapter(
+            tmp_path,
             client_config=config,
             allowed_tools=("Read",),
         )
@@ -1699,10 +1628,7 @@ def test_claude_agent_sdk_adapter_sandbox_readable_paths(
         assert "readable test content" in result.content
 
 
-def test_claude_agent_sdk_adapter_sandbox_disabled(
-    claude_model: str,
-    tmp_path: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_sandbox_disabled(tmp_path: Path) -> None:
     """Verify sandbox can be disabled with enabled=False.
 
     This test validates that SandboxConfig(enabled=False) disables
@@ -1716,8 +1642,8 @@ def test_claude_agent_sdk_adapter_sandbox_disabled(
         ),
         cwd=str(tmp_path),
     )
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         allowed_tools=("Read",),
     )
@@ -1776,10 +1702,7 @@ def _build_command_test_prompt() -> PromptTemplate[CommandTestResult]:
     )
 
 
-def test_claude_agent_sdk_adapter_sandbox_excluded_commands(
-    claude_model: str,
-    tmp_path: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_sandbox_excluded_commands(tmp_path: Path) -> None:
     """Verify excluded_commands allows specific commands to bypass sandbox.
 
     This test validates that SandboxConfig.excluded_commands correctly
@@ -1797,8 +1720,8 @@ def test_claude_agent_sdk_adapter_sandbox_excluded_commands(
         ),
         cwd=str(tmp_path),
     )
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         allowed_tools=("Bash",),
     )
@@ -1829,10 +1752,7 @@ def test_claude_agent_sdk_adapter_sandbox_excluded_commands(
 # =============================================================================
 
 
-def test_claude_agent_sdk_adapter_with_workspace_section(
-    claude_model: str,
-    isolated_workspace: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_with_workspace_section(tmp_path: Path) -> None:
     """Verify ClaudeAgentWorkspaceSection works with the adapter.
 
     This test validates that host files can be mounted into a workspace
@@ -1851,11 +1771,11 @@ def test_claude_agent_sdk_adapter_with_workspace_section(
         session=session,
         mounts=(
             HostMount(
-                host_path=str(isolated_workspace / "README.md"),
+                host_path=str(tmp_path / "README.md"),
                 mount_path="readme.md",
             ),
         ),
-        allowed_host_roots=(str(isolated_workspace),),
+        allowed_host_roots=(str(tmp_path),),
     )
 
     try:
@@ -1871,8 +1791,8 @@ def test_claude_agent_sdk_adapter_with_workspace_section(
             ),
         )
 
-        adapter = ClaudeAgentSDKAdapter(
-            model=claude_model,
+        adapter = _make_adapter(
+            tmp_path,
             client_config=config,
             allowed_tools=("Read",),
         )
@@ -1918,10 +1838,7 @@ def test_claude_agent_sdk_adapter_with_workspace_section(
         workspace.cleanup()
 
 
-def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(
-    claude_model: str,
-    isolated_workspace: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(tmp_path: Path) -> None:
     """Verify HostMount.max_bytes is enforced during workspace creation.
 
     This test validates that the workspace section correctly rejects
@@ -1941,19 +1858,16 @@ def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(
             session=session,
             mounts=(
                 HostMount(
-                    host_path=str(isolated_workspace / "README.md"),
+                    host_path=str(tmp_path / "README.md"),
                     mount_path="readme.md",
                     max_bytes=10,  # Very small - should fail
                 ),
             ),
-            allowed_host_roots=(str(isolated_workspace),),
+            allowed_host_roots=(str(tmp_path),),
         )
 
 
-def test_claude_agent_sdk_adapter_workspace_security_check(
-    claude_model: str,
-    isolated_workspace: Path,
-) -> None:
+def test_claude_agent_sdk_adapter_workspace_security_check(tmp_path: Path) -> None:
     """Verify allowed_host_roots security boundary is enforced.
 
     This test validates that attempting to mount files outside
@@ -1978,7 +1892,7 @@ def test_claude_agent_sdk_adapter_workspace_security_check(
                 ),
             ),
             # Only allow isolated workspace directory
-            allowed_host_roots=(str(isolated_workspace),),
+            allowed_host_roots=(str(tmp_path),),
         )
 
 
@@ -2059,7 +1973,6 @@ class McpWriteAndReadResult:
 
 
 def test_claude_agent_sdk_mcp_tool_writes_file_native_tool_reads(
-    claude_model: str,
     tmp_path: Path,
 ) -> None:
     """Verify MCP-bridged tools can write files that native SDK tools can read.
@@ -2116,8 +2029,8 @@ def test_claude_agent_sdk_mcp_tool_writes_file_native_tool_reads(
         cwd=str(tmp_path),
     )
 
-    adapter = ClaudeAgentSDKAdapter(
-        model=claude_model,
+    adapter = _make_adapter(
+        tmp_path,
         client_config=config,
         # Allow both the MCP tool and the Read tool
         allowed_tools=("Read", "mcp__wink__write_file_to_workspace"),
