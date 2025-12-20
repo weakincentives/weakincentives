@@ -88,20 +88,17 @@ def test_snapshot_roundtrip_integrity(session_factory):
 ### Makefile Targets
 
 ```makefile
-# Existing targets (no change)
-test:
-	uv run pytest --cov=weakincentives --cov-branch --cov-fail-under=100
+# Fast checks (pre-commit, local dev)
+check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test
 
-mutation-test:
-	uv run python build/run_mutmut.py
-
-# Enhanced check target
-check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test mutation-check
+# Slow checks (CI only)
+mutation-check:
+	uv run python build/run_mutmut.py --enforce-gates
 ```
 
 ### `make check` Sequence
 
-All gates run in `make check`. Failures block commits via pre-commit hook:
+Fast gates run in `make check`. Failures block commits via pre-commit hook:
 
 ```
 format-check    → Code style (ruff format --check)
@@ -113,23 +110,35 @@ deptry          → Dependency hygiene
 pip-audit       → Vulnerability scanning
 markdown-check  → Doc formatting
 test            → 100% line+branch coverage
-mutation-check  → Mutation score gates (90%/85%/85%)
+```
+
+### CI-Only Gates
+
+`mutation-check` runs separately in CI (too slow for local dev):
+
+```yaml
+# .github/workflows/ci.yml
+jobs:
+  check:
+    steps:
+      - run: make check
+  mutation:
+    steps:
+      - run: make mutation-check
 ```
 
 ### Gate Enforcement
 
-Each gate has a clear pass/fail threshold:
-
-| Gate | Threshold | Blocks CI |
-|------|-----------|-----------|
-| Line coverage | 100% | Yes |
-| Branch coverage | 100% | Yes |
-| Mutation (session) | 90% | Yes |
-| Mutation (serde) | 85% | Yes |
-| Mutation (dbc) | 85% | Yes |
-| Type errors | 0 | Yes |
-| Lint errors | 0 | Yes |
-| Security issues | 0 high/critical | Yes |
+| Gate | Threshold | Where |
+|------|-----------|-------|
+| Line coverage | 100% | `make check` |
+| Branch coverage | 100% | `make check` |
+| Type errors | 0 | `make check` |
+| Lint errors | 0 | `make check` |
+| Security issues | 0 high/critical | `make check` |
+| Mutation (session) | 90% | CI only |
+| Mutation (serde) | 85% | CI only |
+| Mutation (dbc) | 85% | CI only |
 
 ## Test Organization
 
@@ -185,15 +194,7 @@ SCORE_GATES = {
 }
 ```
 
-### Step 3: Add `mutation-check` to `make check`
-
-```diff
-# Makefile
--check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test
-+check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test mutation-check
-```
-
-### Step 4: Create Regression Test Directory
+### Step 3: Create Regression Test Directory
 
 ```bash
 mkdir -p tests/regression
