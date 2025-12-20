@@ -129,6 +129,34 @@ def test_load_snapshot_recovers_from_unknown_types(tmp_path: Path) -> None:
     assert unknown_slice.items == ({"value": "one"},)
 
 
+def test_load_snapshot_recovers_from_unknown_policy_types(tmp_path: Path) -> None:
+    """Verify snapshots with __main__ policy types can be loaded for display."""
+    snapshot_path = tmp_path / "snapshot.jsonl"
+    payload = {
+        "version": "1",
+        "created_at": datetime.now(UTC).isoformat(),
+        "slices": [
+            {
+                "slice_type": "__main__:ReviewResponse",
+                "item_type": "__main__:ReviewResponse",
+                "items": [{"score": 10}],
+            }
+        ],
+        "policies": {"__main__:ReviewResponse": "state"},
+        "tags": {"session_id": "policy-test"},
+    }
+    snapshot_path.write_text(json.dumps(payload))
+
+    loaded = debug_app.load_snapshot(snapshot_path)
+
+    assert len(loaded) == 1
+    entry = loaded[0]
+    assert entry.meta.validation_error
+    assert "__main__:ReviewResponse" in entry.slices
+    review_slice = entry.slices["__main__:ReviewResponse"]
+    assert review_slice.items == ({"score": 10},)
+
+
 def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
     snapshot_path = tmp_path / "snapshot.jsonl"
     session_ids = _write_snapshot(snapshot_path, ["a", "b", "c"])
