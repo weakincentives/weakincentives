@@ -1851,7 +1851,7 @@ def test_claude_agent_sdk_adapter_with_workspace_section(
         session=session,
         mounts=(
             HostMount(
-                host_path="README.md",
+                host_path=str(isolated_workspace / "README.md"),
                 mount_path="readme.md",
             ),
         ),
