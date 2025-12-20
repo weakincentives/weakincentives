@@ -66,7 +66,7 @@ def _collect_snapshots(root_session: Session) -> list[str]:
     snapshots: list[str] = []
     with dbc_enabled(False):
         for session in _iter_sessions_top_down(root_session):
-            snapshot = session.snapshot()
+            snapshot = session.snapshot(include_all=True)
             if not snapshot.slices:
                 logger.info(
                     "Session snapshot skipped; no slices to persist.",

@@ -60,7 +60,11 @@ from weakincentives.runtime.events import (
 )
 from weakincentives.runtime.events._types import EventHandler
 from weakincentives.runtime.execution_state import ExecutionState
-from weakincentives.runtime.session import SessionProtocol
+from weakincentives.runtime.session import (
+    DEFAULT_SNAPSHOT_POLICIES,
+    SessionProtocol,
+    SlicePolicy,
+)
 from weakincentives.runtime.session.protocols import SnapshotProtocol
 from weakincentives.runtime.session.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
@@ -268,12 +272,22 @@ class SessionStub(SessionProtocol):
     def event_bus(self) -> EventBus:
         return self._event_bus
 
-    def snapshot(self) -> SnapshotProtocol:
+    def snapshot(
+        self,
+        *,
+        tag: str | None = None,
+        policies: frozenset[SlicePolicy] = DEFAULT_SNAPSHOT_POLICIES,
+        include_all: bool = False,
+    ) -> SnapshotProtocol:
+        del tag, policies, include_all
         snapshot = Snapshot(created_at=datetime.now(UTC))
         self.snapshots.append(snapshot)
         return snapshot
 
-    def rollback(self, snapshot: SnapshotProtocol) -> None:
+    def rollback(
+        self, snapshot: SnapshotProtocol, *, preserve_logs: bool = True
+    ) -> None:
+        del preserve_logs
         self.rollbacks.append(snapshot)
 
     def reset(self) -> None:

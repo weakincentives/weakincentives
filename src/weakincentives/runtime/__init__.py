@@ -41,6 +41,7 @@ from .main_loop import (
     MainLoopRequest,
 )
 from .session import (
+    DEFAULT_SNAPSHOT_POLICIES,
     DataEvent,
     ReducerContext,
     ReducerContextProtocol,
@@ -63,6 +64,7 @@ from .session import (
 from .snapshotable import Snapshotable
 
 __all__ = [
+    "DEFAULT_SNAPSHOT_POLICIES",
     "CompositeSnapshot",
     "ControlBus",
     "DataEvent",

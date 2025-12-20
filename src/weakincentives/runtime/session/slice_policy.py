@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Final
 
 
 class SlicePolicy(Enum):
@@ -36,4 +37,9 @@ class SlicePolicy(Enum):
     LOG = "log"
 
 
-__all__ = ["SlicePolicy"]
+DEFAULT_SNAPSHOT_POLICIES: Final[frozenset[SlicePolicy]] = frozenset(
+    {SlicePolicy.STATE}
+)
+
+
+__all__ = ["DEFAULT_SNAPSHOT_POLICIES", "SlicePolicy"]

@@ -36,6 +36,7 @@ from weakincentives.runtime.session import (
     Session,
     SliceAccessor,
     SliceObserver,
+    SlicePolicy,
     Snapshot,
     SnapshotRestoreError,
     SnapshotSerializationError,
@@ -416,7 +417,7 @@ def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> 
     assert second_result.ok
     original_state = session[ExampleOutput].all()
 
-    snapshot = session.snapshot()
+    snapshot = session.snapshot(include_all=True)
     raw = snapshot.to_json()
     restored = Snapshot.from_json(raw)
 
@@ -452,7 +453,7 @@ def test_snapshot_preserves_custom_reducer_behavior(
     session[Summary].register(ExampleOutput, aggregate)
 
     first_result = bus.publish(make_prompt_event(ExampleOutput(text="start")))
-    snapshot = session.snapshot()
+    snapshot = session.snapshot(include_all=True)
 
     second_result = bus.publish(make_prompt_event(ExampleOutput(text="after")))
     assert session[Summary].all()[0].entries == ("start", "after")
@@ -480,7 +481,9 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     bus.publish(executed_event)
     bus.publish(tool_event)
 
-    snapshot = session.snapshot()
+    snapshot = session.snapshot(
+        policies=frozenset({SlicePolicy.STATE, SlicePolicy.LOG})
+    )
     serialized = snapshot.to_json()
     restored = Snapshot.from_json(serialized)
 
@@ -515,6 +518,57 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     assert restored_tool.name == "tool"
     assert restored_tool.params == {"value": 4}
     assert restored_tool.result["value"] == {"value": 4}
+
+
+def test_snapshot_filters_log_slices_by_default(
+    session_factory: SessionFactory,
+) -> None:
+    session, bus = session_factory()
+
+    bus.publish(make_tool_event(1))
+    bus.publish(make_prompt_event(ExampleOutput(text="state")))
+
+    snapshot = session.snapshot()
+
+    assert ToolInvoked not in snapshot.slices
+    assert snapshot.slices[ExampleOutput] == (ExampleOutput(text="state"),)
+
+
+def test_snapshot_respects_registered_log_policy(
+    session_factory: SessionFactory,
+) -> None:
+    @dataclass(slots=True, frozen=True)
+    class LogEntry:
+        message: str
+
+    session, _ = session_factory()
+
+    session[LogEntry].register(LogEntry, append_all, policy=SlicePolicy.LOG)
+    session[LogEntry].seed((LogEntry(message="hello"),))
+
+    snapshot = session.snapshot()
+    assert LogEntry not in snapshot.slices
+
+    snapshot_with_logs = session.snapshot(
+        policies=frozenset({SlicePolicy.STATE, SlicePolicy.LOG})
+    )
+    assert snapshot_with_logs.slices[LogEntry] == (LogEntry(message="hello"),)
+
+
+def test_rollback_preserves_log_slices(session_factory: SessionFactory) -> None:
+    session, bus = session_factory()
+
+    first_event = make_tool_event(1)
+    second_event = make_tool_event(2)
+
+    bus.publish(first_event)
+    snapshot = session.snapshot()
+
+    bus.publish(second_event)
+
+    session.rollback(snapshot)
+
+    assert session[ToolInvoked].all() == (first_event, second_event)
 
 
 def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> None:

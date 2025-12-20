@@ -28,7 +28,7 @@ from .reducers import (
 )
 from .session import DataEvent, Session, iter_sessions_bottom_up
 from .slice_accessor import SliceAccessor
-from .slice_policy import SlicePolicy
+from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -41,6 +41,7 @@ from .state_slice import (
 )
 
 __all__ = [
+    "DEFAULT_SNAPSHOT_POLICIES",
     "DataEvent",
     "ReducerContext",
     "ReducerContextProtocol",

@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
+from .slice_policy import SlicePolicy
 
 if TYPE_CHECKING:
     from ._types import TypedReducer
@@ -50,6 +51,7 @@ class _SliceAccessorProvider(Protocol):
         reducer: TypedReducer[S],
         *,
         slice_type: type[S] | None = None,
+        policy: SlicePolicy | None = None,
     ) -> None: ...
 
     def _mutation_dispatch_event(
@@ -181,6 +183,8 @@ class SliceAccessor[T: SupportsDataclass]:
         self,
         event_type: type[SupportsDataclass],
         reducer: Any,  # TypedReducer[T] - avoiding import cycle  # noqa: ANN401
+        *,
+        policy: SlicePolicy | None = None,
     ) -> None:
         """Register a reducer for events of the given type.
 
@@ -190,6 +194,7 @@ class SliceAccessor[T: SupportsDataclass]:
         Args:
             event_type: The event type that triggers this reducer.
             reducer: Pure function transforming (slice_values, event) -> slice_values.
+            policy: Optional slice policy for rollback behavior.
 
         Example::
 
@@ -197,7 +202,10 @@ class SliceAccessor[T: SupportsDataclass]:
 
         """
         self._provider._mutation_register_reducer(
-            event_type, reducer, slice_type=self._slice_type
+            event_type,
+            reducer,
+            slice_type=self._slice_type,
+            policy=policy,
         )
 
 
