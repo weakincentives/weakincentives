@@ -20,6 +20,7 @@ from weakincentives.runtime.session._types import ReducerContextProtocol
 from weakincentives.runtime.session.reducers import (
     append_all,
     replace_latest_by,
+    upsert_by,
 )
 
 
@@ -76,3 +77,45 @@ def test_append_all_appends_to_empty_slice() -> None:
 
     assert len(updated) == 1
     assert updated[0] == _Sample("a", "first")
+
+
+def test_upsert_by_replaces_first_duplicate_and_removes_others() -> None:
+    """upsert_by replaces first matching key and discards subsequent duplicates."""
+    reducer = upsert_by(lambda item: item.key)
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+    # Slice with duplicate keys - this covers the branch at line 61->64
+    initial = (
+        _Sample("a", "first"),
+        _Sample("a", "duplicate"),  # duplicate key
+        _Sample("b", "other"),
+    )
+
+    updated = reducer(
+        initial,
+        _Sample("a", "updated"),
+        context=context,
+    )
+
+    # Should have 2 items: the updated "a" and "b"
+    assert len(updated) == 2
+    assert updated[0] == _Sample("a", "updated")
+    assert updated[1] == _Sample("b", "other")
+
+
+def test_upsert_by_appends_when_key_not_found() -> None:
+    """upsert_by appends when key doesn't exist."""
+    reducer = upsert_by(lambda item: item.key)
+    session = Session()
+    context = _Context(session=session, event_bus=session.event_bus)
+    initial = (_Sample("a", "first"),)
+
+    updated = reducer(
+        initial,
+        _Sample("b", "new"),
+        context=context,
+    )
+
+    assert len(updated) == 2
+    assert updated[0] == _Sample("a", "first")
+    assert updated[1] == _Sample("b", "new")

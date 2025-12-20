@@ -1280,3 +1280,35 @@ def test_broadcast_dispatches_to_all_reducers(session_factory: SessionFactory) -
     assert call_order == ["A", "B"]
     assert session[SliceA].all() == (SliceA("broadcast"),)
     assert session[SliceB].all() == (SliceB("broadcast"),)
+
+
+def test_prompt_executed_with_mixed_iterable_output(session_factory: SessionFactory) -> None:
+    """Test branch 759->758: non-dataclass items in iterable are skipped."""
+    session, bus = session_factory()
+
+    session[ExampleOutput].register(ExampleOutput, append_all)
+
+    # Create a PromptExecuted event with iterable output containing mixed types
+    mixed_output = [
+        ExampleOutput(text="valid1"),  # Should be dispatched
+        "not-a-dataclass",  # Should be skipped (branch 759->758)
+        ExampleOutput(text="valid2"),  # Should be dispatched
+        42,  # Should be skipped (branch 759->758)
+    ]
+
+    event = PromptExecuted(
+        adapter=GENERIC_ADAPTER_NAME,
+        prompt_name="test",
+        result=PromptResponse(prompt_name="test", output=mixed_output, text=None),
+        session_id=DEFAULT_SESSION_ID,
+        created_at=datetime.now(UTC),
+    )
+
+    result = bus.publish(event)
+    assert result.ok
+
+    # Only dataclass instances should be in the session state
+    assert session[ExampleOutput].all() == (
+        ExampleOutput(text="valid1"),
+        ExampleOutput(text="valid2"),
+    )

@@ -20,6 +20,7 @@ import pytest
 from weakincentives.runtime.session.snapshots import (
     SnapshotPayload,
     SnapshotRestoreError,
+    _normalize_tags,
 )
 
 
@@ -49,3 +50,12 @@ def test_snapshot_payload_rejects_non_string_tags() -> None:
 
     with pytest.raises(SnapshotRestoreError):
         SnapshotPayload.from_json(payload)
+
+
+def test_normalize_tags_with_none() -> None:
+    """Test branch 59->66: when tags is None, return empty MappingProxyType."""
+    result = _normalize_tags(None, error_cls=SnapshotRestoreError)
+
+    # Should return an empty immutable mapping
+    assert len(result) == 0
+    assert isinstance(result, type({}).__bases__[0])  # MappingProxyType

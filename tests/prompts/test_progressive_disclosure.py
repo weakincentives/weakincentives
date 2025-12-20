@@ -904,3 +904,5 @@ def test_read_section_skip_depth_reset() -> None:
     assert "Grandchild:" not in result.value.content
     # Sibling child should be rendered (skip_depth should be reset)
     assert "Sibling Child: test" in result.value.content
+
+

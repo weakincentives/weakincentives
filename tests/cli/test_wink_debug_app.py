@@ -700,3 +700,63 @@ def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None
     }
     assert config_calls["run_called"] is True
     assert infos[0]["event"] == "debug.server.start"
+
+
+def test_run_debug_server_without_browser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that run_debug_server works without opening browser."""
+    config_calls: dict[str, object] = {}
+
+    class FakeConfig:
+        def __init__(
+            self, app: object, host: str, port: int, log_config: object
+        ) -> None:
+            config_calls["config"] = {
+                "app": app,
+                "host": host,
+                "port": port,
+                "log_config": log_config,
+            }
+
+    class FakeServer:
+        def __init__(self, config: FakeConfig) -> None:
+            config_calls["server_config"] = config
+
+        @staticmethod
+        def run() -> None:
+            config_calls["run_called"] = True
+
+    monkeypatch.setattr(debug_app.uvicorn, "Config", FakeConfig)
+    monkeypatch.setattr(debug_app.uvicorn, "Server", FakeServer)
+
+    logger = debug_app.get_logger("test.run_no_browser")
+    infos: list[dict[str, object]] = []
+
+    def capture_info(message: str, *, event: str, context: dict[str, object]) -> None:
+        infos.append({"message": message, "event": event, "context": context})
+
+    monkeypatch.setattr(logger, "info", capture_info)
+
+    # Ensure webbrowser.open is not called
+    browser_opened = False
+
+    def should_not_open(url: str) -> bool:
+        nonlocal browser_opened
+        browser_opened = True
+        return True
+
+    monkeypatch.setattr(debug_app.webbrowser, "open", should_not_open)
+
+    app = FastAPI()
+
+    exit_code = debug_app.run_debug_server(
+        app=app,
+        host="127.0.0.1",
+        port=9000,
+        open_browser=False,
+        logger=logger,
+    )
+
+    assert exit_code == 0
+    assert browser_opened is False
+    assert config_calls["run_called"] is True
+    assert infos[0]["event"] == "debug.server.start"

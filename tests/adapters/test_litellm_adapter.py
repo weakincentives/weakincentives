@@ -1865,3 +1865,159 @@ def test_litellm_adapter_completion_factory_merges_config_and_kwargs(
 
     assert result.text == "Hello from factory!"
     assert captured_kwargs == [{"api_key": "cfg-key", "timeout": 5}]
+
+
+def test_retry_after_from_error_returns_coerced_value() -> None:
+    module = cast(Any, _reload_module())
+
+    class ErrorWithRetryAfter:
+        retry_after = "5"
+
+    result = module._retry_after_from_error(ErrorWithRetryAfter())
+    assert result is not None
+    assert result.total_seconds() == 5
+
+
+def test_retry_after_from_headers_mapping() -> None:
+    module = cast(Any, _reload_module())
+
+    class ErrorWithHeaders:
+        response = {"headers": {"retry-after": "10"}}
+
+    result = module._retry_after_from_error(ErrorWithHeaders())
+    assert result is not None
+    assert result.total_seconds() == 10
+
+
+def test_litellm_adapter_uses_tool_choice_directive() -> None:
+    module = cast(Any, _reload_module())
+
+    def fake_handler(
+        params: GreetingParams, *, context: ToolContext
+    ) -> ToolResult[ToolPayload]:
+        return ToolResult(message="ok", value=ToolPayload(answer="hello"))
+
+    tool = Tool[GreetingParams, ToolPayload](
+        name="greet",
+        description="Say hello",
+        handler=cast(ToolHandler[GreetingParams, ToolPayload], fake_handler),
+    )
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="litellm-tool-choice",
+        name="tool_choice_test",
+        sections=[
+            MarkdownSection[GreetingParams](
+                title="Greeting",
+                key="greeting",
+                template="Say hello to ${user}.",
+                tools=[tool],
+            )
+        ],
+    )
+
+    message = DummyMessage(content="Done", tool_calls=None)
+    response = DummyResponse([DummyChoice(message)])
+
+    def fake_factory(**_kwargs: object) -> RecordingCompletion:
+        return RecordingCompletion([response])
+
+    adapter = module.LiteLLMAdapter(
+        model="test-model",
+        completion_factory=fake_factory,
+        tool_choice={"type": "function", "function": {"name": "greet"}},
+    )
+
+    result = _evaluate_with_session(
+        adapter,
+        prompt,
+        GreetingParams(user="Test"),
+    )
+
+    assert result.text == "Done"
+
+
+def test_litellm_retry_after_from_error_handles_non_coercible_header() -> None:
+    """Test branch 127->129: retry_after header value cannot be coerced."""
+    module = cast(Any, _reload_module())
+
+    class ErrorWithBadHeader:
+        def __init__(self) -> None:
+            self.headers = {"retry-after": "not-a-number"}
+
+    error = ErrorWithBadHeader()
+    result = module._retry_after_from_error(error)
+    assert result is None
+
+
+def test_litellm_retry_after_from_error_handles_non_mapping_headers() -> None:
+    """Test branch 137->145: headers in response is not a Mapping."""
+    module = cast(Any, _reload_module())
+
+    class ErrorWithNonMappingHeaders:
+        def __init__(self) -> None:
+            self.response = {"headers": "not-a-mapping"}
+
+    error = ErrorWithNonMappingHeaders()
+    result = module._retry_after_from_error(error)
+    assert result is None
+
+
+def test_litellm_retry_after_from_error_handles_nested_non_coercible() -> None:
+    """Test branch 143->145: nested header retry_after cannot be coerced."""
+    module = cast(Any, _reload_module())
+
+    class ErrorWithNestedBadHeader:
+        def __init__(self) -> None:
+            self.response = {"headers": {"retry-after": "bad-value"}}
+
+    error = ErrorWithNestedBadHeader()
+    result = module._retry_after_from_error(error)
+    assert result is None
+
+
+def test_litellm_adapter_omits_tool_choice_when_none() -> None:
+    """Test branch 299->301: tool_choice_directive is None."""
+    module = cast(Any, _reload_module())
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=simple_handler,
+    )
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="litellm-no-tool-choice",
+        name="search",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    message = DummyMessage(content="All done")
+    response = DummyResponse([DummyChoice(message)])
+    completion = RecordingCompletion([response])
+    # Explicitly set tool_choice to None
+    adapter = module.LiteLLMAdapter(
+        model="gpt-test",
+        completion=completion,
+        tool_choice=None,
+    )
+
+    result = _evaluate_with_session(
+        adapter,
+        prompt,
+        ToolParams(query="test"),
+    )
+
+    assert result.text == "All done"
+    # Verify that tool_choice was not included in the request
+    request = completion.requests[0]
+    assert "tool_choice" not in request

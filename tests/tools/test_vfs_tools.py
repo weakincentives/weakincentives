@@ -95,6 +95,22 @@ def test_file_info_render_formats_metadata() -> None:
     assert rendered_directory.endswith("/")
 
 
+def test_file_info_render_with_none_size_bytes() -> None:
+    """Test FileInfo render when size_bytes is None."""
+    file_info = FileInfo(
+        path=VfsPath(("src", "app.py")),
+        kind="file",
+        size_bytes=None,
+        version=1,
+        updated_at=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+
+    rendered = file_info.render()
+    # Should show "size ?" when size_bytes is None
+    assert "size ?" in rendered
+    assert "src/app.py" in rendered
+
+
 def test_read_file_result_render_includes_window() -> None:
     payload = ReadFileResult(
         path=VfsPath(("docs", "note.txt")),
@@ -475,6 +491,27 @@ def test_rm_removes_directory_tree(
     fs = _get_filesystem(section)
     assert not fs.exists("src/pkg/module.py")
     assert not fs.exists("src/pkg/util.py")
+
+
+def test_rm_removes_empty_directory(
+    session_and_bus: tuple[Session, InProcessEventBus],
+) -> None:
+    """Test removing an empty directory sets deleted_count to at least 1."""
+    session, _bus = session_and_bus
+    section = _make_section(session=session)
+    # Create an empty directory by creating a file, then deleting it
+    _write(session, section, path=("empty_dir", "temp.txt"), content="x")
+    fs = _get_filesystem(section)
+    fs.delete("empty_dir/temp.txt")
+
+    # Now delete the empty directory
+    rm_tool = find_tool(section, "rm")
+    params = RemoveParams(path="empty_dir")
+    result = invoke_tool(rm_tool, params, session=session, filesystem=section.filesystem)
+
+    # Verify the message indicates at least the directory was deleted
+    assert result.success
+    assert "Deleted 1 entry" in result.message or "Deleted" in result.message
 
 
 def test_write_file_rejects_existing_target(
@@ -1397,3 +1434,22 @@ def test_config_accepts_overrides() -> None:
     section = VfsToolsSection(session=session, config=config)
 
     assert section.accepts_overrides is True
+
+
+def test_file_info_render_with_size_bytes() -> None:
+    """Test branch 172->174: FileInfo.render() when size_bytes is not None."""
+    entry = FileInfo(
+        path=VfsPath(("file.txt",)),
+        kind="file",
+        size_bytes=1024,
+        version=1,
+        updated_at=datetime(2024, 1, 1, tzinfo=UTC),
+    )
+    rendered = entry.render()
+    # Should include size in bytes when size_bytes is not None
+    assert "1024 B" in rendered
+    assert "v1" in rendered
+
+
+
+

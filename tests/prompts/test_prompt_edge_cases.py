@@ -328,6 +328,18 @@ def test_text_section_placeholder_names_cover_named_and_braced() -> None:
     assert section.placeholder_names() == {"value", "other"}
 
 
+def test_text_section_placeholder_names_only_braced() -> None:
+    """Test branch 149->143: braced placeholder syntax ${var}."""
+    section = MarkdownSection[PlaceholderNamesParams](
+        title="Placeholders",
+        template="Only braced: ${value} and ${other}",
+        key="placeholders",
+    )
+
+    # This should trigger branch 149->143 for both placeholders
+    assert section.placeholder_names() == {"value", "other"}
+
+
 @dataclass
 class ContextParams:
     value: str
@@ -376,3 +388,18 @@ def test_prompt_render_propagates_errors_with_existing_context() -> None:
     assert error.section_path == ("Provided",)
     assert error.dataclass_type is ContextParams
     assert error.placeholder == "kept"
+
+
+def test_text_section_placeholder_names_with_escaped_dollars() -> None:
+    """Test branch 149->143: placeholder_names skips escaped $$ patterns."""
+    # Template with escaped dollar signs ($$) - these don't contribute placeholders
+    section = MarkdownSection(
+        title="Escaped",
+        template="Price: $$100 and $value or ${braced}",
+        key="escaped",
+    )
+
+    placeholders = section.placeholder_names()
+
+    # Should only find $value and ${braced}, not the escaped $$
+    assert placeholders == {"value", "braced"}

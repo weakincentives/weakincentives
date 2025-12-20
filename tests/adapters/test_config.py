@@ -168,6 +168,18 @@ def test_openai_model_config_rejects_unsupported_fields() -> None:
         OpenAIModelConfig(frequency_penalty=0.1)
 
 
+def test_openai_model_config_with_none_parallel_tool_calls() -> None:
+    """Test that parallel_tool_calls=None skips adding it to params."""
+    # Create config and set parallel_tool_calls to None to test the skip branch
+    config = OpenAIModelConfig(temperature=0.5)
+    # Use object.__setattr__ to bypass frozen dataclass restriction
+    object.__setattr__(config, "parallel_tool_calls", None)
+    params = config.to_request_params()
+    # When parallel_tool_calls is None, it should not be in params
+    assert "parallel_tool_calls" not in params
+    assert params == {"temperature": 0.5}
+
+
 # LiteLLMClientConfig tests
 
 

@@ -370,3 +370,17 @@ def test_parse_structured_output_rejects_unknown_container() -> None:
         parse_structured_output("{}", rendered)
 
     assert "Unknown output container" in str(exc.value)
+
+
+def test_parse_structured_output_empty_whitespace_only() -> None:
+    """Test branch 113->119: when text.strip() is empty, skip json.loads and use decoder."""
+    prompt = Prompt(_build_summary_prompt()).bind(Guidance(topic="Ada"))
+    rendered = prompt.render()
+
+    # Text with only whitespace - stripped will be empty, triggering branch 113->119
+    reply = "   \n   \t   "
+
+    with pytest.raises(OutputParseError) as exc:
+        parse_structured_output(reply, rendered)
+
+    assert "No JSON object or array" in str(exc.value)

@@ -2882,3 +2882,22 @@ def test_section_init_with_overlay_path_and_filesystem(
 
     # Overlay path should be the same
     assert section2._overlay_path == section1._overlay_path
+
+
+def test_resolve_host_path_finds_file_in_allowed_root() -> None:
+    """Test branch 411->405: _resolve_host_path finds existing file."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Create a test file in the allowed root
+        test_file = Path(tmpdir) / "test.txt"
+        test_file.write_text("content")
+
+        # Should find the file in the allowed root (branch 411: candidate.exists())
+        allowed_roots = (Path(tmpdir),)
+        resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
+        assert resolved == test_file
+
+
+
+

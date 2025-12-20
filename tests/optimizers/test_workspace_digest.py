@@ -479,3 +479,56 @@ def test_workspace_digest_result_has_correct_scope() -> None:
 def test_optimizer_config_defaults() -> None:
     config = OptimizerConfig()
     assert config.accepts_overrides is True
+
+
+def test_optimize_handles_non_string_digest_attribute() -> None:
+    """Test that optimizer handles output with non-string digest attribute."""
+
+    @dataclass(slots=True, frozen=True)
+    class _OutputWithNonStringDigest:
+        digest: int  # Not a string!
+
+    class _NonStringDigestAdapter(ProviderAdapter):
+        @override
+        def evaluate(
+            self,
+            prompt: Prompt[Any],
+            *,
+            session: SessionProtocol,
+            deadline: Deadline | None = None,
+        ) -> PromptResponse[Any]:
+            del deadline
+            # Return output with digest attribute that's not a string
+            return PromptResponse(
+                prompt_name=prompt.name or prompt.key,
+                text="fallback-text",
+                output=_OutputWithNonStringDigest(digest=42),
+            )
+
+    adapter = _NonStringDigestAdapter()
+    optimizer = _create_optimizer(adapter)
+    prompt = Prompt(_build_prompt())
+    session = Session()
+
+    result = optimizer.optimize(prompt, session=session)
+
+    # Should fall back to text since digest attribute is not a string
+    assert result.digest == "fallback-text"
+
+
+def test_latest_workspace_digest_handles_section_key_mismatch() -> None:
+    """Test that latest_workspace_digest handles mismatched section_key."""
+    session = Session()
+
+    # Create a digest with a different section_key
+    _ = set_workspace_digest(session, "other-digest", "value1")
+    _ = set_workspace_digest(session, "workspace-digest", "value2")
+
+    # Should find the matching one
+    result = latest_workspace_digest(session, "workspace-digest")
+    assert result is not None
+    assert getattr(result, "body", None) == "value2"
+
+    # Should return None when no match
+    result = latest_workspace_digest(session, "non-existent")
+    assert result is None

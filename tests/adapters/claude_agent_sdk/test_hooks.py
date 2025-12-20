@@ -1321,3 +1321,29 @@ class TestIsToolErrorResponse:
 
         assert _is_tool_error_response({"content": []}) is False
         assert _is_tool_error_response({}) is False
+
+    def test_content_with_non_dict_item(self) -> None:
+        """Content with non-dict first item is not considered an error."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            _is_tool_error_response,
+        )
+
+        # First item is a string instead of dict
+        assert _is_tool_error_response({"content": ["not a dict"]}) is False
+        # First item is a number instead of dict
+        assert _is_tool_error_response({"content": [123]}) is False
+        # First item is None instead of dict
+        assert _is_tool_error_response({"content": [None]}) is False
+
+    def test_content_with_non_string_text(self) -> None:
+        """Content dict with non-string text field is not considered an error."""
+        from weakincentives.adapters.claude_agent_sdk._hooks import (
+            _is_tool_error_response,
+        )
+
+        # Text field is a number instead of string
+        assert _is_tool_error_response({"content": [{"text": 123}]}) is False
+        # Text field is None instead of string
+        assert _is_tool_error_response({"content": [{"text": None}]}) is False
+        # Text field is a list instead of string
+        assert _is_tool_error_response({"content": [{"text": ["error"]}]}) is False

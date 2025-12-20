@@ -110,6 +110,9 @@ def test_tool_example_output_must_match_sequence_when_result_is_array() -> None:
     )
 
     assert tool.examples == (valid_example,)
+    # Verify the tool correctly identifies this as an array result
+    assert tool.result_type is ExampleResult
+    assert tool.result_container == "array"
 
     invalid_example = ToolExample[ExampleParams, list[ExampleResult]](
         description="not a sequence",
@@ -470,3 +473,22 @@ def test_tool_wrap_handles_empty_toolresult_args(
         match=r"Tool handler return annotation must be ToolResult\[ResultT\].",
     ):
         Tool.wrap(handler)
+
+
+def test_tool_validate_return_annotation_non_toolresult() -> None:
+    """Test validation fails when return is not ToolResult."""
+
+    def handler(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ExampleResult:  # Wrong - not ToolResult
+        """Handler with wrong return type."""
+        return ExampleResult(value=params.query)
+
+    with pytest.raises(PromptValidationError) as exc:
+        Tool[ExampleParams, ExampleResult](
+            name="bad_return",
+            description="Bad return type",
+            handler=handler,  # type: ignore[arg-type]
+        )
+
+    assert "return annotation must be ToolResult[ResultT]" in str(exc.value)

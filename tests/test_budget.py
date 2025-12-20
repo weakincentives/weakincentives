@@ -258,6 +258,19 @@ def test_tracker_check_raises_when_deadline_expired(
     assert error.exceeded_dimension == "deadline"
 
 
+def test_tracker_check_passes_when_total_tokens_not_set() -> None:
+    """check() should pass when max_total_tokens is None."""
+    # Create a budget with only input/output limits, not total
+    budget = Budget(max_input_tokens=1000, max_output_tokens=500)
+    tracker = BudgetTracker(budget=budget)
+
+    # Add usage that would exceed 1000 total tokens
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=600, output_tokens=500))
+
+    # Should not raise since max_total_tokens is None
+    tracker.check()  # No assertion needed - just verify it doesn't raise
+
+
 def test_tracker_thread_safety() -> None:
     """BudgetTracker should be thread-safe for concurrent updates."""
     budget = Budget(max_total_tokens=100000)
@@ -396,3 +409,20 @@ def test_budget_with_all_limits(frozen_utcnow: FrozenUtcNow) -> None:
 
     error = cast(BudgetExceededError, exc_info.value)
     assert error.exceeded_dimension == "input_tokens"
+
+
+def test_tracker_check_total_tokens_only() -> None:
+    """Test branch 158->exit: when only max_total_tokens is set and exceeded."""
+    budget = Budget(max_total_tokens=100)
+    tracker = BudgetTracker(budget=budget)
+
+    # Record usage that exceeds total tokens
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=60, output_tokens=50))
+
+    with pytest.raises(BudgetExceededError) as exc_info:
+        tracker.check()
+
+    error = cast(BudgetExceededError, exc_info.value)
+    assert error.exceeded_dimension == "total_tokens"
+    assert error.consumed.total_tokens == 110
+    assert error.budget.max_total_tokens == 100

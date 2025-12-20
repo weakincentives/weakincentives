@@ -6,12 +6,14 @@ Testing standards for weakincentives.
 
 ### Line + Branch Coverage
 
-Enable branch coverage to catch conditionals where both paths execute the same line:
+**100% line and branch coverage is strictly enforced.** Every conditional branch
+must be tested - no exceptions.
 
 ```toml
 # pyproject.toml
 [tool.coverage.run]
 branch = true
+source = ["src/weakincentives"]
 
 [tool.coverage.report]
 fail_under = 100
@@ -19,8 +21,35 @@ exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
     "@overload",
+    "@abstractmethod",
+    "^\\s*\\.\\.\\.\\s*$",
+    ":\\s*\\.\\.\\.\\s*$",
 ]
 ```
+
+#### Strict Requirements
+
+1. **No `pragma: no branch`**: Do not use branch exclusion pragmas. If a branch
+   cannot be tested, simplify the code to eliminate the branch.
+
+2. **Test all conditionals**: Every `if`, `elif`, `else`, `for`, `while`, and
+   ternary expression must have both branches exercised by tests.
+
+3. **Simplify over exclude**: If a branch is defensive code that "should never
+   happen", either:
+   - Remove it (trust type annotations and upstream validation)
+   - Add a test that proves the branch can be reached
+   - Simplify the code to eliminate the branch
+
+#### Excluded Patterns
+
+The following patterns are automatically excluded from coverage:
+
+- `pragma: no cover` - For genuine impossibilities (e.g., `assert False`)
+- `if TYPE_CHECKING:` - Type-only imports
+- `@overload` - Typing overloads
+- `@abstractmethod` - Abstract method declarations
+- `...` - Protocol/abstract method stubs (both inline and standalone)
 
 ### Mutation Testing
 
@@ -159,16 +188,29 @@ No separate fault injection, fuzz, or stress directories needed - these concerns
 
 ## Implementation
 
-### Step 1: Enable Branch Coverage
+### Step 1: Enable Branch Coverage (COMPLETED)
 
-```diff
-# pyproject.toml
+Branch coverage is now enabled in `pyproject.toml`:
+
+```toml
 [tool.coverage.run]
-+branch = true
+branch = true
 source = ["src/weakincentives"]
+
+[tool.coverage.report]
+fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "@abstractmethod",
+    "^\\s*\\.\\.\\.\\s*$",
+    ":\\s*\\.\\.\\.\\s*$",
+]
 ```
 
-Update `make test` and verify 100% branch coverage passes.
+Both line and branch coverage are enforced at 100%. Tests will fail if any
+branch is not covered.
 
 ### Step 2: Expand Mutation Scope
 

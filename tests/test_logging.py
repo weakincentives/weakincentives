@@ -308,3 +308,46 @@ def test_unwrap_logger_raises_for_invalid_adapter() -> None:
 
     with pytest.raises(TypeError):
         _unwrap_logger(adapter)
+
+
+def test_get_logger_handles_adapter_without_extra_mapping() -> None:
+    """Cover branch where LoggerAdapter.extra is not a Mapping."""
+    base = logging.getLogger("adapter.no.extra")
+
+    class _NoExtraAdapter(logging.LoggerAdapter):
+        def __init__(self) -> None:
+            super().__init__(base, {})
+            self.extra = None  # Not a Mapping
+
+    adapter = _NoExtraAdapter()
+    logger = get_logger("ignored", logger_override=adapter)
+
+    assert logger.logger is base
+    assert logger.extra == {}
+
+
+def test_json_formatter_handles_missing_event_and_context() -> None:
+    """Cover branches where event is None and context is falsy."""
+    configure_logging(json_mode=True, force=True)
+
+    root = logging.getLogger()
+    handler = root.handlers[0]
+
+    # Create record without event or context attributes
+    record = root.makeRecord(
+        name="tests.bare",
+        level=logging.INFO,
+        fn="tests/test_logging.py",
+        lno=0,
+        msg="bare message",
+        args=(),
+        exc_info=None,
+        func=None,
+        extra={},
+    )
+
+    rendered = handler.format(record)
+    payload = json.loads(rendered)
+    assert payload["message"] == "bare message"
+    assert "event" not in payload
+    assert "context" not in payload
