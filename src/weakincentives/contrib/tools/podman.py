@@ -297,6 +297,26 @@ def _resolve_podman_connection(
     return _connection_from_cli(resolved_name)
 
 
+def _find_connection_by_name(
+    connections: list[dict[str, Any]], connection_name: str
+) -> dict[str, Any] | None:
+    """Find a connection by name."""
+    for entry in connections:
+        if entry.get("Name") == connection_name:
+            return entry
+    return None
+
+
+def _find_default_connection(
+    connections: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Find the default connection or first available."""
+    for entry in connections:
+        if entry.get("Default"):
+            return entry
+    return connections[0] if connections else None
+
+
 def _connection_from_cli(
     connection_name: str | None,
 ) -> _PodmanConnectionInfo | None:
@@ -313,19 +333,12 @@ def _connection_from_cli(
         connections = json.loads(result.stdout)
     except json.JSONDecodeError:
         return None
-    candidate: dict[str, Any] | None = None
-    if connection_name:
-        for entry in connections:
-            if entry.get("Name") == connection_name:
-                candidate = entry
-                break
-    else:
-        for entry in connections:
-            if entry.get("Default"):
-                candidate = entry
-                break
-        if candidate is None and connections:
-            candidate = connections[0]
+
+    candidate = (
+        _find_connection_by_name(connections, connection_name)
+        if connection_name
+        else _find_default_connection(connections)
+    )
     if candidate is None:
         return None
     return _PodmanConnectionInfo(

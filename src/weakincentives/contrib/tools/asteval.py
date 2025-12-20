@@ -311,6 +311,15 @@ def _ensure_ascii(value: str, label: str) -> None:
         raise ToolValidationError(f"{label} must be ASCII text.") from error
 
 
+def _validate_path_piece(piece: str) -> None:
+    """Validate a single path piece."""
+    if piece in {".", ".."}:
+        raise ToolValidationError("Path segments may not include '.' or '..'.")
+    _ensure_ascii(piece, "path segment")
+    if len(piece) > _MAX_SEGMENT_LENGTH:
+        raise ToolValidationError("Path segments must be 80 characters or fewer.")
+
+
 def _normalize_segments(raw_segments: Iterable[str]) -> tuple[str, ...]:
     segments: list[str] = []
     for raw_segment in raw_segments:
@@ -322,13 +331,7 @@ def _normalize_segments(raw_segments: Iterable[str]) -> tuple[str, ...]:
         for piece in stripped.split("/"):
             if not piece:
                 continue
-            if piece in {".", ".."}:
-                raise ToolValidationError("Path segments may not include '.' or '..'.")
-            _ensure_ascii(piece, "path segment")
-            if len(piece) > _MAX_SEGMENT_LENGTH:
-                raise ToolValidationError(
-                    "Path segments must be 80 characters or fewer."
-                )
+            _validate_path_piece(piece)
             segments.append(piece)
     if len(segments) > _MAX_PATH_DEPTH:
         raise ToolValidationError("Path depth exceeds the allowed limit (16 segments).")
@@ -733,27 +736,10 @@ class _AstevalToolSuite:
         return result
 
     @staticmethod
-    def _initialize_sandbox(
-        *,
-        fs: Filesystem,
-        reads: tuple[EvalFileRead, ...],
-        writes: tuple[EvalFileWrite, ...],
-        read_globals: Mapping[str, str],
-        user_globals: Mapping[str, object],
-    ) -> _SandboxState:
-        interpreter = _create_interpreter()
-        write_queue: list[EvalFileWrite] = list(writes)
-        state = _SandboxState(
-            interpreter=interpreter,
-            stdout_buffer=io.StringIO(),
-            stderr_buffer=io.StringIO(),
-            symtable=cast(dict[str, object], interpreter.symtable),
-            write_queue=write_queue,
-            helper_writes=[],
-            write_targets={write.path.segments for write in write_queue},
-            pending_write_attempted=bool(write_queue),
-        )
-        read_paths = {read.path.segments for read in reads}
+    def _create_sandbox_print(
+        state: _SandboxState,
+    ) -> Callable[..., None]:
+        """Create a sandbox-safe print function."""
         builtin_print = builtins.print
 
         def sandbox_print(
@@ -780,9 +766,13 @@ class _AstevalToolSuite:
             if flush:
                 _ = state.stdout_buffer.flush()
 
-        def read_text(path: str) -> str:
-            normalized = _normalize_vfs_path(_parse_string_path(path))
-            return _require_file_from_filesystem(fs, normalized)
+        return sandbox_print
+
+    @staticmethod
+    def _create_write_text(
+        state: _SandboxState, read_paths: set[tuple[str, ...]]
+    ) -> Callable[[str, str, str], None]:
+        """Create a sandbox-safe write_text function."""
 
         def write_text(path: str, content: str, mode: str = "create") -> None:
             state.pending_write_attempted = True
@@ -804,12 +794,41 @@ class _AstevalToolSuite:
             state.write_targets.add(key)
             state.helper_writes.append(helper_write)
 
+        return write_text
+
+    @staticmethod
+    def _initialize_sandbox(
+        *,
+        fs: Filesystem,
+        reads: tuple[EvalFileRead, ...],
+        writes: tuple[EvalFileWrite, ...],
+        read_globals: Mapping[str, str],
+        user_globals: Mapping[str, object],
+    ) -> _SandboxState:
+        interpreter = _create_interpreter()
+        write_queue: list[EvalFileWrite] = list(writes)
+        state = _SandboxState(
+            interpreter=interpreter,
+            stdout_buffer=io.StringIO(),
+            stderr_buffer=io.StringIO(),
+            symtable=cast(dict[str, object], interpreter.symtable),
+            write_queue=write_queue,
+            helper_writes=[],
+            write_targets={write.path.segments for write in write_queue},
+            pending_write_attempted=bool(write_queue),
+        )
+        read_paths = {read.path.segments for read in reads}
+
+        def read_text(path: str) -> str:
+            normalized = _normalize_vfs_path(_parse_string_path(path))
+            return _require_file_from_filesystem(fs, normalized)
+
         symtable = state.symtable
         symtable.update(_merge_globals(read_globals, user_globals))
         symtable["vfs_reads"] = dict(read_globals)
         symtable["read_text"] = read_text
-        symtable["write_text"] = write_text
-        symtable["print"] = sandbox_print
+        symtable["write_text"] = _AstevalToolSuite._create_write_text(state, read_paths)
+        symtable["print"] = _AstevalToolSuite._create_sandbox_print(state)
         state.initial_keys = set(symtable)
         return state
 

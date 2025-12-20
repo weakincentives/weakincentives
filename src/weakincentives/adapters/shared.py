@@ -763,79 +763,50 @@ def _restore_filesystem(
         return True
 
 
-@contextmanager
-def tool_execution(
+def _execute_tool_handler(
     *,
     context: _ToolExecutionContext,
-    tool_call: ProviderToolCall,
-) -> Iterator[ToolExecutionOutcome]:
-    """Context manager that executes a tool call and standardizes logging."""
-
-    tool, handler = _resolve_tool_and_handler(
-        tool_call=tool_call,
-        tool_registry=context.tool_registry,
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
+    tool_params: SupportsDataclass | None,
+    filesystem: Filesystem | None,
+) -> ToolResult[SupportsToolResult]:
+    """Execute the tool handler and build the tool context."""
+    _ensure_deadline_not_expired(
+        deadline=context.deadline,
         prompt_name=context.prompt_name,
-        provider_payload=context.provider_payload,
+        tool_name=tool.name,
     )
-    tool_name = tool.name
-    arguments_mapping = _parse_tool_call_arguments(
-        tool_call=tool_call,
-        prompt_name=context.prompt_name,
-        provider_payload=context.provider_payload,
-        parse_arguments=context.parse_arguments,
+    resources = _build_resources(
+        filesystem=filesystem,
+        budget_tracker=context.budget_tracker,
+    )
+    tool_context = ToolContext(
+        prompt=cast(PromptProtocol[Any], context.prompt),
+        rendered_prompt=context.rendered_prompt,
+        adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
+        session=context.session,
+        deadline=context.deadline,
+        resources=resources,
+    )
+    return _invoke_tool_handler(
+        handler=handler,
+        tool_params=tool_params,
+        context=tool_context,
     )
 
-    call_id, log = _build_tool_logger(
-        context=context,
-        tool_name=tool_name,
-        tool_call=tool_call,
-    )
 
-    # Get filesystem early so we can snapshot before tool invocation
-    filesystem = context.prompt.filesystem() if context.prompt else None
-    fs_snapshot = _snapshot_filesystem(filesystem, log=log, tag=f"tool:{tool_name}")
-
-    tool_params: SupportsDataclass | None = None
-    tool_result: ToolResult[SupportsToolResult]
-    try:
-        tool_params = _parse_tool_params(tool=tool, arguments_mapping=arguments_mapping)
-        _ensure_deadline_not_expired(
-            deadline=context.deadline,
-            prompt_name=context.prompt_name,
-            tool_name=tool_name,
-        )
-        resources = _build_resources(
-            filesystem=filesystem,
-            budget_tracker=context.budget_tracker,
-        )
-        tool_context = ToolContext(
-            prompt=cast(PromptProtocol[Any], context.prompt),
-            rendered_prompt=context.rendered_prompt,
-            adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
-            session=context.session,
-            deadline=context.deadline,
-            resources=resources,
-        )
-        tool_result = _invoke_tool_handler(
-            handler=handler,
-            tool_params=tool_params,
-            context=tool_context,
-        )
-    except ToolValidationError as error:
-        # Validation errors happen before tool invocation, no restore needed
-        if tool_params is None:
-            tool_params = cast(
-                SupportsDataclass,
-                _rejected_params(arguments_mapping=arguments_mapping, error=error),
-            )
-        tool_result = _handle_tool_validation_error(log=log, error=error)
-    except VisibilityExpansionRequired:
-        # Progressive disclosure: let this propagate to the caller
-        raise
-    except PromptEvaluationError:
-        raise
-    except DeadlineExceededError as error:
-        # Restore filesystem on deadline exceeded
+def _handle_tool_exception(
+    error: Exception,
+    *,
+    context: _ToolExecutionContext,
+    tool_name: str,
+    log: StructuredLogger,
+    fs_state: tuple[Filesystem | None, FilesystemSnapshot | None],
+) -> ToolResult[SupportsToolResult]:
+    """Handle exceptions during tool execution."""
+    filesystem, fs_snapshot = fs_state
+    if isinstance(error, DeadlineExceededError):
         _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
         raise _handle_tool_deadline_error(
             error=error,
@@ -843,17 +814,80 @@ def tool_execution(
             tool_name=tool_name,
             deadline=context.deadline,
         ) from error
-    except Exception as error:  # propagate message via ToolResult
-        # Restore filesystem on unexpected tool error
-        _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
-        tool_result = _handle_unexpected_tool_error(
+    _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
+    return _handle_unexpected_tool_error(
+        log=log,
+        tool_name=tool_name,
+        provider_payload=context.provider_payload,
+        error=error,
+    )
+
+
+def _ensure_tool_params(
+    tool_params: SupportsDataclass | None,
+    arguments_mapping: Mapping[str, Any],
+    error: Exception,
+) -> SupportsDataclass:
+    """Ensure tool_params is set, creating rejected params if needed."""
+    if tool_params is not None:
+        return tool_params
+    return cast(
+        SupportsDataclass,
+        _rejected_params(arguments_mapping=arguments_mapping, error=error),
+    )
+
+
+@contextmanager
+def tool_execution(
+    *,
+    context: _ToolExecutionContext,
+    tool_call: ProviderToolCall,
+) -> Iterator[ToolExecutionOutcome]:
+    """Context manager that executes a tool call and standardizes logging."""
+    tool, handler = _resolve_tool_and_handler(
+        tool_call=tool_call,
+        tool_registry=context.tool_registry,
+        prompt_name=context.prompt_name,
+        provider_payload=context.provider_payload,
+    )
+    arguments_mapping = _parse_tool_call_arguments(
+        tool_call=tool_call,
+        prompt_name=context.prompt_name,
+        provider_payload=context.provider_payload,
+        parse_arguments=context.parse_arguments,
+    )
+    call_id, log = _build_tool_logger(
+        context=context, tool_name=tool.name, tool_call=tool_call
+    )
+    filesystem = context.prompt.filesystem() if context.prompt else None
+    fs_snapshot = _snapshot_filesystem(filesystem, log=log, tag=f"tool:{tool.name}")
+
+    tool_params: SupportsDataclass | None = None
+    tool_result: ToolResult[SupportsToolResult]
+    try:
+        tool_params = _parse_tool_params(tool=tool, arguments_mapping=arguments_mapping)
+        tool_result = _execute_tool_handler(
+            context=context,
+            tool=tool,
+            handler=handler,
+            tool_params=tool_params,
+            filesystem=filesystem,
+        )
+    except ToolValidationError as error:
+        tool_params = _ensure_tool_params(tool_params, arguments_mapping, error)
+        tool_result = _handle_tool_validation_error(log=log, error=error)
+    except (VisibilityExpansionRequired, PromptEvaluationError):
+        raise
+    except Exception as error:
+        tool_params = _ensure_tool_params(tool_params, arguments_mapping, error)
+        tool_result = _handle_tool_exception(
+            error,
+            context=context,
+            tool_name=tool.name,
             log=log,
-            tool_name=tool_name,
-            provider_payload=context.provider_payload,
-            error=error,
+            fs_state=(filesystem, fs_snapshot),
         )
     else:
-        # Restore filesystem if tool execution reported failure
         if not tool_result.success:
             _ = _restore_filesystem(filesystem, fs_snapshot, log=log)
         _log_tool_completion(log, tool_result)

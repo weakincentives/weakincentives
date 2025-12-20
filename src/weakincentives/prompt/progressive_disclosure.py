@@ -31,7 +31,7 @@ from .tool import Tool, ToolContext
 from .tool_result import ToolResult
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Set
+    from collections.abc import Iterator, Mapping, Set
 
     from ..runtime.session.protocols import SessionProtocol
     from ._types import SupportsDataclass
@@ -286,6 +286,66 @@ def create_read_section_handler(
     )
 
 
+def _render_child_section(
+    node: SectionNode[SupportsDataclass],
+    registry: RegistrySnapshot,
+    section_params: SupportsDataclass,
+    effective: SectionVisibility,
+) -> tuple[str, bool]:
+    """Render a child section and return (rendered_text, should_skip_children)."""
+    rendered = node.section.render(
+        section_params,
+        node.depth,
+        node.number,
+        path=node.path,
+        visibility=effective,
+    )
+
+    should_skip = False
+    if (
+        effective == SectionVisibility.SUMMARY
+        and node.section.summary is not None
+        and rendered
+    ):
+        section_key = ".".join(node.path)
+        child_keys = _collect_child_keys_for_node(node, registry)
+        has_tools = bool(node.section.tools())
+        suffix = build_summary_suffix(section_key, child_keys, has_tools=has_tools)
+        rendered += suffix
+        should_skip = True
+
+    return rendered, should_skip
+
+
+def _should_skip_node(
+    node: SectionNode[SupportsDataclass], skip_depth: int | None
+) -> tuple[bool, int | None]:
+    """Check if node should be skipped based on skip_depth."""
+    if skip_depth is None:
+        return False, None
+    if node.depth > skip_depth:
+        return True, skip_depth
+    return False, None
+
+
+def _iterate_child_nodes(
+    parent_node: SectionNode[SupportsDataclass],
+    registry: RegistrySnapshot,
+) -> Iterator[SectionNode[SupportsDataclass]]:
+    """Iterate over child nodes of a parent, stopping when leaving subtree."""
+    parent_depth = parent_node.depth
+    in_children = False
+    for node in registry.sections:
+        if node is parent_node:
+            in_children = True
+            continue
+        if not in_children:
+            continue
+        if node.depth <= parent_depth:
+            break
+        yield node
+
+
 def _render_children_for_read(
     parent_node: SectionNode[SupportsDataclass],
     registry: RegistrySnapshot,
@@ -295,59 +355,28 @@ def _render_children_for_read(
 ) -> str:
     """Render child sections for read_section, respecting their visibility."""
     rendered_children: list[str] = []
-    parent_depth = parent_node.depth
-    in_children = False
     skip_depth: int | None = None
 
-    for node in registry.sections:
-        if node is parent_node:
-            in_children = True
+    for node in _iterate_child_nodes(parent_node, registry):
+        should_skip, skip_depth = _should_skip_node(node, skip_depth)
+        if should_skip:
             continue
 
-        if not in_children:
-            continue
-
-        # Stop when we leave the parent's subtree
-        if node.depth <= parent_depth:
-            break
-
-        # Handle skip depth for summarized sections
-        if skip_depth is not None:
-            if node.depth > skip_depth:
-                continue
-            skip_depth = None
-
-        # Get effective visibility for this child
-        effective = current_visibility.get(node.path, SectionVisibility.FULL)
-
-        # Resolve parameters
         section_params = registry.resolve_section_params(node, dict(param_lookup))
-
-        # Check if section is enabled
+        if (
+            section_params is None
+        ):  # pragma: no cover - defensive skip for unresolved params
+            skip_depth = node.depth
+            continue
         if not node.section.is_enabled(section_params, session=session):
             skip_depth = node.depth
             continue
 
-        # Render the section
-        rendered = node.section.render(
-            section_params,
-            node.depth,
-            node.number,
-            path=node.path,
-            visibility=effective,
+        effective = current_visibility.get(node.path, SectionVisibility.FULL)
+        rendered, should_skip_children = _render_child_section(
+            node, registry, section_params, effective
         )
-
-        # Add summary suffix for summarized children
-        if (
-            effective == SectionVisibility.SUMMARY
-            and node.section.summary is not None
-            and rendered
-        ):
-            section_key = ".".join(node.path)
-            child_keys = _collect_child_keys_for_node(node, registry)
-            has_tools = bool(node.section.tools())
-            suffix = build_summary_suffix(section_key, child_keys, has_tools=has_tools)
-            rendered += suffix
+        if should_skip_children:
             skip_depth = node.depth
 
         if rendered:

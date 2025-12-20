@@ -353,6 +353,39 @@ def _responses_tool_choice(
     )
 
 
+def _normalize_assistant_tool_calls(
+    tool_calls: Sequence[Mapping[str, Any]], prompt_name: str
+) -> list[dict[str, Any]]:
+    """Convert assistant tool calls to function_call format."""
+    result: list[dict[str, Any]] = []
+    for tool_call in tool_calls:
+        function_payload_obj = tool_call.get("function")
+        function_payload = (
+            cast(Mapping[str, Any], function_payload_obj)
+            if isinstance(function_payload_obj, Mapping)
+            else None
+        )
+        name = function_payload.get("name") if function_payload else None
+        arguments = function_payload.get("arguments") if function_payload else None
+        call_id = tool_call.get("id") or tool_call.get("call_id")
+        if not isinstance(name, str) or not isinstance(arguments, str):
+            raise PromptEvaluationError(
+                "OpenAI tool call is missing name or arguments.",
+                prompt_name=prompt_name,
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                provider_payload={"tool_call": tool_call},
+            )
+        result.append(
+            {
+                "type": "function_call",
+                "call_id": str(call_id or ""),
+                "name": name,
+                "arguments": arguments,
+            }
+        )
+    return result
+
+
 def _normalize_input_messages(
     messages: Sequence[Mapping[str, Any]], *, prompt_name: str
 ) -> list[dict[str, Any]]:
@@ -369,38 +402,14 @@ def _normalize_input_messages(
                 normalized.append(
                     {"type": "message", "role": "assistant", "content": content}
                 )
-            for tool_call in cast(Sequence[Mapping[str, Any]], tool_calls):
-                function_payload_obj = tool_call.get("function")
-                function_payload = (
-                    cast(Mapping[str, Any], function_payload_obj)
-                    if isinstance(function_payload_obj, Mapping)
-                    else None
+            normalized.extend(
+                _normalize_assistant_tool_calls(
+                    cast(Sequence[Mapping[str, Any]], tool_calls), prompt_name
                 )
-                name = function_payload.get("name") if function_payload else None
-                arguments = (
-                    function_payload.get("arguments") if function_payload else None
-                )
-                call_id = tool_call.get("id") or tool_call.get("call_id")
-                if not isinstance(name, str) or not isinstance(arguments, str):
-                    raise PromptEvaluationError(
-                        "OpenAI tool call is missing name or arguments.",
-                        prompt_name=prompt_name,
-                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        provider_payload={"tool_call": tool_call},
-                    )
-                normalized.append(
-                    {
-                        "type": "function_call",
-                        "call_id": str(call_id or ""),
-                        "name": name,
-                        "arguments": arguments,
-                    }
-                )
+            )
             continue
 
         if role == "tool":
-            # Mutate the original message so downstream updates (final output rewrites)
-            # are visible to recorded payloads.
             mutable_message = cast(dict[str, Any], message)
             call_id = mutable_message.get("tool_call_id")
             if call_id is None:
@@ -420,14 +429,8 @@ def _normalize_input_messages(
             continue
 
         if role in {"assistant", "system", "developer", "user"}:
-            mutable_message = cast(dict[str, Any], message)
-            mutable_message["type"] = "message"
             normalized.append(
-                {
-                    "type": "message",
-                    "role": role,
-                    "content": content or "",
-                }
+                {"type": "message", "role": role, "content": content or ""}
             )
             continue
 

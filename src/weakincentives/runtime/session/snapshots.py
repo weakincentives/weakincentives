@@ -379,11 +379,43 @@ class Snapshot:
         return json.dumps(payload, sort_keys=True)
 
     @classmethod
+    def _restore_slice_entry(
+        cls, entry: SnapshotSlicePayload
+    ) -> tuple[SessionSliceType, SessionSlice]:
+        """Restore a single slice from its payload."""
+        slice_type_candidate = _resolve_type(entry.slice_type)
+        item_type_candidate = _resolve_type(entry.item_type)
+
+        if not _is_dataclass_type(slice_type_candidate) or not _is_dataclass_type(
+            item_type_candidate
+        ):
+            raise SnapshotRestoreError("Snapshot types must be dataclasses")
+
+        slice_type = slice_type_candidate
+        item_type = item_type_candidate
+
+        restored_items: list[SupportsDataclass] = []
+        for item_mapping in entry.items:
+            try:
+                restored_item = parse(
+                    item_type,
+                    item_mapping,
+                    allow_dataclass_type=True,
+                    type_key=TYPE_REF_KEY,
+                )
+            except Exception as error:
+                raise SnapshotRestoreError(
+                    f"Failed to restore slice {slice_type.__qualname__}"
+                ) from error
+            else:
+                restored_items.append(restored_item)
+
+        return slice_type, tuple(restored_items)
+
+    @classmethod
     def from_json(cls, raw: str) -> Snapshot:
         """Deserialize a snapshot from its JSON representation."""
-
         payload = SnapshotPayload.from_json(raw)
-
         _validate_schema_version(payload.version)
 
         try:
@@ -405,34 +437,8 @@ class Snapshot:
 
         restored: dict[SessionSliceType, SessionSlice] = {}
         for entry in payload.slices:
-            slice_type_candidate = _resolve_type(entry.slice_type)
-            item_type_candidate = _resolve_type(entry.item_type)
-
-            if not _is_dataclass_type(slice_type_candidate) or not _is_dataclass_type(
-                item_type_candidate
-            ):
-                raise SnapshotRestoreError("Snapshot types must be dataclasses")
-
-            slice_type = slice_type_candidate
-            item_type = item_type_candidate
-
-            restored_items: list[SupportsDataclass] = []
-            for item_mapping in entry.items:
-                try:
-                    restored_item = parse(
-                        item_type,
-                        item_mapping,
-                        allow_dataclass_type=True,
-                        type_key=TYPE_REF_KEY,
-                    )
-                except Exception as error:
-                    raise SnapshotRestoreError(
-                        f"Failed to restore slice {slice_type.__qualname__}"
-                    ) from error
-                else:
-                    restored_items.append(restored_item)
-
-            restored[slice_type] = tuple(restored_items)
+            slice_type, items = cls._restore_slice_entry(entry)
+            restored[slice_type] = items
 
         return cls(
             created_at=_ensure_timezone(created_at),

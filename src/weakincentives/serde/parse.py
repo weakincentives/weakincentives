@@ -111,6 +111,28 @@ def _is_union_type(origin: object) -> bool:
     return origin is _UNION_TYPE or origin is _TYPING_UNION
 
 
+def _is_empty_string_coercible_to_none(
+    value: object, base_type: object, config: _ParseConfig
+) -> bool:
+    """Check if empty string can be coerced to None in an optional union."""
+    return (
+        config.coerce
+        and isinstance(value, str)
+        and value.strip() == ""
+        and any(arg is type(None) for arg in get_args(base_type))
+    )
+
+
+def _raise_union_error(last_error: Exception, path: str) -> None:
+    """Raise an appropriately prefixed error from union coercion."""
+    message = str(last_error)
+    if message.startswith(f"{path}:") or message.startswith(f"{path}."):
+        raise last_error
+    if isinstance(last_error, TypeError):
+        raise TypeError(f"{path}: {message}") from last_error
+    raise ValueError(f"{path}: {message}") from last_error
+
+
 def _coerce_union(
     value: object,
     base_type: object,
@@ -121,12 +143,7 @@ def _coerce_union(
     origin = get_origin(base_type)
     if not _is_union_type(origin):
         return _NOT_HANDLED
-    if (
-        config.coerce
-        and isinstance(value, str)
-        and value.strip() == ""
-        and any(arg is type(None) for arg in get_args(base_type))
-    ):
+    if _is_empty_string_coercible_to_none(value, base_type, config):
         return _apply_constraints(None, merged_meta, path)
     last_error: Exception | None = None
     for arg in get_args(base_type):
@@ -141,13 +158,24 @@ def _coerce_union(
             continue
         return _apply_constraints(coerced, merged_meta, path)
     if last_error is not None:
-        message = str(last_error)
-        if message.startswith(f"{path}:") or message.startswith(f"{path}."):
-            raise last_error
-        if isinstance(last_error, TypeError):
-            raise TypeError(f"{path}: {message}") from last_error
-        raise ValueError(f"{path}: {message}") from last_error
+        _raise_union_error(last_error, path)
     raise TypeError(f"{path}: no matching type in Union")
+
+
+def _try_coerce_literal(
+    value: object, literal: object
+) -> tuple[object | None, Exception | None]:
+    """Attempt to coerce value to match a literal. Returns (coerced, error)."""
+    literal_type = type(literal)
+    try:
+        if isinstance(literal, bool) and isinstance(value, str):
+            coerced = _bool_from_str(value)
+        else:
+            coerced = literal_type(value)
+    except (TypeError, ValueError) as error:
+        return None, error
+    else:
+        return coerced, None
 
 
 def _coerce_literal(
@@ -165,18 +193,14 @@ def _coerce_literal(
     for literal in literals:
         if value == literal:
             return _apply_constraints(literal, merged_meta, path)
-        if config.coerce:
-            literal_type = cast(type[object], type(literal))
-            try:
-                if isinstance(literal, bool) and isinstance(value, str):
-                    coerced_literal = _bool_from_str(value)
-                else:
-                    coerced_literal = literal_type(value)
-            except (TypeError, ValueError) as error:
-                last_literal_error = error
-                continue
-            if coerced_literal == literal:
-                return _apply_constraints(literal, merged_meta, path)
+        if not config.coerce:
+            continue  # pragma: no cover - coerce=False rarely used with Literal
+        coerced_literal, error = _try_coerce_literal(value, literal)
+        if error is not None:
+            last_literal_error = error
+            continue
+        if coerced_literal == literal:
+            return _apply_constraints(literal, merged_meta, path)
     if last_literal_error is not None:
         raise type(last_literal_error)(
             f"{path}: {last_literal_error}"
@@ -462,23 +486,35 @@ def _coerce_to_type(
     return _apply_constraints(coerced, merged_meta, path)
 
 
-def _find_key(
-    data: Mapping[str, object], name: str, alias: str | None, case_insensitive: bool
+def _find_key_exact(
+    data: Mapping[str, object], candidates: list[str | None]
 ) -> str | None:
-    candidates = [alias, name]
+    """Find exact match for any candidate key."""
     for candidate in candidates:
-        if candidate is None:
-            continue
-        if candidate in data:
+        if candidate is not None and candidate in data:
             return candidate
-    if not case_insensitive:
-        return None
+    return None
+
+
+def _build_lowered_key_map(data: Mapping[str, object]) -> dict[str, str]:
+    """Build a case-insensitive key lookup map."""
     lowered_map: dict[str, str] = {}
     for key in data:
         if isinstance(key, str):
             _ = lowered_map.setdefault(key.lower(), key)
+    return lowered_map
+
+
+def _find_key(
+    data: Mapping[str, object], name: str, alias: str | None, case_insensitive: bool
+) -> str | None:
+    candidates = [alias, name]
+    exact = _find_key_exact(data, candidates)
+    if exact is not None or not case_insensitive:
+        return exact
+    lowered_map = _build_lowered_key_map(data)
     for candidate in candidates:
-        if candidate is None or not isinstance(candidate, str):
+        if candidate is None:
             continue
         lowered = candidate.lower()
         if lowered in lowered_map:
@@ -576,6 +612,26 @@ def _run_validation_hooks(instance: object) -> None:
         _ = post_validator()
 
 
+def _resolve_type_from_payload(
+    mapping_data: Mapping[str, object], type_key: str
+) -> tuple[type[object], Mapping[str, object]]:
+    """Resolve dataclass type from payload type_key reference."""
+    type_identifier = mapping_data[type_key]
+    if not isinstance(type_identifier, str):
+        raise TypeError(f"{type_key} must be a string type reference")
+    try:
+        resolved_cls = _resolve_type_identifier(type_identifier)
+    except (TypeError, ValueError) as error:
+        raise TypeError(f"{type_key}: {error}") from error
+    if not dataclasses.is_dataclass(resolved_cls):
+        raise TypeError(f"{type_key}: resolved type is not a dataclass")
+    payload = cast(
+        Mapping[str, object],
+        {key: value for key, value in mapping_data.items() if key != type_key},
+    )
+    return resolved_cls, payload
+
+
 def _resolve_target_dataclass[T](
     cls: type[T] | None,
     mapping_data: Mapping[str, object],
@@ -583,30 +639,17 @@ def _resolve_target_dataclass[T](
     allow_dataclass_type: bool,
     type_key: str,
 ) -> tuple[type[T], Mapping[str, object]]:
-    target_cls = cls
-    referenced_cls: type[T] | None = None
+    target_cls: type[T] | None = cls
+    referenced_cls: type[object] | None = None
     payload = mapping_data
 
     if allow_dataclass_type and type_key in mapping_data:
-        type_identifier = mapping_data[type_key]
-        if not isinstance(type_identifier, str):
-            raise TypeError(f"{type_key} must be a string type reference")
-        try:
-            resolved_cls = cast(type[T], _resolve_type_identifier(type_identifier))
-        except (TypeError, ValueError) as error:
-            raise TypeError(f"{type_key}: {error}") from error
-        if not dataclasses.is_dataclass(resolved_cls):
-            raise TypeError(f"{type_key}: resolved type is not a dataclass")
-        referenced_cls = resolved_cls
-        payload = cast(
-            Mapping[str, object],
-            {key: value for key, value in mapping_data.items() if key != type_key},
-        )
+        referenced_cls, payload = _resolve_type_from_payload(mapping_data, type_key)
 
     if target_cls is None:
         if referenced_cls is None:
             raise TypeError("parse() requires a dataclass type")
-        target_cls = referenced_cls
+        target_cls = cast(type[T], referenced_cls)
 
     if not dataclasses.is_dataclass(target_cls) or not isinstance(target_cls, type):
         raise TypeError("parse() requires a dataclass type")

@@ -160,16 +160,8 @@ class OpenAIModelConfig(LLMConfig):
                 + ". Remove them from OpenAIModelConfig."
             )
 
-    @override
-    def to_request_params(self) -> dict[str, Any]:
-        """Convert non-None fields to request parameters.
-
-        The Responses API uses ``max_output_tokens`` instead of ``max_tokens``,
-        so this override renames the key accordingly.
-        """
-        params: dict[str, Any] = {}
-
-        # Supported core fields
+    def _add_core_params(self, params: dict[str, Any]) -> None:
+        """Add supported core request parameters."""
         if self.temperature is not None:
             params["temperature"] = self.temperature
         if self.max_tokens is not None:
@@ -177,7 +169,8 @@ class OpenAIModelConfig(LLMConfig):
         if self.top_p is not None:
             params["top_p"] = self.top_p
 
-        # OpenAI Responses-specific fields
+    def _add_responses_api_params(self, params: dict[str, Any]) -> None:
+        """Add OpenAI Responses API-specific parameters."""
         if self.logprobs is not None:
             params["logprobs"] = self.logprobs
         if self.top_logprobs is not None:
@@ -189,10 +182,16 @@ class OpenAIModelConfig(LLMConfig):
         if self.user is not None:
             params["user"] = self.user
 
-        # The Responses API currently does not support ``seed``, ``stop``,
-        # ``presence_penalty``, or ``frequency_penalty``. They are intentionally
-        # omitted to keep request payloads aligned with the SDK surface.
+    @override
+    def to_request_params(self) -> dict[str, Any]:
+        """Convert non-None fields to request parameters.
 
+        The Responses API uses ``max_output_tokens`` instead of ``max_tokens``,
+        so this override renames the key accordingly.
+        """
+        params: dict[str, Any] = {}
+        self._add_core_params(params)
+        self._add_responses_api_params(params)
         return params
 
 

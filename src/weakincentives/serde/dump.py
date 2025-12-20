@@ -259,29 +259,37 @@ def _serialize_field_value(
     )
 
 
+def _extract_extras(obj: object, field_names: set[str]) -> dict[str, object]:
+    """Extract extra attributes from a dataclass instance."""
+    extras_attr = getattr(obj, "__extras__", None)
+    obj_dict = getattr(obj, "__dict__", None)
+    if isinstance(obj_dict, dict):
+        return {key: value for key, value in obj_dict.items() if key not in field_names}
+    if isinstance(extras_attr, Mapping):
+        return dict(extras_attr)
+    return {}  # pragma: no cover - defensive fallback for unusual dataclasses
+
+
+def _apply_extras(cloned: object, extras: dict[str, object]) -> None:
+    """Apply extra attributes to a cloned instance."""
+    if hasattr(cloned, "__dict__"):
+        for key, value in extras.items():
+            object.__setattr__(cloned, key, value)
+    else:
+        _set_extras(cloned, extras)
+
+
 def clone[T](obj: T, **updates: object) -> T:
     """Clone a dataclass instance and re-run model-level validation hooks."""
-
     if not dataclasses.is_dataclass(obj) or isinstance(obj, type):
         raise TypeError("clone() requires a dataclass instance")
-    field_names = {field.name for field in dataclasses.fields(obj)}
-    extras: dict[str, object] = {}
-    extras_attr = getattr(obj, "__extras__", None)
-    if hasattr(obj, "__dict__"):
-        extras = {
-            key: value for key, value in obj.__dict__.items() if key not in field_names
-        }
-    elif isinstance(extras_attr, Mapping):
-        extras = dict(extras_attr)
 
+    field_names = {field.name for field in dataclasses.fields(obj)}
+    extras = _extract_extras(obj, field_names)
     cloned = dataclasses.replace(obj, **updates)
 
     if extras:
-        if hasattr(cloned, "__dict__"):
-            for key, value in extras.items():
-                object.__setattr__(cloned, key, value)
-        else:
-            _set_extras(cloned, extras)
+        _apply_extras(cloned, extras)
 
     validator = getattr(cloned, "__validate__", None)
     if callable(validator):

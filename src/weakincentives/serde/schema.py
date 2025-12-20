@@ -345,6 +345,18 @@ def _schema_for_primitive(
     return None
 
 
+def _resolve_field_property_name(
+    field: dataclasses.Field[object],
+    alias_generator: Callable[[str], str] | None,
+) -> str:
+    """Resolve the property name for a field, using alias if available."""
+    field_meta = dict(field.metadata)
+    alias = field_meta.get("alias")
+    if alias_generator is not None and not alias:
+        alias = alias_generator(field.name)
+    return alias or field.name
+
+
 def schema(
     cls: type[object],
     *,
@@ -352,7 +364,6 @@ def schema(
     extra: Literal["ignore", "forbid", "allow"] = IGNORE_EXTRA,
 ) -> dict[str, JSONValue]:
     """Produce a minimal JSON Schema description for a dataclass."""
-
     if not dataclasses.is_dataclass(cls):
         raise TypeError("schema() requires a dataclass type")
     if extra not in EXTRA_MODES:
@@ -365,14 +376,10 @@ def schema(
     for field in dataclasses.fields(cls):
         if not field.init:
             continue
-        field_meta = dict(field.metadata)
-        alias = field_meta.get("alias")
-        if alias_generator is not None and not alias:
-            alias = alias_generator(field.name)
-        property_name = alias or field.name
+        property_name = _resolve_field_property_name(field, alias_generator)
         field_type = type_hints.get(field.name, field.type)
         properties[property_name] = _schema_for_type(
-            field_type, field_meta, alias_generator
+            field_type, dict(field.metadata), alias_generator
         )
         if field.default is MISSING and field.default_factory is MISSING:
             required.append(property_name)
@@ -385,8 +392,6 @@ def schema(
     }
     if required:
         schema_dict["required"] = required
-    if not required:
-        _ = schema_dict.pop("required", None)
     return schema_dict
 
 

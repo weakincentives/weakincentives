@@ -60,6 +60,58 @@ def callable_accepts_session_kwarg(callback: Callable[..., object]) -> bool:
     return param.kind == inspect.Parameter.KEYWORD_ONLY
 
 
+def _normalize_zero_arg_predicate(
+    enabled: Callable[..., bool], accepts_session: bool
+) -> NormalizedEnabledPredicate:
+    """Normalize a zero-argument enabled predicate."""
+    if accepts_session:
+
+        def _without_params_with_session(
+            _: SupportsDataclass | None,
+            session: SessionProtocol | None,
+        ) -> bool:
+            return bool(enabled(session=session))
+
+        return _without_params_with_session
+
+    zero_arg = cast(Callable[[], bool], enabled)
+
+    def _without_params(
+        _: SupportsDataclass | None,
+        session: SessionProtocol | None,
+    ) -> bool:
+        del session
+        return bool(zero_arg())
+
+    return _without_params
+
+
+def _normalize_params_predicate(
+    enabled: Callable[..., bool], accepts_session: bool
+) -> NormalizedEnabledPredicate:
+    """Normalize a predicate that takes params."""
+    if accepts_session:
+
+        def _with_params_and_session(
+            value: SupportsDataclass | None,
+            session: SessionProtocol | None,
+        ) -> bool:
+            return bool(enabled(cast(SupportsDataclass, value), session=session))
+
+        return _with_params_and_session
+
+    coerced = cast(Callable[[SupportsDataclass], bool], enabled)
+
+    def _with_params(
+        value: SupportsDataclass | None,
+        session: SessionProtocol | None,
+    ) -> bool:
+        del session
+        return bool(coerced(cast(SupportsDataclass, value)))
+
+    return _with_params
+
+
 def normalize_enabled_predicate(
     enabled: EnabledPredicate | None,
     params_type: type[SupportsDataclass] | None,
@@ -81,57 +133,11 @@ def normalize_enabled_predicate(
         return None
 
     accepts_session = callable_accepts_session_kwarg(enabled)
+    requires_positional = callable_requires_positional_argument(enabled)
 
-    if params_type is None and not callable_requires_positional_argument(enabled):
-        if accepts_session:
-            # Zero-arg + session keyword callable: (*, session) -> bool
-            zero_arg_with_session = cast(Callable[..., bool], enabled)
-
-            def _without_params_with_session(
-                _: SupportsDataclass | None,
-                session: SessionProtocol | None,
-            ) -> bool:
-                return bool(zero_arg_with_session(session=session))
-
-            return _without_params_with_session
-
-        # Zero-arg callable without session: () -> bool
-        zero_arg = cast(Callable[[], bool], enabled)
-
-        def _without_params(
-            _: SupportsDataclass | None,
-            session: SessionProtocol | None,
-        ) -> bool:
-            del session
-            return bool(zero_arg())
-
-        return _without_params
-
-    if accepts_session:
-        # Params + session keyword callable: (params, *, session) -> bool
-        coerced_with_session = cast(Callable[..., bool], enabled)
-
-        def _with_params_and_session(
-            value: SupportsDataclass | None,
-            session: SessionProtocol | None,
-        ) -> bool:
-            return bool(
-                coerced_with_session(cast(SupportsDataclass, value), session=session)
-            )
-
-        return _with_params_and_session
-
-    # Params only callable: (params) -> bool
-    coerced = cast(Callable[[SupportsDataclass], bool], enabled)
-
-    def _with_params(
-        value: SupportsDataclass | None,
-        session: SessionProtocol | None,
-    ) -> bool:
-        del session
-        return bool(coerced(cast(SupportsDataclass, value)))
-
-    return _with_params
+    if params_type is None and not requires_positional:
+        return _normalize_zero_arg_predicate(enabled, accepts_session)
+    return _normalize_params_predicate(enabled, accepts_session)
 
 
 __all__ = [
