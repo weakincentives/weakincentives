@@ -194,7 +194,7 @@ def test_session_snapshots_restore_across_threads(
         restored = Session(bus=InProcessEventBus())
         restored[ToolInvoked].seed(())
         restored[ExampleResult].seed(())
-        restored.rollback(snapshot, preserve_logs=False)
+        restored.restore(snapshot, preserve_logs=False)
 
         restored_tool_events = restored[ToolInvoked].all()
         restored_results = restored[ExampleResult].all()

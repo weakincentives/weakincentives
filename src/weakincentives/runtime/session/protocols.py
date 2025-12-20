@@ -54,7 +54,7 @@ class SessionProtocol(Protocol):
     Global operations are available directly on the session::
 
         session.reset()                  # Clear all slices
-        session.rollback(snapshot)       # Restore from snapshot
+        session.restore(snapshot)        # Restore from snapshot
 
     """
 
@@ -94,7 +94,7 @@ class SessionProtocol(Protocol):
         """Clear all stored slices while preserving reducer registrations."""
         ...
 
-    def rollback(
+    def restore(
         self, snapshot: SnapshotProtocol, *, preserve_logs: bool = True
     ) -> None:
         """Restore session slices from the provided snapshot."""

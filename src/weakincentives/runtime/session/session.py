@@ -169,7 +169,7 @@ class Session(SessionProtocol):
     Global operations are available directly on the session::
 
         session.reset()                  # Clear all slices
-        session.rollback(snapshot)       # Restore from snapshot
+        session.restore(snapshot)        # Restore from snapshot
 
     """
 
@@ -497,7 +497,7 @@ class Session(SessionProtocol):
         self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
 
     @override
-    def rollback(
+    def restore(
         self, snapshot: SnapshotProtocol, *, preserve_logs: bool = True
     ) -> None:
         """Restore session slices from the provided snapshot.
@@ -515,7 +515,7 @@ class Session(SessionProtocol):
 
             snapshot = session.snapshot()
             # ... operations that modify state ...
-            session.rollback(snapshot)  # Restore previous state
+            session.restore(snapshot)  # Restore previous state
 
         """
         registered_slices = self._registered_slice_types()

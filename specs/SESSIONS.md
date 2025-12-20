@@ -192,7 +192,7 @@ session[Plan].register(SetupPlan, reducer)  # Register reducer
 
 # Session-wide mutations
 session.reset()               # Clear all slices
-session.rollback(snapshot)    # Restore from snapshot
+session.restore(snapshot)     # Restore from snapshot
 ```
 
 **SliceAccessor mutation methods:**
@@ -508,7 +508,7 @@ json_str = snapshot.to_json()
 
 # Restore
 loaded = Snapshot.from_json(json_str)
-session.rollback(loaded)
+session.restore(loaded)
 ```
 
 ### Serialization

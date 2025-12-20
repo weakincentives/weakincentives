@@ -265,7 +265,7 @@ class StructuredOutput:
 class SessionStub(SessionProtocol):
     def __init__(self, *, event_bus: EventBus | None = None) -> None:
         self.snapshots: list[SnapshotProtocol] = []
-        self.rollbacks: list[SnapshotProtocol] = []
+        self.restores: list[SnapshotProtocol] = []
         self._event_bus = event_bus or RecordingBus()
 
     @property
@@ -284,11 +284,11 @@ class SessionStub(SessionProtocol):
         self.snapshots.append(snapshot)
         return snapshot
 
-    def rollback(
+    def restore(
         self, snapshot: SnapshotProtocol, *, preserve_logs: bool = True
     ) -> None:
         del preserve_logs
-        self.rollbacks.append(snapshot)
+        self.restores.append(snapshot)
 
     def reset(self) -> None:
         pass
@@ -610,8 +610,8 @@ def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:
     response = loop.run()
 
     assert response.text == "All done"
-    assert session.snapshots and session.rollbacks
-    assert session.rollbacks == session.snapshots
+    assert session.snapshots and session.restores
+    assert session.restores == session.snapshots
 
 
 def test_inner_loop_includes_prompt_descriptor_in_event() -> None:

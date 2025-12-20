@@ -446,7 +446,7 @@ class ExecutionState:
         """
         # Restore session first
         try:
-            self.session.rollback(snapshot.session)
+            self.session.restore(snapshot.session)
         except SnapshotRestoreError as error:
             raise RestoreFailedError(f"Failed to restore session: {error}") from error
 

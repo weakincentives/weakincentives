@@ -77,7 +77,7 @@ def test_snapshot_roundtrip_integrity(session_factory):
 
     snapshot1 = session.snapshot()
     session.broadcast(AnotherEvent(...))
-    session.rollback(snapshot1)
+    session.restore(snapshot1)
     snapshot2 = session.snapshot()
 
     assert snapshot1 == snapshot2

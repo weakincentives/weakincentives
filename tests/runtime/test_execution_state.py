@@ -812,7 +812,7 @@ class TestExecutionStateRestoreErrors:
         from weakincentives.errors import RestoreFailedError
 
         session = MagicMock()
-        session.rollback.side_effect = SnapshotRestoreError("Session rollback failed")
+        session.restore.side_effect = SnapshotRestoreError("Session rollback failed")
 
         state = ExecutionState(session=session)
 

@@ -425,7 +425,7 @@ def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> 
     assert session[ExampleOutput].all() != original_state
     assert third_result.ok
 
-    session.rollback(restored)
+    session.restore(restored)
 
     assert session[ExampleOutput].all() == original_state
 
@@ -458,7 +458,7 @@ def test_snapshot_preserves_custom_reducer_behavior(
     second_result = bus.publish(make_prompt_event(ExampleOutput(text="after")))
     assert session[Summary].all()[0].entries == ("start", "after")
 
-    session.rollback(snapshot)
+    session.restore(snapshot)
 
     assert session[Summary].all()[0].entries == ("start",)
 
@@ -566,7 +566,7 @@ def test_rollback_preserves_log_slices(session_factory: SessionFactory) -> None:
 
     bus.publish(second_event)
 
-    session.rollback(snapshot)
+    session.restore(snapshot)
 
     assert session[ToolInvoked].all() == (first_event, second_event)
 
@@ -587,7 +587,7 @@ def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> No
 
     second_child = Session(bus=bus, parent=parent)
 
-    parent.rollback(parent_snapshot)
+    parent.restore(parent_snapshot)
 
     assert parent.children == (first_child, second_child)
 
@@ -604,7 +604,7 @@ def test_snapshot_rollback_requires_registered_slices(
     target = Session(bus=InProcessEventBus())
 
     with pytest.raises(SnapshotRestoreError):
-        target.rollback(snapshot)
+        target.restore(snapshot)
 
     assert target[ExampleOutput].all() == ()
 
@@ -944,7 +944,7 @@ def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> N
     bus.publish(make_prompt_event(ExampleOutput(text="second")))
     assert session[ExampleOutput].latest() == ExampleOutput(text="second")
 
-    session.rollback(snapshot)
+    session.restore(snapshot)
 
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
 

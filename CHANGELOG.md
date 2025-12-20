@@ -134,7 +134,7 @@ session.broadcast(AddStep(step="Research"))
 
 # Session-wide operations
 session.reset()
-session.rollback(snapshot)
+session.restore(snapshot)
 ```
 
 This also removes the footgun where `session.mutate(Plan).dispatch(e)` looked
@@ -148,7 +148,7 @@ slice-scoped but actually routed by `type(e)` (broadcast semantics).
 - `session.mutate(T).clear(...)` → `session[T].clear(...)`
 - `session.mutate(T).dispatch(e)` → `session.broadcast(e)`
 - `session.mutate().reset()` → `session.reset()`
-- `session.mutate().rollback(s)` → `session.rollback(s)`
+- `session.mutate().rollback(s)` → `session.restore(s)`
 
 ### Breaking: Ledger Semantics for Default Reducers
 
@@ -417,7 +417,7 @@ agent styles":
     reducer
   - `session.mutate(T).register(E, reducer)` - Register reducer for event type
   - `session.mutate().reset()` - Clear all slices
-  - `session.mutate().rollback(snapshot)` - Restore from snapshot
+  - `session.mutate().restore(snapshot)` - Restore from snapshot
 
 ### Prompts & Templates
 

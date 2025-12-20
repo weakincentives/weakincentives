@@ -743,7 +743,7 @@ session[Plan].clear(lambda p: p.done)         # Clear matching
 
 # Global operations
 session.reset()                               # Clear all slices
-session.rollback(snapshot)                    # Restore from snapshot
+session.restore(snapshot)                     # Restore from snapshot
 ```
 
 ### Legacy helpers (still available)
@@ -851,7 +851,7 @@ session.event_bus.unsubscribe(PromptRendered, handler)
 snapshot = session.snapshot()
 
 # Restore from snapshot
-session.rollback(snapshot)
+session.restore(snapshot)
 
 # Serialize for persistence
 snapshot_json = snapshot.to_json()
