@@ -356,6 +356,17 @@ def test_parse_structured_output_requires_json_payload() -> None:
     assert "No JSON object or array" in str(exc.value)
 
 
+def test_parse_structured_output_handles_empty_text() -> None:
+    """Empty or whitespace-only text should raise OutputParseError."""
+    prompt = Prompt(_build_summary_prompt()).bind(Guidance(topic="Ada"))
+    rendered = prompt.render()
+
+    with pytest.raises(OutputParseError) as exc:
+        parse_structured_output("   ", rendered)
+
+    assert "No JSON object or array" in str(exc.value)
+
+
 def test_parse_structured_output_rejects_unknown_container() -> None:
     rendered = RenderedPrompt[Summary](
         text="",

@@ -308,3 +308,48 @@ def test_unwrap_logger_raises_for_invalid_adapter() -> None:
 
     with pytest.raises(TypeError):
         _unwrap_logger(adapter)
+
+
+def test_get_logger_handles_adapter_with_non_mapping_extra() -> None:
+    """When LoggerAdapter.extra is not a Mapping, skip context merging."""
+    base = logging.getLogger("non-mapping-extra")
+
+    class _NonMappingExtraAdapter(logging.LoggerAdapter):
+        def __init__(self) -> None:
+            super().__init__(base, {})
+            self.extra = "not-a-mapping"  # type: ignore[assignment]
+
+    adapter = _NonMappingExtraAdapter()
+    logger = get_logger("ignored", logger_override=adapter, context={"bound": True})
+
+    # Should still work, just without merging the invalid extra
+    assert logger.logger is base
+    assert logger.extra == {"bound": True}
+
+
+def test_json_formatter_handles_missing_event_and_context() -> None:
+    """JSON formatter should handle records without event or context attrs."""
+    configure_logging(level="INFO", json_mode=True, force=True)
+
+    root = logging.getLogger()
+    assert len(root.handlers) == 1
+    handler = root.handlers[0]
+
+    # Create a record without event or context
+    record = root.makeRecord(
+        name="tests.missing",
+        level=logging.INFO,
+        fn="tests/test_logging.py",
+        lno=0,
+        msg="bare message",
+        args=(),
+        exc_info=None,
+        func=None,
+        extra=None,
+    )
+
+    rendered = handler.format(record)
+    payload = json.loads(rendered)
+    assert "event" not in payload
+    assert "context" not in payload
+    assert payload["message"] == "bare message"

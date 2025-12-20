@@ -414,13 +414,16 @@ def test_pure_handles_uncopyable_keyword_arguments() -> None:
     assert isinstance(use(value=instance), int)
 
 
-def test_pure_allows_unmutated_keyword_arguments() -> None:
-    @pure
-    def compute(*, data: dict[str, int]) -> int:
-        return data.get("value", 0) * 2
+def test_pure_passes_with_unmodified_keyword_argument() -> None:
+    """Pure function with keyword arg that isn't mutated should pass."""
 
-    result = compute(data={"value": 5})
-    assert result == 10
+    @pure
+    def identity(*, data: list[int]) -> list[int]:
+        return data  # No mutation
+
+    lst = [1, 2, 3]
+    result = identity(data=lst)
+    assert result == lst
 
 
 def test_require_predicate_returning_none() -> None:
@@ -458,3 +461,55 @@ def test_session_invariant_helpers_cover_basics() -> None:
     assert len(typed_session.session_id.bytes) == SESSION_ID_BYTE_LENGTH
     assert _created_at_has_tz(typed_session)
     assert _created_at_is_utc(typed_session)
+
+
+class TestContractsWhenDbcDisabled:
+    """Test that decorated functions still work when DBC is disabled."""
+
+    def test_require_skipped_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import weakincentives.dbc as dbc_module
+
+        dbc_module._forced_state = None
+        monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
+        dbc_module.disable_dbc()
+
+        @require(lambda value: value > 0)
+        def square(value: int) -> int:
+            return value * value
+
+        # Invalid input would fail if DBC was enabled, but should pass when disabled
+        assert square(-2) == 4
+
+    def test_ensure_skipped_when_disabled(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import weakincentives.dbc as dbc_module
+
+        dbc_module._forced_state = None
+        monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
+        dbc_module.disable_dbc()
+
+        @ensure(lambda result: result > 0)
+        def negate(value: int) -> int:
+            return -value
+
+        # Return value would fail if DBC was enabled
+        assert negate(5) == -5
+
+    def test_pure_skipped_when_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import weakincentives.dbc as dbc_module
+
+        dbc_module._forced_state = None
+        monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
+        dbc_module.disable_dbc()
+
+        @pure
+        def mutate_list(data: list[int]) -> None:
+            data.append(1)
+
+        lst: list[int] = []
+        mutate_list(lst)
+        # Mutation would fail if DBC was enabled
+        assert lst == [1]

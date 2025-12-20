@@ -45,9 +45,6 @@ class ClaudeAgentSDKClientConfig:
         max_budget_usd: Maximum budget in USD for the session. None means
             unlimited budget. When set, the SDK will stop execution if the
             budget is exceeded.
-        suppress_stderr: If True, suppress stderr output from the Claude Code
-            CLI process. Useful for hiding bun-related errors or other CLI
-            noise in programmatic usage.
         stop_on_structured_output: If True, stop execution immediately after
             the StructuredOutput tool is called. This ensures the turn ends
             cleanly after structured output is produced.
@@ -62,7 +59,6 @@ class ClaudeAgentSDKClientConfig:
     cwd: str | None = None
     max_turns: int | None = None
     max_budget_usd: float | None = None
-    suppress_stderr: bool = True
     stop_on_structured_output: bool = True
     isolation: IsolationConfig | None = None
     betas: tuple[str, ...] | None = None

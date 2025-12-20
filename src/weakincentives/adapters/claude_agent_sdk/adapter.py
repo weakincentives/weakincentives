@@ -253,10 +253,8 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         # Get filesystem from workspace section if present, otherwise create one
         # from the working directory. This ensures MCP-bridged tools operate on
         # the same filesystem as the SDK's native tools.
-        filesystem = prompt.filesystem()
-        if filesystem is None:  # pragma: no branch
-            workspace_root = self._client_config.cwd or str(Path.cwd())
-            filesystem = HostFilesystem(_root=workspace_root)
+        workspace_root = self._client_config.cwd or str(Path.cwd())
+        filesystem = prompt.filesystem() or HostFilesystem(_root=workspace_root)
 
         bridged_tools = create_bridged_tools(
             rendered.tools,
@@ -372,8 +370,8 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         if self._client_config.cwd:
             options_kwargs["cwd"] = self._client_config.cwd
 
-        if self._client_config.permission_mode:  # pragma: no branch
-            options_kwargs["permission_mode"] = self._client_config.permission_mode
+        # permission_mode always has a default value ("bypassPermissions")
+        options_kwargs["permission_mode"] = self._client_config.permission_mode
 
         if self._client_config.max_turns:
             options_kwargs["max_turns"] = self._client_config.max_turns
@@ -416,9 +414,8 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 "wink": mcp_server_config,
             }
 
-        # Suppress stderr if configured (hides bun errors and CLI noise)
-        if self._client_config.suppress_stderr:  # pragma: no branch
-            options_kwargs["stderr"] = lambda _: None
+        # Always suppress stderr to hide bun-related CLI noise
+        options_kwargs["stderr"] = lambda _: None
 
         # Create async hook callbacks
         pre_hook = create_pre_tool_use_hook(hook_context)
@@ -518,15 +515,13 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         for message in reversed(messages):
             if isinstance(message, ResultMessage):
-                if hasattr(message, "result") and message.result:  # pragma: no branch
-                    result_text = message.result
+                result_text = message.result or result_text
                 structured_output = self._try_parse_structured_output(message, rendered)
 
-            if hasattr(message, "usage") and message.usage:
-                usage_dict = message.usage
-                if isinstance(usage_dict, dict):  # pragma: no branch
-                    total_input_tokens += usage_dict.get("input_tokens", 0)
-                    total_output_tokens += usage_dict.get("output_tokens", 0)
+            usage_dict = getattr(message, "usage", None)
+            if usage_dict:
+                total_input_tokens += usage_dict.get("input_tokens", 0)
+                total_output_tokens += usage_dict.get("output_tokens", 0)
 
         usage = TokenUsage(
             input_tokens=total_input_tokens or None,

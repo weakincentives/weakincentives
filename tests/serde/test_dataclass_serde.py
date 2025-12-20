@@ -1031,6 +1031,10 @@ def test_internal_helpers_and_extras_descriptor() -> None:
     assert getattr(Slotted, "__extras__", None) is None  # descriptor access on class
     assert getattr(slotted, "__extras__", None) == {"nickname": "Ace"}
 
+    # Parse again to hit the cached descriptor branch
+    slotted2 = parse(Slotted, {"name": "Bob", "alias": "Builder"}, extra="allow")
+    assert getattr(slotted2, "__extras__", None) == {"alias": "Builder"}
+
     descriptor = _SLOTTED_EXTRAS[Slotted]
     descriptor.__set__(slotted, None)
     assert getattr(slotted, "__extras__", None) is None
@@ -1050,6 +1054,15 @@ def test_merge_annotated_meta_and_bool_parsing() -> None:
 
     assert _bool_from_str(" YES ") is True
     assert _bool_from_str("off") is False
+
+
+def test_merge_annotated_meta_with_non_mapping_extra() -> None:
+    """Annotated with non-Mapping metadata should be skipped."""
+    # Annotated[str, "doc", {"key": "value"}] - the "doc" string is skipped
+    annotated_type = Annotated[str, "documentation", {"merged": True}]
+    base, meta = _merge_annotated_meta(annotated_type, {"initial": 1})
+    assert base is str
+    assert meta == {"initial": 1, "merged": True}  # Only Mapping metadata merged
 
 
 def test_string_normalization_for_membership_constraints() -> None:

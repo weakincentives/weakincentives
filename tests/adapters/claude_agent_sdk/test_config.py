@@ -33,7 +33,6 @@ class TestClaudeAgentSDKClientConfig:
         assert config.cwd is None
         assert config.max_turns is None
         assert config.max_budget_usd is None
-        assert config.suppress_stderr is True
         assert config.stop_on_structured_output is True
         assert config.isolation is None
         assert config.betas is None
@@ -45,7 +44,6 @@ class TestClaudeAgentSDKClientConfig:
             cwd="/home/user/project",
             max_turns=10,
             max_budget_usd=5.0,
-            suppress_stderr=False,
             stop_on_structured_output=False,
             isolation=isolation,
             betas=("extended-thinking", "computer-use"),
@@ -54,7 +52,6 @@ class TestClaudeAgentSDKClientConfig:
         assert config.cwd == "/home/user/project"
         assert config.max_turns == 10
         assert config.max_budget_usd == 5.0
-        assert config.suppress_stderr is False
         assert config.stop_on_structured_output is False
         assert config.isolation is isolation
         assert config.betas == ("extended-thinking", "computer-use")
