@@ -1282,7 +1282,9 @@ def test_broadcast_dispatches_to_all_reducers(session_factory: SessionFactory) -
     assert session[SliceB].all() == (SliceB("broadcast"),)
 
 
-def test_prompt_executed_with_mixed_iterable_output(session_factory: SessionFactory) -> None:
+def test_prompt_executed_with_mixed_iterable_output(
+    session_factory: SessionFactory,
+) -> None:
     """Test branch 759->758: non-dataclass items in iterable are skipped."""
     session, bus = session_factory()
 

@@ -51,7 +51,6 @@ _DESCRIPTION_MAX_LENGTH: Final = 200
 _EXPECTED_TYPE_ARGUMENTS: Final = 2
 _HANDLER_PARAMETER_COUNT: Final = 2
 _VARIADIC_TUPLE_LENGTH: Final = 2
-_SINGLE_GENERIC_ARG_COUNT: Final = 1
 _NONE_TYPE: Final = type(None)
 _POSITIONAL_PARAMETER_KINDS: Final = {
     inspect.Parameter.POSITIONAL_ONLY,
@@ -720,17 +719,16 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             )
 
         args = get_args(annotation)
-        element: object | None = None
-        if origin is tuple:
-            if len(args) != _VARIADIC_TUPLE_LENGTH or args[1] is not Ellipsis:
-                raise PromptValidationError(
-                    "Variadic Tuple[ResultT, ...] is required for Tool sequence results.",
-                    dataclass_type=params_type,
-                    placeholder="ResultT",
-                )
-            element = args[0]
-        elif len(args) == _SINGLE_GENERIC_ARG_COUNT:
-            element = args[0]
+        if origin is tuple and (
+            len(args) != _VARIADIC_TUPLE_LENGTH or args[1] is not Ellipsis
+        ):
+            raise PromptValidationError(
+                "Variadic Tuple[ResultT, ...] is required for Tool sequence results.",
+                dataclass_type=params_type,
+                placeholder="ResultT",
+            )
+        # list[T] and Sequence[T] always have exactly one type arg
+        element = args[0]
 
         if not isinstance(element, type):
             raise PromptValidationError(

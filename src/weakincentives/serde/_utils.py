@@ -63,6 +63,17 @@ def _ordered_values(values: Iterable[JSONValue]) -> list[JSONValue]:
     return items
 
 
+def _get_or_create_extras_descriptor(cls: type[object]) -> _ExtrasDescriptor:
+    """Get or create an extras descriptor for a slotted class."""
+    descriptor = _SLOTTED_EXTRAS.get(cls)
+    if descriptor is not None:
+        return descriptor
+    descriptor = _ExtrasDescriptor()
+    _SLOTTED_EXTRAS[cls] = descriptor
+    cls.__extras__ = descriptor  # type: ignore[attr-defined]
+    return descriptor
+
+
 def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
     """Attach extras to an instance, handling slotted dataclasses."""
 
@@ -70,12 +81,7 @@ def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
     try:
         object.__setattr__(instance, "__extras__", extras_dict)
     except AttributeError:
-        cls = instance.__class__
-        descriptor = _SLOTTED_EXTRAS.get(cls)
-        if descriptor is None:
-            descriptor = _ExtrasDescriptor()
-            _SLOTTED_EXTRAS[cls] = descriptor
-            cls.__extras__ = descriptor  # type: ignore[attr-defined]
+        descriptor = _get_or_create_extras_descriptor(instance.__class__)
         descriptor.__set__(instance, extras_dict)
 
 

@@ -507,7 +507,9 @@ def test_rm_removes_empty_directory(
     # Now delete the empty directory
     rm_tool = find_tool(section, "rm")
     params = RemoveParams(path="empty_dir")
-    result = invoke_tool(rm_tool, params, session=session, filesystem=section.filesystem)
+    result = invoke_tool(
+        rm_tool, params, session=session, filesystem=section.filesystem
+    )
 
     # Verify the message indicates at least the directory was deleted
     assert result.success
@@ -1449,7 +1451,3 @@ def test_file_info_render_with_size_bytes() -> None:
     # Should include size in bytes when size_bytes is not None
     assert "1024 B" in rendered
     assert "v1" in rendered
-
-
-
-

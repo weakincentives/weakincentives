@@ -27,11 +27,12 @@ import pytest
 
 from weakincentives.serde import clone, dump, parse, schema
 from weakincentives.serde._utils import (
-    _set_extras,
     _SLOTTED_EXTRAS,
+    _get_or_create_extras_descriptor,
     _merge_annotated_meta,
     _ordered_values,
     _ParseConfig,
+    _set_extras,
 )
 from weakincentives.serde.parse import (
     _bool_from_str,
@@ -75,8 +76,27 @@ def test_build_lowered_key_map_skips_non_string_keys() -> None:
     assert len(result) == 2
 
 
+def test_get_or_create_extras_descriptor_caches_result() -> None:
+    """Test line 70: when descriptor exists in cache, return it directly."""
+
+    @dataclass(slots=True, frozen=True)
+    class CachedSlottedData:
+        value: str
+
+    # Clear any existing descriptor for this class
+    _SLOTTED_EXTRAS.pop(CachedSlottedData, None)
+
+    # First call creates a new descriptor
+    descriptor1 = _get_or_create_extras_descriptor(CachedSlottedData)
+    assert CachedSlottedData in _SLOTTED_EXTRAS
+
+    # Second call should hit the cache (line 70)
+    descriptor2 = _get_or_create_extras_descriptor(CachedSlottedData)
+    assert descriptor1 is descriptor2
+
+
 def test_set_extras_reuses_descriptor() -> None:
-    """Test branch 75->79: when descriptor already exists, reuse it."""
+    """Test that _set_extras reuses cached descriptor for slotted classes."""
 
     @dataclass(slots=True, frozen=True)
     class SlottedData:
@@ -93,7 +113,7 @@ def test_set_extras_reuses_descriptor() -> None:
     assert SlottedData in _SLOTTED_EXTRAS
     descriptor1 = _SLOTTED_EXTRAS[SlottedData]
 
-    # Second call should reuse the existing descriptor (branch 75->79)
+    # Second call should reuse the existing descriptor
     instance2 = SlottedData(value="second")
     _set_extras(instance2, {"key2": "value2"})
 
@@ -1570,7 +1590,7 @@ def test_merge_annotated_meta_handles_non_mapping_args() -> None:
 
     annotated_type = Annotated[int, "string_metadata", {"key": "value"}, 123]
     base, meta = _merge_annotated_meta(annotated_type, None)
-    assert base == int
+    assert base is int
     assert meta == {"key": "value"}
 
 

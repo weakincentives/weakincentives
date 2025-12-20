@@ -379,8 +379,8 @@ def _render_children_for_read(
         if should_skip_children:
             skip_depth = node.depth
 
-        if rendered:
-            rendered_children.append(rendered)
+        # render() always returns at least a heading; no need to check for empty
+        rendered_children.append(rendered)
 
     return "\n\n".join(rendered_children)
 

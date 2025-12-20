@@ -239,7 +239,9 @@ def test_response_parser_clears_text_when_output_is_not_none() -> None:
     # This triggers line 1423-1430 where extract_parsed_content returns non-None
     message = SimpleNamespace(
         content="Some text content",
-        parsed={"message": "parsed output"}  # This will be parsed by parse_schema_constrained_payload
+        parsed={
+            "message": "parsed output"
+        },  # This will be parsed by parse_schema_constrained_payload
     )
     output, text_value = parser.parse(message, provider_payload=None)
 

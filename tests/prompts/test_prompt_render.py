@@ -520,6 +520,61 @@ def test_collect_child_keys_exits_on_sibling() -> None:
     assert "Sibling: s" in rendered.text
 
 
+def test_collect_child_keys_skips_grandchildren() -> None:
+    """Test _collect_child_keys skips grandchildren and continues to next child.
+
+    This covers the branch 339->329 in rendering.py where we iterate past
+    grandchildren to find subsequent direct children.
+    """
+
+    grandchild = MarkdownSection[OutroParams](
+        title="Grandchild",
+        template="Grandchild: ${footer}",
+        key="grandchild",
+    )
+    child1 = MarkdownSection[DetailsParams](
+        title="Child1",
+        template="Child1: ${body}",
+        key="child1",
+        children=[grandchild],
+    )
+    child2 = MarkdownSection[SummaryParams](
+        title="Child2",
+        template="Child2: ${summary}",
+        key="child2",
+    )
+    parent = MarkdownSection[IntroParams](
+        title="Parent",
+        template="Parent: ${title}",
+        key="parent",
+        summary="Parent summary for SUMMARY visibility",
+        visibility=SectionVisibility.SUMMARY,
+        children=[child1, child2],
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="grandchildren-skip",
+        sections=[parent],
+    )
+
+    rendered = (
+        Prompt(template)
+        .bind(
+            IntroParams(title="p"),
+            DetailsParams(body="c1"),
+            OutroParams(footer="gc"),
+            SummaryParams(summary="c2"),
+        )
+        .render()
+    )
+
+    # Parent should render with SUMMARY visibility (shows summary suffix)
+    assert "Parent summary" in rendered.text
+    # Children and grandchild are hidden in SUMMARY mode
+    # The _collect_child_keys method should skip grandchild and find child2
+
+
 def test_markdown_section_placeholder_extraction_with_braced_syntax() -> None:
     """Test that MarkdownSection extracts placeholders from ${var} syntax."""
     section = MarkdownSection[IntroParams](
@@ -530,9 +585,9 @@ def test_markdown_section_placeholder_extraction_with_braced_syntax() -> None:
 
     # This should extract 'title' placeholder using braced syntax
     params = IntroParams(title="Hello")
-    prompt = Prompt(
-        PromptTemplate(ns="test", key="braced", sections=[section])
-    ).bind(params)
+    prompt = Prompt(PromptTemplate(ns="test", key="braced", sections=[section])).bind(
+        params
+    )
 
     rendered = prompt.render()
     assert "Title: Hello" in rendered.text

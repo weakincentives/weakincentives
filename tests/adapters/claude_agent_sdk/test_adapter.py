@@ -912,7 +912,9 @@ class TestIsolationConfig:
         # Check captured options don't include permission_mode
         assert len(MockSDKQuery.captured_options) == 1
         options = MockSDKQuery.captured_options[0]
-        assert not hasattr(options, "permission_mode") or options.permission_mode is None
+        assert (
+            not hasattr(options, "permission_mode") or options.permission_mode is None
+        )
 
     def test_suppress_stderr_option(
         self, session: Session, simple_prompt: Prompt[None]
@@ -951,7 +953,9 @@ class TestIsolationConfig:
         options = MockSDKQuery.captured_options[0]
         assert not hasattr(options, "stderr") or options.stderr is None
 
-    def test_message_without_result(self, session: Session, simple_prompt: Prompt[None]) -> None:
+    def test_message_without_result(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
         """Messages without result attribute or with falsy result are handled."""
         MockSDKQuery.reset()
         # Create a message without result attribute
@@ -984,7 +988,7 @@ class TestIsolationConfig:
         adapter = ClaudeAgentSDKAdapter()
 
         with sdk_patches():
-            response = adapter.evaluate(simple_prompt, session=session)
+            _ = adapter.evaluate(simple_prompt, session=session)
 
         # Should not crash and usage should be None (non-dict usage ignored)
         assert len(events) == 1

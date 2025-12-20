@@ -32,6 +32,7 @@ from weakincentives.prompt.progressive_disclosure import (
     OpenSectionsParams,
     ReadSectionParams,
     ReadSectionResult,
+    _collect_child_keys_for_node,
     build_summary_suffix,
     compute_current_visibility,
     create_open_sections_handler,
@@ -906,3 +907,53 @@ def test_read_section_skip_depth_reset() -> None:
     assert "Sibling Child: test" in result.value.content
 
 
+def test_collect_child_keys_skips_grandchildren_and_continues() -> None:
+    """Test branch 406->398: skipping grandchildren continues to find siblings."""
+    # Structure: parent -> [child1 -> [grandchild], child2]
+    parent = MarkdownSection[_TestParams](
+        title="Parent",
+        template="Parent: ${name}",
+        key="parent",
+        default_params=_TestParams(),
+        children=[
+            MarkdownSection[_TestParams](
+                title="Child1",
+                template="Child1: ${name}",
+                key="child1",
+                default_params=_TestParams(),
+                children=[
+                    MarkdownSection[_TestParams](
+                        title="Grandchild",
+                        template="Grandchild: ${name}",
+                        key="grandchild",
+                        default_params=_TestParams(),
+                    )
+                ],
+            ),
+            MarkdownSection[_TestParams](
+                title="Child2",
+                template="Child2: ${name}",
+                key="child2",
+                default_params=_TestParams(),
+            ),
+        ],
+    )
+
+    registry = PromptRegistry()
+    registry.register_sections((cast(Section[SupportsDataclass], parent),))
+    snapshot = registry.snapshot()
+
+    # Find parent node in registry
+    parent_node = None
+    for node in snapshot.sections:
+        if node.section.key == "parent":
+            parent_node = node
+            break
+
+    assert parent_node is not None
+
+    # Collect child keys for parent - should skip grandchild but find child2
+    child_keys = _collect_child_keys_for_node(parent_node, snapshot)
+
+    # Should contain both direct children but not grandchild
+    assert child_keys == ("child1", "child2")

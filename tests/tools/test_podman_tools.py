@@ -2897,7 +2897,3 @@ def test_resolve_host_path_finds_file_in_allowed_root() -> None:
         allowed_roots = (Path(tmpdir),)
         resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
         assert resolved == test_file
-
-
-
-
