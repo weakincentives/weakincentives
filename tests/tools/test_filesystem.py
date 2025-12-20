@@ -1304,6 +1304,19 @@ class TestFilesystemBranchCoverage:
             check=True,
             capture_output=True,
         )
+        # Configure git user for CI environments
+        _ = subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+        _ = subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
 
         # First snapshot should create initial commit (branch 1424->1434)
         snapshot = fs.snapshot(tag="first")
