@@ -44,7 +44,7 @@ from typing import Any, cast
 from ..errors import DeadlineExceededError, ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
-from ..runtime.execution_state import ExecutionState
+from ..runtime.execution_state import CompositeSnapshot, ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse
 from ..types.dataclass import (
@@ -144,64 +144,100 @@ class ToolRunner:
                 success=False,
             )
 
-        # Take snapshot before execution
-        pre_snapshot = self.execution_state.snapshot(tag=f"pre:{tool_call.id}")
-
-        try:
-            result = self._invoke_handler(
+        # Use transactional execution via context manager
+        with self.execution_state.tool_transaction(
+            tag=f"pre:{tool_call.id}"
+        ) as snapshot:
+            return self._execute_with_snapshot(
                 tool=tool,
                 handler=cast(
                     ToolHandler[SupportsDataclassOrNone, SupportsToolResult], handler
                 ),
                 tool_call=tool_call,
                 context=context,
+                snapshot=snapshot,
+            )
+
+    def _execute_with_snapshot(
+        self,
+        *,
+        tool: Tool[Any, Any],
+        handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
+        tool_call: ProviderToolCall,
+        context: ToolContext,
+        snapshot: CompositeSnapshot,
+    ) -> ToolResult[Any]:
+        """Execute tool handler with transactional semantics.
+
+        Args:
+            tool: Tool definition.
+            handler: Tool handler function.
+            tool_call: Provider tool call.
+            context: Tool execution context.
+            snapshot: Pre-execution snapshot for manual restore on failure.
+
+        Returns:
+            ToolResult from the tool handler.
+
+        Raises:
+            VisibilityExpansionRequired: Context manager handles restore.
+            PromptEvaluationError: Context manager handles restore.
+        """
+        tool_name = tool_call.function.name
+        try:
+            result = self._invoke_handler(
+                tool=tool,
+                handler=handler,
+                tool_call=tool_call,
+                context=context,
             )
         except VisibilityExpansionRequired:
-            # Restore state on visibility expansion
-            self.execution_state.restore(pre_snapshot)
-            logger.debug(
-                "State restored after visibility expansion required.",
-                event="tool_runner_visibility_restore",
-                context={"tool": tool_name, "call_id": tool_call.id},
-            )
+            # Context manager handles restore on re-raise
             raise
         except DeadlineExceededError as error:
-            # Restore state on deadline exceeded
-            self.execution_state.restore(pre_snapshot)
-            logger.debug(
-                "State restored after deadline exceeded.",
-                event="tool_runner_deadline_restore",
-                context={"tool": tool_name, "call_id": tool_call.id},
-            )
+            # Context manager handles restore on re-raise
             raise PromptEvaluationError(
                 str(error) or f"Tool '{tool_name}' exceeded the deadline.",
                 prompt_name=self.prompt_name,
                 phase=PROMPT_EVALUATION_PHASE_TOOL,
             ) from error
         except Exception as error:
-            # Restore state on any exception
-            self.execution_state.restore(pre_snapshot)
-            logger.debug(
-                "State restored after tool exception.",
-                event="tool_runner_exception_restore",
-                context={
-                    "tool": tool_name,
-                    "call_id": tool_call.id,
-                    "error": str(error),
-                },
+            # Context manager won't restore since we're returning, not raising
+            self._restore_snapshot(
+                snapshot, tool_name=tool_name, call_id=tool_call.id, reason="exception"
             )
             return _wrap_exception_as_tool_result(error, tool_name=tool_name)
 
-        # Restore if tool returned failure
+        # Restore if tool returned failure (manual, since we're returning)
         if not result.success:
-            self.execution_state.restore(pre_snapshot)
-            logger.debug(
-                "State restored after tool failure.",
-                event="tool_runner_failure_restore",
-                context={"tool": tool_name, "call_id": tool_call.id},
+            self._restore_snapshot(
+                snapshot, tool_name=tool_name, call_id=tool_call.id, reason="failure"
             )
 
         return result
+
+    def _restore_snapshot(
+        self,
+        snapshot: CompositeSnapshot,
+        *,
+        tool_name: str,
+        call_id: str | None,
+        reason: str,
+    ) -> None:
+        """Restore from snapshot with logging.
+
+        Args:
+            snapshot: CompositeSnapshot to restore.
+            tool_name: Name of the tool for logging.
+            call_id: Tool call ID for logging.
+            reason: Reason for restore (for logging).
+        """
+        self.execution_state.restore(snapshot)
+        logger.debug(
+            f"State restored after tool {reason}.",
+            event=f"tool_runner_{reason}_restore",
+            context={"tool": tool_name, "call_id": call_id},
+        )
 
     def _invoke_handler(  # noqa: PLR6301
         self,

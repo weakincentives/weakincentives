@@ -275,7 +275,8 @@ sequenceDiagram
 
 ### ToolRunner
 
-A shared `ToolRunner` provides identical transaction semantics for all adapters:
+A shared `ToolRunner` provides identical transaction semantics for all adapters.
+It uses the `tool_transaction` context manager for consistent transaction handling:
 
 ```python
 @dataclass(slots=True)
@@ -293,22 +294,39 @@ class ToolRunner:
         context: ToolContext,
     ) -> ToolResult[Any]:
         """Execute a tool call with transaction semantics."""
-        pre_snapshot = self.execution_state.snapshot(tag=f"pre:{tool_call.id}")
+        # Use transactional execution via context manager
+        with self.execution_state.tool_transaction(
+            tag=f"pre:{tool_call.id}"
+        ) as snapshot:
+            return self._execute_with_snapshot(tool_call, context, snapshot)
 
+    def _execute_with_snapshot(
+        self,
+        tool_call: ProviderToolCall,
+        context: ToolContext,
+        snapshot: CompositeSnapshot,
+    ) -> ToolResult[Any]:
+        """Execute with transactional semantics."""
         try:
             result = self._invoke_handler(tool_call, context=context)
         except VisibilityExpansionRequired:
-            self.execution_state.restore(pre_snapshot)
+            # Context manager handles restore on re-raise
             raise
         except Exception as e:
-            self.execution_state.restore(pre_snapshot)
+            # Manual restore needed since we're returning, not raising
+            self.execution_state.restore(snapshot)
             return _wrap_exception_as_tool_result(e)
 
         if not result.success:
-            self.execution_state.restore(pre_snapshot)
+            # Manual restore for failure results
+            self.execution_state.restore(snapshot)
 
         return result
 ```
+
+The context manager automatically restores state when exceptions propagate out
+of the block. For cases where we catch exceptions and return (rather than
+re-raise), manual restore is required.
 
 Used by:
 
