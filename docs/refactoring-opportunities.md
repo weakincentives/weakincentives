@@ -381,3 +381,285 @@ If addressing these refactorings, the recommended order is:
 6. **Simplify prompt module** - Larger undertaking, do incrementally
 
 Each refactoring should be done incrementally with passing tests at each step.
+
+---
+
+## Additional Findings (Deep Scan)
+
+### 9. Function Parameter Bloat
+
+**Problem**: Several functions have been marked with `# noqa: PLR0913` (too many arguments), indicating they need parameter object refactoring:
+
+| File | Function | Args |
+|------|----------|------|
+| `adapters/shared.py:762` | `_execute_tool_handler()` | 7 |
+| `adapters/shared.py:796` | `_handle_tool_exception()` | 8 |
+| `adapters/shared.py:830` | `_execute_tool_with_snapshot()` | 9 |
+| `serde/dump.py:163` | `dump()` | 6+ |
+| `prompt/registry.py:668` | `_validate_step_output_type()` | 7+ |
+| `adapters/litellm.py:220` | `__init__()` | 6+ |
+
+**Solution**: Create context objects to group related parameters:
+
+```python
+@dataclass(frozen=True, slots=True)
+class ToolExecutionContext:
+    tool: Tool
+    handler: ToolHandler
+    tool_name: str
+    params: dict[str, Any]
+    context: ToolContext
+    # ...
+```
+
+---
+
+### 10. Complex Deserialization in `execution_state.py`
+
+**Problem**: `CompositeSnapshot.from_json()` at line 208 is marked with four noqa suppressions:
+- `C901` (too complex)
+- `PLR0912` (too many branches)
+- `PLR0914` (too many local variables)
+- `PLR0915` (too many statements)
+
+This 100+ line method manually parses JSON with extensive error handling.
+
+**Solution**: Break into smaller parsing functions:
+```python
+def _parse_snapshot_id(payload: Mapping) -> UUID: ...
+def _parse_created_at(payload: Mapping) -> datetime: ...
+def _parse_session_snapshot(payload: Mapping) -> Snapshot: ...
+def _parse_resource_snapshots(payload: Mapping) -> dict[type, object]: ...
+```
+
+---
+
+### 11. Protocol Proliferation
+
+**Finding**: 45+ Protocol classes across the codebase, with some modules defining multiple related protocols:
+
+| Module | Protocols |
+|--------|-----------|
+| `prompt/protocols.py` | 5 protocols |
+| `prompt/overrides/versioning.py` | 5 protocols |
+| `adapters/_provider_protocols.py` | 6 protocols |
+| `runtime/session/*.py` | 4 protocols |
+
+**Observation**: While protocols are good for decoupling, some may be overly fine-grained. Consider consolidating related protocols into fewer, more cohesive interfaces.
+
+---
+
+### 12. Error Message Construction Pattern
+
+**Problem**: 100+ occurrences of inline `msg = ` variable assignments for error messages throughout the codebase. This creates:
+- No central source of truth for error messages
+- Inconsistent message formatting
+- Difficulty maintaining consistent error messaging
+
+**Example locations**:
+- `prompt/overrides/validation.py:112-128` - Multiple error message constructions
+- `adapters/shared.py` - Scattered error strings
+- `runtime/execution_state.py:233-237` - Inline message formatting
+
+**Solution**: Create an `_errors.py` or `messages.py` module per package with message templates:
+
+```python
+# adapters/_messages.py
+class AdapterMessages:
+    TOOL_VALIDATION_FAILED = "Tool validation failed: {error}"
+    DEADLINE_EXCEEDED = "Tool '{tool_name}' exceeded the deadline."
+    # ...
+```
+
+---
+
+### 13. Excessive Type Casting
+
+**Finding**: 269 occurrences of `cast()` across the codebase, heavily concentrated in:
+- `serde/parse.py` - Complex type coercion
+- `adapters/shared.py` - Provider response handling
+- `prompt/overrides/validation.py` - Override processing
+
+**High cast() usage suggests**:
+1. Type annotations could be more precise
+2. Some `cast()` calls could be replaced with `TypeGuard` functions
+3. Protocol definitions might need refinement
+
+**Recommendation**: Audit cast() usage and consider:
+- Using `TypeGuard` for type narrowing
+- Improving generic type parameters
+- Simplifying type hierarchies where possible
+
+---
+
+### 14. Pragma No Cover Accumulation
+
+**Finding**: 79 `# pragma: no cover` directives, primarily in:
+- `dbc/__init__.py` - Defensive guards for pure patches
+- `adapters/shared.py` - Defensive fallbacks
+- `prompt/overrides/inspection.py` - OS error handling
+
+**Concern**: While some are legitimate, the quantity suggests:
+- Potentially untestable code paths
+- Overly defensive programming
+- Opportunities for simplification
+
+---
+
+### 15. DBC Pure Patching Global State
+
+**Problem**: `dbc/__init__.py` lines 334-407 manage patching state using:
+- 4 global variables (`_pure_patch_depth`, `_pure_patch_original_*`)
+- RLock for synchronization
+- Complex activation/deactivation lifecycle
+
+**Issue**: The `_activate_pure_patches()` and `_deactivate_pure_patches()` functions form a fragile state machine with global mutable state.
+
+**Solution**: Extract into a `PurePatchManager` class:
+```python
+class PurePatchManager:
+    def __init__(self) -> None:
+        self._depth = 0
+        self._lock = RLock()
+        self._originals: dict[str, Any] = {}
+
+    @contextmanager
+    def activate(self) -> Iterator[None]:
+        with self._lock:
+            # ...
+```
+
+---
+
+### 16. Logging Component Name Strings
+
+**Problem**: Component names in structured logging are hardcoded strings scattered across modules:
+- `"adapters.shared"`
+- `"sdk_hooks"`
+- `"event_bus"`
+- `"prompt_overrides"`
+- `"session"`
+
+**Solution**: Create a `LoggingComponents` enum:
+```python
+class LoggingComponents(str, Enum):
+    ADAPTERS_SHARED = "adapters.shared"
+    SDK_HOOKS = "sdk_hooks"
+    # ...
+```
+
+---
+
+### 17. `Any` Type Overuse in Claude SDK Hooks
+
+**Problem**: `adapters/claude_agent_sdk/_hooks.py` has 20+ functions using `Any` type with `# noqa: ANN401`:
+
+```python
+async def pre_tool_use_hook(
+    input_data: Any,  # noqa: ANN401
+    sdk_context: Any,  # noqa: ANN401
+) -> ...:
+```
+
+**Issue**: The Claude SDK types are not well-typed, forcing `Any` usage. This reduces type safety.
+
+**Partial solution**: Create type stubs or wrapper types:
+```python
+@dataclass
+class SDKToolUseData:
+    """Typed wrapper for SDK tool use data."""
+    name: str
+    arguments: dict[str, Any]
+    # ...
+
+def parse_tool_use_data(input_data: Any) -> SDKToolUseData: ...
+```
+
+---
+
+### 18. Validation Config Dataclass Proliferation
+
+**Problem**: `prompt/overrides/validation.py` creates config dataclasses just to pass error message templates:
+- `SectionValidationConfig` (lines 94-98)
+- `ToolValidationConfig` (lines 147-152)
+
+These are instantiated multiple times per validation call.
+
+**Solution**: Replace with simpler approach:
+```python
+def _validate_section(
+    override: dict,
+    *,
+    unknown_items_msg: str = "Unknown sections: {items}",
+    # ...
+) -> SectionOverride: ...
+```
+
+---
+
+### 19. Duplicate Index-Building Functions
+
+**Problem**: `prompt/overrides/validation.py` has parallel functions:
+- `_section_descriptor_index()` (line 62)
+- `_tool_descriptor_index()` (line 67)
+
+Similarly for serialization:
+- `serialize_sections()` (line 501)
+- `serialize_tools()` (line 524)
+
+**Solution**: Create generic utilities:
+```python
+def build_descriptor_index[T](
+    descriptors: Iterable[T],
+    key_fn: Callable[[T], str],
+) -> dict[str, T]: ...
+```
+
+---
+
+### 20. Rendering Complexity
+
+**Problem**: `prompt/rendering.py:166` `render()` method is marked with `# noqa: PLR0914, C901` (too complex, too many local variables).
+
+The method handles:
+- Section traversal
+- Tool collection
+- Visibility resolution
+- Parameter binding
+- Structured output configuration
+
+**Solution**: Break into pipeline stages:
+```python
+class RenderingPipeline:
+    def collect_sections(self, prompt: Prompt) -> list[Section]: ...
+    def resolve_visibility(self, sections: list[Section]) -> list[Section]: ...
+    def bind_parameters(self, sections: list[Section]) -> list[Section]: ...
+    def generate_output(self, sections: list[Section]) -> RenderedPrompt: ...
+```
+
+---
+
+## Summary of All Findings
+
+| Category | Count | Priority |
+|----------|-------|----------|
+| God modules (>1000 lines) | 5 | High |
+| Functions needing param objects | 6+ | High |
+| Circular import suppressions | 8 | High |
+| Complex methods (multi-noqa) | 3 | Medium |
+| Duplicate patterns | 6+ | Medium |
+| Type casting overuse | 269 | Medium |
+| Pragma no cover | 79 | Low |
+| Error message scatter | 100+ | Low |
+| Protocol proliferation | 45+ | Low |
+
+## Recommended Refactoring Order
+
+1. **Create parameter context objects** - Quick win, improves readability
+2. **Break circular imports** - Unblocks architectural improvements
+3. **Decompose `adapters/shared.py`** - Highest maintainability gain
+4. **Extract error messages** - Enables consistent messaging
+5. **Reduce Session responsibilities** - Improves testability
+6. **Consolidate path utilities** - Reduces duplication
+7. **Simplify complex methods** - Break down multi-noqa functions
+8. **Address type casting** - Improve type safety incrementally
