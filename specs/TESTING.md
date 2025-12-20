@@ -32,11 +32,12 @@ exclude_lines = [
 1. **No `pragma: no branch`**: Do not use branch exclusion pragmas. If a branch
    cannot be tested, simplify the code to eliminate the branch.
 
-2. **Test all conditionals**: Every `if`, `elif`, `else`, `for`, `while`, and
+1. **Test all conditionals**: Every `if`, `elif`, `else`, `for`, `while`, and
    ternary expression must have both branches exercised by tests.
 
-3. **Simplify over exclude**: If a branch is defensive code that "should never
+1. **Simplify over exclude**: If a branch is defensive code that "should never
    happen", either:
+
    - Remove it (trust type annotations and upstream validation)
    - Add a test that proves the branch can be reached
    - Simplify the code to eliminate the branch

@@ -2012,7 +2012,7 @@ def test_openai_extract_all_tool_calls_skips_when_content_output_set() -> None:
         def __init__(self) -> None:
             self.output = (FirstOutput(), SecondOutput())
 
-    tool_calls, content_output, fallback_output = module._extract_all_tool_calls(
+    _, content_output, fallback_output = module._extract_all_tool_calls(
         Response(), prompt_name="test"
     )
     assert content_output is not None

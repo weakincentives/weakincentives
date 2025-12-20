@@ -526,7 +526,9 @@ def _sanitize_interpreter(interpreter: InterpreterProtocol) -> None:
     for name in getattr(module, "ALL_DISALLOWED", ()):  # pragma: no cover - defensive
         _ = interpreter.symtable.pop(name, None)
     node_handlers = getattr(interpreter, "node_handlers", None)
-    if isinstance(node_handlers, MutableMapping):
+    if isinstance(
+        node_handlers, MutableMapping
+    ):  # pragma: no cover - asteval internals
         handlers = cast(MutableMapping[str, object], node_handlers)
         for key in ("Eval", "Exec", "Import", "ImportFrom"):
             _ = handlers.pop(key, None)

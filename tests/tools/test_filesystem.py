@@ -1325,6 +1325,58 @@ class TestFilesystemBranchCoverage:
         assert isinstance(snapshot, FilesystemSnapshot)
         assert len(snapshot.commit_ref) == 40
 
+    def test_host_filesystem_commit_fails_but_head_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test branch 1424->1434: commit fails but HEAD already exists."""
+        import subprocess
+        from unittest.mock import MagicMock
+
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Create initial commit so HEAD exists
+        fs.write("file.txt", "initial")
+        _ = fs.snapshot(tag="initial")
+
+        # Store original subprocess.run
+        original_run = subprocess.run
+        commit_call_count = 0
+
+        def mock_subprocess_run(
+            args: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
+            nonlocal commit_call_count
+
+            # Let most git commands through
+            if args[0:2] in (
+                ["git", "init"],
+                ["git", "config"],
+                ["git", "add"],
+                ["git", "rev-parse"],
+            ):
+                return original_run(args, **kwargs)
+
+            # For git commit: fail to trigger the HEAD check branch
+            if args[0:2] == ["git", "commit"]:
+                commit_call_count += 1
+                if commit_call_count == 1:
+                    # First commit in this test should fail
+                    mock_result = MagicMock()
+                    mock_result.returncode = 1
+                    mock_result.stderr = "simulated failure"
+                    return mock_result
+                return original_run(args, **kwargs)
+
+            return original_run(args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        # Second snapshot - commit fails but HEAD exists, so we skip fallback
+        # and just get the existing HEAD commit
+        snapshot = fs.snapshot(tag="second")
+        assert isinstance(snapshot, FilesystemSnapshot)
+        assert len(snapshot.commit_ref) == 40
+
 
 def test_normalize_path_with_leading_dotdot() -> None:
     """Test normalize_path when .. appears without parent to pop."""

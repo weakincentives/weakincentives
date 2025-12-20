@@ -147,7 +147,7 @@ def test_renderer_renders_sections_and_tool_overrides() -> None:
 
 
 def test_renderer_tool_override_with_no_description_change() -> None:
-    registry, section = _build_registry()
+    registry, _ = _build_registry()
     snapshot = registry.snapshot()
     renderer = PromptRenderer(
         registry=snapshot,

@@ -493,6 +493,30 @@ def test_rm_removes_directory_tree(
     assert not fs.exists("src/pkg/util.py")
 
 
+def test_rm_removes_nested_directory_tree(
+    session_and_bus: tuple[Session, InProcessEventBus],
+) -> None:
+    """Test branch 963->966: directory with files in subdirectories (deleted_count > 0)."""
+    session, _bus = session_and_bus
+    section = _make_section(session=session)
+    # Create files in nested subdirectory (so glob("**/*") matches them)
+    _write(session, section, path=("src", "pkg", "sub", "module.py"), content="x")
+    _write(session, section, path=("src", "pkg", "sub", "util.py"), content="y")
+
+    rm_tool = find_tool(section, "rm")
+    params = RemoveParams(path="src/pkg")
+    result = invoke_tool(
+        rm_tool, params, session=session, filesystem=section.filesystem
+    )
+
+    # Verify files were deleted
+    fs = _get_filesystem(section)
+    assert not fs.exists("src/pkg/sub/module.py")
+    assert not fs.exists("src/pkg/sub/util.py")
+    # The message should indicate 2 files deleted
+    assert "2" in result.message
+
+
 def test_rm_removes_empty_directory(
     session_and_bus: tuple[Session, InProcessEventBus],
 ) -> None:
@@ -1451,3 +1475,49 @@ def test_file_info_render_with_size_bytes() -> None:
     # Should include size in bytes when size_bytes is not None
     assert "1024 B" in rendered
     assert "v1" in rendered
+
+
+def test_resolve_mount_path_continues_when_file_not_in_first_root(
+    tmp_path: Path,
+) -> None:
+    """Test branch 1650->1644: continue when file doesn't exist in first root."""
+    # Create two roots
+    first_root = tmp_path / "first"
+    first_root.mkdir()
+    second_root = tmp_path / "second"
+    second_root.mkdir()
+
+    # Create file only in second root
+    (second_root / "test.txt").write_text("content", encoding="utf-8")
+
+    # Use VfsToolsSection which calls _resolve_mount_path internally
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = _make_section(
+        session=session,
+        mounts=(HostMount(host_path="test.txt"),),
+        allowed_host_roots=(first_root, second_root),  # File only in second root
+    )
+
+    # The mount should have resolved successfully (found in second root)
+    assert section.filesystem.exists("test.txt")
+
+
+def test_match_glob_skips_already_seen_variant() -> None:
+    """Test branch 1692->1697: skip variant that's already in seen set."""
+    # Test pattern that creates duplicate variants due to multiple **/
+    # For pattern "**/**/*.py", expanding **/ at index 0 gives "**/*.py"
+    # and expanding **/ at index 3 also gives "**/*.py" (duplicate)
+    # This tests the branch where variant is already in seen
+    result = vfs_module._match_glob("xyz.txt", "**/**/*.py")
+    # "xyz.txt" doesn't match any *.py variant, so result is False
+    # The seen set prevents infinite loops by skipping duplicates
+    assert result is False
+
+    # Test that normal patterns with ** still work correctly
+    result = vfs_module._match_glob("a/b", "**/b")
+    assert result is True
+
+    # Test pattern that eventually matches after removing **/
+    result = vfs_module._match_glob("foo.py", "**/*.py")
+    assert result is True  # Matches after **/ is removed

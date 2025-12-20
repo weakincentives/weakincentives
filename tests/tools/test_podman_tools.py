@@ -856,6 +856,30 @@ def test_run_cli_cp_honors_connection_flag(
     assert call[:4] == ["podman", "--connection", "remote", "cp"]
 
 
+def test_run_cli_cp_without_connection_flag(
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    """Test branch 1241->1243: run_cli_cp without connection_name."""
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    runner = _FakeCliRunner()
+    section = _make_section(
+        session=session,
+        client=client,
+        cache_dir=tmp_path,
+        runner=runner,
+        connection_name=None,  # No connection name
+    )
+
+    section.run_cli_cp(source="/tmp/src", destination="/tmp/dst")
+
+    call = runner.calls[-1]
+    # Without connection_name, command should be "podman cp ..."
+    assert call[:2] == ["podman", "cp"]
+    assert "--connection" not in call
+
+
 def test_connection_resolution_uses_cli(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("PODMAN_BASE_URL", raising=False)
     monkeypatch.delenv("PODMAN_IDENTITY", raising=False)
@@ -2832,6 +2856,60 @@ def test_write_via_container_handles_cli_failures(
         section.write_via_container(path=path, content="data", mode="create")
 
 
+def test_write_via_container_skips_mkdir_for_root_level_file(
+    monkeypatch: pytest.MonkeyPatch,
+    session_and_bus: tuple[Session, InProcessEventBus],
+    tmp_path: Path,
+) -> None:
+    """Test branch 1285->1296: skip mkdir when parent is '/' (empty VfsPath)."""
+    from subprocess import CompletedProcess
+    from types import MethodType
+
+    session, _bus = session_and_bus
+    client = _FakePodmanClient()
+    section = _make_section(session=session, client=client, cache_dir=tmp_path)
+
+    # Track if mkdir is called
+    mkdir_called = False
+
+    def _fake_exec(self: object, *, config: object) -> CompletedProcess[str]:
+        nonlocal mkdir_called
+        mkdir_called = True
+        return CompletedProcess([], 0, stdout="", stderr="")
+
+    def _fake_cp(
+        self: object,
+        *,
+        source: str,
+        destination: str,
+        timeout: float | None = None,
+    ) -> CompletedProcess[str]:
+        del source, destination, timeout
+        return CompletedProcess(["podman", "cp"], 0, stdout="", stderr="")
+
+    monkeypatch.setattr(section, "run_cli_exec", MethodType(_fake_exec, section))
+    monkeypatch.setattr(section, "run_cli_cp", MethodType(_fake_cp, section))
+
+    # First: test with a single-segment path - parent is "/work", mkdir SHOULD be called
+    section.write_via_container(
+        path=vfs_module.VfsPath(("file.txt",)),
+        content="data",
+        mode="create",
+    )
+    assert mkdir_called, "mkdir should be called for file.txt (parent=/work)"
+
+    # Reset and test with empty VfsPath - parent is "/", mkdir should be skipped
+    mkdir_called = False
+    # Empty VfsPath results in container_path="/work", parent="/"
+    # This skips the mkdir block (branch 1285->1296)
+    section.write_via_container(
+        path=vfs_module.VfsPath(()),
+        content="data",
+        mode="create",
+    )
+    assert not mkdir_called, "mkdir should be skipped for empty VfsPath (parent=/)"
+
+
 def test_tools_module_missing_attr_raises() -> None:
     from weakincentives.contrib import tools
 
@@ -2897,3 +2975,19 @@ def test_resolve_host_path_finds_file_in_allowed_root() -> None:
         allowed_roots = (Path(tmpdir),)
         resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
         assert resolved == test_file
+
+
+def test_resolve_host_path_continues_when_file_not_in_first_root() -> None:
+    """Test branch 411->405: continue when candidate doesn't exist in first root."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as first_root:
+        with tempfile.TemporaryDirectory() as second_root:
+            # Create file only in second root
+            test_file = Path(second_root) / "test.txt"
+            test_file.write_text("content")
+
+            # First root doesn't have file, should continue to second root
+            allowed_roots = (Path(first_root), Path(second_root))
+            resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
+            assert resolved == test_file

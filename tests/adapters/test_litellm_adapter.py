@@ -1882,7 +1882,8 @@ def test_retry_after_from_headers_mapping() -> None:
     module = cast(Any, _reload_module())
 
     class ErrorWithHeaders:
-        response = {"headers": {"retry-after": "10"}}
+        def __init__(self) -> None:
+            self.response: dict[str, object] = {"headers": {"retry-after": "10"}}
 
     result = module._retry_after_from_error(ErrorWithHeaders())
     assert result is not None
