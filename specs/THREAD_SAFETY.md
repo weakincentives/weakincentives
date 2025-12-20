@@ -148,6 +148,9 @@ to provide thread-based synchronization only.
   behind an `RLock` so slice updates are atomic per reducer application.
 - `LocalPromptOverridesStore` is safe within a single process: root resolution
   and per-file operations are guarded by locks, and writes use temp + rename.
+- `ExecutionState` protects `_pending_tools` access with an `RLock`, making
+  `begin_tool_execution`, `end_tool_execution`, `abort_tool_execution`, and
+  `pending_tool_executions` safe for concurrent calls from hook threads.
 
 ## Non-Guarantees
 
