@@ -150,6 +150,7 @@ Consult these specs before modifying related code:
 | `specs/PROMPTS.md` | Prompt system, composition, structured output |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
+| `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
