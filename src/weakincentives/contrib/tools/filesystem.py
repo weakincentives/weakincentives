@@ -974,7 +974,6 @@ class HostFilesystem:
     _read_only: bool = False
     _mount_point: str | None = None
     _git_initialized: bool = False
-    _is_preexisting_repo: bool = False
 
     @property
     def root(self) -> str:
@@ -1358,17 +1357,7 @@ class HostFilesystem:
             return
 
         git_dir = Path(self._root) / ".git"
-        if git_dir.exists():
-            # Check if this is a pre-existing repo with commits
-            # If so, we mark it to skip snapshot operations to avoid polluting
-            # existing repositories with internal snapshot commits
-            result = subprocess.run(  # nosec B603 B607
-                ["git", "rev-parse", "--verify", "HEAD"],
-                cwd=self._root,
-                capture_output=True,
-            )
-            self._is_preexisting_repo = result.returncode == 0
-        else:
+        if not git_dir.exists():
             _ = subprocess.run(  # nosec B603 B607
                 ["git", "init"],
                 cwd=self._root,
@@ -1388,7 +1377,6 @@ class HostFilesystem:
                 check=True,
                 capture_output=True,
             )
-            self._is_preexisting_repo = False
         self._git_initialized = True
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
@@ -1397,11 +1385,6 @@ class HostFilesystem:
         Uses git's content-addressed storage for copy-on-write semantics.
         Identical files share storage automatically between snapshots.
 
-        For pre-existing git repositories (those with commits before
-        HostFilesystem was created), this returns a no-op snapshot that
-        references the current HEAD. This prevents polluting existing
-        repositories with internal snapshot commits.
-
         Args:
             tag: Optional human-readable label for the snapshot.
 
@@ -1409,24 +1392,6 @@ class HostFilesystem:
             Immutable snapshot that can be stored in session state.
         """
         self._ensure_git()
-
-        # For pre-existing repos, return a no-op snapshot using current HEAD
-        # This avoids creating snapshot commits in existing repositories
-        if self._is_preexisting_repo:
-            result = subprocess.run(  # nosec B603 B607
-                ["git", "rev-parse", "HEAD"],
-                cwd=self._root,
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            return FilesystemSnapshot(
-                snapshot_id=uuid4(),
-                created_at=datetime.now(UTC),
-                commit_ref=result.stdout.strip(),
-                root_path=self._root,
-                tag=tag,
-            )
 
         # Stage all changes (including new and deleted files)
         _ = subprocess.run(  # nosec B603 B607
@@ -1489,10 +1454,6 @@ class HostFilesystem:
         Performs a hard reset to the snapshot's commit and removes any
         untracked files (including ignored files) for a strict rollback.
 
-        For pre-existing git repositories, this is a no-op since snapshots
-        don't create actual commits and restoring would potentially
-        disrupt the repository's actual state.
-
         Args:
             snapshot: The snapshot to restore.
 
@@ -1500,10 +1461,6 @@ class HostFilesystem:
             SnapshotRestoreError: If git reset fails (e.g., invalid commit).
         """
         self._ensure_git()
-
-        # Skip restoration for pre-existing repos - snapshots are no-ops
-        if self._is_preexisting_repo:
-            return
 
         # Hard reset to the commit (restores tracked files)
         result = subprocess.run(  # nosec B603 B607
