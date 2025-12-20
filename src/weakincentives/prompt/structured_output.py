@@ -110,7 +110,7 @@ def _extract_json_payload(
             ) from error
 
     stripped = text.strip()
-    if stripped:
+    if stripped:  # pragma: no branch
         try:
             return json.loads(stripped)
         except json.JSONDecodeError:

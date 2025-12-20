@@ -182,7 +182,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=99"
+addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=100"
 markers = [
     "integration: marks tests that exercise live provider integrations.",
     "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
@@ -244,8 +244,7 @@ branch = true
 source = ["src/weakincentives"]
 
 [tool.coverage.report]
-# Target: 100% line+branch coverage. Current: 99.5%+ (working toward full coverage)
-fail_under = 99
+fail_under = 100
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",

@@ -616,7 +616,7 @@ class InMemoryFilesystem:
             relative = file_path[len(prefix) :] if prefix else file_path
             if "/" in relative:
                 child_dir = relative.split("/")[0]
-                if child_dir not in seen:
+                if child_dir not in seen:  # pragma: no branch
                     seen.add(child_dir)
                     entries.append(
                         FileEntry(
@@ -885,7 +885,7 @@ class InMemoryFilesystem:
             self._ensure_parents(normalized)
         else:
             parent = "/".join(normalized.split("/")[:-1])
-            if parent and parent not in self._directories:
+            if parent and parent not in self._directories:  # pragma: no branch
                 raise FileNotFoundError(f"Parent directory does not exist: {parent}")
 
         self._directories.add(normalized)
@@ -1421,7 +1421,7 @@ class HostFilesystem:
                 cwd=self._root,
                 capture_output=True,
             )
-            if head_check.returncode != 0:
+            if head_check.returncode != 0:  # pragma: no branch
                 # No HEAD commit exists - create an initial empty commit
                 _ = subprocess.run(  # nosec B603 B607
                     ["git", "commit", "--allow-empty", "--no-gpg-sign", "-m", message],

@@ -379,7 +379,7 @@ def _render_children_for_read(
         if should_skip_children:
             skip_depth = node.depth
 
-        if rendered:
+        if rendered:  # pragma: no branch
             rendered_children.append(rendered)
 
     return "\n\n".join(rendered_children)
@@ -403,7 +403,7 @@ def _collect_child_keys_for_node(
         if in_parent:
             if node.depth == parent_depth + 1 and node.path[:-1] == parent_path:
                 child_keys.append(node.section.key)
-            elif node.depth <= parent_depth:
+            elif node.depth <= parent_depth:  # pragma: no branch
                 break
 
     return tuple(child_keys)

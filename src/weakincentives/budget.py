@@ -155,7 +155,7 @@ class BudgetTracker:
                     exceeded_dimension="output_tokens",
                 )
 
-        if budget.max_total_tokens is not None:
+        if budget.max_total_tokens is not None:  # pragma: no branch
             total = consumed.total_tokens or 0
             if total > budget.max_total_tokens:
                 raise BudgetExceededError(

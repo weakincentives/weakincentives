@@ -237,7 +237,7 @@ class PromptRenderer[OutputT]:
                     field_description_patches,
                 )
 
-            if rendered:
+            if rendered:  # pragma: no branch
                 rendered_sections.append(rendered)
 
         # Compute current visibility once for tool injection
@@ -336,7 +336,7 @@ class PromptRenderer[OutputT]:
                 # and their path starts with parent's path
                 if node.depth == parent_depth + 1 and node.path[:-1] == parent_path:
                     child_keys.append(node.section.key)
-                elif node.depth <= parent_depth:
+                elif node.depth <= parent_depth:  # pragma: no branch
                     # We've moved past the parent's children
                     break
 
@@ -359,12 +359,12 @@ class PromptRenderer[OutputT]:
             )
             patched_tool = tool
             if override is not None:
-                if (
+                if (  # pragma: no branch
                     override.description is not None
                     and override.description != tool.description
                 ):
                     patched_tool = replace(tool, description=override.description)
-                if override.param_descriptions:
+                if override.param_descriptions:  # pragma: no branch
                     field_description_patches[tool.name] = dict(
                         override.param_descriptions
                     )

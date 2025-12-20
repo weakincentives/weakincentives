@@ -50,17 +50,14 @@ class SnapshotRestoreError(WinkError, RuntimeError):
 
 
 def _normalize_tags(
-    tags: Mapping[object, object] | None, *, error_cls: type[Exception]
+    tags: Mapping[object, object], *, error_cls: type[Exception]
 ) -> Mapping[str, str]:
     normalized: dict[str, str] = {}
-
-    if tags is not None:  # pragma: no branch - callers always provide tags via get()
-        for key, value in tags.items():
-            if not isinstance(key, str) or not isinstance(value, str):
-                msg = "Snapshot tags must be string key/value pairs"
-                raise error_cls(msg)
-            normalized[key] = value
-
+    for key, value in tags.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            msg = "Snapshot tags must be string key/value pairs"
+            raise error_cls(msg)
+        normalized[key] = value
     return cast(Mapping[str, str], types.MappingProxyType(normalized))
 
 
@@ -189,7 +186,7 @@ def _validate_tags(payload: Mapping[str, JSONValue]) -> Mapping[str, str]:
         raise SnapshotRestoreError("Snapshot tags must be an object")
 
     return _normalize_tags(
-        cast(Mapping[object, object] | None, tags_obj),
+        cast(Mapping[object, object], tags_obj),
         error_cls=SnapshotRestoreError,
     )
 

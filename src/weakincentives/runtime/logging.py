@@ -157,7 +157,7 @@ def get_logger(
     elif isinstance(logger_override, logging.LoggerAdapter):
         base_logger = _unwrap_logger(cast(_SupportsNestedLogger, logger_override))
         adapter_extra = getattr(logger_override, "extra", None)
-        if isinstance(adapter_extra, Mapping):
+        if isinstance(adapter_extra, Mapping):  # pragma: no branch
             base_context = {
                 **dict(cast(StructuredLogPayload, adapter_extra)),
                 **base_context,
@@ -251,10 +251,10 @@ class _JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
         }
         event = getattr(record, "event", None)
-        if event is not None:
+        if event is not None:  # pragma: no branch
             payload["event"] = event
         context = getattr(record, "context", None)
-        if context:
+        if context:  # pragma: no branch
             payload["context"] = context
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)

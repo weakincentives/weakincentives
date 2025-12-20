@@ -31,8 +31,50 @@ from weakincentives.contrib.tools.filesystem import (
     ReadResult,
     SnapshotableFilesystem,
     WriteResult,
+    normalize_path,
 )
 from weakincentives.errors import SnapshotRestoreError
+
+
+class TestNormalizePath:
+    """Tests for normalize_path utility function."""
+
+    def test_empty_path(self) -> None:
+        assert normalize_path("") == ""
+
+    def test_dot_path(self) -> None:
+        assert normalize_path(".") == ""
+
+    def test_root_path(self) -> None:
+        assert normalize_path("/") == ""
+
+    def test_only_slashes_results_in_empty_segments(self) -> None:
+        """Paths with only slashes should result in empty result."""
+        assert normalize_path("//") == ""
+        assert normalize_path("///") == ""
+
+    def test_only_dots_and_slashes(self) -> None:
+        """Paths with only dots and slashes should result in empty."""
+        assert normalize_path("/./") == ""
+        assert normalize_path("././") == ""
+
+    def test_simple_path(self) -> None:
+        assert normalize_path("foo/bar") == "foo/bar"
+
+    def test_path_with_leading_slash(self) -> None:
+        assert normalize_path("/foo/bar") == "foo/bar"
+
+    def test_path_with_trailing_slash(self) -> None:
+        assert normalize_path("foo/bar/") == "foo/bar"
+
+    def test_path_with_parent_refs(self) -> None:
+        assert normalize_path("foo/../bar") == "bar"
+        assert normalize_path("foo/bar/../baz") == "foo/baz"
+
+    def test_parent_refs_at_root(self) -> None:
+        """Parent refs that go beyond root are ignored."""
+        assert normalize_path("../foo") == "foo"
+        assert normalize_path("../../foo") == "foo"
 
 
 class TestInMemoryFilesystemBasics:
@@ -369,6 +411,24 @@ class TestInMemoryFilesystemDelete:
         fs = InMemoryFilesystem(_read_only=True)
         with pytest.raises(PermissionError):
             fs.delete("file.txt")
+
+    def test_delete_root_clears_contents_but_keeps_root(self) -> None:
+        """Deleting root recursively clears contents but root directory persists."""
+        fs = InMemoryFilesystem()
+        fs.write("file.txt", "content")
+        fs.mkdir("subdir")
+        fs.write("subdir/nested.txt", "nested content")
+
+        # Delete root recursively
+        fs.delete("/", recursive=True)
+
+        # Root should still exist
+        stat = fs.stat("/")
+        assert stat.is_directory
+
+        # Contents should be gone
+        assert not fs.exists("file.txt")
+        assert not fs.exists("subdir")
 
 
 class TestInMemoryFilesystemMkdir:
@@ -1218,6 +1278,46 @@ class TestHostFilesystemSnapshots:
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
 
         # This should trigger the fallback path
+        snapshot = fs.snapshot()
+        assert isinstance(snapshot, FilesystemSnapshot)
+        assert len(snapshot.commit_ref) == 40
+
+    def test_snapshot_on_existing_git_repo(self, tmp_path: Path) -> None:
+        """Snapshot should work on pre-existing git repo without re-initializing."""
+        import subprocess
+
+        # Initialize git repo before creating HostFilesystem
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+        # Create a file and commit it
+        (tmp_path / "existing.txt").write_text("pre-existing content")
+        subprocess.run(
+            ["git", "add", "."], cwd=tmp_path, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "--no-gpg-sign", "-m", "initial commit"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+        # Now create HostFilesystem on this existing repo
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("new_file.txt", "new content")
+
+        # Snapshot should work without re-initializing git
         snapshot = fs.snapshot()
         assert isinstance(snapshot, FilesystemSnapshot)
         assert len(snapshot.commit_ref) == 40

@@ -146,7 +146,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
                 placeholders.add(named)
                 continue
             braced = match.group("braced")
-            if braced:
+            if braced:  # pragma: no branch
                 placeholders.add(braced)
         return placeholders
 

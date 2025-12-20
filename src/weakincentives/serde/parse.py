@@ -498,11 +498,7 @@ def _find_key_exact(
 
 def _build_lowered_key_map(data: Mapping[str, object]) -> dict[str, str]:
     """Build a case-insensitive key lookup map."""
-    lowered_map: dict[str, str] = {}
-    for key in data:
-        if isinstance(key, str):  # pragma: no branch - Mapping[str, ...] keys are str
-            _ = lowered_map.setdefault(key.lower(), key)
-    return lowered_map
+    return {key.lower(): key for key in data}
 
 
 def _find_key(

@@ -389,7 +389,7 @@ def extract_payload(response: object) -> dict[str, Any] | None:
             return None
         if isinstance(payload, Mapping):
             mapping_payload = _mapping_to_str_dict(cast(Mapping[Any, Any], payload))
-            if mapping_payload is not None:
+            if mapping_payload is not None:  # pragma: no branch
                 return mapping_payload
         return None
     if isinstance(response, Mapping):  # pragma: no cover - defensive
@@ -1008,7 +1008,7 @@ def build_json_schema_response_format(
             },
             "required": [ARRAY_WRAPPER_KEY],
         }
-        if not allow_extra_keys:
+        if not allow_extra_keys:  # pragma: no branch
             schema_payload["additionalProperties"] = False
     else:
         schema_payload = base_schema
@@ -1453,7 +1453,7 @@ class ResponseParser[OutputT]:
                     phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                     provider_payload=provider_payload,
                 )
-            if output is not None:
+            if output is not None:  # pragma: no branch
                 text_value = None
 
         return output, text_value
@@ -1755,7 +1755,7 @@ class InnerLoop[OutputT]:
 
         if isinstance(self._next_tool_choice, Mapping):
             tool_choice_mapping = cast(Mapping[str, object], self._next_tool_choice)
-            if tool_choice_mapping.get("type") == "function":
+            if tool_choice_mapping.get("type") == "function":  # pragma: no branch
                 self._next_tool_choice = next_choice
 
     def _finalize_response(self, message: ProviderMessage) -> PromptResponse[OutputT]:

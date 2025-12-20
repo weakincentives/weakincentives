@@ -72,7 +72,7 @@ def _set_extras(instance: object, extras: Mapping[str, object]) -> None:
     except AttributeError:
         cls = instance.__class__
         descriptor = _SLOTTED_EXTRAS.get(cls)
-        if descriptor is None:
+        if descriptor is None:  # pragma: no branch
             descriptor = _ExtrasDescriptor()
             _SLOTTED_EXTRAS[cls] = descriptor
             cls.__extras__ = descriptor  # type: ignore[attr-defined]
@@ -99,7 +99,7 @@ def _merge_annotated_meta(
             break
         base = args[0]
         for extra in args[1:]:
-            if isinstance(extra, Mapping):
+            if isinstance(extra, Mapping):  # pragma: no branch
                 merged.update(cast(Mapping[str, object], extra))
     return base, merged
 

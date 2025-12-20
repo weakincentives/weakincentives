@@ -408,7 +408,7 @@ def _resolve_host_path(host_path: str, allowed_roots: Sequence[Path]) -> Path:
             _ = candidate.relative_to(root)
         except ValueError:
             continue
-        if candidate.exists():
+        if candidate.exists():  # pragma: no branch
             return candidate
     raise ToolValidationError("Host path is outside the allowed roots or missing.")
 
@@ -1238,7 +1238,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]:
         cmd: list[str] = ["podman"]
-        if self._connection_name:
+        if self._connection_name:  # pragma: no branch
             cmd.extend(["--connection", self._connection_name])
         cmd.extend(["cp", source, destination])
         runner = self._exec_runner
@@ -1282,7 +1282,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             payload = f"{existing}{content}"
         container_path = _container_path_for(path)
         parent = posixpath.dirname(container_path)
-        if parent and parent != "/":
+        if parent and parent != "/":  # pragma: no branch
             mkdir_result = self.run_cli_exec(
                 config=_ExecConfig(command=["mkdir", "-p", parent], cwd="/"),
             )

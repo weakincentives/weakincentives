@@ -975,6 +975,17 @@ def test_schema_collection_and_literal_models() -> None:
     float_props = as_dict(literal_float_schema["properties"])
     assert as_dict(float_props["ratio"])["type"] == "number"
 
+    # Mixed-type literals don't get a type annotation (valid Python typing)
+    @dataclass
+    class LiteralMixed:
+        mixed: Literal[1, "auto"]  # type: ignore[invalid-type-form]
+
+    literal_mixed_schema = schema(LiteralMixed)
+    mixed_props = as_dict(literal_mixed_schema["properties"])
+    mixed_schema = as_dict(mixed_props["mixed"])
+    assert "type" not in mixed_schema
+    assert mixed_schema["enum"] == [1, "auto"]
+
 
 def test_schema_invalid_extra_value_and_type_errors() -> None:
     with pytest.raises(ValueError):
@@ -1470,3 +1481,24 @@ def test_schema_additional_types() -> None:
     assert as_dict(enum_props["flag"])["type"] == "boolean"
     assert as_dict(enum_props["count"])["type"] == "integer"
     assert as_dict(enum_props["ratio"])["type"] == "number"
+
+    # Mixed-type enums don't get a type annotation
+    class MixedEnum(Enum):
+        ONE = 1
+        AUTO = "auto"
+
+    @dataclass
+    class MixedEnumSchema:
+        mode: MixedEnum
+
+    globals().update({"MixedEnum": MixedEnum, "MixedEnumSchema": MixedEnumSchema})
+    try:
+        mixed_enum_schema = schema(MixedEnumSchema)
+    finally:
+        globals().pop("MixedEnumSchema", None)
+        globals().pop("MixedEnum", None)
+
+    mixed_enum_props = as_dict(mixed_enum_schema["properties"])
+    mode_schema = as_dict(mixed_enum_props["mode"])
+    assert "type" not in mode_schema
+    assert mode_schema["enum"] == [1, "auto"]

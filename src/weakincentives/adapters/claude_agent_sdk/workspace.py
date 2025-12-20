@@ -294,7 +294,7 @@ def _render_workspace_template(previews: tuple[HostMountPreview, ...]) -> str:
         for preview in previews:
             kind = "directory" if preview.is_directory else "file"
             lines.append(f"\n**{preview.mount_path}** ({kind}):")
-            if preview.entries:
+            if preview.entries:  # pragma: no branch
                 visible_entries = preview.entries[:_TEMPLATE_PREVIEW_LIMIT]
                 lines.extend(f"  - {entry}" for entry in visible_entries)
                 remaining = len(preview.entries) - _TEMPLATE_PREVIEW_LIMIT

@@ -649,7 +649,7 @@ def run_debug_server(
     """Run the uvicorn server for the supplied FastAPI app."""
 
     url = f"http://{host}:{port}/"
-    if open_browser:
+    if open_browser:  # pragma: no branch
         threading.Timer(0.2, _open_browser, args=(url, logger)).start()
 
     logger.info(

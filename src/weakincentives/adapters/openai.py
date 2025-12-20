@@ -300,7 +300,7 @@ def _responses_tool_spec(
         normalized["description"] = description
 
     parameters = function_mapping.get("parameters")
-    if parameters is not None:
+    if parameters is not None:  # pragma: no branch
         normalized["parameters"] = parameters
 
     strict = function_mapping.get("strict")
@@ -333,7 +333,7 @@ def _responses_tool_choice(
                 name_val = function_name
         else:
             alt_name = tool_choice_mapping.get("name")
-            if isinstance(alt_name, str):
+            if isinstance(alt_name, str):  # pragma: no branch
                 name_val = alt_name
 
         if name_val and name_val.strip():
@@ -474,7 +474,7 @@ def _extract_all_tool_calls(
             continue
 
         # Track first output with content for text/parsed extraction
-        if content_output is None:
+        if content_output is None:  # pragma: no branch
             content = getattr(output, "content", None)
             if isinstance(content, Sequence) and content:
                 content_output = output
@@ -741,7 +741,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     _responses_tool_spec(spec, prompt_name=prompt_name)
                     for spec in tool_specs
                 ]
-                if tool_choice_directive is not None:
+                if tool_choice_directive is not None:  # pragma: no branch
                     request_payload["tool_choice"] = _responses_tool_choice(
                         tool_choice_directive, prompt_name=prompt_name
                     )

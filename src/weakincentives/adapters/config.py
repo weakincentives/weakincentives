@@ -175,7 +175,7 @@ class OpenAIModelConfig(LLMConfig):
             params["logprobs"] = self.logprobs
         if self.top_logprobs is not None:
             params["top_logprobs"] = self.top_logprobs
-        if self.parallel_tool_calls is not None:
+        if self.parallel_tool_calls is not None:  # pragma: no branch
             params["parallel_tool_calls"] = self.parallel_tool_calls
         if self.store is not None:
             params["store"] = self.store

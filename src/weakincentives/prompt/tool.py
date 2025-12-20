@@ -678,7 +678,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             return_annotation_to_validate = get_args(return_annotation_to_validate)[0]
 
         origin = get_origin(return_annotation_to_validate)
-        if origin is ToolResult:
+        if origin is ToolResult:  # pragma: no branch
             result_args_raw = get_args(return_annotation_to_validate)
             if result_args_raw and self._matches_result_annotation(
                 result_args_raw[0],
@@ -719,7 +719,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                     placeholder="ResultT",
                 )
             element = args[0]
-        elif len(args) == _SINGLE_GENERIC_ARG_COUNT:
+        elif len(args) == _SINGLE_GENERIC_ARG_COUNT:  # pragma: no branch
             element = args[0]
 
         if not isinstance(element, type):

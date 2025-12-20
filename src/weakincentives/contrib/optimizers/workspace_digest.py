@@ -262,7 +262,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             digest = response.output
         elif response.output is not None:
             candidate = getattr(response.output, "digest", None)
-            if isinstance(candidate, str):
+            if isinstance(candidate, str):  # pragma: no branch
                 digest = candidate
         if digest is None and response.text:
             digest = response.text

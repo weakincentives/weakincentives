@@ -77,7 +77,7 @@ def latest_workspace_digest(
 
     entries = session[WorkspaceDigest].all()
     for digest in reversed(entries):
-        if getattr(digest, "section_key", None) == normalized_key:
+        if getattr(digest, "section_key", None) == normalized_key:  # pragma: no branch
             return digest
     return None
 

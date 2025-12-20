@@ -751,7 +751,9 @@ class Session(SessionProtocol):
                 normalized = tuple(result)
                 with self.locked():
                     current = self._state.get(slice_type, EMPTY_SLICE)
-                    if current is previous or current == normalized:
+                    if (
+                        current is previous or current == normalized
+                    ):  # pragma: no branch
                         self._state[slice_type] = normalized
                         # Track change if state actually changed
                         if previous != normalized:

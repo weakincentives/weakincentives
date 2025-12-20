@@ -321,6 +321,16 @@ def test_ensure_raises_without_predicates() -> None:
         ensure()
 
 
+def test_require_skips_when_inactive() -> None:
+    @require(lambda value: value > 0)
+    def square(value: int) -> int:
+        return value * value
+
+    # Would fail if active
+    with dbc_enabled(False):
+        assert square(-5) == 25
+
+
 def test_ensure_skips_when_inactive() -> None:
     @ensure(lambda value, result: result > value)
     def bump(value: int) -> int:
@@ -402,6 +412,15 @@ def test_pure_handles_uncopyable_keyword_arguments() -> None:
 
     instance = NoCopy()
     assert isinstance(use(value=instance), int)
+
+
+def test_pure_allows_unmutated_keyword_arguments() -> None:
+    @pure
+    def compute(*, data: dict[str, int]) -> int:
+        return data.get("value", 0) * 2
+
+    result = compute(data={"value": 5})
+    assert result == 10
 
 
 def test_require_predicate_returning_none() -> None:

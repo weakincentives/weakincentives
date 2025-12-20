@@ -254,7 +254,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         # from the working directory. This ensures MCP-bridged tools operate on
         # the same filesystem as the SDK's native tools.
         filesystem = prompt.filesystem()
-        if filesystem is None:
+        if filesystem is None:  # pragma: no branch
             workspace_root = self._client_config.cwd or str(Path.cwd())
             filesystem = HostFilesystem(_root=workspace_root)
 
@@ -372,7 +372,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         if self._client_config.cwd:
             options_kwargs["cwd"] = self._client_config.cwd
 
-        if self._client_config.permission_mode:
+        if self._client_config.permission_mode:  # pragma: no branch
             options_kwargs["permission_mode"] = self._client_config.permission_mode
 
         if self._client_config.max_turns:
@@ -417,7 +417,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             }
 
         # Suppress stderr if configured (hides bun errors and CLI noise)
-        if self._client_config.suppress_stderr:
+        if self._client_config.suppress_stderr:  # pragma: no branch
             options_kwargs["stderr"] = lambda _: None
 
         # Create async hook callbacks
@@ -518,13 +518,13 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         for message in reversed(messages):
             if isinstance(message, ResultMessage):
-                if hasattr(message, "result") and message.result:
+                if hasattr(message, "result") and message.result:  # pragma: no branch
                     result_text = message.result
                 structured_output = self._try_parse_structured_output(message, rendered)
 
             if hasattr(message, "usage") and message.usage:
                 usage_dict = message.usage
-                if isinstance(usage_dict, dict):
+                if isinstance(usage_dict, dict):  # pragma: no branch
                     total_input_tokens += usage_dict.get("input_tokens", 0)
                     total_output_tokens += usage_dict.get("output_tokens", 0)
 

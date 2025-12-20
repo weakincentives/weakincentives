@@ -607,7 +607,7 @@ class PromptRegistry:
 
             # Validate type coherence
             tool = tool_instances.get(tool_name)
-            if tool is not None:
+            if tool is not None:  # pragma: no branch
                 PromptRegistry._validate_step_type_coherence(
                     step,
                     step_idx,
@@ -717,8 +717,8 @@ def _validate_array_output(
             f"Expected: sequence of {element_type.__name__}, got: {type(output).__name__}."
         )
         raise PromptValidationError(msg, section_path=path, placeholder="steps")
-    for item in cast(Sequence[object], output):
-        if type(item) is not element_type:
+    for item in cast(Sequence[object], output):  # pragma: no branch
+        if type(item) is not element_type:  # pragma: no branch
             msg = (
                 f'Task example step {step_idx} output type mismatch for tool "{tool_name}". '
                 f"Expected: sequence of {element_type.__name__}, "

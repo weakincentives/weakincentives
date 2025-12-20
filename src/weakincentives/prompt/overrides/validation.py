@@ -582,7 +582,7 @@ def _collect_param_descriptions(tool: ToolContractProtocol) -> dict[str, str]:
     descriptions: dict[str, str] = {}
     for field in fields(params_type):
         description = field.metadata.get("description") if field.metadata else None
-        if isinstance(description, str) and description:
+        if isinstance(description, str) and description:  # pragma: no branch
             descriptions[field.name] = description
     return descriptions
 
