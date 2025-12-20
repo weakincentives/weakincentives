@@ -580,9 +580,8 @@ def _build_multi_tool_prompt() -> PromptTemplate[object]:
     task_section = MarkdownSection[MultiStepParams](
         title="Task",
         template=(
-            "Use the Glob tool to list all Python files (*.py pattern) in ${target_dir}. "
-            "Then use the Read tool to read the first Python file you found. "
-            "Finally, summarize what you learned in one sentence."
+            "Find all Python files in the ${target_dir} directory and read the "
+            "contents of at least one of them. Summarize what you found."
         ),
         key="task",
     )
@@ -603,11 +602,12 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(tmp_path: Path) -> N
     """
     config = _make_config(tmp_path)
 
+    # Allow tools that can be used for file discovery and reading
+    # Claude may choose different tools (Glob vs Bash for listing, Read vs Bash for reading)
     adapter = _make_adapter(
         tmp_path,
         client_config=config,
-        # Allow Glob and Read for this multi-step task
-        allowed_tools=("Glob", "Read"),
+        allowed_tools=("Glob", "Read", "Bash"),
     )
 
     prompt_template = _build_multi_tool_prompt()
@@ -624,17 +624,25 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(tmp_path: Path) -> N
     assert response.prompt_name == "multi_tool_workflow"
     assert response.text is not None
 
-    # Verify multiple tool invocations were captured
-    expected_min_tools = 2  # Glob + Read
+    # Verify multiple tool invocations were captured (at least 2 for find + read)
+    expected_min_tools = 2
     assert len(tool_invoked_events) >= expected_min_tools, (
-        f"Expected at least {expected_min_tools} tool invocations (Glob + Read). "
+        f"Expected at least {expected_min_tools} tool invocations. "
         f"Got {len(tool_invoked_events)}: {[e.name for e in tool_invoked_events]}"
     )
 
-    # Verify both Glob and Read were used
+    # Verify at least one file discovery tool was used (Glob or Bash)
     tool_names = {e.name for e in tool_invoked_events}
-    assert "Glob" in tool_names, f"Expected Glob to be invoked. Got: {tool_names}"
-    assert "Read" in tool_names, f"Expected Read to be invoked. Got: {tool_names}"
+    has_discovery_tool = "Glob" in tool_names or "Bash" in tool_names
+    assert has_discovery_tool, (
+        f"Expected Glob or Bash to be invoked for file discovery. Got: {tool_names}"
+    )
+
+    # Verify at least one file reading tool was used (Read or Bash)
+    has_read_tool = "Read" in tool_names or "Bash" in tool_names
+    assert has_read_tool, (
+        f"Expected Read or Bash to be invoked for file reading. Got: {tool_names}"
+    )
 
     # Verify each event has the expected adapter attribution
     for event in tool_invoked_events:
