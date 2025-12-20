@@ -1941,7 +1941,7 @@ def test_claude_agent_sdk_adapter_workspace_respects_byte_limit(
             session=session,
             mounts=(
                 HostMount(
-                    host_path="README.md",
+                    host_path=str(isolated_workspace / "README.md"),
                     mount_path="readme.md",
                     max_bytes=10,  # Very small - should fail
                 ),
