@@ -1221,3 +1221,127 @@ class TestHostFilesystemSnapshots:
         snapshot = fs.snapshot()
         assert isinstance(snapshot, FilesystemSnapshot)
         assert len(snapshot.commit_ref) == 40
+
+    def test_preexisting_repo_snapshot_is_noop(self, tmp_path: Path) -> None:
+        """snapshot() on pre-existing git repo should not create new commits."""
+        import subprocess
+
+        # Initialize a git repo with an initial commit (simulating a real project)
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+        (tmp_path / "file.txt").write_text("original")
+        subprocess.run(
+            ["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "initial"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+        # Get the initial commit hash
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        initial_commit = result.stdout.strip()
+
+        # Create HostFilesystem on this pre-existing repo
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Modify a file
+        fs.write("file.txt", "modified")
+
+        # Snapshot should NOT create a new commit (returns current HEAD)
+        snapshot = fs.snapshot(tag="pre:test:12345")
+        assert snapshot.commit_ref == initial_commit
+
+        # Verify no new commits were created (still only the initial commit)
+        result = subprocess.run(
+            ["git", "rev-list", "--count", "HEAD"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert result.stdout.strip() == "1"
+
+    def test_preexisting_repo_restore_is_noop(self, tmp_path: Path) -> None:
+        """restore() on pre-existing git repo should not modify state."""
+        import subprocess
+
+        # Initialize a git repo with an initial commit
+        subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+        (tmp_path / "file.txt").write_text("original")
+        subprocess.run(
+            ["git", "add", "-A"], cwd=tmp_path, check=True, capture_output=True
+        )
+        subprocess.run(
+            ["git", "commit", "-m", "initial"],
+            cwd=tmp_path,
+            check=True,
+            capture_output=True,
+        )
+
+        # Create HostFilesystem and take a snapshot
+        fs = HostFilesystem(_root=str(tmp_path))
+        snapshot = fs.snapshot()
+
+        # Modify a file
+        fs.write("file.txt", "modified")
+        assert fs.read("file.txt").content == "modified"
+
+        # Restore should be a no-op for pre-existing repos
+        fs.restore(snapshot)
+
+        # File should still be modified (no actual rollback happened)
+        assert fs.read("file.txt").content == "modified"
+
+    def test_new_repo_not_flagged_as_preexisting(self, tmp_path: Path) -> None:
+        """HostFilesystem in empty directory should not be flagged as preexisting."""
+        fs = HostFilesystem(_root=str(tmp_path))
+        fs.write("file.txt", "content")
+
+        # First snapshot triggers git init
+        snapshot1 = fs.snapshot(tag="v1")
+
+        # Should not be flagged as preexisting
+        assert not fs._is_preexisting_repo
+
+        # Modify and take another snapshot
+        fs.write("file.txt", "modified")
+        snapshot2 = fs.snapshot(tag="v2")
+
+        # Should have different commits
+        assert snapshot1.commit_ref != snapshot2.commit_ref
+
+        # Restore should work normally
+        fs.restore(snapshot1)
+        assert fs.read("file.txt").content == "content"
