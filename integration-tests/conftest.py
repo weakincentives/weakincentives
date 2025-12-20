@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -81,3 +82,27 @@ def isolated_project(tmp_path: Path) -> Iterator[Path]:
     )
 
     yield tmp_path
+
+
+@pytest.fixture(scope="module")
+def module_workspace() -> Iterator[Path]:
+    """Create a module-scoped isolated workspace directory.
+
+    This fixture provides a temporary directory that persists across all tests
+    in a module. Used by module-scoped fixtures like client_config that need
+    isolation from the actual repository to prevent snapshot commits from
+    polluting the git history.
+
+    Yields:
+        Path to the isolated workspace directory.
+    """
+    with tempfile.TemporaryDirectory(prefix="wink-integration-") as tmp_dir:
+        workspace = Path(tmp_dir)
+        # Create a minimal README for tests that expect it
+        readme = workspace / "README.md"
+        readme.write_text(
+            "# Test Repository\n\n"
+            "This is an isolated test workspace for integration tests.\n",
+            encoding="utf-8",
+        )
+        yield workspace

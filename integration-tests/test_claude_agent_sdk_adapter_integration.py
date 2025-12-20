@@ -62,10 +62,15 @@ def claude_model() -> str:
 
 
 @pytest.fixture(scope="module")
-def client_config() -> ClaudeAgentSDKClientConfig:
-    """Build a typed ClaudeAgentSDKClientConfig from environment variables."""
+def client_config(module_workspace: Path) -> ClaudeAgentSDKClientConfig:
+    """Build a typed ClaudeAgentSDKClientConfig with isolated workspace.
+
+    Uses module_workspace to ensure all tests operate in an isolated directory,
+    preventing snapshot operations from creating commits in the actual repository.
+    """
     return ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
+        cwd=str(module_workspace),
     )
 
 
@@ -309,12 +314,13 @@ def test_claude_agent_sdk_adapter_with_model_config(
 
 
 def test_claude_agent_sdk_adapter_with_max_turns(
-    claude_model: str, client_config: ClaudeAgentSDKClientConfig
+    claude_model: str, client_config: ClaudeAgentSDKClientConfig, tmp_path: Path
 ) -> None:
     """Verify adapter respects max_turns configuration."""
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         max_turns=1,
+        cwd=str(tmp_path),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -801,6 +807,7 @@ def test_claude_agent_sdk_adapter_custom_tool_without_render(
 
 def test_claude_agent_sdk_adapter_with_isolation_returns_text(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify adapter works correctly with IsolationConfig enabled.
 
@@ -818,6 +825,7 @@ def test_claude_agent_sdk_adapter_with_isolation_returns_text(
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         isolation=isolation,
+        cwd=str(tmp_path),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -840,6 +848,7 @@ def test_claude_agent_sdk_adapter_with_isolation_returns_text(
 
 def test_claude_agent_sdk_adapter_isolation_with_custom_tools(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify custom tools work correctly in isolated mode.
 
@@ -855,6 +864,7 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_tools(
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         isolation=isolation,
+        cwd=str(tmp_path),
     )
 
     tool = _build_uppercase_tool()
@@ -880,6 +890,7 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_tools(
 
 def test_claude_agent_sdk_adapter_isolation_with_structured_output(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify structured output works in isolated mode.
 
@@ -893,6 +904,7 @@ def test_claude_agent_sdk_adapter_isolation_with_structured_output(
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         isolation=isolation,
+        cwd=str(tmp_path),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -950,6 +962,7 @@ def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
         config = ClaudeAgentSDKClientConfig(
             permission_mode="bypassPermissions",
             isolation=isolation,
+            cwd=fake_home,  # Use the temp directory as cwd
         )
 
         adapter = ClaudeAgentSDKAdapter(
@@ -981,6 +994,7 @@ def test_claude_agent_sdk_adapter_isolation_does_not_modify_host_claude_dir(
 
 def test_claude_agent_sdk_adapter_isolation_network_policy_no_network(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify NetworkPolicy.no_network() still allows Claude API access.
 
@@ -997,6 +1011,7 @@ def test_claude_agent_sdk_adapter_isolation_network_policy_no_network(
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         isolation=isolation,
+        cwd=str(tmp_path),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -1020,6 +1035,7 @@ def test_claude_agent_sdk_adapter_isolation_network_policy_no_network(
 
 def test_claude_agent_sdk_adapter_isolation_with_custom_env(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify custom environment variables are passed to SDK subprocess.
 
@@ -1036,6 +1052,7 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_env(
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         isolation=isolation,
+        cwd=str(tmp_path),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -1056,6 +1073,7 @@ def test_claude_agent_sdk_adapter_isolation_with_custom_env(
 
 def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify ephemeral home is cleaned up after successful execution.
 
@@ -1074,6 +1092,7 @@ def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
     config = ClaudeAgentSDKClientConfig(
         permission_mode="bypassPermissions",
         isolation=isolation,
+        cwd=str(tmp_path),
     )
 
     adapter = ClaudeAgentSDKAdapter(
@@ -1103,6 +1122,7 @@ def test_claude_agent_sdk_adapter_isolation_cleanup_on_success(
 
 def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify files are created in the ephemeral home directory during execution.
 
@@ -1142,6 +1162,7 @@ def test_claude_agent_sdk_adapter_isolation_creates_files_in_ephemeral_home(
             network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(enabled=True),
         ),
+        cwd=str(tmp_path),
     )
     adapter = ClaudeAgentSDKAdapter(model=claude_model, client_config=config)
     prompt = Prompt(_build_greeting_prompt()).bind(
@@ -1221,6 +1242,7 @@ def _build_network_test_prompt() -> PromptTemplate[NetworkTestResult]:
 
 def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify network policy allows access to explicitly listed domains.
 
@@ -1235,6 +1257,7 @@ def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
             ),
             sandbox=SandboxConfig(enabled=True),
         ),
+        cwd=str(tmp_path),
     )
     adapter = ClaudeAgentSDKAdapter(
         model=claude_model,
@@ -1266,6 +1289,7 @@ def test_claude_agent_sdk_adapter_network_policy_allows_listed_domain(
 
 def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify network policy blocks access to domains not in the allowed list.
 
@@ -1280,6 +1304,7 @@ def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
             network_policy=NetworkPolicy.no_network(),  # Block all tool network
             sandbox=SandboxConfig(enabled=True),
         ),
+        cwd=str(tmp_path),
     )
     adapter = ClaudeAgentSDKAdapter(
         model=claude_model,
@@ -1310,6 +1335,7 @@ def test_claude_agent_sdk_adapter_network_policy_blocks_unlisted_domain(
 
 def test_claude_agent_sdk_adapter_no_network_blocks_all_tool_access(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify no_network() blocks all network access for tools.
 
@@ -1324,6 +1350,7 @@ def test_claude_agent_sdk_adapter_no_network_blocks_all_tool_access(
             network_policy=NetworkPolicy.no_network(),  # Block all tool network
             sandbox=SandboxConfig(enabled=True),
         ),
+        cwd=str(tmp_path),
     )
     adapter = ClaudeAgentSDKAdapter(
         model=claude_model,
@@ -1402,6 +1429,7 @@ def _build_env_test_prompt() -> PromptTemplate[EnvTestResult]:
 
 def test_claude_agent_sdk_adapter_include_host_env_false(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify include_host_env=False limits environment passed to SDK.
 
@@ -1419,6 +1447,7 @@ def test_claude_agent_sdk_adapter_include_host_env_false(
             include_host_env=False,  # Explicitly false
             env={"WINK_CUSTOM_TEST_VAR": "custom_value"},
         ),
+        cwd=str(tmp_path),
     )
     adapter = ClaudeAgentSDKAdapter(
         model=claude_model,
@@ -1448,6 +1477,7 @@ def test_claude_agent_sdk_adapter_include_host_env_false(
 
 def test_claude_agent_sdk_adapter_include_host_env_true(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify include_host_env=True inherits non-sensitive host environment.
 
@@ -1463,6 +1493,7 @@ def test_claude_agent_sdk_adapter_include_host_env_true(
             network_policy=NetworkPolicy.no_network(),
             include_host_env=True,  # Inherit host env
         ),
+        cwd=str(tmp_path),
     )
     adapter = ClaudeAgentSDKAdapter(
         model=claude_model,
@@ -1670,6 +1701,7 @@ def test_claude_agent_sdk_adapter_sandbox_readable_paths(
 
 def test_claude_agent_sdk_adapter_sandbox_disabled(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify sandbox can be disabled with enabled=False.
 
@@ -1682,6 +1714,7 @@ def test_claude_agent_sdk_adapter_sandbox_disabled(
             network_policy=NetworkPolicy.no_network(),
             sandbox=SandboxConfig(enabled=False),
         ),
+        cwd=str(tmp_path),
     )
     adapter = ClaudeAgentSDKAdapter(
         model=claude_model,
@@ -1745,6 +1778,7 @@ def _build_command_test_prompt() -> PromptTemplate[CommandTestResult]:
 
 def test_claude_agent_sdk_adapter_sandbox_excluded_commands(
     claude_model: str,
+    tmp_path: Path,
 ) -> None:
     """Verify excluded_commands allows specific commands to bypass sandbox.
 
@@ -1761,6 +1795,7 @@ def test_claude_agent_sdk_adapter_sandbox_excluded_commands(
                 allow_unsandboxed_commands=True,
             ),
         ),
+        cwd=str(tmp_path),
     )
     adapter = ClaudeAgentSDKAdapter(
         model=claude_model,
