@@ -1020,6 +1020,41 @@ def test_host_mount_double_star_glob_includes_root_files(tmp_path: Path) -> None
     assert fs.exists("pkg/nested.py"), "Nested .py file should be included"
 
 
+def test_host_mount_double_star_glob_preserves_prefix(tmp_path: Path) -> None:
+    """Ensure ** patterns do not drop path prefixes when matching zero directories."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "test_root.py").write_text("root", encoding="utf-8")
+    src = repo / "src"
+    src.mkdir()
+    (src / "test_match.py").write_text("match", encoding="utf-8")
+    nested = src / "pkg"
+    nested.mkdir()
+    (nested / "test_nested.py").write_text("nested", encoding="utf-8")
+    other = repo / "other"
+    other.mkdir()
+    (other / "test_other.py").write_text("other", encoding="utf-8")
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+    section = _make_section(
+        session=session,
+        mounts=(
+            HostMount(
+                host_path="repo",
+                include_glob=("src/**/test_*.py",),
+            ),
+        ),
+        allowed_host_roots=(tmp_path,),
+    )
+
+    fs = section.filesystem
+    assert fs.exists("src/test_match.py")
+    assert fs.exists("src/pkg/test_nested.py")
+    assert not fs.exists("test_root.py")
+    assert not fs.exists("other/test_other.py")
+
+
 def test_normalize_string_path_requires_value() -> None:
     with pytest.raises(ToolValidationError, match="test is required"):
         vfs_module._normalize_string_path(None, allow_empty=False, field="test")

@@ -1670,15 +1670,33 @@ def _match_glob(path: str, pattern: str) -> bool:
     This function handles that case: **/*.py should match both "foo.py" (zero
     directories) and "bar/baz.py" (one+ directories).
     """
-    if "**/" in pattern:
-        # Extract suffix after **/ (e.g., "**/*.py" -> "*.py")
-        suffix = pattern.split("**/")[-1]
-        # Match just the suffix (handles zero directories case)
-        if fnmatch.fnmatchcase(path, suffix):
-            return True
-        # Match the full pattern (handles one+ directories case)
+    if "**/" not in pattern:
         return fnmatch.fnmatchcase(path, pattern)
-    return fnmatch.fnmatchcase(path, pattern)
+
+    # Match the full pattern first (handles one+ directories case).
+    if fnmatch.fnmatchcase(path, pattern):
+        return True
+
+    # Allow **/ to match zero directories by removing one or more occurrences.
+    # This preserves any prefix before **/ (e.g., "src/**/test_*.py" -> "src/test_*.py").
+    candidates = [pattern]
+    seen: set[str] = {pattern}
+    while candidates:
+        current = candidates.pop()
+        start = 0
+        while True:
+            index = current.find("**/", start)
+            if index == -1:
+                break
+            variant = f"{current[:index]}{current[index + 3 :]}"
+            if variant not in seen:
+                if fnmatch.fnmatchcase(path, variant):
+                    return True
+                seen.add(variant)
+                candidates.append(variant)
+            start = index + 3
+
+    return False
 
 
 def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
