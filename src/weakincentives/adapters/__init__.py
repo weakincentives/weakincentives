@@ -32,7 +32,7 @@ from .core import (
     PromptResponse,
     ProviderAdapter,
 )
-from .shared import ThrottleError, ThrottlePolicy, new_throttle_policy
+from .throttle import ThrottleError, ThrottlePolicy, new_throttle_policy
 from .tool_runner import ToolRunner
 
 __all__ = [

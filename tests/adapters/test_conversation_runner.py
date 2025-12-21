@@ -31,16 +31,14 @@ from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
 )
-from weakincentives.adapters.shared import (
+from weakincentives.adapters.inner_loop import (
     InnerLoop,
     InnerLoopConfig,
     InnerLoopInputs,
-    ThrottlePolicy,
-    ToolChoice,
-    new_throttle_policy,
     run_inner_loop,
-    token_usage_from_payload,
 )
+from weakincentives.adapters.throttle import ThrottlePolicy, new_throttle_policy
+from weakincentives.adapters.utilities import ToolChoice, token_usage_from_payload
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext

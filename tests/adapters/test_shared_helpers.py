@@ -20,11 +20,29 @@ import pytest
 
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from tests.helpers.events import NullEventBus
-from weakincentives.adapters import PromptEvaluationError, shared
+from weakincentives.adapters import PromptEvaluationError
+from weakincentives.adapters._provider_protocols import ProviderChoice
 from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
     SessionProtocol,
+)
+from weakincentives.adapters.inner_loop import (
+    InnerLoopConfig,
+    InnerLoopInputs,
+    run_inner_loop,
+)
+from weakincentives.adapters.response_parser import (
+    ResponseParser,
+    build_json_schema_response_format,
+)
+from weakincentives.adapters.tool_executor import ToolMessageSerializer
+from weakincentives.adapters.utilities import (
+    ToolChoice,
+    extract_payload,
+    first_choice,
+    mapping_to_str_dict,
+    parse_tool_arguments,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate
@@ -37,14 +55,14 @@ from weakincentives.runtime.session import Session
 def test_first_choice_returns_first_item() -> None:
     response = SimpleNamespace(choices=["first", "second"])
 
-    assert shared.first_choice(response, prompt_name="example") == "first"
+    assert first_choice(response, prompt_name="example") == "first"
 
 
 def test_first_choice_requires_sequence() -> None:
     response = SimpleNamespace(choices=None)
 
     with pytest.raises(PromptEvaluationError):
-        shared.first_choice(response, prompt_name="example")
+        first_choice(response, prompt_name="example")
 
 
 def test_parse_tool_arguments_rejects_non_string_keys(
@@ -54,10 +72,12 @@ def test_parse_tool_arguments_rejects_non_string_keys(
         # Simulate a mapping that does not use string keys to exercise defensive branch.
         return {1: "value"}
 
-    monkeypatch.setattr(shared.json, "loads", fake_loads)
+    import weakincentives.adapters.utilities as utils_module
+
+    monkeypatch.setattr(utils_module, "json", SimpleNamespace(loads=fake_loads))
 
     with pytest.raises(PromptEvaluationError) as err:
-        shared.parse_tool_arguments(
+        parse_tool_arguments(
             "{}",
             prompt_name="example",
             provider_payload=None,
@@ -68,7 +88,7 @@ def test_parse_tool_arguments_rejects_non_string_keys(
 
 
 def test_mapping_to_str_dict_rejects_non_string_keys() -> None:
-    assert shared._mapping_to_str_dict({1: "value"}) is None
+    assert mapping_to_str_dict({1: "value"}) is None
 
 
 def test_run_inner_loop_requires_message_payload() -> None:
@@ -86,16 +106,16 @@ def test_run_inner_loop_requires_message_payload() -> None:
     def call_provider(
         messages: list[dict[str, Any]],
         tool_specs: list[Mapping[str, Any]],
-        tool_choice: shared.ToolChoice | None,
+        tool_choice: ToolChoice | None,
         response_format: Mapping[str, Any] | None,
     ) -> DummyResponse:
         return DummyResponse()
 
-    def select_choice(response: DummyResponse) -> shared.ProviderChoice:
+    def select_choice(response: DummyResponse) -> ProviderChoice:
         return response.choices[0]
 
     serialize_stub = cast(
-        shared.ToolMessageSerializer,
+        ToolMessageSerializer,
         lambda _result, *, payload=None: "",
     )
 
@@ -114,7 +134,7 @@ def test_run_inner_loop_requires_message_payload() -> None:
     prompt = Prompt(PromptTemplate(ns="tests", key="example"))
     session = Session(bus=bus)
 
-    config = shared.InnerLoopConfig(
+    config = InnerLoopConfig(
         execution_state=ExecutionState(session=session),
         tool_choice="auto",
         response_format=None,
@@ -124,7 +144,7 @@ def test_run_inner_loop_requires_message_payload() -> None:
         serialize_tool_message_fn=serialize_stub,
     )
 
-    inputs = shared.InnerLoopInputs[object](
+    inputs = InnerLoopInputs[object](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=adapter,
         prompt=prompt,
@@ -135,7 +155,7 @@ def test_run_inner_loop_requires_message_payload() -> None:
     )
 
     with pytest.raises(PromptEvaluationError):
-        shared.run_inner_loop(inputs=inputs, config=config)
+        run_inner_loop(inputs=inputs, config=config)
 
 
 def test_extract_payload_handles_mapping_with_non_string_keys() -> None:
@@ -147,7 +167,7 @@ def test_extract_payload_handles_mapping_with_non_string_keys() -> None:
             return {1: "value"}
 
     response = ResponseWithBadKeys()
-    result = shared.extract_payload(response)
+    result = extract_payload(response)
     assert result is None
 
 
@@ -170,7 +190,7 @@ def test_build_json_schema_response_format_with_extra_keys_allowed() -> None:
     )
 
     rendered = Prompt(template).bind().render()
-    result = shared.build_json_schema_response_format(rendered, "test")
+    result = build_json_schema_response_format(rendered, "test")
 
     assert result is not None
     schema_payload = result["json_schema"]["schema"]  # type: ignore[index]
@@ -193,7 +213,7 @@ def test_response_parser_preserves_text_when_output_is_none() -> None:
     )
 
     rendered = Prompt(template).bind().render()
-    parser = shared.ResponseParser(
+    parser = ResponseParser(
         prompt_name="test",
         rendered=rendered,
         require_structured_output_text=False,
@@ -229,7 +249,7 @@ def test_response_parser_clears_text_when_output_is_not_none() -> None:
     )
 
     rendered = Prompt(template).bind().render()
-    parser = shared.ResponseParser(
+    parser = ResponseParser(
         prompt_name="test",
         rendered=rendered,
         require_structured_output_text=False,

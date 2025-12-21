@@ -30,13 +30,15 @@ from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
 )
-from weakincentives.adapters.shared import (
+from weakincentives.adapters.tool_executor import (
+    RejectedToolParams,
+    ToolExecutionContext,
     ToolExecutionOutcome,
-    _RejectedToolParams,
-    _ToolExecutionContext,
+    tool_execution,
+)
+from weakincentives.adapters.utilities import (
     format_publish_failures,
     parse_tool_arguments,
-    tool_execution,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
@@ -75,13 +77,13 @@ def _base_context(
     *,
     deadline: Deadline | None = None,
     session: SessionProtocol | None = None,
-) -> _ToolExecutionContext:
+) -> ToolExecutionContext:
     bus = InProcessEventBus()
     prompt_template = _build_prompt(tool)
     prompt = Prompt(prompt_template)
     effective_session = session or Session(bus=bus)
     execution_state = ExecutionState(session=effective_session)
-    return _ToolExecutionContext(
+    return ToolExecutionContext(
         adapter_name="adapter",
         adapter=cast(Any, object()),
         prompt=prompt,
@@ -143,7 +145,7 @@ def test_tool_execution_records_validation_failure() -> None:
     context = _base_context(tool)
 
     with tool_execution(context=context, tool_call=tool_call) as outcome:
-        assert isinstance(outcome.params, _RejectedToolParams)
+        assert isinstance(outcome.params, RejectedToolParams)
         assert outcome.params.raw_arguments == {"query": "policies", "extra": True}
         assert outcome.result.success is False
         assert "Tool validation failed" in outcome.result.message

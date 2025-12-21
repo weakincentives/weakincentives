@@ -31,7 +31,7 @@ from ..prompt.tool import ResourceRegistry
 from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import SupportsDataclass
-from . import shared as _shared
+from ._names import OPENAI_ADAPTER_NAME
 from ._provider_protocols import (
     ProviderChoice,
     ProviderChoiceData,
@@ -50,19 +50,14 @@ from .core import (
     ProviderAdapter,
     SessionProtocol,
 )
-from .shared import (
-    OPENAI_ADAPTER_NAME,
-    InnerLoopConfig,
-    InnerLoopInputs,
-    ThrottleError,
-    ThrottleKind,
+from .inner_loop import InnerLoopConfig, InnerLoopInputs, run_inner_loop
+from .response_parser import build_json_schema_response_format
+from .throttle import ThrottleError, ThrottleKind, throttle_details
+from .utilities import (
     ToolChoice,
-    build_json_schema_response_format,
     deadline_provider_payload,
     format_publish_failures,
     parse_tool_arguments,
-    run_inner_loop,
-    throttle_details,
 )
 
 OutputT = TypeVar("OutputT")
@@ -794,12 +789,4 @@ __all__ = [
     "OpenAIClientConfig",
     "OpenAIModelConfig",
     "OpenAIProtocol",
-    "extract_parsed_content",
-    "message_text_content",
-    "parse_schema_constrained_payload",
 ]
-
-
-message_text_content = _shared.message_text_content
-extract_parsed_content = _shared.extract_parsed_content
-parse_schema_constrained_payload = _shared.parse_schema_constrained_payload

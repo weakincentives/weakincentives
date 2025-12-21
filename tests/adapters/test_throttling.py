@@ -21,12 +21,12 @@ from tests.adapters._test_stubs import DummyChoice, DummyMessage, DummyResponse
 from tests.adapters.test_conversation_runner import RecordingBus, build_inner_loop
 from weakincentives.adapters import litellm, openai
 from weakincentives.adapters.core import PROMPT_EVALUATION_PHASE_REQUEST
-from weakincentives.adapters.shared import (
+from weakincentives.adapters.throttle import (
     ThrottleError,
     ThrottlePolicy,
-    _jittered_backoff,
-    _sleep_for,
+    jittered_backoff,
     new_throttle_policy,
+    sleep_for,
     throttle_details,
 )
 from weakincentives.deadlines import Deadline
@@ -45,9 +45,9 @@ def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
     def _sleep(delay: timedelta) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("weakincentives.adapters.shared._sleep_for", _sleep)
+    monkeypatch.setattr("weakincentives.adapters.inner_loop.sleep_for", _sleep)
     monkeypatch.setattr(
-        "weakincentives.adapters.shared.random.uniform", lambda _a, b: b
+        "weakincentives.adapters.throttle.random.uniform", lambda _a, b: b
     )
 
     def provider(
@@ -92,7 +92,7 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
     session = Session(bus=bus)
 
     monkeypatch.setattr(
-        "weakincentives.adapters.shared._sleep_for", lambda _delay: None
+        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
 
     def provider(
@@ -128,17 +128,17 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
     assert "budget" in error.message
 
 
-def test_jittered_backoff_returns_retry_after(
+def testjittered_backoff_returns_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "weakincentives.adapters.shared.random.uniform", lambda _a, _b: 0.0
+        "weakincentives.adapters.throttle.random.uniform", lambda _a, _b: 0.0
     )
 
     policy = new_throttle_policy(base_delay=timedelta(milliseconds=10))
     retry_after = timedelta(milliseconds=30)
 
-    delay = _jittered_backoff(policy=policy, attempt=1, retry_after=retry_after)
+    delay = jittered_backoff(policy=policy, attempt=1, retry_after=retry_after)
 
     assert delay == retry_after
 
@@ -189,7 +189,7 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = RecordingBus()
     session = Session(bus=bus)
     monkeypatch.setattr(
-        "weakincentives.adapters.shared._sleep_for", lambda _delay: None
+        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
 
     def provider(
@@ -226,10 +226,10 @@ def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None
     bus = RecordingBus()
     session = Session(bus=bus)
     monkeypatch.setattr(
-        "weakincentives.adapters.shared._sleep_for", lambda _delay: None
+        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
     monkeypatch.setattr(
-        "weakincentives.adapters.shared._jittered_backoff",
+        "weakincentives.adapters.inner_loop.jittered_backoff",
         lambda **_: timedelta(seconds=3),
     )
 
@@ -265,24 +265,22 @@ def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None
     assert "Deadline expired" in str(excinfo.value)
 
 
-def test_jittered_backoff_respects_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
+def testjittered_backoff_respects_retry_after(monkeypatch: pytest.MonkeyPatch) -> None:
     policy = new_throttle_policy(
         base_delay=timedelta(seconds=1),
         max_delay=timedelta(seconds=4),
         max_total_delay=timedelta(seconds=10),
     )
     monkeypatch.setattr(
-        "weakincentives.adapters.shared.random.uniform", lambda _a, b: b
+        "weakincentives.adapters.throttle.random.uniform", lambda _a, b: b
     )
 
-    delay = _jittered_backoff(
-        policy=policy, attempt=2, retry_after=timedelta(seconds=2)
-    )
+    delay = jittered_backoff(policy=policy, attempt=2, retry_after=timedelta(seconds=2))
 
     assert delay == timedelta(seconds=2)
 
 
-def test_jittered_backoff_clamps_to_retry_after(
+def testjittered_backoff_clamps_to_retry_after(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     policy = new_throttle_policy(
@@ -291,17 +289,15 @@ def test_jittered_backoff_clamps_to_retry_after(
         max_total_delay=timedelta(seconds=10),
     )
     monkeypatch.setattr(
-        "weakincentives.adapters.shared.random.uniform", lambda _a, _b: 0
+        "weakincentives.adapters.throttle.random.uniform", lambda _a, _b: 0
     )
 
-    delay = _jittered_backoff(
-        policy=policy, attempt=2, retry_after=timedelta(seconds=1)
-    )
+    delay = jittered_backoff(policy=policy, attempt=2, retry_after=timedelta(seconds=1))
 
     assert delay == timedelta(seconds=1)
 
 
-def test_jittered_backoff_with_non_positive_base() -> None:
+def testjittered_backoff_with_non_positive_base() -> None:
     policy = ThrottlePolicy(
         max_attempts=1,
         base_delay=timedelta(0),
@@ -309,14 +305,14 @@ def test_jittered_backoff_with_non_positive_base() -> None:
         max_total_delay=timedelta(seconds=1),
     )
 
-    assert _jittered_backoff(policy=policy, attempt=1, retry_after=None) == timedelta(0)
+    assert jittered_backoff(policy=policy, attempt=1, retry_after=None) == timedelta(0)
 
 
 def test_sleep_for_invokes_time_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     observed: list[float] = []
-    monkeypatch.setattr("weakincentives.adapters.shared.time.sleep", observed.append)
+    monkeypatch.setattr("weakincentives.adapters.throttle.time.sleep", observed.append)
 
-    _sleep_for(timedelta(milliseconds=150))
+    sleep_for(timedelta(milliseconds=150))
 
     assert observed == [0.15]
 
