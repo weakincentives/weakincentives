@@ -30,7 +30,8 @@ except ModuleNotFoundError:  # pragma: no cover
     from ._test_stubs import DummyToolCall, ToolParams, ToolPayload
 
 from weakincentives.adapters.tool_runner import ToolRunner
-from weakincentives.contrib.tools.filesystem import Filesystem, InMemoryFilesystem
+from weakincentives.contrib.tools.filesystem import Filesystem
+from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.errors import DeadlineExceededError
 from weakincentives.prompt import (
     MarkdownSection,

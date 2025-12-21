@@ -21,7 +21,8 @@ Example usage::
 
     from weakincentives.runtime import ExecutionState, Session
     from weakincentives.prompt import ResourceRegistry
-    from weakincentives.contrib.tools.filesystem import InMemoryFilesystem, Filesystem
+    from weakincentives.contrib.tools.filesystem import Filesystem
+    from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 
     # Create session and resources
     session = Session()

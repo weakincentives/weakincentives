@@ -34,7 +34,7 @@ from typing import Final, Literal
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
-from .filesystem import InMemoryFilesystem
+from .filesystem_memory import InMemoryFilesystem
 from .vfs_types import (
     HostMount,
     HostMountPreview,

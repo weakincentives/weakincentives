@@ -45,8 +45,8 @@ from .asteval import (
 )
 from .filesystem import (
     Filesystem,
-    HostFilesystem,
 )
+from .filesystem_host import HostFilesystem
 from .podman_connection import (
     resolve_connection_settings,
     resolve_podman_connection,

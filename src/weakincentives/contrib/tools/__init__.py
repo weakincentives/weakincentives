@@ -23,14 +23,8 @@ This package provides domain-specific tools that extend the core primitives:
 
 Example usage::
 
-    from weakincentives.contrib.tools import (
-        Filesystem,
-        InMemoryFilesystem,
-        PlanningToolsSection,
-        VfsToolsSection,
-        AstevalSection,
-        PodmanSandboxSection,
-    )
+    from weakincentives.contrib.tools import Filesystem, PlanningToolsSection
+    from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 """
 
 # pyright: reportImportCycles=false
@@ -64,13 +58,13 @@ from .filesystem import (
     FilesystemSnapshot,
     GlobMatch as FilesystemGlobMatch,
     GrepMatch as FilesystemGrepMatch,
-    HostFilesystem,
-    InMemoryFilesystem,
     ReadResult,
     SnapshotableFilesystem,
     WriteMode,
     WriteResult,
 )
+from .filesystem_host import HostFilesystem
+from .filesystem_memory import InMemoryFilesystem
 from .planning import (
     AddStep,
     Plan,

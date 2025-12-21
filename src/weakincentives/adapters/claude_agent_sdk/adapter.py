@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any, TypeVar, cast, override
 
 from ...budget import Budget, BudgetTracker
-from ...contrib.tools.filesystem import Filesystem, HostFilesystem
+from ...contrib.tools.filesystem import Filesystem
+from ...contrib.tools.filesystem_host import HostFilesystem
 from ...deadlines import Deadline
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired

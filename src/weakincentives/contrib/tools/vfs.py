@@ -40,8 +40,8 @@ from ...types import SupportsDataclass, SupportsToolResult
 from .filesystem import (
     READ_ENTIRE_FILE,
     Filesystem,
-    InMemoryFilesystem,
 )
+from .filesystem_memory import InMemoryFilesystem
 from .vfs_mounts import (
     MAX_MOUNT_PREVIEW_ENTRIES,
     MountContext,

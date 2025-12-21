@@ -26,7 +26,7 @@ from uuid import uuid4
 
 import pytest
 
-import weakincentives.contrib.tools.filesystem as filesystem_module
+import weakincentives.contrib.tools.filesystem_host as filesystem_host_module
 import weakincentives.contrib.tools.podman as podman_module
 import weakincentives.contrib.tools.podman_connection as podman_connection_module
 import weakincentives.contrib.tools.podman_eval as podman_eval_module
@@ -2760,7 +2760,7 @@ def test_grep_honors_result_limit(
     handle = section.ensure_workspace()
     (handle.overlay_path / "one.txt").write_text("match", encoding="utf-8")
     (handle.overlay_path / "two.txt").write_text("match", encoding="utf-8")
-    monkeypatch.setattr(filesystem_module, "_MAX_GREP_MATCHES", 1)
+    monkeypatch.setattr(filesystem_host_module, "MAX_GREP_MATCHES", 1)
     tool = find_tool(section, "grep")
     handler = tool.handler
     assert handler is not None

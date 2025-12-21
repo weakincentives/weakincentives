@@ -33,7 +33,8 @@ from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
-from .filesystem import READ_ENTIRE_FILE, Filesystem, InMemoryFilesystem
+from .filesystem import READ_ENTIRE_FILE, Filesystem
+from .filesystem_memory import InMemoryFilesystem
 from .vfs_types import (
     MAX_WRITE_LENGTH as _MAX_WRITE_LENGTH,
     VfsPath,
