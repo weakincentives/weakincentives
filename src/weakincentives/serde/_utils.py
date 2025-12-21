@@ -16,10 +16,14 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable, Mapping, Sized
+from dataclasses import dataclass
+from datetime import date, datetime, time
 from decimal import Decimal
 from importlib import import_module
+from pathlib import Path
 from re import Pattern
 from typing import Any as _AnyType, Final, Literal, cast, get_args
+from uuid import UUID
 
 from ..dataclasses import FrozenDataclass
 from ..types import JSONValue
@@ -27,6 +31,76 @@ from ..types import JSONValue
 MISSING_SENTINEL: Final[object] = object()
 _UNION_TYPE = type(int | str)
 TYPE_REF_KEY: Final[str] = "__type__"
+
+
+@dataclass(slots=True, frozen=True)
+class TypeCoercer:
+    """Bidirectional type coercion specification.
+
+    Defines how to parse values from JSON-like inputs and serialize values back
+    to JSON-compatible outputs for a specific type.
+
+    Attributes:
+        parse: Callable to convert JSON-like value to the target Python type.
+        dump: Optional callable to convert Python type to JSON-like value.
+              If None, the value is assumed to be JSON-compatible as-is.
+    """
+
+    parse: Callable[[object], object]
+    dump: Callable[[object], object] | None = None
+
+
+def _parse_decimal(value: object) -> Decimal:
+    return Decimal(str(value))
+
+
+def _parse_uuid(value: object) -> UUID:
+    return UUID(str(value))
+
+
+def _parse_path(value: object) -> Path:
+    return Path(str(value))
+
+
+def _parse_datetime(value: object) -> datetime:
+    return datetime.fromisoformat(str(value))
+
+
+def _parse_date(value: object) -> date:
+    return date.fromisoformat(str(value))
+
+
+def _parse_time(value: object) -> time:
+    return time.fromisoformat(str(value))
+
+
+def _dump_isoformat(value: object) -> str:
+    return cast(datetime | date | time, value).isoformat()
+
+
+def _parse_int(value: object) -> int:
+    return int(cast(int | float | str, value))
+
+
+def _parse_float(value: object) -> float:
+    return float(cast(int | float | str, value))
+
+
+def _parse_str(value: object) -> str:
+    return str(value)
+
+
+TYPE_COERCERS: Final[Mapping[type[object], TypeCoercer]] = {
+    int: TypeCoercer(parse=_parse_int),
+    float: TypeCoercer(parse=_parse_float),
+    str: TypeCoercer(parse=_parse_str),
+    Decimal: TypeCoercer(parse=_parse_decimal, dump=str),
+    UUID: TypeCoercer(parse=_parse_uuid, dump=str),
+    Path: TypeCoercer(parse=_parse_path, dump=str),
+    datetime: TypeCoercer(parse=_parse_datetime, dump=_dump_isoformat),
+    date: TypeCoercer(parse=_parse_date, dump=_dump_isoformat),
+    time: TypeCoercer(parse=_parse_time, dump=_dump_isoformat),
+}
 
 
 class _ExtrasDescriptor:
@@ -332,7 +406,9 @@ def type_identifier(cls: type[object]) -> str:
 
 __all__ = [  # noqa: RUF022
     "MISSING_SENTINEL",
+    "TYPE_COERCERS",
     "TYPE_REF_KEY",
+    "TypeCoercer",
     "_AnyType",
     "_ExtrasDescriptor",
     "_ParseConfig",

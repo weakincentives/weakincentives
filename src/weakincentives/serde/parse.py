@@ -19,10 +19,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import MISSING
-from datetime import date, datetime, time
-from decimal import Decimal
 from enum import Enum
-from pathlib import Path
 from typing import (
     Literal,
     Union as _TypingUnion,  # pyright: ignore[reportDeprecated]
@@ -31,11 +28,11 @@ from typing import (
     get_origin,
     get_type_hints,
 )
-from uuid import UUID
 
 from ..types import JSONValue
 from ._utils import (
     _UNION_TYPE,
+    TYPE_COERCERS,
     TYPE_REF_KEY,
     _AnyType,
     _apply_constraints,
@@ -64,46 +61,6 @@ def _bool_from_str(value: str) -> bool:
 
 
 _NOT_HANDLED = object()
-
-
-def _decimal_from_any(value: object) -> object:
-    return Decimal(str(value))
-
-
-def _uuid_from_any(value: object) -> object:
-    return UUID(str(value))
-
-
-def _path_from_any(value: object) -> object:
-    return Path(str(value))
-
-
-def _datetime_from_any(value: object) -> object:
-    return datetime.fromisoformat(str(value))
-
-
-def _date_from_any(value: object) -> object:
-    return date.fromisoformat(str(value))
-
-
-def _time_from_any(value: object) -> object:
-    return time.fromisoformat(str(value))
-
-
-_PRIMITIVE_COERCERS: dict[type[object], Callable[[object], object]] = cast(
-    dict[type[object], Callable[[object], object]],
-    {
-        int: int,
-        float: float,
-        str: str,
-        Decimal: _decimal_from_any,
-        UUID: _uuid_from_any,
-        Path: _path_from_any,
-        datetime: _datetime_from_any,
-        date: _date_from_any,
-        time: _time_from_any,
-    },
-)
 
 
 def _is_union_type(origin: object) -> bool:
@@ -225,8 +182,8 @@ def _coerce_primitive(
     path: str,
     config: _ParseConfig,
 ) -> object:
-    coercer = _PRIMITIVE_COERCERS.get(cast(type[object], base_type))
-    if coercer is None:
+    type_coercer = TYPE_COERCERS.get(cast(type[object], base_type))
+    if type_coercer is None:
         return _NOT_HANDLED
 
     literal_type = cast(type[object], base_type)
@@ -236,7 +193,7 @@ def _coerce_primitive(
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: expected {type_name}")
     try:
-        coerced_value = coercer(value)
+        coerced_value = type_coercer.parse(value)
     except Exception as error:
         type_name = getattr(base_type, "__name__", type(base_type).__name__)
         raise TypeError(f"{path}: unable to coerce {value!r} to {type_name}") from error

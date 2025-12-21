@@ -18,16 +18,18 @@ from __future__ import annotations
 
 import dataclasses
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from datetime import date, datetime, time
-from decimal import Decimal
 from enum import Enum
-from pathlib import Path
 from typing import cast, no_type_check
-from uuid import UUID
 
 from ..types import JSONValue
 from ..types.dataclass import SupportsDataclass
-from ._utils import MISSING_SENTINEL, TYPE_REF_KEY, _set_extras, _type_identifier
+from ._utils import (
+    MISSING_SENTINEL,
+    TYPE_COERCERS,
+    TYPE_REF_KEY,
+    _set_extras,
+    _type_identifier,
+)
 
 
 def _serialize(
@@ -74,10 +76,9 @@ def _serialize_primitive(
         return MISSING_SENTINEL if exclude_none else None
     if isinstance(value, Enum):
         return value.value
-    if isinstance(value, (datetime, date, time)):
-        return value.isoformat()
-    if isinstance(value, (UUID, Decimal, Path)):
-        return str(value)
+    for coercer_type, type_coercer in TYPE_COERCERS.items():
+        if isinstance(value, coercer_type) and type_coercer.dump is not None:
+            return type_coercer.dump(value)
     return None
 
 
