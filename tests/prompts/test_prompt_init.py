@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import cast
 
 import pytest
 
@@ -24,7 +24,6 @@ from weakincentives.prompt import (
     PromptDescriptor,
     PromptTemplate,
     PromptValidationError,
-    SectionNode,
 )
 from weakincentives.prompt.section import Section
 from weakincentives.types import SupportsDataclass
@@ -75,10 +74,10 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
         sections=[root],
     )
 
-    sections = cast(tuple[SectionNode[Any], ...], prompt.sections)
-    titles = [node.section.title for node in sections]
-    depths = [node.depth for node in sections]
-    paths = [node.path for node in sections]
+    nodes = prompt.nodes
+    titles = [node.section.title for node in nodes]
+    depths = [node.depth for node in nodes]
+    paths = [node.path for node in nodes]
 
     assert titles == ["Root", "Child", "Sibling"]
     assert depths == [0, 1, 1]
@@ -89,6 +88,12 @@ def test_prompt_initialization_flattens_sections_depth_first() -> None:
     ]
     assert prompt.params_types == {RootParams, ChildParams, SiblingParams}
     assert prompt.name == "demo"
+
+    # Verify Prompt.sections returns original Section objects
+    bound_prompt = Prompt(prompt)
+    bound_sections = bound_prompt.sections
+    assert len(bound_sections) == 1
+    assert bound_sections[0] is root
 
 
 def test_prompt_requires_non_empty_key() -> None:
