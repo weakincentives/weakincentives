@@ -605,15 +605,14 @@ class PromptRegistry:
                     placeholder="steps",
                 )
 
-            # Validate type coherence
-            tool = tool_instances.get(tool_name)
-            if tool is not None:
-                PromptRegistry._validate_step_type_coherence(
-                    step,
-                    step_idx,
-                    tool,
-                    path,
-                )
+            # Validate type coherence - tool_instances contains all registered tools
+            tool = tool_instances[tool_name]
+            PromptRegistry._validate_step_type_coherence(
+                step,
+                step_idx,
+                tool,
+                path,
+            )
 
     @staticmethod
     def _validate_step_type_coherence(

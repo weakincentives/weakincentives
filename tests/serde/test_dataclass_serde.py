@@ -28,11 +28,17 @@ import pytest
 from weakincentives.serde import clone, dump, parse, schema
 from weakincentives.serde._utils import (
     _SLOTTED_EXTRAS,
+    _get_or_create_extras_descriptor,
     _merge_annotated_meta,
     _ordered_values,
     _ParseConfig,
+    _set_extras,
 )
-from weakincentives.serde.parse import _bool_from_str, _coerce_to_type
+from weakincentives.serde.parse import (
+    _bool_from_str,
+    _build_lowered_key_map,
+    _coerce_to_type,
+)
 from weakincentives.types import JSONValue
 
 parse_module = importlib.import_module("weakincentives.serde.parse")
@@ -47,6 +53,77 @@ def test_module_exports_align_with_public_api() -> None:
     assert dump is module_dump
     assert parse is module_parse
     assert schema is module_schema
+
+
+def test_build_lowered_key_map_skips_non_string_keys() -> None:
+    """Test branch 503->502: non-string keys are skipped in _build_lowered_key_map."""
+    # Create a mapping with mixed string and non-string keys
+    data: Mapping[Any, Any] = {
+        "ValidKey": "value1",
+        "AnotherKey": "value2",
+        123: "non-string-key-value",  # This should be skipped
+        ("tuple", "key"): "another-non-string",  # This should also be skipped
+    }
+
+    result = _build_lowered_key_map(data)
+
+    # Only string keys should be in the result
+    assert "validkey" in result
+    assert "anotherkey" in result
+    assert result["validkey"] == "ValidKey"
+    assert result["anotherkey"] == "AnotherKey"
+    # Non-string keys should not be in the result
+    assert len(result) == 2
+
+
+def test_get_or_create_extras_descriptor_caches_result() -> None:
+    """Test line 70: when descriptor exists in cache, return it directly."""
+
+    @dataclass(slots=True, frozen=True)
+    class CachedSlottedData:
+        value: str
+
+    # Clear any existing descriptor for this class
+    _SLOTTED_EXTRAS.pop(CachedSlottedData, None)
+
+    # First call creates a new descriptor
+    descriptor1 = _get_or_create_extras_descriptor(CachedSlottedData)
+    assert CachedSlottedData in _SLOTTED_EXTRAS
+
+    # Second call should hit the cache (line 70)
+    descriptor2 = _get_or_create_extras_descriptor(CachedSlottedData)
+    assert descriptor1 is descriptor2
+
+
+def test_set_extras_reuses_descriptor() -> None:
+    """Test that _set_extras reuses cached descriptor for slotted classes."""
+
+    @dataclass(slots=True, frozen=True)
+    class SlottedData:
+        value: str
+
+    # Clear any existing descriptor for this class
+    _SLOTTED_EXTRAS.pop(SlottedData, None)
+
+    # First call creates a new descriptor
+    instance1 = SlottedData(value="first")
+    _set_extras(instance1, {"key1": "value1"})
+
+    # Verify descriptor was created
+    assert SlottedData in _SLOTTED_EXTRAS
+    descriptor1 = _SLOTTED_EXTRAS[SlottedData]
+
+    # Second call should reuse the existing descriptor
+    instance2 = SlottedData(value="second")
+    _set_extras(instance2, {"key2": "value2"})
+
+    # Verify the same descriptor is used
+    descriptor2 = _SLOTTED_EXTRAS[SlottedData]
+    assert descriptor1 is descriptor2
+
+    # Both instances should have their own extras
+    assert instance1.__extras__ == {"key1": "value1"}  # type: ignore[attr-defined]
+    assert instance2.__extras__ == {"key2": "value2"}  # type: ignore[attr-defined]
 
 
 class Color(Enum):
@@ -1470,3 +1547,82 @@ def test_schema_additional_types() -> None:
     assert as_dict(enum_props["flag"])["type"] == "boolean"
     assert as_dict(enum_props["count"])["type"] == "integer"
     assert as_dict(enum_props["ratio"])["type"] == "number"
+
+
+def test_set_extras_creates_new_descriptor_when_none_exists() -> None:
+    @dataclass(slots=True)
+    class NewSlotted:
+        name: str
+
+    if NewSlotted in _SLOTTED_EXTRAS:
+        del _SLOTTED_EXTRAS[NewSlotted]
+
+    instance = parse(NewSlotted, {"name": "Test", "extra": "value"}, extra="allow")
+    assert getattr(instance, "__extras__", None) == {"extra": "value"}
+    assert NewSlotted in _SLOTTED_EXTRAS
+
+
+def test_set_extras_reuses_existing_descriptor() -> None:
+    """Test branch 75->79: descriptor already exists for the class."""
+
+    @dataclass(slots=True)
+    class ReusedSlotted:
+        name: str
+
+    # Ensure descriptor doesn't exist yet
+    if ReusedSlotted in _SLOTTED_EXTRAS:
+        del _SLOTTED_EXTRAS[ReusedSlotted]
+
+    # First instance creates the descriptor
+    first = parse(ReusedSlotted, {"name": "First", "extra1": "value1"}, extra="allow")
+    assert getattr(first, "__extras__", None) == {"extra1": "value1"}
+    assert ReusedSlotted in _SLOTTED_EXTRAS
+
+    # Second instance reuses the existing descriptor (branch 75->79)
+    second = parse(ReusedSlotted, {"name": "Second", "extra2": "value2"}, extra="allow")
+    assert getattr(second, "__extras__", None) == {"extra2": "value2"}
+    # First instance should still have its own extras
+    assert getattr(first, "__extras__", None) == {"extra1": "value1"}
+
+
+def test_merge_annotated_meta_handles_non_mapping_args() -> None:
+    from typing import Annotated
+
+    annotated_type = Annotated[int, "string_metadata", {"key": "value"}, 123]
+    base, meta = _merge_annotated_meta(annotated_type, None)
+    assert base is int
+    assert meta == {"key": "value"}
+
+
+def test_schema_literal_mixed_types() -> None:
+    @dataclass
+    class MixedLiteral:
+        value: Literal["text", 42]
+
+    mixed_schema = schema(MixedLiteral)
+    props = as_dict(mixed_schema["properties"])
+    value_schema = as_dict(props["value"])
+    assert "type" not in value_schema
+    assert value_schema["enum"] == ["text", 42]
+
+
+def test_schema_enum_mixed_types() -> None:
+    class MixedEnum(Enum):
+        TEXT = "text"
+        NUMBER = 42
+
+    @dataclass
+    class MixedEnumModel:
+        value: MixedEnum
+
+    globals()["MixedEnum"] = MixedEnum
+    globals()["MixedEnumModel"] = MixedEnumModel
+    try:
+        mixed_schema = schema(MixedEnumModel)
+        props = as_dict(mixed_schema["properties"])
+        value_schema = as_dict(props["value"])
+        assert "type" not in value_schema
+        assert set(value_schema["enum"]) == {"text", 42}
+    finally:
+        globals().pop("MixedEnumModel", None)
+        globals().pop("MixedEnum", None)

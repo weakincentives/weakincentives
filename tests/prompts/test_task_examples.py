@@ -1470,3 +1470,95 @@ class TestSectionHierarchy:
         assert ("tools",) in section_paths
         assert ("workflow-examples",) in section_paths
         assert ("workflow-examples", "example-1") in section_paths
+
+
+class TestArrayOutputValidationEdgeCases:
+    """Additional edge case tests for array output validation."""
+
+    def test_array_output_empty_sequence(self) -> None:
+        """Test validation succeeds with empty array output."""
+        tool: Tool[SearchParams, list[ArrayItem]] = Tool[SearchParams, list[ArrayItem]](
+            name="array_tool",
+            description="Tool returning array",
+            handler=_array_handler,
+        )
+
+        tools_section = MarkdownSection(
+            key="tools",
+            title="Tools",
+            template="Tools:",
+            tools=[tool],
+        )
+
+        example = TaskExample(
+            key="array-empty",
+            objective="Test empty array",
+            outcome="Done",
+            steps=[
+                TaskStep(
+                    tool_name="array_tool",
+                    example=ToolExample(
+                        description="Step with empty output",
+                        input=SearchParams(pattern="x", path="y"),
+                        output=[],  # Empty array
+                    ),
+                ),
+            ],
+        )
+
+        # Should succeed - empty arrays are valid (validation only, not rendering)
+        template = PromptTemplate(
+            ns="test",
+            key="empty-array",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
+        # Validation passed - template created successfully
+        assert template is not None
+
+    def test_array_output_correct_types_all_match(self) -> None:
+        """Test validation succeeds when all items match expected type."""
+        tool: Tool[SearchParams, list[ArrayItem]] = Tool[SearchParams, list[ArrayItem]](
+            name="array_tool",
+            description="Tool returning array",
+            handler=_array_handler,
+        )
+
+        tools_section = MarkdownSection(
+            key="tools",
+            title="Tools",
+            template="Tools:",
+            tools=[tool],
+        )
+
+        example = TaskExample(
+            key="array-good",
+            objective="Test",
+            outcome="Done",
+            steps=[
+                TaskStep(
+                    tool_name="array_tool",
+                    example=ToolExample(
+                        description="Step",
+                        input=SearchParams(pattern="x", path="y"),
+                        output=[ArrayItem(value="a"), ArrayItem(value="b")],
+                    ),
+                ),
+            ],
+        )
+
+        # Should succeed - all items match (validation only, not rendering)
+        template = PromptTemplate(
+            ns="test",
+            key="good-array",
+            sections=[
+                tools_section,
+                TaskExamplesSection(examples=[example]),
+            ],
+        )
+
+        # Validation passed - template created successfully
+        assert template is not None

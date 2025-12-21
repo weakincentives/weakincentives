@@ -439,3 +439,20 @@ def test_session_invariant_helpers_cover_basics() -> None:
     assert len(typed_session.session_id.bytes) == SESSION_ID_BYTE_LENGTH
     assert _created_at_has_tz(typed_session)
     assert _created_at_is_utc(typed_session)
+
+
+def test_require_skips_when_inactive() -> None:
+    @require(lambda value: value > 0)
+    def square(value: int) -> int:
+        return value * value
+
+    with dbc_enabled(False):
+        assert square(-1) == 1
+
+
+def test_pure_handles_equal_keyword_arguments() -> None:
+    @pure
+    def read_dict(*, data: dict[str, int]) -> int:
+        return data["value"]
+
+    assert read_dict(data={"value": 42}) == 42

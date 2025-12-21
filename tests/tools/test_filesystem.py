@@ -413,6 +413,13 @@ class TestInMemoryFilesystemMkdir:
         with pytest.raises(PermissionError):
             fs.mkdir("mydir")
 
+    def test_mkdir_top_level_without_parents(self) -> None:
+        """Test creating top-level directory without parents option."""
+        fs = InMemoryFilesystem()
+        # Create a top-level directory - parent would be empty string
+        fs.mkdir("topdir", parents=False)
+        assert fs.exists("topdir")
+
     def test_mkdir_root_is_noop(self) -> None:
         fs = InMemoryFilesystem()
         fs.mkdir(".")  # Should not raise, root always exists
@@ -1221,3 +1228,194 @@ class TestHostFilesystemSnapshots:
         snapshot = fs.snapshot()
         assert isinstance(snapshot, FilesystemSnapshot)
         assert len(snapshot.commit_ref) == 40
+
+
+class TestFilesystemBranchCoverage:
+    """Tests to cover specific uncovered branches."""
+
+    def test_normalize_path_with_parent_refs_and_result(self) -> None:
+        """Test branch 408: normalize_path with .. when result is not empty."""
+        from weakincentives.contrib.tools.filesystem import normalize_path
+
+        # Test path with .. that pops from result
+        result = normalize_path("a/b/../c")
+        assert result == "a/c"
+
+        # Test multiple .. references
+        result = normalize_path("a/b/c/../../d")
+        assert result == "a/d"
+
+    def test_list_with_implicit_subdirectories(self) -> None:
+        """Test branch 619: _collect_file_entries when child_dir not in seen."""
+        fs = InMemoryFilesystem()
+        # Create files in subdirectories without explicitly creating the directories
+        fs.write("dir1/subdir/file1.txt", "content1")
+        fs.write("dir1/subdir/file2.txt", "content2")
+        fs.write("dir1/other/file3.txt", "content3")
+
+        # List dir1 - should show implicit subdirectories
+        entries = fs.list("dir1")
+        dir_names = [e.name for e in entries if e.is_directory]
+        assert "subdir" in dir_names
+        assert "other" in dir_names
+
+    def test_delete_non_root_directory(self) -> None:
+        """Test branch 855: delete() removes directory when path is not root."""
+        fs = InMemoryFilesystem()
+        fs.mkdir("mydir")
+        assert fs.exists("mydir")
+
+        # Delete the directory (branch 855->exit when normalized is truthy)
+        fs.delete("mydir")
+        assert not fs.exists("mydir")
+
+    def test_mkdir_without_parents_when_parent_missing(self) -> None:
+        """Test branch 888: mkdir without parents when parent doesn't exist."""
+        fs = InMemoryFilesystem()
+
+        # Try to create nested directory without parents
+        with pytest.raises(FileNotFoundError, match="Parent directory does not exist"):
+            fs.mkdir("a/b/c", parents=False)
+
+    def test_host_filesystem_snapshot_initializes_git(self, tmp_path: Path) -> None:
+        """Test branch 1360: _ensure_git_initialized when .git doesn't exist."""
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # First snapshot should initialize git (branch 1360->1380)
+        snapshot = fs.snapshot(tag="initial")
+        assert isinstance(snapshot, FilesystemSnapshot)
+
+        # Verify .git directory was created
+        git_dir = tmp_path / ".git"
+        assert git_dir.exists()
+
+    def test_host_filesystem_snapshot_creates_initial_commit_when_no_head(
+        self, tmp_path: Path
+    ) -> None:
+        """Test branch 1424: snapshot creates initial commit when HEAD doesn't exist."""
+        import subprocess
+
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Initialize git but don't create any commits
+        _ = subprocess.run(
+            ["git", "init"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+        # Configure git user for CI environments
+        _ = subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+        _ = subprocess.run(
+            ["git", "config", "user.name", "Test User"],
+            cwd=str(tmp_path),
+            check=True,
+            capture_output=True,
+        )
+
+        # First snapshot should create initial commit (branch 1424->1434)
+        snapshot = fs.snapshot(tag="first")
+        assert isinstance(snapshot, FilesystemSnapshot)
+        assert len(snapshot.commit_ref) == 40
+
+    def test_host_filesystem_snapshot_skips_initial_commit_when_head_exists(
+        self, tmp_path: Path
+    ) -> None:
+        """Test that snapshot skips initial commit when HEAD already exists."""
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Create a file and take first snapshot (this will create HEAD)
+        fs.write("file.txt", "content")
+        _ = fs.snapshot(tag="first")
+
+        # Second snapshot should not create initial commit (branch 1424 not taken)
+        snapshot = fs.snapshot(tag="second")
+        assert isinstance(snapshot, FilesystemSnapshot)
+        assert len(snapshot.commit_ref) == 40
+
+    def test_host_filesystem_commit_fails_but_head_exists(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Test branch 1424->1434: commit fails but HEAD already exists."""
+        import subprocess
+        from unittest.mock import MagicMock
+
+        fs = HostFilesystem(_root=str(tmp_path))
+
+        # Create initial commit so HEAD exists
+        fs.write("file.txt", "initial")
+        _ = fs.snapshot(tag="initial")
+
+        # Store original subprocess.run
+        original_run = subprocess.run
+        commit_call_count = 0
+
+        def mock_subprocess_run(
+            args: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
+            nonlocal commit_call_count
+
+            # Let most git commands through
+            if args[0:2] in (
+                ["git", "init"],
+                ["git", "config"],
+                ["git", "add"],
+                ["git", "rev-parse"],
+            ):
+                return original_run(args, **kwargs)
+
+            # For git commit: fail to trigger the HEAD check branch
+            if args[0:2] == ["git", "commit"]:
+                commit_call_count += 1
+                if commit_call_count == 1:
+                    # First commit in this test should fail
+                    mock_result = MagicMock()
+                    mock_result.returncode = 1
+                    mock_result.stderr = "simulated failure"
+                    return mock_result
+                return original_run(args, **kwargs)
+
+            return original_run(args, **kwargs)
+
+        monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
+
+        # Second snapshot - commit fails but HEAD exists, so we skip fallback
+        # and just get the existing HEAD commit
+        snapshot = fs.snapshot(tag="second")
+        assert isinstance(snapshot, FilesystemSnapshot)
+        assert len(snapshot.commit_ref) == 40
+
+
+def test_normalize_path_with_leading_dotdot() -> None:
+    """Test normalize_path when .. appears without parent to pop."""
+    from weakincentives.contrib.tools.filesystem import normalize_path
+
+    # When result is empty and .. is encountered, nothing should be popped
+    result = normalize_path("../file.txt")
+    assert result == "file.txt"
+
+    result = normalize_path("../../file.txt")
+    assert result == "file.txt"
+
+    result = normalize_path("dir/../../../file.txt")
+    assert result == "file.txt"
+
+
+def test_in_memory_filesystem_delete_root_directory() -> None:
+    """Test that delete on root directory is handled correctly."""
+    from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+
+    fs = InMemoryFilesystem()
+    fs.write("/dir/file.txt", "content")
+
+    # Deleting root should not remove the root itself
+    fs.delete("/", recursive=True)
+
+    # Root should still exist, but contents should be gone
+    assert fs.exists("/")
+    assert not fs.exists("/dir")

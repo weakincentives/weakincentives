@@ -136,3 +136,117 @@ def test_run_inner_loop_requires_message_payload() -> None:
 
     with pytest.raises(PromptEvaluationError):
         shared.run_inner_loop(inputs=inputs, config=config)
+
+
+def test_extract_payload_handles_mapping_with_non_string_keys() -> None:
+    """Test branch 389->391: mapping_payload is None due to non-string keys."""
+
+    class ResponseWithBadKeys:
+        def model_dump(self) -> dict[int, str]:
+            # Mapping with non-string keys
+            return {1: "value"}
+
+    response = ResponseWithBadKeys()
+    result = shared.extract_payload(response)
+    assert result is None
+
+
+def test_build_json_schema_response_format_with_extra_keys_allowed() -> None:
+    """Test branch 997->1002: allow_extra_keys is True."""
+    from dataclasses import dataclass
+
+    from weakincentives.prompt import Prompt, PromptTemplate
+
+    @dataclass
+    class TestOutput:
+        value: str
+
+    template = PromptTemplate[list[TestOutput]](
+        ns="tests",
+        key="test-extra-keys",
+        name="test",
+        sections=[],
+        allow_extra_keys=True,
+    )
+
+    rendered = Prompt(template).bind().render()
+    result = shared.build_json_schema_response_format(rendered, "test")
+
+    assert result is not None
+    schema_payload = result["json_schema"]["schema"]  # type: ignore[index]
+    # When allow_extra_keys is True, additionalProperties should not be set to False
+    assert schema_payload.get("additionalProperties") != False  # noqa: E712
+
+
+def test_response_parser_preserves_text_when_output_is_none() -> None:
+    """Test branch 1455->1458: output is None, text_value is preserved."""
+    from types import SimpleNamespace
+
+    from weakincentives.prompt import Prompt, PromptTemplate
+
+    # Create a plain text prompt (no structured output)
+    template = PromptTemplate(
+        ns="tests",
+        key="test-plain",
+        name="test",
+        sections=[],
+    )
+
+    rendered = Prompt(template).bind().render()
+    parser = shared.ResponseParser(
+        prompt_name="test",
+        rendered=rendered,
+        require_structured_output_text=False,
+    )
+
+    # Create a message with plain text content
+    message = SimpleNamespace(content="Plain text response")
+    output, text_value = parser.parse(message, provider_payload=None)
+
+    # output should be None (no structured output)
+    assert output is None
+    # text_value should be preserved (not set to None)
+    assert text_value == "Plain text response"
+
+
+def test_response_parser_clears_text_when_output_is_not_none() -> None:
+    """Test branch 1455->1456: when output is successfully parsed, text_value is set to None."""
+    from dataclasses import dataclass
+    from types import SimpleNamespace
+
+    from weakincentives.prompt import Prompt, PromptTemplate
+
+    @dataclass
+    class TestOutput:
+        message: str
+
+    # Create a prompt with structured output
+    template = PromptTemplate[TestOutput](
+        ns="tests",
+        key="test-structured",
+        name="test",
+        sections=[],
+    )
+
+    rendered = Prompt(template).bind().render()
+    parser = shared.ResponseParser(
+        prompt_name="test",
+        rendered=rendered,
+        require_structured_output_text=False,
+    )
+
+    # Create a message with text content and a parsed attribute containing valid JSON
+    # This triggers line 1423-1430 where extract_parsed_content returns non-None
+    message = SimpleNamespace(
+        content="Some text content",
+        parsed={
+            "message": "parsed output"
+        },  # This will be parsed by parse_schema_constrained_payload
+    )
+    output, text_value = parser.parse(message, provider_payload=None)
+
+    # output should be parsed (line 1425-1430 succeeds)
+    assert output is not None
+    assert output.message == "parsed output"  # type: ignore[attr-defined]
+    # text_value should be set to None (line 1456, triggered by line 1455 when output is not None)
+    assert text_value is None

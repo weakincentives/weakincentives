@@ -195,6 +195,58 @@ def test_prompt_render_requires_parameter_values() -> None:
     assert exc.value.dataclass_type is DetailsParams
 
 
+def test_prompt_render_iterates_through_siblings() -> None:
+    parent1 = MarkdownSection[IntroParams](
+        title="Parent1",
+        template="Parent1: ${title}",
+        key="parent1",
+    )
+    child1 = MarkdownSection[DetailsParams](
+        title="Child1",
+        template="Child1: ${body}",
+        key="child1",
+    )
+    parent2 = MarkdownSection[OutroParams](
+        title="Parent2",
+        template="Parent2: ${footer}",
+        key="parent2",
+    )
+    child2 = MarkdownSection[SummaryParams](
+        title="Child2",
+        template="Child2: ${summary}",
+        key="child2",
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="siblings",
+        sections=[
+            MarkdownSection(
+                title="Root",
+                key="root",
+                template="Root",
+                children=[parent1, child1, parent2, child2],
+            )
+        ],
+    )
+
+    rendered = (
+        Prompt(template)
+        .bind(
+            IntroParams(title="a"),
+            DetailsParams(body="b"),
+            OutroParams(footer="c"),
+            SummaryParams(summary="d"),
+        )
+        .render()
+    )
+
+    assert "Parent1: a" in rendered.text
+    assert "Child1: b" in rendered.text
+    assert "Parent2: c" in rendered.text
+    assert "Child2: d" in rendered.text
+
+
 def test_prompt_render_requires_dataclass_instances() -> None:
     template = build_prompt()
 
@@ -369,3 +421,173 @@ def test_markdown_section_missing_placeholder_raises_prompt_error() -> None:
 
     assert isinstance(exc.value, PromptRenderError)
     assert exc.value.placeholder == "name"
+
+
+def test_section_rendering_empty_string_is_skipped() -> None:
+    """Test that sections rendering to empty strings are not included in output."""
+
+    class EmptySection(MarkdownSection[IntroParams]):
+        def render(
+            self,
+            params: IntroParams,
+            depth: int,
+            number: str,
+            *,
+            path: tuple[str, ...] = (),
+            visibility: SectionVisibility | None = None,
+        ) -> str:
+            del params, depth, number, path, visibility
+            return ""  # Empty render
+
+    empty_section = EmptySection(
+        title="Empty",
+        template="unused",
+        key="empty",
+    )
+    non_empty = MarkdownSection[DetailsParams](
+        title="Content",
+        template="Content: ${body}",
+        key="content",
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="empty-section",
+        sections=[empty_section, non_empty],
+    )
+
+    rendered = (
+        Prompt(template)
+        .bind(
+            IntroParams(title="ignored"),
+            DetailsParams(body="visible"),
+        )
+        .render()
+    )
+
+    # Empty section should not appear in output
+    assert "Empty" not in rendered.text
+    assert "Content: visible" in rendered.text
+
+
+def test_collect_child_keys_exits_on_sibling() -> None:
+    """Test _collect_child_keys stops when encountering siblings."""
+
+    parent = MarkdownSection[IntroParams](
+        title="Parent",
+        template="Parent: ${title}",
+        key="parent",
+        children=[
+            MarkdownSection[DetailsParams](
+                title="Child1",
+                template="Child1: ${body}",
+                key="child1",
+            ),
+            MarkdownSection[OutroParams](
+                title="Child2",
+                template="Child2: ${footer}",
+                key="child2",
+            ),
+        ],
+    )
+    sibling = MarkdownSection[SummaryParams](
+        title="Sibling",
+        template="Sibling: ${summary}",
+        key="sibling",
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="collect-children",
+        sections=[parent, sibling],
+    )
+
+    rendered = (
+        Prompt(template)
+        .bind(
+            IntroParams(title="p"),
+            DetailsParams(body="c1"),
+            OutroParams(footer="c2"),
+            SummaryParams(summary="s"),
+        )
+        .render()
+    )
+
+    # All sections should render
+    assert "Parent: p" in rendered.text
+    assert "Child1: c1" in rendered.text
+    assert "Child2: c2" in rendered.text
+    assert "Sibling: s" in rendered.text
+
+
+def test_collect_child_keys_skips_grandchildren() -> None:
+    """Test _collect_child_keys skips grandchildren and continues to next child.
+
+    This covers the branch 339->329 in rendering.py where we iterate past
+    grandchildren to find subsequent direct children.
+    """
+
+    grandchild = MarkdownSection[OutroParams](
+        title="Grandchild",
+        template="Grandchild: ${footer}",
+        key="grandchild",
+    )
+    child1 = MarkdownSection[DetailsParams](
+        title="Child1",
+        template="Child1: ${body}",
+        key="child1",
+        children=[grandchild],
+    )
+    child2 = MarkdownSection[SummaryParams](
+        title="Child2",
+        template="Child2: ${summary}",
+        key="child2",
+    )
+    parent = MarkdownSection[IntroParams](
+        title="Parent",
+        template="Parent: ${title}",
+        key="parent",
+        summary="Parent summary for SUMMARY visibility",
+        visibility=SectionVisibility.SUMMARY,
+        children=[child1, child2],
+    )
+
+    template = PromptTemplate(
+        ns="tests/prompts",
+        key="grandchildren-skip",
+        sections=[parent],
+    )
+
+    rendered = (
+        Prompt(template)
+        .bind(
+            IntroParams(title="p"),
+            DetailsParams(body="c1"),
+            OutroParams(footer="gc"),
+            SummaryParams(summary="c2"),
+        )
+        .render()
+    )
+
+    # Parent should render with SUMMARY visibility (shows summary suffix)
+    assert "Parent summary" in rendered.text
+    # Children and grandchild are hidden in SUMMARY mode
+    # The _collect_child_keys method should skip grandchild and find child2
+
+
+def test_markdown_section_placeholder_extraction_with_braced_syntax() -> None:
+    """Test that MarkdownSection extracts placeholders from ${var} syntax."""
+    section = MarkdownSection[IntroParams](
+        title="Test",
+        template="Title: ${title}",
+        key="test",
+    )
+
+    # This should extract 'title' placeholder using braced syntax
+    params = IntroParams(title="Hello")
+    prompt = Prompt(PromptTemplate(ns="test", key="braced", sections=[section])).bind(
+        params
+    )
+
+    rendered = prompt.render()
+    assert "Title: Hello" in rendered.text

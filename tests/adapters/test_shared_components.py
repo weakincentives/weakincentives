@@ -24,6 +24,7 @@ import pytest
 from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives import ToolValidationError
+from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -1549,3 +1550,68 @@ class TestHostFilesystemToolIntegration:
         # File should be restored
         assert fs.exists("data.txt")
         assert fs.read("data.txt").content == "important data"
+
+
+def test_extract_payload_handles_mapping_payload() -> None:
+    mapping_data = {"key": "value", "nested": {"inner": "data"}}
+    result = shared.extract_payload(mapping_data)
+    assert result == {"key": "value", "nested": {"inner": "data"}}
+
+
+def test_build_json_schema_response_format_object_container() -> None:
+    rendered = RenderedPrompt(
+        text="system",
+        structured_output=StructuredOutputConfig(
+            dataclass_type=StructuredOutput,
+            container="object",
+            allow_extra_keys=False,
+        ),
+    )
+    result = shared.build_json_schema_response_format(rendered, "test")
+    assert result is not None
+    schema_payload = result["json_schema"]["schema"]
+    assert schema_payload["additionalProperties"] is False
+
+
+def test_response_parser_sets_text_to_none_when_output_present() -> None:
+    rendered = RenderedPrompt(
+        text="system",
+        structured_output=StructuredOutputConfig(
+            dataclass_type=StructuredOutput,
+            container="object",
+            allow_extra_keys=False,
+        ),
+    )
+    parser = ResponseParser[StructuredOutput](
+        prompt_name="test",
+        rendered=rendered,
+        require_structured_output_text=False,
+    )
+    message = SimpleNamespace(content="Some text", parsed={"answer": "result"})
+    output, text = parser.parse(message, None)
+    assert output is not None
+    assert text is None
+
+
+def test_response_parser_preserves_text_when_output_is_none() -> None:
+    """Test that text_value is preserved when structured output is None."""
+    rendered = RenderedPrompt(
+        text="system",
+        structured_output=StructuredOutputConfig(
+            dataclass_type=StructuredOutput,
+            container="object",
+            allow_extra_keys=False,
+        ),
+    )
+    parser = ResponseParser[StructuredOutput](
+        prompt_name="test",
+        rendered=rendered,
+        require_structured_output_text=False,
+    )
+    # Simulate case where parsed is None but content exists
+    # parse_structured_output might return None in edge cases
+    message = SimpleNamespace(content='{"invalid_field": "value"}', parsed=None)
+
+    # This should raise because the JSON doesn't match the schema
+    with pytest.raises(PromptEvaluationError):
+        parser.parse(message, None)

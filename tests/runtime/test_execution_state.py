@@ -1114,3 +1114,65 @@ class TestToolTransactionContextManager:
         with pytest.raises(ValueError, match="specific error"):
             with state.tool_transaction():
                 raise ValueError("specific error")
+
+
+class TestCompositeSnapshotNullMetadata:
+    """Tests for CompositeSnapshot with None metadata."""
+
+    def test_from_json_accepts_null_metadata(self) -> None:
+        """from_json accepts null metadata field."""
+        import json
+
+        session = Session()
+        snapshot = CompositeSnapshot(
+            snapshot_id=UUID("12345678-1234-5678-1234-567812345678"),
+            created_at=datetime.now(UTC),
+            session=session.snapshot(),
+            metadata=None,  # Explicitly None
+        )
+        json_str = snapshot.to_json()
+
+        # Verify null metadata in JSON
+        data = json.loads(json_str)
+        assert data["metadata"] is None
+
+        # Roundtrip should work
+        restored = CompositeSnapshot.from_json(json_str)
+        assert restored.metadata is None
+
+
+class TestExecutionStateNonSnapshotableResource:
+    """Tests for ExecutionState with non-snapshotable resources."""
+
+    def test_restore_skips_non_snapshotable_resource(self) -> None:
+        """restore skips resources that are not Snapshotable."""
+        import types as types_module
+
+        class NonSnapshotableResource:
+            """Resource that does not implement Snapshotable."""
+
+            value: str = "initial"
+
+        session = Session()
+        resource = NonSnapshotableResource()
+        resources = ResourceRegistry.build({NonSnapshotableResource: resource})
+        state = ExecutionState(session=session, resources=resources)
+
+        # Modify resource
+        resource.value = "modified"
+
+        # Create a fake snapshot with the resource
+        snapshot2 = CompositeSnapshot(
+            snapshot_id=UUID("12345678-1234-5678-1234-567812345678"),
+            created_at=datetime.now(UTC),
+            session=session.snapshot(),
+            resources=types_module.MappingProxyType(
+                {NonSnapshotableResource: "fake-snapshot"}
+            ),
+        )
+
+        # Restore should skip non-snapshotable resource (no error)
+        state.restore(snapshot2)
+
+        # Resource should still be modified (not restored)
+        assert resource.value == "modified"

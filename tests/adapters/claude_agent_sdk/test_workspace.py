@@ -282,6 +282,23 @@ class TestClaudeAgentWorkspaceSectionTemplate:
         finally:
             section.cleanup()
 
+    def test_template_shows_mount_with_no_entries(self, session: Session) -> None:
+        """Test template rendering when a mount has no entries (empty directory)."""
+        with tempfile.TemporaryDirectory() as host_dir:
+            # Create an empty directory - no files
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=host_dir)],
+            )
+
+            try:
+                rendered = section.render(None, depth=1, number="1")
+                # Should still show the mount with total bytes
+                assert "(directory):" in rendered
+                assert "Total:" in rendered
+            finally:
+                section.cleanup()
+
     def test_template_shows_file_mount(self, session: Session) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
             host_path = Path(host_dir)

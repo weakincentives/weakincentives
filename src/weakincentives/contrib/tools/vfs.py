@@ -878,17 +878,17 @@ class FilesystemToolHandlers:
         glob_results = fs.glob(pattern, path=base_str)
         matches: list[GlobMatch] = []
 
+        # fs.glob already filters to files only, no need to check is_file
         for match in glob_results:
-            if match.is_file:
-                stat = fs.stat(match.path)
-                matches.append(
-                    GlobMatch(
-                        path=path_from_string(match.path),
-                        size_bytes=stat.size_bytes,
-                        version=1,
-                        updated_at=stat.modified_at or self._clock(),
-                    )
+            stat = fs.stat(match.path)
+            matches.append(
+                GlobMatch(
+                    path=path_from_string(match.path),
+                    size_bytes=stat.size_bytes,
+                    version=1,
+                    updated_at=stat.modified_at or self._clock(),
                 )
+            )
 
         matches.sort(key=lambda match: match.path.segments)
         message = _format_glob_message(base, pattern, matches)

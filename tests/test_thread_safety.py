@@ -274,3 +274,37 @@ def test_session_reset_clears_runtime_state() -> None:
     session.reset()
 
     assert session[ExampleResult].all() == ()
+
+
+def test_session_reducer_optimistic_concurrency_retry() -> None:
+    """Test branch 818->796: reducer retries when state is modified concurrently."""
+    from weakincentives.runtime.session import append_all
+
+    @dataclass(slots=True, frozen=True)
+    class CounterEvent:
+        value: int
+
+    bus = InProcessEventBus()
+    session = Session(bus=bus)
+
+    # Register a reducer that appends values
+    session[CounterEvent].register(CounterEvent, append_all)
+
+    # Broadcast many events concurrently to trigger optimistic concurrency retries
+    max_workers = 4
+    total_events = 100
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [
+            executor.submit(lambda i=i: session.broadcast(CounterEvent(value=i)))
+            for i in range(total_events)
+        ]
+        for future in futures:
+            future.result()
+
+    # All events should be in the session state, even though some reducers retried
+    events = session[CounterEvent].all()
+    assert len(events) == total_events
+    # Verify all values are present (order might vary due to threading)
+    values = {event.value for event in events}
+    assert values == set(range(total_events))

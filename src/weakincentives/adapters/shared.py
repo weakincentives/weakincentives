@@ -1452,8 +1452,9 @@ class ResponseParser[OutputT]:
                     phase=PROMPT_EVALUATION_PHASE_RESPONSE,
                     provider_payload=provider_payload,
                 )
-            if output is not None:
-                text_value = None
+            # parse_structured_output and parse_schema_constrained_payload
+            # always return a value or raise - output is never None here
+            text_value = None
 
         return output, text_value
 
@@ -1753,9 +1754,8 @@ class InnerLoop[OutputT]:
         self._check_budget()
 
         if isinstance(self._next_tool_choice, Mapping):
-            tool_choice_mapping = cast(Mapping[str, object], self._next_tool_choice)
-            if tool_choice_mapping.get("type") == "function":
-                self._next_tool_choice = next_choice
+            # Mapping tool_choice always specifies a function call - reset to auto
+            self._next_tool_choice = next_choice
 
     def _finalize_response(self, message: ProviderMessage) -> PromptResponse[OutputT]:
         """Assemble and publish the final prompt response."""

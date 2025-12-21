@@ -604,6 +604,41 @@ class TestToolRunnerParamValidation:
         assert result.value is not None
         assert result.value.answer == "done"
 
+    def test_tool_with_empty_arguments_json(self) -> None:
+        """Test branch 221->234: when arguments_json is empty/None, skip parsing."""
+
+        def no_params_handler(
+            params: None, *, context: ToolContext
+        ) -> ToolResult[ToolPayload]:
+            return ToolResult(message="ok", value=ToolPayload(answer="done"))
+
+        tool = Tool[None, ToolPayload](
+            name="no_params_tool",
+            description="A tool that takes no params",
+            handler=no_params_handler,
+        )
+        session = Session()
+        state = ExecutionState(session=session)
+
+        runner = ToolRunner(
+            execution_state=state,
+            tool_registry=_build_tool_registry(tool),
+            prompt_name="test",
+        )
+        context = _build_tool_context(session)
+        # Create a tool call with empty arguments_json to trigger branch 221->234
+        tool_call = DummyToolCall(
+            call_id="call_123",
+            name="no_params_tool",
+            arguments="",  # Empty string triggers branch 221->234
+        )
+
+        result = runner.execute(tool_call, context=context)
+
+        assert result.success
+        assert result.value is not None
+        assert result.value.answer == "done"
+
     def test_tool_param_parse_error(self) -> None:
         """Tool returns failure when param parsing fails."""
         tool = Tool[ToolParams, ToolPayload](

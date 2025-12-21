@@ -1972,3 +1972,297 @@ def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
     )
 
     assert result.text == "Hello!"
+
+
+def test_openai_responses_tool_spec_includes_parameters() -> None:
+    module = cast(Any, _reload_module())
+    spec = module._responses_tool_spec(
+        {
+            "type": "function",
+            "function": {
+                "name": "search",
+                "parameters": {"type": "object", "properties": {}},
+            },
+        },
+        prompt_name="test",
+    )
+    assert spec["parameters"] == {"type": "object", "properties": {}}
+
+
+def test_openai_responses_tool_choice_uses_alt_name() -> None:
+    module = cast(Any, _reload_module())
+    tool_choice = module._responses_tool_choice(
+        {"type": "function", "function": {"name": "search"}}, prompt_name="test"
+    )
+    assert tool_choice["name"] == "search"
+
+
+def test_openai_extract_all_tool_calls_skips_when_content_output_set() -> None:
+    module = cast(Any, _reload_module())
+
+    class FirstOutput:
+        def __init__(self) -> None:
+            self.content = [{"type": "output_json", "json": {"answer": "first"}}]
+
+    class SecondOutput:
+        def __init__(self) -> None:
+            self.content = "should be skipped"
+
+    class Response:
+        def __init__(self) -> None:
+            self.output = (FirstOutput(), SecondOutput())
+
+    _, content_output, fallback_output = module._extract_all_tool_calls(
+        Response(), prompt_name="test"
+    )
+    assert content_output is not None
+    assert fallback_output is not None
+
+
+def test_openai_adapter_passes_tool_choice_directive_to_request() -> None:
+    module = cast(Any, _reload_module())
+
+    def fake_handler(
+        params: ToolParams, *, context: ToolContext
+    ) -> ToolResult[ToolPayload]:
+        return ToolResult(message="ok", value=ToolPayload(answer="done"))
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_tool",
+        description="Search",
+        handler=cast(ToolHandler[ToolParams, ToolPayload], fake_handler),
+    )
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="openai-tool-choice-directive",
+        name="search",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Search for ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    message = DummyMessage(content="Search complete", tool_calls=None)
+    response = DummyResponse([DummyChoice(message)])
+    client = DummyOpenAIClient([response])
+
+    adapter = module.OpenAIAdapter(
+        model="gpt-test",
+        client=client,
+        tool_choice={"type": "function", "function": {"name": "search_tool"}},
+    )
+
+    _evaluate_with_session(
+        adapter,
+        prompt,
+        ToolParams(query="test"),
+    )
+
+    request = cast(dict[str, Any], client.responses.requests[0])
+    assert "tool_choice" in request
+
+
+def test_openai_responses_tool_spec_omits_parameters_when_none() -> None:
+    """Test branch 306->309: parameters is None."""
+    module = cast(Any, _reload_module())
+    spec = module._responses_tool_spec(
+        {
+            "type": "function",
+            "function": {"name": "do_it"},
+        },
+        prompt_name="test",
+    )
+    assert "parameters" not in spec
+    assert spec["name"] == "do_it"
+
+
+def test_openai_responses_tool_choice_uses_top_level_name() -> None:
+    """Test branch 339->341: alt_name path when function is not a Mapping and name is a string."""
+    module = cast(Any, _reload_module())
+    # Test the path where function is not a Mapping but name IS a string
+    tool_choice = module._responses_tool_choice(
+        {"type": "function", "name": "search_tool"}, prompt_name="test"
+    )
+    assert tool_choice == {"type": "function", "name": "search_tool"}
+
+
+def test_openai_responses_tool_choice_with_non_string_name() -> None:
+    """Test branch 339->342: alt_name is not a string."""
+    module = cast(Any, _reload_module())
+    from weakincentives.adapters.core import PromptEvaluationError
+
+    # Test the path where function is not a Mapping and name is NOT a string
+    # This should raise an error because name_val remains None
+    with pytest.raises(PromptEvaluationError, match="missing a function name"):
+        module._responses_tool_choice(
+            {"type": "function", "name": 123}, prompt_name="test"
+        )
+
+
+def test_openai_adapter_omits_tool_choice_when_none() -> None:
+    """Test branch 752->756: tool_choice_directive is None."""
+    module = cast(Any, _reload_module())
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=simple_handler,
+    )
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="openai-no-tool-choice",
+        name="search",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    message = DummyMessage(content="All done", tool_calls=None)
+    response = DummyResponse([DummyChoice(message)])
+    client = DummyOpenAIClient([response])
+    # Explicitly set tool_choice to None
+    adapter = module.OpenAIAdapter(
+        model="gpt-test",
+        client=client,
+        tool_choice=None,
+    )
+
+    result = _evaluate_with_session(
+        adapter,
+        prompt,
+        ToolParams(query="test"),
+    )
+
+    assert result.text == "All done"
+    # Verify that tool_choice was not included in the request
+    request = cast(dict[str, Any], client.responses.requests[0])
+    assert "tool_choice" not in request
+
+
+def test_openai_adapter_updates_function_tool_choice_after_tool_call() -> None:
+    """Test branch 1757: when tool_choice type is 'function', it updates after tool execution."""
+    module = cast(Any, _reload_module())
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=simple_handler,
+    )
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="openai-function-tool-choice",
+        name="search",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    # First response includes a tool call
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "test"}),
+    )
+    first = DummyResponse(
+        [DummyChoice(DummyMessage(content="searching", tool_calls=[tool_call]))]
+    )
+    # Second response is the final result
+    second = DummyResponse(
+        [DummyChoice(DummyMessage(content="Found results", tool_calls=None))]
+    )
+    client = DummyOpenAIClient([first, second])
+
+    # Set tool_choice to type="function" to trigger the update branch
+    adapter = module.OpenAIAdapter(
+        model="gpt-test",
+        client=client,
+        tool_choice={"type": "function", "function": {"name": "search_notes"}},
+    )
+
+    result = _evaluate_with_session(
+        adapter,
+        prompt,
+        ToolParams(query="test"),
+    )
+
+    assert result.text == "Found results"
+    # Verify the tool was called
+    assert len(client.responses.requests) == 2
+
+
+def test_openai_adapter_preserves_non_function_tool_choice() -> None:
+    """Test branch 1757->exit: tool_choice type is not 'function'."""
+    module = cast(Any, _reload_module())
+
+    tool = Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search stored notes.",
+        handler=simple_handler,
+    )
+
+    prompt = PromptTemplate(
+        ns=PROMPT_NS,
+        key="openai-required-tool-choice",
+        name="search",
+        sections=[
+            MarkdownSection[ToolParams](
+                title="Task",
+                key="task",
+                template="Look up ${query}",
+                tools=[tool],
+            )
+        ],
+    )
+
+    tool_call = DummyToolCall(
+        call_id="call_1",
+        name="search_notes",
+        arguments=json.dumps({"query": "test"}),
+    )
+    first = DummyResponse(
+        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
+    )
+    second = DummyResponse(
+        [DummyChoice(DummyMessage(content="All done", tool_calls=None))]
+    )
+    client = DummyOpenAIClient([first, second])
+
+    # Set tool_choice to a string (not a function mapping)
+    # This tests the branch where tool_choice is not {"type": "function", ...}
+    adapter = module.OpenAIAdapter(
+        model="gpt-test",
+        client=client,
+        tool_choice="required",
+    )
+
+    result = _evaluate_with_session(
+        adapter,
+        prompt,
+        ToolParams(query="test"),
+    )
+
+    assert result.text == "All done"
+    # Verify that first request used "required" tool_choice
+    first_request = cast(dict[str, Any], client.responses.requests[0])
+    assert first_request.get("tool_choice") == "required"
+    # Second request should also use "required" (not changed)
+    # because it's not a mapping with type="function"
+    second_request = cast(dict[str, Any], client.responses.requests[1])
+    assert second_request.get("tool_choice") == "required"

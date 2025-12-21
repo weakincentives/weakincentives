@@ -146,6 +146,34 @@ def test_renderer_renders_sections_and_tool_overrides() -> None:
     assert rendered.tool_param_descriptions == {"search": {"query": "New query."}}
 
 
+def test_renderer_tool_override_with_no_description_change() -> None:
+    registry, _ = _build_registry()
+    snapshot = registry.snapshot()
+    renderer = PromptRenderer(
+        registry=snapshot,
+        structured_output=None,
+    )
+
+    params_lookup = renderer.build_param_lookup((_IntroParams(title="Test"),))
+
+    original_description = snapshot.sections[0].section.tools()[0].description
+
+    rendered = renderer.render(
+        params_lookup,
+        tool_overrides={
+            "search": ToolOverride(
+                name="search",
+                expected_contract_hash=hash_text("hash"),
+                description=original_description,
+                param_descriptions={},
+            )
+        },
+    )
+
+    assert rendered.tools[0].description == original_description
+    assert rendered.tool_param_descriptions == {}
+
+
 def test_renderer_rejects_unregistered_params_types() -> None:
     registry, _ = _build_registry()
     snapshot = registry.snapshot()

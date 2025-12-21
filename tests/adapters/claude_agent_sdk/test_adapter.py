@@ -865,3 +865,134 @@ class TestIsolationConfig:
         with sdk_patches():
             with pytest.raises(Exception):  # noqa: B017
                 adapter.evaluate(simple_prompt, session=session)
+
+    def test_uses_prompt_filesystem_when_available(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
+        """When prompt has filesystem, adapter uses it instead of creating one."""
+        from weakincentives.contrib.tools.vfs import VfsToolsSection
+
+        # Create a prompt with a VFS workspace section containing a filesystem
+        workspace = VfsToolsSection(session=session)
+
+        template = PromptTemplate[None](
+            ns="test",
+            key="with-fs",
+            name="with_filesystem",
+            sections=[
+                workspace,
+                MarkdownSection(title="Task", template="Do something", key="task"),
+            ],
+        )
+        prompt = Prompt(template)
+
+        adapter = ClaudeAgentSDKAdapter()
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        with sdk_patches():
+            response = adapter.evaluate(prompt, session=session)
+
+        # Verify the filesystem from the prompt was used
+        assert response is not None
+
+    def test_no_permission_mode_when_none(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
+        """When permission_mode is None, it's not added to options."""
+        config = ClaudeAgentSDKClientConfig(permission_mode=None)
+        adapter = ClaudeAgentSDKAdapter(client_config=config)
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        with sdk_patches():
+            _ = adapter.evaluate(simple_prompt, session=session)
+
+        # Check captured options don't include permission_mode
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+        assert (
+            not hasattr(options, "permission_mode") or options.permission_mode is None
+        )
+
+    def test_suppress_stderr_option(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
+        """When suppress_stderr is True, stderr callback is added to options."""
+        config = ClaudeAgentSDKClientConfig(suppress_stderr=True)
+        adapter = ClaudeAgentSDKAdapter(client_config=config)
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        with sdk_patches():
+            _ = adapter.evaluate(simple_prompt, session=session)
+
+        # Check captured options include stderr callback
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+        assert hasattr(options, "stderr")
+        assert callable(options.stderr)
+
+    def test_suppress_stderr_false(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
+        """When suppress_stderr is False, stderr callback is not added."""
+        config = ClaudeAgentSDKClientConfig(suppress_stderr=False)
+        adapter = ClaudeAgentSDKAdapter(client_config=config)
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        with sdk_patches():
+            _ = adapter.evaluate(simple_prompt, session=session)
+
+        # Check captured options do not include stderr callback
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+        assert not hasattr(options, "stderr") or options.stderr is None
+
+    def test_message_without_result(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
+        """Messages without result attribute or with falsy result are handled."""
+        MockSDKQuery.reset()
+        # Create a message without result attribute
+        message_without_result = MockResultMessage()
+        message_without_result.result = None
+        MockSDKQuery.set_results([message_without_result])
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            response = adapter.evaluate(simple_prompt, session=session)
+
+        assert response.text is None
+
+    def test_non_dict_usage_ignored(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
+        """Non-dict usage values are gracefully ignored."""
+        from weakincentives.runtime.events import PromptExecuted
+
+        MockSDKQuery.reset()
+        # Create a message with non-dict usage
+        message = MockResultMessage(result="Done")
+        message.usage = "not a dict"  # type: ignore[assignment]
+        MockSDKQuery.set_results([message])
+
+        events: list[PromptExecuted] = []
+        session.event_bus.subscribe(PromptExecuted, lambda e: events.append(e))
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            _ = adapter.evaluate(simple_prompt, session=session)
+
+        # Should not crash and usage should be None (non-dict usage ignored)
+        assert len(events) == 1
+        usage = events[0].usage
+        assert usage is not None
+        assert usage.input_tokens is None
+        assert usage.output_tokens is None

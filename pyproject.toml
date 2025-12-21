@@ -239,6 +239,19 @@ mutate_only_covered_lines = true
 debug = false
 
 [tool.coverage.run]
+branch = true
+source = ["src/weakincentives"]
+
+[tool.coverage.report]
+fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "@overload",
+    "@abstractmethod",
+    "^\\s*\\.\\.\\.\\s*$",
+    ":\\s*\\.\\.\\.\\s*$",
+]
 
 [tool.deptry]
 

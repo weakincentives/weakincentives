@@ -865,3 +865,42 @@ def test_collect_param_descriptions_without_metadata(tmp_path: Path) -> None:
     overrides = seed_tools(prompt, descriptor)
 
     assert overrides[tool.name].param_descriptions == {}
+
+
+def test_collect_param_descriptions_with_partial_metadata(tmp_path: Path) -> None:
+    """Test branch 585->583: fields without description metadata are skipped."""
+
+    @dataclass
+    class _MixedParams:
+        with_desc: str = field(metadata={"description": "Has a description"})
+        no_desc: str = field(metadata={"other": "value"})  # No description key
+        empty_desc: str = field(metadata={"description": ""})  # Empty description
+
+    @dataclass
+    class _MixedResult:
+        value: str
+
+    tool = Tool[_MixedParams, _MixedResult](
+        name="mixed",
+        description="Mixed metadata description.",
+        handler=None,
+    )
+
+    prompt = PromptTemplate(
+        ns="tests/versioning",
+        key="mixed-metadata",
+        sections=[
+            MarkdownSection[_GreetingParams](
+                title="Example",
+                template="Example body for ${subject}.",
+                key="example",
+                tools=[tool],
+            )
+        ],
+    )
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    overrides = seed_tools(prompt, descriptor)
+
+    # Only the field with a non-empty description should be included
+    assert overrides[tool.name].param_descriptions == {"with_desc": "Has a description"}
