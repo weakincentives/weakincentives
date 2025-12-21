@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from weakincentives.adapters.claude_agent_sdk._errors import normalize_sdk_error
 from weakincentives.adapters.core import PromptEvaluationError
-from weakincentives.adapters.shared import ThrottleError
+from weakincentives.adapters.throttle import ThrottleError
 
 
 class MockCLINotFoundError(Exception):

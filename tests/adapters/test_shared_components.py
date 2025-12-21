@@ -24,20 +24,25 @@ import pytest
 from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives import ToolValidationError
-from weakincentives.adapters import shared
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
     ProviderAdapter,
 )
-from weakincentives.adapters.shared import (
+from weakincentives.adapters.response_parser import (
     ResponseParser,
+    build_json_schema_response_format,
+)
+from weakincentives.adapters.tool_executor import (
+    ToolExecutionContext,
     ToolExecutionOutcome,
     ToolExecutor,
-    _parse_tool_params,
-    _publish_tool_invocation,
-    _ToolExecutionContext,
+    parse_tool_params,
+    publish_tool_invocation,
+)
+from weakincentives.adapters.utilities import (
+    extract_payload,
     parse_tool_arguments,
     tool_to_spec,
 )
@@ -124,7 +129,7 @@ def test_tool_to_spec_accepts_none_params() -> None:
     }
 
 
-def test_parse_tool_params_rejects_arguments_for_none_params() -> None:
+def testparse_tool_params_rejects_arguments_for_none_params() -> None:
     def no_param_handler(
         params: None, *, context: ToolContext
     ) -> ToolResult[EchoPayload]:
@@ -138,20 +143,20 @@ def test_parse_tool_params_rejects_arguments_for_none_params() -> None:
     )
 
     with pytest.raises(ToolValidationError, match="does not accept any arguments"):
-        _parse_tool_params(
+        parse_tool_params(
             tool=cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool),
             arguments_mapping={"unexpected": "value"},
         )
 
 
-def test_parse_tool_params_returns_none_for_empty_arguments() -> None:
+def testparse_tool_params_returns_none_for_empty_arguments() -> None:
     tool = Tool[None, EchoPayload](
         name="no_params",
         description="No arguments required.",
         handler=None,
     )
 
-    parsed = _parse_tool_params(
+    parsed = parse_tool_params(
         tool=cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool),
         arguments_mapping={},
     )
@@ -210,7 +215,7 @@ def test_tool_executor_success() -> None:
     assert len(executor.tool_message_records) == 1
 
 
-def test_publish_tool_invocation_attaches_usage() -> None:
+def testpublish_tool_invocation_attaches_usage() -> None:
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
         description="Echo",
@@ -228,7 +233,7 @@ def test_publish_tool_invocation_attaches_usage() -> None:
         tool.name: typed_tool
     }
 
-    context = _ToolExecutionContext(
+    context = ToolExecutionContext(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[Any], object()),
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
@@ -259,7 +264,7 @@ def test_publish_tool_invocation_attaches_usage() -> None:
         snapshot=snapshot,
     )
 
-    invocation = _publish_tool_invocation(context=context, outcome=outcome)
+    invocation = publish_tool_invocation(context=context, outcome=outcome)
 
     tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
 
@@ -748,7 +753,7 @@ class TestToolExecutionFilesystemIntegration:
 
 
 class TestPublishInvocationFilesystemRestore:
-    """Tests for filesystem restore in _publish_tool_invocation."""
+    """Tests for filesystem restore in publish_tool_invocation."""
 
     def test_filesystem_restored_on_publish_failure(self) -> None:
         """Verify filesystem is restored when event publishing fails."""
@@ -801,7 +806,7 @@ class TestPublishInvocationFilesystemRestore:
             str, Tool[SupportsDataclassOrNone, SupportsToolResult]
         ] = {tool.name: typed_tool}
 
-        context = _ToolExecutionContext(
+        context = ToolExecutionContext(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=Prompt(PromptTemplate(ns="test", key="tool")),
@@ -823,7 +828,7 @@ class TestPublishInvocationFilesystemRestore:
             snapshot=composite_snapshot,
         )
 
-        _publish_tool_invocation(context=context, outcome=outcome)
+        publish_tool_invocation(context=context, outcome=outcome)
 
         # Filesystem should be restored because publish failed and tool succeeded
         assert fs.read("/test.txt").content == "before_tool"
@@ -882,7 +887,7 @@ class TestPublishInvocationFilesystemRestore:
             str, Tool[SupportsDataclassOrNone, SupportsToolResult]
         ] = {tool.name: typed_tool}
 
-        context = _ToolExecutionContext(
+        context = ToolExecutionContext(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=Prompt(PromptTemplate(ns="test", key="tool")),
@@ -904,7 +909,7 @@ class TestPublishInvocationFilesystemRestore:
             snapshot=composite_snapshot,
         )
 
-        _publish_tool_invocation(context=context, outcome=outcome)
+        publish_tool_invocation(context=context, outcome=outcome)
 
         # Restore should NOT have been called since tool.success=False
         assert fs.restore_called is False
@@ -1554,7 +1559,7 @@ class TestHostFilesystemToolIntegration:
 
 def test_extract_payload_handles_mapping_payload() -> None:
     mapping_data = {"key": "value", "nested": {"inner": "data"}}
-    result = shared.extract_payload(mapping_data)
+    result = extract_payload(mapping_data)
     assert result == {"key": "value", "nested": {"inner": "data"}}
 
 
@@ -1567,7 +1572,7 @@ def test_build_json_schema_response_format_object_container() -> None:
             allow_extra_keys=False,
         ),
     )
-    result = shared.build_json_schema_response_format(rendered, "test")
+    result = build_json_schema_response_format(rendered, "test")
     assert result is not None
     schema_payload = result["json_schema"]["schema"]
     assert schema_payload["additionalProperties"] is False

@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from ..core import PromptEvaluationError
 
 if TYPE_CHECKING:
-    from ..shared import ThrottleError, ThrottleKind
+    from ..throttle import ThrottleError, ThrottleKind
 
 __all__ = [
     "normalize_sdk_error",
@@ -34,7 +34,7 @@ def _create_throttle_error(
     retry_after: timedelta | None = None,
 ) -> ThrottleError:
     """Create a ThrottleError with proper details."""
-    from ..shared import ThrottleDetails, ThrottleError
+    from ..throttle import ThrottleDetails, ThrottleError
 
     details = ThrottleDetails(
         kind=kind,

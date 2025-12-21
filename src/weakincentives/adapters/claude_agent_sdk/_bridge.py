@@ -28,7 +28,7 @@ from ...runtime.events import ToolInvoked
 from ...runtime.execution_state import CompositeSnapshot, ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
-from ..shared import _build_resources
+from ..utilities import build_resources
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
@@ -157,7 +157,7 @@ class BridgedTool:
                 params = parse(self._tool.params_type, args, extra="forbid")
 
             filesystem = self._execution_state.resources.get(Filesystem)
-            resources = _build_resources(
+            resources = build_resources(
                 filesystem=filesystem,
                 budget_tracker=self._budget_tracker,
             )

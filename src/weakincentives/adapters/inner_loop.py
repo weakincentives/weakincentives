@@ -40,7 +40,6 @@ from ..types.dataclass import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
-from . import throttle as _throttle
 from ._names import AdapterName
 from ._provider_protocols import ProviderChoice, ProviderMessage, ProviderToolCall
 from .core import (
@@ -54,10 +53,12 @@ from .core import (
 )
 from .response_parser import ResponseParser
 from .throttle import (
-    ThrottleDetails,
     ThrottleError,
     ThrottlePolicy,
+    details_from_error,
+    jittered_backoff,
     new_throttle_policy,
+    sleep_for,
 )
 from .tool_executor import (
     ToolExecutor,
@@ -78,27 +79,6 @@ from .utilities import (
 if TYPE_CHECKING:
     from ..prompt.tool import Tool
     from .core import ProviderAdapter
-
-
-def _jittered_backoff(
-    *,
-    policy: ThrottlePolicy,
-    attempt: int,
-    retry_after: timedelta | None,
-) -> timedelta:
-    return _throttle.jittered_backoff(
-        policy=policy, attempt=attempt, retry_after=retry_after
-    )
-
-
-def _sleep_for(delay: timedelta) -> None:
-    _throttle.sleep_for(delay)
-
-
-def _details_from_error(
-    error: ThrottleError, *, attempts: int, retry_safe: bool
-) -> ThrottleDetails:
-    return _throttle.details_from_error(error, attempts=attempts, retry_safe=retry_safe)
 
 
 logger: StructuredLogger = get_logger(
@@ -307,12 +287,12 @@ class InnerLoop[OutputT]:
                         "Throttle retry budget exhausted.",
                         prompt_name=self.inputs.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        details=_details_from_error(
+                        details=details_from_error(
                             error, attempts=attempts, retry_safe=False
                         ),
                     ) from error
 
-                delay = _jittered_backoff(
+                delay = jittered_backoff(
                     policy=throttle_policy,
                     attempt=attempts,
                     retry_after=error.retry_after,
@@ -323,7 +303,7 @@ class InnerLoop[OutputT]:
                         "Deadline expired before retrying after throttling.",
                         prompt_name=self.inputs.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        details=_details_from_error(
+                        details=details_from_error(
                             error, attempts=attempts, retry_safe=False
                         ),
                     ) from error
@@ -334,7 +314,7 @@ class InnerLoop[OutputT]:
                         "Throttle retry window exceeded configured budget.",
                         prompt_name=self.inputs.prompt_name,
                         phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        details=_details_from_error(
+                        details=details_from_error(
                             error, attempts=attempts, retry_safe=False
                         ),
                     ) from error
@@ -351,7 +331,7 @@ class InnerLoop[OutputT]:
                         "delay_seconds": delay.total_seconds(),
                     },
                 )
-                _sleep_for(delay)
+                sleep_for(delay)
 
     def _prepare(self) -> None:
         """Initialize execution state prior to the provider loop."""

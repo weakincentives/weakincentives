@@ -24,13 +24,30 @@ import pytest
 
 from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
-from weakincentives.adapters import shared
+from weakincentives.adapters._provider_protocols import ProviderChoice, ProviderToolCall
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
     PromptResponse,
     ProviderAdapter,
+)
+from weakincentives.adapters.inner_loop import (
+    InnerLoop,
+    InnerLoopConfig,
+    InnerLoopInputs,
+    run_inner_loop,
+)
+from weakincentives.adapters.tool_executor import (
+    ToolExecutionContext,
+    execute_tool_call,
+)
+from weakincentives.adapters.utilities import (
+    ToolChoice,
+    deadline_provider_payload,
+    format_publish_failures,
+    parse_tool_arguments,
+    raise_tool_deadline_error,
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
@@ -82,8 +99,8 @@ def _tool_context(
     prompt_name: str,
     provider_payload: dict[str, Any] | None = None,
     deadline: Deadline | None = None,
-) -> shared._ToolExecutionContext:
-    return shared._ToolExecutionContext(
+) -> ToolExecutionContext:
+    return ToolExecutionContext(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
@@ -91,21 +108,21 @@ def _tool_context(
         tool_registry=tool_registry,
         execution_state=execution_state,
         prompt_name=prompt_name,
-        parse_arguments=shared.parse_tool_arguments,
-        format_publish_failures=shared.format_publish_failures,
+        parse_arguments=parse_tool_arguments,
+        format_publish_failures=format_publish_failures,
         deadline=deadline,
         provider_payload=provider_payload,
     )
 
 
 def test_deadline_provider_payload_handles_none() -> None:
-    assert shared.deadline_provider_payload(None) is None
+    assert deadline_provider_payload(None) is None
 
 
 def test_raise_tool_deadline_error() -> None:
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
     with pytest.raises(PromptEvaluationError) as excinfo:
-        shared._raise_tool_deadline_error(
+        raise_tool_deadline_error(
             prompt_name="test", tool_name="tool", deadline=deadline
         )
     assert isinstance(excinfo.value, PromptEvaluationError)
@@ -124,7 +141,7 @@ def test_inner_loop_raise_deadline_error() -> None:
     execution_state = ExecutionState(session=session)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
-    inputs = shared.InnerLoopInputs[BodyResult](
+    inputs = InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
@@ -133,7 +150,7 @@ def test_inner_loop_raise_deadline_error() -> None:
         render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
-    config = shared.InnerLoopConfig(
+    config = InnerLoopConfig(
         execution_state=execution_state,
         tool_choice="auto",
         response_format=None,
@@ -143,7 +160,7 @@ def test_inner_loop_raise_deadline_error() -> None:
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
         deadline=deadline,
     )
-    loop = shared.InnerLoop[BodyResult](inputs=inputs, config=config)
+    loop = InnerLoop[BodyResult](inputs=inputs, config=config)
     with pytest.raises(PromptEvaluationError):
         loop._raise_deadline_error("expired", phase=PROMPT_EVALUATION_PHASE_REQUEST)
 
@@ -160,7 +177,7 @@ def test_inner_loop_detects_expired_deadline(
     frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
 
-    inputs = shared.InnerLoopInputs[BodyResult](
+    inputs = InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
@@ -169,7 +186,7 @@ def test_inner_loop_detects_expired_deadline(
         render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
-    config = shared.InnerLoopConfig(
+    config = InnerLoopConfig(
         execution_state=execution_state,
         tool_choice="auto",
         response_format=None,
@@ -179,7 +196,7 @@ def test_inner_loop_detects_expired_deadline(
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
         deadline=deadline,
     )
-    loop = shared.InnerLoop[BodyResult](inputs=inputs, config=config)
+    loop = InnerLoop[BodyResult](inputs=inputs, config=config)
     frozen_utcnow.advance(timedelta(seconds=10))
     with pytest.raises(PromptEvaluationError):
         loop._ensure_deadline_remaining(
@@ -217,7 +234,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
     deadline = Deadline(anchor + timedelta(seconds=5))
     frozen_utcnow.advance(timedelta(seconds=10))
     with pytest.raises(PromptEvaluationError) as excinfo:
-        shared.execute_tool_call(
+        execute_tool_call(
             context=_tool_context(
                 prompt=prompt,
                 rendered=rendered,
@@ -226,7 +243,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
                 prompt_name="deadline",
                 deadline=deadline,
             ),
-            tool_call=cast(shared.ProviderToolCall, call),
+            tool_call=cast(ProviderToolCall, call),
         )
     assert isinstance(excinfo.value, PromptEvaluationError)
     error = excinfo.value
@@ -265,7 +282,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
         id="call", function=SimpleNamespace(name="echo", arguments='{"content": "hi"}')
     )
 
-    invocation, result = shared.execute_tool_call(
+    invocation, result = execute_tool_call(
         context=_tool_context(
             prompt=prompt,
             rendered=rendered,
@@ -273,7 +290,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
             execution_state=execution_state,
             prompt_name="publish",
         ),
-        tool_call=cast(shared.ProviderToolCall, call),
+        tool_call=cast(ProviderToolCall, call),
     )
 
     assert result.success is True
@@ -294,7 +311,7 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
     def call_provider(
         messages: list[dict[str, Any]],
         tool_specs: list[dict[str, Any]],
-        tool_choice: shared.ToolChoice,
+        tool_choice: ToolChoice,
         response_format: Mapping[str, Any] | None,
         /,
     ) -> object:
@@ -311,10 +328,10 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
             ]
         )
 
-    def select_choice(response: SimpleNamespace, /) -> shared.ProviderChoice:
-        return cast(shared.ProviderChoice, response.choices[0])
+    def select_choice(response: SimpleNamespace, /) -> ProviderChoice:
+        return cast(ProviderChoice, response.choices[0])
 
-    config = shared.InnerLoopConfig(
+    config = InnerLoopConfig(
         execution_state=execution_state,
         tool_choice="auto",
         response_format=None,
@@ -322,12 +339,12 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
         call_provider=call_provider,
         select_choice=select_choice,
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
-        format_publish_failures=shared.format_publish_failures,
-        parse_arguments=shared.parse_tool_arguments,
+        format_publish_failures=format_publish_failures,
+        parse_arguments=parse_tool_arguments,
         deadline=deadline,
     )
 
-    inputs = shared.InnerLoopInputs[BodyResult](
+    inputs = InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[BodyResult], object()),
         prompt=prompt,
@@ -337,6 +354,6 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
 
-    result = shared.run_inner_loop(inputs=inputs, config=config)
+    result = run_inner_loop(inputs=inputs, config=config)
 
     assert isinstance(result, PromptResponse)

@@ -21,14 +21,25 @@ from typing import Any, Literal, TypeVar, cast
 
 import pytest
 
-from weakincentives.adapters import OpenAIClientConfig, OpenAIModelConfig, shared
+from weakincentives.adapters import OpenAIClientConfig, OpenAIModelConfig
+from weakincentives.adapters._names import OPENAI_ADAPTER_NAME
+from weakincentives.adapters._tool_messages import serialize_tool_message
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptResponse,
     ProviderAdapter,
 )
-from weakincentives.adapters.shared import OPENAI_ADAPTER_NAME
+from weakincentives.adapters.inner_loop import InnerLoopConfig, InnerLoopInputs
+from weakincentives.adapters.response_parser import (
+    build_json_schema_response_format,
+    content_part_text,
+    extract_parsed_content,
+    message_text_content,
+    parse_schema_constrained_payload,
+    parsed_payload_from_part,
+)
+from weakincentives.adapters.utilities import format_publish_failures
 from weakincentives.prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     StructuredOutputConfig,
@@ -522,14 +533,11 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
 
 
 def test_openai_format_publish_failures_handles_defaults() -> None:
-    module = cast(Any, _reload_module())
-
     failure = HandlerFailure(handler=lambda _: None, error=RuntimeError(""))
-    message = module.format_publish_failures((failure,))
+    message = format_publish_failures((failure,))
     assert message == "Reducer errors prevented applying tool result: RuntimeError"
     assert (
-        module.format_publish_failures(())
-        == "Reducer errors prevented applying tool result."
+        format_publish_failures(()) == "Reducer errors prevented applying tool result."
     )
 
 
@@ -1102,32 +1110,28 @@ def test_openai_adapter_raises_on_invalid_parsed_payload() -> None:
 
 
 def test_openai_message_text_content_handles_structured_parts() -> None:
-    module = cast(Any, _reload_module())
-
     mapping_parts = [{"type": "output_text", "text": "Hello"}]
-    assert module.message_text_content(mapping_parts) == "Hello"
+    assert message_text_content(mapping_parts) == "Hello"
 
     class TextBlock:
         def __init__(self, text: str) -> None:
             self.type = "text"
             self.text = text
 
-    assert module.message_text_content([TextBlock("World")]) == "World"
-    assert module.message_text_content(123) == "123"
-    assert shared._content_part_text(None) == ""
-    assert shared._content_part_text({"type": "output_text", "text": 123}) == ""
+    assert message_text_content([TextBlock("World")]) == "World"
+    assert message_text_content(123) == "123"
+    assert content_part_text(None) == ""
+    assert content_part_text({"type": "output_text", "text": 123}) == ""
 
     class BadTextBlock:
         def __init__(self) -> None:
             self.type = "text"
             self.text = 123
 
-    assert shared._content_part_text(BadTextBlock()) == ""
+    assert content_part_text(BadTextBlock()) == ""
 
 
 def test_openai_extract_parsed_content_handles_attribute_blocks() -> None:
-    module = cast(Any, _reload_module())
-
     class JsonBlock:
         def __init__(self, payload: dict[str, object]) -> None:
             self.type = "output_json"
@@ -1136,22 +1140,20 @@ def test_openai_extract_parsed_content_handles_attribute_blocks() -> None:
     block = JsonBlock({"answer": "attribute"})
     message = DummyMessage(content=[block], tool_calls=None)
 
-    parsed = module.extract_parsed_content(message)
+    parsed = extract_parsed_content(message)
 
     assert parsed == {"answer": "attribute"}
-    assert shared._parsed_payload_from_part({"type": "other"}) is None
+    assert parsed_payload_from_part({"type": "other"}) is None
 
     class OtherBlock:
         def __init__(self) -> None:
             self.type = "other"
             self.json = {"answer": "ignored"}
 
-    assert shared._parsed_payload_from_part(OtherBlock()) is None
+    assert parsed_payload_from_part(OtherBlock()) is None
 
 
 def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None:
-    module = cast(Any, _reload_module())
-
     prompt = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="openai-structured-schema-array-wrapped",
@@ -1169,21 +1171,19 @@ def test_openai_parse_schema_constrained_payload_unwraps_wrapped_array() -> None
 
     payload = {ARRAY_WRAPPER_KEY: [{"answer": "Ready"}]}
 
-    parsed = module.parse_schema_constrained_payload(payload, rendered)
+    parsed = parse_schema_constrained_payload(payload, rendered)
 
     assert isinstance(parsed, list)
     assert parsed[0].answer == "Ready"
 
     with pytest.raises(TypeError):
-        module.parse_schema_constrained_payload({"wrong": []}, rendered)
+        parse_schema_constrained_payload({"wrong": []}, rendered)
 
     with pytest.raises(TypeError):
-        module.parse_schema_constrained_payload(["oops"], rendered)
+        parse_schema_constrained_payload(["oops"], rendered)
 
 
 def test_openai_parse_schema_constrained_payload_handles_object_container() -> None:
-    module = cast(Any, _reload_module())
-
     template = PromptTemplate[StructuredAnswer](
         ns=PROMPT_NS,
         key="openai-structured-schema",
@@ -1199,19 +1199,17 @@ def test_openai_parse_schema_constrained_payload_handles_object_container() -> N
 
     rendered = Prompt(template).bind(ToolParams(query="policies")).render()
 
-    parsed = module.parse_schema_constrained_payload({"answer": "Ready"}, rendered)
+    parsed = parse_schema_constrained_payload({"answer": "Ready"}, rendered)
 
     assert parsed.answer == "Ready"
 
     with pytest.raises(TypeError):
-        module.parse_schema_constrained_payload("oops", rendered)
+        parse_schema_constrained_payload("oops", rendered)
 
 
 def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt() -> (
     None
 ):
-    module = cast(Any, _reload_module())
-
     template = PromptTemplate(
         ns=PROMPT_NS,
         key="openai-plain",
@@ -1227,23 +1225,19 @@ def test_openai_build_json_schema_response_format_returns_none_for_plain_prompt(
 
     rendered = Prompt(template).bind(ToolParams(query="world")).render()
 
-    response_format = module.build_json_schema_response_format(rendered, "plain")
+    response_format = build_json_schema_response_format(rendered, "plain")
 
     assert response_format is None
 
 
 def test_openai_parse_schema_constrained_payload_requires_structured_prompt() -> None:
-    module = cast(Any, _reload_module())
-
     rendered = RenderedPrompt(text="")
 
     with pytest.raises(TypeError):
-        module.parse_schema_constrained_payload({}, rendered)
+        parse_schema_constrained_payload({}, rendered)
 
 
 def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays() -> None:
-    module = cast(Any, _reload_module())
-
     template = PromptTemplate[list[StructuredAnswer]](
         ns=PROMPT_NS,
         key="openai-structured-schema-array-non-seq",
@@ -1260,12 +1254,10 @@ def test_openai_parse_schema_constrained_payload_rejects_non_sequence_arrays() -
     rendered = Prompt(template).bind(ToolParams(query="policies")).render()
 
     with pytest.raises(TypeError):
-        module.parse_schema_constrained_payload("oops", rendered)
+        parse_schema_constrained_payload("oops", rendered)
 
 
 def test_openai_parse_schema_constrained_payload_rejects_unknown_container() -> None:
-    module = cast(Any, _reload_module())
-
     rendered = RenderedPrompt(
         text="",
         structured_output=StructuredOutputConfig(
@@ -1276,7 +1268,7 @@ def test_openai_parse_schema_constrained_payload_rejects_unknown_container() -> 
     )
 
     with pytest.raises(TypeError):
-        module.parse_schema_constrained_payload({}, rendered)
+        parse_schema_constrained_payload({}, rendered)
 
 
 def test_openai_adapter_raises_for_unknown_tool() -> None:
@@ -1644,7 +1636,7 @@ def test_openai_adapter_delegates_to_shared_runner(
 
     assert result is sentinel
     inputs = captured["inputs"]
-    assert isinstance(inputs, module.InnerLoopInputs)
+    assert isinstance(inputs, InnerLoopInputs)
     assert inputs.adapter_name == OPENAI_ADAPTER_NAME
     assert inputs.prompt_name == "shared-runner"
 
@@ -1655,15 +1647,15 @@ def test_openai_adapter_delegates_to_shared_runner(
         {"role": "system", "content": expected_rendered.text}
     ]
 
-    expected_response_format = module.build_json_schema_response_format(
+    expected_response_format = build_json_schema_response_format(
         expected_rendered, "shared-runner"
     )
     expected_text_config = _text_config_from_json_schema(expected_response_format)
     config = captured["config"]
-    assert isinstance(config, module.InnerLoopConfig)
+    assert isinstance(config, InnerLoopConfig)
     assert config.response_format == expected_text_config
     assert config.require_structured_output_text is False
-    assert config.serialize_tool_message_fn is module.serialize_tool_message
+    assert config.serialize_tool_message_fn is serialize_tool_message
 
     call_provider = config.call_provider
     select_choice = config.select_choice

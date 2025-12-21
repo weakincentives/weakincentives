@@ -45,7 +45,7 @@ def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
     def _sleep(delay: timedelta) -> None:
         delays.append(delay)
 
-    monkeypatch.setattr("weakincentives.adapters.throttle.sleep_for", _sleep)
+    monkeypatch.setattr("weakincentives.adapters.inner_loop.sleep_for", _sleep)
     monkeypatch.setattr(
         "weakincentives.adapters.throttle.random.uniform", lambda _a, b: b
     )
@@ -92,7 +92,7 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
     session = Session(bus=bus)
 
     monkeypatch.setattr(
-        "weakincentives.adapters.throttle.sleep_for", lambda _delay: None
+        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
 
     def provider(
@@ -189,7 +189,7 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     bus = RecordingBus()
     session = Session(bus=bus)
     monkeypatch.setattr(
-        "weakincentives.adapters.throttle.sleep_for", lambda _delay: None
+        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
 
     def provider(
@@ -226,10 +226,10 @@ def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None
     bus = RecordingBus()
     session = Session(bus=bus)
     monkeypatch.setattr(
-        "weakincentives.adapters.throttle.sleep_for", lambda _delay: None
+        "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
     monkeypatch.setattr(
-        "weakincentives.adapters.throttle.jittered_backoff",
+        "weakincentives.adapters.inner_loop.jittered_backoff",
         lambda **_: timedelta(seconds=3),
     )
 
