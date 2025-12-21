@@ -22,6 +22,7 @@ from typing import cast
 import pytest
 
 import weakincentives.contrib.tools.asteval as asteval_module
+import weakincentives.contrib.tools.asteval_engine as asteval_engine_module
 import weakincentives.contrib.tools.vfs_types as vfs_types_module
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives import ToolValidationError
@@ -137,10 +138,10 @@ def test_missing_dependency_instructs_extra_install(
     def fail_import(_module: str) -> object:
         raise ModuleNotFoundError
 
-    monkeypatch.setattr(asteval_module, "import_module", fail_import)
+    monkeypatch.setattr(asteval_engine_module, "import_module", fail_import)
 
     with pytest.raises(RuntimeError) as captured:
-        asteval_module._load_asteval_module()
+        asteval_engine_module.load_asteval_module()
 
     assert "weakincentives[asteval]" in str(captured.value)
 
@@ -352,7 +353,8 @@ def test_timeout_discards_writes(monkeypatch: pytest.MonkeyPatch) -> None:
         return True, None, "Execution timed out."
 
     monkeypatch.setattr(
-        "weakincentives.contrib.tools.asteval._execute_with_timeout", fake_timeout
+        "weakincentives.contrib.tools.asteval_engine.execute_with_timeout",
+        fake_timeout,
     )
 
     params = EvalParams(
@@ -389,7 +391,8 @@ def test_timeout_reports_discarded_writes_message(
         return True, None, "Execution timed out."
 
     monkeypatch.setattr(
-        "weakincentives.contrib.tools.asteval._execute_with_timeout", fake_timeout
+        "weakincentives.contrib.tools.asteval_engine.execute_with_timeout",
+        fake_timeout,
     )
 
     result = invoke_tool(
@@ -416,7 +419,7 @@ def test_timeout_reports_discarded_writes_message(
 def test_stdout_truncation_and_flush() -> None:
     session, vfs_section, tool = _setup_sections()
 
-    extra = asteval_module._MAX_STREAM_LENGTH + 100
+    extra = asteval_engine_module.MAX_STREAM_LENGTH + 100
     params = EvalParams(
         code=f"print('A' * {extra}, flush=True)",
     )
@@ -427,7 +430,7 @@ def test_stdout_truncation_and_flush() -> None:
     assert result.value is not None
     payload = result.value
     assert payload.stdout.endswith("...")
-    assert len(payload.stdout) == asteval_module._MAX_STREAM_LENGTH
+    assert len(payload.stdout) == asteval_engine_module.MAX_STREAM_LENGTH
 
 
 def test_print_invalid_sep_reports_error() -> None:
@@ -509,7 +512,7 @@ def test_invalid_global_names_raise() -> None:
 def test_code_length_validation() -> None:
     session, vfs_section, tool = _setup_sections()
 
-    long_code = "x" * (asteval_module._MAX_CODE_LENGTH + 1)
+    long_code = "x" * (asteval_engine_module.MAX_CODE_LENGTH + 1)
     with pytest.raises(ToolValidationError):
         invoke_tool(
             tool,
@@ -637,7 +640,7 @@ def test_invalid_write_mode_rejected() -> None:
 def test_write_content_length_validation() -> None:
     session, vfs_section, tool = _setup_sections()
 
-    long_content = "x" * (asteval_module._MAX_WRITE_LENGTH + 1)
+    long_content = "x" * (asteval_engine_module._MAX_WRITE_LENGTH + 1)
     write = EvalFileWrite(path=VfsPath(("output", "large.txt")), content=long_content)
 
     with pytest.raises(ToolValidationError):
@@ -1030,12 +1033,12 @@ def test_overwrite_requires_existing_file() -> None:
 def test_execute_with_timeout_times_out(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(asteval_module, "_TIMEOUT_SECONDS", 0.01, raising=False)
+    monkeypatch.setattr(asteval_engine_module, "TIMEOUT_SECONDS", 0.01, raising=False)
 
     def sleeper() -> None:
         time.sleep(0.05)
 
-    timed_out, value, message = asteval_module._execute_with_timeout(sleeper)
+    timed_out, value, message = asteval_engine_module.execute_with_timeout(sleeper)
 
     assert timed_out is True
     assert value is None
@@ -1045,9 +1048,9 @@ def test_execute_with_timeout_times_out(
 def test_execute_with_timeout_returns_value(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(asteval_module, "_TIMEOUT_SECONDS", 0.01, raising=False)
+    monkeypatch.setattr(asteval_engine_module, "TIMEOUT_SECONDS", 0.01, raising=False)
 
-    timed_out, value, message = asteval_module._execute_with_timeout(lambda: "ok")
+    timed_out, value, message = asteval_engine_module.execute_with_timeout(lambda: "ok")
 
     assert timed_out is False
     assert value == "ok"
@@ -1060,7 +1063,7 @@ def test_execute_with_timeout_handles_timeout_error(
     def raiser() -> None:
         raise TimeoutError
 
-    timed_out, value, message = asteval_module._execute_with_timeout(raiser)
+    timed_out, value, message = asteval_engine_module.execute_with_timeout(raiser)
 
     assert timed_out is False
     assert value is None
@@ -1074,11 +1077,11 @@ def test_execute_with_timeout_propagates_error(
         raise ValueError("boom")
 
     with pytest.raises(ValueError, match="boom"):
-        asteval_module._execute_with_timeout(explode)
+        asteval_engine_module.execute_with_timeout(explode)
 
 
 def test_merge_globals_combines_mappings() -> None:
-    merged = asteval_module._merge_globals({"alpha": 1}, {"beta": 2})
+    merged = asteval_engine_module.merge_globals({"alpha": 1}, {"beta": 2})
     assert merged == {"alpha": 1, "beta": 2}
 
 
