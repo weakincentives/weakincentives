@@ -700,7 +700,428 @@ All proposals are additive. Existing code continues to work:
 
 ---
 
-## Appendix: API Reference Sketches
+## Concrete Refactoring Opportunities
+
+This section identifies specific locations in the codebase that would benefit
+from these abstractions, with before/after code examples.
+
+### 1. Workspace Digest Index (Computed Slice)
+
+**Location:** `src/weakincentives/contrib/tools/digests.py:52-82`
+
+The current implementation filters through ALL workspace digests on every
+lookup, creating O(n) complexity for what should be O(1).
+
+**Before:**
+
+```python
+# digests.py:70-82 - O(n) scan on every lookup
+def latest_workspace_digest(
+    session: SessionProtocol,
+    section_key: str,
+) -> WorkspaceDigest | None:
+    normalized_key = _normalized_key(section_key)
+    entries = session[WorkspaceDigest].all()  # Get ALL entries
+    for digest in reversed(entries):          # Scan backward
+        if getattr(digest, "section_key", None) == normalized_key:
+            return digest
+    return None
+
+# digests.py:52-57 - O(n) filter on every write
+def set_workspace_digest(...) -> WorkspaceDigest:
+    existing = tuple(
+        digest
+        for digest in session[WorkspaceDigest].all()
+        if getattr(digest, "section_key", None) != normalized_key
+    )
+    session[WorkspaceDigest].seed((*existing, entry))
+```
+
+**After (with Computed Slice):**
+
+```python
+from weakincentives.runtime import computed
+
+@computed
+def workspace_digest_index(
+    digests: tuple[WorkspaceDigest, ...]
+) -> Mapping[str, WorkspaceDigest]:
+    """Derives a section_key -> latest_digest index from WorkspaceDigest slice."""
+    index: dict[str, WorkspaceDigest] = {}
+    for digest in digests:
+        # Later entries overwrite earlier ones (latest wins)
+        index[digest.section_key] = digest
+    return MappingProxyType(index)
+
+# Installation (once during section init)
+session.install_computed(
+    workspace_digest_index,
+    sources=(WorkspaceDigest,),
+)
+
+# Usage - O(1) lookup
+def latest_workspace_digest(
+    session: SessionProtocol,
+    section_key: str,
+) -> WorkspaceDigest | None:
+    normalized_key = _normalized_key(section_key)
+    index = session[WorkspaceDigestIndex].latest()
+    return index.get(normalized_key)
+
+# Write simplifies to append-only (index auto-updates)
+def set_workspace_digest(...) -> WorkspaceDigest:
+    entry = WorkspaceDigest(section_key=normalized_key, body=body.strip())
+    session[WorkspaceDigest].append(entry)
+    return entry
+```
+
+**Impact:** Reduces lookup from O(n) to O(1), eliminates filtering logic.
+
+---
+
+### 2. Bounded Event Ledgers (Slice Windows)
+
+**Location:** `src/weakincentives/runtime/session/session.py:207-210`
+
+The built-in LOG slices grow unbounded. Long-running agents accumulate
+massive event histories.
+
+**Before:**
+
+```python
+# session.py:207-210 - Unbounded growth
+self._slice_policies: dict[SessionSliceType, SlicePolicy] = {
+    _PROMPT_RENDERED_TYPE: SlicePolicy.LOG,
+    _PROMPT_EXECUTED_TYPE: SlicePolicy.LOG,
+    _TOOL_INVOKED_TYPE: SlicePolicy.LOG,
+}
+# No retention limit - grows forever
+```
+
+**After (with Slice Windows):**
+
+```python
+from weakincentives.runtime import SliceWindow, EvictionPolicy
+
+# During session initialization
+session[ToolInvoked].configure(
+    window=SliceWindow.count(max_items=1000),
+    eviction=EvictionPolicy.FIFO,
+)
+session[PromptExecuted].configure(
+    window=SliceWindow.count(max_items=500),
+    eviction=EvictionPolicy.FIFO,
+)
+session[PromptRendered].configure(
+    window=SliceWindow.count(max_items=500),
+    eviction=EvictionPolicy.FIFO,
+)
+
+# Or time-based for recent history
+session[ToolInvoked].configure(
+    window=SliceWindow.time(max_age_seconds=3600),  # Keep last hour
+)
+
+# Or composite for important events
+session[ToolInvoked].configure(
+    window=SliceWindow.composite(
+        SliceWindow.predicate(
+            keep=lambda t: not t.result.success,  # Always keep failures
+            max_items=100,
+        ),
+        SliceWindow.count(max_items=900),  # Plus recent 900
+    ),
+)
+```
+
+**Impact:** Prevents OOM in long-running agents, keeps relevant history.
+
+---
+
+### 3. Plan Workflow State Machine
+
+**Location:** `src/weakincentives/contrib/tools/planning.py:529-640`
+
+The planning tools have implicit state machine semantics with scattered
+validation. Every handler checks preconditions manually.
+
+**Before:**
+
+```python
+# planning.py:529-605 - Scattered precondition checks
+def setup_plan(self, params: SetupPlan, *, context: ToolContext) -> ToolResult[Plan]:
+    ensure_context_uses_session(context=context, session=self._section.session)
+    del context
+    objective = _normalize_text(params.objective, "objective")  # Validation
+    initial_steps = _normalize_step_titles(params.initial_steps)  # Validation
+    # ... handler logic
+
+def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[Plan]:
+    ensure_context_uses_session(context=context, session=self._section.session)
+    del context
+    session = self._section.session
+    plan = _require_plan(session)    # Precondition: plan must exist
+    _ensure_active(plan)              # Precondition: must be active
+    normalized_steps = _normalize_step_titles(params.steps)  # Validation
+    if not normalized_steps:
+        raise ToolValidationError("Provide at least one step to add.")
+    # ... handler logic
+
+def update_step(self, params: UpdateStep, *, context: ToolContext) -> ToolResult[Plan]:
+    ensure_context_uses_session(context=context, session=self._section.session)
+    del context
+    session = self._section.session
+    plan = _require_plan(session)    # Same precondition
+    _ensure_active(plan)              # Same precondition
+    _ensure_step_exists(plan, params.step_id)  # Additional check
+    # ... handler logic
+
+# Helper functions scattered at bottom of file
+def _require_plan(session: Session) -> Plan: ...
+def _ensure_active(plan: Plan) -> None: ...
+def _ensure_step_exists(plan: Plan, step_id: int) -> None: ...
+```
+
+**After (with State Machine):**
+
+```python
+from weakincentives.runtime import StateMachine, state, transition, guard
+
+class PlanWorkflow(StateMachine):
+    """Explicit state machine for plan lifecycle."""
+
+    # States
+    uninitialized = state(initial=True)
+    active = state()
+    completed = state(terminal=True)
+
+    # Transitions with guards
+    @transition(from_=uninitialized, to=active)
+    def setup(self, event: SetupPlan) -> None:
+        """Initialize a new plan."""
+        pass
+
+    @transition(from_=active, to=active)
+    @guard(lambda self, e: len(e.steps) > 0, "Must provide at least one step")
+    def add_step(self, event: AddStep) -> None:
+        """Add steps to active plan."""
+        pass
+
+    @transition(from_=active, to=active)
+    @guard(lambda self, e: self._step_exists(e.step_id), "Step must exist")
+    def update_step(self, event: UpdateStep) -> None:
+        """Update a step in active plan."""
+        pass
+
+    @transition(from_=active, to=completed)
+    @guard(lambda self, e: self._all_steps_done(), "All steps must be done")
+    def complete(self, event: CompletePlan) -> None:
+        """Mark plan as completed."""
+        pass
+
+    def _step_exists(self, step_id: int) -> bool:
+        plan = self.context.session[Plan].latest()
+        return any(s.step_id == step_id for s in plan.steps)
+
+    def _all_steps_done(self) -> bool:
+        plan = self.context.session[Plan].latest()
+        return all(s.status == "done" for s in plan.steps)
+
+# Installation
+session.install(PlanWorkflow)
+
+# Handlers become simple - state machine validates preconditions
+def add_step(self, params: AddStep, *, context: ToolContext) -> ToolResult[Plan]:
+    # State machine validates: plan exists, is active, steps non-empty
+    session.broadcast(params)  # Transition happens here
+    return ToolResult(message="Steps added.", value=session[Plan].latest())
+
+# Introspection for agents
+workflow = session[PlanWorkflow].latest()
+workflow.can_transition(AddStep(steps=("x",)))  # True/False
+workflow.available_transitions()  # [AddStep, UpdateStep, CompletePlan]
+```
+
+**Impact:** Eliminates ~60 lines of scattered validation, makes state
+transitions explicit and introspectable.
+
+---
+
+### 4. Validation Middleware
+
+**Location:** `src/weakincentives/contrib/tools/planning.py:608-640`,
+`src/weakincentives/contrib/tools/podman.py:491-560`
+
+Validation patterns are duplicated across tool handlers.
+
+**Before:**
+
+```python
+# planning.py:608-620 - Repeated in every handler
+def _normalize_text(value: str, field_name: str) -> str:
+    stripped = value.strip()
+    if not stripped:
+        raise ToolValidationError(f"{field_name.title()} must not be empty.")
+    if len(stripped) > _MAX_TITLE_LENGTH:
+        raise ToolValidationError(f"...must be <= {_MAX_TITLE_LENGTH} characters.")
+    return stripped
+
+# podman.py:491-510 - Similar pattern
+def _ensure_ascii(value: str, *, field: str) -> str:
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError:
+        raise ToolValidationError(f"{field} must be ASCII.")
+
+def _validate_command(cmd: list[str]) -> list[str]:
+    if not cmd:
+        raise ToolValidationError("command must contain at least one entry.")
+    # ... more validation
+```
+
+**After (with Validation Middleware):**
+
+```python
+from weakincentives.runtime import Middleware, ReducerContext
+from weakincentives.validation import (
+    Validator, non_empty, max_length, ascii_only, compose
+)
+
+# Reusable validators
+title_validator = compose(
+    non_empty("title"),
+    max_length(500, "title"),
+)
+
+command_validator = compose(
+    non_empty("command"),
+    each(ascii_only("command entry")),
+)
+
+class ValidationMiddleware(Middleware):
+    """Apply registered validators before reducer execution."""
+
+    def __init__(self, validators: Mapping[type, Validator]) -> None:
+        self.validators = validators
+
+    def __call__(
+        self,
+        ctx: ReducerContext,
+        next_fn: Callable[[ReducerContext], T],
+    ) -> T:
+        validator = self.validators.get(ctx.event_type)
+        if validator:
+            validator(ctx.event)  # Raises ToolValidationError if invalid
+        return next_fn(ctx)
+
+# Registration
+session.use(
+    ValidationMiddleware({
+        SetupPlan: compose(
+            field("objective", title_validator),
+            field("initial_steps", each(title_validator)),
+        ),
+        AddStep: field("steps", compose(non_empty(), each(title_validator))),
+        UpdateStep: field("title", optional(title_validator)),
+    })
+)
+
+# Handlers become pure business logic
+def setup_plan(self, params: SetupPlan, *, context: ToolContext) -> ToolResult[Plan]:
+    # Validation already done by middleware
+    session.broadcast(params)
+    return ToolResult(message="Plan created.", value=session[Plan].latest())
+```
+
+**Impact:** Centralizes validation, reduces handler boilerplate by ~50%.
+
+---
+
+### 5. Notification Retention (Slice Windows + Computed)
+
+**Location:** `src/weakincentives/adapters/claude_agent_sdk/adapter.py:245`
+
+Notifications use `append_all` with no retention limit.
+
+**Before:**
+
+```python
+# adapter.py:245 - Unbounded notifications
+session[Notification].register(Notification, append_all)
+
+# Usage - accumulates forever
+session.broadcast(Notification(source=..., payload=...))
+```
+
+**After:**
+
+```python
+from weakincentives.runtime import SliceWindow, EvictionPolicy
+
+# Bounded retention with priority for errors
+session[Notification].configure(
+    window=SliceWindow.composite(
+        # Keep all errors indefinitely (up to 100)
+        SliceWindow.predicate(
+            keep=lambda n: n.source == NotificationSource.ERROR,
+            max_items=100,
+        ),
+        # Keep last 500 other notifications
+        SliceWindow.count(max_items=500),
+    ),
+    eviction=EvictionPolicy.FIFO,
+)
+
+# Computed slice for quick error access
+@computed
+def notification_errors(
+    notifications: tuple[Notification, ...]
+) -> tuple[Notification, ...]:
+    return tuple(n for n in notifications if n.source == NotificationSource.ERROR)
+
+session.install_computed(notification_errors, sources=(Notification,))
+
+# Usage
+errors = session[NotificationErrors].latest()  # O(1) cached
+```
+
+---
+
+## Priority Ranking for Implementation
+
+Based on the codebase analysis, here's the recommended implementation order:
+
+| Priority | Abstraction | Effort | Impact | Refactoring Target |
+|----------|-------------|--------|--------|-------------------|
+| **1** | Slice Windows | Low | High | LOG slices, Notification |
+| **2** | Computed Slices | Medium | High | WorkspaceDigest index |
+| **3** | Validation Middleware | Medium | Medium | Planning, Podman, VFS tools |
+| **4** | State Machines | Medium | Medium | Plan workflow |
+| **5** | Selective Snapshot | Low | Medium | Tool transactions |
+| **6** | Effect System | High | Medium | Logging, external calls |
+| **7** | Typed Channels | Medium | Low | Future-proofing |
+| **8** | Saga Pattern | High | Low | Specialized use cases |
+
+### Why This Order?
+
+1. **Slice Windows** solves an immediate problem (memory growth) with minimal
+   API surface. Non-breaking addition.
+
+2. **Computed Slices** addresses a clear performance pattern (O(n) → O(1))
+   visible in digests.py. The memoization pattern is well-understood.
+
+3. **Validation Middleware** reduces boilerplate significantly across all
+   tool handlers. Familiar concept from web frameworks.
+
+4. **State Machines** makes implicit workflow logic explicit. Moderate
+   complexity but high documentation value.
+
+5-8. Lower priority as they address less common patterns or require more
+     design work.
+
+---
+
+
 
 ### Computed Slices
 
