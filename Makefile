@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent all clean
 
 # Format code with ruff
 format:
@@ -52,6 +52,10 @@ pyright:
 # Run all type checkers
 typecheck: ty pyright
 
+# Check type coverage (100% completeness required)
+type-coverage:
+	@uv run --all-extras python build/run_type_coverage.py -q
+
 # Run tests with coverage (100% minimum)
 test:
 	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= tests
@@ -88,8 +92,8 @@ demo-claude-agent:
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
-# Run all checks (format check, lint, typecheck, bandit, vulture, deptry, pip-audit, markdown, test)
-check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test
+# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, pip-audit, markdown, test)
+check: format-check lint typecheck type-coverage bandit vulture deptry pip-audit markdown-check test
 
 # Run all checks and fixes
 all: format lint-fix bandit deptry pip-audit typecheck test

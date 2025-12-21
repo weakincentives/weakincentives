@@ -21,7 +21,7 @@ from pathlib import Path
 from .dbc import dbc_enabled
 from .runtime.session import Session, iter_sessions_bottom_up
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 def dump_session(root_session: Session, target: str | Path) -> Path | None:
