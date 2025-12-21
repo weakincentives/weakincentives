@@ -519,10 +519,9 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
 
     assert tool_events
     tool_event = tool_events[0]
-    assert tool_event.result.message.startswith(
-        "Reducer errors prevented applying tool result:"
-    )
-    assert "Reducer crashed" in tool_event.result.message
+    # Event stores immutable snapshot of original tool result
+    assert tool_event.result.message == "ok"
+    assert tool_event.result.value == ToolPayload(answer="policies")
 
     latest_payload = session[ToolPayload].latest()
     assert latest_payload == ToolPayload(answer="baseline")

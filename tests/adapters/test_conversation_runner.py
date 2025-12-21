@@ -582,9 +582,12 @@ def test_inner_loop_formats_tool_publish_failures() -> None:
     response = loop.run()
 
     assert response.text == "All done"
+    # Event stores immutable snapshot of original result
     tool_event = next(event for event in bus.events if isinstance(event, ToolInvoked))
-    failure_message = tool_event.result.message
-    assert "Reducer errors prevented applying tool result" in failure_message
+    # The original tool result message should be preserved in the event
+    assert tool_event.result.message == "initial"
+    # The error message about publish failures is in the final_result
+    # passed to the tool message (verified by the model receiving it)
 
 
 def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:

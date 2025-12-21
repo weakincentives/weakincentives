@@ -264,7 +264,7 @@ def testpublish_tool_invocation_attaches_usage() -> None:
         snapshot=snapshot,
     )
 
-    invocation = publish_tool_invocation(context=context, outcome=outcome)
+    invocation, _ = publish_tool_invocation(context=context, outcome=outcome)
 
     tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
 
@@ -828,7 +828,7 @@ class TestPublishInvocationFilesystemRestore:
             snapshot=composite_snapshot,
         )
 
-        publish_tool_invocation(context=context, outcome=outcome)
+        _, _ = publish_tool_invocation(context=context, outcome=outcome)
 
         # Filesystem should be restored because publish failed and tool succeeded
         assert fs.read("/test.txt").content == "before_tool"
@@ -909,7 +909,7 @@ class TestPublishInvocationFilesystemRestore:
             snapshot=composite_snapshot,
         )
 
-        publish_tool_invocation(context=context, outcome=outcome)
+        _, _ = publish_tool_invocation(context=context, outcome=outcome)
 
         # Restore should NOT have been called since tool.success=False
         assert fs.restore_called is False

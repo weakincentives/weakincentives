@@ -28,14 +28,25 @@ _LOGGER = logging.getLogger(__name__)
 _SEQUENCE_EXCLUSIONS = (str, bytes, bytearray)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class ToolResult[ResultValueT]:
-    """Structured response emitted by a tool handler."""
+    """Structured response emitted by a tool handler.
+
+    Immutable: once created, instances cannot be modified. This ensures
+    tool results maintain consistent state after being published to events
+    or stored in session history.
+    """
 
     message: str
     value: ResultValueT | None
     success: bool = True
     exclude_value_from_context: bool = False
+
+    def with_message(self, message: str) -> ToolResult[ResultValueT]:
+        """Return a new ToolResult with an updated message."""
+        from dataclasses import replace
+
+        return replace(self, message=message)
 
     def render(self) -> str:
         """Return the canonical textual representation of the payload."""

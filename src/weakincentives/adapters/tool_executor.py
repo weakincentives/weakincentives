@@ -504,8 +504,15 @@ def publish_tool_invocation(
     *,
     context: ToolExecutionContext,
     outcome: ToolExecutionOutcome,
-) -> ToolInvoked:
-    """Publish a tool invocation event to the session event bus."""
+) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
+    """Publish a tool invocation event to the session event bus.
+
+    Returns:
+        A tuple of (ToolInvoked event, final ToolResult). The ToolResult may
+        differ from outcome.result if event publishing failed (contains error
+        message). The ToolInvoked event always stores the original result as
+        an immutable snapshot.
+    """
     session_id = getattr(context.session, "session_id", None)
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
@@ -524,6 +531,7 @@ def publish_tool_invocation(
         event_id=uuid4(),
     )
     publish_result = context.session.event_bus.publish(invocation)
+    final_result: ToolResult[SupportsToolResult] = outcome.result
     if not publish_result.ok:
         # Restore to pre-tool state if tool succeeded (not already restored)
         if outcome.result.success:
@@ -549,14 +557,17 @@ def publish_tool_invocation(
                 "failed_handlers": failure_handlers,
             },
         )
-        outcome.result.message = context.format_publish_failures(publish_result.errors)
+        # Create a new immutable result with the error message
+        final_result = outcome.result.with_message(
+            context.format_publish_failures(publish_result.errors)
+        )
     else:
         outcome.log.debug(
             "Tool event published.",
             event="tool_event_published",
             context={"handler_count": publish_result.handled_count},
         )
-    return invocation
+    return invocation, final_result
 
 
 def execute_tool_call(
@@ -570,11 +581,11 @@ def execute_tool_call(
         context=context,
         tool_call=tool_call,
     ) as outcome:
-        invocation = publish_tool_invocation(
+        invocation, final_result = publish_tool_invocation(
             context=context,
             outcome=outcome,
         )
-    return invocation, outcome.result
+    return invocation, final_result
 
 
 @dataclass(slots=True)
@@ -654,7 +665,7 @@ class ToolExecutor:
                 context=execution_context,
                 tool_call=tool_call,
             ) as outcome:
-                _ = publish_tool_invocation(
+                _, final_result = publish_tool_invocation(
                     context=execution_context,
                     outcome=outcome,
                 )
@@ -662,10 +673,10 @@ class ToolExecutor:
             tool_message = {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
-                "content": self.serialize_tool_message_fn(outcome.result),
+                "content": self.serialize_tool_message_fn(final_result),
             }
             messages.append(tool_message)
-            self._tool_message_records.append((outcome.result, tool_message))
+            self._tool_message_records.append((final_result, tool_message))
 
         return messages, next_tool_choice
 
