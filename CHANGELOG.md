@@ -36,16 +36,15 @@ Release highlights for weakincentives.
   - `STATE`: Working state restored on tool failure (Plan, VisibilityOverrides)
   - `LOG`: Append-only records preserved during restore (ToolInvoked events)
 
-- **ToolRunner for unified tool execution.** New `ToolRunner` provides
-  identical transaction semantics across all adapters - automatic snapshot
-  before execution and restore on failure:
+- **tool_transaction context manager.** `ExecutionState.tool_transaction()`
+  provides transactional semantics for tool execution with automatic
+  snapshot/restore on exceptions:
 
   ```python
-  from weakincentives.adapters import ToolRunner
-
-  runner = ToolRunner(execution_state=state, tool_registry=tools, prompt_name="my_prompt")
-  result = runner.execute(tool_call, context=context)
-  # State automatically restored if result.success is False
+  with execution_state.tool_transaction(tag="my_tool") as snapshot:
+      result = execute_tool(...)
+      if not result.success:
+          execution_state.restore(snapshot)
   ```
 
 - **New error classes** for execution state operations:
