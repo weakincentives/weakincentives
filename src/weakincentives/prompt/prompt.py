@@ -301,12 +301,15 @@ class Prompt[OutputT]:
         )
 
     def bind(self, *params: SupportsDataclass) -> Prompt[OutputT]:
-        """Mutate this prompt's bound parameters; return self for chaining.
+        """Return a new Prompt with updated bound parameters.
 
         New dataclass instances replace any existing binding of the same
         dataclass type; otherwise they are appended. Passing multiple params
         of the same type in a single bind() call is not allowed - validation
         will raise an error during render().
+
+        This method is immutable and returns a new Prompt instance rather than
+        mutating self.
         """
 
         if not params:
@@ -329,8 +332,14 @@ class Prompt[OutputT]:
             if not replaced:
                 current.append(candidate)
 
-        self._params = tuple(current)
-        return self
+        # Return a new Prompt instance with updated params
+        new_prompt: Prompt[OutputT] = Prompt(
+            self.template,
+            overrides_store=self.overrides_store,
+            overrides_tag=self.overrides_tag,
+        )
+        new_prompt._params = tuple(current)
+        return new_prompt
 
     def render(
         self,
