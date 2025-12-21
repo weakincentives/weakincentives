@@ -329,7 +329,7 @@ WINK's core abstractions exist to make that discipline real:
 - Safety is enforced at tool boundaries where side effects happen
 
 If you want the formal version of these behaviors, skim the specs:
-`specs/PROMPTS.md`, `specs/TOOLS.md`, `specs/SESSIONS.md`, `specs/MAIN_LOOP.md`.
+[specs/PROMPTS.md](specs/PROMPTS.md), [specs/TOOLS.md](specs/TOOLS.md), [specs/SESSIONS.md](specs/SESSIONS.md), [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md).
 
 ### 1.3 The core bet: prompts as first-class, typed programs
 
@@ -700,7 +700,7 @@ state, sections for organization, progressive disclosure for token management.
 
 ## 3. Prompts
 
-*Canonical spec: `specs/PROMPTS.md`*
+*Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md)*
 
 The prompt system is the heart of WINK. It is intentionally **not** a generic
 templating engine. The design goal is predictability:
@@ -970,7 +970,7 @@ See `weakincentives.prompt.task_examples` for details.
 
 ## 4. Tools
 
-*Canonical spec: `specs/TOOLS.md`*
+*Canonical spec: [specs/TOOLS.md](specs/TOOLS.md)*
 
 The tool system is designed around one hard rule:
 
@@ -1069,7 +1069,7 @@ ToolResult(
 - If `render()` is missing, WINK logs a warning and serializes the dataclass to
   JSON. This works but is less controlled.
 - Exceptions raised by handlers are caught and converted into tool failures
-  (with some safety exceptions; see `specs/TOOLS.md`).
+  (with some safety exceptions; see [specs/TOOLS.md](specs/TOOLS.md)).
 
 The `exclude_value_from_context=True` flag is useful for tools that return
 large payloads (like file contents). The model sees a summary message, but the
@@ -1125,7 +1125,7 @@ the tools themselves. The model sees them together.
 
 ## 5. Sessions
 
-*Canonical spec: `specs/SESSIONS.md`*
+*Canonical spec: [specs/SESSIONS.md](specs/SESSIONS.md)*
 
 A `Session` is WINK's answer to "agent memory", with a constraint:
 
@@ -1282,7 +1282,7 @@ event log even when rolling back working state.
 
 ## 6. Adapters
 
-*Canonical spec: `specs/ADAPTERS.md`*
+*Canonical spec: [specs/ADAPTERS.md](specs/ADAPTERS.md)*
 
 Adapters bridge a prompt to a provider and enforce consistent semantics:
 
@@ -1372,14 +1372,14 @@ This adapter is different from OpenAI/LiteLLM: instead of WINK executing tools
 itself, it delegates to Claude Code's tool execution. This gives you Claude's
 native tooling with WINK's prompt composition and session management.
 
-See `specs/CLAUDE_AGENT_SDK.md` for full configuration reference and isolation
+See [specs/CLAUDE_AGENT_SDK.md](specs/CLAUDE_AGENT_SDK.md) for full configuration reference and isolation
 guarantees.
 
 ---
 
 ## 7. Orchestration with MainLoop
 
-*Canonical spec: `specs/MAIN_LOOP.md`*
+*Canonical spec: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)*
 
 `MainLoop` exists for one reason:
 
@@ -1438,7 +1438,7 @@ enforced at the adapter level, so they work consistently across providers.
 
 ## 8. Progressive disclosure
 
-*Canonical spec: `specs/PROGRESSIVE_DISCLOSURE.md`*
+*Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md) (Progressive Disclosure section)*
 
 Long prompts are expensive. Progressive disclosure is WINK's first-class
 solution:
@@ -1507,7 +1507,7 @@ MainLoop applies the override and re-renders the prompt.
 
 ## 9. Prompt overrides and optimization
 
-*Canonical spec: `specs/PROMPT_OPTIMIZATION.md`*
+*Canonical spec: [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)*
 
 Overrides are how WINK supports fast iteration without code edits:
 
@@ -1601,7 +1601,7 @@ security-critical text.
 
 ## 10. Workspace tools
 
-*Canonical spec: `specs/WORKSPACE.md`*
+*Canonical spec: [specs/WORKSPACE.md](specs/WORKSPACE.md)*
 
 WINK includes several tool suites aimed at background agents that need to
 inspect and manipulate a repository safely. They live in
@@ -2118,11 +2118,11 @@ wink debug <snapshot_path> [--host ...] [--port ...]
 
 ## Where to go deeper
 
-- **Prompts**: `specs/PROMPTS.md`
-- **Tools**: `specs/TOOLS.md`
-- **Sessions**: `specs/SESSIONS.md`
-- **MainLoop**: `specs/MAIN_LOOP.md`
-- **Workspace**: `specs/WORKSPACE.md`
-- **Overrides & optimization**: `specs/PROMPT_OPTIMIZATION.md`
-- **Code review example**: `guides/code-review-agent.md`
-- **Contributor guide**: `AGENTS.md`
+- **Prompts**: [specs/PROMPTS.md](specs/PROMPTS.md)
+- **Tools**: [specs/TOOLS.md](specs/TOOLS.md)
+- **Sessions**: [specs/SESSIONS.md](specs/SESSIONS.md)
+- **MainLoop**: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)
+- **Workspace**: [specs/WORKSPACE.md](specs/WORKSPACE.md)
+- **Overrides & optimization**: [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)
+- **Code review example**: [guides/code-review-agent.md](guides/code-review-agent.md)
+- **Contributor guide**: [AGENTS.md](AGENTS.md)
