@@ -10,20 +10,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Dataclass helper utilities for session modules."""
+"""Dataclass helper utilities for session modules.
+
+This module re-exports the canonical ``is_dataclass_instance`` helper from
+:mod:`weakincentives.types.dataclass` for backward compatibility with
+existing imports within the session module.
+"""
 
 from __future__ import annotations
 
-from dataclasses import is_dataclass
-from typing import TypeGuard
-
-from ...types.dataclass import SupportsDataclass
-
-
-def is_dataclass_instance(value: object) -> TypeGuard[SupportsDataclass]:
-    """Return ``True`` when ``value`` is a dataclass instance."""
-
-    return is_dataclass(value) and not isinstance(value, type)
-
+from ...types.dataclass import is_dataclass_instance
 
 __all__ = ["is_dataclass_instance"]

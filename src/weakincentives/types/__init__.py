@@ -19,6 +19,7 @@ from .dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,
+    is_dataclass_instance,
 )
 from .json import (
     ContractResult,
@@ -42,4 +43,5 @@ __all__ = [
     "SupportsDataclass",
     "SupportsDataclassOrNone",
     "SupportsToolResult",
+    "is_dataclass_instance",
 ]
