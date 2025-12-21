@@ -8,7 +8,7 @@ By the end of this guide, you'll know how to build agents that:
 
 - Browse codebases, answer questions, and propose changes—safely sandboxed
 - Use structured output to return typed, validated responses
-- Maintain explicit, replayable state across turns
+- Maintain explicit, inspectable state across turns
 - Manage token costs with progressive disclosure (show summaries, expand on
   demand)
 - Iterate on prompts quickly using version-controlled overrides
@@ -25,7 +25,7 @@ This guide is written for engineers who want to:
   glue".
 - Treat prompts as real software artifacts: testable, inspectable, and
   versionable.
-- Keep tool use and side effects explicit, gated, and replayable.
+- Keep tool use and side effects explicit, gated, and auditable.
 - Iterate on prompts quickly without compromising correctness.
 
 **If you only read one thing**: in WINK, the prompt is the agent.
@@ -82,7 +82,7 @@ that tree.
 
 - **Deterministic by default.** Prompt rendering is pure. State transitions
   flow through reducers. Side effects are confined to tool handlers. You can
-  snapshot the entire state at any point and replay it.
+  snapshot the entire state at any point and restore it later.
 
 - **No async (yet).** Adapters are synchronous. This simplifies debugging at
   the cost of throughput. Async may come later.
@@ -91,7 +91,7 @@ that tree.
 
 - You want the prompt to be the source of truth, not a graph definition.
 - You're building single-agent workflows where the model handles most routing.
-- You value determinism, testability, and replayability over flexibility.
+- You value determinism, testability, and auditability over flexibility.
 - You're tired of prompt text and tool definitions drifting apart.
 
 **When to stick with LangGraph:**
@@ -138,7 +138,7 @@ higher-level orchestration.
    2. [Queries](#52-queries)
    3. [Reducers](#53-reducers)
    4. [Declarative reducers with @reducer](#54-declarative-reducers-with-reducer)
-   5. [Snapshots and replay](#55-snapshots-and-replay)
+   5. [Snapshots and restore](#55-snapshots-and-restore)
    6. [SlicePolicy: state vs logs](#56-slicepolicy-state-vs-logs)
 6. [Adapters](#6-adapters)
    1. [ProviderAdapter.evaluate](#61-provideradapterevaluate)
@@ -217,11 +217,11 @@ with dataclasses. Type mismatches surface at construction time, not at runtime
 when the model is mid-response. Pyright strict mode is enforced; the type
 checker is your first line of defense.
 
-**Replayability**
+**Inspectability**
 
 If a run went wrong, you can inspect exactly what was rendered and what tools
 ran. Sessions record every event as an immutable ledger. Snapshots let you
-restore state to any point and replay from there.
+capture state at any point and restore it later.
 
 **Controlled context growth**
 
@@ -274,7 +274,7 @@ WINK's core abstractions exist to make that discipline real:
 
 - Prompts are structured, typed objects that you can inspect and test
 - Tools are explicit contracts that surface what the model can do
-- State is replayable so you can debug failures
+- State is inspectable so you can debug failures
 - Safety is enforced at tool boundaries where side effects happen
 
 If you want the formal version of these behaviors, skim the specs:
@@ -331,9 +331,9 @@ In other words: **your agent is a typed prompt + tools + state.**
 
 Two "novel" properties fall out of this structure:
 
-1. **Deterministic inspection**: render, snapshot, diff, and replay prompts.
-   The same inputs produce the same outputs. You can write tests that assert on
-   exact prompt text.
+1. **Deterministic inspection**: render, snapshot, and diff prompts. The same
+   inputs produce the same outputs. You can write tests that assert on exact
+   prompt text.
 
 2. **Safe iteration**: apply prompt tweaks via overrides that are validated
    against hashes. When you change a section in code, existing overrides stop
@@ -444,7 +444,7 @@ template = PromptTemplate[Summary](
 
 prompt = Prompt(template).bind(SummarizeRequest(
     text="WINK is a Python library for building agents. It treats prompts as "
-         "typed programs. Tools are explicit. State is replayable."
+         "typed programs. Tools are explicit. State is inspectable."
 ))
 
 bus = InProcessEventBus()
@@ -1078,7 +1078,7 @@ the tools themselves. The model sees them together.
 
 A `Session` is WINK's answer to "agent memory", with a constraint:
 
-> **Memory must be deterministic and replayable.**
+> **Memory must be deterministic and inspectable.**
 
 Instead of "a magic dict" you mutate, sessions store typed slices managed by
 pure reducers. Every mutation flows through a reducer, and every change is
@@ -1095,8 +1095,8 @@ A session is a container keyed by dataclass type:
 Mental model: **"events in, new immutable slices out"**.
 
 The session never mutates in place. Reducers return new tuples. This makes
-snapshots trivial (just serialize the current tuples) and replay
-straightforward (re-apply the events).
+snapshots trivial (just serialize the current tuples) and restoration
+straightforward.
 
 ### 5.2 Queries
 
@@ -1130,7 +1130,7 @@ new_state = reducer(current_state, event)
 
 Reducers never mutate state directly. They always return a new value. This
 makes state changes predictable: given the same inputs, you always get the same
-output. It also makes debugging easier—you can log every event and replay the
+output. It also makes debugging easier—you can log every event and trace the
 exact sequence that led to any state.
 
 In WINK, reducers have this signature: `(slice_values, event) -> new_slice_values`.
@@ -1187,7 +1187,7 @@ This pattern keeps reducer logic close to the data it operates on. The
 `@reducer` decorator is just metadata; the actual reducer registration happens
 in `session.install()`.
 
-### 5.5 Snapshots and replay
+### 5.5 Snapshots and restore
 
 Sessions can be snapshotted and restored:
 
