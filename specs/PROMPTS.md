@@ -86,6 +86,30 @@ rendered = prompt.render()
   Rebinding the same type replaces the previous value; providing the same type
   more than once in a single `bind()` call is rejected during render.
 
+**Accessing Sections:**
+
+Both `PromptTemplate` and `Prompt` expose two properties for accessing sections:
+
+- **`.sections`** - Returns the original `Section` objects as passed during
+  construction. Use this when you need the section instances themselves (e.g.,
+  to check types, access configuration, or pass to other APIs).
+
+- **`.nodes`** - Returns flattened `SectionNode` wrappers that include metadata
+  about each section's position in the tree: `depth`, `path` (tuple of keys),
+  and `number` (e.g., "1.2.1"). Use this when you need traversal metadata or
+  are iterating over the flattened section hierarchy.
+
+```python
+# Access original sections
+for section in template.sections:
+    print(section.key, section.title)
+
+# Access nodes with positional metadata
+for node in template.nodes:
+    print(node.path, node.depth, node.number)
+    print(node.section.title)  # Access wrapped section
+```
+
 ### Section
 
 Abstract base with metadata, `is_enabled`, `render`, child handling, and
