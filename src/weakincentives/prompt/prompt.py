@@ -372,12 +372,15 @@ class Prompt[OutputT]:
         *params: SupportsDataclass,
         resources: Mapping[type[object], object] | None = None,
     ) -> Prompt[OutputT]:
-        """Mutate this prompt's bound parameters; return self for chaining.
+        """Return a new Prompt with updated bound parameters.
 
         New dataclass instances replace any existing binding of the same
         dataclass type; otherwise they are appended. Passing multiple params
         of the same type in a single bind() call is not allowed - validation
         will raise an error during render().
+
+        This method is immutable and returns a new Prompt instance rather than
+        mutating self.
 
         Args:
             *params: Dataclass instances to bind as section parameters.
@@ -392,38 +395,44 @@ class Prompt[OutputT]:
                 resources={Filesystem: fs, BudgetTracker: tracker},
             )
         """
-        # Handle params binding
-        if params:
-            # All new params are appended, but if there's already a param of the
-            # same type in existing params, we replace it. Duplicates within the
-            # same bind() call are passed through for validation during render().
-            current = list(self._params)
-            for candidate in params:
-                replaced = False
-                for idx, existing in enumerate(current):
-                    # Only replace if the existing param is from a previous bind,
-                    # not from the current params list. Check by comparing with
-                    # original self._params length.
-                    if type(existing) is type(candidate) and idx < len(self._params):
-                        current[idx] = candidate
-                        replaced = True
-                        break
-                if not replaced:
-                    current.append(candidate)
+        if not params and resources is None:
+            return self
 
-            self._params = tuple(current)
+        # Handle params binding
+        current = list(self._params)
+        for candidate in params:
+            replaced = False
+            for idx, existing in enumerate(current):
+                # Only replace if the existing param is from a previous bind,
+                # not from the current params list. Check by comparing with
+                # original self._params length.
+                if type(existing) is type(candidate) and idx < len(self._params):
+                    current[idx] = candidate
+                    replaced = True
+                    break
+            if not replaced:
+                current.append(candidate)
 
         # Handle resources binding
+        new_bound_resources = self._bound_resources
         if resources is not None:
             new_registry = ResourceRegistry.build(resources)
-            if self._bound_resources is None:
-                self._bound_resources = new_registry
+            if new_bound_resources is None:
+                new_bound_resources = new_registry
             else:
-                self._bound_resources = self._bound_resources.merge(
+                new_bound_resources = new_bound_resources.merge(
                     new_registry, strict=False
                 )
 
-        return self
+        # Return a new Prompt instance with updated params and resources
+        new_prompt: Prompt[OutputT] = Prompt(
+            self.template,
+            overrides_store=self.overrides_store,
+            overrides_tag=self.overrides_tag,
+        )
+        new_prompt._params = tuple(current)
+        new_prompt._bound_resources = new_bound_resources
+        return new_prompt
 
     def render(
         self,
