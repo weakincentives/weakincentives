@@ -14,6 +14,10 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
+import pytest
+
 from weakincentives.prompt import SectionVisibility
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import (
@@ -229,3 +233,44 @@ def test_register_visibility_reducers_is_idempotent() -> None:
     overrides = session[VisibilityOverrides].latest()
     assert overrides is not None
     assert overrides.get(("test",)) == SectionVisibility.SUMMARY
+
+
+def test_visibility_overrides_uses_immutable_mapping() -> None:
+    """VisibilityOverrides.overrides uses an immutable mapping."""
+    # Default instance
+    overrides = VisibilityOverrides()
+    assert isinstance(overrides.overrides, MappingProxyType)
+
+    # With initial overrides
+    overrides_with_data = VisibilityOverrides(
+        overrides={("section",): SectionVisibility.SUMMARY}
+    )
+    # Mapping may be plain dict from constructor, but methods return MappingProxyType
+    updated = overrides_with_data.with_override(("other",), SectionVisibility.FULL)
+    assert isinstance(updated.overrides, MappingProxyType)
+
+    # Verify mutation raises TypeError
+    with pytest.raises(TypeError):
+        updated.overrides["new",] = SectionVisibility.FULL  # type: ignore[index]
+
+
+def test_visibility_overrides_without_override_returns_immutable() -> None:
+    """without_override returns VisibilityOverrides with immutable mapping."""
+    overrides = VisibilityOverrides().with_override(("a",), SectionVisibility.SUMMARY)
+    result = overrides.without_override(("a",))
+    assert isinstance(result.overrides, MappingProxyType)
+
+
+def test_clear_all_returns_immutable_mapping() -> None:
+    """ClearAllVisibilityOverrides reducer returns immutable mapping."""
+    bus = InProcessDispatcher()
+    session = Session(bus=bus)
+
+    session.dispatch(
+        SetVisibilityOverride(path=("test",), visibility=SectionVisibility.SUMMARY)
+    )
+    session.dispatch(ClearAllVisibilityOverrides())
+
+    overrides = session[VisibilityOverrides].latest()
+    assert overrides is not None
+    assert isinstance(overrides.overrides, MappingProxyType)

@@ -20,6 +20,7 @@ user-provided visibility selector or constant.
 
 from __future__ import annotations
 
+import types
 from dataclasses import field, replace
 from typing import TYPE_CHECKING
 
@@ -92,7 +93,7 @@ class VisibilityOverrides:
     """
 
     overrides: Mapping[SectionPath, SectionVisibility] = field(
-        default_factory=lambda: dict[SectionPath, SectionVisibility]()
+        default_factory=lambda: types.MappingProxyType({})
     )
 
     def get(self, path: SectionPath) -> SectionVisibility | None:
@@ -105,13 +106,13 @@ class VisibilityOverrides:
         """Return a new VisibilityOverrides with the given override added."""
         new_overrides = dict(self.overrides)
         new_overrides[path] = visibility
-        return VisibilityOverrides(overrides=new_overrides)
+        return VisibilityOverrides(overrides=types.MappingProxyType(new_overrides))
 
     def without_override(self, path: SectionPath) -> VisibilityOverrides:
         """Return a new VisibilityOverrides with the given override removed."""
         new_overrides = dict(self.overrides)
         _ = new_overrides.pop(path, None)
-        return VisibilityOverrides(overrides=new_overrides)
+        return VisibilityOverrides(overrides=types.MappingProxyType(new_overrides))
 
     @reducer(on=SetVisibilityOverride)
     def handle_set(self, event: SetVisibilityOverride) -> VisibilityOverrides:
@@ -129,7 +130,7 @@ class VisibilityOverrides:
     ) -> VisibilityOverrides:
         """Handle ClearAllVisibilityOverrides event."""
         del event
-        return replace(self, overrides={})
+        return replace(self, overrides=types.MappingProxyType({}))
 
 
 def register_visibility_reducers(session: SessionProtocol) -> None:
