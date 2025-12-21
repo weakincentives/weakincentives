@@ -53,6 +53,7 @@ from weakincentives.runtime.session import Session, SessionProtocol
 
 @dataclass(slots=True, frozen=True)
 class _FakeOptimizationOutput:
+    summary: str
     digest: str
 
 
@@ -162,8 +163,11 @@ class _RecordingAdapter(ProviderAdapter):
             session.event_bus.publish(event)
 
         digest_value = f"{self.mode}-digest"
+        summary_value = f"{self.mode}-summary"
         if self.mode == "dataclass":
-            output: Any = _FakeOptimizationOutput(digest=digest_value)
+            output: Any = _FakeOptimizationOutput(
+                summary=summary_value, digest=digest_value
+            )
             text: str | None = None
         elif self.mode == "string":
             output = digest_value
@@ -224,6 +228,7 @@ def test_optimize_persists_digest_from_output() -> None:
     assert result.digest == "dataclass-digest"
     assert latest is not None
     assert getattr(latest, "body", None) == "dataclass-digest"
+    assert getattr(latest, "summary", None) == "dataclass-summary"
 
 
 def test_session_clear_slice_removes_entire_digest_slice() -> None:

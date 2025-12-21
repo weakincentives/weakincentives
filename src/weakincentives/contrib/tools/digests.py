@@ -28,9 +28,15 @@ from ...types.dataclass import SupportsDataclass
 
 @FrozenDataclass()
 class WorkspaceDigest(SupportsDataclass):
-    """Digest entry persisted within a :class:`Session` slice."""
+    """Digest entry persisted within a :class:`Session` slice.
+
+    The digest contains a short summary and the full body content. By default,
+    sections render the summary, and models can use the ``read_section`` tool
+    to access the full body when needed.
+    """
 
     section_key: str
+    summary: str
     body: str
 
 
@@ -44,11 +50,28 @@ def set_workspace_digest(
     session: SessionProtocol,
     section_key: str,
     body: str,
+    *,
+    summary: str | None = None,
 ) -> WorkspaceDigest:
-    """Persist the workspace digest for ``section_key``."""
+    """Persist the workspace digest for ``section_key``.
 
+    Args:
+        session: The session to persist the digest in.
+        section_key: The key of the workspace digest section.
+        body: The full digest content.
+        summary: Optional short summary (1 paragraph). If not provided,
+            a default summary is generated from the body.
+
+    Returns:
+        The persisted WorkspaceDigest entry.
+    """
     normalized_key = _normalized_key(section_key)
-    entry = WorkspaceDigest(section_key=normalized_key, body=body.strip())
+    effective_summary = summary.strip() if summary else _default_summary(body)
+    entry = WorkspaceDigest(
+        section_key=normalized_key,
+        summary=effective_summary,
+        body=body.strip(),
+    )
     existing = tuple(
         digest
         for digest in session[WorkspaceDigest].all()
@@ -56,6 +79,11 @@ def set_workspace_digest(
     )
     session[WorkspaceDigest].seed((*existing, entry))
     return entry
+
+
+def _default_summary(body: str) -> str:
+    """Generate a default summary from the body content."""
+    return "Workspace digest available. Use read_section to view the full details."
 
 
 def clear_workspace_digest(session: SessionProtocol, section_key: str) -> None:
@@ -94,7 +122,18 @@ _DEFAULT_PLACEHOLDER = textwrap.dedent(
 
 
 class WorkspaceDigestSection(Section[SupportsDataclass]):
-    """Render a cached workspace digest sourced from the active session."""
+    """Render a cached workspace digest sourced from the active session.
+
+    This section renders content from a WorkspaceDigest stored in session state.
+    The visibility is determined dynamically based on whether a digest exists:
+
+    - When a digest exists: SUMMARY visibility shows the digest summary, FULL
+      visibility shows the complete digest body
+    - When no digest exists: FULL visibility shows a placeholder message
+
+    Models can use the ``read_section`` tool to access the full digest content
+    when the section is rendered with SUMMARY visibility.
+    """
 
     def __init__(
         self,
@@ -106,12 +145,91 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
     ) -> None:
         self._session = session
         self._placeholder = placeholder.strip()
-        super().__init__(title=title, key=key, accepts_overrides=True)
+        self._key = key  # Store key before super().__init__ for _get_current_summary
+        super().__init__(
+            title=title,
+            key=key,
+            accepts_overrides=True,
+            # Summary and visibility are computed dynamically via property/selector
+            summary=self._get_current_summary(),
+            visibility=self._visibility_selector,
+        )
         self.params_type = None
+
+    def _visibility_selector(
+        self, params: SupportsDataclass | None = None
+    ) -> SectionVisibility:
+        """Return SUMMARY if digest exists, FULL otherwise."""
+        del params  # Not used - visibility based on session state
+        digest = latest_workspace_digest(self._session, self._key)
+        if digest is not None:
+            return SectionVisibility.SUMMARY
+        return SectionVisibility.FULL
+
+    def _get_current_summary(self) -> str | None:
+        """Return the current summary if a digest exists, None otherwise."""
+        digest = latest_workspace_digest(self._session, self._key)
+        if digest is not None:
+            return digest.summary
+        return None
+
+    @property
+    def summary(  # pyright: ignore[reportImplicitOverride]
+        self,
+    ) -> str | None:
+        """Return the current summary from session state, or None if no digest."""
+        return self._get_current_summary()
+
+    @summary.setter
+    def summary(self, value: str | None) -> None:
+        """Ignore setter - summary is computed dynamically from session state."""
+        # Parent's __init__ sets self.summary, but we compute it dynamically
+        pass
+
+    def _get_content_for_visibility(self, visibility: SectionVisibility | None) -> str:
+        """Return appropriate content based on visibility.
+
+        This is the central method for determining what content to render.
+        Both render_body and render_override delegate to this method.
+
+        Args:
+            visibility: The effective visibility to use. If None, computes
+                effective visibility from the section's selector.
+
+        Returns:
+            The content to render: summary for SUMMARY visibility,
+            full body for FULL visibility, or placeholder if no digest.
+        """
+        digest = latest_workspace_digest(self._session, self._key)
+
+        # If no digest exists, always return the placeholder
+        if digest is None:
+            _LOGGER.warning(
+                "Workspace digest missing; returning placeholder.",
+                event="workspace_digest_missing",
+                context={"section_key": self._key},
+            )
+            return self._placeholder
+
+        # Digest exists - determine effective visibility
+        effective = (
+            visibility
+            if visibility is not None
+            else self.effective_visibility(override=None, params=None)
+        )
+
+        if effective == SectionVisibility.SUMMARY:
+            return digest.summary.strip()
+        return digest.body.strip()
 
     @override
     def original_body_template(self) -> str:
         return self._placeholder
+
+    @override
+    def original_summary_template(self) -> str | None:
+        # Return a placeholder for hashing purposes; actual summary is dynamic
+        return "Workspace digest summary."
 
     @override
     def render_body(
@@ -122,8 +240,8 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         path: tuple[str, ...] = (),
         session: object = None,
     ) -> str:
-        del params, visibility, path, session
-        return self._resolve_body()
+        del params, path, session
+        return self._get_content_for_visibility(visibility)
 
     @override
     def render_override(
@@ -134,9 +252,36 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         number: str,
         path: tuple[str, ...] = (),
     ) -> str:
+        """Render the section with an override body.
+
+        When a digest exists in session state, the content is sourced from the
+        session digest (respecting visibility - summary for SUMMARY, full body
+        for FULL). The override_body is ignored in this case.
+
+        When NO digest exists, the override_body is used as fallback content,
+        allowing pre-seeded overrides to populate the section before the first
+        optimization run.
+        """
         del params
         heading = self.format_heading(depth, number, path)
-        body = self._resolve_body(override_body=override_body)
+
+        digest = latest_workspace_digest(self._session, self._key)
+        if digest is not None:
+            # Digest exists - use session content, respecting visibility
+            effective = self.effective_visibility(
+                override=None, params=None, session=self._session, path=path
+            )
+            if effective == SectionVisibility.SUMMARY:
+                body = digest.summary.strip()
+            else:
+                body = digest.body.strip()
+        elif override_body and override_body.strip():
+            # No digest - use override body as fallback
+            body = textwrap.dedent(override_body).strip()
+        else:
+            # No digest, no override - use placeholder
+            body = self._placeholder
+
         if body:
             return f"{heading}\n\n{body.strip()}"
         return heading
@@ -153,19 +298,6 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
             key=self.key,
             placeholder=self._placeholder,
         )
-
-    def _resolve_body(self, override_body: str | None = None) -> str:
-        digest = latest_workspace_digest(self._session, self.key)
-        if digest is not None and digest.body.strip():
-            return digest.body.strip()
-        if override_body is not None and override_body.strip():
-            return textwrap.dedent(override_body).strip()
-        _LOGGER.warning(
-            "Workspace digest missing; returning placeholder.",
-            event="workspace_digest_missing",
-            context={"section_key": self.key},
-        )
-        return self._placeholder
 
 
 __all__ = [

@@ -2967,12 +2967,16 @@ def test_resolve_host_path_finds_file_in_allowed_root() -> None:
     import tempfile
 
     with tempfile.TemporaryDirectory() as tmpdir:
+        # Resolve the temp directory to handle macOS /var -> /private/var symlink
+        resolved_tmpdir = Path(tmpdir).resolve()
+
         # Create a test file in the allowed root
-        test_file = Path(tmpdir) / "test.txt"
+        test_file = resolved_tmpdir / "test.txt"
         test_file.write_text("content")
 
         # Should find the file in the allowed root (branch 411: candidate.exists())
-        allowed_roots = (Path(tmpdir),)
+        # Use resolved path to avoid symlink resolution mismatches
+        allowed_roots = (resolved_tmpdir,)
         resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
         assert resolved == test_file
 
@@ -2983,11 +2987,15 @@ def test_resolve_host_path_continues_when_file_not_in_first_root() -> None:
 
     with tempfile.TemporaryDirectory() as first_root:
         with tempfile.TemporaryDirectory() as second_root:
+            # Resolve paths to handle macOS /var -> /private/var symlink
+            resolved_first = Path(first_root).resolve()
+            resolved_second = Path(second_root).resolve()
+
             # Create file only in second root
-            test_file = Path(second_root) / "test.txt"
+            test_file = resolved_second / "test.txt"
             test_file.write_text("content")
 
             # First root doesn't have file, should continue to second root
-            allowed_roots = (Path(first_root), Path(second_root))
+            allowed_roots = (resolved_first, resolved_second)
             resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
             assert resolved == test_file
