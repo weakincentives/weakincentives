@@ -17,11 +17,11 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, is_dataclass
+from dataclasses import dataclass
 from typing import Any, cast
 
 from ..serde import dump
-from ._types import SupportsDataclass
+from ..types.dataclass import SupportsDataclass, is_dataclass_instance
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -49,8 +49,9 @@ def render_tool_payload(value: object) -> str:
     if value is None:
         return ""
 
-    if _is_dataclass_instance(value):
-        return _render_dataclass(cast(SupportsDataclass, value))
+    if is_dataclass_instance(value):
+        # ty doesn't recognize TypeGuard narrowing; cast required for ty
+        return _render_dataclass(cast(SupportsDataclass, value))  # pyright: ignore[reportUnnecessaryCast]
 
     if isinstance(value, Mapping):
         typed_mapping = cast(Mapping[Any, object], value)
@@ -64,10 +65,6 @@ def render_tool_payload(value: object) -> str:
         return value.decode("utf-8", errors="replace")
 
     return str(value)
-
-
-def _is_dataclass_instance(value: object) -> bool:
-    return is_dataclass(value) and not isinstance(value, type)
 
 
 def _render_dataclass(value: SupportsDataclass) -> str:
@@ -107,7 +104,7 @@ def _render_mapping(mapping: Mapping[Any, object]) -> str:
 
 
 def _normalize_mapping_value(value: object) -> object:
-    if _is_dataclass_instance(value):
+    if is_dataclass_instance(value):
         try:
             return dump(value, exclude_none=True)
         except TypeError:

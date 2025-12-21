@@ -16,7 +16,7 @@ import inspect
 import re
 import types
 from collections.abc import Callable, Mapping, Sequence as SequenceABC
-from dataclasses import dataclass, field, is_dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
@@ -40,6 +40,7 @@ from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,
+    is_dataclass_instance,
 )
 from .errors import PromptValidationError
 from .tool_result import ToolResult
@@ -393,11 +394,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             ) from error
 
     @staticmethod
-    def _is_dataclass_instance(candidate: object) -> bool:
-        return is_dataclass(candidate) and not isinstance(candidate, type)
-
     def _validate_example_input(
-        self,
         example_input: object,
         params_type: ParamsType,
     ) -> None:
@@ -409,7 +406,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
                     placeholder="examples",
                 )
             return
-        if not self._is_dataclass_instance(example_input):
+        if not is_dataclass_instance(example_input):
             raise PromptValidationError(
                 "Tool example input must be a ParamsT dataclass instance.",
                 dataclass_type=params_type,
@@ -448,10 +445,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
             sequence_output = cast(SequenceABC[object], example_output)
             for item in sequence_output:
-                if (
-                    not self._is_dataclass_instance(item)
-                    or type(item) is not result_type
-                ):
+                if not is_dataclass_instance(item) or type(item) is not result_type:
                     raise PromptValidationError(
                         "Tool example output must be a sequence of ResultT dataclass instances.",
                         dataclass_type=params_type,
@@ -460,7 +454,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             return
 
         if (
-            not self._is_dataclass_instance(example_output)
+            not is_dataclass_instance(example_output)
             or type(example_output) is not result_type
         ):
             raise PromptValidationError(

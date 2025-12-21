@@ -15,8 +15,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import Field
-from typing import Any, ClassVar, Protocol, runtime_checkable
+from dataclasses import Field, is_dataclass
+from typing import Any, ClassVar, Protocol, TypeGuard, runtime_checkable
 
 type DataclassFieldMapping = dict[str, Field[Any]]
 
@@ -37,9 +37,26 @@ SupportsDataclassOrNone = SupportsDataclass | None
 SupportsToolResult = SupportsDataclass | Sequence[SupportsDataclass] | None
 
 
+def is_dataclass_instance(value: object) -> TypeGuard[SupportsDataclass]:
+    """Return ``True`` when ``value`` is a dataclass instance (not a type).
+
+    This is the canonical helper for checking whether an object is an instance
+    of a dataclass rather than the dataclass type itself. Use this function
+    throughout the codebase for consistent behavior.
+
+    Args:
+        value: The object to check.
+
+    Returns:
+        True if ``value`` is a dataclass instance, False otherwise.
+    """
+    return is_dataclass(value) and not isinstance(value, type)
+
+
 __all__ = [
     "DataclassFieldMapping",
     "SupportsDataclass",
     "SupportsDataclassOrNone",
     "SupportsToolResult",
+    "is_dataclass_instance",
 ]
