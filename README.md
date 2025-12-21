@@ -4,6 +4,9 @@ WINK is a Python library for building background agents—automated AI systems t
 run unattended. It provides typed, composable primitives designed for determinism,
 testability, and safe execution without heavy dependencies or hosted services.
 
+> **New to WINK?** Read the [WINK Guide](WINK_GUIDE.md) for a comprehensive
+> introduction—philosophy, quickstart, and practical patterns for building agents.
+
 ## The Shift
 
 The reasoning loop is moving model-side. Complex nested workflows may work today,
@@ -82,10 +85,11 @@ structure itself.
 
 ### Other key features
 
-- **Redux-style state management.** Every state change flows through pure reducers
-  processing published events. Tool calls, prompt evaluations, and internal
-  decisions become a replayable ledger—not scattered mutations in free-form dicts.
-  See [Session State](specs/SESSIONS.md).
+- **Event-driven state management.** Every state change flows through pure
+  functions called "reducers" that process published events. State is immutable;
+  changes produce new values rather than mutating in place. This makes state
+  predictable and inspectable—you can snapshot at any point and see exactly what
+  happened. See [Session State](specs/SESSIONS.md).
 
 - **Hash-based prompt overrides.** Prompt descriptors carry content hashes so
   overrides apply only to the intended version. Teams iterate on prompts via

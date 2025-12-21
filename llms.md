@@ -8,7 +8,7 @@ human developers, but this README is written so automated coding agents
 productive consumers of the API surface without depending on internals.
 
 The public API centers on typed prompts, declarative tool contracts,
-replayable sessions, and provider-agnostic adapters so you can keep
+inspectable sessions, and provider-agnostic adapters so you can keep
 determinism, observability, and safety front and center while iterating on
 agent behaviors.
 
@@ -28,9 +28,10 @@ An agent harness in WINK wires together five core components:
    bindings and optional overrides. Pass params to the constructor or call
    `.bind()` to attach additional params before evaluation.
 
-1. **Session** (`weakincentives.runtime.Session`): Redux-like event ledger
-   that records all prompt renders, tool invocations, and custom state.
-   Creates its own `EventBus` internally (access via `session.event_bus`).
+1. **Session** (`weakincentives.runtime.Session`): Event-driven state
+   container that records all prompt renders, tool invocations, and custom
+   state. State changes flow through pure reducers. Creates its own `EventBus`
+   internally (access via `session.event_bus`).
 
 1. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to
    LLM providers. Call `adapter.evaluate(prompt, session=session)` to execute.
@@ -73,9 +74,10 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
 - **Tools** (`weakincentives.prompt.Tool`): Declarative descriptions of
   capabilities the model can invoke. Tools surface type-checked handlers and
   renderable schemas.
-- **Sessions** (`weakincentives.runtime.Session`): Redux-style ledgers that
-  record every prompt render and tool invocation as immutable events. Reducers
-  keep state deterministic and replayable.
+- **Sessions** (`weakincentives.runtime.Session`): Event-driven state
+  containers that record every prompt render and tool invocation as immutable
+  events. State changes flow through pure functions called "reducers", keeping
+  state deterministic and inspectable.
 - **Adapters** (`weakincentives.adapters.ProviderAdapter`): Bridges to model
   providers that negotiate tool calls and structured outputs without locking
   you into a single vendor.
