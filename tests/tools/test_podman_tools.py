@@ -2820,10 +2820,18 @@ def test_remove_rejects_root_and_missing(
 
     original = vfs_module.normalize_string_path
 
-    def _fake(path: str, *, field: str) -> vfs_module.VfsPath:
+    def _fake(
+        path: str | None,
+        *,
+        allow_empty: bool = False,
+        field: str,
+        mount_point: str | None = None,
+    ) -> vfs_module.VfsPath:
         if path == "trigger":
             return vfs_module.VfsPath(())
-        return original(path, field=field)
+        return original(
+            path, allow_empty=allow_empty, field=field, mount_point=mount_point
+        )
 
     monkeypatch.setattr(vfs_module, "normalize_string_path", _fake)
     with pytest.raises(ToolValidationError):
