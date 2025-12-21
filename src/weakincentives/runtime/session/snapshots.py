@@ -41,6 +41,7 @@ SNAPSHOT_SCHEMA_VERSION = "1"
 
 type SnapshotState = Mapping[SessionSliceType, SessionSlice]
 type SnapshotPolicies = Mapping[SessionSliceType, SlicePolicy]
+type PayloadPolicies = Mapping[str, SlicePolicy]
 
 
 class SnapshotSerializationError(WinkError, RuntimeError):
@@ -210,12 +211,13 @@ def _validate_tags(payload: Mapping[str, JSONValue]) -> Mapping[str, str]:
     )
 
 
-def _validate_policies(payload: Mapping[str, JSONValue]) -> SnapshotPolicies:
+def _validate_payload_policies(payload: Mapping[str, JSONValue]) -> PayloadPolicies:
+    """Validate policy format without resolving types (for SnapshotPayload)."""
     policies_obj = payload.get("policies", {})
     if not isinstance(policies_obj, Mapping):
         raise SnapshotRestoreError("Snapshot policies must be an object")
 
-    normalized: dict[SessionSliceType, SlicePolicy] = {}
+    normalized: dict[str, SlicePolicy] = {}
     for key, value in policies_obj.items():
         if not isinstance(value, str):
             raise SnapshotRestoreError("Snapshot policy values must be strings")
@@ -223,12 +225,21 @@ def _validate_policies(payload: Mapping[str, JSONValue]) -> SnapshotPolicies:
             policy = SlicePolicy(value)
         except ValueError as error:
             raise SnapshotRestoreError("Snapshot policy value is invalid") from error
+        normalized[key] = policy
+
+    return cast(PayloadPolicies, types.MappingProxyType(normalized))
+
+
+def _resolve_payload_policies(policies: PayloadPolicies) -> SnapshotPolicies:
+    """Resolve type identifiers in policies (for Snapshot restoration)."""
+    resolved: dict[SessionSliceType, SlicePolicy] = {}
+    for key, policy in policies.items():
         slice_type = _resolve_type(key)
         if not _is_dataclass_type(slice_type):
             raise SnapshotRestoreError("Snapshot policy keys must be dataclass types")
-        normalized[slice_type] = policy
+        resolved[slice_type] = policy
 
-    return cast(SnapshotPolicies, types.MappingProxyType(normalized))
+    return cast(SnapshotPolicies, types.MappingProxyType(resolved))
 
 
 def _construct_snapshot_payload(
@@ -239,7 +250,7 @@ def _construct_snapshot_payload(
     children_ids = _validate_children_ids(payload)
     slices = _validate_slices(payload)
     tags = _validate_tags(payload)
-    policies = _validate_policies(payload)
+    policies = _validate_payload_policies(payload)
 
     return cls(
         version=version,
@@ -325,9 +336,9 @@ class SnapshotPayload:
     tags: Mapping[str, str] = field(
         default_factory=lambda: cast(Mapping[str, str], types.MappingProxyType({}))
     )
-    policies: SnapshotPolicies = field(
+    policies: PayloadPolicies = field(
         default_factory=lambda: cast(
-            SnapshotPolicies,
+            PayloadPolicies,
             types.MappingProxyType({}),
         )
     )
@@ -522,5 +533,5 @@ class Snapshot:
             children_ids=children_ids,
             slices=restored,
             tags=payload.tags,
-            policies=payload.policies,
+            policies=_resolve_payload_policies(payload.policies),
         )
