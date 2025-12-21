@@ -229,7 +229,14 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
         path=digest_node.path,
         body="- Override digest",
     )
-    set_workspace_digest(session, "workspace-digest", "- Session digest")
+    # When a digest exists, visibility is SUMMARY by default, so we provide
+    # an explicit summary to verify it's used instead of the override body.
+    set_workspace_digest(
+        session,
+        "workspace-digest",
+        "- Session digest body",
+        summary="Session digest summary",
+    )
 
     rendered = (
         Prompt(
@@ -240,7 +247,10 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
         .bind(ReviewTurnParams(request="demo request"))
         .render()
     )
-    assert "Session digest" in rendered.text
+    # With SUMMARY visibility, the session digest summary is shown (not the
+    # override body or the session body)
+    assert "Session digest summary" in rendered.text
+    assert "Override digest" not in rendered.text
 
 
 def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
