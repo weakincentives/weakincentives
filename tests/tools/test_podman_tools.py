@@ -30,6 +30,8 @@ import weakincentives.contrib.tools.filesystem_host as filesystem_host_module
 import weakincentives.contrib.tools.podman as podman_module
 import weakincentives.contrib.tools.podman_connection as podman_connection_module
 import weakincentives.contrib.tools.podman_eval as podman_eval_module
+import weakincentives.contrib.tools.podman_lifecycle as podman_lifecycle_module
+import weakincentives.contrib.tools.podman_shell as podman_shell_module
 import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives import ToolValidationError
@@ -274,7 +276,7 @@ def _prepare_resolved_mount(
     include_glob: tuple[str, ...] = (),
     exclude_glob: tuple[str, ...] = (),
     max_bytes: int | None = None,
-) -> tuple[podman_module._ResolvedHostMount, Path, Path]:
+) -> tuple[podman_lifecycle_module.ResolvedHostMount, Path, Path]:
     host_root = tmp_path / "resolved-root"
     repo = host_root / "sunfish"
     repo.mkdir(parents=True, exist_ok=True)
@@ -287,7 +289,7 @@ def _prepare_resolved_mount(
         exclude_glob=exclude_glob,
         max_bytes=max_bytes,
     )
-    resolved = podman_module._resolve_single_host_mount(mount, (host_root,))
+    resolved = podman_lifecycle_module.resolve_single_host_mount(mount, (host_root,))
     overlay = tmp_path / "overlay"
     overlay.mkdir()
     return resolved, file_path, overlay
@@ -421,7 +423,7 @@ def test_host_mount_materializes_overlay(
 
 def test_host_mount_resolver_rejects_empty_path(tmp_path: Path) -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._resolve_single_host_mount(
+        podman_lifecycle_module.resolve_single_host_mount(
             HostMount(host_path=""),
             (tmp_path,),
         )
@@ -429,18 +431,18 @@ def test_host_mount_resolver_rejects_empty_path(tmp_path: Path) -> None:
 
 def test_resolve_host_path_requires_allowed_roots() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._resolve_host_path("docs", ())
+        podman_lifecycle_module.resolve_host_path("docs", ())
 
 
 def test_resolve_host_path_rejects_outside_root(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     with pytest.raises(ToolValidationError):
-        podman_module._resolve_host_path("../outside", (root,))
+        podman_lifecycle_module.resolve_host_path("../outside", (root,))
 
 
 def test_normalize_mount_globs_discards_empty_entries() -> None:
-    result = podman_module._normalize_mount_globs(
+    result = podman_lifecycle_module.normalize_mount_globs(
         (" *.py ", " ", "*.md"),
         "include_glob",
     )
@@ -450,7 +452,7 @@ def test_normalize_mount_globs_discards_empty_entries() -> None:
 def test_preview_mount_entries_handles_file(tmp_path: Path) -> None:
     file_path = tmp_path / "item.txt"
     file_path.write_text("payload", encoding="utf-8")
-    result = podman_module._preview_mount_entries(file_path)
+    result = podman_lifecycle_module.preview_mount_entries(file_path)
     assert result == ("item.txt",)
 
 
@@ -468,13 +470,13 @@ def test_preview_mount_entries_raises_on_oserror(
 
     monkeypatch.setattr(Path, "iterdir", _raise)
     with pytest.raises(ToolValidationError):
-        podman_module._preview_mount_entries(directory)
+        podman_lifecycle_module.preview_mount_entries(directory)
 
 
 def test_iter_host_mount_files_handles_file(tmp_path: Path) -> None:
     file_path = tmp_path / "item.txt"
     file_path.write_text("payload", encoding="utf-8")
-    entries = tuple(podman_module._iter_host_mount_files(file_path, False))
+    entries = tuple(podman_lifecycle_module.iter_host_mount_files(file_path, False))
     assert entries == (file_path,)
 
 
@@ -517,7 +519,7 @@ def test_copy_mount_respects_include_glob(tmp_path: Path) -> None:
     resolved, file_path, overlay = _prepare_resolved_mount(
         tmp_path, include_glob=("*.py",)
     )
-    podman_module.PodmanSandboxSection._copy_mount_into_overlay(
+    podman_lifecycle_module.copy_mount_into_overlay(
         overlay=overlay,
         mount=resolved,
     )
@@ -529,7 +531,7 @@ def test_copy_mount_respects_exclude_glob(tmp_path: Path) -> None:
     resolved, file_path, overlay = _prepare_resolved_mount(
         tmp_path, exclude_glob=("*.txt",)
     )
-    podman_module.PodmanSandboxSection._copy_mount_into_overlay(
+    podman_lifecycle_module.copy_mount_into_overlay(
         overlay=overlay,
         mount=resolved,
     )
@@ -543,14 +545,14 @@ def test_copy_mount_stat_failure_raises(
     resolved, file_path, overlay = _prepare_resolved_mount(tmp_path)
     original_stat = Path.stat
 
-    def _raise(self: Path) -> os.stat_result:
+    def _raise(self: Path, *, follow_symlinks: bool = True) -> os.stat_result:
         if self == file_path:
             raise OSError("boom")
-        return original_stat(self)
+        return original_stat(self, follow_symlinks=follow_symlinks)
 
     monkeypatch.setattr(Path, "stat", _raise)
     with pytest.raises(ToolValidationError):
-        podman_module.PodmanSandboxSection._copy_mount_into_overlay(
+        podman_lifecycle_module.copy_mount_into_overlay(
             overlay=overlay,
             mount=resolved,
         )
@@ -559,7 +561,7 @@ def test_copy_mount_stat_failure_raises(
 def test_copy_mount_max_bytes_guard(tmp_path: Path) -> None:
     resolved, _file_path, overlay = _prepare_resolved_mount(tmp_path, max_bytes=1)
     with pytest.raises(ToolValidationError):
-        podman_module.PodmanSandboxSection._copy_mount_into_overlay(
+        podman_lifecycle_module.copy_mount_into_overlay(
             overlay=overlay,
             mount=resolved,
         )
@@ -622,7 +624,7 @@ def test_host_mount_hydration_raises_on_write_error(
     # Compute expected target path before section creation
     overlay = cache_dir / str(session.session_id)
     target = overlay / "sunfish" / file_path.name
-    original_copy = podman_module.shutil.copy2
+    original_copy = podman_lifecycle_module.shutil.copy2
 
     def _fail_on_target(
         src: Path,
@@ -635,7 +637,7 @@ def test_host_mount_hydration_raises_on_write_error(
         return original_copy(src, dst, follow_symlinks=follow_symlinks)
 
     # Patch before section creation since hydration happens in __init__
-    monkeypatch.setattr(podman_module.shutil, "copy2", _fail_on_target)
+    monkeypatch.setattr(podman_lifecycle_module.shutil, "copy2", _fail_on_target)
 
     with pytest.raises(ToolValidationError):
         _make_section(
@@ -1432,7 +1434,7 @@ def test_default_cache_root_respects_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     monkeypatch.setenv("WEAKINCENTIVES_CACHE", str(tmp_path))
-    assert podman_module._default_cache_root() == tmp_path
+    assert podman_lifecycle_module.default_cache_root() == tmp_path
 
 
 def test_default_cache_root_uses_home(
@@ -1441,7 +1443,7 @@ def test_default_cache_root_uses_home(
     monkeypatch.delenv("WEAKINCENTIVES_CACHE", raising=False)
     monkeypatch.setattr(podman_module.Path, "home", lambda: tmp_path)
     expected = tmp_path / ".cache" / "weakincentives" / "podman"
-    assert podman_module._default_cache_root() == expected
+    assert podman_lifecycle_module.default_cache_root() == expected
 
 
 def test_client_factory_creates_client(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1458,7 +1460,7 @@ def test_client_factory_creates_client(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_module = SimpleNamespace(PodmanClient=_StubClient)
     monkeypatch.setitem(sys.modules, "podman", fake_module)
 
-    factory = podman_module._build_client_factory(base_url=None, identity=None)
+    factory = podman_lifecycle_module.build_client_factory(base_url=None, identity=None)
     client = factory()
     assert created["kwargs"] == {}
     client.close()
@@ -1517,7 +1519,7 @@ def test_client_factory_uses_connection_options(
 
     fake_module = SimpleNamespace(PodmanClient=_DummyClient)
     monkeypatch.setitem(sys.modules, "podman", fake_module)
-    factory = podman_module._build_client_factory(
+    factory = podman_lifecycle_module.build_client_factory(
         base_url="unix:///tmp/podman.sock",
         identity="identity.pem",
     )
@@ -1533,44 +1535,44 @@ def test_client_factory_uses_connection_options(
 
 def test_command_validation_rejects_blank_entry() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_command(("",))
+        podman_shell_module.normalize_command(("",))
 
 
 def test_command_validation_rejects_long_entry() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_command(("x" * 5_000,))
+        podman_shell_module.normalize_command(("x" * 5_000,))
 
 
 def test_env_validation_guards_limits() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_env({str(index): "x" for index in range(70)})
+        podman_shell_module.normalize_env({str(index): "x" for index in range(70)})
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_env({"": "value"})
+        podman_shell_module.normalize_env({"": "value"})
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_env({"k" * 100: "value"})
+        podman_shell_module.normalize_env({"k" * 100: "value"})
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_env({"KEY": "v" * 600})
+        podman_shell_module.normalize_env({"KEY": "v" * 600})
 
 
 def test_timeout_validation_rejects_nan() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_timeout(float("nan"))
+        podman_shell_module.normalize_timeout(float("nan"))
 
 
 def test_cwd_validation_guards_paths() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_cwd("/tmp")
+        podman_shell_module.normalize_cwd("/tmp")
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_cwd("/".join(str(index) for index in range(20)))
+        podman_shell_module.normalize_cwd("/".join(str(index) for index in range(20)))
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_cwd("a/../b")
+        podman_shell_module.normalize_cwd("a/../b")
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_cwd("x" * 90)
-    assert podman_module._normalize_cwd("   ") == "/workspace"
+        podman_shell_module.normalize_cwd("x" * 90)
+    assert podman_shell_module.normalize_cwd("   ") == "/workspace"
 
 
 def test_truncate_stream_marks_output() -> None:
-    truncated = podman_module._truncate_stream("a" * (35_000))
+    truncated = podman_shell_module.truncate_stream("a" * (35_000))
     assert truncated.endswith("[truncated]")
 
 
@@ -2019,7 +2021,7 @@ def test_write_via_container_appends_existing_content(
     cp_payloads: list[str] = []
 
     def _fake_exec(
-        self: PodmanSandboxSection, *, config: podman_module._ExecConfig
+        self: PodmanSandboxSection, *, config: podman_shell_module.ShellExecConfig
     ) -> CompletedProcess[str]:
         del self
         _ = (
@@ -2067,7 +2069,7 @@ def test_write_via_container_reports_mkdir_failure(
     cp_calls = 0
 
     def _fail_exec(
-        self: PodmanSandboxSection, *, config: podman_module._ExecConfig
+        self: PodmanSandboxSection, *, config: podman_shell_module.ShellExecConfig
     ) -> CompletedProcess[str]:
         del self
         _ = (
@@ -2115,7 +2117,7 @@ def test_write_via_container_rejects_non_utf8_append(
     target.write_bytes(b"\xff\xff")
 
     def _unexpected(
-        self: PodmanSandboxSection, *, config: podman_module._ExecConfig
+        self: PodmanSandboxSection, *, config: podman_shell_module.ShellExecConfig
     ) -> CompletedProcess[str]:
         raise AssertionError("run_cli_exec should not be called")
 
@@ -2164,7 +2166,7 @@ def test_write_via_container_propagates_read_oserror(
     monkeypatch.setattr(Path, "read_text", _raise)
 
     def _unexpected(
-        self: PodmanSandboxSection, *, config: podman_module._ExecConfig
+        self: PodmanSandboxSection, *, config: podman_shell_module.ShellExecConfig
     ) -> CompletedProcess[str]:
         raise AssertionError("run_cli_exec should not be called")
 
@@ -2279,7 +2281,10 @@ def test_run_python_script_delegates_to_run_cli_exec(
 
 
 def test_container_path_for_root() -> None:
-    assert podman_module._container_path_for(vfs_module.VfsPath(())) == "/workspace"
+    assert (
+        podman_lifecycle_module.container_path_for(vfs_module.VfsPath(()))
+        == "/workspace"
+    )
 
 
 def test_assert_within_overlay_raises_for_outside(tmp_path: Path) -> None:
@@ -2288,7 +2293,7 @@ def test_assert_within_overlay_raises_for_outside(tmp_path: Path) -> None:
     outside = root.parent / "other"
     outside.mkdir()
     with pytest.raises(ToolValidationError):
-        podman_module._assert_within_overlay(root, outside)
+        podman_lifecycle_module.assert_within_overlay(root, outside)
 
 
 def test_assert_within_overlay_handles_missing_paths(
@@ -2305,7 +2310,7 @@ def test_assert_within_overlay_handles_missing_paths(
         return original(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _fake_resolve)
-    podman_module._assert_within_overlay(root, missing)
+    podman_lifecycle_module.assert_within_overlay(root, missing)
 
 
 def test_ls_rejects_file_path(
@@ -2994,7 +2999,7 @@ def test_resolve_host_path_finds_file_in_allowed_root() -> None:
         # Should find the file in the allowed root (branch 411: candidate.exists())
         # Use resolved path to avoid symlink resolution mismatches
         allowed_roots = (resolved_tmpdir,)
-        resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
+        resolved = podman_lifecycle_module.resolve_host_path("test.txt", allowed_roots)
         assert resolved == test_file
 
 
@@ -3014,5 +3019,7 @@ def test_resolve_host_path_continues_when_file_not_in_first_root() -> None:
 
             # First root doesn't have file, should continue to second root
             allowed_roots = (resolved_first, resolved_second)
-            resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
+            resolved = podman_lifecycle_module.resolve_host_path(
+                "test.txt", allowed_roots
+            )
             assert resolved == test_file
