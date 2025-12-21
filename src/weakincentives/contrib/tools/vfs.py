@@ -779,19 +779,8 @@ format_edit_message = _format_edit_message
 format_glob_message = _format_glob_message
 format_grep_message = _format_grep_message
 
-# Backward-compatible aliases for internal functions used in tests
-_normalize_string_path = normalize_string_path
-_normalize_optional_path = normalize_optional_path
-_normalize_path = normalize_path
-_normalize_segments = normalize_segments
-_MAX_MOUNT_PREVIEW_ENTRIES = MAX_MOUNT_PREVIEW_ENTRIES
-_MountContext = MountContext
-_match_glob = match_glob
-_resolve_mount_path = resolve_mount_path
-_now = get_current_time
-
-
 __all__ = [
+    "MAX_MOUNT_PREVIEW_ENTRIES",
     "MAX_WRITE_LENGTH",
     "DeleteEntry",
     "EditFileParams",
@@ -807,6 +796,7 @@ __all__ = [
     "ListDirectory",
     "ListDirectoryParams",
     "ListDirectoryResult",
+    "MountContext",
     "ReadFile",
     "ReadFileParams",
     "ReadFileResult",
@@ -826,11 +816,15 @@ __all__ = [
     "format_path",
     "format_timestamp",
     "format_write_file_message",
+    "match_glob",
     "normalize_content",
     "normalize_limit",
     "normalize_offset",
+    "normalize_optional_path",
     "normalize_path",
+    "normalize_segments",
     "normalize_string_path",
     "path_from_string",
     "render_host_mounts_block",
+    "resolve_mount_path",
 ]
