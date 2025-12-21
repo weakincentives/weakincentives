@@ -34,16 +34,19 @@ from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
 from .filesystem import READ_ENTIRE_FILE, Filesystem, InMemoryFilesystem
-from .vfs import VfsPath
+from .vfs_types import (
+    MAX_WRITE_LENGTH as _MAX_WRITE_LENGTH,
+    VfsPath,
+    ensure_ascii as _ensure_ascii,
+    format_path as _format_vfs_path,
+    normalize_path as _normalize_vfs_path,
+    normalize_segments as _normalize_segments,
+)
 
 _LOGGER: StructuredLogger = get_logger(__name__, context={"component": "tools.asteval"})
 
 _MAX_CODE_LENGTH: Final[int] = 2_000
 _MAX_STREAM_LENGTH: Final[int] = 4_096
-_MAX_WRITE_LENGTH: Final[int] = 48_000
-_MAX_PATH_DEPTH: Final[int] = 16
-_MAX_SEGMENT_LENGTH: Final[int] = 80
-_ASCII: Final[str] = "ascii"
 _TIMEOUT_SECONDS: Final[float] = 5.0
 _FIRST_PRINTABLE_ASCII: Final[int] = 32  # Space character code point
 _MISSING_DEPENDENCY_MESSAGE: Final[str] = (
@@ -302,48 +305,6 @@ def _truncate_stream(text: str) -> str:
     suffix = "..."
     keep = _MAX_STREAM_LENGTH - len(suffix)
     return f"{text[:keep]}{suffix}"
-
-
-def _ensure_ascii(value: str, label: str) -> None:
-    try:
-        _ = value.encode(_ASCII)
-    except UnicodeEncodeError as error:  # pragma: no cover - defensive guard
-        raise ToolValidationError(f"{label} must be ASCII text.") from error
-
-
-def _validate_path_piece(piece: str) -> None:
-    """Validate a single path piece."""
-    if piece in {".", ".."}:
-        raise ToolValidationError("Path segments may not include '.' or '..'.")
-    _ensure_ascii(piece, "path segment")
-    if len(piece) > _MAX_SEGMENT_LENGTH:
-        raise ToolValidationError("Path segments must be 80 characters or fewer.")
-
-
-def _normalize_segments(raw_segments: Iterable[str]) -> tuple[str, ...]:
-    segments: list[str] = []
-    for raw_segment in raw_segments:
-        stripped = raw_segment.strip()
-        if not stripped:
-            continue
-        if stripped.startswith("/"):
-            raise ToolValidationError("Absolute paths are not allowed in the VFS.")
-        for piece in stripped.split("/"):
-            if not piece:
-                continue
-            _validate_path_piece(piece)
-            segments.append(piece)
-    if len(segments) > _MAX_PATH_DEPTH:
-        raise ToolValidationError("Path depth exceeds the allowed limit (16 segments).")
-    return tuple(segments)
-
-
-def _normalize_vfs_path(path: VfsPath) -> VfsPath:
-    return VfsPath(_normalize_segments(path.segments))
-
-
-def _format_vfs_path(path: VfsPath) -> str:
-    return "/".join(path.segments) or "/"
 
 
 def _require_file_from_filesystem(fs: Filesystem, path: VfsPath) -> str:

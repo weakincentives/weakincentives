@@ -22,6 +22,7 @@ from typing import cast
 import pytest
 
 import weakincentives.contrib.tools.asteval as asteval_module
+import weakincentives.contrib.tools.vfs_types as vfs_types_module
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives import ToolValidationError
 from weakincentives.contrib.tools import (
@@ -531,11 +532,11 @@ def test_control_character_validation() -> None:
 
 
 def test_normalize_path_skips_blank_segments() -> None:
-    normalized = asteval_module._normalize_vfs_path(VfsPath(("docs", " ", "file.txt")))
+    normalized = vfs_types_module.normalize_path(VfsPath(("docs", " ", "file.txt")))
 
     assert normalized.segments == ("docs", "file.txt")
 
-    nested = asteval_module._normalize_vfs_path(VfsPath(("logs//", "item.txt")))
+    nested = vfs_types_module.normalize_path(VfsPath(("logs//", "item.txt")))
     assert nested.segments == ("logs", "item.txt")
 
 
@@ -545,13 +546,13 @@ def test_normalize_path_skips_blank_segments() -> None:
         VfsPath(("/absolute",)),
         VfsPath((".", "file.txt")),
         VfsPath(("..", "file.txt")),
-        VfsPath(("a" * (asteval_module._MAX_SEGMENT_LENGTH + 1),)),
-        VfsPath(tuple(f"seg{i}" for i in range(asteval_module._MAX_PATH_DEPTH + 1))),
+        VfsPath(("a" * (vfs_types_module._MAX_SEGMENT_LENGTH + 1),)),
+        VfsPath(tuple(f"seg{i}" for i in range(vfs_types_module._MAX_PATH_DEPTH + 1))),
     ],
 )
 def test_normalize_path_invalid_segments(path: VfsPath) -> None:
     with pytest.raises(ToolValidationError):
-        asteval_module._normalize_vfs_path(path)
+        vfs_types_module.normalize_path(path)
 
 
 def test_read_requires_existing_file() -> None:
