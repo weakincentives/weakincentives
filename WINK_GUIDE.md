@@ -105,9 +105,47 @@ higher-level orchestration.
 
 ---
 
+## Technical Strategy
+
+WINK is built around a specific bet about where durable value lives in agent
+systems:
+
+**Don't compete at the model layer.** Models and agent frameworks will
+commoditize quickly. Treating them as swappable dependencies is the winning
+posture. WINK's adapters exist precisely so you can switch providers without
+rewriting your agent.
+
+**Differentiate with your system of record.** Long-term advantage comes from
+owning authoritative data, definitions, permissions, and business context—not
+from the reasoning loop. The model is a commodity; your domain knowledge isn't.
+
+**Keep product semantics out of prompts.** Encode domain meaning and safety in
+stable tools and structured context, not provider-specific prompt glue. When
+your business logic lives in typed tool handlers and well-defined state, it
+survives model upgrades.
+
+**Use provider runtimes; own the tools.** Let vendors handle planning,
+orchestration, and retries. Invest in high-quality tools that expose your
+system-of-record capabilities. The Claude Agent SDK adapter is an example: it
+delegates execution to Claude Code's native runtime while WINK owns the tool
+definitions and session state.
+
+**Build evaluation as your control plane.** Make model and runtime upgrades
+safe via scenario tests and structured output validation. When you can verify
+behavior programmatically, you can improve without rewrites.
+
+The future points toward SDKs shaped like the Claude Agent SDK: sophisticated
+sandboxing, native tool integration, seamless handoff between local and hosted
+execution. Models will increasingly come with their own tool runtimes, deeply
+integrated into training. WINK's job is to give you stable primitives—prompts,
+tools, state—that work across that evolving landscape.
+
+---
+
 ## Table of Contents
 
 0. [Coming from LangGraph or LangChain?](#coming-from-langgraph-or-langchain)
+0. [Technical Strategy](#technical-strategy)
 1. [Philosophy](#1-philosophy)
    1. [What "weak incentives" means](#11-what-weak-incentives-means)
    2. [The shift: orchestration shrinks, context engineering grows](#12-the-shift-orchestration-shrinks-context-engineering-grows)
