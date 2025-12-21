@@ -4,6 +4,9 @@ WINK is a Python library for building background agents—automated AI systems t
 run unattended. It provides typed, composable primitives designed for determinism,
 testability, and safe execution without heavy dependencies or hosted services.
 
+> **New to WINK?** Read the [WINK Guide](WINK_GUIDE.md) for a comprehensive
+> introduction—philosophy, quickstart, and practical patterns for building agents.
+
 ## The Shift
 
 The reasoning loop is moving model-side. Complex nested workflows may work today,
