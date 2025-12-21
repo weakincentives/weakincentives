@@ -270,7 +270,7 @@ def test_section_template_truncates_mount_preview(tmp_path: Path) -> None:
     allowed_root = tmp_path / "workspace"
     big_dir = allowed_root / "big"
     big_dir.mkdir(parents=True)
-    limit = vfs_module._MAX_MOUNT_PREVIEW_ENTRIES
+    limit = vfs_module.MAX_MOUNT_PREVIEW_ENTRIES
     for index in range(limit + 3):
         (big_dir / f"file{index:02d}.txt").write_text("sample", encoding="utf-8")
 
@@ -291,7 +291,9 @@ def test_write_file_creates_snapshot(
 ) -> None:
     session, _bus = session_and_bus
     timestamp = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    monkeypatch.setattr("weakincentives.contrib.tools.vfs._now", lambda: timestamp)
+    monkeypatch.setattr(
+        "weakincentives.contrib.tools.vfs_mounts.get_current_time", lambda: timestamp
+    )
 
     section = _make_section(session=session)
     write_tool = find_tool(section, "write_file")
@@ -1120,21 +1122,21 @@ def test_host_mount_double_star_glob_preserves_prefix(tmp_path: Path) -> None:
 
 def test_normalize_string_path_requires_value() -> None:
     with pytest.raises(ToolValidationError, match="test is required"):
-        vfs_module._normalize_string_path(None, allow_empty=False, field="test")
+        vfs_module.normalize_string_path(None, allow_empty=False, field="test")
 
 
 def test_normalize_string_path_allows_empty() -> None:
-    result = vfs_module._normalize_string_path("", allow_empty=True, field="path")
+    result = vfs_module.normalize_string_path("", allow_empty=True, field="path")
     assert result.segments == ()
 
 
 def test_normalize_string_path_rejects_missing_reference() -> None:
     with pytest.raises(ToolValidationError, match="must reference a file or directory"):
-        vfs_module._normalize_string_path("/", allow_empty=False, field="path")
+        vfs_module.normalize_string_path("/", allow_empty=False, field="path")
 
 
 def test_normalize_string_path_returns_segments() -> None:
-    result = vfs_module._normalize_string_path(
+    result = vfs_module.normalize_string_path(
         "docs/readme.md", allow_empty=False, field="file_path"
     )
     assert result.segments == ("docs", "readme.md")
@@ -1142,7 +1144,7 @@ def test_normalize_string_path_returns_segments() -> None:
 
 def test_normalize_string_path_strips_mount_point_prefix() -> None:
     """Paths like /workspace/sunfish should normalize to sunfish when mount_point is set."""
-    result = vfs_module._normalize_string_path(
+    result = vfs_module.normalize_string_path(
         "/workspace/sunfish/README.md",
         allow_empty=False,
         field="file_path",
@@ -1153,7 +1155,7 @@ def test_normalize_string_path_strips_mount_point_prefix() -> None:
 
 def test_normalize_string_path_strips_mount_point_root() -> None:
     """Path /workspace should normalize to empty when mount_point is /workspace."""
-    result = vfs_module._normalize_string_path(
+    result = vfs_module.normalize_string_path(
         "/workspace", allow_empty=True, field="path", mount_point="/workspace"
     )
     assert result.segments == ()
@@ -1161,7 +1163,7 @@ def test_normalize_string_path_strips_mount_point_root() -> None:
 
 def test_normalize_string_path_strips_mount_point_relative() -> None:
     """Relative paths like workspace/file.txt should also be stripped."""
-    result = vfs_module._normalize_string_path(
+    result = vfs_module.normalize_string_path(
         "workspace/file.txt", allow_empty=False, field="path", mount_point="workspace"
     )
     assert result.segments == ("file.txt",)
@@ -1169,7 +1171,7 @@ def test_normalize_string_path_strips_mount_point_relative() -> None:
 
 def test_normalize_string_path_ignores_mount_point_when_none() -> None:
     """When mount_point is None, no prefix stripping occurs."""
-    result = vfs_module._normalize_string_path(
+    result = vfs_module.normalize_string_path(
         "workspace/file.txt", allow_empty=False, field="path", mount_point=None
     )
     assert result.segments == ("workspace", "file.txt")
@@ -1177,28 +1179,28 @@ def test_normalize_string_path_ignores_mount_point_when_none() -> None:
 
 def test_normalize_segments_rejects_absolute() -> None:
     with pytest.raises(ToolValidationError, match="Absolute paths are not allowed"):
-        vfs_module._normalize_segments(("/bad",))
+        vfs_module.normalize_segments(("/bad",))
 
 
 def test_normalize_segments_skips_empty_parts() -> None:
-    result = vfs_module._normalize_segments(("dir//sub",))
+    result = vfs_module.normalize_segments(("dir//sub",))
     assert result == ("dir", "sub")
 
 
 def test_normalize_optional_path_returns_value() -> None:
-    result = vfs_module._normalize_optional_path(VfsPath(("docs",)))
+    result = vfs_module.normalize_optional_path(VfsPath(("docs",)))
     assert result.segments == ("docs",)
 
 
 def test_normalize_path_returns_segments() -> None:
-    result = vfs_module._normalize_path(VfsPath(("docs", "file.txt")))
+    result = vfs_module.normalize_path(VfsPath(("docs", "file.txt")))
     assert result.segments == ("docs", "file.txt")
 
 
 def test_normalize_path_enforces_depth_limit() -> None:
     deep = tuple(str(index) for index in range(17))
     with pytest.raises(ToolValidationError, match="Path depth exceeds"):
-        vfs_module._normalize_path(VfsPath(deep))
+        vfs_module.normalize_path(VfsPath(deep))
 
 
 def test_host_mount_outside_allowed_root(tmp_path: Path) -> None:
@@ -1245,13 +1247,13 @@ def test_resolve_mount_path_returns_candidate(tmp_path: Path) -> None:
     file_path = allowed / "data.txt"
     file_path.write_text("payload", encoding="utf-8")
 
-    resolved = vfs_module._resolve_mount_path("data.txt", (allowed,))
+    resolved = vfs_module.resolve_mount_path("data.txt", (allowed,))
     assert resolved == file_path
 
 
 def test_resolve_mount_path_requires_allowed_roots() -> None:
     with pytest.raises(ToolValidationError, match="No allowed host roots"):
-        vfs_module._resolve_mount_path("data.txt", ())
+        vfs_module.resolve_mount_path("data.txt", ())
 
 
 def test_prompt_filesystem_returns_workspace_section_filesystem() -> None:
@@ -1509,15 +1511,15 @@ def test_match_glob_skips_already_seen_variant() -> None:
     # For pattern "**/**/*.py", expanding **/ at index 0 gives "**/*.py"
     # and expanding **/ at index 3 also gives "**/*.py" (duplicate)
     # This tests the branch where variant is already in seen
-    result = vfs_module._match_glob("xyz.txt", "**/**/*.py")
+    result = vfs_module.match_glob("xyz.txt", "**/**/*.py")
     # "xyz.txt" doesn't match any *.py variant, so result is False
     # The seen set prevents infinite loops by skipping duplicates
     assert result is False
 
     # Test that normal patterns with ** still work correctly
-    result = vfs_module._match_glob("a/b", "**/b")
+    result = vfs_module.match_glob("a/b", "**/b")
     assert result is True
 
     # Test pattern that eventually matches after removing **/
-    result = vfs_module._match_glob("foo.py", "**/*.py")
+    result = vfs_module.match_glob("foo.py", "**/*.py")
     assert result is True  # Matches after **/ is removed
