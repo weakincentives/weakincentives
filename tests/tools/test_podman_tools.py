@@ -28,6 +28,8 @@ import pytest
 
 import weakincentives.contrib.tools.filesystem as filesystem_module
 import weakincentives.contrib.tools.podman as podman_module
+import weakincentives.contrib.tools.podman_connection as podman_connection_module
+import weakincentives.contrib.tools.podman_eval as podman_eval_module
 import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives import ToolValidationError
@@ -320,12 +322,12 @@ def test_section_registers_vfs_tool(
 
 
 def test_truncate_eval_stream_limits_length() -> None:
-    short = podman_module._truncate_eval_stream("hello")
+    short = podman_eval_module.truncate_eval_stream("hello")
     assert short == "hello"
-    long_text = "x" * (podman_module._EVAL_MAX_STREAM_LENGTH + 5)
-    truncated = podman_module._truncate_eval_stream(long_text)
+    long_text = "x" * (podman_eval_module._EVAL_MAX_STREAM_LENGTH + 5)
+    truncated = podman_eval_module.truncate_eval_stream(long_text)
     assert truncated.endswith("...")
-    assert len(truncated) == podman_module._EVAL_MAX_STREAM_LENGTH
+    assert len(truncated) == podman_eval_module._EVAL_MAX_STREAM_LENGTH
 
 
 def test_section_registers_eval_tool(
@@ -788,7 +790,7 @@ def test_section_auto_resolves_connection(
     session, _bus = session_and_bus
     client = _FakePodmanClient()
     cli_runner = _FakeCliRunner([_ExecResponse(exit_code=0, stdout="auto")])
-    resolved = podman_module._PodmanConnectionInfo(
+    resolved = podman_connection_module.PodmanConnectionInfo(
         base_url="ssh://detected",
         identity="/tmp/key",
         connection_name="auto-conn",
@@ -796,12 +798,12 @@ def test_section_auto_resolves_connection(
 
     def _fake_resolve(
         *, preferred_name: str | None = None
-    ) -> podman_module._PodmanConnectionInfo | None:
+    ) -> podman_connection_module.PodmanConnectionInfo | None:
         return resolved
 
     monkeypatch.setattr(
-        podman_module,
-        "_resolve_podman_connection",
+        podman_connection_module,
+        "resolve_podman_connection",
         _fake_resolve,
     )
 
@@ -828,7 +830,7 @@ def test_section_auto_resolves_connection(
 def test_connection_resolution_prefers_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("PODMAN_BASE_URL", "ssh://env")
     monkeypatch.setenv("PODMAN_IDENTITY", "/tmp/env")
-    result = podman_module._resolve_podman_connection(preferred_name="custom")
+    result = podman_connection_module.resolve_podman_connection(preferred_name="custom")
     assert result is not None
     assert result.base_url == "ssh://env"
     assert result.identity == "/tmp/env"
@@ -905,9 +907,11 @@ def test_connection_resolution_uses_cli(monkeypatch: pytest.MonkeyPatch) -> None
     ) -> SimpleNamespace:
         return SimpleNamespace(stdout=json.dumps(connections))
 
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(podman_connection_module.subprocess, "run", _fake_run)
 
-    result = podman_module._resolve_podman_connection(preferred_name="desired")
+    result = podman_connection_module.resolve_podman_connection(
+        preferred_name="desired"
+    )
     assert result is not None
     assert result.base_url == "ssh://desired"
     assert result.identity == "/tmp/desired"
@@ -941,9 +945,9 @@ def test_connection_resolution_falls_back_to_first_entry(
     ) -> SimpleNamespace:
         return SimpleNamespace(stdout=json.dumps(connections))
 
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(podman_connection_module.subprocess, "run", _fake_run)
 
-    result = podman_module._resolve_podman_connection()
+    result = podman_connection_module.resolve_podman_connection()
     assert result is not None
     assert result.base_url == "ssh://first"
     assert result.connection_name == "first"
@@ -976,9 +980,9 @@ def test_connection_resolution_prefers_default_entry(
     ) -> SimpleNamespace:
         return SimpleNamespace(stdout=json.dumps(connections))
 
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(podman_connection_module.subprocess, "run", _fake_run)
 
-    result = podman_module._resolve_podman_connection()
+    result = podman_connection_module.resolve_podman_connection()
     assert result is not None
     assert result.base_url == "ssh://preferred"
     assert result.connection_name == "preferred"
@@ -994,9 +998,9 @@ def test_connection_resolution_handles_cli_failure(
     def _fail(*_: object, **__: object) -> None:
         raise FileNotFoundError("podman")
 
-    monkeypatch.setattr(podman_module.subprocess, "run", _fail)
+    monkeypatch.setattr(podman_connection_module.subprocess, "run", _fail)
 
-    assert podman_module._resolve_podman_connection() is None
+    assert podman_connection_module.resolve_podman_connection() is None
 
 
 def test_connection_resolution_handles_invalid_json(
@@ -1009,9 +1013,9 @@ def test_connection_resolution_handles_invalid_json(
     def _fake_run(*_: object, **__: object) -> SimpleNamespace:
         return SimpleNamespace(stdout="not json")
 
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(podman_connection_module.subprocess, "run", _fake_run)
 
-    assert podman_module._resolve_podman_connection() is None
+    assert podman_connection_module.resolve_podman_connection() is None
 
 
 def test_connection_resolution_missing_requested_name(
@@ -1032,14 +1036,18 @@ def test_connection_resolution_missing_requested_name(
     def _fake_run(*_: object, **__: object) -> SimpleNamespace:
         return SimpleNamespace(stdout=json.dumps(connections))
 
-    monkeypatch.setattr(podman_module.subprocess, "run", _fake_run)
+    monkeypatch.setattr(podman_connection_module.subprocess, "run", _fake_run)
 
-    assert podman_module._resolve_podman_connection(preferred_name="missing") is None
+    assert (
+        podman_connection_module.resolve_podman_connection(preferred_name="missing")
+        is None
+    )
 
 
 def test_resolve_connection_static_handles_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Patch where the function is used (podman module), not where it's defined
     monkeypatch.setattr(
         podman_module,
         "_resolve_podman_connection",
@@ -1051,11 +1059,12 @@ def test_resolve_connection_static_handles_missing(
 def test_resolve_connection_static_returns_mapping(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    resolved = podman_module._PodmanConnectionInfo(
+    resolved = podman_connection_module.PodmanConnectionInfo(
         base_url="ssh://detected",
         identity="/tmp/key",
         connection_name="resolved",
     )
+    # Patch where the function is used (podman module), not where it's defined
     monkeypatch.setattr(
         podman_module,
         "_resolve_podman_connection",
@@ -1724,7 +1733,7 @@ def test_evaluate_python_runs_script_passthrough(
     assert payload.globals == {}
     assert captured["script"] == "print('ok')"
     assert captured["args"] == ()
-    assert captured["timeout"] == podman_module._EVAL_TIMEOUT_SECONDS
+    assert captured["timeout"] == podman_eval_module._EVAL_TIMEOUT_SECONDS
 
 
 def test_evaluate_python_accepts_large_scripts(

@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import fnmatch
-import json
 import math
 import os
 import posixpath
@@ -47,6 +46,13 @@ from .asteval import (
 from .filesystem import (
     Filesystem,
     HostFilesystem,
+)
+from .podman_connection import (
+    resolve_connection_settings as _resolve_connection_settings,
+    resolve_podman_connection as _resolve_podman_connection,
+)
+from .podman_eval import (
+    PodmanEvalSuite as _PodmanEvalSuite,
 )
 from .vfs import (
     DeleteEntry,
@@ -81,18 +87,11 @@ _MAX_ENV_VARS: Final[int] = 64
 _MAX_TIMEOUT: Final[float] = 120.0
 _MIN_TIMEOUT: Final[float] = 1.0
 _DEFAULT_TIMEOUT: Final[float] = 30.0
-_EVAL_TIMEOUT_SECONDS: Final[float] = 5.0
 _MAX_PATH_DEPTH: Final[int] = 16
 _MAX_PATH_SEGMENT: Final[int] = 80
-_EVAL_MAX_STREAM_LENGTH: Final[int] = 4_096
 _ASCII: Final[str] = "ascii"
-_LOWEST_PRINTABLE_CODEPOINT: Final[int] = 32
-_ALLOWED_CONTROL_CHARACTERS: Final[tuple[str, str]] = ("\n", "\t")
 _CAPTURE_DISABLED: Final[str] = "capture disabled"
 _CACHE_ENV: Final[str] = "WEAKINCENTIVES_CACHE"
-_PODMAN_BASE_URL_ENV: Final[str] = "PODMAN_BASE_URL"
-_PODMAN_IDENTITY_ENV: Final[str] = "PODMAN_IDENTITY"
-_PODMAN_CONNECTION_ENV: Final[str] = "PODMAN_CONNECTION"
 _CPU_PERIOD: Final[int] = 100_000
 _CPU_QUOTA: Final[int] = 100_000
 _MEMORY_LIMIT: Final[str] = "1g"
@@ -255,13 +254,6 @@ class _WorkspaceHandle:
 
 
 @FrozenDataclass()
-class _PodmanConnectionInfo:
-    base_url: str | None
-    identity: str | None
-    connection_name: str | None
-
-
-@FrozenDataclass()
 class _ResolvedHostMount:
     source_label: str
     resolved_host: Path
@@ -278,74 +270,6 @@ def _default_cache_root() -> Path:
     if override:
         return Path(override).expanduser()
     return Path.home() / ".cache" / "weakincentives" / "podman"
-
-
-def _resolve_podman_connection(
-    *,
-    preferred_name: str | None = None,
-) -> _PodmanConnectionInfo | None:
-    env_base_url = os.environ.get(_PODMAN_BASE_URL_ENV)
-    env_identity = os.environ.get(_PODMAN_IDENTITY_ENV)
-    env_connection = os.environ.get(_PODMAN_CONNECTION_ENV)
-    if env_base_url or env_identity:
-        return _PodmanConnectionInfo(
-            base_url=env_base_url,
-            identity=env_identity,
-            connection_name=preferred_name or env_connection,
-        )
-    resolved_name = preferred_name or env_connection
-    return _connection_from_cli(resolved_name)
-
-
-def _find_connection_by_name(
-    connections: list[dict[str, Any]], connection_name: str
-) -> dict[str, Any] | None:
-    """Find a connection by name."""
-    for entry in connections:
-        if entry.get("Name") == connection_name:
-            return entry
-    return None
-
-
-def _find_default_connection(
-    connections: list[dict[str, Any]],
-) -> dict[str, Any] | None:
-    """Find the default connection or first available."""
-    for entry in connections:
-        if entry.get("Default"):
-            return entry
-    return connections[0] if connections else None
-
-
-def _connection_from_cli(
-    connection_name: str | None,
-) -> _PodmanConnectionInfo | None:
-    try:
-        result = subprocess.run(  # nosec B603 B607
-            ["podman", "system", "connection", "list", "--format", "json"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-    except (OSError, subprocess.CalledProcessError):
-        return None
-    try:
-        connections = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-
-    candidate = (
-        _find_connection_by_name(connections, connection_name)
-        if connection_name
-        else _find_default_connection(connections)
-    )
-    if candidate is None:
-        return None
-    return _PodmanConnectionInfo(
-        base_url=candidate.get("URI"),
-        identity=candidate.get("Identity"),
-        connection_name=candidate.get("Name"),
-    )
 
 
 def _resolve_podman_host_mounts(
@@ -568,62 +492,6 @@ def _truncate_stream(value: str) -> str:
         return value
     truncated = value[: _MAX_STDIO_CHARS - len("[truncated]")]
     return f"{truncated}[truncated]"
-
-
-def _truncate_eval_stream(value: str) -> str:
-    if len(value) <= _EVAL_MAX_STREAM_LENGTH:
-        return value
-    suffix = "..."
-    keep = _EVAL_MAX_STREAM_LENGTH - len(suffix)
-    return f"{value[:keep]}{suffix}"
-
-
-def _normalize_podman_eval_code(code: str) -> str:
-    for char in code:
-        code_point = ord(char)
-        if (
-            code_point < _LOWEST_PRINTABLE_CODEPOINT
-            and char not in _ALLOWED_CONTROL_CHARACTERS
-        ):
-            raise ToolValidationError("Code contains unsupported control characters.")
-    return code
-
-
-def _resolve_connection_settings(
-    *,
-    base_url: str | None,
-    identity: str | os.PathLike[str] | None,
-    connection_name: str | None,
-) -> tuple[str, str | None, str | None]:
-    env_connection = os.environ.get(_PODMAN_CONNECTION_ENV)
-    preferred_connection = connection_name or env_connection
-    resolved_connection: _PodmanConnectionInfo | None = None
-    if base_url is None or identity is None:
-        resolved_connection = _resolve_podman_connection(
-            preferred_name=preferred_connection
-        )
-    resolved_base_url = base_url or (
-        resolved_connection.base_url if resolved_connection is not None else None
-    )
-    resolved_identity = identity or (
-        resolved_connection.identity if resolved_connection is not None else None
-    )
-    resolved_connection_name = (
-        connection_name
-        or (
-            resolved_connection.connection_name
-            if resolved_connection is not None
-            else None
-        )
-        or env_connection
-    )
-    if resolved_base_url is None:
-        message = (
-            "Podman connection could not be resolved. Configure `podman system connection` {}"
-        ).format("or set PODMAN_BASE_URL/PODMAN_IDENTITY.")
-        raise ToolValidationError(message)
-    identity_str = str(resolved_identity) if resolved_identity is not None else None
-    return resolved_base_url, identity_str, resolved_connection_name
 
 
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
@@ -1365,78 +1233,6 @@ def _assert_within_overlay(root: Path, candidate: Path) -> None:
         _ = resolved.relative_to(root)
     except ValueError as error:
         raise ToolValidationError("Path escapes the workspace boundary.") from error
-
-
-class _PodmanEvalSuite:
-    def __init__(self, *, section: PodmanSandboxSection) -> None:
-        super().__init__()
-        self._section = section
-
-    def evaluate_python(
-        self, params: EvalParams, *, context: ToolContext
-    ) -> ToolResult[EvalResult]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        del context
-        self._ensure_passthrough_payload_is_empty(params)
-        code = _normalize_podman_eval_code(params.code)
-        _ = self._section.ensure_workspace()
-        try:
-            completed = self._section.run_python_script(
-                script=code,
-                args=(),
-                timeout=_EVAL_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            return self._timeout_result()
-        except FileNotFoundError as error:
-            raise ToolValidationError(
-                "Podman CLI is required to execute evaluation commands."
-            ) from error
-
-        stdout = _truncate_eval_stream(str(completed.stdout or ""))
-        stderr = _truncate_eval_stream(str(completed.stderr or ""))
-        success = completed.returncode == 0
-        if success:
-            message = f"Evaluation succeeded (exit code {completed.returncode})."
-        else:
-            message = f"Evaluation failed (exit code {completed.returncode})."
-        result = EvalResult(
-            value_repr=None,
-            stdout=stdout,
-            stderr=stderr,
-            globals={},
-            reads=(),
-            writes=(),
-        )
-        self._section.touch_workspace()
-        return ToolResult(message=message, value=result, success=success)
-
-    @staticmethod
-    def _ensure_passthrough_payload_is_empty(params: EvalParams) -> None:
-        if params.reads:
-            raise ToolValidationError(
-                "Podman evaluate_python reads are not supported; access the workspace directly."
-            )
-        if params.writes:
-            raise ToolValidationError(
-                "Podman evaluate_python writes are not supported; use the write_file tool."
-            )
-        if params.globals:
-            raise ToolValidationError(
-                "Podman evaluate_python globals are not supported."
-            )
-
-    @staticmethod
-    def _timeout_result() -> ToolResult[EvalResult]:
-        result = EvalResult(
-            value_repr=None,
-            stdout="",
-            stderr="Execution timed out.",
-            globals={},
-            reads=(),
-            writes=(),
-        )
-        return ToolResult(message="Evaluation timed out.", value=result, success=False)
 
 
 class _PodmanShellSuite:
