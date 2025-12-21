@@ -12,6 +12,8 @@
 
 """Integration adapters for optional third-party providers."""
 
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
 
 from ._names import (
