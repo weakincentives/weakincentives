@@ -19,6 +19,7 @@ import pytest
 
 from weakincentives.prompt.errors import PromptValidationError
 from weakincentives.prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from weakincentives.prompt.tool_validation import normalize_result_annotation
 
 
 @dataclass
@@ -310,7 +311,7 @@ def test_tool_rejects_handler_with_non_sequence_result_when_sequence_expected() 
 
 def test_tool_normalize_result_annotation_rejects_unknown_annotation() -> None:
     with pytest.raises(PromptValidationError) as error_info:
-        Tool._normalize_result_annotation(
+        normalize_result_annotation(
             ExampleResult | None,
             ExampleParams,
         )

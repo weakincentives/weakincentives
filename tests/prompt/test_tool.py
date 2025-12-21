@@ -19,7 +19,7 @@ from typing import Annotated, Literal, cast
 
 import pytest
 
-import weakincentives.prompt.tool as tool_module
+import weakincentives.prompt.tool_validation as tool_validation_module
 from weakincentives.prompt import (
     PromptValidationError,
     Tool,
@@ -28,6 +28,7 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt._render_tool_examples import _render_example_value
+from weakincentives.prompt.tool_validation import normalize_result_annotation
 from weakincentives.types import SupportsDataclass, SupportsDataclassOrNone
 
 
@@ -254,13 +255,13 @@ def test_tool_example_output_requires_none_when_result_none() -> None:
 
 
 def test_coerce_none_type_accepts_union_alias() -> None:
-    coerced = tool_module._coerce_none_type(SupportsDataclassOrNone)
+    coerced = tool_validation_module.coerce_none_type(SupportsDataclassOrNone)
 
     assert coerced is SupportsDataclass
 
 
 def test_coerce_none_type_returns_none_when_union_is_all_none() -> None:
-    coerced = tool_module._coerce_none_type(type(None) | None)
+    coerced = tool_validation_module.coerce_none_type(type(None) | None)
 
     assert coerced is type(None)
 
@@ -268,16 +269,18 @@ def test_coerce_none_type_returns_none_when_union_is_all_none() -> None:
 def test_coerce_none_type_handles_union_type_with_only_none(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(tool_module, "get_origin", lambda _: types.UnionType)
-    monkeypatch.setattr(tool_module, "get_args", lambda _: (type(None), type(None)))
+    monkeypatch.setattr(tool_validation_module, "get_origin", lambda _: types.UnionType)
+    monkeypatch.setattr(
+        tool_validation_module, "get_args", lambda _: (type(None), type(None))
+    )
 
-    coerced = tool_module._coerce_none_type(object())
+    coerced = tool_validation_module.coerce_none_type(object())
 
     assert coerced is type(None)
 
 
 def test_tool_normalizes_none_result_annotation() -> None:
-    result_type, container = Tool._normalize_result_annotation(
+    result_type, container = normalize_result_annotation(
         None,
         ExampleParams,
     )
@@ -466,7 +469,7 @@ def test_tool_wrap_handles_empty_toolresult_args(
     def fake_get_args(annotation: object) -> tuple[object, ...]:
         return () if annotation == ToolResult[int] else typing.get_args(annotation)
 
-    monkeypatch.setattr(tool_module, "get_args", fake_get_args)
+    monkeypatch.setattr(tool_validation_module, "get_args", fake_get_args)
 
     with pytest.raises(
         PromptValidationError,
