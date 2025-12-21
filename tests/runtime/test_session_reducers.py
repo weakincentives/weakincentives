@@ -119,3 +119,35 @@ def test_upsert_by_appends_when_key_not_found() -> None:
     assert len(updated) == 2
     assert updated[0] == _Sample("a", "first")
     assert updated[1] == _Sample("b", "new")
+
+
+@dataclass(slots=True)
+class _ConcurrentValue:
+    value: int
+
+
+def test_session_retries_state_write_if_slice_changes_during_dispatch() -> None:
+    """Session retries reducer loop when state mutates between lock acquisitions."""
+
+    session = Session()
+    mutated = False
+
+    def reducer(
+        previous: tuple[_ConcurrentValue, ...],
+        event: _ConcurrentValue,
+        *,
+        context: ReducerContextProtocol,
+    ) -> tuple[_ConcurrentValue, ...]:
+        nonlocal mutated
+        if not mutated:
+            mutated = True
+            context.session._mutation_seed_slice(
+                _ConcurrentValue, (_ConcurrentValue(event.value + 1),)
+            )
+        return (event,)
+
+    session._mutation_register_reducer(_ConcurrentValue, reducer)
+
+    session._mutation_dispatch_event(_ConcurrentValue, _ConcurrentValue(1))
+
+    assert session._state[_ConcurrentValue] == (_ConcurrentValue(1),)
