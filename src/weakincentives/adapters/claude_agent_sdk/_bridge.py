@@ -20,7 +20,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
-from ...contrib.tools.filesystem import Filesystem
 from ...deadlines import Deadline
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
@@ -28,7 +27,6 @@ from ...runtime.events import ToolInvoked
 from ...runtime.execution_state import CompositeSnapshot, ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...serde import parse, schema
-from ..utilities import build_resources
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
@@ -156,18 +154,13 @@ class BridgedTool:
             else:
                 params = parse(self._tool.params_type, args, extra="forbid")
 
-            filesystem = self._execution_state.resources.get(Filesystem)
-            resources = build_resources(
-                filesystem=filesystem,
-                budget_tracker=self._budget_tracker,
-            )
             context = ToolContext(
                 prompt=self._prompt,
                 rendered_prompt=self._rendered_prompt,
                 adapter=self._adapter,
                 session=self._session,
                 deadline=self._deadline,
-                resources=resources,
+                execution_state=self._execution_state,
             )
 
             result = handler(params, context=context)

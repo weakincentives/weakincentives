@@ -71,6 +71,21 @@ if TYPE_CHECKING:
         RenderedPromptProtocol,
     )
 
+
+class ExecutionStateProtocol(Protocol):
+    """Protocol for ExecutionState to avoid circular imports.
+
+    ToolContext needs access to ExecutionState.resources, but ExecutionState
+    imports ResourceRegistry from this module. Using a protocol breaks the
+    cycle.
+    """
+
+    @property
+    def resources(self) -> ResourceRegistry:
+        """Return the resource registry."""
+        ...
+
+
 ParamsT_contra = TypeVar(
     "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
 )
@@ -172,7 +187,9 @@ class ToolContext:
     """Immutable container exposing prompt execution state to handlers.
 
     ToolContext provides access to prompt metadata, session state, and
-    runtime resources during tool execution.
+    runtime resources during tool execution. Resources come from the
+    ExecutionState's snapshotted resource registry, ensuring tools see
+    consistent state that can be rolled back on failure.
 
     Resources are available through the typed ``resources`` registry:
 
@@ -199,7 +216,19 @@ class ToolContext:
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     deadline: Deadline | None = None
-    resources: ResourceRegistry = field(default_factory=ResourceRegistry)
+    execution_state: ExecutionStateProtocol | None = None
+
+    @property
+    def resources(self) -> ResourceRegistry:
+        """Return the resource registry from execution state.
+
+        Resources are provided by the ExecutionState, ensuring tools see
+        the snapshotted resource set that participates in transactional
+        rollback on tool failure.
+        """
+        if self.execution_state is None:
+            return ResourceRegistry()
+        return self.execution_state.resources
 
     @property
     def filesystem(self) -> Filesystem | None:

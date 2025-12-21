@@ -19,12 +19,10 @@ from pathlib import Path
 from typing import Any, TypeVar, cast, override
 
 from ...budget import Budget, BudgetTracker
-from ...contrib.tools.filesystem import Filesystem
 from ...contrib.tools.filesystem_host import HostFilesystem
 from ...deadlines import Deadline
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.tool import ResourceRegistry
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.execution_state import ExecutionState
@@ -34,6 +32,7 @@ from ...runtime.session.protocols import SessionProtocol
 from ...serde import parse, schema
 from .._names import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
+from ..utilities import build_resources
 from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
@@ -255,7 +254,10 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         # Create ExecutionState for transactional tool execution
         # Both bridged MCP tools and native SDK tools will use this for rollback
-        resources = ResourceRegistry.build({Filesystem: filesystem})
+        # Resources include filesystem (snapshotable) and budget tracker
+        resources = build_resources(
+            filesystem=filesystem, budget_tracker=budget_tracker
+        )
         execution_state = ExecutionState(session=session, resources=resources)
 
         # Add execution_state to hook context for native tool transactions

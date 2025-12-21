@@ -145,13 +145,16 @@ def _build_tool_context(
         ),
     )
     prompt = Prompt(prompt_template)
+    execution_state = ExecutionState(
+        session=session, resources=resources or ResourceRegistry()
+    )
     return ToolContext(
         prompt=prompt,
         rendered_prompt=None,
         adapter=cast(Any, object()),
         session=session,
         deadline=None,
-        resources=resources or ResourceRegistry(),
+        execution_state=execution_state,
     )
 
 
@@ -716,7 +719,7 @@ class TestToolRunnerDeadlineExpired:
             adapter=cast(Any, object()),
             session=session,
             deadline=deadline,
-            resources=ResourceRegistry(),
+            execution_state=state,
         )
         tool_call = _make_tool_call("test_tool", {"query": "hello"})
 

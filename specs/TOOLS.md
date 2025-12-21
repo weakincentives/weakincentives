@@ -101,12 +101,23 @@ class ToolContext:
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     deadline: Deadline | None = None
-    budget_tracker: BudgetTracker | None = None
-    resources: ResourceRegistry = field(default_factory=ResourceRegistry)
+    execution_state: ExecutionState | None = None
+
+    @property
+    def resources(self) -> ResourceRegistry:
+        """Resources from ExecutionState for transactional access."""
+        ...
 
     @property
     def filesystem(self) -> Filesystem | None: ...
+
+    @property
+    def budget_tracker(self) -> BudgetTracker | None: ...
 ```
+
+Resources are accessed via the `execution_state.resources` registry. This ensures
+tools see the snapshotted resource set that participates in transactional rollback
+on tool failure.
 
 Tool handlers that need an event bus should publish via `context.session.event_bus`.
 

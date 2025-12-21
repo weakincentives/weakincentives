@@ -820,12 +820,13 @@ class TestCreateBridgedToolsWithFilesystem:
 class TestBudgetTrackerInResourceRegistry:
     def test_passes_budget_tracker_to_tool_context_via_resources(
         self,
-        execution_state: ExecutionState,
+        session: Session,
         mock_adapter: MagicMock,
         mock_prompt: MagicMock,
     ) -> None:
-        """Test that budget_tracker parameter is accessible via context.resources."""
+        """Test that budget_tracker in execution_state.resources is accessible."""
         from weakincentives.budget import Budget, BudgetTracker
+        from weakincentives.prompt.tool import ResourceRegistry
 
         captured_budget_tracker: list[BudgetTracker | None] = []
 
@@ -848,6 +849,10 @@ class TestBudgetTrackerInResourceRegistry:
         test_budget = Budget(max_total_tokens=1000)
         test_tracker = BudgetTracker(budget=test_budget)
 
+        # BudgetTracker is now accessed from execution_state.resources
+        resources = ResourceRegistry.build({BudgetTracker: test_tracker})
+        state_with_tracker = ExecutionState(session=session, resources=resources)
+
         bridged = BridgedTool(
             name="capture",
             description="Tool that captures context",
@@ -856,7 +861,7 @@ class TestBudgetTrackerInResourceRegistry:
                 "properties": {"query": {"type": "string"}},
             },
             tool=capture_tool,
-            execution_state=execution_state,
+            execution_state=state_with_tracker,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,
@@ -871,12 +876,13 @@ class TestBudgetTrackerInResourceRegistry:
 
     def test_create_bridged_tools_passes_budget_tracker_via_resources(
         self,
-        execution_state: ExecutionState,
+        session: Session,
         mock_adapter: MagicMock,
         mock_prompt: MagicMock,
     ) -> None:
         """Test that create_bridged_tools passes budget_tracker via resources."""
         from weakincentives.budget import Budget, BudgetTracker
+        from weakincentives.prompt.tool import ResourceRegistry
 
         captured_budget_tracker: list[BudgetTracker | None] = []
 
@@ -899,9 +905,13 @@ class TestBudgetTrackerInResourceRegistry:
         test_budget = Budget(max_total_tokens=1000)
         test_tracker = BudgetTracker(budget=test_budget)
 
+        # BudgetTracker is now accessed from execution_state.resources
+        resources = ResourceRegistry.build({BudgetTracker: test_tracker})
+        state_with_tracker = ExecutionState(session=session, resources=resources)
+
         bridged_tools = create_bridged_tools(
             (capture_tool,),
-            execution_state=execution_state,
+            execution_state=state_with_tracker,
             adapter=mock_adapter,
             prompt=mock_prompt,
             rendered_prompt=None,

@@ -23,11 +23,9 @@ from importlib import import_module
 from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
-from ..contrib.tools.filesystem import Filesystem
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
-from ..prompt.tool import ResourceRegistry
 from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import SupportsDataclass
@@ -55,6 +53,7 @@ from .response_parser import build_json_schema_response_format
 from .throttle import ThrottleError, ThrottleKind, throttle_details
 from .utilities import (
     ToolChoice,
+    build_resources,
     deadline_provider_payload,
     format_publish_failures,
     parse_tool_arguments,
@@ -619,8 +618,11 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             effective_tracker = BudgetTracker(budget=budget)
 
         # Create ExecutionState for transactional tool execution
+        # Resources include filesystem (snapshotable) and budget tracker
         filesystem = prompt.filesystem()
-        resources = ResourceRegistry.build({Filesystem: filesystem})
+        resources = build_resources(
+            filesystem=filesystem, budget_tracker=effective_tracker
+        )
         execution_state = ExecutionState(session=session, resources=resources)
 
         config = InnerLoopConfig(
