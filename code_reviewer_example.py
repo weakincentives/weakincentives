@@ -943,15 +943,20 @@ def _build_workspace_section(
                 ),
             )
 
-    # Default: VFS + Asteval
+    # Default: VFS + Asteval (sharing the same filesystem)
+    vfs_section = VfsToolsSection(
+        session=session,
+        mounts=mounts,
+        allowed_host_roots=allowed_roots,
+        accepts_overrides=True,
+    )
     return (
-        VfsToolsSection(
+        vfs_section,
+        AstevalSection(
             session=session,
-            mounts=mounts,
-            allowed_host_roots=allowed_roots,
+            filesystem=vfs_section.filesystem,
             accepts_overrides=True,
         ),
-        AstevalSection(session=session, accepts_overrides=True),
     )
 
 

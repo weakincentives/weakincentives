@@ -1292,6 +1292,48 @@ def test_prompt_filesystem_returns_none_when_no_workspace() -> None:
     assert prompt.filesystem() is None
 
 
+def test_prompt_template_rejects_multiple_distinct_filesystems() -> None:
+    """Test that PromptTemplate raises error with multiple distinct filesystems."""
+    from weakincentives.prompt.errors import PromptValidationError
+
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    section1 = VfsToolsSection(session=session)
+    section2 = VfsToolsSection(session=session)
+
+    # Each VfsToolsSection has its own filesystem, so this should raise
+    with pytest.raises(PromptValidationError, match="2 distinct filesystems"):
+        PromptTemplate(
+            ns="test",
+            key="test-prompt",
+            sections=(section1, section2),
+        )
+
+
+def test_prompt_template_allows_shared_filesystem() -> None:
+    """Test that PromptTemplate allows multiple workspace sections sharing a filesystem."""
+    from weakincentives.contrib.tools import AstevalSection
+
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    vfs_section = VfsToolsSection(session=session)
+    # AstevalSection shares the same filesystem
+    asteval_section = AstevalSection(session=session, filesystem=vfs_section.filesystem)
+
+    # This should NOT raise because they share the same filesystem
+    template = PromptTemplate(
+        ns="test",
+        key="test-prompt",
+        sections=(vfs_section, asteval_section),
+    )
+    prompt = Prompt(template)
+
+    # filesystem() should return the shared filesystem
+    fs = prompt.filesystem()
+    assert fs is not None
+    assert fs is vfs_section.filesystem
+
+
 def test_clone_preserves_filesystem_state() -> None:
     """Test that cloning VfsToolsSection preserves filesystem state."""
     dispatcher1 = InProcessDispatcher()
