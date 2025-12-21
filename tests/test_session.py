@@ -658,7 +658,7 @@ def test_clone_preserves_state_and_reducer_registration(
     assert clone.created_at == provided_created_at
     assert clone[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
-    assert clone._reducers.keys() == session._reducers.keys()
+    assert clone._state_store._reducers.keys() == session._state_store._reducers.keys()
 
     clone_bus.publish(make_prompt_event(ExampleOutput(text="second")))
 

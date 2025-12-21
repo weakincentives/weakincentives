@@ -171,9 +171,9 @@ def test_cloned_session_preserves_visibility_reducers() -> None:
     cloned = session.clone(bus=bus)
 
     # Cloned session should have exactly 1 reducer per event type (not duplicates)
-    assert len(cloned._reducers.get(SetVisibilityOverride, [])) == 1
-    assert len(cloned._reducers.get(ClearVisibilityOverride, [])) == 1
-    assert len(cloned._reducers.get(ClearAllVisibilityOverrides, [])) == 1
+    assert len(cloned._state_store._reducers.get(SetVisibilityOverride, [])) == 1
+    assert len(cloned._state_store._reducers.get(ClearVisibilityOverride, [])) == 1
+    assert len(cloned._state_store._reducers.get(ClearAllVisibilityOverrides, [])) == 1
 
     # Cloned session should work with visibility events
     cloned.broadcast(
