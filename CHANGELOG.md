@@ -57,6 +57,15 @@ Release highlights for weakincentives.
 - **ResourceRegistry.snapshotable_resources()** returns all registered
   resources implementing the `Snapshotable` protocol.
 
+### Removed
+
+- **ProviderAdapterProtocol from public exports.** The
+  `weakincentives.prompt.ProviderAdapterProtocol` is no longer part of the
+  public API. Users implementing custom adapters should subclass
+  `weakincentives.adapters.ProviderAdapter` (the ABC), which is the blessed
+  extension mechanism. Internal code continues to use the protocol for
+  structural typing, but it is not exposed for external use.
+
 ## v0.15.0 - 2025-12-17
 
 ### Added

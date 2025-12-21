@@ -34,6 +34,12 @@ AdapterOutputT = TypeVar("AdapterOutputT")
 
 
 class PromptResponseProtocol(Protocol[AdapterOutputT]):
+    """Internal protocol for adapter responses.
+
+    Not exported from ``weakincentives.prompt``. Use
+    ``weakincentives.adapters.PromptResponse`` for public API.
+    """
+
     prompt_name: str
     text: str | None
     output: AdapterOutputT | None
@@ -120,9 +126,10 @@ class PromptProtocol(Protocol[PromptOutputT]):
 
 
 class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
-    """Interface describing the subset of adapter behaviour required by tools.
+    """Internal protocol for adapters.
 
-    Telemetry is published via session.event_bus, not a separate bus parameter.
+    Not exported from ``weakincentives.prompt``. Use
+    ``weakincentives.adapters.ProviderAdapter`` ABC for public API.
     """
 
     def evaluate(
@@ -138,8 +145,6 @@ class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
 
 __all__ = [
     "PromptProtocol",
-    "PromptResponseProtocol",
     "PromptTemplateProtocol",
-    "ProviderAdapterProtocol",
     "RenderedPromptProtocol",
 ]

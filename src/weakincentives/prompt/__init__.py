@@ -46,7 +46,6 @@ from .prompt import Prompt, PromptTemplate, SectionNode
 from .protocols import (
     PromptProtocol,
     PromptTemplateProtocol,
-    ProviderAdapterProtocol,
     RenderedPromptProtocol,
 )
 from .rendering import RenderedPrompt
@@ -87,7 +86,6 @@ __all__ = [
     "PromptTemplate",
     "PromptTemplateProtocol",
     "PromptValidationError",
-    "ProviderAdapterProtocol",
     "ReadSectionParams",
     "ReadSectionResult",
     "RenderedPrompt",
