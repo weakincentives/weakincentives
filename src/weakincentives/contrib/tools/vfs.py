@@ -33,7 +33,7 @@ from typing import Final, Literal, cast, override
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
-from ...prompt.markdown import MarkdownSection
+from ...prompt.session_bound import SessionBoundMarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Session
 from ...types import SupportsDataclass, SupportsToolResult
@@ -450,7 +450,7 @@ class VfsConfig:
     )
 
 
-class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
+class VfsToolsSection(SessionBoundMarkdownSection[_VfsSectionParams]):
     """Prompt section exposing the virtual filesystem tool suite.
 
     Use :class:`VfsConfig` to consolidate configuration::
@@ -523,26 +523,18 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         )
 
     @property
-    def session(self) -> Session:
-        return self._session
-
-    @property
     def filesystem(self) -> Filesystem:
         """Return the filesystem managed by this section."""
         return self._filesystem
 
     @override
-    def clone(self, **kwargs: object) -> VfsToolsSection:
-        session_obj = kwargs.get("session")
-        if not isinstance(session_obj, Session):
-            msg = "session is required to clone VfsToolsSection."
-            raise TypeError(msg)
-        provided_bus = kwargs.get("bus")
-        if provided_bus is not None and provided_bus is not session_obj.event_bus:
-            msg = "Provided bus must match the target session's event bus."
-            raise TypeError(msg)
+    def _rebind_to_session(
+        self,
+        session: Session,
+        **kwargs: object,
+    ) -> VfsToolsSection:
         return VfsToolsSection(
-            session=session_obj,
+            session=session,
             config=self._config,
             _filesystem=self._filesystem,
             _mount_previews=self._mount_previews,

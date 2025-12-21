@@ -51,6 +51,11 @@ from .protocols import (
 )
 from .rendering import RenderedPrompt
 from .section import Section, SectionVisibility
+from .session_bound import (
+    SessionBoundMarkdownSection,
+    SessionBoundSection,
+    validate_clone_session,
+)
 from .structured_output import (
     OutputParseError,
     StructuredOutputConfig,
@@ -99,6 +104,8 @@ __all__ = [
     "SectionOverride",
     "SectionPath",
     "SectionVisibility",
+    "SessionBoundMarkdownSection",
+    "SessionBoundSection",
     "SetVisibilityOverride",
     "StructuredOutputConfig",
     "TaskExample",
@@ -119,6 +126,7 @@ __all__ = [
     "hash_text",
     "parse_structured_output",
     "register_visibility_reducers",
+    "validate_clone_session",
 ]
 
 

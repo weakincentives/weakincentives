@@ -23,7 +23,7 @@ from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
 from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import PromptRenderError
-from ...prompt.markdown import MarkdownSection
+from ...prompt.session_bound import SessionBoundMarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Session, reducer, replace_latest
 from ...types import SupportsDataclass, SupportsToolResult
@@ -274,7 +274,7 @@ def _template_for_strategy(strategy: PlanningStrategy) -> str:
     return f"{_PLANNING_SECTION_HEADER}{guidance}{_PLANNING_SECTION_BODY}"
 
 
-class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
+class PlanningToolsSection(SessionBoundMarkdownSection[_PlanningSectionParams]):
     """Prompt section exposing the planning tool suite.
 
     Use :class:`PlanningConfig` to consolidate configuration::
@@ -325,10 +325,6 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
             accepts_overrides=resolved_accepts_overrides,
         )
 
-    @property
-    def session(self) -> Session:
-        return self._session
-
     @staticmethod
     def _initialize_session(session: Session) -> None:
         # Use a dummy initial factory so SetupPlan can create a new plan
@@ -341,15 +337,13 @@ class PlanningToolsSection(MarkdownSection[_PlanningSectionParams]):
         session[Plan].register(Plan, replace_latest)
 
     @override
-    def clone(self, **kwargs: object) -> PlanningToolsSection:
-        session = kwargs.get("session")
-        if not isinstance(session, Session):
-            msg = "session is required to clone PlanningToolsSection."
-            raise TypeError(msg)
-        return PlanningToolsSection(
-            session=session,
-            config=self._config,
-        )
+    def _rebind_to_session(
+        self,
+        session: Session,
+        **kwargs: object,
+    ) -> PlanningToolsSection:
+        del kwargs  # Not used - PlanningToolsSection has no shared resources
+        return PlanningToolsSection(session=session, config=self._config)
 
     @override
     def render_body(

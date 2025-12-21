@@ -339,6 +339,112 @@ cloned = section.clone(session=new_session, bus=new_bus)
 - Tool-backed sections rewire reducers and handlers to provided instances
 - Children are recursively cloned
 
+## Session-Bound Sections
+
+Session-bound sections reduce the "subclass tax" for creating tool sections
+that depend on a session. Instead of implementing the full `clone()` method
+in each subclass, sections only need to implement `_rebind_to_session()`.
+
+### SessionBoundMarkdownSection
+
+For sections that extend `MarkdownSection` and need session binding:
+
+```python
+from weakincentives.prompt import SessionBoundMarkdownSection
+
+class MyToolSection(SessionBoundMarkdownSection[MyParams]):
+    def __init__(self, *, session: Session, config: MyConfig) -> None:
+        self._session = session
+        self._config = config
+        super().__init__(
+            title="My Tools",
+            key="my.tools",
+            template="Tool instructions...",
+        )
+
+    def _rebind_to_session(
+        self, session: Session, **kwargs: object
+    ) -> MyToolSection:
+        return MyToolSection(session=session, config=self._config)
+```
+
+The base class handles:
+
+- Session validation in `clone()`
+- Bus consistency validation
+- Calling `_rebind_to_session()` with the validated session
+
+### SessionBoundSection
+
+For custom sections that need session binding without `MarkdownSection`:
+
+```python
+from weakincentives.prompt import SessionBoundSection
+
+class MyCustomSection(SessionBoundSection[MyParams]):
+    def __init__(self, *, session: Session, title: str) -> None:
+        self._session = session
+        self._title = title
+        super().__init__(title=title, key="my.section")
+
+    def _rebind_to_session(
+        self, session: Session, **kwargs: object
+    ) -> MyCustomSection:
+        return MyCustomSection(session=session, title=self._title)
+```
+
+### Config Pattern
+
+Session-bound sections should follow the config pattern:
+
+1. Define a `FrozenDataclass` config that consolidates constructor arguments
+1. Store config as `self._config`
+1. Reuse config in `_rebind_to_session()`:
+
+```python
+@FrozenDataclass()
+class MyConfig:
+    strategy: Strategy = Strategy.DEFAULT
+    accepts_overrides: bool = False
+
+class MyToolSection(SessionBoundMarkdownSection[MyParams]):
+    def __init__(
+        self,
+        *,
+        session: Session,
+        config: MyConfig | None = None,
+    ) -> None:
+        self._session = session
+        self._config = config or MyConfig()
+        # ... rest of init
+
+    def _rebind_to_session(
+        self, session: Session, **kwargs: object
+    ) -> MyToolSection:
+        return MyToolSection(session=session, config=self._config)
+```
+
+### Sharing Resources
+
+Some sections share resources (like filesystems) across clones. Handle this
+in `_rebind_to_session()`:
+
+```python
+def _rebind_to_session(
+    self, session: Session, **kwargs: object
+) -> MySection:
+    # Extract optional shared resource from kwargs
+    filesystem = kwargs.get("filesystem")
+    if filesystem is not None and not isinstance(filesystem, Filesystem):
+        raise TypeError("filesystem must be a Filesystem instance.")
+
+    return MySection(
+        session=session,
+        config=self._config,
+        filesystem=filesystem if filesystem is not None else self._filesystem,
+    )
+```
+
 ## Error Handling
 
 ### Exception Types

@@ -33,7 +33,7 @@ from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
-from ...prompt.markdown import MarkdownSection
+from ...prompt.session_bound import SessionBoundMarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session, replace_latest
@@ -492,7 +492,7 @@ def _truncate_stream(value: str) -> str:
     return f"{truncated}[truncated]"
 
 
-class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
+class PodmanSandboxSection(SessionBoundMarkdownSection[_PodmanSectionParams]):
     """Prompt section exposing the Podman ``shell_execute`` tool.
 
     Use :class:`PodmanSandboxConfig` to consolidate configuration::
@@ -836,20 +836,15 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             accepts_overrides=accepts_overrides,
         )
 
-    @property
-    def session(self) -> Session:
-        return self._session
-
     @override
-    def clone(self, **kwargs: object) -> PodmanSandboxSection:  # pragma: no cover
-        session = kwargs.get("session")
-        if not isinstance(session, Session):
-            msg = "session is required to clone PodmanSandboxSection."
-            raise TypeError(msg)
-        provided_bus = kwargs.get("bus")
-        if provided_bus is not None and provided_bus is not session.event_bus:
-            msg = "Provided bus must match the target session's event bus."
-            raise TypeError(msg)
+    def _rebind_to_session(  # pragma: no cover
+        self,
+        session: Session,
+        **kwargs: object,
+    ) -> PodmanSandboxSection:
+        del (
+            kwargs
+        )  # Not used - shared resources are passed via private constructor args
         return PodmanSandboxSection(
             session=session,
             config=self._config,

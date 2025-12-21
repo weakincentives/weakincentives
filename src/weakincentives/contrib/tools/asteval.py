@@ -29,7 +29,7 @@ from typing import Final, Literal, Protocol, TextIO, cast, override
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
-from ...prompt.markdown import MarkdownSection
+from ...prompt.session_bound import SessionBoundMarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
@@ -967,7 +967,7 @@ def summarize_eval_writes(writes: Sequence[EvalFileWrite]) -> str | None:
     return _summarize_writes(writes)
 
 
-class AstevalSection(MarkdownSection[_AstevalSectionParams]):
+class AstevalSection(SessionBoundMarkdownSection[_AstevalSectionParams]):
     """Prompt section exposing the :mod:`asteval` evaluation tool.
 
     Use :class:`AstevalConfig` to consolidate configuration::
@@ -1055,20 +1055,16 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         )
 
     @property
-    def session(self) -> Session:
-        return self._session
-
-    @property
     def filesystem(self) -> Filesystem:
         """Return the filesystem managed by this section."""
         return self._filesystem
 
     @override
-    def clone(self, **kwargs: object) -> AstevalSection:
-        session = kwargs.get("session")
-        if not isinstance(session, Session):
-            msg = "session is required to clone AstevalSection."
-            raise TypeError(msg)
+    def _rebind_to_session(
+        self,
+        session: Session,
+        **kwargs: object,
+    ) -> AstevalSection:
         # Use provided filesystem if given, otherwise keep the current one.
         # This allows sharing a filesystem across sections (e.g., with VfsToolsSection).
         filesystem = kwargs.get("filesystem")

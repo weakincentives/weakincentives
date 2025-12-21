@@ -19,7 +19,7 @@ from typing import override
 
 from ...dataclasses import FrozenDataclass
 from ...prompt._visibility import SectionVisibility
-from ...prompt.section import Section
+from ...prompt.session_bound import SessionBoundSection
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
 from ...runtime.session.protocols import SessionProtocol
@@ -121,7 +121,7 @@ _DEFAULT_PLACEHOLDER = textwrap.dedent(
 ).strip()
 
 
-class WorkspaceDigestSection(Section[SupportsDataclass]):
+class WorkspaceDigestSection(SessionBoundSection[SupportsDataclass]):
     """Render a cached workspace digest sourced from the active session.
 
     This section renders content from a WorkspaceDigest stored in session state.
@@ -147,6 +147,7 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
     ) -> None:
         self._session = session
         self._placeholder = placeholder.strip()
+        self._title = title
         self._key = key  # Store key before super().__init__ for _get_current_summary
         super().__init__(
             title=title,
@@ -289,15 +290,16 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
         return heading
 
     @override
-    def clone(self, **kwargs: object) -> WorkspaceDigestSection:
-        session_obj = kwargs.get("session")
-        if not isinstance(session_obj, Session):
-            msg = "session is required to clone WorkspaceDigestSection."
-            raise TypeError(msg)
+    def _rebind_to_session(
+        self,
+        session: Session,
+        **kwargs: object,
+    ) -> WorkspaceDigestSection:
+        del kwargs  # Not used
         return WorkspaceDigestSection(
-            session=session_obj,
-            title=self.title,
-            key=self.key,
+            session=session,
+            title=self._title,
+            key=self._key,
             placeholder=self._placeholder,
         )
 

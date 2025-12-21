@@ -537,3 +537,12 @@ def test_latest_workspace_digest_handles_section_key_mismatch() -> None:
     # Should return None when no match
     result = latest_workspace_digest(session, "non-existent")
     assert result is None
+
+
+def test_workspace_digest_section_session_property() -> None:
+    """Test that WorkspaceDigestSection exposes session via property."""
+    session = Session()
+    section = WorkspaceDigestSection(session=session)
+
+    # Access session via the inherited property
+    assert section.session is session
