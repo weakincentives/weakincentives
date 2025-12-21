@@ -47,7 +47,6 @@ from weakincentives.contrib.tools import (
     WriteFileParams,
 )
 from weakincentives.contrib.tools.vfs import format_timestamp, path_from_string
-from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session
 
@@ -1255,41 +1254,6 @@ def test_resolve_mount_path_returns_candidate(tmp_path: Path) -> None:
 def test_resolve_mount_path_requires_allowed_roots() -> None:
     with pytest.raises(ToolValidationError, match="No allowed host roots"):
         vfs_mounts_module.resolve_mount_path("data.txt", ())
-
-
-def test_prompt_filesystem_returns_workspace_section_filesystem() -> None:
-    """Test that Prompt.filesystem() returns filesystem from workspace section."""
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    section = VfsToolsSection(session=session)
-    template = PromptTemplate(
-        ns="test",
-        key="test-prompt",
-        sections=(section,),
-    )
-    prompt = Prompt(template)
-
-    fs = prompt.filesystem()
-
-    assert fs is not None
-    assert fs is section.filesystem
-
-
-def test_prompt_filesystem_returns_none_when_no_workspace() -> None:
-    """Test that Prompt.filesystem() returns None without workspace section."""
-    section = MarkdownSection(
-        title="Test",
-        template="Test content",
-        key="test",
-    )
-    template = PromptTemplate(
-        ns="test",
-        key="test-prompt",
-        sections=(section,),
-    )
-    prompt = Prompt(template)
-
-    assert prompt.filesystem() is None
 
 
 def test_clone_preserves_filesystem_state() -> None:

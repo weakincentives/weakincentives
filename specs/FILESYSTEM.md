@@ -458,58 +458,35 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
 
 ## Prompt Integration
 
-### Prompt.filesystem() Method
+### Accessing Filesystem from Sections
 
-The `Prompt` class exposes a `filesystem()` method that locates the workspace
-section in the template and returns its filesystem. This provides convenient
-access without requiring callers to navigate the section tree.
+The filesystem is accessed directly from the workspace section. Callers should
+fetch the filesystem from the relevant section rather than using a prompt-level
+convenience method:
 
 ```python
-class Prompt(Generic[OutputT]):
-    def filesystem(self) -> Filesystem | None:
-        """Return the filesystem from the workspace section, if present.
+# Access filesystem directly from the section
+fs = vfs_section.filesystem
 
-        Searches the template's section tree for a section implementing
-        WorkspaceSection and returns its filesystem property.
-
-        Returns None if no workspace section exists in the template.
-        """
-        section = self._find_workspace_section()
-        if section is None:
-            return None
-        return section.filesystem
-
-    def _find_workspace_section(self) -> WorkspaceSection | None:
-        """Locate the workspace section in the template tree."""
-        for section in self.template.sections:
-            if isinstance(section, WorkspaceSection):
-                return section
-            # Recursively search children
-            found = self._search_children(section)
-            if found is not None:
-                return found
-        return None
+# Or use find_section to locate the workspace section in a prompt
+section = prompt.find_section(VfsToolsSection)
+fs = section.filesystem
 ```
 
 ### Adapter Propagation
 
-Adapters construct `ToolContext` with the filesystem from the prompt:
+Adapters use the `filesystem_from_prompt` helper function to locate the
+workspace section and extract its filesystem for tool execution:
 
 ```python
-def _build_tool_context(
-    self,
-    prompt: Prompt[OutputT],
-    rendered: RenderedPrompt[OutputT],
-    session: SessionProtocol,
-) -> ToolContext:
-    return ToolContext(
-        prompt=prompt,
-        rendered_prompt=rendered,
-        adapter=self,
-        session=session,
-        deadline=rendered.deadline,
-        filesystem=prompt.filesystem(),  # Propagate from workspace section
-    )
+from .utilities import filesystem_from_prompt
+
+def evaluate(self, prompt: Prompt[OutputT], ...) -> PromptResponse[OutputT]:
+    # Get filesystem from workspace section if present
+    filesystem = filesystem_from_prompt(prompt)
+    resources = ResourceRegistry.build({Filesystem: filesystem})
+    execution_state = ExecutionState(session=session, resources=resources)
+    # ... tool execution uses filesystem from resources
 ```
 
 ## Backend Implementations
@@ -778,9 +755,8 @@ template = PromptTemplate(
 
 prompt = Prompt(template)
 
-# Access filesystem via prompt (delegates to workspace section)
-fs = prompt.filesystem()
-assert fs is vfs_section.filesystem  # Same instance
+# Access filesystem directly from the workspace section
+fs = vfs_section.filesystem
 
 # Pre-populate or inspect before evaluation
 fs.write("scratch/notes.txt", "Working notes...")

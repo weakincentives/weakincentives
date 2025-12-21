@@ -56,6 +56,7 @@ from .throttle import ThrottleError, ThrottleKind, throttle_details
 from .utilities import (
     ToolChoice,
     deadline_provider_payload,
+    filesystem_from_prompt,
     format_publish_failures,
     parse_tool_arguments,
 )
@@ -619,7 +620,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             effective_tracker = BudgetTracker(budget=budget)
 
         # Create ExecutionState for transactional tool execution
-        filesystem = prompt.filesystem()
+        filesystem = filesystem_from_prompt(prompt)
         resources = ResourceRegistry.build({Filesystem: filesystem})
         execution_state = ExecutionState(session=session, resources=resources)
 

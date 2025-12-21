@@ -104,6 +104,13 @@ Release highlights for weakincentives.
   The default `render()` combines heading + body + tool examples. Existing
   sections that override `render()` continue to work unchanged.
 
+### Removed
+
+- **`Prompt.filesystem()` method removed.** Access the filesystem directly from
+  the workspace section (`section.filesystem`) instead. Adapters use the
+  internal `filesystem_from_prompt` helper function to locate workspace
+  sections.
+
 ### Breaking: Session Slice Accessors + Explicit Broadcast
 
 Session's query/mutation builders have been replaced by slice accessors via
@@ -204,8 +211,6 @@ Workspace file tools are now backed by a `Filesystem` protocol instead of a
 - New `weakincentives.contrib.tools.filesystem` module with `Filesystem`,
   `InMemoryFilesystem`, and `HostFilesystem`.
 - `ToolContext` now includes `filesystem: Filesystem | None` for handlers.
-- `Prompt.filesystem()` returns the filesystem exposed by any section
-  implementing `WorkspaceSection`.
 - `VirtualFileSystem` has been removed; VFS tools now operate through a backend.
 
 ### Breaking: Prompt Params Type Naming

@@ -92,6 +92,36 @@ class AdapterRenderOptions:
     session: SessionProtocol | None = None
 
 
+def filesystem_from_prompt(prompt: Prompt[Any] | None) -> Filesystem | None:
+    """Return the filesystem from a prompt's workspace section, if present.
+
+    Searches the prompt's section tree for a section implementing
+    WorkspaceSection and returns its filesystem property.
+
+    Returns None if no workspace section exists or prompt is None.
+    """
+    if prompt is None:
+        return None
+
+    # Handle mock prompts or prompts without template
+    template = getattr(prompt, "template", None)
+    if template is None:
+        return None
+
+    # Import here to avoid circular imports
+    from ..contrib.tools.workspace import WorkspaceSection
+
+    snapshot = getattr(template, "_snapshot", None)
+    if snapshot is None:  # pragma: no cover
+        return None
+
+    for node in snapshot.sections:
+        section = node.section
+        if isinstance(section, WorkspaceSection):
+            return section.filesystem
+    return None
+
+
 def build_resources(
     *,
     filesystem: Filesystem | None,
@@ -384,6 +414,7 @@ __all__ = [
     "call_provider_with_normalization",
     "deadline_provider_payload",
     "extract_payload",
+    "filesystem_from_prompt",
     "first_choice",
     "format_publish_failures",
     "parse_tool_arguments",

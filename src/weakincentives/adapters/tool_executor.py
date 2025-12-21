@@ -51,6 +51,7 @@ from .utilities import (
     ToolChoice,
     build_resources,
     deadline_provider_payload,
+    filesystem_from_prompt,
     raise_tool_deadline_error,
     token_usage_from_payload,
 )
@@ -482,8 +483,10 @@ def tool_execution(
         tool_call=tool_call,
     )
 
-    # Get filesystem for ToolContext
-    filesystem = context.prompt.filesystem() if context.prompt else None
+    # Get filesystem for ToolContext: first try prompt, then execution_state
+    filesystem = filesystem_from_prompt(context.prompt)
+    if filesystem is None:
+        filesystem = context.execution_state.resources.get(Filesystem)
 
     # Use transactional execution
     with context.execution_state.tool_transaction(tag=f"tool:{tool_name}") as snapshot:

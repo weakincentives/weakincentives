@@ -34,6 +34,7 @@ from ...runtime.session.protocols import SessionProtocol
 from ...serde import parse, schema
 from .._names import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
+from ..utilities import filesystem_from_prompt
 from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
@@ -248,7 +249,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         # Get filesystem from workspace section if present, otherwise create one
         # from the working directory. This ensures MCP-bridged tools operate on
         # the same filesystem as the SDK's native tools.
-        filesystem = prompt.filesystem()
+        filesystem = filesystem_from_prompt(prompt)
         if filesystem is None:
             workspace_root = self._client_config.cwd or str(Path.cwd())
             filesystem = HostFilesystem(_root=workspace_root)

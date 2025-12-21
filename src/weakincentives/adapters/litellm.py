@@ -47,6 +47,7 @@ from .utilities import (
     AdapterRenderOptions,
     ToolChoice,
     call_provider_with_normalization,
+    filesystem_from_prompt,
     first_choice,
     format_publish_failures,
     parse_tool_arguments,
@@ -318,7 +319,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             effective_tracker = BudgetTracker(budget=budget)
 
         # Create ExecutionState for transactional tool execution
-        filesystem = prompt.filesystem()
+        filesystem = filesystem_from_prompt(prompt)
         resources = ResourceRegistry.build({Filesystem: filesystem})
         execution_state = ExecutionState(session=session, resources=resources)
 
