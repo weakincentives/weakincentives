@@ -146,6 +146,18 @@ def test_invariant_is_inert_when_disabled() -> None:
     assert counter.balance == -5
 
 
+def test_invariant_init_skipped_when_disabled() -> None:
+    @invariant(lambda self: self.balance >= 0)
+    class Counter:
+        def __init__(self, initial: int) -> None:
+            self.balance = initial
+
+    # Instantiate when dbc is disabled - should skip invariant check
+    with dbc_enabled(False):
+        counter = Counter(-10)
+    assert counter.balance == -10
+
+
 def test_pure_detects_mutation() -> None:
     @pure
     def mutate(values: list[int]) -> list[int]:
