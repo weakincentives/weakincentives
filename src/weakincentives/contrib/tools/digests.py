@@ -135,6 +135,8 @@ class WorkspaceDigestSection(Section[SupportsDataclass]):
     when the section is rendered with SUMMARY visibility.
     """
 
+    params_type: type[SupportsDataclass] | None
+
     def __init__(
         self,
         *,

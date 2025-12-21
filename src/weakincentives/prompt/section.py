@@ -49,6 +49,9 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
     _generic_owner_name: ClassVar[str | None] = "Section"
 
+    key: str
+    children: tuple[Section[SupportsDataclass], ...]
+
     def __init__(
         self,
         *,
