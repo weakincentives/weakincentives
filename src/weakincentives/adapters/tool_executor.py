@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import uuid4
 
 from ..budget import BudgetTracker
-from ..contrib.tools.filesystem import Filesystem
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
@@ -49,7 +48,6 @@ from .core import (
 from .utilities import (
     ToolArgumentsParser,
     ToolChoice,
-    build_resources,
     deadline_provider_payload,
     raise_tool_deadline_error,
     token_usage_from_payload,
@@ -319,14 +317,13 @@ def _restore_snapshot_if_needed(
     )
 
 
-def _execute_tool_handler(  # noqa: PLR0913
+def _execute_tool_handler(
     *,
     context: ToolExecutionContext,
     tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
     handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
     tool_name: str,
     tool_params: SupportsDataclass | None,
-    filesystem: Filesystem | None,
 ) -> ToolResult[SupportsToolResult]:
     """Execute the tool handler and build the tool context."""
     _ensure_deadline_not_expired(
@@ -334,17 +331,13 @@ def _execute_tool_handler(  # noqa: PLR0913
         prompt_name=context.prompt_name,
         tool_name=tool_name,
     )
-    resources = build_resources(
-        filesystem=filesystem,
-        budget_tracker=context.budget_tracker,
-    )
     tool_context = ToolContext(
         prompt=cast(PromptProtocol[Any], context.prompt),
         rendered_prompt=context.rendered_prompt,
         adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
         session=context.session,
         deadline=context.deadline,
-        resources=resources,
+        execution_state=context.execution_state,
     )
     return _invoke_tool_handler(
         handler=handler,
@@ -396,7 +389,6 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
     arguments_mapping: Mapping[str, Any],
     call_id: str | None,
     log: StructuredLogger,
-    filesystem: Filesystem | None,
     snapshot: CompositeSnapshot,
 ) -> Iterator[ToolExecutionOutcome]:
     """Execute tool with transactional snapshot restore on failure."""
@@ -410,7 +402,6 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
             handler=handler,
             tool_name=tool_name,
             tool_params=tool_params,
-            filesystem=filesystem,
         )
     except (VisibilityExpansionRequired, PromptEvaluationError):
         # Context manager handles restore; just re-raise
@@ -482,9 +473,6 @@ def tool_execution(
         tool_call=tool_call,
     )
 
-    # Get filesystem for ToolContext
-    filesystem = context.prompt.filesystem() if context.prompt else None
-
     # Use transactional execution
     with context.execution_state.tool_transaction(tag=f"tool:{tool_name}") as snapshot:
         yield from _execute_tool_with_snapshot(
@@ -495,7 +483,6 @@ def tool_execution(
             arguments_mapping=arguments_mapping,
             call_id=call_id,
             log=log,
-            filesystem=filesystem,
             snapshot=snapshot,
         )
 

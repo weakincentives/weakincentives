@@ -31,6 +31,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.tool import ResourceRegistry, Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import ToolInvoked
+from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
 
@@ -65,12 +66,13 @@ def build_tool_context(
         resources = ResourceRegistry()
     else:
         resources = ResourceRegistry.build({Filesystem: filesystem})
+    execution_state = ExecutionState(session=session, resources=resources)
     return ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=None,
         adapter=adapter,
         session=session,
-        resources=resources,
+        execution_state=execution_state,
     )
 
 

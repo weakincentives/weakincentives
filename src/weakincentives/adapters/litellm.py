@@ -21,10 +21,8 @@ from importlib import import_module
 from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
-from ..contrib.tools.filesystem import Filesystem
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
-from ..prompt.tool import ResourceRegistry
 from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ._names import LITELLM_ADAPTER_NAME
@@ -46,6 +44,7 @@ from .throttle import ThrottleError, ThrottleKind, throttle_details
 from .utilities import (
     AdapterRenderOptions,
     ToolChoice,
+    build_resources,
     call_provider_with_normalization,
     first_choice,
     format_publish_failures,
@@ -318,8 +317,11 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             effective_tracker = BudgetTracker(budget=budget)
 
         # Create ExecutionState for transactional tool execution
+        # Resources include filesystem (snapshotable) and budget tracker
         filesystem = prompt.filesystem()
-        resources = ResourceRegistry.build({Filesystem: filesystem})
+        resources = build_resources(
+            filesystem=filesystem, budget_tracker=effective_tracker
+        )
         execution_state = ExecutionState(session=session, resources=resources)
 
         config = InnerLoopConfig(

@@ -492,3 +492,25 @@ def test_tool_validate_return_annotation_non_toolresult() -> None:
         )
 
     assert "return annotation must be ToolResult[ResultT]" in str(exc.value)
+
+
+def test_tool_context_resources_returns_empty_when_execution_state_is_none() -> None:
+    """ToolContext.resources returns empty ResourceRegistry when execution_state is None."""
+    from unittest.mock import MagicMock
+
+    from weakincentives.prompt.tool import ResourceRegistry
+
+    context = ToolContext(
+        prompt=MagicMock(),
+        rendered_prompt=None,
+        adapter=MagicMock(),
+        session=MagicMock(),
+        deadline=None,
+        execution_state=None,
+    )
+
+    result = context.resources
+
+    assert isinstance(result, ResourceRegistry)
+    # Verify it's empty by checking that get returns None for any type
+    assert result.get(object) is None
