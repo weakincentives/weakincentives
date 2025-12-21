@@ -20,10 +20,11 @@ from __future__ import annotations
 
 from dataclasses import field
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Literal
 from uuid import UUID, uuid4
 
 from ...dataclasses import FrozenDataclass
+from ...types import JSONObject
 
 __all__ = [
     "Notification",
@@ -50,7 +51,7 @@ class Notification:
     source: NotificationSource = field(
         metadata={"description": "Hook that generated this notification."}
     )
-    payload: dict[str, Any] = field(
+    payload: JSONObject = field(
         default_factory=dict,
         metadata={"description": "Raw input dict from the SDK hook."},
     )

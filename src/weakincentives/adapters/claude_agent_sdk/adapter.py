@@ -31,6 +31,7 @@ from ...runtime.execution_state import ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol
+from ...runtime.session.slice_policy import SlicePolicy
 from ...serde import parse, schema
 from .._names import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
@@ -243,7 +244,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
 
         # Register Notification reducer if not already registered
-        session[Notification].register(Notification, append_all)
+        session[Notification].register(Notification, append_all, policy=SlicePolicy.LOG)
 
         # Get filesystem from workspace section if present, otherwise create one
         # from the working directory. This ensures MCP-bridged tools operate on
