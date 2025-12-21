@@ -528,7 +528,7 @@ def seed_sections(
     prompt: PromptLike,
     descriptor: PromptDescriptor,
 ) -> dict[tuple[str, ...], SectionOverride]:
-    section_lookup = {node.path: node.section for node in prompt.sections}
+    section_lookup = {node.path: node.section for node in prompt.nodes}
     seeded: dict[tuple[str, ...], SectionOverride] = {}
     for section in descriptor.sections:
         section_obj = section_lookup.get(section.path)
@@ -555,7 +555,7 @@ def seed_tools(
     if not descriptor.tools:
         return {}
     tool_lookup: dict[str, ToolContractProtocol] = {}
-    for node in prompt.sections:
+    for node in prompt.nodes:
         for tool in node.section.tools():
             tool_lookup[tool.name] = tool
     seeded: dict[str, ToolOverride] = {}
