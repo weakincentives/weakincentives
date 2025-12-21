@@ -26,12 +26,12 @@ from weakincentives.contrib.tools.filesystem import (
     FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
-    HostFilesystem,
-    InMemoryFilesystem,
     ReadResult,
     SnapshotableFilesystem,
     WriteResult,
 )
+from weakincentives.contrib.tools.filesystem_host import HostFilesystem
+from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.errors import SnapshotRestoreError
 
 
@@ -1408,7 +1408,7 @@ def test_normalize_path_with_leading_dotdot() -> None:
 
 def test_in_memory_filesystem_delete_root_directory() -> None:
     """Test that delete on root directory is handled correctly."""
-    from weakincentives.contrib.tools.filesystem import InMemoryFilesystem
+    from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 
     fs = InMemoryFilesystem()
     fs.write("/dir/file.txt", "content")

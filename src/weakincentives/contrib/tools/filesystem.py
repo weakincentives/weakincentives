@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Filesystem protocol and backend implementations for workspace operations.
+"""Filesystem protocol and result types for workspace operations.
 
 This module provides a unified `Filesystem` protocol that abstracts over
 workspace backends (in-memory VFS, Podman containers, host filesystem) so
@@ -20,12 +20,15 @@ storage implementation.
 The protocol uses simple `str` paths throughout - tool handlers convert these
 to structured result types (with VfsPath) for serialization to the LLM.
 
+Implementations are in separate modules:
+
+- `filesystem_memory.InMemoryFilesystem`: Session-scoped in-memory storage
+- `filesystem_host.HostFilesystem`: Sandboxed host directory access
+
 Example usage::
 
-    from weakincentives.contrib.tools.filesystem import (
-        Filesystem,
-        InMemoryFilesystem,
-    )
+    from weakincentives.contrib.tools.filesystem import Filesystem
+    from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 
     # Create an in-memory filesystem
     fs = InMemoryFilesystem()
@@ -59,14 +62,6 @@ from weakincentives.contrib.tools._filesystem_utils import (
     WriteResult as WriteResult,
     normalize_path as normalize_path,
     validate_path as validate_path,
-)
-
-# Import implementations from separate modules
-from weakincentives.contrib.tools.filesystem_host import (
-    HostFilesystem as HostFilesystem,
-)
-from weakincentives.contrib.tools.filesystem_memory import (
-    InMemoryFilesystem as InMemoryFilesystem,
 )
 
 # ---------------------------------------------------------------------------
@@ -311,8 +306,6 @@ __all__ = [
     "FilesystemSnapshot",
     "GlobMatch",
     "GrepMatch",
-    "HostFilesystem",
-    "InMemoryFilesystem",
     "ReadResult",
     "SnapshotableFilesystem",
     "WriteMode",
