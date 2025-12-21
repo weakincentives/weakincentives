@@ -65,7 +65,8 @@ that tree.
 **What's familiar:**
 
 - Tools are functions with typed params and results. You'll recognize this.
-- State management exists. Sessions are Redux-like: immutable, event-driven.
+- State management exists. Sessions use an event-driven pattern: state is
+  immutable, and changes flow through pure functions called "reducers."
 - Provider abstraction exists. Adapters swap between OpenAI, LiteLLM, Claude.
 
 **What's different:**
@@ -1119,7 +1120,20 @@ Queries are read-only; they never mutate the session.
 
 ### 5.3 Reducers
 
-Reducers are pure functions: `(slice_values, event) -> new_slice_values`.
+A **reducer** is a pure function that takes the current state and an event,
+and returns the new state. The name comes from functional programming (and was
+popularized by Redux in frontend development), but the concept is simple:
+
+```
+new_state = reducer(current_state, event)
+```
+
+Reducers never mutate state directly. They always return a new value. This
+makes state changes predictable: given the same inputs, you always get the same
+output. It also makes debugging easier—you can log every event and replay the
+exact sequence that led to any state.
+
+In WINK, reducers have this signature: `(slice_values, event) -> new_slice_values`.
 
 WINK ships helper reducers:
 
