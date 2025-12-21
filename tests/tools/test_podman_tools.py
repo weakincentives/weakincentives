@@ -1050,7 +1050,7 @@ def test_resolve_connection_static_handles_missing(
     # Patch where the function is used (podman module), not where it's defined
     monkeypatch.setattr(
         podman_module,
-        "_resolve_podman_connection",
+        "resolve_podman_connection",
         lambda *, preferred_name=None: None,
     )
     assert PodmanSandboxSection.resolve_connection() is None
@@ -1067,7 +1067,7 @@ def test_resolve_connection_static_returns_mapping(
     # Patch where the function is used (podman module), not where it's defined
     monkeypatch.setattr(
         podman_module,
-        "_resolve_podman_connection",
+        "resolve_podman_connection",
         lambda *, preferred_name=None: resolved,
     )
     result = PodmanSandboxSection.resolve_connection(connection_name="preferred")
@@ -1086,8 +1086,8 @@ def test_section_requires_connection_when_detection_fails(
     session, _bus = session_and_bus
     client = _FakePodmanClient()
     monkeypatch.setattr(
-        podman_module,
-        "_resolve_podman_connection",
+        podman_connection_module,
+        "resolve_podman_connection",
         lambda *, preferred_name=None: None,
     )
     with pytest.raises(ToolValidationError):

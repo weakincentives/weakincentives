@@ -48,12 +48,10 @@ from .filesystem import (
     HostFilesystem,
 )
 from .podman_connection import (
-    resolve_connection_settings as _resolve_connection_settings,
-    resolve_podman_connection as _resolve_podman_connection,
+    resolve_connection_settings,
+    resolve_podman_connection,
 )
-from .podman_eval import (
-    PodmanEvalSuite as _PodmanEvalSuite,
-)
+from .podman_eval import PodmanEvalSuite
 from .vfs import (
     DeleteEntry,
     EditFileParams,
@@ -515,7 +513,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         self._session = session
         self._image = config.image
         self._mounts = tuple(config.mounts)
-        base_url, identity_str, connection_name = _resolve_connection_settings(
+        base_url, identity_str, connection_name = resolve_connection_settings(
             base_url=config.base_url,
             identity=config.identity,
             connection_name=config.connection_name,
@@ -590,7 +588,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
 
         self._fs_handlers = FilesystemToolHandlers(clock=self._clock)
         self._shell_suite = _PodmanShellSuite(section=self)
-        self._eval_suite = _PodmanEvalSuite(section=self)
+        self._eval_suite = PodmanEvalSuite(section=self)
         accepts_overrides = config.accepts_overrides
         tools = (
             Tool[ListDirectoryParams, tuple[FileInfo, ...]](
@@ -868,7 +866,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     def resolve_connection(
         connection_name: str | None = None,
     ) -> dict[str, str | None] | None:
-        resolved = _resolve_podman_connection(preferred_name=connection_name)
+        resolved = resolve_podman_connection(preferred_name=connection_name)
         if resolved is None:
             return None
         return {
