@@ -2099,20 +2099,63 @@ PromptEvaluationError
 
 ### 15.7 weakincentives.serde
 
+Dataclass serialization utilities (no Pydantic required):
+
 ```python
-dump(obj) -> dict
-parse(DataclassType, mapping) -> DataclassType
-schema(DataclassType) -> dict
-clone(obj) -> dataclass copy
+from weakincentives.serde import dump, parse, schema, clone
+
+# Serialize a dataclass to a JSON-compatible dict
+data = dump(my_dataclass)
+
+# Parse a dict back into a dataclass (with validation)
+obj = parse(MyDataclass, {"field": "value"})
+
+# Generate JSON schema for a dataclass
+json_schema = schema(MyDataclass)
+
+# Deep copy a frozen dataclass
+copy = clone(my_dataclass)
 ```
+
+**Key behaviors:**
+
+- `parse()` validates required fields and rejects unknown keys by default
+- Nested dataclasses are recursively parsed
+- `tuple`, `frozenset`, and other immutable collections are handled
+- `schema()` produces OpenAI-compatible JSON schemas for structured output
 
 ### 15.8 CLI
 
 Installed via the `wink` extra:
 
 ```bash
-wink debug <snapshot_path> [--host ...] [--port ...]
+pip install "weakincentives[wink]"
 ```
+
+**Commands:**
+
+```bash
+# Start the debug UI server
+wink debug <snapshot_path> [options]
+```
+
+**Options:**
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--host` | `127.0.0.1` | Host interface to bind |
+| `--port` | `8000` | Port to bind |
+| `--open-browser` | `true` | Open browser automatically |
+| `--no-open-browser` | - | Disable auto-open |
+| `--log-level` | `INFO` | Log verbosity (DEBUG, INFO, WARNING, ERROR) |
+| `--json-logs` | `true` | Emit structured JSON logs |
+| `--no-json-logs` | - | Emit plain text logs |
+
+**Exit codes:**
+
+- `0`: Success
+- `2`: Invalid input (missing file, parse error)
+- `3`: Server failed to start
 
 ---
 
