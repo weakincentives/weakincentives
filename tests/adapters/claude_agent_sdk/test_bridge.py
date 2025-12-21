@@ -720,10 +720,8 @@ class TestVisibilityExpansionRequiredPropagation:
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
         """Test that filesystem is accessed via execution_state resources."""
-        from weakincentives.contrib.tools.filesystem import (
-            Filesystem,
-            InMemoryFilesystem,
-        )
+        from weakincentives.contrib.tools.filesystem import Filesystem
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
@@ -776,10 +774,8 @@ class TestCreateBridgedToolsWithFilesystem:
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
         """Test that create_bridged_tools passes filesystem via execution_state."""
-        from weakincentives.contrib.tools.filesystem import (
-            Filesystem,
-            InMemoryFilesystem,
-        )
+        from weakincentives.contrib.tools.filesystem import Filesystem
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.prompt.tool import ResourceRegistry
 
         captured_filesystem: list[object] = []
@@ -927,10 +923,8 @@ class TestBridgedToolTransactionalExecution:
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
         """Test that state is restored when tool returns success=False."""
-        from weakincentives.contrib.tools.filesystem import (
-            Filesystem,
-            InMemoryFilesystem,
-        )
+        from weakincentives.contrib.tools.filesystem import Filesystem
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
@@ -984,10 +978,8 @@ class TestBridgedToolTransactionalExecution:
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
         """Test that state is restored when tool raises exception."""
-        from weakincentives.contrib.tools.filesystem import (
-            Filesystem,
-            InMemoryFilesystem,
-        )
+        from weakincentives.contrib.tools.filesystem import Filesystem
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
@@ -1037,10 +1029,8 @@ class TestBridgedToolTransactionalExecution:
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
         """Test that state is restored when validation fails."""
-        from weakincentives.contrib.tools.filesystem import (
-            Filesystem,
-            InMemoryFilesystem,
-        )
+        from weakincentives.contrib.tools.filesystem import Filesystem
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
@@ -1079,10 +1069,8 @@ class TestBridgedToolTransactionalExecution:
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
         """Test that state is restored when VisibilityExpansionRequired is raised."""
-        from weakincentives.contrib.tools.filesystem import (
-            Filesystem,
-            InMemoryFilesystem,
-        )
+        from weakincentives.contrib.tools.filesystem import Filesystem
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
@@ -1189,10 +1177,8 @@ class TestCreateBridgedToolsWithExecutionState:
         self, session: Session, mock_adapter: MagicMock, mock_prompt: MagicMock
     ) -> None:
         """Test that create_bridged_tools passes execution_state to BridgedTool."""
-        from weakincentives.contrib.tools.filesystem import (
-            Filesystem,
-            InMemoryFilesystem,
-        )
+        from weakincentives.contrib.tools.filesystem import Filesystem
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
