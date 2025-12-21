@@ -194,13 +194,26 @@ higher-level orchestration.
 
 "Weak incentives" is an engineering stance:
 
-> Build agent systems so that the easiest path is the safe, correct, and
-> observable path—and the system has weak incentives to surprise you.
+> Build agent systems where well-constructed prompts and tools create weak
+> incentives for the model to do the right thing and stay on task.
 
-The name comes from mechanism design: a system with "weak incentives" is one
-where participants have little reason to deviate from the intended behavior.
-Applied to software, this means building systems where the path of least
-resistance leads to correct, predictable outcomes.
+The name comes from mechanism design: a system with the right incentives is one
+where participants naturally gravitate toward intended behavior. Applied to
+agents, this means shaping the prompt, tools, and context so the model's
+easiest path is also the correct one.
+
+This isn't about constraining the model or managing downside risk. It's about
+*encouraging* correct behavior through structure:
+
+- **Clear instructions co-located with tools** make the right action obvious
+- **Typed contracts** guide the model toward valid outputs
+- **Progressive disclosure** keeps the model focused on what matters now
+- **Explicit state** gives the model the context it needs to make good decisions
+
+The optimization process strengthens these incentives. When you refine a prompt
+override or add a tool example, you're making the correct path even more
+natural. Over iterations, the system becomes increasingly well-tuned—not
+through constraints, but through clarity.
 
 Concretely, WINK pushes you toward:
 
@@ -235,11 +248,11 @@ Hash-validated prompt overrides prevent accidental drift between "tested" and
 "running". When you override a section's text, the system validates that you're
 overriding the version you think you're overriding.
 
-This isn't "safety theater". It's pragmatic reliability engineering for systems
-that call untrusted reasoning engines and still need to behave predictably.
-Models will hallucinate, misunderstand, and occasionally do the opposite of
-what you asked. WINK's constraints make those failures observable and
-recoverable.
+The goal isn't to constrain the model—it's to give it the best possible
+starting point. When prompts are clear, tools are well-documented, and state is
+explicit, the model has strong signals about what to do. When something goes
+wrong, you can see exactly what happened and refine the incentives for next
+time.
 
 ### 1.2 The shift: orchestration shrinks, context engineering grows
 
