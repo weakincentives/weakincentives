@@ -803,6 +803,8 @@ enabling rollback after failed tool invocations or exploratory changes.
   semantics on disk-backed filesystems.
 - **Tool-invocation granularity**: Snapshots are taken between tool calls; we
   do not track sub-operation changes.
+- **External git storage**: Git repositories are stored outside the workspace
+  root to prevent agents from accessing or modifying snapshot internals.
 
 ### FilesystemSnapshot Dataclass
 
@@ -817,11 +819,16 @@ class FilesystemSnapshot:
     created_at: datetime
     commit_ref: str  # Git commit hash (for disk) or version ID (for memory)
     root_path: str   # Filesystem root at snapshot time
+    git_dir: str | None = None  # External git directory (for HostFilesystem)
     tag: str | None = None  # Optional human-readable label
 ```
 
 The `commit_ref` field stores a git commit hash for `HostFilesystem` and
 `PodmanFilesystem`, or an internal version identifier for `InMemoryFilesystem`.
+
+The `git_dir` field stores the path to the external git repository for
+`HostFilesystem`, enabling cross-session restore when the filesystem instance
+is recreated.
 
 ### SnapshotableFilesystem Protocol
 
@@ -932,7 +939,10 @@ Only modified files allocate new memory.
 
 ### HostFilesystem Implementation
 
-The host filesystem uses git to manage snapshots:
+The host filesystem uses git to manage snapshots. The git repository is stored
+**outside** the workspace root to prevent agents from accessing or modifying
+the snapshot internals. By default, a sibling directory is created (e.g.,
+`/workspace/.wink-git-<uuid>` for a root of `/workspace/project`).
 
 ```python
 @dataclass(slots=True)
@@ -940,33 +950,46 @@ class HostFilesystem:
     """Host filesystem with git-based snapshots."""
 
     _root: str
+    _read_only: bool = False
+    _mount_point: str | None = None
     _git_initialized: bool = False
+    _git_dir: str | None = None  # External git directory path
+
+    def _run_git(
+        self,
+        args: Sequence[str],
+        *,
+        check: bool = True,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        """Run git command with external git-dir and work-tree."""
+        cmd = [
+            "git",
+            f"--git-dir={self._git_dir}",
+            f"--work-tree={self._root}",
+            *args,
+        ]
+        return subprocess.run(cmd, cwd=self._root, check=check, capture_output=True, text=text)
 
     def _ensure_git(self) -> None:
         """Initialize git repository if needed."""
         if self._git_initialized:
             return
-        git_dir = Path(self._root) / ".git"
-        if not git_dir.exists():
-            subprocess.run(
-                ["git", "init"],
-                cwd=self._root,
-                check=True,
-                capture_output=True,
-            )
+
+        # Create external git directory if not specified
+        if self._git_dir is None:
+            root_path = Path(self._root).resolve()
+            git_parent = root_path.parent
+            self._git_dir = str(git_parent / f".wink-git-{uuid4().hex[:8]}")
+
+        git_path = Path(self._git_dir)
+        if not git_path.exists():
+            git_path.mkdir(parents=True, exist_ok=True)
+            # Initialize bare repository in external directory
+            subprocess.run(["git", "init", "--bare"], cwd=self._git_dir, check=True, capture_output=True)
             # Configure for snapshot use
-            subprocess.run(
-                ["git", "config", "user.email", "wink@localhost"],
-                cwd=self._root,
-                check=True,
-                capture_output=True,
-            )
-            subprocess.run(
-                ["git", "config", "user.name", "WINK Snapshots"],
-                cwd=self._root,
-                check=True,
-                capture_output=True,
-            )
+            subprocess.run(["git", "--git-dir", self._git_dir, "config", "user.email", "wink@localhost"], check=True, capture_output=True)
+            subprocess.run(["git", "--git-dir", self._git_dir, "config", "user.name", "WINK Snapshots"], check=True, capture_output=True)
         self._git_initialized = True
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
@@ -974,62 +997,67 @@ class HostFilesystem:
         self._ensure_git()
 
         # Stage all changes
-        subprocess.run(
-            ["git", "add", "-A"],
-            cwd=self._root,
-            check=True,
-            capture_output=True,
-        )
+        self._run_git(["add", "-A"])
 
         # Commit (allow empty for idempotent snapshots)
         message = tag or f"snapshot-{datetime.now(UTC).isoformat()}"
-        subprocess.run(
-            ["git", "commit", "-m", message, "--allow-empty"],
-            cwd=self._root,
-            capture_output=True,
-        )
+        self._run_git(["commit", "-m", message, "--allow-empty", "--no-gpg-sign"], check=False)
 
         # Get commit hash
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
-            cwd=self._root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        commit_ref = result.stdout.strip()
+        result = self._run_git(["rev-parse", "HEAD"], text=True)
+        commit_ref = str(result.stdout).strip()
 
         return FilesystemSnapshot(
             snapshot_id=uuid4(),
             created_at=datetime.now(UTC),
             commit_ref=commit_ref,
             root_path=self._root,
+            git_dir=self._git_dir,
             tag=tag,
         )
 
     def restore(self, snapshot: FilesystemSnapshot) -> None:
         """Restore to a git commit."""
+        # Use git_dir from snapshot if available
+        if snapshot.git_dir is not None and self._git_dir is None:
+            self._git_dir = snapshot.git_dir
+
         self._ensure_git()
 
         # Hard reset to the commit (restores tracked files)
-        result = subprocess.run(
-            ["git", "reset", "--hard", snapshot.commit_ref],
-            cwd=self._root,
-            capture_output=True,
-            text=True,
-        )
+        result = self._run_git(["reset", "--hard", snapshot.commit_ref], check=False, text=True)
         if result.returncode != 0:
-            raise SnapshotRestoreError(
-                f"Failed to restore snapshot: {result.stderr}"
-            )
+            raise SnapshotRestoreError(f"Failed to restore snapshot: {result.stderr}")
 
         # Remove untracked files and directories for strict rollback
-        subprocess.run(
-            ["git", "clean", "-fd"],
-            cwd=self._root,
-            capture_output=True,
-        )
+        # -x removes ignored files too for full restore
+        self._run_git(["clean", "-xfd"], check=False)
+
+    def cleanup(self) -> None:
+        """Remove the external git directory.
+
+        Call this when the filesystem is no longer needed to clean up
+        the snapshot storage. Safe to call multiple times.
+        """
+        if self._git_dir is not None and Path(self._git_dir).exists():
+            shutil.rmtree(self._git_dir)
+            self._git_initialized = False
+
+    @property
+    def git_dir(self) -> str | None:
+        """External git directory path, if initialized."""
+        return self._git_dir
 ```
+
+**Key design points:**
+
+- The git repository is a **bare repository** initialized with `git init --bare`
+- All git commands use `--git-dir` and `--work-tree` flags to separate storage
+  from workspace
+- The `cleanup()` method removes the external git directory when no longer needed
+- Snapshots include `git_dir` to enable cross-session restore
+- The `restore()` method can use `git_dir` from a snapshot if the filesystem
+  instance doesn't have one set
 
 ### PodmanFilesystem Implementation
 
