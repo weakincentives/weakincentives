@@ -74,12 +74,18 @@ class HostFilesystem:
     All paths are resolved relative to the root and validated to ensure
     they cannot escape the sandbox via symlinks or path traversal.
     Supports snapshot and restore operations via git commits.
+
+    The git repository used for snapshots is stored outside the workspace
+    root to prevent agents from accessing or modifying it. By default,
+    a sibling directory is created (e.g., ``/workspace/.wink-git-<uuid>``
+    for a root of ``/workspace/project``).
     """
 
     _root: str
     _read_only: bool = False
     _mount_point: str | None = None
     _git_initialized: bool = False
+    _git_dir: str | None = None
 
     @property
     def root(self) -> str:
@@ -119,6 +125,40 @@ class HostFilesystem:
             raise PermissionError(msg) from None
 
         return candidate
+
+    def _run_git(
+        self,
+        args: Sequence[str],
+        *,
+        check: bool = True,
+        text: bool = False,
+    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+        """Run git command with external git-dir and work-tree.
+
+        All git commands use --git-dir and --work-tree to keep the git
+        repository separate from the workspace files.
+
+        Args:
+            args: Git subcommand and arguments (e.g., ["add", "-A"]).
+            check: Raise CalledProcessError on non-zero exit.
+            text: Decode output as text.
+
+        Returns:
+            CompletedProcess with stdout/stderr captured.
+        """
+        cmd: list[str] = [
+            "git",
+            f"--git-dir={self._git_dir}",
+            f"--work-tree={self._root}",
+            *args,
+        ]
+        return subprocess.run(  # nosec B603 B607
+            cmd,
+            cwd=self._root,
+            check=check,
+            capture_output=True,
+            text=text,
+        )
 
     def read(
         self,
@@ -458,28 +498,53 @@ class HostFilesystem:
     # --- Snapshot Operations ---
 
     def _ensure_git(self) -> None:
-        """Initialize git repository if needed for snapshot support."""
+        """Initialize git repository if needed for snapshot support.
+
+        Creates the git repository in an external directory (outside the
+        workspace root) to prevent agents from accessing git internals.
+        """
         if self._git_initialized:
             return
 
-        git_dir = Path(self._root) / ".git"
-        if not git_dir.exists():
+        # Create external git directory if not specified
+        if self._git_dir is None:
+            root_path = Path(self._root).resolve()
+            git_parent = root_path.parent
+            self._git_dir = str(git_parent / f".wink-git-{uuid4().hex[:8]}")
+
+        git_path = Path(self._git_dir)
+        if not git_path.exists():
+            git_path.mkdir(parents=True, exist_ok=True)
+            # Initialize bare repository in external directory
             _ = subprocess.run(  # nosec B603 B607
-                ["git", "init"],
-                cwd=self._root,
+                ["git", "init", "--bare"],
+                cwd=self._git_dir,
                 check=True,
                 capture_output=True,
             )
             # Configure for snapshot use (local config only)
+            # Use --git-dir since it's a bare repo
             _ = subprocess.run(  # nosec B603 B607
-                ["git", "config", "user.email", "wink@localhost"],
-                cwd=self._root,
+                [
+                    "git",
+                    "--git-dir",
+                    self._git_dir,
+                    "config",
+                    "user.email",
+                    "wink@localhost",
+                ],
                 check=True,
                 capture_output=True,
             )
             _ = subprocess.run(  # nosec B603 B607
-                ["git", "config", "user.name", "WINK Snapshots"],
-                cwd=self._root,
+                [
+                    "git",
+                    "--git-dir",
+                    self._git_dir,
+                    "config",
+                    "user.name",
+                    "WINK Snapshots",
+                ],
                 check=True,
                 capture_output=True,
             )
@@ -500,20 +565,14 @@ class HostFilesystem:
         self._ensure_git()
 
         # Stage all changes (including new and deleted files)
-        _ = subprocess.run(  # nosec B603 B607
-            ["git", "add", "-A"],
-            cwd=self._root,
-            check=True,
-            capture_output=True,
-        )
+        _ = self._run_git(["add", "-A"])
 
         # Commit (allow empty for idempotent snapshots)
         # Use --no-gpg-sign to avoid issues in environments with signing hooks
         message = tag or f"snapshot-{datetime.now(UTC).isoformat()}"
-        commit_result = subprocess.run(  # nosec B603 B607
-            ["git", "commit", "-m", message, "--allow-empty", "--no-gpg-sign"],
-            cwd=self._root,
-            capture_output=True,
+        commit_result = self._run_git(
+            ["commit", "-m", message, "--allow-empty", "--no-gpg-sign"],
+            check=False,
             text=True,
         )
 
@@ -522,35 +581,26 @@ class HostFilesystem:
         if commit_result.returncode != 0:
             # Check if this is because there's nothing to commit
             # and no prior commits exist (empty repo)
-            head_check = subprocess.run(  # nosec B603 B607
-                ["git", "rev-parse", "--verify", "HEAD"],
-                cwd=self._root,
-                capture_output=True,
+            head_check = self._run_git(
+                ["rev-parse", "--verify", "HEAD"],
+                check=False,
             )
             if head_check.returncode != 0:
                 # No HEAD commit exists - create an initial empty commit
-                _ = subprocess.run(  # nosec B603 B607
-                    ["git", "commit", "--allow-empty", "--no-gpg-sign", "-m", message],
-                    cwd=self._root,
-                    check=True,
-                    capture_output=True,
+                _ = self._run_git(
+                    ["commit", "--allow-empty", "--no-gpg-sign", "-m", message],
                 )
 
-        # Get commit hash
-        result = subprocess.run(  # nosec B603 B607
-            ["git", "rev-parse", "HEAD"],
-            cwd=self._root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        commit_ref = result.stdout.strip()
+        # Get commit hash (text=True guarantees str stdout)
+        result = self._run_git(["rev-parse", "HEAD"], text=True)
+        commit_ref = str(result.stdout).strip()
 
         return FilesystemSnapshot(
             snapshot_id=uuid4(),
             created_at=datetime.now(UTC),
             commit_ref=commit_ref,
             root_path=self._root,
+            git_dir=self._git_dir,
             tag=tag,
         )
 
@@ -566,13 +616,16 @@ class HostFilesystem:
         Raises:
             SnapshotRestoreError: If git reset fails (e.g., invalid commit).
         """
+        # Use git_dir from snapshot if available and we don't have one yet
+        if snapshot.git_dir is not None and self._git_dir is None:
+            self._git_dir = snapshot.git_dir
+
         self._ensure_git()
 
         # Hard reset to the commit (restores tracked files)
-        result = subprocess.run(  # nosec B603 B607
-            ["git", "reset", "--hard", snapshot.commit_ref],
-            cwd=self._root,
-            capture_output=True,
+        result = self._run_git(
+            ["reset", "--hard", snapshot.commit_ref],
+            check=False,
             text=True,
         )
         if result.returncode != 0:
@@ -581,8 +634,19 @@ class HostFilesystem:
 
         # Remove untracked files and directories for strict rollback
         # -x removes ignored files too (e.g., cache, logs) for full restore
-        _ = subprocess.run(  # nosec B603 B607
-            ["git", "clean", "-xfd"],
-            cwd=self._root,
-            capture_output=True,
-        )
+        _ = self._run_git(["clean", "-xfd"], check=False)
+
+    def cleanup(self) -> None:
+        """Remove the external git directory.
+
+        Call this when the filesystem is no longer needed to clean up
+        the snapshot storage. Safe to call multiple times.
+        """
+        if self._git_dir is not None and Path(self._git_dir).exists():
+            shutil.rmtree(self._git_dir)
+            self._git_initialized = False
+
+    @property
+    def git_dir(self) -> str | None:
+        """External git directory path, if initialized."""
+        return self._git_dir

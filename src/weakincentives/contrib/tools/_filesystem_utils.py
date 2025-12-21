@@ -111,12 +111,16 @@ class FilesystemSnapshot:
     The ``commit_ref`` field stores a git commit hash for disk-backed
     filesystems (HostFilesystem) or an internal version identifier for
     in-memory filesystems (InMemoryFilesystem).
+
+    For HostFilesystem, ``git_dir`` stores the external git repository
+    location to enable cross-session restore.
     """
 
     snapshot_id: UUID
     created_at: datetime
     commit_ref: str
     root_path: str
+    git_dir: str | None = None
     tag: str | None = None
 
 

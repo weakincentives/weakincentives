@@ -1158,12 +1158,16 @@ class TestHostFilesystemSnapshots:
         # First snapshot initializes git
         _ = fs.snapshot()
         assert fs._git_initialized
-        git_dir = tmp_path / ".git"
+        # Git dir is external, not inside workspace
+        assert fs.git_dir is not None
+        git_dir = Path(fs.git_dir)
         assert git_dir.exists()
 
         # Second snapshot reuses existing git
+        first_git_dir = fs.git_dir
         _ = fs.snapshot()
         # Still the same git dir
+        assert fs.git_dir == first_git_dir
         assert git_dir.exists()
 
     def test_idempotent_empty_snapshot(self, tmp_path: Path) -> None:
@@ -1192,27 +1196,29 @@ class TestHostFilesystemSnapshots:
         # Store original subprocess.run
         original_run = subprocess.run
 
-        call_count = 0
+        commit_call_count = 0
 
         def mock_subprocess_run(
             args: list[str], **kwargs: object
         ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
-            nonlocal call_count
-            call_count += 1
+            nonlocal commit_call_count
+
+            # Check for git command type by looking for subcommand after flags
+            # Commands now use: git --git-dir=... --work-tree=... <subcommand>
+            subcommand = None
+            for arg in args:
+                if arg in {"init", "--bare", "config", "add", "commit", "rev-parse"}:
+                    subcommand = arg
+                    break
 
             # Let git init and config calls through
-            if args[0:2] in (
-                ["git", "init"],
-                ["git", "config"],
-                ["git", "add"],
-                ["git", "rev-parse"],
-            ):
+            if subcommand in {"init", "--bare", "config", "add", "rev-parse"}:
                 return original_run(args, **kwargs)
 
             # For git commit: fail the first time, succeed the second
-            if args[0:2] == ["git", "commit"]:
-                # First commit call should fail (simulating edge case)
-                if call_count <= 5:  # After init, 2 config, add, first commit
+            if subcommand == "commit":
+                commit_call_count += 1
+                if commit_call_count == 1:
                     mock_result = MagicMock()
                     mock_result.returncode = 1
                     mock_result.stderr = "simulated failure"
@@ -1278,47 +1284,27 @@ class TestFilesystemBranchCoverage:
             fs.mkdir("a/b/c", parents=False)
 
     def test_host_filesystem_snapshot_initializes_git(self, tmp_path: Path) -> None:
-        """Test branch 1360: _ensure_git_initialized when .git doesn't exist."""
+        """Test that snapshot initializes external git directory."""
         fs = HostFilesystem(_root=str(tmp_path))
 
-        # First snapshot should initialize git (branch 1360->1380)
+        # First snapshot should initialize git in external directory
         snapshot = fs.snapshot(tag="initial")
         assert isinstance(snapshot, FilesystemSnapshot)
 
-        # Verify .git directory was created
-        git_dir = tmp_path / ".git"
+        # Verify external git directory was created (not inside workspace)
+        assert fs.git_dir is not None
+        git_dir = Path(fs.git_dir)
         assert git_dir.exists()
+        # Git dir should NOT be inside workspace root
+        assert not (tmp_path / ".git").exists()
 
     def test_host_filesystem_snapshot_creates_initial_commit_when_no_head(
         self, tmp_path: Path
     ) -> None:
-        """Test branch 1424: snapshot creates initial commit when HEAD doesn't exist."""
-        import subprocess
-
+        """Test that snapshot creates initial commit when HEAD doesn't exist."""
         fs = HostFilesystem(_root=str(tmp_path))
 
-        # Initialize git but don't create any commits
-        _ = subprocess.run(
-            ["git", "init"],
-            cwd=str(tmp_path),
-            check=True,
-            capture_output=True,
-        )
-        # Configure git user for CI environments
-        _ = subprocess.run(
-            ["git", "config", "user.email", "test@example.com"],
-            cwd=str(tmp_path),
-            check=True,
-            capture_output=True,
-        )
-        _ = subprocess.run(
-            ["git", "config", "user.name", "Test User"],
-            cwd=str(tmp_path),
-            check=True,
-            capture_output=True,
-        )
-
-        # First snapshot should create initial commit (branch 1424->1434)
+        # First snapshot should create initial commit
         snapshot = fs.snapshot(tag="first")
         assert isinstance(snapshot, FilesystemSnapshot)
         assert len(snapshot.commit_ref) == 40
@@ -1341,7 +1327,7 @@ class TestFilesystemBranchCoverage:
     def test_host_filesystem_commit_fails_but_head_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test branch 1424->1434: commit fails but HEAD already exists."""
+        """Test that commit fails but HEAD already exists skips fallback."""
         import subprocess
         from unittest.mock import MagicMock
 
@@ -1360,17 +1346,19 @@ class TestFilesystemBranchCoverage:
         ) -> subprocess.CompletedProcess[bytes] | subprocess.CompletedProcess[str]:
             nonlocal commit_call_count
 
+            # Check for git command type by looking for subcommand after flags
+            subcommand = None
+            for arg in args:
+                if arg in {"init", "--bare", "config", "add", "commit", "rev-parse"}:
+                    subcommand = arg
+                    break
+
             # Let most git commands through
-            if args[0:2] in (
-                ["git", "init"],
-                ["git", "config"],
-                ["git", "add"],
-                ["git", "rev-parse"],
-            ):
+            if subcommand in {"init", "--bare", "config", "add", "rev-parse"}:
                 return original_run(args, **kwargs)
 
             # For git commit: fail to trigger the HEAD check branch
-            if args[0:2] == ["git", "commit"]:
+            if subcommand == "commit":
                 commit_call_count += 1
                 if commit_call_count == 1:
                     # First commit in this test should fail
@@ -1419,3 +1407,165 @@ def test_in_memory_filesystem_delete_root_directory() -> None:
     # Root should still exist, but contents should be gone
     assert fs.exists("/")
     assert not fs.exists("/dir")
+
+
+# External Git Directory Tests
+
+
+class TestHostFilesystemExternalGitDir:
+    """Tests for HostFilesystem external git directory feature."""
+
+    def test_git_dir_outside_workspace_root(self, tmp_path: Path) -> None:
+        """Git directory should be created outside workspace root."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        fs = HostFilesystem(_root=str(workspace))
+        fs.write("file.txt", "content")
+
+        snapshot = fs.snapshot()
+
+        # Git dir should exist but not inside workspace
+        assert fs.git_dir is not None
+        assert Path(fs.git_dir).exists()
+        assert not (workspace / ".git").exists()
+        # Git dir should be a sibling of workspace
+        assert Path(fs.git_dir).parent == tmp_path
+        assert snapshot.git_dir == fs.git_dir
+
+    def test_git_dir_not_accessible_in_workspace(self, tmp_path: Path) -> None:
+        """Workspace should not contain .git folder after snapshot."""
+        workspace = tmp_path / "project"
+        workspace.mkdir()
+        fs = HostFilesystem(_root=str(workspace))
+        fs.write("src/main.py", "print('hello')")
+
+        _ = fs.snapshot()
+
+        # Verify no .git in workspace
+        assert not (workspace / ".git").exists()
+        # Workspace files should still exist
+        assert (workspace / "src" / "main.py").exists()
+
+    def test_custom_git_dir(self, tmp_path: Path) -> None:
+        """Custom git directory can be specified."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        custom_git = tmp_path / "custom-git-storage"
+
+        fs = HostFilesystem(_root=str(workspace), _git_dir=str(custom_git))
+        fs.write("file.txt", "content")
+        snapshot = fs.snapshot()
+
+        assert fs.git_dir == str(custom_git)
+        assert custom_git.exists()
+        assert snapshot.git_dir == str(custom_git)
+
+    def test_cleanup_removes_git_dir(self, tmp_path: Path) -> None:
+        """cleanup() should remove the external git directory."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        fs = HostFilesystem(_root=str(workspace))
+        fs.write("file.txt", "content")
+
+        _ = fs.snapshot()
+        git_dir_path = Path(fs.git_dir)
+        assert git_dir_path.exists()
+
+        fs.cleanup()
+
+        assert not git_dir_path.exists()
+        assert fs._git_initialized is False
+
+    def test_cleanup_idempotent(self, tmp_path: Path) -> None:
+        """cleanup() should be safe to call multiple times."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        fs = HostFilesystem(_root=str(workspace))
+        fs.write("file.txt", "content")
+
+        _ = fs.snapshot()
+        fs.cleanup()
+        # Should not raise
+        fs.cleanup()
+        fs.cleanup()
+
+    def test_cleanup_before_snapshot(self, tmp_path: Path) -> None:
+        """cleanup() should be safe to call before any snapshot."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        fs = HostFilesystem(_root=str(workspace))
+
+        # Should not raise even though git was never initialized
+        fs.cleanup()
+
+    def test_snapshot_contains_git_dir(self, tmp_path: Path) -> None:
+        """Snapshot should contain the git_dir path."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        fs = HostFilesystem(_root=str(workspace))
+        fs.write("file.txt", "content")
+
+        snapshot = fs.snapshot()
+
+        assert snapshot.git_dir is not None
+        assert snapshot.git_dir == fs.git_dir
+
+    def test_restore_with_snapshot_git_dir(self, tmp_path: Path) -> None:
+        """Restore should work when filesystem git_dir is not set but snapshot has it."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        git_dir = tmp_path / "git-storage"
+
+        # Create filesystem and snapshot with git_dir
+        fs1 = HostFilesystem(_root=str(workspace), _git_dir=str(git_dir))
+        fs1.write("file.txt", "original")
+        snapshot = fs1.snapshot()
+
+        # Modify file
+        fs1.write("file.txt", "modified")
+        assert fs1.read("file.txt").content == "modified"
+
+        # Create new filesystem without git_dir and restore
+        fs2 = HostFilesystem(_root=str(workspace))
+        fs2.restore(snapshot)
+
+        # Should use git_dir from snapshot
+        assert fs2.git_dir == str(git_dir)
+        assert fs2.read("file.txt").content == "original"
+
+    def test_git_dir_property(self, tmp_path: Path) -> None:
+        """git_dir property should return the external git directory path."""
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        fs = HostFilesystem(_root=str(workspace))
+
+        # Before snapshot, git_dir should be None
+        assert fs.git_dir is None
+
+        fs.write("file.txt", "content")
+        _ = fs.snapshot()
+
+        # After snapshot, git_dir should be set
+        assert fs.git_dir is not None
+        assert Path(fs.git_dir).exists()
+
+    def test_multiple_filesystems_independent_git_dirs(self, tmp_path: Path) -> None:
+        """Multiple HostFilesystem instances should have independent git dirs."""
+        ws1 = tmp_path / "workspace1"
+        ws2 = tmp_path / "workspace2"
+        ws1.mkdir()
+        ws2.mkdir()
+
+        fs1 = HostFilesystem(_root=str(ws1))
+        fs2 = HostFilesystem(_root=str(ws2))
+
+        fs1.write("file.txt", "content1")
+        fs2.write("file.txt", "content2")
+
+        _ = fs1.snapshot()
+        _ = fs2.snapshot()
+
+        # Each should have its own git dir
+        assert fs1.git_dir != fs2.git_dir
+        assert Path(fs1.git_dir).exists()
+        assert Path(fs2.git_dir).exists()
