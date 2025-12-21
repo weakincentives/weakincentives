@@ -273,47 +273,35 @@ sequenceDiagram
 | `VisibilityExpansionRequired` | Restore, re-raise for retry |
 | `DeadlineExceededError` | Restore, convert to `PromptEvaluationError` |
 
-### ToolRunner
+### tool_transaction Context Manager
 
-A shared `ToolRunner` provides identical transaction semantics for all adapters:
+The `ExecutionState.tool_transaction()` context manager provides transactional
+semantics for all tool execution:
 
 ```python
-@dataclass(slots=True)
-class ToolRunner:
-    """Unified tool execution with transaction semantics."""
+@contextmanager
+def tool_transaction(
+    self,
+    *,
+    tag: str | None = None,
+) -> Iterator[CompositeSnapshot]:
+    """Execute code block with transactional snapshot semantics.
 
-    execution_state: ExecutionState
-    tool_registry: Mapping[str, Tool[Any, Any]]
-    prompt_name: str
-
-    def execute(
-        self,
-        tool_call: ProviderToolCall,
-        *,
-        context: ToolContext,
-    ) -> ToolResult[Any]:
-        """Execute a tool call with transaction semantics."""
-        pre_snapshot = self.execution_state.snapshot(tag=f"pre:{tool_call.id}")
-
-        try:
-            result = self._invoke_handler(tool_call, context=context)
-        except VisibilityExpansionRequired:
-            self.execution_state.restore(pre_snapshot)
-            raise
-        except Exception as e:
-            self.execution_state.restore(pre_snapshot)
-            return _wrap_exception_as_tool_result(e)
-
-        if not result.success:
-            self.execution_state.restore(pre_snapshot)
-
-        return result
+    Takes a snapshot before the block executes. On any exception, the
+    snapshot is automatically restored before re-raising.
+    """
+    snapshot = self.snapshot(tag=tag)
+    try:
+        yield snapshot
+    except Exception:
+        self.restore(snapshot)
+        raise
 ```
 
 Used by:
 
-- `ToolExecutor` in `adapters/shared.py` (OpenAI/LiteLLM path)
-- `BridgedTool` in `adapters/claude_agent_sdk/_bridge.py` (Claude Agent SDK path)
+- `tool_execution()` context manager in `adapters/tool_executor.py`
+- `BridgedTool` in `adapters/claude_agent_sdk/_bridge.py`
 
 ## Filesystem
 

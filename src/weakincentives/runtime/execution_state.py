@@ -479,7 +479,7 @@ class ExecutionState:
         restore manually using the yielded snapshot.
 
         This context manager provides consistent transaction semantics for
-        synchronous tool execution in adapters like BridgedTool and ToolRunner.
+        synchronous tool execution in adapters like BridgedTool and ToolExecutor.
 
         Example usage::
 
