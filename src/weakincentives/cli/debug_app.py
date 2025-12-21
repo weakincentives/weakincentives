@@ -18,17 +18,18 @@ import json
 import re
 import threading
 import webbrowser
+import zipfile
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
 from types import MappingProxyType
-from typing import Annotated, cast
+from typing import Annotated, Literal, cast
 from urllib.parse import unquote
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
 
@@ -135,6 +136,48 @@ class LoadedSnapshot:
 
 
 SnapshotLoader = Callable[[Path], tuple[LoadedSnapshot, ...]]
+
+# Metadata filename stored inside the ZIP archive
+_WINK_METADATA_FILENAME = "_wink_metadata.json"
+
+
+@FrozenDataclass()
+class FilesystemArchiveMetadata:
+    """Metadata from a filesystem archive."""
+
+    version: str
+    created_at: str
+    session_id: str | None
+    root_path: str
+    file_count: int
+    total_bytes: int
+
+
+@FrozenDataclass()
+class FileTreeNode:
+    """Node in the filesystem tree."""
+
+    name: str
+    type: Literal["file", "directory"]
+    path: str | None = None  # Full path for files
+    size: int | None = None  # Byte size for files
+    children: tuple[FileTreeNode, ...] | None = None  # For directories
+
+
+@FrozenDataclass()
+class FileContent:
+    """Content of a file from the archive."""
+
+    path: str
+    content: str | None  # None for binary files
+    size_bytes: int
+    total_lines: int | None = None
+    offset: int = 0
+    limit: int | None = None
+    truncated: bool = False
+    encoding: str = "utf-8"
+    binary: bool = False
+    error: str | None = None
 
 
 def load_snapshot(snapshot_path: Path) -> tuple[LoadedSnapshot, ...]:
@@ -438,6 +481,341 @@ class SnapshotStore:
         return self._entries[self._index]
 
 
+class FilesystemArchiveStore:
+    """In-memory store for filesystem archive contents."""
+
+    def __init__(self, *, logger: StructuredLogger | None = None) -> None:
+        super().__init__()
+        self._logger = logger or get_logger(__name__)
+        self._archive_path: Path | None = None
+        self._metadata: FilesystemArchiveMetadata | None = None
+        self._file_index: dict[str, int] = {}  # path -> size in bytes
+        self._tree: FileTreeNode | None = None
+
+    @property
+    def has_archive(self) -> bool:
+        """Return True if an archive is currently loaded."""
+        return self._archive_path is not None
+
+    @property
+    def archive_path(self) -> Path | None:
+        """Return the path to the loaded archive."""
+        return self._archive_path
+
+    @property
+    def metadata(self) -> FilesystemArchiveMetadata | None:
+        """Return metadata for the loaded archive."""
+        return self._metadata
+
+    @property
+    def tree(self) -> FileTreeNode | None:
+        """Return the file tree for the loaded archive."""
+        return self._tree
+
+    def load_for_snapshot(self, snapshot_path: Path) -> bool:
+        """Load the companion archive for a snapshot file.
+
+        Args:
+            snapshot_path: Path to the .jsonl snapshot file.
+
+        Returns:
+            True if an archive was found and loaded, False otherwise.
+        """
+        archive_path = self._find_companion_archive(snapshot_path)
+        if archive_path is None:
+            self._clear()
+            self._logger.debug(
+                "No companion archive found",
+                event="debug.filesystem.archive_not_found",
+                context={"expected_path": str(snapshot_path.with_suffix(".fs.zip"))},
+            )
+            return False
+
+        return self._load_archive(archive_path)
+
+    def read_file(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> FileContent:
+        """Read a file from the archive.
+
+        Args:
+            path: Path to the file within the archive.
+            offset: Line offset (0-indexed).
+            limit: Maximum number of lines to return.
+
+        Returns:
+            FileContent with the file contents or error information.
+        """
+        if self._archive_path is None:
+            return FileContent(
+                path=path,
+                content=None,
+                size_bytes=0,
+                error="No archive loaded",
+            )
+
+        if path not in self._file_index:
+            return FileContent(
+                path=path,
+                content=None,
+                size_bytes=0,
+                error=f"File not found: {path}",
+            )
+
+        try:
+            with zipfile.ZipFile(self._archive_path, "r") as zf:
+                raw_bytes = zf.read(path)
+                size_bytes = len(raw_bytes)
+
+                # Try to decode as UTF-8
+                try:
+                    content = raw_bytes.decode("utf-8")
+                except UnicodeDecodeError:
+                    self._logger.debug(
+                        "Binary file detected",
+                        event="debug.filesystem.file_read",
+                        context={"path": path, "size_bytes": size_bytes},
+                    )
+                    return FileContent(
+                        path=path,
+                        content=None,
+                        size_bytes=size_bytes,
+                        binary=True,
+                        error="Binary file cannot be displayed as text",
+                    )
+
+                lines = content.splitlines(keepends=True)
+                total_lines = len(lines)
+
+                # Apply pagination
+                if offset > 0:
+                    lines = lines[offset:]
+                truncated = False
+                if limit is not None and len(lines) > limit:
+                    lines = lines[:limit]
+                    truncated = True
+
+                paginated_content = "".join(lines)
+
+                self._logger.debug(
+                    "File read from archive",
+                    event="debug.filesystem.file_read",
+                    context={"path": path, "size_bytes": size_bytes},
+                )
+
+                return FileContent(
+                    path=path,
+                    content=paginated_content,
+                    size_bytes=size_bytes,
+                    total_lines=total_lines,
+                    offset=offset,
+                    limit=limit,
+                    truncated=truncated,
+                )
+
+        except (zipfile.BadZipFile, OSError) as error:
+            self._logger.warning(
+                "Failed to read file from archive",
+                event="debug.filesystem.file_read_error",
+                context={"path": path, "error": str(error)},
+            )
+            return FileContent(
+                path=path,
+                content=None,
+                size_bytes=0,
+                error=f"Failed to read file: {error}",
+            )
+
+    def read_file_raw(self, path: str) -> bytes | None:
+        """Read raw bytes of a file from the archive.
+
+        Args:
+            path: Path to the file within the archive.
+
+        Returns:
+            Raw bytes of the file, or None if not found or error.
+        """
+        if self._archive_path is None or path not in self._file_index:
+            return None
+
+        try:
+            with zipfile.ZipFile(self._archive_path, "r") as zf:
+                return zf.read(path)
+        except (zipfile.BadZipFile, OSError):
+            return None
+
+    def _load_archive(self, archive_path: Path) -> bool:
+        """Load an archive file.
+
+        Args:
+            archive_path: Path to the .fs.zip archive.
+
+        Returns:
+            True if loaded successfully, False otherwise.
+        """
+        try:
+            file_index, metadata, tree = self._parse_archive(archive_path)
+        except (zipfile.BadZipFile, OSError) as error:
+            self._logger.warning(
+                "Failed to load filesystem archive",
+                event="debug.filesystem.archive_error",
+                context={"path": str(archive_path), "error": str(error)},
+            )
+            self._clear()
+            return False
+
+        self._archive_path = archive_path
+        self._file_index = file_index
+        self._metadata = metadata
+        self._tree = tree
+
+        self._logger.info(
+            "Filesystem archive loaded",
+            event="debug.filesystem.archive_loaded",
+            context={"path": str(archive_path), "file_count": len(file_index)},
+        )
+        return True
+
+    def _parse_archive(
+        self, archive_path: Path
+    ) -> tuple[dict[str, int], FilesystemArchiveMetadata | None, FileTreeNode]:
+        """Parse an archive file and extract its contents.
+
+        Returns:
+            Tuple of (file_index, metadata, tree).
+        """
+        with zipfile.ZipFile(archive_path, "r") as zf:
+            # Build file index
+            file_index: dict[str, int] = {}
+            for info in zf.infolist():
+                if not info.is_dir() and info.filename != _WINK_METADATA_FILENAME:
+                    file_index[info.filename] = info.file_size
+
+            # Load metadata if present
+            metadata = self._load_archive_metadata(zf, file_index, archive_path)
+
+            # Build file tree
+            tree = _build_file_tree(file_index)
+
+        return file_index, metadata, tree
+
+    def _load_archive_metadata(
+        self,
+        zf: zipfile.ZipFile,
+        file_index: dict[str, int],
+        archive_path: Path,
+    ) -> FilesystemArchiveMetadata | None:
+        """Load metadata from an archive if present."""
+        if _WINK_METADATA_FILENAME not in zf.namelist():
+            return None
+
+        try:
+            raw = zf.read(_WINK_METADATA_FILENAME).decode("utf-8")
+            meta_dict = json.loads(raw)
+            return FilesystemArchiveMetadata(
+                version=meta_dict.get("version", "1"),
+                created_at=meta_dict.get("created_at", ""),
+                session_id=meta_dict.get("session_id"),
+                root_path=meta_dict.get("root_path", "/"),
+                file_count=meta_dict.get("file_count", len(file_index)),
+                total_bytes=meta_dict.get("total_bytes", 0),
+            )
+        except (json.JSONDecodeError, KeyError) as error:
+            self._logger.warning(
+                "Failed to parse archive metadata",
+                event="debug.filesystem.archive_error",
+                context={"path": str(archive_path), "error": str(error)},
+            )
+            # Continue without metadata
+            return FilesystemArchiveMetadata(
+                version="1",
+                created_at="",
+                session_id=None,
+                root_path="/",
+                file_count=len(file_index),
+                total_bytes=sum(file_index.values()),
+            )
+
+    def _clear(self) -> None:
+        """Clear the current archive state."""
+        self._archive_path = None
+        self._metadata = None
+        self._file_index = {}
+        self._tree = None
+
+    @staticmethod
+    def _find_companion_archive(snapshot_path: Path) -> Path | None:
+        """Find the companion .fs.zip archive for a snapshot file."""
+        # Try .fs.zip suffix first
+        archive_path = snapshot_path.with_suffix(".fs.zip")
+        if archive_path.exists():
+            return archive_path
+
+        # Also try replacing .jsonl with .fs.zip (handles non-standard paths)
+        if snapshot_path.suffix == ".jsonl":  # pragma: no branch
+            stem = snapshot_path.stem
+            archive_path = snapshot_path.parent / f"{stem}.fs.zip"
+            if archive_path.exists():  # pragma: no cover
+                return archive_path
+
+        return None
+
+
+def _build_file_tree(file_index: dict[str, int]) -> FileTreeNode:
+    """Build a hierarchical file tree from the file index."""
+    tree_dict = _build_tree_dict(file_index)
+    return _convert_tree_dict("/", tree_dict)
+
+
+# Type alias for tree dictionary nodes
+_TreeDict = dict[str, "_TreeDict | dict[str, object]"]
+
+
+def _build_tree_dict(file_index: dict[str, int]) -> dict[str, object]:
+    """Build a nested dictionary structure from file paths."""
+    tree_dict: dict[str, object] = {}
+
+    for path, size in sorted(file_index.items()):
+        parts = path.split("/")
+        current = tree_dict
+        for i, part in enumerate(parts):
+            if i == len(parts) - 1:
+                # Leaf node (file)
+                current[part] = {"__file__": True, "__size__": size, "__path__": path}
+            elif part not in current:
+                current[part] = {}
+                current = cast("dict[str, object]", current[part])
+            else:
+                next_level = current[part]
+                if (
+                    isinstance(next_level, dict) and "__file__" not in next_level
+                ):  # pragma: no branch
+                    current = cast("dict[str, object]", next_level)
+
+    return tree_dict
+
+
+def _convert_tree_dict(name: str, node: Mapping[str, object]) -> FileTreeNode:
+    """Convert a tree dictionary node to a FileTreeNode."""
+    if "__file__" in node:
+        return FileTreeNode(
+            name=name,
+            type="file",
+            path=cast(str, node.get("__path__")),
+            size=cast(int, node.get("__size__")),
+        )
+
+    children = tuple(
+        _convert_tree_dict(str(child_name), cast("Mapping[str, object]", child_node))
+        for child_name, child_node in sorted(node.items())
+    )
+    return FileTreeNode(name=name, type="directory", children=children)
+
+
 def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
     return {
         "version": meta.version,
@@ -462,12 +840,20 @@ def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
 
 class _DebugAppHandlers:
     def __init__(
-        self, *, store: SnapshotStore, logger: StructuredLogger, static_dir: Path
+        self,
+        *,
+        store: SnapshotStore,
+        filesystem_store: FilesystemArchiveStore,
+        logger: StructuredLogger,
+        static_dir: Path,
     ) -> None:
         super().__init__()
         self._store = store
+        self._filesystem_store = filesystem_store
         self._logger = logger
         self._static_dir = static_dir
+        # Load filesystem archive for current snapshot
+        _ = self._filesystem_store.load_for_snapshot(store.path)
 
     def index(self) -> str:
         index_path = self._static_dir / "index.html"
@@ -524,6 +910,8 @@ class _DebugAppHandlers:
                 line_number=line_number,
             )
         )
+        # Reload filesystem archive for new snapshot
+        _ = self._filesystem_store.load_for_snapshot(self._store.path)
         return _meta_response(meta)
 
     def _slice_items(self, encoded_slice_type: str) -> SnapshotSlicePayload:
@@ -583,6 +971,57 @@ class _DebugAppHandlers:
         _validate_optional_line_number(line_value)
         return cast(str | None, session_value), cast(int | None, line_value)
 
+    # --- Filesystem Explorer Handlers ---
+
+    def get_filesystem_tree(self) -> Mapping[str, JSONValue]:
+        """Return the filesystem tree for the current snapshot."""
+        fs = self._filesystem_store
+        if not fs.has_archive:
+            return {
+                "has_archive": False,
+                "archive_path": None,
+                "metadata": None,
+                "tree": None,
+            }
+
+        return {
+            "has_archive": True,
+            "archive_path": str(fs.archive_path) if fs.archive_path else None,
+            "metadata": _filesystem_metadata_response(fs.metadata),
+            "tree": _file_tree_response(fs.tree),
+        }
+
+    def get_filesystem_file(
+        self,
+        encoded_path: str,
+        *,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=0)] = None,
+    ) -> Mapping[str, JSONValue]:
+        """Return the content of a file from the filesystem archive."""
+        file_path = unquote(encoded_path)
+        content = self._filesystem_store.read_file(
+            file_path, offset=offset, limit=limit
+        )
+        return _file_content_response(content)
+
+    def download_filesystem_file(self, encoded_path: str) -> Response:
+        """Return raw file content for download."""
+        file_path = unquote(encoded_path)
+        raw_bytes = self._filesystem_store.read_file_raw(file_path)
+        if raw_bytes is None:
+            raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
+
+        # Determine content type based on file extension
+        filename = file_path.rsplit("/", 1)[-1]
+        content_type = _guess_content_type(filename)
+
+        return Response(
+            content=raw_bytes,
+            media_type=content_type,
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
     @staticmethod
     def _parse_switch_payload(
         payload: Mapping[str, JSONValue],
@@ -604,6 +1043,92 @@ class _DebugAppHandlers:
         )
 
 
+def _filesystem_metadata_response(
+    metadata: FilesystemArchiveMetadata | None,
+) -> Mapping[str, JSONValue] | None:
+    """Convert FilesystemArchiveMetadata to JSON response."""
+    if metadata is None:
+        return None
+    return {
+        "version": metadata.version,
+        "created_at": metadata.created_at,
+        "session_id": metadata.session_id,
+        "root_path": metadata.root_path,
+        "file_count": metadata.file_count,
+        "total_bytes": metadata.total_bytes,
+    }
+
+
+def _file_tree_response(tree: FileTreeNode | None) -> Mapping[str, JSONValue] | None:
+    """Convert FileTreeNode to JSON response."""
+    if tree is None:  # pragma: no cover
+        return None
+
+    def convert(node: FileTreeNode) -> Mapping[str, JSONValue]:
+        result: dict[str, JSONValue] = {
+            "name": node.name,
+            "type": node.type,
+        }
+        if node.path is not None:
+            result["path"] = node.path
+        if node.size is not None:
+            result["size"] = node.size
+        if node.children is not None:
+            result["children"] = [convert(child) for child in node.children]
+        return result
+
+    return convert(tree)
+
+
+def _file_content_response(content: FileContent) -> Mapping[str, JSONValue]:
+    """Convert FileContent to JSON response."""
+    result: dict[str, JSONValue] = {
+        "path": content.path,
+        "content": content.content,
+        "size_bytes": content.size_bytes,
+        "binary": content.binary,
+    }
+    if content.total_lines is not None:
+        result["total_lines"] = content.total_lines
+    if content.offset:
+        result["offset"] = content.offset
+    if content.limit is not None:
+        result["limit"] = content.limit
+    if content.truncated:
+        result["truncated"] = content.truncated
+    if content.error is not None:
+        result["error"] = content.error
+    return result
+
+
+def _guess_content_type(filename: str) -> str:
+    """Guess content type based on file extension."""
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    content_types: dict[str, str] = {
+        "py": "text/x-python",
+        "js": "text/javascript",
+        "ts": "text/typescript",
+        "json": "application/json",
+        "yaml": "application/x-yaml",
+        "yml": "application/x-yaml",
+        "md": "text/markdown",
+        "txt": "text/plain",
+        "html": "text/html",
+        "css": "text/css",
+        "xml": "application/xml",
+        "toml": "application/toml",
+        "sh": "text/x-shellscript",
+        "rs": "text/x-rust",
+        "go": "text/x-go",
+        "java": "text/x-java",
+        "c": "text/x-c",
+        "cpp": "text/x-c++",
+        "h": "text/x-c",
+        "hpp": "text/x-c++",
+    }
+    return content_types.get(extension, "application/octet-stream")
+
+
 def _validate_optional_session_id(value: JSONValue | None) -> None:
     if value is not None and not isinstance(value, str):
         raise HTTPException(status_code=400, detail="session_id must be a string")
@@ -618,10 +1143,17 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
     """Construct the FastAPI application for inspecting snapshots."""
 
     static_dir = Path(str(files(__package__).joinpath("static")))
-    handlers = _DebugAppHandlers(store=store, logger=logger, static_dir=static_dir)
+    filesystem_store = FilesystemArchiveStore(logger=logger)
+    handlers = _DebugAppHandlers(
+        store=store,
+        filesystem_store=filesystem_store,
+        logger=logger,
+        static_dir=static_dir,
+    )
 
     app = FastAPI(title="wink snapshot debug server")
     app.state.snapshot_store = store
+    app.state.filesystem_store = filesystem_store
     app.state.logger = logger
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -634,6 +1166,15 @@ def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
     _ = app.get("/api/snapshots")(handlers.list_snapshots)
     _ = app.post("/api/select")(handlers.select)
     _ = app.post("/api/switch")(handlers.switch)
+
+    # Filesystem explorer routes
+    _ = app.get("/api/filesystem/tree")(handlers.get_filesystem_tree)
+    _ = app.get("/api/filesystem/file/{encoded_path:path}")(
+        handlers.get_filesystem_file
+    )
+    _ = app.get("/api/filesystem/download/{encoded_path:path}")(
+        handlers.download_filesystem_file
+    )
 
     return app
 

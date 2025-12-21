@@ -21,7 +21,10 @@ import textwrap
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, cast
+
+if TYPE_CHECKING:
+    from weakincentives.contrib.tools.filesystem import Filesystem
 
 from examples import (
     build_logged_session,
@@ -54,7 +57,7 @@ from weakincentives.contrib.tools import (
     WorkspaceDigestSection,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.debug import dump_session as dump_session_tree
+from weakincentives.debug import dump_session_with_filesystem
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
@@ -285,6 +288,22 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         """Expose workspace mode for display."""
         return self._use_podman
 
+    @property
+    def filesystem(self) -> Filesystem | None:
+        """Return the filesystem from the workspace section, if present."""
+        from weakincentives.contrib.tools.workspace import WorkspaceSection
+
+        # Access the template's sections and find the workspace section
+        snapshot = self._template._snapshot  # pyright: ignore[reportPrivateUsage]
+        if snapshot is None:
+            return None
+
+        for node in snapshot.sections:
+            section = node.section
+            if isinstance(section, WorkspaceSection):
+                return section.filesystem
+        return None
+
 
 class CodeReviewApp:
     """Owns the REPL loop and user interaction."""
@@ -363,7 +382,11 @@ class CodeReviewApp:
             self._cleanup()
 
         print("Goodbye.")
-        dump_session_tree(self._loop.session, SNAPSHOT_DIR)
+        dump_session_with_filesystem(
+            self._loop.session,
+            SNAPSHOT_DIR,
+            filesystem=self._loop.filesystem,
+        )
 
     def _cleanup(self) -> None:
         """Clean up resources."""

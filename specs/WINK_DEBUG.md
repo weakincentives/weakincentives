@@ -9,7 +9,7 @@ workspace file contents without writing code.
 
 ## CLI Contract
 
-```
+```text
 wink debug <snapshot_path> [--host HOST] [--port PORT] [--open-browser|--no-open-browser]
 ```
 
@@ -142,8 +142,8 @@ Query parameters:
 String values that look like Markdown are automatically wrapped with rendered
 HTML. The detection heuristic checks for:
 
-- Headers (`# `, `## `, etc.)
-- Lists (`- `, `* `, `+ `, `1. `)
+- Headers (`#`, `##`, etc.)
+- Lists (`-`, `*`, `+`, `1.`)
 - Code spans (`` `code` ``)
 - Links (`[text](url)`)
 - Bold (`**text**`)
@@ -303,7 +303,7 @@ format for broad compatibility and tooling support.
 
 ### Naming Convention
 
-```
+```text
 snapshots/
 ├── abc123-session.jsonl     # Session snapshot
 └── abc123-session.fs.zip    # Filesystem archive (same stem + .fs.zip)
@@ -318,7 +318,7 @@ automatically discover associated archives.
 The ZIP archive contains all files from the workspace filesystem at the time
 of export, preserving the directory structure:
 
-```
+```text
 abc123-session.fs.zip
 ├── sunfish/
 │   ├── README.md
@@ -360,12 +360,12 @@ When loading a JSONL snapshot, the server checks for a companion `.fs.zip`
 archive:
 
 1. Look for `<stem>.fs.zip` next to `<stem>.jsonl`
-2. If found, load the archive into memory
-3. Build a file tree index for navigation
+1. If found, load the archive into memory
+1. Build a file tree index for navigation
 
 If no archive exists, the filesystem explorer panel is hidden.
 
-### API Routes
+### Filesystem API Routes
 
 #### `GET /api/filesystem/tree`
 
@@ -467,19 +467,19 @@ The explorer uses file extension and content sniffing to determine file types:
 The filesystem explorer is displayed as a collapsible panel in the debug UI:
 
 1. **File Tree Panel** (left): Collapsible directory tree with file icons
-2. **File Viewer Panel** (right): Content display with:
+1. **File Viewer Panel** (right): Content display with:
    - File path breadcrumb
    - Line numbers
    - Syntax highlighting (via Prism.js or similar)
    - Download button
    - Copy button for content
-3. **Search**: Quick filter for file paths
+1. **Search**: Quick filter for file paths
 
 ### Archive Loading
 
 Archives are loaded into memory on demand:
 
-- Small archives (<10MB): Fully loaded into memory
+- Small archives (\<10MB): Fully loaded into memory
 - Large archives (>=10MB): Streamed on demand per file access
 
 Memory limit: 50MB total for cached file contents. LRU eviction when exceeded.
@@ -489,9 +489,9 @@ Memory limit: 50MB total for cached file contents. LRU eviction when exceeded.
 When switching to a different JSONL snapshot via `POST /api/switch`:
 
 1. Check for companion `.fs.zip` for the new snapshot
-2. Clear cached archive state
-3. Load new archive if present
-4. Return updated filesystem availability in metadata
+1. Clear cached archive state
+1. Load new archive if present
+1. Return updated filesystem availability in metadata
 
 ## Debug Module Extensions
 
@@ -596,7 +596,7 @@ def on_shutdown():
         logger.info(f"Filesystem saved: {fs_path}")
 ```
 
-## Data Types
+## Filesystem Data Types
 
 ### FilesystemArchiveMetadata
 
@@ -640,7 +640,7 @@ class FileContent:
     error: str | None = None
 ```
 
-## Logging
+## Filesystem Logging
 
 | Event | Level | Context |
 |-------|-------|---------|
