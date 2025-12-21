@@ -2,7 +2,24 @@
 
 A practical guide to building deterministic, typed, safe background agents.
 
-This book is written for engineers who want to:
+**What you'll learn to build:**
+
+By the end of this guide, you'll know how to build agents that:
+
+- Browse codebases, answer questions, and propose changes—safely sandboxed
+- Use structured output to return typed, validated responses
+- Maintain explicit, replayable state across turns
+- Manage token costs with progressive disclosure (show summaries, expand on
+  demand)
+- Iterate on prompts quickly using version-controlled overrides
+
+The running example is a code review agent. It's a practical pattern: the agent
+reads files, makes a plan, and returns structured feedback. The same patterns
+apply to research agents, Q&A bots, automation assistants, and more.
+
+---
+
+This guide is written for engineers who want to:
 
 - Build agents that can run unattended without turning into "a pile of prompt
   glue".
@@ -13,14 +30,83 @@ This book is written for engineers who want to:
 
 **If you only read one thing**: in WINK, the prompt is the agent.
 
-**Status**: the project is marked Alpha in `pyproject.toml`. Expect some APIs
-to evolve. Do not add backward-compatibility shims; delete unused code
-completely.
+**Status**: Alpha. Expect some APIs to evolve as the library matures.
+
+---
+
+## Coming from LangGraph or LangChain?
+
+If you've built agents with LangGraph, LangChain, or similar frameworks, here's
+a quick orientation.
+
+**Different philosophy, different primitives.**
+
+LangGraph centers on **graphs**: nodes are functions, edges are transitions,
+state flows through the graph. You model agent behavior as explicit control
+flow. LangChain centers on **chains**: composable sequences of calls to LLMs,
+tools, and retrievers.
+
+WINK centers on **the prompt itself**. There's no graph. There's no chain. The
+prompt—a tree of typed sections—*is* your agent. The model decides what to do
+next based on what's in the prompt. Tools, instructions, and state all live in
+that tree.
+
+**Concept mapping:**
+
+| LangGraph / LangChain | WINK equivalent |
+|----------------------|-----------------|
+| Graph / Chain | `PromptTemplate` (tree of sections) |
+| Node / Tool | `Tool` + handler function |
+| State / Memory | `Session` (typed slices + reducers) |
+| Router / Conditional edge | `enabled()` predicate on sections |
+| Checkpointing | `session.snapshot()` / `session.restore()` |
+| LangSmith tracing | Session events + debug UI |
+
+**What's familiar:**
+
+- Tools are functions with typed params and results. You'll recognize this.
+- State management exists. Sessions are Redux-like: immutable, event-driven.
+- Provider abstraction exists. Adapters swap between OpenAI, LiteLLM, Claude.
+
+**What's different:**
+
+- **No explicit routing.** You don't define edges. The model reads the prompt
+  and decides which tools to call. Sections can be conditionally enabled, but
+  there's no "if tool X returns Y, go to node Z."
+
+- **Prompt and tools are co-located.** In LangChain, you define tools in one
+  place and prompts in another. In WINK, the section that explains "use this
+  tool for searching" is the same section that registers the tool. They can't
+  drift apart.
+
+- **Deterministic by default.** Prompt rendering is pure. State transitions
+  flow through reducers. Side effects are confined to tool handlers. You can
+  snapshot the entire state at any point and replay it.
+
+- **No async (yet).** Adapters are synchronous. This simplifies debugging at
+  the cost of throughput. Async may come later.
+
+**When to use WINK instead of LangGraph:**
+
+- You want the prompt to be the source of truth, not a graph definition.
+- You're building single-agent workflows where the model handles most routing.
+- You value determinism, testability, and replayability over flexibility.
+- You're tired of prompt text and tool definitions drifting apart.
+
+**When to stick with LangGraph:**
+
+- You need explicit multi-step workflows with complex branching logic.
+- You're building multi-agent systems with explicit handoffs.
+- You need async streaming throughout.
+
+You can also use both: WINK for prompt/tool/state management, LangGraph for
+higher-level orchestration.
 
 ---
 
 ## Table of Contents
 
+0. [Coming from LangGraph or LangChain?](#coming-from-langgraph-or-langchain)
 1. [Philosophy](#1-philosophy)
    1. [What "weak incentives" means](#11-what-weak-incentives-means)
    2. [The shift: orchestration shrinks, context engineering grows](#12-the-shift-orchestration-shrinks-context-engineering-grows)
@@ -30,6 +116,7 @@ completely.
    1. [Install](#21-install)
    2. [End-to-end: a tiny structured agent](#22-end-to-end-a-tiny-structured-agent)
    3. [Add a tool](#23-add-a-tool)
+   4. [Your first complete agent](#24-your-first-complete-agent-copy-paste-ready)
 3. [Prompts](#3-prompts)
    1. [PromptTemplate](#31-prompttemplate)
    2. [Prompt](#32-prompt)
@@ -87,15 +174,16 @@ completely.
     2. [A repo Q&A agent](#132-a-repo-qa-agent)
     3. [A "safe patch" agent](#133-a-safe-patch-agent)
     4. [A research agent with progressive disclosure](#134-a-research-agent-with-progressive-disclosure)
-14. [API reference](#14-api-reference)
-    1. [Top-level exports](#141-top-level-exports)
-    2. [weakincentives.prompt](#142-weakincentivesprompt)
-    3. [weakincentives.runtime](#143-weakincentivesruntime)
-    4. [weakincentives.adapters](#144-weakincentivesadapters)
-    5. [weakincentives.contrib.tools](#145-weakincentivescontribtools)
-    6. [weakincentives.optimizers](#146-weakincentivesoptimizers)
-    7. [weakincentives.serde](#147-weakincentivesserde)
-    8. [CLI](#148-cli)
+14. [Troubleshooting](#14-troubleshooting)
+15. [API reference](#15-api-reference)
+    1. [Top-level exports](#151-top-level-exports)
+    2. [weakincentives.prompt](#152-weakincentivesprompt)
+    3. [weakincentives.runtime](#153-weakincentivesruntime)
+    4. [weakincentives.adapters](#154-weakincentivesadapters)
+    5. [weakincentives.contrib.tools](#155-weakincentivescontribtools)
+    6. [weakincentives.optimizers](#156-weakincentivesoptimizers)
+    7. [weakincentives.serde](#157-weakincentivesserde)
+    8. [CLI](#158-cli)
 
 ---
 
@@ -353,14 +441,21 @@ template = PromptTemplate[Summary](
     ),
 )
 
-prompt = Prompt(template).bind(SummarizeRequest(text="..."))
+prompt = Prompt(template).bind(SummarizeRequest(
+    text="WINK is a Python library for building agents. It treats prompts as "
+         "typed programs. Tools are explicit. State is replayable."
+))
 
 bus = InProcessEventBus()
 session = Session(bus=bus)
 
-# Evaluate with an adapter (see section 6).
+# To actually run this, you need an adapter and API key:
+#
+# from weakincentives.adapters.openai import OpenAIAdapter
+# adapter = OpenAIAdapter(model="gpt-4o-mini")
 # response = adapter.evaluate(prompt, session=session)
-# print(response.output)  # -> Summary(...)
+# print(response.output)
+# # -> Summary(title='WINK Overview', bullets=('Python library...', ...))
 ```
 
 **Notes:**
@@ -437,6 +532,117 @@ to the model and execute calls synchronously.
 The pattern to notice: **tools and their documentation live together**. The
 section says "You may call tools when needed" and provides the `now` tool. The
 model sees both in the same context.
+
+### 2.4 Your first complete agent (copy-paste ready)
+
+Here's a minimal but complete agent you can run. It answers questions about a
+topic using a search tool. Copy this into a file and run it.
+
+```python
+"""Minimal WINK agent: a topic Q&A bot with a mock search tool."""
+import os
+from dataclasses import dataclass
+from weakincentives.prompt import (
+    Prompt, PromptTemplate, MarkdownSection, Tool, ToolContext, ToolResult
+)
+from weakincentives.runtime import Session
+from weakincentives.adapters.openai import OpenAIAdapter
+
+# 1. Define structured output
+@dataclass(slots=True, frozen=True)
+class Answer:
+    summary: str
+    sources: tuple[str, ...]
+
+# 2. Define a tool
+@dataclass(slots=True, frozen=True)
+class SearchParams:
+    query: str
+
+@dataclass(slots=True, frozen=True)
+class SearchResult:
+    snippets: tuple[str, ...]
+    def render(self) -> str:
+        return "\n".join(f"- {s}" for s in self.snippets)
+
+def search_handler(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
+    # In a real agent, this would call a search API
+    del context
+    return ToolResult(
+        message=f"Found results for: {params.query}",
+        value=SearchResult(snippets=(
+            f"Result 1 about {params.query}",
+            f"Result 2 about {params.query}",
+        )),
+    )
+
+search_tool = Tool[SearchParams, SearchResult](
+    name="search",
+    description="Search for information about a topic.",
+    handler=search_handler,
+)
+
+# 3. Define params
+@dataclass(slots=True, frozen=True)
+class QuestionParams:
+    question: str
+
+# 4. Build the prompt template
+template = PromptTemplate[Answer](
+    ns="demo",
+    key="qa-agent",
+    sections=(
+        MarkdownSection(
+            title="Instructions",
+            key="instructions",
+            template=(
+                "You are a helpful research assistant.\n\n"
+                "Use the search tool to find information, then answer the "
+                "question with a summary and list of sources."
+            ),
+            tools=(search_tool,),
+        ),
+        MarkdownSection(
+            title="Question",
+            key="question",
+            template="${question}",
+        ),
+    ),
+)
+
+# 5. Run the agent
+def main():
+    session = Session()
+    adapter = OpenAIAdapter(model="gpt-4o-mini")
+
+    prompt = Prompt(template).bind(QuestionParams(
+        question="What is the capital of France?"
+    ))
+
+    response = adapter.evaluate(prompt, session=session)
+
+    print(f"Summary: {response.output.summary}")
+    print(f"Sources: {response.output.sources}")
+
+if __name__ == "__main__":
+    if not os.environ.get("OPENAI_API_KEY"):
+        print("Set OPENAI_API_KEY to run this example")
+    else:
+        main()
+```
+
+**What's happening:**
+
+1. `PromptTemplate[Answer]` declares that the model must return JSON matching
+   the `Answer` dataclass
+2. The `search` tool is registered on the Instructions section—the model sees
+   the tool alongside the instructions for using it
+3. `adapter.evaluate()` sends the prompt to OpenAI, executes any tool calls,
+   and parses the structured response
+4. You get back `response.output` as a typed `Answer` instance
+
+This is the core loop. Everything else in WINK builds on this: sessions for
+state, sections for organization, progressive disclosure for token management.
 
 ---
 
@@ -1613,12 +1819,108 @@ sources it used.
 
 ---
 
-## 14. API reference
+## 14. Troubleshooting
+
+Common issues you'll hit when getting started:
+
+### "PromptValidationError: placeholder not found"
+
+Your template uses `${foo}` but no bound dataclass has a `foo` field.
+
+**Fix**: Check that your dataclass field names match placeholder names exactly.
+Placeholders are case-sensitive.
+
+```python
+# Wrong: placeholder is ${query}, field is question
+@dataclass
+class Params:
+    question: str  # Should be 'query'
+
+# Right
+@dataclass
+class Params:
+    query: str
+```
+
+### "Tool handler returned None"
+
+Tool handlers must return `ToolResult`, not `None`.
+
+**Fix**: Always return a `ToolResult`, even for failures:
+
+```python
+def handler(params, *, context):
+    if something_wrong:
+        return ToolResult(message="Failed", value=None, success=False)
+    return ToolResult(message="OK", value=result)
+```
+
+### "OutputParseError: missing required field"
+
+The model's JSON response doesn't match your output dataclass.
+
+**Fix**: Check that your dataclass fields match what the model returns. Add
+clear instructions in your prompt about the expected JSON structure. Use
+`allow_extra_keys=True` on the template if you want to ignore extra fields.
+
+### Model doesn't call tools
+
+The model sees tools but chooses not to use them.
+
+**Fixes**:
+
+1. Make instructions clearer: "Use the search tool to find information before
+   answering"
+2. Add tool examples to show correct usage
+3. Check that the tool description accurately describes what it does
+
+### "DeadlineExceededError"
+
+The agent ran past its deadline.
+
+**Fixes**:
+
+1. Increase the deadline
+2. Reduce prompt size (use progressive disclosure)
+3. Check for tool handlers that hang or take too long
+
+### Session state not persisting
+
+State changes aren't visible in subsequent queries.
+
+**Fix**: Make sure you're using the same session instance, and that you've
+registered reducers for your event types:
+
+```python
+session[Plan].register(AddStep, my_reducer)
+session.broadcast(AddStep(step="do thing"))
+```
+
+### Debugging prompts
+
+To see exactly what's being sent to the model:
+
+```python
+rendered = prompt.render(session=session)
+print(rendered.text)  # Full prompt markdown
+print([t.name for t in rendered.tools])  # Tool names
+```
+
+For full session inspection, use the debug UI:
+
+```bash
+pip install "weakincentives[wink]"
+wink debug snapshots/session.jsonl
+```
+
+---
+
+## 15. API reference
 
 This is a curated reference of the APIs you'll touch most often. For complete
 details, read module docstrings and the specs.
 
-### 14.1 Top-level exports
+### 15.1 Top-level exports
 
 Import from `weakincentives` when you want the "90% API":
 
@@ -1647,7 +1949,7 @@ Import from `weakincentives` when you want the "90% API":
 
 - `WinkError`, `ToolValidationError`, snapshot/restore errors
 
-### 14.2 weakincentives.prompt
+### 15.2 weakincentives.prompt
 
 ```python
 PromptTemplate[OutputT](ns, key, name=None, sections=..., allow_extra_keys=False)
@@ -1666,7 +1968,7 @@ ToolResult(message, value, success=True, exclude_value_from_context=False)
 - `VisibilityExpansionRequired`
 - `VisibilityOverrides`, `SetVisibilityOverride`, ...
 
-### 14.3 weakincentives.runtime
+### 15.3 weakincentives.runtime
 
 ```python
 Session(bus, tags=None, parent=None)
@@ -1686,7 +1988,7 @@ session.restore(snapshot, preserve_logs=True)
 - Telemetry events (`PromptRendered`, `ToolInvoked`, `PromptExecuted`,
   `TokenUsage`)
 
-### 14.4 weakincentives.adapters
+### 15.4 weakincentives.adapters
 
 ```python
 ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=...)
@@ -1703,7 +2005,7 @@ PromptEvaluationError
 
 - `ThrottlePolicy`, `new_throttle_policy`, `ThrottleError`
 
-### 14.5 weakincentives.contrib.tools
+### 15.5 weakincentives.contrib.tools
 
 **Planning:**
 
@@ -1721,7 +2023,7 @@ PromptEvaluationError
 - `AstevalSection(session, accepts_overrides=False)`
 - `PodmanSandboxSection(session, config=PodmanSandboxConfig(...))` (extra)
 
-### 14.6 weakincentives.optimizers
+### 15.6 weakincentives.optimizers
 
 - `PromptOptimizer` protocol and `BasePromptOptimizer`
 - `OptimizationContext`, `OptimizationResult`
@@ -1730,7 +2032,7 @@ PromptEvaluationError
 
 - `WorkspaceDigestOptimizer`
 
-### 14.7 weakincentives.serde
+### 15.7 weakincentives.serde
 
 ```python
 dump(obj) -> dict
@@ -1739,7 +2041,7 @@ schema(DataclassType) -> dict
 clone(obj) -> dataclass copy
 ```
 
-### 14.8 CLI
+### 15.8 CLI
 
 Installed via the `wink` extra:
 
