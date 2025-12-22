@@ -37,6 +37,14 @@ LiteLLM SDK. It keeps evaluation, tooling, and structured-output semantics in
 lock-step with the reference adapter. See the
 [LiteLLM Adapter specification](specs/ADAPTERS.md).
 
+## MCP Integration Section
+
+`McpIntegrationSection` connects external MCP (Model Context Protocol) servers
+to prompts, exposing their tools as first-class weakincentives tools. Supports
+stdio, SSE, and HTTP transports with session-aware event publication and
+transactional execution semantics. See the
+[MCP Integration specification](specs/MCP_INTEGRATION.md).
+
 ## Native OpenAI Structured Outputs
 
 Enhancements to the OpenAI adapter that attach JSON Schema derived from prompt
