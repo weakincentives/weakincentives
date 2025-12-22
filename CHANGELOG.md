@@ -82,20 +82,10 @@ New error classes for execution state operations:
 
 ### Changed
 
-- **Git storage moved outside workspace root.** Filesystem snapshots now store
-  git repositories in a sibling directory (e.g., `.wink-git-<uuid>`) rather
-  than inside the workspace. This prevents agents from accessing or modifying
-  snapshot internals.
-
 - **Internal refactoring.** The contrib tools modules (filesystem, asteval,
   podman, vfs) have been decomposed into smaller, focused modules. The adapter
   `shared.py` has been split into focused components. These are internal
   changes with no public API impact.
-
-### Fixed
-
-- **`wink debug snapshots` regression.** The debug UI now correctly loads and
-  displays session snapshots.
 
 ## v0.15.0 - 2025-12-17
 
