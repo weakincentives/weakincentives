@@ -15,6 +15,24 @@ planning, and the `MainLoop` pattern in one place.
   namespace/key), reusable planning/workspace tools, and full observability via
   event subscribers.
 
+## Transactional Tool Execution
+
+The code reviewer benefits from WINK's transactional tool execution. Every tool
+call (reading files, updating plans, writing workspace state) is wrapped in a
+transaction. If a tool fails:
+
+- Session state (the review plan, visibility overrides) rolls back automatically
+- Filesystem changes are undone
+- The agent continues from a known-good state
+
+This is particularly valuable when the agent is navigating a large codebase.
+A failed `read_file` or interrupted `planning_update_step` doesn't corrupt the
+review session. The agent's plan remains consistent, and the model can retry
+or take a different approach without debugging "what state are we actually in?"
+
+No explicit error handling code is required—the framework handles rollback
+automatically. See [Execution State](../specs/EXECUTION_STATE.md) for details.
+
 ## Runtime Architecture
 
 The example uses a two-layer design:
@@ -236,7 +254,7 @@ Custom deadlines can be passed to `execute()` if needed.
 Attached via `attach_logging_subscribers(bus)` from `examples.logging`:
 
 | Event | Output |
-|-------|--------|
+| ---------------- | ------------------------------------ |
 | `PromptRendered` | Full prompt text with label |
 | `ToolInvoked` | Params, result, payload, token usage |
 | `PromptExecuted` | Token usage summary |
@@ -259,7 +277,7 @@ OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 ### Environment Variables
 
 | Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
+| ------------------------ | -------- | --------- | -------------- |
 | `OPENAI_API_KEY` | Yes | - | OpenAI API key |
 | `OPENAI_MODEL` | No | `gpt-5.1` | Model to use |
 | `CODE_REVIEW_PROMPT_TAG` | No | `latest` | Overrides tag |
@@ -267,7 +285,7 @@ OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 ### REPL Commands
 
 | Input | Action |
-|-------|--------|
+| ----------------------- | ------------------------ |
 | Non-empty text | Submit as review request |
 | `exit` / `quit` / empty | Terminate REPL |
 
@@ -284,7 +302,7 @@ OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 The example imports several helpers from the `examples` package:
 
 | Function | Purpose |
-|----------|---------|
+| ---------------------------- | -------------------------------- |
 | `build_logged_session` | Create session with logging tags |
 | `configure_logging` | Set up console logging |
 | `render_plan_snapshot` | Format plan state for display |
@@ -294,7 +312,7 @@ The example imports several helpers from the `examples` package:
 ## Key Files
 
 | File | Purpose |
-|------|---------|
+| ---------------------------- | ----------------------------- |
 | `code_reviewer_example.py` | Main script |
 | `examples/` | Shared example utilities |
 | `test-repositories/sunfish/` | Mounted repository fixture |

@@ -17,7 +17,7 @@ The running example is a code review agent. It's a practical pattern: the agent
 reads files, makes a plan, and returns structured feedback. The same patterns
 apply to research agents, Q&A bots, automation assistants, and more.
 
----
+______________________________________________________________________
 
 This guide is written for engineers who want to:
 
@@ -32,7 +32,7 @@ This guide is written for engineers who want to:
 
 **Status**: Alpha. Expect some APIs to evolve as the library matures.
 
----
+______________________________________________________________________
 
 ## Coming from LangGraph or LangChain?
 
@@ -47,14 +47,14 @@ flow. LangChain centers on **chains**: composable sequences of calls to LLMs,
 tools, and retrievers.
 
 WINK centers on **the prompt itself**. There's no graph. There's no chain. The
-prompt—a tree of typed sections—*is* your agent. The model decides what to do
+prompt—a tree of typed sections—_is_ your agent. The model decides what to do
 next based on what's in the prompt. Tools, instructions, and state all live in
 that tree.
 
 **Concept mapping:**
 
 | LangGraph / LangChain | WINK equivalent |
-|----------------------|-----------------|
+| ------------------------- | ------------------------------------------ |
 | Graph / Chain | `PromptTemplate` (tree of sections) |
 | Node / Tool | `Tool` + handler function |
 | State / Memory | `Session` (typed slices + reducers) |
@@ -103,7 +103,7 @@ that tree.
 You can also use both: WINK for prompt/tool/state management, LangGraph for
 higher-level orchestration.
 
----
+______________________________________________________________________
 
 ## Technical Strategy
 
@@ -140,91 +140,92 @@ execution. Models will increasingly come with their own tool runtimes, deeply
 integrated into training. WINK's job is to give you stable primitives—prompts,
 tools, state—that work across that evolving landscape.
 
----
+______________________________________________________________________
 
 ## Table of Contents
 
 0. [Coming from LangGraph or LangChain?](#coming-from-langgraph-or-langchain)
-0. [Technical Strategy](#technical-strategy)
+1. [Technical Strategy](#technical-strategy)
 1. [Philosophy](#1-philosophy)
    1. [What "weak incentives" means](#11-what-weak-incentives-means)
-   2. [The shift: orchestration shrinks, context engineering grows](#12-the-shift-orchestration-shrinks-context-engineering-grows)
-   3. [The core bet: prompts as first-class, typed programs](#13-the-core-bet-prompts-as-first-class-typed-programs)
-   4. [What WINK is (and is not)](#14-what-wink-is-and-is-not)
-2. [Quickstart](#2-quickstart)
+   1. [The shift: orchestration shrinks, context engineering grows](#12-the-shift-orchestration-shrinks-context-engineering-grows)
+   1. [The core bet: prompts as first-class, typed programs](#13-the-core-bet-prompts-as-first-class-typed-programs)
+   1. [What WINK is (and is not)](#14-what-wink-is-and-is-not)
+1. [Quickstart](#2-quickstart)
    1. [Install](#21-install)
-   2. [End-to-end: a tiny structured agent](#22-end-to-end-a-tiny-structured-agent)
-   3. [Add a tool](#23-add-a-tool)
-   4. [Your first complete agent](#24-your-first-complete-agent-copy-paste-ready)
-3. [Prompts](#3-prompts)
+   1. [End-to-end: a tiny structured agent](#22-end-to-end-a-tiny-structured-agent)
+   1. [Add a tool](#23-add-a-tool)
+   1. [Your first complete agent](#24-your-first-complete-agent-copy-paste-ready)
+1. [Prompts](#3-prompts)
    1. [PromptTemplate](#31-prompttemplate)
-   2. [Prompt](#32-prompt)
-   3. [Sections](#33-sections)
-   4. [MarkdownSection](#34-markdownsection)
-   5. [Structured output](#35-structured-output)
-   6. [Dynamic scoping with enabled()](#36-dynamic-scoping-with-enabled)
-   7. [Session-bound sections and cloning](#37-session-bound-sections-and-cloning)
-   8. [Few-shot traces with TaskExamplesSection](#38-few-shot-traces-with-taskexamplessection)
-4. [Tools](#4-tools)
+   1. [Prompt](#32-prompt)
+   1. [Sections](#33-sections)
+   1. [MarkdownSection](#34-markdownsection)
+   1. [Structured output](#35-structured-output)
+   1. [Dynamic scoping with enabled()](#36-dynamic-scoping-with-enabled)
+   1. [Session-bound sections and cloning](#37-session-bound-sections-and-cloning)
+   1. [Few-shot traces with TaskExamplesSection](#38-few-shot-traces-with-taskexamplessection)
+1. [Tools](#4-tools)
    1. [Tool contracts](#41-tool-contracts)
-   2. [ToolContext, resources, and Filesystem](#42-toolcontext-resources-and-filesystem)
-   3. [ToolResult semantics](#43-toolresult-semantics)
-   4. [Tool examples](#44-tool-examples)
-   5. [Tool suites as sections](#45-tool-suites-as-sections)
-5. [Sessions](#5-sessions)
+   1. [ToolContext, resources, and Filesystem](#42-toolcontext-resources-and-filesystem)
+   1. [ToolResult semantics](#43-toolresult-semantics)
+   1. [Tool examples](#44-tool-examples)
+   1. [Tool suites as sections](#45-tool-suites-as-sections)
+   1. [Transactional tool execution](#46-transactional-tool-execution)
+1. [Sessions](#5-sessions)
    1. [Session as deterministic memory](#51-session-as-deterministic-memory)
-   2. [Queries](#52-queries)
-   3. [Reducers](#53-reducers)
-   4. [Declarative reducers with @reducer](#54-declarative-reducers-with-reducer)
-   5. [Snapshots and restore](#55-snapshots-and-restore)
-   6. [SlicePolicy: state vs logs](#56-slicepolicy-state-vs-logs)
-6. [Adapters](#6-adapters)
+   1. [Queries](#52-queries)
+   1. [Reducers](#53-reducers)
+   1. [Declarative reducers with @reducer](#54-declarative-reducers-with-reducer)
+   1. [Snapshots and restore](#55-snapshots-and-restore)
+   1. [SlicePolicy: state vs logs](#56-slicepolicy-state-vs-logs)
+1. [Adapters](#6-adapters)
    1. [ProviderAdapter.evaluate](#61-provideradapterevaluate)
-   2. [OpenAIAdapter](#62-openaiadapter)
-   3. [LiteLLMAdapter](#63-litellmadapter)
-   4. [Claude Agent SDK adapter](#64-claude-agent-sdk-adapter)
-7. [Orchestration with MainLoop](#7-orchestration-with-mainloop)
+   1. [OpenAIAdapter](#62-openaiadapter)
+   1. [LiteLLMAdapter](#63-litellmadapter)
+   1. [Claude Agent SDK adapter](#64-claude-agent-sdk-adapter)
+1. [Orchestration with MainLoop](#7-orchestration-with-mainloop)
    1. [The minimal MainLoop](#71-the-minimal-mainloop)
-   2. [Deadlines and budgets](#72-deadlines-and-budgets)
-8. [Progressive disclosure](#8-progressive-disclosure)
+   1. [Deadlines and budgets](#72-deadlines-and-budgets)
+1. [Progressive disclosure](#8-progressive-disclosure)
    1. [SectionVisibility: FULL vs SUMMARY](#81-sectionvisibility-full-vs-summary)
-   2. [open_sections and read_section](#82-open_sections-and-read_section)
-   3. [Visibility overrides in session state](#83-visibility-overrides-in-session-state)
-9. [Prompt overrides and optimization](#9-prompt-overrides-and-optimization)
+   1. [open_sections and read_section](#82-open_sections-and-read_section)
+   1. [Visibility overrides in session state](#83-visibility-overrides-in-session-state)
+1. [Prompt overrides and optimization](#9-prompt-overrides-and-optimization)
    1. [Hash-based safety: override only what you intended](#91-hash-based-safety-override-only-what-you-intended)
-   2. [LocalPromptOverridesStore](#92-localpromptoverridesstore)
-   3. [Override file format](#93-override-file-format)
-   4. [A practical override workflow](#94-a-practical-override-workflow)
-10. [Workspace tools](#10-workspace-tools)
-    1. [PlanningToolsSection](#101-planningtoolssection)
-    2. [VfsToolsSection](#102-vfstoolssection)
-    3. [WorkspaceDigestSection](#103-workspacedigestsection)
-    4. [AstevalSection](#104-astevalsection)
-    5. [PodmanSandboxSection](#105-podmansandboxsection)
-    6. [Wiring a workspace into a prompt](#106-wiring-a-workspace-into-a-prompt)
-11. [Debugging and observability](#11-debugging-and-observability)
-    1. [Structured logging](#111-structured-logging)
-    2. [Session events](#112-session-events)
-    3. [Dumping snapshots to JSONL](#113-dumping-snapshots-to-jsonl)
-    4. [The debug UI](#114-the-debug-ui)
-12. [Testing and reliability](#12-testing-and-reliability)
-13. [Recipes](#13-recipes)
-    1. [A code-review agent](#131-a-code-review-agent)
-    2. [A repo Q&A agent](#132-a-repo-qa-agent)
-    3. [A "safe patch" agent](#133-a-safe-patch-agent)
-    4. [A research agent with progressive disclosure](#134-a-research-agent-with-progressive-disclosure)
-14. [Troubleshooting](#14-troubleshooting)
-15. [API reference](#15-api-reference)
-    1. [Top-level exports](#151-top-level-exports)
-    2. [weakincentives.prompt](#152-weakincentivesprompt)
-    3. [weakincentives.runtime](#153-weakincentivesruntime)
-    4. [weakincentives.adapters](#154-weakincentivesadapters)
-    5. [weakincentives.contrib.tools](#155-weakincentivescontribtools)
-    6. [weakincentives.optimizers](#156-weakincentivesoptimizers)
-    7. [weakincentives.serde](#157-weakincentivesserde)
-    8. [CLI](#158-cli)
+   1. [LocalPromptOverridesStore](#92-localpromptoverridesstore)
+   1. [Override file format](#93-override-file-format)
+   1. [A practical override workflow](#94-a-practical-override-workflow)
+1. [Workspace tools](#10-workspace-tools)
+   1. [PlanningToolsSection](#101-planningtoolssection)
+   1. [VfsToolsSection](#102-vfstoolssection)
+   1. [WorkspaceDigestSection](#103-workspacedigestsection)
+   1. [AstevalSection](#104-astevalsection)
+   1. [PodmanSandboxSection](#105-podmansandboxsection)
+   1. [Wiring a workspace into a prompt](#106-wiring-a-workspace-into-a-prompt)
+1. [Debugging and observability](#11-debugging-and-observability)
+   1. [Structured logging](#111-structured-logging)
+   1. [Session events](#112-session-events)
+   1. [Dumping snapshots to JSONL](#113-dumping-snapshots-to-jsonl)
+   1. [The debug UI](#114-the-debug-ui)
+1. [Testing and reliability](#12-testing-and-reliability)
+1. [Recipes](#13-recipes)
+   1. [A code-review agent](#131-a-code-review-agent)
+   1. [A repo Q&A agent](#132-a-repo-qa-agent)
+   1. [A "safe patch" agent](#133-a-safe-patch-agent)
+   1. [A research agent with progressive disclosure](#134-a-research-agent-with-progressive-disclosure)
+1. [Troubleshooting](#14-troubleshooting)
+1. [API reference](#15-api-reference)
+   1. [Top-level exports](#151-top-level-exports)
+   1. [weakincentives.prompt](#152-weakincentivesprompt)
+   1. [weakincentives.runtime](#153-weakincentivesruntime)
+   1. [weakincentives.adapters](#154-weakincentivesadapters)
+   1. [weakincentives.contrib.tools](#155-weakincentivescontribtools)
+   1. [weakincentives.optimizers](#156-weakincentivesoptimizers)
+   1. [weakincentives.serde](#157-weakincentivesserde)
+   1. [CLI](#158-cli)
 
----
+______________________________________________________________________
 
 ## 1. Philosophy
 
@@ -241,7 +242,7 @@ agents, this means shaping the prompt, tools, and context so the model's
 easiest path is also the correct one.
 
 This isn't about constraining the model or managing downside risk. It's about
-*encouraging* correct behavior through structure:
+_encouraging_ correct behavior through structure:
 
 - **Clear instructions co-located with tools** make the right action obvious
 - **Typed contracts** guide the model toward valid outputs
@@ -386,7 +387,7 @@ Two "novel" properties fall out of this structure:
    inputs produce the same outputs. You can write tests that assert on exact
    prompt text.
 
-2. **Safe iteration**: apply prompt tweaks via overrides that are validated
+1. **Safe iteration**: apply prompt tweaks via overrides that are validated
    against hashes. When you change a section in code, existing overrides stop
    applying until you explicitly update them. No silent drift.
 
@@ -417,7 +418,7 @@ for the pieces that benefit from determinism (prompt design, tool contracts,
 state snapshots) and let something else coordinate the rest. WINK plays well
 with others.
 
----
+______________________________________________________________________
 
 ## 2. Quickstart
 
@@ -687,20 +688,20 @@ if __name__ == "__main__":
 
 1. `PromptTemplate[Answer]` declares that the model must return JSON matching
    the `Answer` dataclass
-2. The `search` tool is registered on the Instructions section—the model sees
+1. The `search` tool is registered on the Instructions section—the model sees
    the tool alongside the instructions for using it
-3. `adapter.evaluate()` sends the prompt to OpenAI, executes any tool calls,
+1. `adapter.evaluate()` sends the prompt to OpenAI, executes any tool calls,
    and parses the structured response
-4. You get back `response.output` as a typed `Answer` instance
+1. You get back `response.output` as a typed `Answer` instance
 
 This is the core loop. Everything else in WINK builds on this: sessions for
 state, sections for organization, progressive disclosure for token management.
 
----
+______________________________________________________________________
 
 ## 3. Prompts
 
-*Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md)*
+_Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md)_
 
 The prompt system is the heart of WINK. It is intentionally **not** a generic
 templating engine. The design goal is predictability:
@@ -844,8 +845,8 @@ Structured output is declared by parameterizing the prompt template:
 Adapters will:
 
 1. Instruct the model to return JSON for the schema
-2. Parse the response into your dataclass type
-3. Return it as `PromptResponse.output`
+1. Parse the response into your dataclass type
+1. Return it as `PromptResponse.output`
 
 If you need to parse output yourself (or you're using a custom adapter), use
 `parse_structured_output(...)`:
@@ -966,11 +967,11 @@ many models generalize better from examples than from abstract instructions.
 
 See `weakincentives.prompt.task_examples` for details.
 
----
+______________________________________________________________________
 
 ## 4. Tools
 
-*Canonical spec: [specs/TOOLS.md](specs/TOOLS.md)*
+_Canonical spec: [specs/TOOLS.md](specs/TOOLS.md)_
 
 The tool system is designed around one hard rule:
 
@@ -1121,11 +1122,87 @@ Examples in `weakincentives.contrib.tools`:
 Each section bundles the instructions ("here's how to use these tools") with
 the tools themselves. The model sees them together.
 
----
+### 4.6 Transactional tool execution
+
+_Canonical spec: [specs/EXECUTION_STATE.md](specs/EXECUTION_STATE.md)_
+
+One of the hardest problems in building agents is handling partial failures.
+When a tool call fails halfway through, you're left with corrupted session
+state, inconsistent filesystem changes, or both. Debugging becomes a nightmare
+of "what state was the agent actually in when this happened?"
+
+WINK solves this with **transactional tool execution**. Every tool call is
+wrapped in a transaction:
+
+1. **Snapshot**: Before the tool runs, WINK captures the current state of the
+   session and any snapshotable resources (like the filesystem)
+1. **Execute**: The tool handler runs
+1. **Commit or rollback**: If the tool succeeds, changes are kept. If it fails,
+   WINK automatically restores the snapshot
+
+This happens by default—you don't need to opt in or write rollback logic.
+Failed tools simply don't leave traces in mutable state.
+
+**What gets rolled back:**
+
+- Session slices marked as `STATE` (working state like plans, visibility
+  overrides, workspace digests)
+- Filesystem changes (both in-memory VFS and disk-backed via git commits)
+
+**What's preserved:**
+
+- Session slices marked as `LOG` (historical records like `ToolInvoked`,
+  `PromptRendered`)
+- External side effects (API calls, network requests)
+
+**Example scenario:**
+
+```python
+# Tool handler that might fail
+def risky_handler(params, *, context):
+    fs = context.resources.get(Filesystem)
+    session = context.session
+
+    # Update session state
+    session.broadcast(UpdatePlan(status="in-progress"))
+
+    # Write to filesystem
+    fs.write("output.txt", "partial results")
+
+    # Oops, something goes wrong
+    if params.force:
+        raise ValueError("Simulated failure")
+
+    return ToolResult(message="done", value=None)
+```
+
+If this tool raises an exception:
+
+- The session state rolls back (plan status reverts)
+- The filesystem write is undone
+- The model sees a clean failure message
+- No debugging required to figure out "what state are we actually in"
+
+**Why this matters:**
+
+- **Simpler error handling**: You don't need defensive rollback code in every
+  tool handler
+- **Consistent state**: Failed operations never leave the agent in an
+  inconsistent state
+- **Easier debugging**: When something fails, you know exactly what state you're
+  in—the state from before the failed call
+- **Adapter parity**: OpenAI, LiteLLM, and Claude Agent SDK adapters all use
+  the same transaction semantics
+
+This is especially valuable for agents that modify files, update plans, or
+maintain complex working state. A failed `write_file` or `update_plan` doesn't
+corrupt your agent's world model.
+
+______________________________________________________________________
 
 ## 5. Sessions
 
-*Canonical spec: [specs/SESSIONS.md](specs/SESSIONS.md)*
+_Canonical spec: [specs/SESSIONS.md](specs/SESSIONS.md)_
 
 A `Session` is WINK's answer to "agent memory", with a constraint:
 
@@ -1278,11 +1355,11 @@ snapshot = session.snapshot(include_all=True)
 This distinction matters for debugging. You often want to preserve the full
 event log even when rolling back working state.
 
----
+______________________________________________________________________
 
 ## 6. Adapters
 
-*Canonical spec: [specs/ADAPTERS.md](specs/ADAPTERS.md)*
+_Canonical spec: [specs/ADAPTERS.md](specs/ADAPTERS.md)_
 
 Adapters bridge a prompt to a provider and enforce consistent semantics:
 
@@ -1375,11 +1452,11 @@ native tooling with WINK's prompt composition and session management.
 See [specs/CLAUDE_AGENT_SDK.md](specs/CLAUDE_AGENT_SDK.md) for full configuration reference and isolation
 guarantees.
 
----
+______________________________________________________________________
 
 ## 7. Orchestration with MainLoop
 
-*Canonical spec: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)*
+_Canonical spec: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)_
 
 `MainLoop` exists for one reason:
 
@@ -1434,11 +1511,11 @@ response, session = loop.execute(request, deadline=deadline, budget=budget)
 Deadlines prevent runaway agents. Budgets prevent runaway costs. Both are
 enforced at the adapter level, so they work consistently across providers.
 
----
+______________________________________________________________________
 
 ## 8. Progressive disclosure
 
-*Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md) (Progressive Disclosure section)*
+_Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md) (Progressive Disclosure section)_
 
 Long prompts are expensive. Progressive disclosure is WINK's first-class
 solution:
@@ -1503,11 +1580,11 @@ session[VisibilityOverrides].apply(
 This is what happens under the hood when the model calls `open_sections`.
 MainLoop applies the override and re-renders the prompt.
 
----
+______________________________________________________________________
 
 ## 9. Prompt overrides and optimization
 
-*Canonical spec: [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)*
+_Canonical spec: [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)_
 
 Overrides are how WINK supports fast iteration without code edits:
 
@@ -1568,7 +1645,7 @@ The override JSON format is intentionally simple (and human editable):
     "search": {
       "expected_contract_hash": "...",
       "description": "Search the index.",
-      "param_descriptions": {"query": "Keywords"}
+      "param_descriptions": { "query": "Keywords" }
     }
   }
 }
@@ -1588,20 +1665,20 @@ A workflow that works well in teams:
 
 1. **Seed** override files from the current prompt
    (`store.seed(prompt, tag="v1")`)
-2. **Run** your agent and collect failures / quality notes
-3. **Edit** override sections directly (or generate them with an optimizer)
-4. **Re-run** tests/evals
-5. **Commit** override files alongside code
+1. **Run** your agent and collect failures / quality notes
+1. **Edit** override sections directly (or generate them with an optimizer)
+1. **Re-run** tests/evals
+1. **Commit** override files alongside code
 
 For "hardening", disable overrides on sensitive sections/tools with
 `accepts_overrides=False`. This prevents accidental changes to
 security-critical text.
 
----
+______________________________________________________________________
 
 ## 10. Workspace tools
 
-*Canonical spec: [specs/WORKSPACE.md](specs/WORKSPACE.md)*
+_Canonical spec: [specs/WORKSPACE.md](specs/WORKSPACE.md)_
 
 WINK includes several tool suites aimed at background agents that need to
 inspect and manipulate a repository safely. They live in
@@ -1732,7 +1809,7 @@ def build_repo_agent_template(*, session: Session):
 **The important idea**: the workspace sections are built with the active
 session. Each run gets its own session with its own tool sections.
 
----
+______________________________________________________________________
 
 ## 11. Debugging and observability
 
@@ -1789,7 +1866,7 @@ This starts a local server that renders the prompt/tool timeline for
 inspection. You can see exactly what was sent to the model, what tools were
 called, and how state evolved.
 
----
+______________________________________________________________________
 
 ## 12. Testing and reliability
 
@@ -1801,13 +1878,13 @@ model.
 1. **Prompt rendering tests**: render prompts with fixed params and assert
    exact markdown (snapshot tests). These run fast and catch template regressions.
 
-2. **Tool handler tests**: call handlers directly with fake `ToolContext` +
+1. **Tool handler tests**: call handlers directly with fake `ToolContext` +
    resources. No model needed. Test the business logic in isolation.
 
-3. **Reducer tests**: test state transitions as pure functions. Given this
+1. **Reducer tests**: test state transitions as pure functions. Given this
    slice and this event, expect this new slice.
 
-4. **Integration tests**: run `adapter.evaluate` behind a flag (and record
+1. **Integration tests**: run `adapter.evaluate` behind a flag (and record
    sessions). These are slow and cost money, so run them selectively.
 
 **A prompt snapshot test:**
@@ -1821,7 +1898,7 @@ def test_prompt_renders_stably():
 The test doesn't call a model. It just verifies that the prompt renders as
 expected. When prompts are deterministic, you can test them like regular code.
 
----
+______________________________________________________________________
 
 ## 13. Recipes
 
@@ -1882,7 +1959,7 @@ Progressive disclosure shines here. The model starts with summaries, expands
 relevant sources, and cites its sources. The session log shows exactly which
 sources it used.
 
----
+______________________________________________________________________
 
 ## 14. Troubleshooting
 
@@ -1936,8 +2013,8 @@ The model sees tools but chooses not to use them.
 
 1. Make instructions clearer: "Use the search tool to find information before
    answering"
-2. Add tool examples to show correct usage
-3. Check that the tool description accurately describes what it does
+1. Add tool examples to show correct usage
+1. Check that the tool description accurately describes what it does
 
 ### "DeadlineExceededError"
 
@@ -1946,8 +2023,8 @@ The agent ran past its deadline.
 **Fixes**:
 
 1. Increase the deadline
-2. Reduce prompt size (use progressive disclosure)
-3. Check for tool handlers that hang or take too long
+1. Reduce prompt size (use progressive disclosure)
+1. Check for tool handlers that hang or take too long
 
 ### Session state not persisting
 
@@ -1978,7 +2055,7 @@ pip install "weakincentives[wink]"
 wink debug snapshots/session.jsonl
 ```
 
----
+______________________________________________________________________
 
 ## 15. API reference
 
@@ -2080,8 +2157,7 @@ PromptEvaluationError
 
 - `VfsToolsSection(session, config=VfsConfig(...), accepts_overrides=False)`
 - `HostMount(host_path, mount_path=None, include_glob=(), exclude_glob=())`
-- `WorkspaceDigestSection(session, title="Workspace Digest",
-  key="workspace-digest")`
+- `WorkspaceDigestSection(session, title="Workspace Digest", key="workspace-digest")`
 
 **Sandboxes:**
 
@@ -2142,7 +2218,7 @@ wink debug <snapshot_path> [options]
 **Options:**
 
 | Option | Default | Description |
-|--------|---------|-------------|
+| ------------------- | ----------- | ------------------------------------------- |
 | `--host` | `127.0.0.1` | Host interface to bind |
 | `--port` | `8000` | Port to bind |
 | `--open-browser` | `true` | Open browser automatically |
@@ -2157,7 +2233,7 @@ wink debug <snapshot_path> [options]
 - `2`: Invalid input (missing file, parse error)
 - `3`: Server failed to start
 
----
+______________________________________________________________________
 
 ## Where to go deeper
 
