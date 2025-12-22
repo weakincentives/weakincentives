@@ -156,6 +156,7 @@ Consult these specs before modifying related code:
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/LOGGING.md` | Logging surfaces |
 | `specs/LANGSMITH.md` | LangSmith telemetry, prompt hub, evaluation integration |
+| `specs/OTEL.md` | OpenTelemetry trace export, span lifecycle, OTLP integration |
 
 Full spec index in `AGENTS.md`.
 

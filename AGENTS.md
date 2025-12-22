@@ -94,6 +94,8 @@ a goal at any time.
 - **LANGSMITH.md**: LangSmith integration—when implementing telemetry, prompt
   hub, or evaluation features.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
+- **OTEL.md**: OpenTelemetry trace export—when implementing OTEL integration,
+  span lifecycle, or OTLP exporters.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.
 - **PROMPT_OPTIMIZATION.md**: Override system and optimizer abstraction—when
