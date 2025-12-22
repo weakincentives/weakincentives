@@ -104,6 +104,8 @@ a goal at any time.
   helpers or shared state.
 - **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
   modifying tools.
+- **USER_IDENTITY.md**: User identity primitives and ToolContext access—when
+  implementing user-scoped tooling or authorization.
 - **WORKSPACE.md**: VFS, Podman sandbox, asteval, and workspace digest—when
   editing workspace tooling.
 
