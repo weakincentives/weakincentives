@@ -74,10 +74,6 @@ these guarantees:
   - `STATE`: Working state restored on tool failure (Plan, VisibilityOverrides)
   - `LOG`: Append-only records preserved during restore (ToolInvoked events)
 
-- **ToolRunner**: Shared tool execution with identical transaction semantics
-  across all adapters (OpenAI, LiteLLM, Claude Agent SDK). Automatic snapshot
-  before execution and restore on failure.
-
 - **Filesystem snapshots**: `HostFilesystem` uses git-based copy-on-write for
   efficient snapshots. `InMemoryFilesystem` uses Python structural sharing.
   Both implement `SnapshotableFilesystem` for coordinated rollback.
