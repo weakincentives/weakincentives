@@ -4,25 +4,25 @@ WINK is a Python library for building background agents—automated AI systems t
 run unattended. It provides typed, composable primitives designed for determinism,
 testability, and safe execution without heavy dependencies or hosted services.
 
-> **New to WINK?** Read the [WINK Guide](WINK_GUIDE.md) for a comprehensive
-> introduction—philosophy, quickstart, and practical patterns for building agents.
+> **New to WINK?** Read the [WINK Guide](WINK_GUIDE.md) for philosophy,
+> quickstart, technical strategy, and practical patterns.
 
-## The Shift
+**If you only read one thing**: in WINK, the prompt is the agent.
 
-The reasoning loop is moving model-side. Complex nested workflows may work today,
-but they won't age well—models will absorb that scaffolding.
+This library is for engineers who want to build agents that don't turn into
+"a pile of prompt glue"—where prompts are testable software artifacts, side
+effects are explicit and auditable, and iteration is fast without sacrificing
+correctness.
 
-What remains: tools, retrieval, and **context engineering**.
+## What "weak incentives" means
 
-Tools and retrieval draw on familiar software skills. Context engineering doesn't.
-It's a genuinely new discipline: what's relevant now, what to summarize versus
-preserve, how to structure information so models reason over it well. No clean
-precedent from traditional engineering. Builders who master it early win.
+The name comes from mechanism design: shape the prompt, tools, and context so
+the model's easiest path is also the correct one. Clear instructions co-located
+with tools, typed contracts, progressive disclosure, and explicit state all
+create _weak incentives_ for the model to do the right thing.
 
-Some orchestration stays—for auditability, cost control, hard constraints. WINK
-focuses there: typed prompts as the primary artifact, observable session state,
-sandboxed tools. The framework handles the scaffolding that needs to remain; you
-focus on what you're feeding the model.
+See [Philosophy](WINK_GUIDE.md#1-philosophy) in the WINK Guide for the full
+treatment.
 
 ## What makes WINK different?
 
@@ -115,6 +115,10 @@ structure itself.
 
 - **Minimal dependencies.** No Pydantic, no heavyweight stacks. Custom serde
   modules provide validation without sprawling dependency trees.
+
+See [What WINK is (and is not)](WINK_GUIDE.md#14-what-wink-is-and-is-not) for
+scope and boundaries. Coming from LangGraph or LangChain? See the
+[framework comparison](WINK_GUIDE.md#coming-from-langgraph-or-langchain).
 
 ## Requirements
 
