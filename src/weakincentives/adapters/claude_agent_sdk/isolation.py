@@ -561,38 +561,24 @@ class EphemeralHome:
         env["AWS_REGION"] = bedrock.region
         env["AWS_DEFAULT_REGION"] = bedrock.region
 
-        # Set custom endpoint URL if provided
-        if bedrock.endpoint_url:
-            env["AWS_ENDPOINT_URL_BEDROCK_RUNTIME"] = bedrock.endpoint_url
+        # Map optional config fields to environment variables
+        optional_mappings: dict[str, str | None] = {
+            "AWS_ENDPOINT_URL_BEDROCK_RUNTIME": bedrock.endpoint_url,
+            "AWS_SESSION_TOKEN": bedrock.session_token,
+            "AWS_PROFILE": bedrock.profile,
+            "AWS_ROLE_ARN": bedrock.role_arn,
+            "AWS_ROLE_SESSION_NAME": bedrock.role_session_name,
+            "AWS_EXTERNAL_ID": bedrock.external_id,
+            "AWS_WEB_IDENTITY_TOKEN_FILE": bedrock.web_identity_token_file,
+        }
 
-        # Static credentials (access key + secret key)
+        # Static credentials require both key and secret
         if bedrock.access_key_id and bedrock.secret_access_key:
             env["AWS_ACCESS_KEY_ID"] = bedrock.access_key_id
             env["AWS_SECRET_ACCESS_KEY"] = bedrock.secret_access_key
 
-            # Session token for temporary credentials (STS)
-            if bedrock.session_token:
-                env["AWS_SESSION_TOKEN"] = bedrock.session_token
-
-        # Named profile from ~/.aws/credentials
-        elif bedrock.profile:
-            env["AWS_PROFILE"] = bedrock.profile
-
-        # Role assumption (with or without web identity)
-        if bedrock.role_arn:
-            env["AWS_ROLE_ARN"] = bedrock.role_arn
-
-            # Session name for role assumption
-            if bedrock.role_session_name:
-                env["AWS_ROLE_SESSION_NAME"] = bedrock.role_session_name
-
-            # External ID for cross-account access
-            if bedrock.external_id:
-                env["AWS_EXTERNAL_ID"] = bedrock.external_id
-
-            # Web identity token file (OIDC)
-            if bedrock.web_identity_token_file:
-                env["AWS_WEB_IDENTITY_TOKEN_FILE"] = bedrock.web_identity_token_file
+        # Apply all non-None optional values
+        env.update({k: v for k, v in optional_mappings.items() if v is not None})
 
     @staticmethod
     def get_setting_sources() -> list[str]:
