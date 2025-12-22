@@ -522,6 +522,13 @@ print(f"Accuracy: {report.accuracy:.2%}")
 - `contains`: Substring matching with `all_of`/`any_of` combinators
 - `llm_judge`: LLM-as-Judge with categorical ratings using a judge template
 
+### Bug Fixes
+
+- **Prompt.bind() now returns a new instance** instead of mutating self,
+  aligning with the immutable FrozenDataclass patterns used throughout the
+  codebase. Existing code using the fluent `Prompt(template).bind(params)`
+  pattern continues to work unchanged.
+
 ### First-Class Resource Injection
 
 Pass custom resources into `adapter.evaluate()` and `MainLoop.execute()`,
