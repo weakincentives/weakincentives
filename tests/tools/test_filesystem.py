@@ -32,7 +32,7 @@ from weakincentives.contrib.tools.filesystem import (
 )
 from weakincentives.contrib.tools.filesystem_host import HostFilesystem
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-from weakincentives.errors import SnapshotRestoreError
+from weakincentives.errors import SnapshotError, SnapshotRestoreError
 
 
 class TestInMemoryFilesystemBasics:
@@ -1327,7 +1327,7 @@ class TestFilesystemBranchCoverage:
     def test_host_filesystem_commit_fails_but_head_exists(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Test that commit fails but HEAD already exists skips fallback."""
+        """Test that commit fails with HEAD raises SnapshotError."""
         import subprocess
         from unittest.mock import MagicMock
 
@@ -1357,7 +1357,7 @@ class TestFilesystemBranchCoverage:
             if subcommand in {"init", "--bare", "config", "add", "rev-parse"}:
                 return original_run(args, **kwargs)
 
-            # For git commit: fail to trigger the HEAD check branch
+            # For git commit: fail to trigger the error path
             if subcommand == "commit":
                 commit_call_count += 1
                 if commit_call_count == 1:
@@ -1372,11 +1372,9 @@ class TestFilesystemBranchCoverage:
 
         monkeypatch.setattr(subprocess, "run", mock_subprocess_run)
 
-        # Second snapshot - commit fails but HEAD exists, so we skip fallback
-        # and just get the existing HEAD commit
-        snapshot = fs.snapshot(tag="second")
-        assert isinstance(snapshot, FilesystemSnapshot)
-        assert len(snapshot.commit_ref) == 40
+        # Second snapshot - commit fails but HEAD exists, should raise error
+        with pytest.raises(SnapshotError, match="Failed to create snapshot commit"):
+            fs.snapshot(tag="second")
 
 
 def test_normalize_path_with_leading_dotdot() -> None:

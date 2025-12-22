@@ -56,7 +56,7 @@ from weakincentives.contrib.tools._filesystem_utils import (
     normalize_path,
     validate_path,
 )
-from weakincentives.errors import SnapshotRestoreError
+from weakincentives.errors import SnapshotError, SnapshotRestoreError
 
 __all__ = ["HostFilesystem"]
 
@@ -590,6 +590,15 @@ class HostFilesystem:
                 _ = self._run_git(
                     ["commit", "--allow-empty", "--no-gpg-sign", "-m", message],
                 )
+            else:
+                # HEAD exists but commit failed - this is an error condition
+                # (e.g., disk full, permission denied, corrupted git state)
+                stderr = (
+                    commit_result.stderr.strip()
+                    if commit_result.stderr
+                    else "unknown error"
+                )
+                raise SnapshotError(f"Failed to create snapshot commit: {stderr}")
 
         # Get commit hash (text=True guarantees str stdout)
         result = self._run_git(["rev-parse", "HEAD"], text=True)
