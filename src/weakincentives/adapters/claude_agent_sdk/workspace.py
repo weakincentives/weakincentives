@@ -421,9 +421,12 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         return self._filesystem
 
     def cleanup(self) -> None:
-        """Remove the temporary workspace directory."""
+        """Remove the temporary workspace directory and associated resources."""
         if self._temp_dir.exists():
             shutil.rmtree(self._temp_dir, ignore_errors=True)
+        # HostFilesystem.cleanup() removes external git directories used for snapshots
+        if isinstance(self._filesystem, HostFilesystem):
+            self._filesystem.cleanup()
 
     @override
     def clone(self, **kwargs: Any) -> ClaudeAgentWorkspaceSection:
