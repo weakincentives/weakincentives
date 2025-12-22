@@ -43,7 +43,7 @@ from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
-from weakincentives.runtime.events import InProcessEventBus, PromptRendered
+from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
 
@@ -67,7 +67,7 @@ class _RepositoryOptimizationAdapter:
         self,
         prompt: Prompt[SupportsDataclass],
         *,
-        bus: InProcessEventBus | None = None,
+        bus: InProcessDispatcher | None = None,
         session: Session | None = None,
         deadline: object | None = None,
         budget: object | None = None,
@@ -92,7 +92,7 @@ class _RepositoryOptimizationAdapter:
                     created_at=datetime.now(UTC),
                     event_id=uuid4(),
                 )
-                bus.publish(optimization_event)
+                bus.dispatch(optimization_event)
             return PromptResponse(
                 prompt_name=prompt.name or prompt.key,
                 text=self.instructions,
@@ -116,7 +116,7 @@ class _RecordingDeadlineAdapter:
         self,
         prompt: Prompt[SupportsDataclass],
         *,
-        bus: InProcessEventBus | None = None,
+        bus: InProcessDispatcher | None = None,
         session: Session | None = None,
         deadline: Deadline | None = None,
         budget: object | None = None,
@@ -137,7 +137,7 @@ def test_prompt_render_reducer_prints_full_prompt(
     tmp_path: Path,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     attach_logging_subscribers(bus)
     session = Session(bus=bus)
 
@@ -153,7 +153,7 @@ def test_prompt_render_reducer_prints_full_prompt(
         event_id=uuid4(),
     )
 
-    publish_result = bus.publish(event)
+    publish_result = bus.dispatch(event)
     assert publish_result.handled_count >= 1
     del overrides_store  # Not needed for this test
 
@@ -167,7 +167,7 @@ def test_prompt_render_reducer_prints_full_prompt(
 
 
 def test_workspace_digest_section_empty_by_default() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     template = build_task_prompt(session=session)
 
@@ -185,7 +185,7 @@ def test_workspace_digest_override_applied_when_no_session_digest(
     tmp_path: Path,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     template = build_task_prompt(session=session)
 
@@ -259,7 +259,7 @@ def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
     """Auto-optimization runs when execute() is called without existing digest."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     attach_logging_subscribers(bus)
     loop = CodeReviewLoop(
         adapter=cast(ProviderAdapter[ReviewResponse], adapter),
@@ -286,7 +286,7 @@ def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     loop = CodeReviewLoop(
         adapter=adapter,
         bus=bus,

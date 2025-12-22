@@ -24,12 +24,12 @@ from ...adapters._names import AdapterName
 from ...dataclasses import FrozenDataclass
 from ..logging import StructuredLogger, get_logger
 from ._types import (
-    ControlBus,
-    EventBus,
+    ControlDispatcher,
+    Dispatcher,
+    DispatchResult,
     EventHandler,
     HandlerFailure,
-    PublishResult,
-    TelemetryBus,
+    TelemetryDispatcher,
     TokenUsage,
     ToolInvoked,
 )
@@ -49,11 +49,11 @@ def _describe_handler(handler: EventHandler) -> str:
     return repr(handler)  # pragma: no cover - defensive fallback
 
 
-logger: StructuredLogger = get_logger(__name__, context={"component": "event_bus"})
+logger: StructuredLogger = get_logger(__name__, context={"component": "dispatcher"})
 
 
-class InProcessEventBus:
-    """Process-local event bus that delivers events synchronously."""
+class InProcessDispatcher:
+    """Process-local dispatcher that delivers events synchronously."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -77,7 +77,7 @@ class InProcessEventBus:
             else:
                 return True
 
-    def publish(self, event: object) -> PublishResult:
+    def dispatch(self, event: object) -> DispatchResult:
         with self._lock:
             handlers = tuple(self._handlers.get(type(event), ()))
         invoked: list[EventHandler] = []
@@ -97,7 +97,7 @@ class InProcessEventBus:
                 )
                 failures.append(HandlerFailure(handler=handler, error=error))
 
-        return PublishResult(
+        return DispatchResult(
             event=event,
             handlers_invoked=tuple(invoked),
             errors=tuple(failures),
@@ -134,14 +134,14 @@ class PromptRendered:
 
 
 __all__ = [
-    "ControlBus",
-    "EventBus",
+    "ControlDispatcher",
+    "DispatchResult",
+    "Dispatcher",
     "HandlerFailure",
-    "InProcessEventBus",
+    "InProcessDispatcher",
     "PromptExecuted",
     "PromptRendered",
-    "PublishResult",
-    "TelemetryBus",
+    "TelemetryDispatcher",
     "TokenUsage",
     "ToolInvoked",
 ]

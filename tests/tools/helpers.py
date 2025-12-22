@@ -110,6 +110,6 @@ def invoke_tool(
         created_at=datetime.now(UTC),
         rendered_output=rendered_output,
     )
-    publish_result = session.event_bus.publish(event)
+    publish_result = session.dispatcher.dispatch(event)
     assert publish_result.ok
     return result

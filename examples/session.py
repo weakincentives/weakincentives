@@ -40,14 +40,14 @@ def build_logged_session(
         tags: Optional mapping of string tags to attach to the session.
 
     Returns:
-        A new Session instance with logging subscribers attached to its event bus.
+        A new Session instance with logging subscribers attached to its dispatcher.
     """
     session_tags: dict[str, str] = {}
     if tags:
         session_tags.update(tags)
 
     session = Session(parent=parent, tags=cast(Mapping[object, object], session_tags))
-    attach_logging_subscribers(session.event_bus)
+    attach_logging_subscribers(session.dispatcher)
     return session
 
 

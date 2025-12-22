@@ -21,15 +21,15 @@ from uuid import UUID, uuid4
 import pytest
 
 from tests.helpers.adapters import TEST_ADAPTER_NAME
-from tests.helpers.events import NullEventBus
+from tests.helpers.events import NullDispatcher
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
+    DispatchResult,
     HandlerFailure,
-    InProcessEventBus,
+    InProcessDispatcher,
     PromptExecuted,
     PromptRendered,
-    PublishResult,
     TokenUsage,
     ToolInvoked,
 )
@@ -47,7 +47,7 @@ def make_prompt_response(prompt_name: str) -> PromptResponse[object]:
 
 
 def test_null_event_bus_is_noop() -> None:
-    bus = NullEventBus()
+    bus = NullDispatcher()
 
     events: list[PromptExecuted] = []
 
@@ -56,7 +56,7 @@ def test_null_event_bus_is_noop() -> None:
         events.append(event)
 
     bus.subscribe(PromptExecuted, record_event)
-    result = bus.publish(
+    result = bus.dispatch(
         PromptExecuted(
             prompt_name="demo",
             adapter=TEST_ADAPTER_NAME,
@@ -67,7 +67,7 @@ def test_null_event_bus_is_noop() -> None:
     )
 
     assert events == []
-    assert isinstance(result, PublishResult)
+    assert isinstance(result, DispatchResult)
     assert result.ok
     assert result.handlers_invoked == ()
     assert result.handled_count == 0
@@ -75,7 +75,7 @@ def test_null_event_bus_is_noop() -> None:
 
 
 def test_publish_without_subscribers_returns_success_result() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
 
     event = PromptExecuted(
         prompt_name="demo",
@@ -85,7 +85,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
         created_at=datetime.now(UTC),
     )
 
-    result = bus.publish(event)
+    result = bus.dispatch(event)
 
     assert result.ok
     assert result.handlers_invoked == ()
@@ -96,7 +96,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
 
 
 def test_publish_prompt_rendered_returns_success() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
 
     event = PromptRendered(
         prompt_ns="demo",
@@ -109,7 +109,7 @@ def test_publish_prompt_rendered_returns_success() -> None:
         created_at=datetime.now(UTC),
     )
 
-    result = bus.publish(event)
+    result = bus.dispatch(event)
 
     assert result.ok
     assert result.errors == ()
@@ -117,7 +117,7 @@ def test_publish_prompt_rendered_returns_success() -> None:
 
 
 def test_in_process_bus_delivers_in_order() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     delivered: list[PromptExecuted] = []
 
     def first_handler(event: object) -> None:
@@ -138,7 +138,7 @@ def test_in_process_bus_delivers_in_order() -> None:
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
-    result = bus.publish(event)
+    result = bus.dispatch(event)
 
     assert delivered == [event, event]
     assert result.handlers_invoked == (first_handler, second_handler)
@@ -151,7 +151,7 @@ def test_in_process_bus_delivers_in_order() -> None:
 def test_in_process_bus_isolates_handler_exceptions(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     received: list[PromptExecuted] = []
 
     def bad_handler(event: object) -> None:
@@ -173,7 +173,7 @@ def test_in_process_bus_isolates_handler_exceptions(
         created_at=datetime.now(UTC),
     )
     with caplog.at_level(logging.ERROR, logger="weakincentives.runtime.events"):
-        result = bus.publish(event)
+        result = bus.dispatch(event)
 
     assert received == [event]
     assert any(
@@ -192,7 +192,7 @@ def test_in_process_bus_isolates_handler_exceptions(
 
 
 def test_publish_result_raise_if_errors() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
 
     def first_handler(_: object) -> None:
         raise ValueError("first")
@@ -203,7 +203,7 @@ def test_publish_result_raise_if_errors() -> None:
     bus.subscribe(PromptExecuted, first_handler)
     bus.subscribe(PromptExecuted, second_handler)
 
-    result = bus.publish(
+    result = bus.dispatch(
         PromptExecuted(
             prompt_name="demo",
             adapter=TEST_ADAPTER_NAME,
@@ -278,7 +278,7 @@ def test_token_usage_total_tokens_sums_counts() -> None:
 
 
 def test_unsubscribe_removes_handler_and_returns_true() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     delivered: list[PromptExecuted] = []
 
     def handler(event: object) -> None:
@@ -294,18 +294,18 @@ def test_unsubscribe_removes_handler_and_returns_true() -> None:
         created_at=datetime.now(UTC),
     )
 
-    bus.publish(event)
+    bus.dispatch(event)
     assert len(delivered) == 1
 
     result = bus.unsubscribe(PromptExecuted, handler)
     assert result is True
 
-    bus.publish(event)
+    bus.dispatch(event)
     assert len(delivered) == 1
 
 
 def test_unsubscribe_returns_false_for_nonexistent_handler() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
 
     def handler_a(_: object) -> None:
         pass
@@ -320,7 +320,7 @@ def test_unsubscribe_returns_false_for_nonexistent_handler() -> None:
 
 
 def test_unsubscribe_returns_false_for_nonexistent_event_type() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
 
     def handler(_: object) -> None:
         pass
@@ -330,7 +330,7 @@ def test_unsubscribe_returns_false_for_nonexistent_event_type() -> None:
 
 
 def test_unsubscribe_does_not_affect_other_handlers() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     delivered_a: list[PromptExecuted] = []
     delivered_b: list[PromptExecuted] = []
 
@@ -353,19 +353,19 @@ def test_unsubscribe_does_not_affect_other_handlers() -> None:
         created_at=datetime.now(UTC),
     )
 
-    bus.publish(event)
+    bus.dispatch(event)
     assert len(delivered_a) == 1
     assert len(delivered_b) == 1
 
     bus.unsubscribe(PromptExecuted, handler_a)
 
-    bus.publish(event)
+    bus.dispatch(event)
     assert len(delivered_a) == 1
     assert len(delivered_b) == 2
 
 
 def test_null_event_bus_unsubscribe_returns_false() -> None:
-    bus = NullEventBus()
+    bus = NullDispatcher()
 
     def handler(_: object) -> None:
         pass

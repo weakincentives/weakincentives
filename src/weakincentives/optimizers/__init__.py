@@ -26,7 +26,7 @@ Example usage::
 
     context = OptimizationContext(
         adapter=adapter,
-        event_bus=session.event_bus,
+        dispatcher=session.dispatcher,
         overrides_store=overrides_store,
     )
     optimizer = WorkspaceDigestOptimizer(

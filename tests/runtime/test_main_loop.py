@@ -34,7 +34,7 @@ from weakincentives.prompt import (
     VisibilityOverrides,
 )
 from weakincentives.prompt.tool import ResourceRegistry
-from weakincentives.runtime.events import EventBus, InProcessEventBus
+from weakincentives.runtime.events import Dispatcher, InProcessDispatcher
 from weakincentives.runtime.main_loop import (
     MainLoop,
     MainLoopCompleted,
@@ -135,7 +135,7 @@ class _TestLoop(MainLoop[_Request, _Output]):
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        bus: EventBus,
+        bus: Dispatcher,
         config: MainLoopConfig | None = None,
     ) -> None:
         super().__init__(adapter=adapter, bus=bus, config=config)
@@ -278,7 +278,7 @@ def test_failed_without_session_id() -> None:
 
 def test_execute_successful_execution() -> None:
     """MainLoop.execute returns response on success."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     adapter = _MockAdapter()
     loop = _TestLoop(adapter=adapter, bus=bus)
 
@@ -292,7 +292,7 @@ def test_execute_successful_execution() -> None:
 
 def test_execute_passes_budget_from_config() -> None:
     """MainLoop.execute creates BudgetTracker with config budget."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     budget = Budget(max_total_tokens=1000)
     config = MainLoopConfig(budget=budget)
     adapter = _MockAdapter()
@@ -306,7 +306,7 @@ def test_execute_passes_budget_from_config() -> None:
 
 def test_execute_passes_deadline_from_config() -> None:
     """MainLoop.execute passes config deadline to adapter."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
     config = MainLoopConfig(deadline=deadline)
     adapter = _MockAdapter()
@@ -319,7 +319,7 @@ def test_execute_passes_deadline_from_config() -> None:
 
 def test_execute_budget_overrides_config() -> None:
     """MainLoop.execute budget parameter overrides config."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     config_budget = Budget(max_total_tokens=1000)
     config = MainLoopConfig(budget=config_budget)
     adapter = _MockAdapter()
@@ -334,7 +334,7 @@ def test_execute_budget_overrides_config() -> None:
 
 def test_execute_deadline_overrides_config() -> None:
     """MainLoop.execute deadline parameter overrides config."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     config_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
     config = MainLoopConfig(deadline=config_deadline)
     adapter = _MockAdapter()
@@ -348,7 +348,7 @@ def test_execute_deadline_overrides_config() -> None:
 
 def test_execute_handles_visibility_expansion() -> None:
     """MainLoop.execute accumulates visibility overrides in session state and retries."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
         {("section1",): SectionVisibility.FULL},
         {("section2",): SectionVisibility.FULL},
@@ -370,7 +370,7 @@ def test_execute_handles_visibility_expansion() -> None:
 
 def test_execute_propagates_adapter_error() -> None:
     """MainLoop.execute propagates adapter exceptions."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     error = RuntimeError("adapter failure")
     adapter = _MockAdapter(error=error)
     loop = _TestLoop(adapter=adapter, bus=bus)
@@ -386,7 +386,7 @@ def test_execute_propagates_adapter_error() -> None:
 
 def test_handle_request_publishes_completed_event_on_success() -> None:
     """MainLoop.handle_request publishes MainLoopCompleted on success."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     adapter = _MockAdapter()
     loop = _TestLoop(adapter=adapter, bus=bus)
 
@@ -402,7 +402,7 @@ def test_handle_request_publishes_completed_event_on_success() -> None:
 
 def test_handle_request_publishes_failed_event_and_reraises_on_error() -> None:
     """MainLoop.handle_request publishes MainLoopFailed and re-raises on error."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     error = RuntimeError("adapter failure")
     adapter = _MockAdapter(error=error)
     loop = _TestLoop(adapter=adapter, bus=bus)
@@ -421,7 +421,7 @@ def test_handle_request_publishes_failed_event_and_reraises_on_error() -> None:
 
 def test_handle_request_budget_overrides_config() -> None:
     """MainLoopRequest budget overrides config budget."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     config_budget = Budget(max_total_tokens=1000)
     config = MainLoopConfig(budget=config_budget)
     adapter = _MockAdapter()
@@ -440,7 +440,7 @@ def test_handle_request_budget_overrides_config() -> None:
 
 def test_handle_request_deadline_overrides_config() -> None:
     """MainLoopRequest deadline overrides config deadline."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     config_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
     config = MainLoopConfig(deadline=config_deadline)
     adapter = _MockAdapter()
@@ -458,7 +458,7 @@ def test_handle_request_deadline_overrides_config() -> None:
 
 def test_handle_request_handles_visibility_expansion() -> None:
     """MainLoop.handle_request handles visibility expansion."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
         {("ref",): SectionVisibility.FULL},
     ]
@@ -481,14 +481,14 @@ def test_handle_request_handles_visibility_expansion() -> None:
 
 def test_bus_subscribe_and_publish_workflow() -> None:
     """MainLoop works with bus-driven subscribe/publish pattern."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     adapter = _MockAdapter()
     _TestLoop(adapter=adapter, bus=bus)  # Auto-subscribes handle_request
 
     completed_events: list[MainLoopCompleted[_Output]] = []
     bus.subscribe(MainLoopCompleted, lambda e: completed_events.append(e))
     request = MainLoopRequest(request=_Request(message="hello"))
-    bus.publish(request)
+    bus.dispatch(request)
 
     assert len(completed_events) == 1
     assert completed_events[0].response.output == _Output(result="success")
@@ -496,7 +496,7 @@ def test_bus_subscribe_and_publish_workflow() -> None:
 
 def test_bus_session_persists_across_visibility_retries() -> None:
     """Same session is reused across visibility expansion retries."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
         {("section1",): SectionVisibility.FULL},
     ]
@@ -513,7 +513,7 @@ def test_bus_session_persists_across_visibility_retries() -> None:
 
 def test_same_budget_tracker_used_across_visibility_retries() -> None:
     """Same BudgetTracker is used across visibility expansion retries."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     budget = Budget(max_total_tokens=1000)
     config = MainLoopConfig(budget=budget)
     visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
@@ -537,7 +537,7 @@ def test_same_budget_tracker_used_across_visibility_retries() -> None:
 
 def test_no_budget_tracker_when_no_budget() -> None:
     """No BudgetTracker is created when no budget is set."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     adapter = _MockAdapter()
     loop = _TestLoop(adapter=adapter, bus=bus)
 
@@ -579,7 +579,7 @@ def test_request_accepts_resources() -> None:
 
 def test_execute_passes_resources_from_config() -> None:
     """MainLoop.execute passes config resources to adapter."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     resource = _CustomResource(name="config-resource")
     resources = ResourceRegistry.build({_CustomResource: resource})
     config = MainLoopConfig(resources=resources)
@@ -593,7 +593,7 @@ def test_execute_passes_resources_from_config() -> None:
 
 def test_execute_resources_overrides_config() -> None:
     """MainLoop.execute resources parameter overrides config."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     config_resource = _CustomResource(name="config-resource")
     config_resources = ResourceRegistry.build({_CustomResource: config_resource})
     config = MainLoopConfig(resources=config_resources)
@@ -609,7 +609,7 @@ def test_execute_resources_overrides_config() -> None:
 
 def test_handle_request_passes_resources() -> None:
     """MainLoopRequest resources are passed to adapter."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     resource = _CustomResource(name="request-resource")
     resources = ResourceRegistry.build({_CustomResource: resource})
     adapter = _MockAdapter()
@@ -626,7 +626,7 @@ def test_handle_request_passes_resources() -> None:
 
 def test_handle_request_resources_overrides_config() -> None:
     """MainLoopRequest resources override config resources."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     config_resource = _CustomResource(name="config-resource")
     config_resources = ResourceRegistry.build({_CustomResource: config_resource})
     config = MainLoopConfig(resources=config_resources)
@@ -646,7 +646,7 @@ def test_handle_request_resources_overrides_config() -> None:
 
 def test_same_resources_used_across_visibility_retries() -> None:
     """Same resources are passed across visibility expansion retries."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     resource = _CustomResource(name="persistent-resource")
     resources = ResourceRegistry.build({_CustomResource: resource})
     visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
@@ -667,7 +667,7 @@ def test_same_resources_used_across_visibility_retries() -> None:
 
 def test_no_resources_when_not_set() -> None:
     """No resources are passed when not configured."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     adapter = _MockAdapter()
     loop = _TestLoop(adapter=adapter, bus=bus)
 

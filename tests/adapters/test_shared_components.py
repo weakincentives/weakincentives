@@ -60,9 +60,9 @@ from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import ResourceRegistry, Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import (
-    EventBus,
+    Dispatcher,
+    DispatchResult,
     HandlerFailure,
-    PublishResult,
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
@@ -76,16 +76,16 @@ from weakincentives.types.dataclass import (
 )
 
 
-class RecordingBus(EventBus):
+class RecordingBus(Dispatcher):
     def __init__(self) -> None:
         self.events: list[object] = []
 
     def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
         pass
 
-    def publish(self, event: object) -> PublishResult:
+    def dispatch(self, event: object) -> DispatchResult:
         self.events.append(event)
-        return PublishResult(event=event, handlers_invoked=(), errors=())
+        return DispatchResult(event=event, handlers_invoked=(), errors=())
 
 
 @dataclass
@@ -763,19 +763,19 @@ class TestPublishInvocationFilesystemRestore:
         def dummy_handler(e: object) -> None:
             pass
 
-        class FailingBus(EventBus):
+        class FailingBus(Dispatcher):
             def subscribe(
                 self, event_type: type[object], handler: EventHandler
             ) -> None:
                 pass
 
-            def publish(self, event: object) -> PublishResult:
-                return PublishResult(
+            def dispatch(self, event: object) -> DispatchResult:
+                return DispatchResult(
                     event=event,
                     handlers_invoked=(),
                     errors=(
                         HandlerFailure(
-                            handler=dummy_handler, error=Exception("publish failed")
+                            handler=dummy_handler, error=Exception("dispatch failed")
                         ),
                     ),
                 )
@@ -842,19 +842,19 @@ class TestPublishInvocationFilesystemRestore:
         def dummy_handler(e: object) -> None:
             pass
 
-        class FailingBus(EventBus):
+        class FailingBus(Dispatcher):
             def subscribe(
                 self, event_type: type[object], handler: EventHandler
             ) -> None:
                 pass
 
-            def publish(self, event: object) -> PublishResult:
-                return PublishResult(
+            def dispatch(self, event: object) -> DispatchResult:
+                return DispatchResult(
                     event=event,
                     handlers_invoked=(),
                     errors=(
                         HandlerFailure(
-                            handler=dummy_handler, error=Exception("publish failed")
+                            handler=dummy_handler, error=Exception("dispatch failed")
                         ),
                     ),
                 )

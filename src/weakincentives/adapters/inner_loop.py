@@ -385,7 +385,7 @@ class InnerLoop[OutputT]:
     def _publish_rendered_event(self) -> None:
         """Publish the PromptRendered event."""
 
-        publish_result = self.config.session.event_bus.publish(
+        dispatch_result = self.config.session.dispatcher.dispatch(
             PromptRendered(
                 prompt_ns=self.inputs.prompt.ns,
                 prompt_key=self.inputs.prompt.key,
@@ -399,24 +399,24 @@ class InnerLoop[OutputT]:
                 event_id=uuid4(),
             )
         )
-        if not publish_result.ok:
+        if not dispatch_result.ok:
             failure_handlers = [
                 getattr(failure.handler, "__qualname__", repr(failure.handler))
-                for failure in publish_result.errors
+                for failure in dispatch_result.errors
             ]
             self._log.error(
-                "Prompt rendered publish failed.",
-                event="prompt_rendered_publish_failed",
+                "Prompt rendered dispatch failed.",
+                event="prompt_rendered_dispatch_failed",
                 context={
-                    "failure_count": len(publish_result.errors),
+                    "failure_count": len(dispatch_result.errors),
                     "failed_handlers": failure_handlers,
                 },
             )
         else:
             self._log.debug(
-                "Prompt rendered event published.",
-                event="prompt_rendered_published",
-                context={"handler_count": publish_result.handled_count},
+                "Prompt rendered event dispatched.",
+                event="prompt_rendered_dispatched",
+                context={"handler_count": dispatch_result.handled_count},
             )
 
     def _handle_tool_calls(
@@ -492,7 +492,7 @@ class InnerLoop[OutputT]:
 
         usage = token_usage_from_payload(self._provider_payload)
 
-        publish_result = self.config.session.event_bus.publish(
+        dispatch_result = self.config.session.dispatcher.dispatch(
             PromptExecuted(
                 prompt_name=self.inputs.prompt_name,
                 adapter=self.inputs.adapter_name,
@@ -503,20 +503,20 @@ class InnerLoop[OutputT]:
                 event_id=uuid4(),
             )
         )
-        if not publish_result.ok:
+        if not dispatch_result.ok:
             failure_handlers = [
                 getattr(failure.handler, "__qualname__", repr(failure.handler))
-                for failure in publish_result.errors
+                for failure in dispatch_result.errors
             ]
             self._log.error(
-                "Prompt execution publish failed.",
-                event="prompt_execution_publish_failed",
+                "Prompt execution dispatch failed.",
+                event="prompt_execution_dispatch_failed",
                 context={
-                    "failure_count": len(publish_result.errors),
+                    "failure_count": len(dispatch_result.errors),
                     "failed_handlers": failure_handlers,
                 },
             )
-            publish_result.raise_if_errors()
+            dispatch_result.raise_if_errors()
         self._log.info(
             "Prompt execution completed.",
             event="prompt_execution_succeeded",
@@ -527,7 +527,7 @@ class InnerLoop[OutputT]:
                 if response_payload.text
                 else 0,
                 "structured_output": self._response_parser.should_parse_structured_output,
-                "handler_count": publish_result.handled_count,
+                "handler_count": dispatch_result.handled_count,
             },
         )
 

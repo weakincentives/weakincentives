@@ -82,9 +82,9 @@ class SliceAccessor[T: SupportsDataclass]:
         # Reducer registration
         session[Plan].register(AddStep, add_step_reducer)
 
-    For broadcast dispatch that runs all reducers for an event type::
+    For dispatch that runs all reducers for an event type::
 
-        session.broadcast(AddStep(step="x"))
+        session.dispatch(AddStep(step="x"))
 
     """
 

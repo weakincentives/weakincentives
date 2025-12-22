@@ -21,7 +21,7 @@ from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.contrib.tools import PlanningStrategy, PlanningToolsSection
 from weakincentives.contrib.tools.planning import SetupPlan, UpdateStep
 from weakincentives.runtime import Session
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 
 # Tests for build_logged_session
 
@@ -29,7 +29,7 @@ from weakincentives.runtime.events import InProcessEventBus
 def test_build_logged_session_creates_session_with_event_bus() -> None:
     session = build_logged_session()
 
-    assert session.event_bus is not None
+    assert session.dispatcher is not None
 
 
 def test_build_logged_session_applies_provided_tags() -> None:
@@ -137,7 +137,7 @@ def test_render_plan_snapshot_returns_no_plan_message_when_empty() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
@@ -149,7 +149,7 @@ def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_steps() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
@@ -181,7 +181,7 @@ def test_render_plan_snapshot_renders_plan_steps() -> None:
 
 
 def test_render_plan_snapshot_renders_completed_plan() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
@@ -205,7 +205,7 @@ def test_render_plan_snapshot_renders_completed_plan() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_without_steps() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")

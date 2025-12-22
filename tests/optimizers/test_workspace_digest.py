@@ -160,7 +160,7 @@ class _RecordingAdapter(ProviderAdapter):
                 session_id=getattr(session, "session_id", None) if session else None,
                 created_at=datetime.now(UTC),
             )
-            session.event_bus.publish(event)
+            session.dispatcher.dispatch(event)
 
         digest_value = f"{self.mode}-digest"
         summary_value = f"{self.mode}-summary"
@@ -207,7 +207,7 @@ def _create_optimizer(
     session = Session()
     context = OptimizationContext(
         adapter=adapter,
-        event_bus=session.event_bus,
+        dispatcher=session.dispatcher,
         overrides_store=overrides_store,
         overrides_tag=overrides_tag,
         optimization_session=optimization_session,

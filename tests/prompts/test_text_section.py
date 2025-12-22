@@ -30,7 +30,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.rendering import PromptRenderer
 from weakincentives.prompt.tool import ToolContext, ToolExample, ToolResult
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
 
@@ -372,9 +372,9 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
 
     # With SUMMARY visibility via session state, the section's own tools are excluded,
     # but the open_sections tool is injected for progressive disclosure
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
-    session.broadcast(
+    session.dispatch(
         SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.SUMMARY)
     )
     rendered_summary = renderer.render(params_lookup, session=session)
@@ -423,9 +423,9 @@ def test_summary_visibility_skips_child_sections() -> None:
     assert "Child content: Child Detail" in rendered_full.text
 
     # With SUMMARY visibility on parent via session state, child is skipped
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
-    session.broadcast(
+    session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
     rendered_summary = renderer.render(params_lookup, session=session)
@@ -482,9 +482,9 @@ def test_summary_visibility_skips_child_tools() -> None:
 
     # With SUMMARY visibility on parent via session state, child (and its tools) are skipped.
     # The open_sections tool is injected for progressive disclosure.
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
-    session.broadcast(
+    session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
     rendered_summary = renderer.render(params_lookup, session=session)
@@ -529,9 +529,9 @@ def test_summary_visibility_default_excludes_tools() -> None:
     assert "Summary: Test" in rendered.text
 
     # Override to FULL via session state includes tools
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
-    session.broadcast(
+    session.dispatch(
         SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.FULL)
     )
     rendered_full = renderer.render(params_lookup, session=session)
@@ -592,9 +592,9 @@ def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
     )
 
     # With SUMMARY visibility on parent via session state, child is skipped but sibling is rendered
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
-    session.broadcast(
+    session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
     rendered = renderer.render(params_lookup, session=session)

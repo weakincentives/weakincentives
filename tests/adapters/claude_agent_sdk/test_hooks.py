@@ -40,7 +40,7 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
 from weakincentives.adapters.claude_agent_sdk._notifications import Notification
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.events._types import TokenUsage, ToolInvoked
 from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, append_all
@@ -48,7 +48,7 @@ from weakincentives.runtime.session import Session, append_all
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     return Session(bus=bus)
 
 
@@ -176,7 +176,7 @@ class TestPreToolUseHook:
 class TestPostToolUseHook:
     def test_publishes_tool_invoked_event(self, session: Session) -> None:
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -226,7 +226,7 @@ class TestPostToolUseHook:
 
     def test_handles_tool_error(self, session: Session) -> None:
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -249,7 +249,7 @@ class TestPostToolUseHook:
 
     def test_handles_non_dict_tool_response(self, session: Session) -> None:
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -273,7 +273,7 @@ class TestPostToolUseHook:
 
     def test_truncates_long_output(self, session: Session) -> None:
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -332,7 +332,7 @@ class TestPostToolUseHook:
     def test_skips_mcp_wink_tools(self, session: Session) -> None:
         """MCP-bridged WINK tools should not publish events (they do it themselves)."""
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -357,7 +357,7 @@ class TestPostToolUseHook:
     def test_skips_mcp_wink_tools_with_parsed_input(self, session: Session) -> None:
         """MCP-bridged WINK tools should be skipped even with full SDK input format."""
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -561,7 +561,7 @@ class TestPostToolUseHookWithTypedParsing:
     def test_publishes_event_with_raw_result(self, session: Session) -> None:
         """Test that hook stores raw dict as result, not typed dataclass."""
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -600,7 +600,7 @@ class TestPostToolUseHookWithTypedParsing:
     def test_fallback_when_missing_tool_name(self, session: Session) -> None:
         """Test fallback to dict access when parsing fails (missing required field)."""
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -624,7 +624,7 @@ class TestPostToolUseHookWithTypedParsing:
     def test_fallback_with_string_tool_response(self, session: Session) -> None:
         """Test fallback when parsing fails and tool_response is a string."""
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),
@@ -648,7 +648,7 @@ class TestPostToolUseHookWithTypedParsing:
     def test_fallback_with_none_tool_response(self, session: Session) -> None:
         """Test fallback when parsing fails and tool_response is None."""
         events: list[ToolInvoked] = []
-        session.event_bus.subscribe(ToolInvoked, lambda e: events.append(e))
+        session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
             execution_state=ExecutionState(session=session),

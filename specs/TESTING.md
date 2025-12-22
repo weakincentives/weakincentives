@@ -103,10 +103,10 @@ Snapshots are critical for rollback correctness. Test:
 def test_snapshot_roundtrip_integrity(session_factory):
     """Snapshot and rollback preserve exact state."""
     session, _ = session_factory()
-    session.broadcast(SomeEvent(...))
+    session.dispatch(SomeEvent(...))
 
     snapshot1 = session.snapshot()
-    session.broadcast(AnotherEvent(...))
+    session.dispatch(AnotherEvent(...))
     session.restore(snapshot1)
     snapshot2 = session.snapshot()
 

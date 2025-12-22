@@ -49,7 +49,7 @@ class ProviderAdapter(ABC):
 
 **Notes:**
 
-- Telemetry is published via `session.event_bus`.
+- Telemetry is published via `session.dispatcher`.
 - Visibility overrides are managed via session state (`VisibilityOverrides`),
   not passed to adapters directly.
 - Resources are merged with workspace defaults (e.g., filesystem from prompt);
@@ -83,7 +83,7 @@ fields are included in request payloads.
 1. **Call** - Issue the provider request with throttle protection and deadline
    checks.
 1. **Parse** - Extract assistant content and dispatch tool calls.
-1. **Emit** - Publish `PromptRendered` and `PromptExecuted` events to `session.event_bus`.
+1. **Emit** - Publish `PromptRendered` and `PromptExecuted` events to `session.dispatcher`.
 
 ## Provider Implementations
 
@@ -293,7 +293,7 @@ flowchart LR
 - Dataclass parsing uses `serde.parse`. Validation errors produce
   `ToolResult(success=False)` rather than raising.
 - `ToolContext` exposes prompt, adapter, session, and deadline. Tool handlers
-  can access `session.event_bus` when they need to publish telemetry.
+  can access `session.dispatcher` when they need to publish telemetry.
 - Handlers run synchronously. Exceptions are logged and converted to failed
   results.
 - Before event emission, the adapter captures a session snapshot. On publish
@@ -427,7 +427,7 @@ def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
 
 ## Telemetry
 
-Adapters emit events through `session.event_bus`:
+Adapters emit events through `session.dispatcher`:
 
 | Event | When | Payload |
 |-------|------|---------|

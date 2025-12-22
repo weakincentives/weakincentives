@@ -40,7 +40,7 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.runtime.events import (
-    InProcessEventBus,
+    InProcessDispatcher,
     PromptExecuted,
     PromptRendered,
 )
@@ -154,7 +154,7 @@ class SimpleOutput:
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     return Session(bus=bus)
 
 
@@ -308,7 +308,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         self, session: Session, simple_prompt: Prompt[SimpleOutput]
     ) -> None:
         events: list[PromptRendered] = []
-        session.event_bus.subscribe(PromptRendered, lambda e: events.append(e))
+        session.dispatcher.subscribe(PromptRendered, lambda e: events.append(e))
 
         _setup_mock_query(
             [MockResultMessage(result="Hello!", usage=None, structured_output=None)]
@@ -423,7 +423,7 @@ class TestClaudeAgentSDKAdapterEvaluate:
         )
 
         events: list[PromptExecuted] = []
-        session.event_bus.subscribe(PromptExecuted, lambda e: events.append(e))
+        session.dispatcher.subscribe(PromptExecuted, lambda e: events.append(e))
 
         adapter = ClaudeAgentSDKAdapter()
 
@@ -983,7 +983,7 @@ class TestIsolationConfig:
         MockSDKQuery.set_results([message])
 
         events: list[PromptExecuted] = []
-        session.event_bus.subscribe(PromptExecuted, lambda e: events.append(e))
+        session.dispatcher.subscribe(PromptExecuted, lambda e: events.append(e))
 
         adapter = ClaudeAgentSDKAdapter()
 

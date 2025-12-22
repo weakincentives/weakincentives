@@ -535,7 +535,7 @@ class _PlanningToolSuite:
         initial_steps = _normalize_step_titles(params.initial_steps)
         normalized = SetupPlan(objective=objective, initial_steps=initial_steps)
         session = self._section.session
-        session.broadcast(normalized)
+        _ = session.dispatch(normalized)
         plan = _require_plan(session)
         step_count = len(initial_steps)
         message = (
@@ -554,7 +554,7 @@ class _PlanningToolSuite:
             message = "Provide at least one step to add."
             raise ToolValidationError(message)
         normalized = AddStep(steps=normalized_steps)
-        session.broadcast(normalized)
+        _ = session.dispatch(normalized)
         plan = _require_plan(session)
         message = f"Added {len(normalized_steps)} step{'s' if len(normalized_steps) != 1 else ''}."
         return ToolResult(message=message, value=plan)
@@ -581,7 +581,7 @@ class _PlanningToolSuite:
             title=updated_title,
             status=updated_status,
         )
-        session.broadcast(normalized)
+        _ = session.dispatch(normalized)
         plan = _require_plan(session)
         return ToolResult(message=f"Step {step_id} updated.", value=plan)
 

@@ -277,7 +277,7 @@ class BridgedTool:
             rendered_output=rendered_output[:1000] if rendered_output else "",
             call_id=None,
         )
-        self._session.event_bus.publish(event)
+        self._session.dispatcher.dispatch(event)
 
 
 def create_bridged_tools(

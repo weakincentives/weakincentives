@@ -36,13 +36,13 @@ response = adapter.evaluate(prompt, session=session)
 
 ### How It Works
 
-`configure_wink()` patches the `InProcessEventBus` class to automatically
+`configure_wink()` patches the `InProcessDispatcher` class to automatically
 attach telemetry handlers to every new bus instance:
 
 ```mermaid
 flowchart LR
-    Configure["configure_wink()"] --> Patch["Patch InProcessEventBus.__init__"]
-    Patch --> NewBus["New EventBus Created"]
+    Configure["configure_wink()"] --> Patch["Patch InProcessDispatcher.__init__"]
+    Patch --> NewBus["New Dispatcher Created"]
     NewBus --> Attach["Auto-attach LangSmithTelemetryHandler"]
     Attach --> Events["Events flow to LangSmith"]
 ```
@@ -136,7 +136,7 @@ process_user_request (run_type="chain")
 ```mermaid
 flowchart TB
     subgraph WINK["WINK Runtime"]
-        EventBus["Event Bus"]
+        Dispatcher["Event Bus"]
         Session["Session"]
         Adapter["Provider Adapter"]
         OverrideStore["Override Store"]
@@ -147,7 +147,7 @@ flowchart TB
         Hub["Prompt Hub"]
     end
 
-    EventBus -->|PromptRendered<br/>ToolInvoked<br/>PromptExecuted| Tracing
+    Dispatcher -->|PromptRendered<br/>ToolInvoked<br/>PromptExecuted| Tracing
     OverrideStore <-->|resolve/upsert| Hub
 ```
 
@@ -213,7 +213,7 @@ class PromptOverridesStore(Protocol):
 ```mermaid
 sequenceDiagram
     participant A as Adapter
-    participant B as EventBus
+    participant B as Dispatcher
     participant T as TelemetryHandler
     participant Q as AsyncQueue
     participant L as LangSmith Client
@@ -532,10 +532,10 @@ class LangSmithTelemetryHandler:
         client: Client | None = None,  # For testing
     ) -> None: ...
 
-    def attach(self, bus: EventBus) -> None:
+    def attach(self, bus: Dispatcher) -> None:
         """Subscribe to all telemetry events."""
 
-    def detach(self, bus: EventBus) -> None:
+    def detach(self, bus: Dispatcher) -> None:
         """Unsubscribe from all telemetry events."""
 
     def flush(self, *, timeout: float | None = None) -> None:
@@ -670,7 +670,7 @@ from weakincentives.contrib.langsmith import (
     LangSmithConfig,
     LangSmithTelemetryHandler,
 )
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.adapters.openai import OpenAIAdapter
 
@@ -681,7 +681,7 @@ config = LangSmithConfig(
 )
 
 # Setup
-bus = InProcessEventBus()
+bus = InProcessDispatcher()
 session = Session(bus=bus)
 adapter = OpenAIAdapter(model="gpt-4o")
 
@@ -748,7 +748,7 @@ store = LangSmithPromptOverridesStore(config)
 
 class ObservableAgentLoop(MainLoop[UserRequest, AgentOutput]):
     def __init__(self, adapter: ProviderAdapter[AgentOutput]) -> None:
-        bus = InProcessEventBus()
+        bus = InProcessDispatcher()
         super().__init__(adapter=adapter, bus=bus)
 
         # Attach telemetry

@@ -63,7 +63,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 
 Owns user interaction:
 
-- Creates an `EventBus` with logging subscribers
+- Creates an `Dispatcher` with logging subscribers
 - Instantiates `CodeReviewLoop` with the adapter and bus
 - Runs the interactive REPL loop
 - Dumps session state on exit

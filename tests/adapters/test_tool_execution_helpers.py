@@ -50,7 +50,7 @@ from weakincentives.prompt import (
     ToolHandler,
     ToolResult,
 )
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
@@ -78,7 +78,7 @@ def _base_context(
     deadline: Deadline | None = None,
     session: SessionProtocol | None = None,
 ) -> ToolExecutionContext:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     prompt_template = _build_prompt(tool)
     prompt = Prompt(prompt_template)
     effective_session = session or Session(bus=bus)

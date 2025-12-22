@@ -229,7 +229,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         )
         prompt_text = rendered.text
 
-        session.event_bus.publish(
+        session.dispatcher.dispatch(
             PromptRendered(
                 prompt_ns=prompt.ns,
                 prompt_key=prompt.key,
@@ -344,7 +344,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             output=output,
         )
 
-        session.event_bus.publish(
+        session.dispatcher.dispatch(
             PromptExecuted(
                 prompt_name=prompt_name,
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,

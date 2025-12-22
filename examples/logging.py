@@ -21,7 +21,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any, cast
 
 from weakincentives.runtime import (
-    EventBus,
+    Dispatcher,
     PromptExecuted,
     PromptRendered,
     TokenUsage,
@@ -49,7 +49,7 @@ def configure_logging() -> None:
     )
 
 
-def attach_logging_subscribers(bus: EventBus) -> None:
+def attach_logging_subscribers(bus: Dispatcher) -> None:
     """Subscribe to prompt lifecycle events for structured logging."""
 
     bus.subscribe(PromptRendered, _print_rendered_prompt)

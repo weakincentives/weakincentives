@@ -26,8 +26,8 @@ from ...dataclasses import FrozenDataclass
 EventHandler = Callable[[object], None]
 
 
-class EventBus(Protocol):
-    """Minimal synchronous publish/subscribe abstraction."""
+class Dispatcher(Protocol):
+    """Minimal synchronous event dispatcher with delivery tracking."""
 
     def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
         """Register a handler for the given event type."""
@@ -40,26 +40,26 @@ class EventBus(Protocol):
         """
         ...
 
-    def publish(self, event: object) -> PublishResult:
-        """Publish an event instance to subscribers."""
+    def dispatch(self, event: object) -> DispatchResult:
+        """Dispatch an event to registered handlers and return the result."""
         ...
 
 
-# Type aliases to clarify bus usage patterns.
+# Type aliases to clarify dispatcher usage patterns.
 #
-# ControlBus: Used by MainLoop for request/response orchestration
+# ControlDispatcher: Used by MainLoop for request/response orchestration
 # (MainLoopRequest, MainLoopCompleted, MainLoopFailed events).
 #
-# TelemetryBus: Used by adapters and sessions for observability
+# TelemetryDispatcher: Used by adapters and sessions for observability
 # (PromptRendered, ToolInvoked, PromptExecuted events).
 #
-# Both aliases resolve to EventBus at runtime; the distinction is semantic.
+# Both aliases resolve to Dispatcher at runtime; the distinction is semantic.
 
-type ControlBus = EventBus
-"""EventBus used for MainLoop request/response control flow."""
+type ControlDispatcher = Dispatcher
+"""Dispatcher used for MainLoop request/response control flow."""
 
-type TelemetryBus = EventBus
-"""EventBus used for session telemetry and adapter observability events."""
+type TelemetryDispatcher = Dispatcher
+"""Dispatcher used for session telemetry and adapter observability events."""
 
 
 @FrozenDataclass()
@@ -75,8 +75,8 @@ class HandlerFailure:
 
 
 @dataclass(slots=True, frozen=True)
-class PublishResult:
-    """Summary of an event publish invocation."""
+class DispatchResult:
+    """Summary of an event dispatch invocation."""
 
     event: object
     handlers_invoked: tuple[EventHandler, ...]
@@ -99,7 +99,7 @@ class PublishResult:
             return
 
         failures = ", ".join(str(failure) for failure in self.errors)
-        message = f"Errors while publishing {type(self.event).__name__}: {failures}"
+        message = f"Errors while dispatching {type(self.event).__name__}: {failures}"
         raise ExceptionGroup(
             message,
             tuple(cast(Exception, failure.error) for failure in self.errors),
@@ -141,12 +141,12 @@ class ToolInvoked:
 
 
 __all__ = [
-    "ControlBus",
-    "EventBus",
+    "ControlDispatcher",
+    "DispatchResult",
+    "Dispatcher",
     "EventHandler",
     "HandlerFailure",
-    "PublishResult",
-    "TelemetryBus",
+    "TelemetryDispatcher",
     "TokenUsage",
     "ToolInvoked",
 ]

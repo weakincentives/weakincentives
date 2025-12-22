@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from weakincentives.runtime.events import EventBus
+from weakincentives.runtime.events import Dispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session._types import ReducerContextProtocol
 from weakincentives.runtime.session.reducers import (
@@ -33,13 +33,13 @@ class _Sample:
 @dataclass(slots=True)
 class _Context(ReducerContextProtocol):
     session: Session
-    event_bus: EventBus
+    dispatcher: Dispatcher
 
 
 def test_replace_latest_by_replaces_matching_entry() -> None:
     reducer = replace_latest_by(lambda item: item.key)
     session = Session()
-    context = _Context(session=session, event_bus=session.event_bus)
+    context = _Context(session=session, dispatcher=session.dispatcher)
     initial = (_Sample("a", "first"), _Sample("b", "second"))
 
     updated = reducer(
@@ -57,7 +57,7 @@ def test_replace_latest_by_replaces_matching_entry() -> None:
 def test_append_all_always_appends() -> None:
     """append_all appends unconditionally (ledger semantics)."""
     session = Session()
-    context = _Context(session=session, event_bus=session.event_bus)
+    context = _Context(session=session, dispatcher=session.dispatcher)
     initial = (_Sample("a", "first"),)
 
     # Append same value - should still append
@@ -71,7 +71,7 @@ def test_append_all_always_appends() -> None:
 def test_append_all_appends_to_empty_slice() -> None:
     """append_all works on empty slices."""
     session = Session()
-    context = _Context(session=session, event_bus=session.event_bus)
+    context = _Context(session=session, dispatcher=session.dispatcher)
 
     updated = append_all((), _Sample("a", "first"), context=context)
 
@@ -83,7 +83,7 @@ def test_upsert_by_replaces_first_duplicate_and_removes_others() -> None:
     """upsert_by replaces first matching key and discards subsequent duplicates."""
     reducer = upsert_by(lambda item: item.key)
     session = Session()
-    context = _Context(session=session, event_bus=session.event_bus)
+    context = _Context(session=session, dispatcher=session.dispatcher)
     # Slice with duplicate keys - this covers the branch at line 61->64
     initial = (
         _Sample("a", "first"),
@@ -107,7 +107,7 @@ def test_upsert_by_appends_when_key_not_found() -> None:
     """upsert_by appends when key doesn't exist."""
     reducer = upsert_by(lambda item: item.key)
     session = Session()
-    context = _Context(session=session, event_bus=session.event_bus)
+    context = _Context(session=session, dispatcher=session.dispatcher)
     initial = (_Sample("a", "first"),)
 
     updated = reducer(

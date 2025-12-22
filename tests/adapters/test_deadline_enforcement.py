@@ -54,7 +54,7 @@ from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
+from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
 from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.protocols import SessionProtocol
@@ -136,7 +136,7 @@ def test_raise_tool_deadline_error() -> None:
 def test_inner_loop_raise_deadline_error() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session: SessionProtocol = Session(bus=bus)
     execution_state = ExecutionState(session=session)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
@@ -170,7 +170,7 @@ def test_inner_loop_detects_expired_deadline(
 ) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session: SessionProtocol = Session(bus=bus)
     execution_state = ExecutionState(session=session)
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
@@ -209,7 +209,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
 ) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session: SessionProtocol = Session(bus=bus)
     execution_state = ExecutionState(session=session)
 
@@ -253,7 +253,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
 def test_execute_tool_call_publishes_invocation() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session: SessionProtocol = Session(bus=bus)
     execution_state = ExecutionState(session=session)
 
@@ -303,7 +303,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
 def test_run_inner_loop_replaces_rendered_deadline() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     execution_state = ExecutionState(session=session)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))

@@ -185,7 +185,7 @@ def test_workspace_digest_section_render_override_with_full_visibility() -> None
         session, "workspace-digest", "Full body content", summary="Short summary"
     )
     # Set visibility override to FULL
-    session.broadcast(
+    session.dispatch(
         SetVisibilityOverride(
             path=("workspace-digest",), visibility=SectionVisibility.FULL
         )

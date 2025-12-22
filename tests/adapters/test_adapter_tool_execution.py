@@ -68,7 +68,7 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.prompt.errors import VisibilityExpansionRequired
-from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
+from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
 from weakincentives.runtime.session import (
     ReducerEvent,
     Session,
@@ -161,7 +161,7 @@ def _evaluate_prompt(
     return adapter.evaluate(bound_prompt, **kwargs)
 
 
-def _record_tool_events(bus: InProcessEventBus) -> list[ToolInvoked]:
+def _record_tool_events(bus: InProcessDispatcher) -> list[ToolInvoked]:
     events: list[ToolInvoked] = []
 
     def capture(event: object) -> None:
@@ -217,7 +217,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
@@ -268,7 +268,7 @@ def test_adapter_tool_context_receives_deadline(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
@@ -308,7 +308,7 @@ def test_adapter_tool_deadline_exceeded(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
@@ -353,7 +353,7 @@ def test_adapter_deadline_preflight_rejection(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     frozen_utcnow.set(anchor)
@@ -404,7 +404,7 @@ def test_adapter_tool_execution_validation_error(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
@@ -462,7 +462,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
@@ -521,7 +521,7 @@ def test_adapter_tool_execution_rejects_type_errors(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
@@ -574,7 +574,7 @@ def test_adapter_tool_execution_unexpected_exception(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     events = _record_tool_events(bus)
 
@@ -630,7 +630,7 @@ def test_adapter_tool_execution_rolls_back_session(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     session[ToolPayload].register(ToolPayload, replace_latest)
     session[ToolPayload].seed((ToolPayload(answer="baseline"),))
@@ -714,7 +714,7 @@ def test_adapter_tool_visibility_expansion_propagates(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="docs"))
@@ -756,7 +756,7 @@ def test_tool_receives_filesystem_from_workspace_section(
         handler=tool_handler,
     )
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     # Create a workspace section with VFS filesystem
@@ -822,7 +822,7 @@ def test_budget_tracker_passed_to_tool_context_via_resources(
         handler=tool_handler,
     )
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     prompt_template = PromptTemplate(

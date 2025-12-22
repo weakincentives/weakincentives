@@ -19,7 +19,7 @@ from typing import Any, cast
 import pytest
 
 from tests.helpers.adapters import TEST_ADAPTER_NAME
-from tests.helpers.events import NullEventBus
+from tests.helpers.events import NullDispatcher
 from weakincentives.adapters import PromptEvaluationError
 from weakincentives.adapters._provider_protocols import ProviderChoice
 from weakincentives.adapters.core import (
@@ -47,7 +47,7 @@ from weakincentives.adapters.utilities import (
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.runtime.events import EventBus
+from weakincentives.runtime.events import Dispatcher
 from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session
 
@@ -93,7 +93,7 @@ def test_mapping_to_str_dict_rejects_non_string_keys() -> None:
 
 def test_run_inner_loop_requires_message_payload() -> None:
     rendered = RenderedPrompt(text="system")
-    bus = NullEventBus()
+    bus = NullDispatcher()
 
     class DummyChoice:
         def __init__(self) -> None:
@@ -124,7 +124,7 @@ def test_run_inner_loop_requires_message_payload() -> None:
             self,
             prompt: Prompt[object],
             *,
-            bus: EventBus,
+            bus: Dispatcher,
             session: SessionProtocol,
             deadline: Deadline | None = None,
         ) -> PromptResponse[object]:

@@ -29,7 +29,7 @@ from weakincentives.adapters.claude_agent_sdk.workspace import (
 )
 from weakincentives.contrib.tools.filesystem import Filesystem
 from weakincentives.contrib.tools.workspace import WorkspaceSection
-from weakincentives.runtime import InProcessEventBus, Session
+from weakincentives.runtime import InProcessDispatcher, Session
 
 
 class TestHostMount:
@@ -79,7 +79,7 @@ class TestHostMountPreview:
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     return Session(bus=bus)
 
 
@@ -231,7 +231,7 @@ class TestClaudeAgentWorkspaceSectionCleanup:
             )
 
             try:
-                new_bus = InProcessEventBus()
+                new_bus = InProcessDispatcher()
                 new_session = Session(bus=new_bus)
                 cloned = section.clone(session=new_session)
 
@@ -251,7 +251,7 @@ class TestClaudeAgentWorkspaceSectionCleanup:
             _ = fs.write("test_file.txt", "test content")
 
             # Clone to a new session
-            new_bus = InProcessEventBus()
+            new_bus = InProcessDispatcher()
             new_session = Session(bus=new_bus)
             cloned = section.clone(session=new_session)
 
@@ -277,9 +277,9 @@ class TestClaudeAgentWorkspaceSectionCleanup:
         section = ClaudeAgentWorkspaceSection(session=session)
 
         try:
-            new_bus = InProcessEventBus()
+            new_bus = InProcessDispatcher()
             new_session = Session(bus=new_bus)
-            other_bus = InProcessEventBus()
+            other_bus = InProcessDispatcher()
 
             with pytest.raises(TypeError, match="bus must match"):
                 section.clone(session=new_session, bus=other_bus)

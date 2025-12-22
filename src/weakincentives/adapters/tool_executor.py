@@ -511,7 +511,7 @@ def publish_tool_invocation(
     context: ToolExecutionContext,
     outcome: ToolExecutionOutcome,
 ) -> ToolInvoked:
-    """Publish a tool invocation event to the session event bus."""
+    """Dispatch a tool invocation event to the session dispatcher."""
     session_id = getattr(context.session, "session_id", None)
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
@@ -529,8 +529,8 @@ def publish_tool_invocation(
         call_id=outcome.call_id,
         event_id=uuid4(),
     )
-    publish_result = context.session.event_bus.publish(invocation)
-    if not publish_result.ok:
+    dispatch_result = context.session.dispatcher.dispatch(invocation)
+    if not dispatch_result.ok:
         # Restore to pre-tool state if tool succeeded (not already restored)
         if outcome.result.success:
             _restore_snapshot_if_needed(
@@ -545,22 +545,22 @@ def publish_tool_invocation(
         )
         failure_handlers = [
             getattr(failure.handler, "__qualname__", repr(failure.handler))
-            for failure in publish_result.errors
+            for failure in dispatch_result.errors
         ]
         outcome.log.error(
-            "Tool event publish failed.",
-            event="tool_event_publish_failed",
+            "Tool event dispatch failed.",
+            event="tool_event_dispatch_failed",
             context={
-                "failure_count": len(publish_result.errors),
+                "failure_count": len(dispatch_result.errors),
                 "failed_handlers": failure_handlers,
             },
         )
-        outcome.result.message = context.format_publish_failures(publish_result.errors)
+        outcome.result.message = context.format_publish_failures(dispatch_result.errors)
     else:
         outcome.log.debug(
-            "Tool event published.",
-            event="tool_event_published",
-            context={"handler_count": publish_result.handled_count},
+            "Tool event dispatched.",
+            event="tool_event_dispatched",
+            context={"handler_count": dispatch_result.handled_count},
         )
     return invocation
 

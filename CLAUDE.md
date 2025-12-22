@@ -204,10 +204,10 @@ prompt = Prompt[OutputType](
 ### Session State
 
 ```python
-from weakincentives.runtime import Session, InProcessEventBus
+from weakincentives.runtime import Session, InProcessDispatcher
 from weakincentives.contrib.tools import Plan, AddStep
 
-bus = InProcessEventBus()
+bus = InProcessDispatcher()
 session = Session(bus=bus)
 
 # Query state via indexing
@@ -216,7 +216,7 @@ session[Plan].all()                               # All values in slice
 session[Plan].where(lambda p: p.active)           # Filter by predicate
 
 # Dispatch events (through reducers)
-session.broadcast(AddStep(...))                   # Broadcast to all reducers
+session.dispatch(AddStep(...))                    # Dispatch to all reducers
 
 # Direct mutations via indexing (bypass reducers)
 session[Plan].seed(initial_plan)                  # Initialize slice

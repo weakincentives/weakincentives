@@ -57,7 +57,7 @@ from weakincentives.contrib.tools import (
     WriteFileParams,
 )
 from weakincentives.prompt.tool import Tool
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 
@@ -294,13 +294,13 @@ def _prepare_resolved_mount(
 
 
 @pytest.fixture()
-def session_and_bus() -> tuple[Session, InProcessEventBus]:
-    bus = InProcessEventBus()
+def session_and_bus() -> tuple[Session, InProcessDispatcher]:
+    bus = InProcessDispatcher()
     return Session(bus=bus), bus
 
 
 def test_section_registers_shell_tool(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -311,7 +311,7 @@ def test_section_registers_shell_tool(
 
 
 def test_section_registers_vfs_tool(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -331,7 +331,7 @@ def test_truncate_eval_stream_limits_length() -> None:
 
 
 def test_section_registers_eval_tool(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -342,7 +342,7 @@ def test_section_registers_eval_tool(
 
 
 def test_host_mount_filesystem_is_populated_at_construction(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     """Verify mounts are hydrated eagerly during section construction.
 
@@ -374,7 +374,7 @@ def test_host_mount_filesystem_is_populated_at_construction(
 
 
 def test_host_mount_populates_prompt_copy(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -392,7 +392,7 @@ def test_host_mount_populates_prompt_copy(
 
 
 def test_host_mount_materializes_overlay(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -479,7 +479,7 @@ def test_iter_host_mount_files_handles_file(tmp_path: Path) -> None:
 
 
 def test_host_mount_allows_binary_files(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -566,7 +566,7 @@ def test_copy_mount_max_bytes_guard(tmp_path: Path) -> None:
 
 
 def test_host_mount_hydration_skips_existing_overlay(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     """Verify _hydrate_overlay_mounts is a no-op when overlay is non-empty.
 
@@ -606,7 +606,7 @@ def test_host_mount_hydration_skips_existing_overlay(
 
 
 def test_host_mount_hydration_raises_on_write_error(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -648,7 +648,7 @@ def test_host_mount_hydration_raises_on_write_error(
 
 
 def test_section_exposes_new_client(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -658,7 +658,7 @@ def test_section_exposes_new_client(
 
 
 def test_close_stops_and_removes_container(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -685,7 +685,7 @@ def test_close_stops_and_removes_container(
 
 
 def test_close_is_idempotent(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -712,7 +712,7 @@ def test_close_is_idempotent(
 
 
 def test_close_without_workspace(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -723,7 +723,7 @@ def test_close_without_workspace(
 
 
 def test_close_handles_client_factory_failure(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -748,7 +748,7 @@ def test_close_handles_client_factory_failure(
 
 
 def test_close_handles_missing_container(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -784,7 +784,7 @@ def test_close_handles_missing_container(
 
 def test_section_auto_resolves_connection(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -838,7 +838,7 @@ def test_connection_resolution_prefers_env(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_run_cli_cp_honors_connection_flag(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -859,7 +859,7 @@ def test_run_cli_cp_honors_connection_flag(
 
 
 def test_run_cli_cp_without_connection_flag(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     """Test branch 1241->1243: run_cli_cp without connection_name."""
@@ -1080,7 +1080,7 @@ def test_resolve_connection_static_returns_mapping(
 
 def test_section_requires_connection_when_detection_fails(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1103,7 +1103,7 @@ def test_section_requires_connection_when_detection_fails(
 
 
 def test_shell_execute_runs_commands_and_stores_workspace(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1136,7 +1136,7 @@ def test_shell_execute_runs_commands_and_stores_workspace(
 
 
 def test_shell_execute_validates_command(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1156,7 +1156,7 @@ def test_shell_execute_validates_command(
 
 
 def test_shell_execute_merges_environment(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1178,7 +1178,7 @@ def test_shell_execute_merges_environment(
 
 
 def test_shell_execute_respects_capture_flag(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1204,7 +1204,7 @@ def test_shell_execute_respects_capture_flag(
 
 
 def test_shell_execute_captures_output_by_default(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1230,7 +1230,7 @@ def test_shell_execute_captures_output_by_default(
 
 
 def test_shell_execute_normalizes_cwd(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1252,7 +1252,7 @@ def test_shell_execute_normalizes_cwd(
 
 
 def test_shell_execute_rejects_non_ascii_stdin(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1272,9 +1272,9 @@ def test_shell_execute_rejects_non_ascii_stdin(
 
 
 def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
-    other_bus = InProcessEventBus()
+    other_bus = InProcessDispatcher()
     other_session = Session(bus=other_bus)
     client = _FakePodmanClient()
     section = _make_section(
@@ -1292,7 +1292,7 @@ def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
 
 
 def test_shell_execute_cli_fallback(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1323,7 +1323,7 @@ def test_shell_execute_cli_fallback(
 
 
 def test_shell_execute_cli_capture_disabled(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1353,7 +1353,7 @@ def test_shell_execute_cli_capture_disabled(
 
 
 def test_shell_execute_cli_timeout(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1394,7 +1394,7 @@ def test_shell_execute_cli_timeout(
 
 
 def test_shell_execute_cli_missing_binary(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1575,7 +1575,7 @@ def test_truncate_stream_marks_output() -> None:
 
 
 def test_workspace_reuse_between_calls(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1605,7 +1605,7 @@ def test_workspace_reuse_between_calls(
 def test_touch_workspace_handles_missing_handle(
     tmp_path: Path,
 ) -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = _make_section(
         session=session, client=_FakePodmanClient(), cache_dir=tmp_path
@@ -1614,7 +1614,7 @@ def test_touch_workspace_handles_missing_handle(
 
 
 def test_readiness_failure_raises(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1633,7 +1633,7 @@ def test_readiness_failure_raises(
 
 
 def test_shell_execute_truncates_output(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1685,7 +1685,7 @@ def test_podman_shell_result_renders_human_readable() -> None:
 
 
 def test_evaluate_python_runs_script_passthrough(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1737,7 +1737,7 @@ def test_evaluate_python_runs_script_passthrough(
 
 
 def test_evaluate_python_accepts_large_scripts(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1776,7 +1776,7 @@ def test_evaluate_python_accepts_large_scripts(
 
 
 def test_evaluate_python_rejects_control_characters(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1793,7 +1793,7 @@ def test_evaluate_python_rejects_control_characters(
 
 
 def test_evaluate_python_marks_failure_on_nonzero_exit(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1828,7 +1828,7 @@ def test_evaluate_python_marks_failure_on_nonzero_exit(
 
 
 def test_evaluate_python_reports_timeout(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1863,7 +1863,7 @@ def test_evaluate_python_reports_timeout(
 
 
 def test_evaluate_python_missing_cli_raises(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1882,7 +1882,7 @@ def test_evaluate_python_missing_cli_raises(
 
 
 def test_evaluate_python_truncates_streams(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1921,7 +1921,7 @@ def test_evaluate_python_truncates_streams(
 
 
 def test_evaluate_python_rejects_reads_writes_and_globals(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -1959,7 +1959,7 @@ def test_evaluate_python_rejects_reads_writes_and_globals(
 
 
 def test_ls_lists_workspace_files(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -1982,7 +1982,7 @@ def test_ls_lists_workspace_files(
 
 
 def test_read_file_returns_numbered_lines(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2005,7 +2005,7 @@ def test_read_file_returns_numbered_lines(
 
 
 def test_write_via_container_appends_existing_content(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2056,7 +2056,7 @@ def test_write_via_container_appends_existing_content(
 
 
 def test_write_via_container_reports_mkdir_failure(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2103,7 +2103,7 @@ def test_write_via_container_reports_mkdir_failure(
 
 
 def test_write_via_container_rejects_non_utf8_append(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2140,7 +2140,7 @@ def test_write_via_container_rejects_non_utf8_append(
 
 
 def test_write_via_container_propagates_read_oserror(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2189,7 +2189,7 @@ def test_write_via_container_propagates_read_oserror(
 
 
 def test_glob_matches_files(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2212,7 +2212,7 @@ def test_glob_matches_files(
 
 
 def test_grep_finds_pattern(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2233,7 +2233,7 @@ def test_grep_finds_pattern(
 
 
 def test_exec_runner_property_exposes_runner(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2249,7 +2249,7 @@ def test_exec_runner_property_exposes_runner(
 
 
 def test_run_python_script_delegates_to_run_cli_exec(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2309,7 +2309,7 @@ def test_assert_within_overlay_handles_missing_paths(
 
 
 def test_ls_rejects_file_path(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2329,7 +2329,7 @@ def test_ls_rejects_file_path(
 
 
 def test_read_file_missing_path(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2346,7 +2346,7 @@ def test_read_file_missing_path(
 
 
 def test_read_file_rejects_invalid_encoding(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2366,7 +2366,7 @@ def test_read_file_rejects_invalid_encoding(
 
 
 def test_write_file_rejects_existing_file(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2392,7 +2392,7 @@ def test_write_file_rejects_existing_file(
 
 
 def test_edit_file_rejects_long_strings(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2424,7 +2424,7 @@ def test_edit_file_rejects_long_strings(
 
 
 def test_edit_file_missing_path(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2445,7 +2445,7 @@ def test_edit_file_missing_path(
 
 
 def test_edit_file_rejects_invalid_encoding(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2475,7 +2475,7 @@ def test_edit_file_rejects_invalid_encoding(
 
 
 def test_edit_file_requires_occurrence(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2505,7 +2505,7 @@ def test_edit_file_requires_occurrence(
 
 
 def test_edit_file_requires_unique_match(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2535,7 +2535,7 @@ def test_edit_file_requires_unique_match(
 
 
 def test_edit_file_replace_all_branch(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2565,7 +2565,7 @@ def test_edit_file_replace_all_branch(
 
 
 def test_glob_rejects_empty_pattern(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2582,7 +2582,7 @@ def test_glob_rejects_empty_pattern(
 
 
 def test_grep_rejects_invalid_regex(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2601,7 +2601,7 @@ def test_grep_rejects_invalid_regex(
 
 
 def test_grep_honors_glob_argument(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2624,7 +2624,7 @@ def test_grep_honors_glob_argument(
 
 
 def test_grep_supports_default_path(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2648,7 +2648,7 @@ def test_grep_supports_default_path(
 
 
 def test_grep_respects_glob_filter(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2667,7 +2667,7 @@ def test_grep_respects_glob_filter(
 
 
 def test_grep_ignores_blank_glob(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2691,7 +2691,7 @@ def test_grep_ignores_blank_glob(
 
 
 def test_grep_skips_invalid_file_encoding(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -2715,7 +2715,7 @@ def test_grep_skips_invalid_file_encoding(
 
 def test_grep_handles_oserror(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -2751,7 +2751,7 @@ def test_grep_handles_oserror(
 
 def test_grep_honors_result_limit(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -2775,7 +2775,7 @@ def test_grep_honors_result_limit(
 
 
 def test_grep_skips_binary_and_collects_match(
-    session_and_bus: tuple[Session, InProcessEventBus], tmp_path: Path
+    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     session, _bus = session_and_bus
     client = _FakePodmanClient()
@@ -2805,7 +2805,7 @@ def test_grep_skips_binary_and_collects_match(
 
 def test_remove_rejects_root_and_missing(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -2852,7 +2852,7 @@ def test_remove_rejects_root_and_missing(
 
 def test_write_via_container_handles_cli_failures(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     session, _bus = session_and_bus
@@ -2875,7 +2875,7 @@ def test_write_via_container_handles_cli_failures(
 
 def test_write_via_container_skips_mkdir_for_root_level_file(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     """Test branch 1285->1296: skip mkdir when parent is '/' (empty VfsPath)."""
@@ -2935,7 +2935,7 @@ def test_tools_module_missing_attr_raises() -> None:
 
 
 def test_section_init_with_overlay_path_and_filesystem(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     """Test that PodmanSandboxSection accepts _overlay_path and _filesystem for cloning."""
@@ -2951,7 +2951,7 @@ def test_section_init_with_overlay_path_and_filesystem(
     _ = fs.write("test_file.txt", "test content")
 
     # Create new session for clone
-    new_bus = InProcessEventBus()
+    new_bus = InProcessDispatcher()
     new_session = Session(bus=new_bus)
 
     # Create a new section with the preserved overlay path and filesystem

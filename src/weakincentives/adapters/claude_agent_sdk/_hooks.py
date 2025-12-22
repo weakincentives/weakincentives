@@ -391,7 +391,7 @@ def create_post_tool_use_hook(
             rendered_output=data.output_text[:1000] if data.output_text else "",
             call_id=tool_use_id,
         )
-        hook_context.session.event_bus.publish(event)
+        hook_context.session.dispatcher.dispatch(event)
 
         logger.debug(
             "claude_agent_sdk.hook.tool_invoked",
@@ -565,7 +565,7 @@ def create_subagent_start_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session.broadcast(notification)
+        hook_context.session.dispatch(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_start",
@@ -613,7 +613,7 @@ def create_subagent_stop_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session.broadcast(notification)
+        hook_context.session.dispatch(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
@@ -658,7 +658,7 @@ def create_pre_compact_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session.broadcast(notification)
+        hook_context.session.dispatch(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.pre_compact",
@@ -703,7 +703,7 @@ def create_notification_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session.broadcast(notification)
+        hook_context.session.dispatch(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.notification",

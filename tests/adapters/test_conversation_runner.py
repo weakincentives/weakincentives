@@ -48,11 +48,11 @@ from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import (
-    EventBus,
+    Dispatcher,
+    DispatchResult,
     HandlerFailure,
     PromptExecuted,
     PromptRendered,
-    PublishResult,
     TokenUsage,
     ToolInvoked,
 )
@@ -80,7 +80,7 @@ class DummyAdapter(ProviderAdapter[object]):
         self,
         prompt: Prompt[object],
         *,
-        bus: EventBus,
+        bus: Dispatcher,
         session: SessionProtocol | None = None,
         deadline: Deadline | None = None,
     ) -> PromptResponse[object]:
@@ -118,7 +118,7 @@ def serialize_tool_message(
     return {"message": result.message, "payload": payload}
 
 
-class RecordingBus(EventBus):
+class RecordingBus(Dispatcher):
     def __init__(
         self,
         *,
@@ -137,23 +137,23 @@ class RecordingBus(EventBus):
     ) -> None:  # pragma: no cover - unused
         self.subscriptions.append((event_type, handler))
 
-    def publish(self, event: object) -> PublishResult:
+    def dispatch(self, event: object) -> DispatchResult:
         self.events.append(event)
         if self.fail_rendered and isinstance(event, PromptRendered):
-            return self._failure_result(event, "prompt rendered publish failure")
+            return self._failure_result(event, "prompt rendered dispatch failure")
         if self.fail_tool and isinstance(event, ToolInvoked):
             return self._failure_result(event, "reducer failure")
         if self.fail_prompt and isinstance(event, PromptExecuted):
-            return self._failure_result(event, "prompt publish failure")
-        return PublishResult(event=event, handlers_invoked=(), errors=())
+            return self._failure_result(event, "prompt dispatch failure")
+        return DispatchResult(event=event, handlers_invoked=(), errors=())
 
     @staticmethod
-    def _failure_result(event: object, message: str) -> PublishResult:
+    def _failure_result(event: object, message: str) -> DispatchResult:
         def failure_handler(_event: object) -> None:  # pragma: no cover - defensive
             return None
 
         failure = HandlerFailure(handler=failure_handler, error=RuntimeError(message))
-        return PublishResult(
+        return DispatchResult(
             event=event,
             handlers_invoked=(failure_handler,),
             errors=(failure,),
@@ -261,14 +261,14 @@ class StructuredOutput:
 
 
 class SessionStub(SessionProtocol):
-    def __init__(self, *, event_bus: EventBus | None = None) -> None:
+    def __init__(self, *, dispatcher: Dispatcher | None = None) -> None:
         self.snapshots: list[SnapshotProtocol] = []
         self.restores: list[SnapshotProtocol] = []
-        self._event_bus = event_bus or RecordingBus()
+        self._dispatcher = dispatcher or RecordingBus()
 
     @property
-    def event_bus(self) -> EventBus:
-        return self._event_bus
+    def dispatcher(self) -> Dispatcher:
+        return self._dispatcher
 
     def snapshot(
         self,
@@ -561,13 +561,13 @@ def test_inner_loop_raises_on_prompt_publish_failure() -> None:
     with pytest.raises(ExceptionGroup) as exc_info:
         loop.run()
 
-    assert "prompt publish failure" in str(exc_info.value)
+    assert "prompt dispatch failure" in str(exc_info.value)
     assert isinstance(bus.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
 
 
-def test_inner_loop_formats_tool_publish_failures() -> None:
-    """Test that InnerLoop formats publish failures for tools."""
+def test_inner_loop_formats_tool_dispatch_failures() -> None:
+    """Test that InnerLoop formats dispatch failures for tools."""
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
         description="Echo the provided value.",
@@ -587,8 +587,8 @@ def test_inner_loop_formats_tool_publish_failures() -> None:
     assert "Reducer errors prevented applying tool result" in failure_message
 
 
-def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:
-    """Test that InnerLoop rolls back session on tool publish failure."""
+def test_inner_loop_rolls_back_on_tool_dispatch_failure() -> None:
+    """Test that InnerLoop rolls back session on tool dispatch failure."""
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
         description="Echo the provided value.",
@@ -596,7 +596,7 @@ def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:
     )
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
-    session = SessionStub(event_bus=RecordingBus(fail_tool=True))
+    session = SessionStub(dispatcher=RecordingBus(fail_tool=True))
     execution_state = ExecutionState(session=session)
 
     loop = build_inner_loop(

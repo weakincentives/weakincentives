@@ -218,7 +218,7 @@ class PromptOptimizer(Protocol[InputT, OutputT]):
 @dataclass(slots=True, frozen=True)
 class OptimizationContext:
     adapter: ProviderAdapter[object]
-    event_bus: EventBus
+    dispatcher: Dispatcher
     deadline: Deadline | None = None
     overrides_store: PromptOverridesStore | None = None
     overrides_tag: str = "latest"
@@ -316,7 +316,7 @@ from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
 
 context = OptimizationContext(
     adapter=adapter,
-    event_bus=bus,
+    dispatcher=bus,
     overrides_store=store,
 )
 
@@ -360,7 +360,7 @@ Optimizers define event types for observability:
 - `OptimizationCompleted` - Result summary on success
 - `OptimizationFailed` - Error context on exception
 
-Note: Event publishing is available through `OptimizationContext.event_bus` but
+Note: Event publishing is available through `OptimizationContext.dispatcher` but
 optimizers must explicitly emit events in their implementations.
 
 ## Limitations
