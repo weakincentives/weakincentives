@@ -246,22 +246,22 @@ class BridgedTool:
             rendered = result.render()
             output_text = rendered if rendered else result.message
 
-        # Publish ToolInvoked event with the actual tool result value
+        # Dispatch ToolInvoked event with the actual tool result value
         # This enables session reducers to dispatch based on the value type
-        self._publish_tool_invoked(args, result, output_text)
+        self._dispatch_tool_invoked(args, result, output_text)
 
         return {
             "content": [{"type": "text", "text": output_text}],
             "isError": not result.success,
         }
 
-    def _publish_tool_invoked(
+    def _dispatch_tool_invoked(
         self,
         args: dict[str, Any],
         result: ToolResult[Any],
         rendered_output: str,
     ) -> None:
-        """Publish a ToolInvoked event for session reducer dispatch.
+        """Dispatch a ToolInvoked event for session reducer dispatch.
 
         The session extracts the value from result.value for slice routing.
         """
@@ -303,8 +303,8 @@ def create_bridged_tools(
         rendered_prompt: Rendered prompt for tool context.
         deadline: Optional deadline for tool context.
         budget_tracker: Optional budget tracker for tool context.
-        adapter_name: Name of the adapter for event publishing.
-        prompt_name: Name of the prompt for event publishing.
+        adapter_name: Name of the adapter for event dispatching.
+        prompt_name: Name of the prompt for event dispatching.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.

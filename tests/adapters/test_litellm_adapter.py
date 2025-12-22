@@ -43,7 +43,7 @@ from weakincentives.adapters.response_parser import (
     parse_schema_constrained_payload,
     parsed_payload_from_part,
 )
-from weakincentives.adapters.utilities import format_publish_failures
+from weakincentives.adapters.utilities import format_dispatch_failures
 from weakincentives.prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     StructuredOutputConfig,
@@ -562,12 +562,12 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
     assert prompt_result.output == StructuredAnswer(answer="Policy summary")
 
 
-def test_litellm_format_publish_failures_handles_defaults() -> None:
+def test_litellm_format_dispatch_failures_handles_defaults() -> None:
     failure = HandlerFailure(handler=lambda _: None, error=RuntimeError(""))
-    message = format_publish_failures((failure,))
+    message = format_dispatch_failures((failure,))
     assert message == "Reducer errors prevented applying tool result: RuntimeError"
     assert (
-        format_publish_failures(()) == "Reducer errors prevented applying tool result."
+        format_dispatch_failures(()) == "Reducer errors prevented applying tool result."
     )
 
 

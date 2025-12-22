@@ -38,8 +38,8 @@ from weakincentives.adapters.tool_executor import (
     ToolExecutionContext,
     ToolExecutionOutcome,
     ToolExecutor,
+    dispatch_tool_invocation,
     parse_tool_params,
-    publish_tool_invocation,
 )
 from weakincentives.adapters.utilities import (
     extract_payload,
@@ -194,7 +194,7 @@ def test_tool_executor_success() -> None:
         execution_state=execution_state,
         tool_registry=tool_registry,
         serialize_tool_message_fn=serialize_tool_message,
-        format_publish_failures=lambda x: "",
+        format_dispatch_failures=lambda x: "",
         parse_arguments=parse_tool_arguments,
     )
 
@@ -215,7 +215,7 @@ def test_tool_executor_success() -> None:
     assert len(executor.tool_message_records) == 1
 
 
-def testpublish_tool_invocation_attaches_usage() -> None:
+def testdispatch_tool_invocation_attaches_usage() -> None:
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
         description="Echo",
@@ -242,7 +242,7 @@ def testpublish_tool_invocation_attaches_usage() -> None:
         execution_state=execution_state,
         prompt_name="test",
         parse_arguments=parse_tool_arguments,
-        format_publish_failures=lambda errors: "",
+        format_dispatch_failures=lambda errors: "",
         deadline=None,
     ).with_provider_payload(
         {
@@ -264,7 +264,7 @@ def testpublish_tool_invocation_attaches_usage() -> None:
         snapshot=snapshot,
     )
 
-    invocation = publish_tool_invocation(context=context, outcome=outcome)
+    invocation = dispatch_tool_invocation(context=context, outcome=outcome)
 
     tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
 
@@ -379,7 +379,7 @@ def test_tool_executor_raises_when_deadline_expired(
         execution_state=execution_state,
         tool_registry=tool_registry,
         serialize_tool_message_fn=serialize_tool_message,
-        format_publish_failures=lambda x: "",
+        format_dispatch_failures=lambda x: "",
         parse_arguments=parse_tool_arguments,
         deadline=deadline,
     )
@@ -551,7 +551,7 @@ class TestToolExecutionFilesystemIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -615,7 +615,7 @@ class TestToolExecutionFilesystemIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -676,7 +676,7 @@ class TestToolExecutionFilesystemIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -737,7 +737,7 @@ class TestToolExecutionFilesystemIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -753,7 +753,7 @@ class TestToolExecutionFilesystemIntegration:
 
 
 class TestPublishInvocationFilesystemRestore:
-    """Tests for filesystem restore in publish_tool_invocation."""
+    """Tests for filesystem restore in dispatch_tool_invocation."""
 
     def test_filesystem_restored_on_publish_failure(self) -> None:
         """Verify filesystem is restored when event publishing fails."""
@@ -815,7 +815,7 @@ class TestPublishInvocationFilesystemRestore:
             execution_state=execution_state,
             prompt_name="test",
             parse_arguments=parse_tool_arguments,
-            format_publish_failures=lambda errors: "publish failed",
+            format_dispatch_failures=lambda errors: "publish failed",
             deadline=None,
         )
 
@@ -828,7 +828,7 @@ class TestPublishInvocationFilesystemRestore:
             snapshot=composite_snapshot,
         )
 
-        publish_tool_invocation(context=context, outcome=outcome)
+        dispatch_tool_invocation(context=context, outcome=outcome)
 
         # Filesystem should be restored because publish failed and tool succeeded
         assert fs.read("/test.txt").content == "before_tool"
@@ -896,7 +896,7 @@ class TestPublishInvocationFilesystemRestore:
             execution_state=execution_state,
             prompt_name="test",
             parse_arguments=parse_tool_arguments,
-            format_publish_failures=lambda errors: "publish failed",
+            format_dispatch_failures=lambda errors: "publish failed",
             deadline=None,
         )
 
@@ -909,7 +909,7 @@ class TestPublishInvocationFilesystemRestore:
             snapshot=composite_snapshot,
         )
 
-        publish_tool_invocation(context=context, outcome=outcome)
+        dispatch_tool_invocation(context=context, outcome=outcome)
 
         # Restore should NOT have been called since tool.success=False
         assert fs.restore_called is False
@@ -992,7 +992,7 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1060,7 +1060,7 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1132,7 +1132,7 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1200,7 +1200,7 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1267,7 +1267,7 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1335,7 +1335,7 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1410,7 +1410,7 @@ class TestHostFilesystemToolIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1474,7 +1474,7 @@ class TestHostFilesystemToolIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1539,7 +1539,7 @@ class TestHostFilesystemToolIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
+            format_dispatch_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 

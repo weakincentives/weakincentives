@@ -37,7 +37,7 @@ from weakincentives.adapters.tool_executor import (
     tool_execution,
 )
 from weakincentives.adapters.utilities import (
-    format_publish_failures,
+    format_dispatch_failures,
     parse_tool_arguments,
 )
 from weakincentives.deadlines import Deadline
@@ -95,7 +95,7 @@ def _base_context(
         execution_state=execution_state,
         prompt_name=cast(str, prompt.name),
         parse_arguments=parse_tool_arguments,
-        format_publish_failures=format_publish_failures,
+        format_dispatch_failures=format_dispatch_failures,
         deadline=deadline,
         provider_payload={},
     )

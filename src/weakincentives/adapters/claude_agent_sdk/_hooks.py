@@ -348,7 +348,7 @@ def create_post_tool_use_hook(
 ) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording and state rollback.
 
-    The hook publishes ToolInvoked events to the session bus. It attempts to
+    The hook dispatches ToolInvoked events to the session dispatcher. It attempts to
     parse the input data into typed dataclasses (PostToolUseInput, ToolResponse)
     for better type safety, falling back to dict access if parsing fails.
 
@@ -372,7 +372,7 @@ def create_post_tool_use_hook(
         _ = sdk_context
         data = _parse_tool_data(input_data)
 
-        # Skip logging for MCP-bridged WINK tools - they publish their own
+        # Skip logging for MCP-bridged WINK tools - they dispatch their own
         # ToolInvoked events via BridgedTool with richer context (typed values).
         if data.tool_name.startswith("mcp__wink__"):
             return {}

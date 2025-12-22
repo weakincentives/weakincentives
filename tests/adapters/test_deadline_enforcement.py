@@ -45,7 +45,7 @@ from weakincentives.adapters.tool_executor import (
 from weakincentives.adapters.utilities import (
     ToolChoice,
     deadline_provider_payload,
-    format_publish_failures,
+    format_dispatch_failures,
     parse_tool_arguments,
     raise_tool_deadline_error,
 )
@@ -109,7 +109,7 @@ def _tool_context(
         execution_state=execution_state,
         prompt_name=prompt_name,
         parse_arguments=parse_tool_arguments,
-        format_publish_failures=format_publish_failures,
+        format_dispatch_failures=format_dispatch_failures,
         deadline=deadline,
         provider_payload=provider_payload,
     )
@@ -339,7 +339,7 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
         call_provider=call_provider,
         select_choice=select_choice,
         serialize_tool_message_fn=lambda *_args, **_kwargs: {},
-        format_publish_failures=format_publish_failures,
+        format_dispatch_failures=format_dispatch_failures,
         parse_arguments=parse_tool_arguments,
         deadline=deadline,
     )

@@ -69,7 +69,7 @@ from .utilities import (
     ToolChoice,
     deadline_provider_payload,
     extract_payload,
-    format_publish_failures,
+    format_dispatch_failures,
     parse_tool_arguments,
     serialize_tool_call,
     token_usage_from_payload,
@@ -130,8 +130,8 @@ class InnerLoopConfig:
     call_provider: ProviderCall
     select_choice: ChoiceSelector
     serialize_tool_message_fn: ToolMessageSerializer
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
-        format_publish_failures
+    format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str] = (
+        format_dispatch_failures
     )
     parse_arguments: ToolArgumentsParser = parse_tool_arguments
     logger_override: StructuredLogger | None = None
@@ -368,7 +368,7 @@ class InnerLoop[OutputT]:
             execution_state=self.config.execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=self.config.serialize_tool_message_fn,
-            format_publish_failures=self.config.format_publish_failures,
+            format_dispatch_failures=self.config.format_dispatch_failures,
             parse_arguments=self.config.parse_arguments,
             logger_override=self.config.logger_override,
             deadline=self._deadline,
@@ -380,10 +380,10 @@ class InnerLoop[OutputT]:
             require_structured_output_text=self.config.require_structured_output_text,
         )
 
-        self._publish_rendered_event()
+        self._dispatch_rendered_event()
 
-    def _publish_rendered_event(self) -> None:
-        """Publish the PromptRendered event."""
+    def _dispatch_rendered_event(self) -> None:
+        """Dispatch the PromptRendered event."""
 
         dispatch_result = self.config.session.dispatcher.dispatch(
             PromptRendered(
@@ -447,7 +447,7 @@ class InnerLoop[OutputT]:
             self._next_tool_choice = next_choice
 
     def _finalize_response(self, message: ProviderMessage) -> PromptResponse[OutputT]:
-        """Assemble and publish the final prompt response."""
+        """Assemble and dispatch the final prompt response."""
 
         self._ensure_deadline_remaining(
             "Deadline expired while finalizing provider response.",
@@ -481,14 +481,14 @@ class InnerLoop[OutputT]:
             output=output,
         )
 
-        self._publish_executed_event(response_payload)
+        self._dispatch_executed_event(response_payload)
 
         return response_payload
 
-    def _publish_executed_event(
+    def _dispatch_executed_event(
         self, response_payload: PromptResponse[OutputT]
     ) -> None:
-        """Publish the PromptExecuted event."""
+        """Dispatch the PromptExecuted event."""
 
         usage = token_usage_from_payload(self._provider_payload)
 

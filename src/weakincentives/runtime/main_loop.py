@@ -69,7 +69,7 @@ class MainLoopRequest[UserRequestT]:
 
 @FrozenDataclass()
 class MainLoopCompleted[OutputT]:
-    """Event published when MainLoop execution succeeds."""
+    """Event dispatched when MainLoop execution succeeds."""
 
     request_id: UUID
     response: PromptResponse[OutputT]
@@ -79,7 +79,7 @@ class MainLoopCompleted[OutputT]:
 
 @FrozenDataclass()
 class MainLoopFailed:
-    """Event published when MainLoop execution fails."""
+    """Event dispatched when MainLoop execution fails."""
 
     request_id: UUID
     error: Exception
@@ -91,7 +91,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
     """Abstract orchestrator for agent workflow execution.
 
     MainLoop standardizes agent workflow orchestration: receive request, build
-    prompt, evaluate, handle visibility expansion, publish result. Implementations
+    prompt, evaluate, handle visibility expansion, dispatch result. Implementations
     define only the domain-specific factories via ``create_prompt`` and
     ``create_session``.
 
@@ -250,7 +250,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
             bus.subscribe(MainLoopRequest, loop.handle_request)
 
-        On success, publishes ``MainLoopCompleted``. On failure, publishes
+        On success, dispatches ``MainLoopCompleted``. On failure, dispatches
         ``MainLoopFailed`` and re-raises the exception.
 
         Args:

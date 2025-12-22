@@ -64,7 +64,7 @@ type TelemetryDispatcher = Dispatcher
 
 @FrozenDataclass()
 class HandlerFailure:
-    """Container describing a handler error captured during publish."""
+    """Container describing a handler error captured during dispatch."""
 
     handler: EventHandler
     error: BaseException

@@ -108,7 +108,7 @@ class ToolExecutionContext:
     execution_state: ExecutionState
     prompt_name: str
     parse_arguments: ToolArgumentsParser
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
+    format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str]
     deadline: Deadline | None
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
@@ -506,12 +506,12 @@ def tool_execution(
         )
 
 
-def publish_tool_invocation(
+def dispatch_tool_invocation(
     *,
     context: ToolExecutionContext,
     outcome: ToolExecutionOutcome,
 ) -> ToolInvoked:
-    """Dispatch a tool invocation event to the session dispatcher."""
+    """Send a tool invocation event to the session dispatcher."""
     session_id = getattr(context.session, "session_id", None)
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
@@ -537,11 +537,11 @@ def publish_tool_invocation(
                 context.execution_state,
                 outcome.snapshot,
                 outcome.log,
-                reason="publish_failure",
+                reason="dispatch_failure",
             )
         outcome.log.warning(
-            "State rollback triggered after publish failure.",
-            event="state_rollback_due_to_publish_failure",
+            "State rollback triggered after dispatch failure.",
+            event="state_rollback_due_to_dispatch_failure",
         )
         failure_handlers = [
             getattr(failure.handler, "__qualname__", repr(failure.handler))
@@ -555,7 +555,9 @@ def publish_tool_invocation(
                 "failed_handlers": failure_handlers,
             },
         )
-        outcome.result.message = context.format_publish_failures(dispatch_result.errors)
+        outcome.result.message = context.format_dispatch_failures(
+            dispatch_result.errors
+        )
     else:
         outcome.log.debug(
             "Tool event dispatched.",
@@ -570,13 +572,13 @@ def execute_tool_call(
     context: ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
-    """Execute a provider tool call and publish the resulting event."""
+    """Execute a provider tool call and dispatch the resulting event."""
 
     with tool_execution(
         context=context,
         tool_call=tool_call,
     ) as outcome:
-        invocation = publish_tool_invocation(
+        invocation = dispatch_tool_invocation(
             context=context,
             outcome=outcome,
         )
@@ -585,7 +587,7 @@ def execute_tool_call(
 
 @dataclass(slots=True)
 class ToolExecutor:
-    """Handles execution of tool calls and event publishing.
+    """Handles execution of tool calls and event dispatching.
 
     The execution_state provides unified access to session and resources.
     Session is accessed via execution_state.session.
@@ -599,7 +601,7 @@ class ToolExecutor:
     execution_state: ExecutionState
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
     serialize_tool_message_fn: ToolMessageSerializer
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
+    format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str]
     parse_arguments: ToolArgumentsParser
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
@@ -624,7 +626,7 @@ class ToolExecutor:
             execution_state=self.execution_state,
             prompt_name=self.prompt_name,
             parse_arguments=self.parse_arguments,
-            format_publish_failures=self.format_publish_failures,
+            format_dispatch_failures=self.format_dispatch_failures,
             deadline=self.deadline,
             logger_override=self.logger_override,
             budget_tracker=self.budget_tracker,
@@ -660,7 +662,7 @@ class ToolExecutor:
                 context=execution_context,
                 tool_call=tool_call,
             ) as outcome:
-                _ = publish_tool_invocation(
+                _ = dispatch_tool_invocation(
                     context=execution_context,
                     outcome=outcome,
                 )
@@ -687,7 +689,7 @@ __all__ = [
     "ToolExecutionOutcome",
     "ToolExecutor",
     "ToolMessageSerializer",
+    "dispatch_tool_invocation",
     "execute_tool_call",
-    "publish_tool_invocation",
     "tool_execution",
 ]
