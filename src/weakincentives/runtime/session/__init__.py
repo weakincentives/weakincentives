@@ -39,9 +39,19 @@ from .state_slice import (
     install_state_slice,
     reducer,
 )
+from .visibility_overrides import (
+    ClearAllVisibilityOverrides,
+    ClearVisibilityOverride,
+    SetVisibilityOverride,
+    VisibilityOverrides,
+    get_session_visibility_override,
+    register_visibility_reducers,
+)
 
 __all__ = [
     "DEFAULT_SNAPSHOT_POLICIES",
+    "ClearAllVisibilityOverrides",
+    "ClearVisibilityOverride",
     "DataEvent",
     "ReducerContext",
     "ReducerContextProtocol",
@@ -49,6 +59,7 @@ __all__ = [
     "ReducerMeta",
     "Session",
     "SessionProtocol",
+    "SetVisibilityOverride",
     "SliceAccessor",
     "SliceObserver",
     "SlicePolicy",
@@ -58,11 +69,14 @@ __all__ = [
     "SnapshotSerializationError",
     "Subscription",
     "TypedReducer",
+    "VisibilityOverrides",
     "append_all",
     "build_reducer_context",
+    "get_session_visibility_override",
     "install_state_slice",
     "iter_sessions_bottom_up",
     "reducer",
+    "register_visibility_reducers",
     "replace_latest",
     "replace_latest_by",
     "upsert_by",

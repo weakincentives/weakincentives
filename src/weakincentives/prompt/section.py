@@ -318,7 +318,9 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
         # Check session state for override if no explicit override provided
         if visibility is None and session is not None and path is not None:
-            from .visibility_overrides import get_session_visibility_override
+            from ..runtime.session.visibility_overrides import (
+                get_session_visibility_override,
+            )
 
             visibility = get_session_visibility_override(session, path)
 

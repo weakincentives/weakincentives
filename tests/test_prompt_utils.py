@@ -175,8 +175,8 @@ def test_workspace_digest_section_render_override_respects_visibility() -> None:
 
 def test_workspace_digest_section_render_override_with_full_visibility() -> None:
     """render_override returns full body when visibility is set to FULL."""
-    from weakincentives.prompt.visibility_overrides import (
-        SectionVisibility,
+    from weakincentives.prompt._visibility import SectionVisibility
+    from weakincentives.runtime.session.visibility_overrides import (
         SetVisibilityOverride,
     )
 

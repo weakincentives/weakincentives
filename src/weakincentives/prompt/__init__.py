@@ -14,6 +14,14 @@
 
 from __future__ import annotations
 
+from ..runtime.session.visibility_overrides import (
+    ClearAllVisibilityOverrides,
+    ClearVisibilityOverride,
+    SetVisibilityOverride,
+    VisibilityOverrides,
+    get_session_visibility_override,
+    register_visibility_reducers,
+)
 from ._types import ToolRenderableResult
 from .errors import (
     PromptError,
@@ -59,14 +67,6 @@ from .structured_output import (
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
 from .tool import ResourceRegistry, Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
-from .visibility_overrides import (
-    ClearAllVisibilityOverrides,
-    ClearVisibilityOverride,
-    SetVisibilityOverride,
-    VisibilityOverrides,
-    get_session_visibility_override,
-    register_visibility_reducers,
-)
 
 __all__ = [
     "ClearAllVisibilityOverrides",
