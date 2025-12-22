@@ -209,21 +209,27 @@ ______________________________________________________________________
    1. [Dumping snapshots to JSONL](#113-dumping-snapshots-to-jsonl)
    1. [The debug UI](#114-the-debug-ui)
 1. [Testing and reliability](#12-testing-and-reliability)
-1. [Recipes](#13-recipes)
-   1. [A code-review agent](#131-a-code-review-agent)
-   1. [A repo Q&A agent](#132-a-repo-qa-agent)
-   1. [A "safe patch" agent](#133-a-safe-patch-agent)
-   1. [A research agent with progressive disclosure](#134-a-research-agent-with-progressive-disclosure)
-1. [Troubleshooting](#14-troubleshooting)
-1. [API reference](#15-api-reference)
-   1. [Top-level exports](#151-top-level-exports)
-   1. [weakincentives.prompt](#152-weakincentivesprompt)
-   1. [weakincentives.runtime](#153-weakincentivesruntime)
-   1. [weakincentives.adapters](#154-weakincentivesadapters)
-   1. [weakincentives.contrib.tools](#155-weakincentivescontribtools)
-   1. [weakincentives.optimizers](#156-weakincentivesoptimizers)
-   1. [weakincentives.serde](#157-weakincentivesserde)
-   1. [CLI](#158-cli)
+1. [Approach to code quality](#13-approach-to-code-quality)
+   1. [Strict type checking](#131-strict-type-checking)
+   1. [Design-by-contract](#132-design-by-contract)
+   1. [Coverage and mutation testing](#133-coverage-and-mutation-testing)
+   1. [Security scanning](#134-security-scanning)
+   1. [Quality gates in practice](#135-quality-gates-in-practice)
+1. [Recipes](#14-recipes)
+   1. [A code-review agent](#141-a-code-review-agent)
+   1. [A repo Q&A agent](#142-a-repo-qa-agent)
+   1. [A "safe patch" agent](#143-a-safe-patch-agent)
+   1. [A research agent with progressive disclosure](#144-a-research-agent-with-progressive-disclosure)
+1. [Troubleshooting](#15-troubleshooting)
+1. [API reference](#16-api-reference)
+   1. [Top-level exports](#161-top-level-exports)
+   1. [weakincentives.prompt](#162-weakincentivesprompt)
+   1. [weakincentives.runtime](#163-weakincentivesruntime)
+   1. [weakincentives.adapters](#164-weakincentivesadapters)
+   1. [weakincentives.contrib.tools](#165-weakincentivescontribtools)
+   1. [weakincentives.optimizers](#166-weakincentivesoptimizers)
+   1. [weakincentives.serde](#167-weakincentivesserde)
+   1. [CLI](#168-cli)
 
 ______________________________________________________________________
 
@@ -1900,12 +1906,178 @@ expected. When prompts are deterministic, you can test them like regular code.
 
 ______________________________________________________________________
 
-## 13. Recipes
+## 13. Approach to code quality
+
+WINK applies strict quality gates that go beyond typical Python projects. These
+gates exist because agent code has unusual failure modes: type mismatches
+surface mid-conversation, subtle bugs can cause cascading failures across tool
+calls, and security vulnerabilities in tool handlers can have serious
+consequences.
+
+The gates aren't bureaucracy—they're aligned with the "weak incentives"
+philosophy. Just as we design prompts to make correct model behavior natural,
+we design the codebase to make correct code natural. Strict types catch errors
+at construction time. Contracts document and enforce invariants. Coverage and
+mutation testing ensure tests actually verify behavior.
+
+### 13.1 Strict type checking
+
+WINK enforces pyright strict mode. Type annotations are the source of truth:
+
+```python
+# Pyright catches this at edit time, not runtime
+def handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
+    return ToolResult(message="ok", value=None)  # Error: expected MyResult, got None
+```
+
+**Why this matters for agents:**
+
+- Tool params and results are serialized/deserialized automatically. Type
+  mismatches that would cause runtime failures are caught at construction.
+- Session slices are keyed by type. A typo in a type annotation silently
+  creates a separate slice.
+- Adapters use type information to generate JSON schemas. Wrong types mean
+  wrong schemas sent to the model.
+
+**Practical implications:**
+
+- Every function has type annotations
+- Use `slots=True, frozen=True` dataclasses for immutable data
+- Avoid `Any` except where truly necessary
+- Run `make typecheck` (or your IDE's type checker) frequently
+
+### 13.2 Design-by-contract
+
+Public APIs use decorators from `weakincentives.dbc`:
+
+```python
+from weakincentives.dbc import require, ensure, invariant, pure
+
+@require(lambda x: x > 0, "x must be positive")
+@ensure(lambda result: result >= 0, "result must be non-negative")
+def compute(x: int) -> int:
+    ...
+
+@pure  # Marks function as having no side effects
+def render_template(template: str, params: dict) -> str:
+    ...
+```
+
+**What the decorators do:**
+
+- `@require`: precondition checked on entry
+- `@ensure`: postcondition checked on exit
+- `@invariant`: class invariant checked after each method
+- `@pure`: documents (and can verify) side-effect-free functions
+
+**Why this matters for agents:**
+
+- Contracts document expectations that types can't express ("non-empty list",
+  "valid path", "positive budget")
+- Violations fail fast with clear messages, not silently corrupted state
+- The `@pure` marker identifies deterministic functions—important for
+  understanding what can be snapshotted/replayed
+
+**When to use contracts:**
+
+- Public API boundaries
+- Tool handlers (validate params beyond type checking)
+- Reducers (invariants on state transitions)
+- Anywhere a comment would say "assumes X" or "requires Y"
+
+Read `specs/DBC.md` before modifying DbC-decorated modules.
+
+### 13.3 Coverage and mutation testing
+
+WINK requires 100% line coverage for `src/weakincentives/`. But coverage alone
+is insufficient—a test can execute a line without verifying its behavior.
+
+Mutation testing fills this gap. Mutmut modifies source code (e.g., changes
+`>` to `>=`, removes lines) and checks if tests catch the mutation. A high
+mutation score means tests actually verify behavior, not just execute it.
+
+**Requirements:**
+
+- 100% line coverage (enforced by pytest-cov)
+- 80% mutation score for hotspots (`runtime/session/`, `serde/`)
+
+**Hotspot rationale:**
+
+Session state and serialization are correctness-critical. A bug in session
+snapshot/restore can corrupt agent state. A bug in serde can cause silent data
+loss. These modules get extra scrutiny.
+
+**Running the tests:**
+
+```bash
+make test           # Coverage-gated unit tests
+make mutation-test  # Mutation testing (slower, run before PRs)
+```
+
+### 13.4 Security scanning
+
+Agent code often handles untrusted input (user requests, model outputs) and
+performs privileged operations (file access, command execution). Security
+scanning is not optional.
+
+**Tools:**
+
+- **Bandit**: static analysis for common Python security issues
+- **Deptry**: finds unused, missing, or misplaced dependencies
+- **pip-audit**: checks dependencies for known vulnerabilities
+
+**These run automatically in CI.** You can also run them locally:
+
+```bash
+make bandit      # Security analysis
+make deptry      # Dependency hygiene
+make pip-audit   # Vulnerability scan
+```
+
+**Security considerations for tool handlers:**
+
+- Never pass unsanitized model output to shell commands
+- Validate file paths against allowed roots
+- Use VFS or sandboxes for file operations when possible
+- Avoid pickle, eval, or exec on untrusted data
+
+### 13.5 Quality gates in practice
+
+All gates are combined in `make check`:
+
+```bash
+make check  # Runs: format, lint, typecheck, test, bandit, deptry, pip-audit
+```
+
+**Before every commit:**
+
+1. Run `make check`
+2. Fix any failures
+3. Commit only when clean
+
+**Pre-commit hooks enforce this.** After running `./install-hooks.sh`, commits
+are blocked unless `make check` passes.
+
+**Why the gates are strict:**
+
+Agent systems have compounding failure modes. A type mismatch in a tool param
+causes a serialization error, which causes a tool failure, which causes the
+model to retry with bad assumptions, which causes a cascade of wasted tokens
+and incorrect behavior. Catching errors early—at the type level, at the
+contract level, at the test level—prevents these cascades.
+
+The 100% coverage requirement isn't about the number. It's about the habit:
+every line of code should have a reason to exist, and that reason should be
+testable. If a line can't be tested, it probably shouldn't exist.
+
+______________________________________________________________________
+
+## 14. Recipes
 
 These are intentionally opinionated. They reflect the "weak incentives" style:
 reduce surprise, keep state explicit, and make side effects auditable.
 
-### 13.1 A code-review agent
+### 14.1 A code-review agent
 
 See `code_reviewer_example.py` in this repo for a full, runnable example that
 demonstrates:
@@ -1919,7 +2091,7 @@ demonstrates:
 This is the canonical "put it all together" example. Read it after you
 understand the individual pieces.
 
-### 13.2 A repo Q&A agent
+### 14.2 A repo Q&A agent
 
 **Goal**: answer questions about a codebase quickly.
 
@@ -1932,7 +2104,7 @@ understand the individual pieces.
 The model sees a summary, asks questions, digs into details as needed. Token
 usage stays low for simple questions.
 
-### 13.3 A "safe patch" agent
+### 14.3 A "safe patch" agent
 
 **Goal**: generate a patch but avoid uncontrolled writes.
 
@@ -1945,7 +2117,7 @@ usage stays low for simple questions.
 The model can experiment freely in the VFS. Only the final diff matters.
 Humans review the diff before applying it to the real repo.
 
-### 13.4 A research agent with progressive disclosure
+### 14.4 A research agent with progressive disclosure
 
 **Goal**: answer deep questions without stuffing a giant blob into the prompt.
 
@@ -1961,7 +2133,7 @@ sources it used.
 
 ______________________________________________________________________
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
 Common issues you'll hit when getting started:
 
@@ -2057,12 +2229,12 @@ wink debug snapshots/session.jsonl
 
 ______________________________________________________________________
 
-## 15. API reference
+## 16. API reference
 
 This is a curated reference of the APIs you'll touch most often. For complete
 details, read module docstrings and the specs.
 
-### 15.1 Top-level exports
+### 16.1 Top-level exports
 
 Import from `weakincentives` when you want the "90% API":
 
@@ -2091,7 +2263,7 @@ Import from `weakincentives` when you want the "90% API":
 
 - `WinkError`, `ToolValidationError`, snapshot/restore errors
 
-### 15.2 weakincentives.prompt
+### 16.2 weakincentives.prompt
 
 ```python
 PromptTemplate[OutputT](ns, key, name=None, sections=..., allow_extra_keys=False)
@@ -2110,7 +2282,7 @@ ToolResult(message, value, success=True, exclude_value_from_context=False)
 - `VisibilityExpansionRequired`
 - `VisibilityOverrides`, `SetVisibilityOverride`, ...
 
-### 15.3 weakincentives.runtime
+### 16.3 weakincentives.runtime
 
 ```python
 Session(bus, tags=None, parent=None)
@@ -2130,7 +2302,7 @@ session.restore(snapshot, preserve_logs=True)
 - Telemetry events (`PromptRendered`, `ToolInvoked`, `PromptExecuted`,
   `TokenUsage`)
 
-### 15.4 weakincentives.adapters
+### 16.4 weakincentives.adapters
 
 ```python
 ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=...)
@@ -2147,7 +2319,7 @@ PromptEvaluationError
 
 - `ThrottlePolicy`, `new_throttle_policy`, `ThrottleError`
 
-### 15.5 weakincentives.contrib.tools
+### 16.5 weakincentives.contrib.tools
 
 **Planning:**
 
@@ -2164,7 +2336,7 @@ PromptEvaluationError
 - `AstevalSection(session, accepts_overrides=False)`
 - `PodmanSandboxSection(session, config=PodmanSandboxConfig(...))` (extra)
 
-### 15.6 weakincentives.optimizers
+### 16.6 weakincentives.optimizers
 
 - `PromptOptimizer` protocol and `BasePromptOptimizer`
 - `OptimizationContext`, `OptimizationResult`
@@ -2173,7 +2345,7 @@ PromptEvaluationError
 
 - `WorkspaceDigestOptimizer`
 
-### 15.7 weakincentives.serde
+### 16.7 weakincentives.serde
 
 Dataclass serialization utilities (no Pydantic required):
 
@@ -2200,7 +2372,7 @@ copy = clone(my_dataclass)
 - `tuple`, `frozenset`, and other immutable collections are handled
 - `schema()` produces OpenAI-compatible JSON schemas for structured output
 
-### 15.8 CLI
+### 16.8 CLI
 
 Installed via the `wink` extra:
 

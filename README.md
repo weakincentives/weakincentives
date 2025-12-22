@@ -374,6 +374,20 @@ Key targets:
 - `make mutation-test` (mutmut, 80% score gate)
 - `make check` (all of the above plus Bandit, Deptry, pip-audit)
 
+### Approach to code quality
+
+WINK applies strict quality gates to keep the codebase predictable and safe:
+
+- **Strict type checking.** Pyright strict mode enforced; type annotations are the
+  source of truth.
+- **Design-by-contract.** Public APIs use `@require`, `@ensure`, and `@invariant`
+  decorators from `weakincentives.dbc`.
+- **100% test coverage.** Every line in `src/weakincentives/` must be covered.
+- **Mutation testing.** Hotspots (session, serde) require 80% mutation score.
+- **Security scanning.** Bandit, Deptry, and pip-audit run on every CI build.
+
+Run `make check` before committing to verify all gates pass.
+
 ### Integration tests
 
 ```bash
