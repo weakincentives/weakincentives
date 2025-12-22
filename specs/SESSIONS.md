@@ -394,8 +394,7 @@ sequenceDiagram
 
     A->>B: publish(PromptRendered)
     B->>H: dispatch to subscribers
-    H-->>B: handler results
-    B-->>A: PublishResult
+    Note over B,H: Errors logged, not returned
 
     A->>B: publish(ToolInvoked)
     B->>H: dispatch to subscribers
@@ -406,18 +405,20 @@ sequenceDiagram
 
 ### Event Bus
 
-In-process pub/sub for prompt lifecycle events:
+In-process pub/sub for prompt lifecycle events with fire-and-forget semantics:
 
 ```python
 from weakincentives.runtime.events import InProcessEventBus
 
 bus = InProcessEventBus()
 bus.subscribe(PromptExecuted, handler)
-result = bus.publish(event)
-
-if not result.ok:
-    result.raise_if_errors()  # Optional strict mode
+bus.publish(event)  # Returns None; errors are logged and isolated
 ```
+
+**Fire-and-Forget Semantics**: The `publish()` method returns `None`. Publishers
+do not receive feedback about handler success or failure. Handler exceptions are
+logged and isolated—they do not propagate to the publisher. This design ensures
+that event producers remain decoupled from consumers.
 
 ### Event Types
 
@@ -472,27 +473,11 @@ class ToolInvoked:
     event_id: UUID = field(default_factory=uuid4)
 ```
 
-### Publish Results
-
-```python
-@dataclass(slots=True, frozen=True)
-class PublishResult:
-    event: object
-    handlers_invoked: tuple[EventHandler, ...]
-    errors: tuple[HandlerFailure, ...]
-    handled_count: int
-
-    @property
-    def ok(self) -> bool: ...
-
-    def raise_if_errors(self) -> None: ...
-```
-
 ### Delivery Semantics
 
 - Events delivered synchronously on publisher thread
 - In-order delivery per bus instance
-- Handler exceptions logged and isolated (unless `raise_if_errors()` called)
+- Handler exceptions logged and isolated (do not propagate to publisher)
 - No persistence or cross-process forwarding (implement in subscribers)
 
 ## Snapshots

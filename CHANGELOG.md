@@ -4,6 +4,49 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Breaking: Fire-and-Forget EventBus Semantics
+
+`EventBus.publish()` now returns `None` instead of `PublishResult`. This change
+enforces pure fire-and-forget semantics where publishers are completely
+decoupled from subscriber behavior.
+
+**Removed:**
+
+- `PublishResult` dataclass
+- `HandlerFailure` dataclass
+- `format_publish_failures()` utility function
+- `result.ok`, `result.handled_count`, `result.raise_if_errors()` patterns
+
+**Migration:**
+
+```python
+# Before
+result = bus.publish(event)
+if not result.ok:
+    result.raise_if_errors()
+
+# After
+bus.publish(event)  # Handler errors are logged and isolated
+```
+
+Tests that verified publish results must now verify effects through session
+state inspection:
+
+```python
+# Before
+result = bus.publish(event)
+assert result.ok
+assert result.handled_count == 1
+
+# After
+bus.publish(event)
+assert session[ExpectedSlice].latest() == expected_value
+```
+
+Handler exceptions are now logged via structured logging and do not propagate
+to publishers. This simplifies adapter code and enforces the event bus contract
+where publishers should not depend on subscriber behavior.
+
 ### First-Class Resource Injection
 
 You can now pass custom resources into `adapter.evaluate()` and

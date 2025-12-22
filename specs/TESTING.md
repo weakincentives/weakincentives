@@ -91,6 +91,61 @@ def test_regression_42_session_deadlock():
     ...
 ```
 
+## Event Bus Testing
+
+The `EventBus.publish()` method has fire-and-forget semantics—it returns `None`
+and does not expose handler success/failure to publishers. Tests must verify
+event effects through session state inspection rather than publish results.
+
+### Testing Event Effects
+
+```python
+def test_event_updates_session_state(session_factory):
+    """Verify event effects via session state, not publish results."""
+    session, bus = session_factory()
+
+    # Publish event (returns None)
+    bus.publish(make_tool_event(value=42))
+
+    # Verify effect through session state
+    assert session[ExamplePayload].latest() == ExamplePayload(value=42)
+```
+
+### Testing Handler Registration
+
+To verify handlers are registered correctly, check that published events produce
+expected state changes:
+
+```python
+def test_reducer_is_registered(session_factory):
+    """Verify reducer registration by checking state mutation."""
+    session, bus = session_factory()
+
+    # Register custom reducer
+    session[Counter].register(Increment, increment_reducer)
+
+    # Publish and verify reducer ran
+    bus.publish(Increment(amount=5))
+    assert session[Counter].latest().value == 5
+```
+
+### Testing Idempotent Registration
+
+To verify that `_attach_to_bus` or similar methods are idempotent (don't create
+duplicate subscriptions), check that events produce single state entries:
+
+```python
+def test_attach_is_idempotent(session_factory):
+    """Calling attach twice should not duplicate handlers."""
+    session, bus = session_factory()
+    session._attach_to_bus(bus)  # Second attach
+
+    bus.publish(make_event(value=1))
+
+    # If attach wasn't idempotent, we'd see duplicates
+    assert len(session[Payload].all()) == 1
+```
+
 ## Snapshot Integrity Tests
 
 Snapshots are critical for rollback correctness. Test:
