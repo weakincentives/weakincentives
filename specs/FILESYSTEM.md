@@ -941,8 +941,8 @@ Only modified files allocate new memory.
 
 The host filesystem uses git to manage snapshots. The git repository is stored
 **outside** the workspace root to prevent agents from accessing or modifying
-the snapshot internals. By default, a sibling directory is created (e.g.,
-`/workspace/.wink-git-<uuid>` for a root of `/workspace/project`).
+the snapshot internals. By default, a temporary directory is created using
+Python's `tempfile.mkdtemp()` (e.g., `/tmp/wink-git-abc12345`).
 
 ```python
 @dataclass(slots=True)
@@ -977,14 +977,17 @@ class HostFilesystem:
             return
 
         # Create external git directory if not specified
+        needs_init = False
         if self._git_dir is None:
-            root_path = Path(self._root).resolve()
-            git_parent = root_path.parent
-            self._git_dir = str(git_parent / f".wink-git-{uuid4().hex[:8]}")
+            self._git_dir = tempfile.mkdtemp(prefix="wink-git-")
+            needs_init = True
 
         git_path = Path(self._git_dir)
         if not git_path.exists():
             git_path.mkdir(parents=True, exist_ok=True)
+            needs_init = True
+
+        if needs_init:
             # Initialize bare repository in external directory
             subprocess.run(["git", "init", "--bare"], cwd=self._git_dir, check=True, capture_output=True)
             # Configure for snapshot use

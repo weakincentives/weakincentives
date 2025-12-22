@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 from uuid import UUID
 
@@ -1426,8 +1427,9 @@ class TestHostFilesystemExternalGitDir:
         assert fs.git_dir is not None
         assert Path(fs.git_dir).exists()
         assert not (workspace / ".git").exists()
-        # Git dir should be a sibling of workspace
-        assert Path(fs.git_dir).parent == tmp_path
+        # Git dir should be in system temp directory, not related to workspace
+        assert Path(fs.git_dir).parent == Path(tempfile.gettempdir())
+        assert Path(fs.git_dir).name.startswith("wink-git-")
         assert snapshot.git_dir == fs.git_dir
 
     def test_git_dir_not_accessible_in_workspace(self, tmp_path: Path) -> None:
