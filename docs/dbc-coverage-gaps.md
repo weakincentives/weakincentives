@@ -3,6 +3,17 @@
 This document tracks Design-by-Contract (DbC) annotation gaps in the
 weakincentives codebase and defines the necessary work to address them.
 
+## Important: Test-Time Enforcement Only
+
+Per `specs/DBC.md`, DbC decorators are **no-ops in production**. They only
+activate during test runs (via pytest plugin or `WEAKINCENTIVES_DBC=1`).
+
+This means:
+- **Runtime validation must remain** in production code (e.g., `if not isinstance(...)`)
+- DbC annotations **supplement** runtime checks, they don't replace them
+- The value is **catching contract violations during development** with clear diagnostics
+- Annotations document invariants and contracts for contributors
+
 ## Current Coverage Summary
 
 DbC annotations are currently used in **6 files**:
@@ -19,14 +30,14 @@ DbC annotations are currently used in **6 files**:
 
 ### Phase 1: Serde Module (High Priority)
 
-The serde module performs dataclass serialization/deserialization and lacks
-DbC coverage despite having clear preconditions.
+The serde module performs dataclass serialization/deserialization. It already
+has runtime checks but lacks DbC coverage for test-time contract enforcement.
 
 #### `serde/parse.py`
 
 ```python
-# Current: runtime checks at lines 681-684
-# Recommended:
+# Existing runtime checks remain (lines 681-684)
+# Add DbC for test-time enforcement:
 @require(
     lambda cls, data: isinstance(data, Mapping),
     lambda cls, data, extra: extra in {"ignore", "forbid", "allow"},
@@ -37,21 +48,22 @@ def parse(cls, data, *, extra="ignore", ...): ...
 #### `serde/dump.py`
 
 ```python
-# Current: runtime check at line 175-176
-# Recommended:
+# Existing runtime check remains (line 175-176)
+# Add DbC for test-time enforcement:
 @require(lambda obj: dataclasses.is_dataclass(obj) and not isinstance(obj, type))
 def dump(obj, *, by_alias=True, ...): ...
 
-# Current: runtime check at line 284-285
-# Recommended:
+# Existing runtime check remains (line 284-285)
+# Add DbC for test-time enforcement:
 @require(lambda obj: dataclasses.is_dataclass(obj) and not isinstance(obj, type))
 def clone(obj, **updates): ...
 ```
 
 ### Phase 2: Budget and Deadline Classes (Medium Priority)
 
-These classes have `__post_init__` validation that could be expressed as
-DbC invariants for better test-time enforcement.
+These classes have `__post_init__` validation (runtime checks that must remain).
+Adding DbC `@invariant` provides test-time enforcement that catches violations
+earlier in the development cycle with better diagnostics.
 
 #### `budget.py`
 
