@@ -57,14 +57,6 @@ Release highlights for weakincentives.
 - **ResourceRegistry.snapshotable_resources()** returns all registered
   resources implementing the `Snapshotable` protocol.
 
-### Documentation
-
-- **Transactional tool execution highlighted in README and guides.** Added
-  prominent documentation of transactional tool calls as a key capability:
-  automatic rollback of session state and filesystem changes when tools fail.
-  Updated `README.md`, `WINK_GUIDE.md` (new section 4.6), and
-  `guides/code-review-agent.md` to explain the feature and its benefits.
-
 ## v0.15.0 - 2025-12-17
 
 ### Added
