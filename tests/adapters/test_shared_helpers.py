@@ -72,9 +72,9 @@ def test_parse_tool_arguments_rejects_non_string_keys(
         # Simulate a mapping that does not use string keys to exercise defensive branch.
         return {1: "value"}
 
-    import weakincentives.adapters.utilities as utils_module
+    import weakincentives.adapters.tool_spec as tool_spec_module
 
-    monkeypatch.setattr(utils_module, "json", SimpleNamespace(loads=fake_loads))
+    monkeypatch.setattr(tool_spec_module, "json", SimpleNamespace(loads=fake_loads))
 
     with pytest.raises(PromptEvaluationError) as err:
         parse_tool_arguments(
