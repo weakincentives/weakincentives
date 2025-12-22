@@ -1143,7 +1143,7 @@ class SnapshotRestoreError(SnapshotError):
 ### Usage Example
 
 ```python
-from weakincentives.contrib.tools.filesystem import HostFilesystem
+from weakincentives.contrib.tools.filesystem_host import HostFilesystem
 
 # Create filesystem with snapshot support
 fs = HostFilesystem(_root="/workspace/project")

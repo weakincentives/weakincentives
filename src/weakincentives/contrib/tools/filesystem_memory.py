@@ -39,7 +39,8 @@ from datetime import UTC, datetime
 from typing import Literal
 from uuid import uuid4
 
-from weakincentives.contrib.tools._filesystem_utils import (
+from weakincentives.errors import SnapshotRestoreError
+from weakincentives.filesystem import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
     MAX_WRITE_LENGTH,
@@ -57,7 +58,6 @@ from weakincentives.contrib.tools._filesystem_utils import (
     now,
     validate_path,
 )
-from weakincentives.errors import SnapshotRestoreError
 
 # Re-export READ_ENTIRE_FILE for direct imports from this module
 __all__ = ["InMemoryFilesystem"]

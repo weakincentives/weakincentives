@@ -31,16 +31,14 @@ from dataclasses import field
 from datetime import UTC, datetime
 from typing import Final, Literal, cast, override
 
+from weakincentives.filesystem import READ_ENTIRE_FILE, Filesystem
+
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Session
 from ...types import SupportsDataclass, SupportsToolResult
-from .filesystem import (
-    READ_ENTIRE_FILE,
-    Filesystem,
-)
 from .filesystem_memory import InMemoryFilesystem
 from .vfs_mounts import (
     MAX_MOUNT_PREVIEW_ENTRIES,

@@ -27,8 +27,8 @@ from weakincentives.adapters.claude_agent_sdk.workspace import (
     WorkspaceBudgetExceededError,
     WorkspaceSecurityError,
 )
-from weakincentives.contrib.tools.filesystem import Filesystem
 from weakincentives.contrib.tools.workspace import WorkspaceSection
+from weakincentives.filesystem import Filesystem
 from weakincentives.runtime import InProcessDispatcher, Session
 
 

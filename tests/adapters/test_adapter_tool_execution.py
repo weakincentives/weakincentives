@@ -735,9 +735,9 @@ def test_tool_receives_filesystem_from_workspace_section(
     adapter_harness: AdapterHarness,
 ) -> None:
     """Test that tool handlers receive filesystem from workspace sections."""
-    from weakincentives.contrib.tools.filesystem import Filesystem
     from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
     from weakincentives.contrib.tools.vfs import VfsToolsSection
+    from weakincentives.filesystem import Filesystem
 
     captured_filesystem: list[Filesystem | None] = []
 

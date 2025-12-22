@@ -30,8 +30,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, override, runtime_checkable
 
 if TYPE_CHECKING:
+    from weakincentives.filesystem import Filesystem
+
     from ...runtime.session import Session
-    from .filesystem import Filesystem
 
 __all__ = ["ToolSuiteSection", "WorkspaceSection"]
 

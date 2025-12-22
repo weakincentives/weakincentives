@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from ..budget import BudgetTracker
-from ..contrib.tools.filesystem import Filesystem
+from ..filesystem import Filesystem
 from ..prompt.tool import ResourceRegistry
 
 

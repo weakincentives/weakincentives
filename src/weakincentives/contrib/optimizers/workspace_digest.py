@@ -18,6 +18,8 @@ import textwrap
 from dataclasses import dataclass
 from typing import Any, cast, override
 
+from weakincentives.filesystem import Filesystem
+
 from ...adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_RESPONSE,
@@ -39,7 +41,6 @@ from ..tools.digests import (
     clear_workspace_digest,
     set_workspace_digest,
 )
-from ..tools.filesystem import Filesystem
 from ..tools.planning import PlanningStrategy, PlanningToolsSection
 from ..tools.workspace import WorkspaceSection
 

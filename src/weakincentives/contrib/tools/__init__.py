@@ -14,7 +14,7 @@
 
 This package provides domain-specific tools that extend the core primitives:
 
-- **Filesystem**: Protocol and backends for workspace file operations
+- **Filesystem backends**: In-memory and host filesystem implementations
 - **Planning tools**: Session-scoped todo list for background agents
 - **VFS tools**: Virtual filesystem with glob, grep, and file operations
 - **Asteval tools**: Sandboxed Python expression evaluation
@@ -23,8 +23,8 @@ This package provides domain-specific tools that extend the core primitives:
 
 Example usage::
 
-    from weakincentives.contrib.tools import Filesystem, PlanningToolsSection
-    from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+    from weakincentives.filesystem import Filesystem
+    from weakincentives.contrib.tools import InMemoryFilesystem, PlanningToolsSection
 """
 
 # pyright: reportImportCycles=false
@@ -33,6 +33,21 @@ from __future__ import annotations
 
 from importlib import import_module
 from typing import Any
+
+from weakincentives.filesystem import (
+    READ_ENTIRE_FILE,
+    FileEncoding,
+    FileEntry,
+    FileStat,
+    Filesystem,
+    FilesystemSnapshot,
+    GlobMatch as FilesystemGlobMatch,
+    GrepMatch as FilesystemGrepMatch,
+    ReadResult,
+    SnapshotableFilesystem,
+    WriteMode,
+    WriteResult,
+)
 
 from .asteval import (
     AstevalConfig,
@@ -48,20 +63,6 @@ from .digests import (
     clear_workspace_digest,
     latest_workspace_digest,
     set_workspace_digest,
-)
-from .filesystem import (
-    READ_ENTIRE_FILE,
-    FileEncoding,
-    FileEntry,
-    FileStat,
-    Filesystem,
-    FilesystemSnapshot,
-    GlobMatch as FilesystemGlobMatch,
-    GrepMatch as FilesystemGrepMatch,
-    ReadResult,
-    SnapshotableFilesystem,
-    WriteMode,
-    WriteResult,
 )
 from .filesystem_host import HostFilesystem
 from .filesystem_memory import InMemoryFilesystem

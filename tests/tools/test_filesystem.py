@@ -20,7 +20,10 @@ from uuid import UUID
 
 import pytest
 
-from weakincentives.contrib.tools.filesystem import (
+from weakincentives.contrib.tools.filesystem_host import HostFilesystem
+from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.errors import SnapshotError, SnapshotRestoreError
+from weakincentives.filesystem import (
     READ_ENTIRE_FILE,
     FileEntry,
     FileStat,
@@ -31,9 +34,6 @@ from weakincentives.contrib.tools.filesystem import (
     SnapshotableFilesystem,
     WriteResult,
 )
-from weakincentives.contrib.tools.filesystem_host import HostFilesystem
-from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-from weakincentives.errors import SnapshotError, SnapshotRestoreError
 
 
 class TestInMemoryFilesystemBasics:
@@ -1242,7 +1242,7 @@ class TestFilesystemBranchCoverage:
 
     def test_normalize_path_with_parent_refs_and_result(self) -> None:
         """Test branch 408: normalize_path with .. when result is not empty."""
-        from weakincentives.contrib.tools.filesystem import normalize_path
+        from weakincentives.filesystem import normalize_path
 
         # Test path with .. that pops from result
         result = normalize_path("a/b/../c")
@@ -1380,7 +1380,7 @@ class TestFilesystemBranchCoverage:
 
 def test_normalize_path_with_leading_dotdot() -> None:
     """Test normalize_path when .. appears without parent to pop."""
-    from weakincentives.contrib.tools.filesystem import normalize_path
+    from weakincentives.filesystem import normalize_path
 
     # When result is empty and .. is encountered, nothing should be popped
     result = normalize_path("../file.txt")
