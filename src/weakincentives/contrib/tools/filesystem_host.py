@@ -33,6 +33,7 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess  # nosec: B404
+import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -77,8 +78,8 @@ class HostFilesystem:
 
     The git repository used for snapshots is stored outside the workspace
     root to prevent agents from accessing or modifying it. By default,
-    a sibling directory is created (e.g., ``/workspace/.wink-git-<uuid>``
-    for a root of ``/workspace/project``).
+    a temporary directory is created using Python's ``tempfile.mkdtemp()``
+    (e.g., ``/tmp/wink-git-abc12345``).
     """
 
     _root: str
@@ -507,14 +508,19 @@ class HostFilesystem:
             return
 
         # Create external git directory if not specified
+        needs_init = False
         if self._git_dir is None:
-            root_path = Path(self._root).resolve()
-            git_parent = root_path.parent
-            self._git_dir = str(git_parent / f".wink-git-{uuid4().hex[:8]}")
+            self._git_dir = tempfile.mkdtemp(prefix="wink-git-")
+            needs_init = True
 
+        # Handle custom _git_dir that doesn't exist yet (mkdtemp already creates
+        # the directory when using the default, so this only applies to custom paths)
         git_path = Path(self._git_dir)
         if not git_path.exists():
             git_path.mkdir(parents=True, exist_ok=True)
+            needs_init = True
+
+        if needs_init:
             # Initialize bare repository in external directory
             _ = subprocess.run(  # nosec B603 B607
                 ["git", "init", "--bare"],
