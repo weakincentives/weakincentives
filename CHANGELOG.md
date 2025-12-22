@@ -2,6 +2,40 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### First-Class Resource Injection
+
+You can now pass custom resources into `adapter.evaluate()` and
+`MainLoop.execute()`, making tools cleaner, more testable, and portable.
+
+```python
+from weakincentives.prompt.tool import ResourceRegistry
+from myapp.http import HTTPClient
+
+# Build resource registry with your dependencies
+http_client = HTTPClient(base_url="https://api.example.com")
+resources = ResourceRegistry.build({HTTPClient: http_client})
+
+# Pass to adapter - merged with workspace resources (e.g., filesystem)
+response = adapter.evaluate(prompt, session=session, resources=resources)
+
+# Or at the MainLoop level
+config = MainLoopConfig(resources=resources)
+loop = MyLoop(adapter=adapter, bus=bus, config=config)
+response, session = loop.execute(request)
+```
+
+**Key features:**
+
+- `ResourceRegistry.merge()` combines registries with the second taking
+  precedence on conflicts
+- User-provided resources override workspace defaults (e.g., custom filesystem)
+- Tool handlers access resources via `context.resources.get(ResourceType)`
+- `MainLoopConfig`, `MainLoopRequest`, and `MainLoop.execute()` all accept
+  `resources` parameter
+- All adapters (OpenAI, LiteLLM, Claude Agent SDK) support resource injection
+
 ## v0.16.0 - 2025-12-21
 
 ### Transactional Tool Execution

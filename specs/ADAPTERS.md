@@ -34,6 +34,7 @@ class ProviderAdapter(ABC):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[OutputT]: ...
 ```
 
@@ -44,12 +45,15 @@ class ProviderAdapter(ABC):
 - `deadline` - Optional wall-clock deadline
 - `budget` - Optional token/time budget limits
 - `budget_tracker` - Optional shared tracker for budget consumption
+- `resources` - Optional resources to inject (merged with workspace resources)
 
 **Notes:**
 
 - Telemetry is published via `session.event_bus`.
 - Visibility overrides are managed via session state (`VisibilityOverrides`),
   not passed to adapters directly.
+- Resources are merged with workspace defaults (e.g., filesystem from prompt);
+  user-provided resources take precedence on conflicts.
 
 ### Configuration
 
@@ -341,6 +345,85 @@ response = adapter.evaluate(
 
 The adapter records token usage after each provider response and checks limits
 at defined checkpoints. Budget tracking is thread-safe for concurrent execution.
+
+## Resource Injection
+
+Adapters support injecting custom resources that are made available to tool
+handlers through `ToolContext.resources`. This enables dependency injection
+for testing and decouples tools from specific implementations.
+
+```python
+from weakincentives.prompt.tool import ResourceRegistry
+from myapp.http import HTTPClient
+
+# Create resources registry with custom dependencies
+http_client = HTTPClient(base_url="https://api.example.com")
+resources = ResourceRegistry.build({HTTPClient: http_client})
+
+# Pass to adapter - resources merge with workspace defaults
+response = adapter.evaluate(
+    prompt,
+    session=session,
+    resources=resources,
+)
+```
+
+### Merging Behavior
+
+Resources are merged in layers:
+
+1. **Workspace resources** - Built from prompt (e.g., `Filesystem` from
+   `WorkspaceSection`)
+1. **User resources** - Passed via `resources` parameter
+
+User resources take precedence on conflicts. This allows overriding workspace
+defaults while preserving unspecified resources:
+
+```python
+# Workspace provides InMemoryFilesystem
+workspace = ResourceRegistry.build({Filesystem: InMemoryFilesystem()})
+
+# User provides custom filesystem, keeps other resources
+user = ResourceRegistry.build({Filesystem: HostFilesystem("/tmp")})
+merged = workspace.merge(user)  # user's Filesystem wins
+```
+
+### MainLoop Integration
+
+`MainLoop.execute()` and `MainLoopConfig` also accept resources:
+
+```python
+from weakincentives.runtime import MainLoop, MainLoopConfig
+
+config = MainLoopConfig(resources=default_resources)
+loop = MyLoop(adapter=adapter, bus=bus, config=config)
+
+# Per-request override
+response, session = loop.execute(request, resources=custom_resources)
+```
+
+Request-level resources override config defaults. The same resources are used
+across visibility expansion retries.
+
+### Tool Access
+
+Tools access resources through `ToolContext`:
+
+```python
+def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
+    # Typed lookup with protocol key
+    http = context.resources.get(HTTPClient)
+    if http is None:
+        return ToolResult(message="HTTPClient not available", success=False)
+
+    # Sugar properties for common resources
+    fs = context.filesystem  # shorthand for context.resources.get(Filesystem)
+    budget = context.budget_tracker
+
+    # Use resources...
+    response = http.get("/data")
+    return ToolResult(message="Done", value=Result(...), success=True)
+```
 
 ## Telemetry
 

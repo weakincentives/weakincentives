@@ -72,8 +72,9 @@ class _RepositoryOptimizationAdapter:
         deadline: object | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
+        resources: object | None = None,
     ) -> PromptResponse[Any]:
-        del deadline, budget, budget_tracker
+        del deadline, budget, budget_tracker, resources
         self.calls.append(prompt.key)
 
         if "workspace-digest" in prompt.key:
@@ -120,8 +121,9 @@ class _RecordingDeadlineAdapter:
         deadline: Deadline | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
+        resources: object | None = None,
     ) -> PromptResponse[Any]:
-        del bus, session, budget, budget_tracker
+        del bus, session, budget, budget_tracker, resources
         self.deadlines.append(deadline)
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,

@@ -33,6 +33,7 @@ from weakincentives.prompt import (
     VisibilityExpansionRequired,
     VisibilityOverrides,
 )
+from weakincentives.prompt.tool import ResourceRegistry
 from weakincentives.runtime.events import EventBus, InProcessEventBus
 from weakincentives.runtime.main_loop import (
     MainLoop,
@@ -89,6 +90,8 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self._budget_trackers: list[BudgetTracker | None] = []
         self._last_deadline: Deadline | None = None
         self._last_session: SessionProtocol | None = None
+        self._last_resources: ResourceRegistry | None = None
+        self._resources_list: list[ResourceRegistry | None] = []
 
     def evaluate(
         self,
@@ -98,6 +101,7 @@ class _MockAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[_Output]:
         del prompt, budget
         self._call_count += 1
@@ -105,6 +109,8 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self._budget_trackers.append(budget_tracker)
         self._last_deadline = deadline
         self._last_session = session
+        self._last_resources = resources
+        self._resources_list.append(resources)
 
         # If there are visibility requests remaining, raise the exception
         if self._visibility_requests:
@@ -538,3 +544,133 @@ def test_no_budget_tracker_when_no_budget() -> None:
     loop.execute(_Request(message="hello"))
 
     assert adapter._last_budget_tracker is None
+
+
+# =============================================================================
+# Resource Injection Tests
+# =============================================================================
+
+
+@dataclass(slots=True, frozen=True)
+class _CustomResource:
+    """Custom resource for testing resource injection."""
+
+    name: str
+
+
+def test_config_accepts_resources() -> None:
+    """MainLoopConfig accepts resources parameter."""
+    resource = _CustomResource(name="config-resource")
+    resources = ResourceRegistry.build({_CustomResource: resource})
+    config = MainLoopConfig(resources=resources)
+    assert config.resources is resources
+
+
+def test_request_accepts_resources() -> None:
+    """MainLoopRequest accepts resources parameter."""
+    resource = _CustomResource(name="request-resource")
+    resources = ResourceRegistry.build({_CustomResource: resource})
+    request = MainLoopRequest(
+        request=_Request(message="hello"),
+        resources=resources,
+    )
+    assert request.resources is resources
+
+
+def test_execute_passes_resources_from_config() -> None:
+    """MainLoop.execute passes config resources to adapter."""
+    bus = InProcessEventBus()
+    resource = _CustomResource(name="config-resource")
+    resources = ResourceRegistry.build({_CustomResource: resource})
+    config = MainLoopConfig(resources=resources)
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
+
+    loop.execute(_Request(message="hello"))
+
+    assert adapter._last_resources is resources
+
+
+def test_execute_resources_overrides_config() -> None:
+    """MainLoop.execute resources parameter overrides config."""
+    bus = InProcessEventBus()
+    config_resource = _CustomResource(name="config-resource")
+    config_resources = ResourceRegistry.build({_CustomResource: config_resource})
+    config = MainLoopConfig(resources=config_resources)
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
+
+    override_resource = _CustomResource(name="override-resource")
+    override_resources = ResourceRegistry.build({_CustomResource: override_resource})
+    loop.execute(_Request(message="hello"), resources=override_resources)
+
+    assert adapter._last_resources is override_resources
+
+
+def test_handle_request_passes_resources() -> None:
+    """MainLoopRequest resources are passed to adapter."""
+    bus = InProcessEventBus()
+    resource = _CustomResource(name="request-resource")
+    resources = ResourceRegistry.build({_CustomResource: resource})
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, bus=bus)
+
+    request = MainLoopRequest(
+        request=_Request(message="hello"),
+        resources=resources,
+    )
+    loop.handle_request(request)
+
+    assert adapter._last_resources is resources
+
+
+def test_handle_request_resources_overrides_config() -> None:
+    """MainLoopRequest resources override config resources."""
+    bus = InProcessEventBus()
+    config_resource = _CustomResource(name="config-resource")
+    config_resources = ResourceRegistry.build({_CustomResource: config_resource})
+    config = MainLoopConfig(resources=config_resources)
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
+
+    override_resource = _CustomResource(name="override-resource")
+    override_resources = ResourceRegistry.build({_CustomResource: override_resource})
+    request = MainLoopRequest(
+        request=_Request(message="hello"),
+        resources=override_resources,
+    )
+    loop.handle_request(request)
+
+    assert adapter._last_resources is override_resources
+
+
+def test_same_resources_used_across_visibility_retries() -> None:
+    """Same resources are passed across visibility expansion retries."""
+    bus = InProcessEventBus()
+    resource = _CustomResource(name="persistent-resource")
+    resources = ResourceRegistry.build({_CustomResource: resource})
+    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+        {("section1",): SectionVisibility.FULL},
+        {("section2",): SectionVisibility.FULL},
+    ]
+    adapter = _MockAdapter(visibility_requests=visibility_requests)
+    loop = _TestLoop(adapter=adapter, bus=bus)
+
+    loop.execute(_Request(message="hello"), resources=resources)
+
+    # Called 3 times: 2 visibility expansions + 1 success
+    assert adapter._call_count == 3
+    # Same resources should be used for all calls
+    assert len(adapter._resources_list) == 3
+    assert all(r is resources for r in adapter._resources_list)
+
+
+def test_no_resources_when_not_set() -> None:
+    """No resources are passed when not configured."""
+    bus = InProcessEventBus()
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, bus=bus)
+
+    loop.execute(_Request(message="hello"))
+
+    assert adapter._last_resources is None

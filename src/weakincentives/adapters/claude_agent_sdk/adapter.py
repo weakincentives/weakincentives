@@ -167,6 +167,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using Claude Agent SDK with hook-based state sync.
 
@@ -180,6 +181,8 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             deadline: Optional deadline for execution timeout.
             budget: Optional token budget constraints.
             budget_tracker: Optional shared budget tracker.
+            resources: Optional resources to inject (merged with workspace resources,
+                user-provided resources take precedence).
 
         Returns:
             PromptResponse with structured output and events published.
@@ -205,6 +208,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 session=session,
                 deadline=effective_deadline,
                 budget_tracker=budget_tracker,
+                resources=resources,
             )
         )
 
@@ -215,6 +219,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         session: SessionProtocol,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
+        resources: ResourceRegistry | None,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
         sdk = _import_sdk()
@@ -254,9 +259,15 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             filesystem = HostFilesystem(_root=workspace_root)
 
         # Create ExecutionState for transactional tool execution
+        # Build workspace resources from prompt, then merge with user-provided resources
         # Both bridged MCP tools and native SDK tools will use this for rollback
-        resources = ResourceRegistry.build({Filesystem: filesystem})
-        execution_state = ExecutionState(session=session, resources=resources)
+        workspace_resources = ResourceRegistry.build({Filesystem: filesystem})
+        effective_resources = (
+            workspace_resources.merge(resources)
+            if resources is not None
+            else workspace_resources
+        )
+        execution_state = ExecutionState(session=session, resources=effective_resources)
 
         # Add execution_state to hook context for native tool transactions
         hook_context = HookContext(
