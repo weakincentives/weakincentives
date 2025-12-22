@@ -43,9 +43,16 @@ from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
+from weakincentives.runtime import InMemoryMailbox
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
+from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
+
+# Type alias for the test mailbox
+_TestMailbox = InMemoryMailbox[
+    MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+]
 
 
 @dataclass(slots=True, frozen=True)
@@ -259,11 +266,10 @@ def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
     """Auto-optimization runs when execute() is called without existing digest."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    bus = InProcessDispatcher()
-    attach_logging_subscribers(bus)
+    mailbox: _TestMailbox = InMemoryMailbox()
     loop = CodeReviewLoop(
         adapter=cast(ProviderAdapter[ReviewResponse], adapter),
-        bus=bus,
+        requests=mailbox,
         overrides_store=overrides_store,
     )
 
@@ -286,10 +292,10 @@ def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
-    bus = InProcessDispatcher()
+    mailbox: _TestMailbox = InMemoryMailbox()
     loop = CodeReviewLoop(
         adapter=adapter,
-        bus=bus,
+        requests=mailbox,
         overrides_store=overrides_store,
     )
 

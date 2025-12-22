@@ -64,10 +64,9 @@ from .mailbox import (
 )
 from .main_loop import (
     MainLoop,
-    MainLoopCompleted,
     MainLoopConfig,
-    MainLoopFailed,
     MainLoopRequest,
+    MainLoopResult,
 )
 from .session import (
     DEFAULT_SNAPSHOT_POLICIES,
@@ -112,10 +111,9 @@ __all__ = [
     "MailboxError",
     "MailboxFullError",
     "MainLoop",
-    "MainLoopCompleted",
     "MainLoopConfig",
-    "MainLoopFailed",
     "MainLoopRequest",
+    "MainLoopResult",
     "Message",
     "MessageData",
     "NeverResolvingReply",

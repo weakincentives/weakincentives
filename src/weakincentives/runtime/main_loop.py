@@ -26,7 +26,7 @@ from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.tool import ResourceRegistry
 from ..prompt.visibility_overrides import SetVisibilityOverride
-from .events._types import ControlDispatcher
+from .mailbox import Mailbox, Message
 from .session import Session
 
 if TYPE_CHECKING:
@@ -44,19 +44,16 @@ class MainLoopConfig:
     deadline: Deadline | None = None
     budget: Budget | None = None
     resources: ResourceRegistry | None = None
+    visibility_timeout: int = 300
+    wait_time_seconds: int = 20
 
 
 @FrozenDataclass()
 class MainLoopRequest[UserRequestT]:
-    """Event requesting MainLoop execution with optional constraints.
+    """Request for MainLoop execution with optional constraints.
 
     The ``budget``, ``deadline``, and ``resources`` fields override config defaults
     when set. A fresh ``BudgetTracker`` is created per execution.
-
-    Note: ``InProcessDispatcher`` dispatches by ``type(event)``, not generic alias.
-    ``MainLoopRequest[T]`` is for static type checking; at runtime all events are
-    ``MainLoopRequest``. For multiple loop types on one bus, filter by request type
-    in the handler or use separate buses.
     """
 
     request: UserRequestT
@@ -68,91 +65,85 @@ class MainLoopRequest[UserRequestT]:
 
 
 @FrozenDataclass()
-class MainLoopCompleted[OutputT]:
-    """Event dispatched when MainLoop execution succeeds."""
+class MainLoopResult[OutputT]:
+    """Result of MainLoop execution (success or failure)."""
 
     request_id: UUID
-    response: PromptResponse[OutputT]
+    response: PromptResponse[OutputT] | None
+    error: Exception | None
     session_id: UUID
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
-
-@FrozenDataclass()
-class MainLoopFailed:
-    """Event dispatched when MainLoop execution fails."""
-
-    request_id: UUID
-    error: Exception
-    session_id: UUID | None
-    failed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    @property
+    def success(self) -> bool:
+        """Return True if execution succeeded."""
+        return self.error is None
 
 
 class MainLoop[UserRequestT, OutputT](ABC):
     """Abstract orchestrator for agent workflow execution.
 
     MainLoop standardizes agent workflow orchestration: receive request, build
-    prompt, evaluate, handle visibility expansion, dispatch result. Implementations
+    prompt, evaluate, handle visibility expansion, return result. Implementations
     define only the domain-specific factories via ``create_prompt`` and
     ``create_session``.
 
+    Execution modes:
+
+    1. **Mailbox-driven** (via ``run()``): Process requests from a mailbox queue.
+       Supports request-reply pattern with ``send_expecting_reply()``.
+
+    2. **Direct** (via ``execute()``): Synchronous single-request execution.
+
     Execution flow:
-        1. Receive ``MainLoopRequest`` via bus or direct ``execute()`` call
+        1. Receive ``MainLoopRequest`` via mailbox or direct ``execute()`` call
         2. Create session via ``create_session()``
         3. Create prompt via ``create_prompt(request)``
         4. Evaluate with adapter
         5. On ``VisibilityExpansionRequired``: accumulate overrides, retry step 4
-        6. Publish ``MainLoopCompleted`` or ``MainLoopFailed``
+        6. Return ``MainLoopResult`` (or reply via mailbox)
 
     Usage::
 
-        class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
-            def __init__(
-                self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlDispatcher
-            ) -> None:
-                super().__init__(adapter=adapter, bus=bus)
-                self._template = PromptTemplate[ReviewResult](
-                    ns="reviews",
-                    key="code-review",
-                    sections=[...],
-                )
+        # Mailbox-driven usage
+        mailbox: InMemoryMailbox[MainLoopRequest[ReviewRequest], MainLoopResult[ReviewResult]] = InMemoryMailbox()
+        loop = CodeReviewLoop(adapter=adapter, requests=mailbox)
 
-            def create_prompt(self, request: ReviewRequest) -> Prompt[ReviewResult]:
-                return Prompt(self._template).bind(ReviewParams.from_request(request))
+        # Client sends request expecting reply
+        reply = mailbox.send_expecting_reply(MainLoopRequest(request=ReviewRequest(...)))
 
-            def create_session(self) -> Session:
-                return Session(bus=self._bus, tags={"loop": "code-review"})
+        # Loop processes in background
+        loop.run(max_iterations=1)
 
-        # Dispatcher-driven usage (subscription is automatic in __init__)
-        loop = CodeReviewLoop(adapter=adapter, bus=bus)
-        bus.dispatch(MainLoopRequest(request=ReviewRequest(...)))
+        # Client awaits result
+        result = reply.wait(timeout=60)
 
-        # Direct usage
-        response, session = loop.execute(ReviewRequest(...))
+        # Or direct usage
+        result, session = loop.execute(ReviewRequest(...))
     """
 
     _adapter: ProviderAdapter[OutputT]
-    _bus: ControlDispatcher
+    _requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
     _config: MainLoopConfig
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        bus: ControlDispatcher,
+        requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         config: MainLoopConfig | None = None,
     ) -> None:
-        """Initialize the MainLoop with an adapter, dispatcher, and optional config.
+        """Initialize the MainLoop with an adapter and mailbox.
 
         Args:
             adapter: Provider adapter for prompt evaluation.
-            bus: Control dispatcher for request/response event routing.
+            requests: Mailbox for receiving requests and sending replies.
             config: Optional configuration for default deadline/budget.
         """
         super().__init__()
         self._adapter = adapter
-        self._bus = bus
+        self._requests = requests
         self._config = config if config is not None else MainLoopConfig()
-        bus.subscribe(MainLoopRequest, self.handle_request)
 
     @abstractmethod
     def create_prompt(self, request: UserRequestT) -> Prompt[OutputT]:
@@ -180,6 +171,70 @@ class MainLoop[UserRequestT, OutputT](ABC):
             A session configured for the loop's domain.
         """
         ...
+
+    def run(self, *, max_iterations: int | None = None) -> None:
+        """Process requests from the mailbox.
+
+        Continuously receives messages from the mailbox and processes them.
+        For messages expecting a reply, sends the result via the reply channel.
+        For fire-and-forget messages, acknowledges after processing.
+
+        Args:
+            max_iterations: Maximum number of messages to process. None means
+                run until mailbox is empty (with wait).
+        """
+        iterations = 0
+        while max_iterations is None or iterations < max_iterations:
+            messages = self._requests.receive(
+                visibility_timeout=self._config.visibility_timeout,
+                wait_time_seconds=self._config.wait_time_seconds,
+            )
+            if not messages:
+                break
+
+            for msg in messages:
+                self._process_message(msg)
+                iterations += 1
+                if max_iterations is not None and iterations >= max_iterations:
+                    break
+
+    def _process_message(
+        self, msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
+    ) -> None:
+        """Process a single message from the mailbox."""
+        request_event = msg.body
+        result = self._execute_request(request_event)
+
+        if msg.expects_reply():
+            msg.reply(result)
+        else:
+            _ = msg.acknowledge()
+
+    def _execute_request(
+        self, request_event: MainLoopRequest[UserRequestT]
+    ) -> MainLoopResult[OutputT]:
+        """Execute a request and return the result."""
+        session: Session | None = None
+        try:
+            response, session = self.execute(
+                request_event.request,
+                budget=request_event.budget,
+                deadline=request_event.deadline,
+                resources=request_event.resources,
+            )
+            return MainLoopResult(
+                request_id=request_event.request_id,
+                response=response,
+                error=None,
+                session_id=session.session_id,
+            )
+        except Exception as exc:
+            return MainLoopResult(
+                request_id=request_event.request_id,
+                response=None,
+                error=exc,
+                session_id=session.session_id if session else uuid4(),
+            )
 
     def execute(
         self,
@@ -243,52 +298,11 @@ class MainLoop[UserRequestT, OutputT](ABC):
             else:
                 return response, session
 
-    def handle_request(self, event: object) -> None:
-        """Handle a MainLoopRequest event from the bus.
-
-        This method is designed to be subscribed to the event bus::
-
-            bus.subscribe(MainLoopRequest, loop.handle_request)
-
-        On success, dispatches ``MainLoopCompleted``. On failure, dispatches
-        ``MainLoopFailed`` and re-raises the exception.
-
-        Args:
-            event: A ``MainLoopRequest`` instance (type is ``object`` for
-                compatibility with ``EventHandler`` signature).
-        """
-        request_event: MainLoopRequest[UserRequestT] = event  # type: ignore[assignment]
-
-        try:
-            response, session = self.execute(
-                request_event.request,
-                budget=request_event.budget,
-                deadline=request_event.deadline,
-                resources=request_event.resources,
-            )
-
-            completed = MainLoopCompleted[OutputT](
-                request_id=request_event.request_id,
-                response=response,
-                session_id=session.session_id,
-            )
-            _ = self._bus.dispatch(completed)
-
-        except Exception as exc:
-            failed = MainLoopFailed(
-                request_id=request_event.request_id,
-                error=exc,
-                session_id=None,
-            )
-            _ = self._bus.dispatch(failed)
-            raise
-
 
 __all__ = [
     "MainLoop",
-    "MainLoopCompleted",
     "MainLoopConfig",
-    "MainLoopFailed",
     "MainLoopRequest",
+    "MainLoopResult",
     "ResourceRegistry",
 ]
