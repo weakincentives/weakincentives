@@ -35,6 +35,7 @@ from typing import (
 
 from ..budget import BudgetTracker
 from ..deadlines import Deadline
+from ..runtime.idempotency import IdempotencyConfig
 from ..runtime.snapshotable import Snapshotable
 from ..types.dataclass import (
     SupportsDataclass,
@@ -257,7 +258,16 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
 
 @dataclass(slots=True)
 class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
-    """Describe a callable tool exposed by prompt sections."""
+    """Describe a callable tool exposed by prompt sections.
+
+    Attributes:
+        name: Tool name matching OpenAI function name constraints.
+        description: Short ASCII description (1-200 chars).
+        handler: Callable that processes tool invocations.
+        examples: Sample invocations for documentation.
+        idempotency: Optional configuration for exactly-once semantics.
+        accepts_overrides: Whether the tool accepts parameter overrides.
+    """
 
     name: str
     description: str
@@ -265,6 +275,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
     examples: tuple[ToolExample[ParamsT, ResultT], ...] = field(
         default_factory=tuple,
     )
+    idempotency: IdempotencyConfig | None = None
     params_type: type[ParamsT] = field(init=False, repr=False)
     result_type: type[SupportsDataclass] | type[None] = field(init=False, repr=False)
     result_container: Literal["object", "array"] = field(
@@ -902,6 +913,7 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
 
 __all__ = [
+    "IdempotencyConfig",
     "ResourceRegistry",
     "Tool",
     "ToolContext",

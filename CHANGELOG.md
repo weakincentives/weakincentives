@@ -2,6 +2,61 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Idempotency Ledger for Tools
+
+Tools can now declare an idempotency strategy for exactly-once execution
+semantics. When a tool is configured with idempotency and an effect ledger
+is available, results are cached and reused on retry, protecting external
+side effects from duplicate execution.
+
+```python
+from weakincentives.prompt import Tool, IdempotencyConfig
+from weakincentives.runtime import EffectLedger
+
+# Tool with automatic idempotency (key from name + params hash)
+tool = Tool[Params, Result](
+    name="create_order",
+    description="Create a new order",
+    handler=handler,
+    idempotency=IdempotencyConfig(
+        strategy="auto",
+        ttl=timedelta(hours=1),
+    ),
+)
+
+# Enable idempotency in tool executor
+ledger = EffectLedger()
+executor = ToolExecutor(..., effect_ledger=ledger)
+```
+
+New primitives:
+
+- **IdempotencyConfig**: Configuration for tool idempotency with strategies
+  (`auto`, `params`, `custom`, `none`), TTL, and scope settings.
+
+- **IdempotencyStrategy**: Enum for key computation strategies.
+
+- **ToolEffect**: Record of a tool execution stored in the ledger, including
+  idempotency key, params hash, result, and expiration.
+
+- **EffectLedger**: In-memory ledger for tracking tool effects with lookup,
+  record, invalidation, and expiration management.
+
+- **compute_idempotency_key()**: Compute idempotency key based on tool config.
+
+- **compute_params_hash()**: Deterministic hash of tool parameters.
+
+Strategies for key computation:
+
+| Strategy | Description |
+|----------|-------------|
+| `auto` | Key from tool name + hash of all serialized params (default) |
+| `params` | Key from tool name + hash of specific param fields |
+| `custom` | Key from user-provided function |
+| `none` | Disable idempotency |
+
 ## v0.16.0 - 2025-12-21
 
 ### Transactional Tool Execution

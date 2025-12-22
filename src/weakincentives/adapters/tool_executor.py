@@ -32,6 +32,12 @@ from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ..runtime.events import HandlerFailure, ToolInvoked
 from ..runtime.execution_state import CompositeSnapshot, ExecutionState
+from ..runtime.idempotency import (
+    EffectLedger,
+    IdempotencyStrategy,
+    ToolEffect,
+    compute_idempotency_key,
+)
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse
 from ..types.dataclass import (
@@ -99,6 +105,11 @@ class ToolExecutionContext:
 
     The execution_state provides unified access to session and resources.
     Session is accessed via execution_state.session.
+
+    Attributes:
+        effect_ledger: Optional ledger for idempotent tool execution.
+            When provided, tools with idempotency config will check the ledger
+            before execution and record results after successful execution.
     """
 
     adapter_name: AdapterName
@@ -114,6 +125,7 @@ class ToolExecutionContext:
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
     budget_tracker: BudgetTracker | None = None
+    effect_ledger: EffectLedger | None = None
 
     @property
     def session(self) -> SessionProtocol:
@@ -319,6 +331,108 @@ def _restore_snapshot_if_needed(
     )
 
 
+def _check_idempotency_cache(
+    *,
+    context: ToolExecutionContext,
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool_params: SupportsDataclass | None,
+    log: StructuredLogger,
+) -> tuple[str | None, ToolEffect | None]:
+    """Check effect ledger for cached result.
+
+    Returns:
+        Tuple of (idempotency_key, cached_effect).
+        If no idempotency config or strategy is NONE, returns (None, None).
+        If cached effect found, returns (key, effect).
+        If no cache hit, returns (key, None).
+    """
+    if context.effect_ledger is None:
+        return None, None
+
+    idempotency_config = tool.idempotency
+    if idempotency_config is None:
+        return None, None
+
+    strategy = (
+        idempotency_config.strategy
+        if isinstance(idempotency_config.strategy, IdempotencyStrategy)
+        else IdempotencyStrategy(idempotency_config.strategy)
+    )
+    if strategy == IdempotencyStrategy.NONE:
+        return None, None
+
+    idempotency_key = compute_idempotency_key(
+        tool_name=tool.name,
+        params=tool_params,
+        config=idempotency_config,
+    )
+    if idempotency_key is None:  # pragma: no cover - NONE strategy returns above
+        return None, None
+
+    cached_effect = context.effect_ledger.lookup(idempotency_key)
+    if cached_effect is not None:
+        log.info(
+            "Returning cached result from effect ledger.",
+            event="tool.idempotency_cache_hit",
+            context={"idempotency_key": idempotency_key},
+        )
+    return idempotency_key, cached_effect
+
+
+def _record_idempotency_effect(  # noqa: PLR0913
+    *,
+    context: ToolExecutionContext,
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool_params: SupportsDataclass | None,
+    tool_result: ToolResult[SupportsToolResult],
+    idempotency_key: str,
+    log: StructuredLogger,
+) -> None:
+    """Record tool execution result in the effect ledger."""
+    if context.effect_ledger is None:  # pragma: no cover - defensive
+        return
+
+    idempotency_config = tool.idempotency
+    if idempotency_config is None:  # pragma: no cover - defensive
+        return
+
+    # Only record successful executions
+    if not tool_result.success:
+        log.debug(
+            "Skipping effect recording for failed tool execution.",
+            event="tool.idempotency_skip_failed",
+            context={"idempotency_key": idempotency_key},
+        )
+        return
+
+    effect = context.effect_ledger.record(
+        idempotency_key=idempotency_key,
+        tool_name=tool.name,
+        params=tool_params,
+        result=tool_result,
+        ttl=idempotency_config.ttl,
+    )
+    log.debug(
+        "Recorded tool effect in ledger.",
+        event="tool.idempotency_recorded",
+        context={
+            "idempotency_key": idempotency_key,
+            "effect_id": str(effect.effect_id),
+        },
+    )
+
+
+def _build_cached_result(
+    cached_effect: ToolEffect,
+) -> ToolResult[Any]:
+    """Build a ToolResult from a cached ToolEffect."""
+    return ToolResult(
+        message=cached_effect.result_message,
+        value=cached_effect.result_value,
+        success=cached_effect.result_success,
+    )
+
+
 def _execute_tool_handler(  # noqa: PLR0913
     *,
     context: ToolExecutionContext,
@@ -387,7 +501,7 @@ def _handle_tool_exception(  # noqa: PLR0913
     )
 
 
-def _execute_tool_with_snapshot(  # noqa: PLR0913
+def _execute_tool_with_snapshot(  # noqa: PLR0913, C901
     *,
     context: ToolExecutionContext,
     tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
@@ -399,19 +513,52 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
     filesystem: Filesystem | None,
     snapshot: CompositeSnapshot,
 ) -> Iterator[ToolExecutionOutcome]:
-    """Execute tool with transactional snapshot restore on failure."""
+    """Execute tool with transactional snapshot restore on failure.
+
+    Supports idempotent execution when the tool has idempotency config and
+    an effect ledger is available on the context. Cached results are returned
+    without re-executing the handler.
+    """
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsToolResult]
+    idempotency_key: str | None = None
+
     try:
         tool_params = parse_tool_params(tool=tool, arguments_mapping=arguments_mapping)
-        tool_result = _execute_tool_handler(
+
+        # Check idempotency cache before execution
+        idempotency_key, cached_effect = _check_idempotency_cache(
             context=context,
             tool=tool,
-            handler=handler,
-            tool_name=tool_name,
             tool_params=tool_params,
-            filesystem=filesystem,
+            log=log,
         )
+
+        if cached_effect is not None:
+            # Return cached result without executing handler
+            tool_result = _build_cached_result(cached_effect)
+        else:
+            # Execute the tool handler
+            tool_result = _execute_tool_handler(
+                context=context,
+                tool=tool,
+                handler=handler,
+                tool_name=tool_name,
+                tool_params=tool_params,
+                filesystem=filesystem,
+            )
+
+            # Record in ledger if idempotency is enabled and execution succeeded
+            if idempotency_key is not None:
+                _record_idempotency_effect(
+                    context=context,
+                    tool=tool,
+                    tool_params=tool_params,
+                    tool_result=tool_result,
+                    idempotency_key=idempotency_key,
+                    log=log,
+                )
+
     except (VisibilityExpansionRequired, PromptEvaluationError):
         # Context manager handles restore; just re-raise
         raise
@@ -583,6 +730,11 @@ class ToolExecutor:
 
     The execution_state provides unified access to session and resources.
     Session is accessed via execution_state.session.
+
+    Attributes:
+        effect_ledger: Optional ledger for idempotent tool execution.
+            When provided, tools with idempotency config will check the ledger
+            before execution and reuse cached results when available.
     """
 
     adapter_name: AdapterName
@@ -598,6 +750,7 @@ class ToolExecutor:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
+    effect_ledger: EffectLedger | None = None
     _log: StructuredLogger = field(init=False)
     _context: ToolExecutionContext = field(init=False)
     _tool_message_records: list[
@@ -622,6 +775,7 @@ class ToolExecutor:
             deadline=self.deadline,
             logger_override=self.logger_override,
             budget_tracker=self.budget_tracker,
+            effect_ledger=self.effect_ledger,
         )
         self._tool_message_records = []
 

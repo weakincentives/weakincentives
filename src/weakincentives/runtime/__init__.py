@@ -32,6 +32,14 @@ from .execution_state import (
     ExecutionState,
     SnapshotMetadata,
 )
+from .idempotency import (
+    EffectLedger,
+    IdempotencyConfig,
+    IdempotencyStrategy,
+    ToolEffect,
+    compute_idempotency_key,
+    compute_params_hash,
+)
 from .logging import StructuredLogger, configure_logging, get_logger
 from .main_loop import (
     MainLoop,
@@ -68,9 +76,12 @@ __all__ = [
     "CompositeSnapshot",
     "ControlBus",
     "DataEvent",
+    "EffectLedger",
     "EventBus",
     "ExecutionState",
     "HandlerFailure",
+    "IdempotencyConfig",
+    "IdempotencyStrategy",
     "InProcessEventBus",
     "MainLoop",
     "MainLoopCompleted",
@@ -95,10 +106,13 @@ __all__ = [
     "StructuredLogger",
     "TelemetryBus",
     "TokenUsage",
+    "ToolEffect",
     "ToolInvoked",
     "TypedReducer",
     "append_all",
     "build_reducer_context",
+    "compute_idempotency_key",
+    "compute_params_hash",
     "configure_logging",
     "events",
     "get_logger",

@@ -57,7 +57,14 @@ from .structured_output import (
     parse_structured_output,
 )
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
-from .tool import ResourceRegistry, Tool, ToolContext, ToolExample, ToolHandler
+from .tool import (
+    IdempotencyConfig,
+    ResourceRegistry,
+    Tool,
+    ToolContext,
+    ToolExample,
+    ToolHandler,
+)
 from .tool_result import ToolResult
 from .visibility_overrides import (
     ClearAllVisibilityOverrides,
@@ -71,6 +78,7 @@ from .visibility_overrides import (
 __all__ = [
     "ClearAllVisibilityOverrides",
     "ClearVisibilityOverride",
+    "IdempotencyConfig",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",

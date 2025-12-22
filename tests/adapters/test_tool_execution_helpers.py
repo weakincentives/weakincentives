@@ -50,6 +50,7 @@ from weakincentives.prompt import (
     ToolHandler,
     ToolResult,
 )
+from weakincentives.runtime import EffectLedger, IdempotencyConfig
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, SessionProtocol
@@ -215,3 +216,217 @@ def test_tool_execution_converts_unexpected_exceptions() -> None:
         assert outcome.result.success is False
         assert outcome.result.message == "Tool 'search_notes' execution failed: boom"
         assert outcome.params == ToolParams(query="policies")
+
+
+# --- Idempotency Integration Tests ---
+
+
+def _build_idempotent_tool(
+    handler: ToolHandler[ToolParams, ToolPayload],
+    *,
+    strategy: str = "auto",
+) -> Tool[ToolParams, ToolPayload]:
+    return Tool[ToolParams, ToolPayload](
+        name="search_notes",
+        description="Search",
+        handler=handler,
+        idempotency=IdempotencyConfig(strategy=strategy),  # type: ignore[arg-type]
+    )
+
+
+def _context_with_ledger(
+    tool: Tool[ToolParams, ToolPayload],
+    ledger: EffectLedger,
+) -> ToolExecutionContext:
+    bus = InProcessEventBus()
+    prompt_template = _build_prompt(tool)
+    prompt = Prompt(prompt_template)
+    session = Session(bus=bus)
+    execution_state = ExecutionState(session=session)
+    return ToolExecutionContext(
+        adapter_name="adapter",
+        adapter=cast(Any, object()),
+        prompt=prompt,
+        rendered_prompt=None,
+        tool_registry=cast(
+            Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+            {tool.name: cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)},
+        ),
+        execution_state=execution_state,
+        prompt_name=cast(str, prompt.name),
+        parse_arguments=parse_tool_arguments,
+        format_publish_failures=format_publish_failures,
+        deadline=None,
+        provider_payload={},
+        effect_ledger=ledger,
+    )
+
+
+def test_idempotency_records_successful_execution() -> None:
+    call_count = 0
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        nonlocal call_count
+        call_count += 1
+        return ToolResult(
+            message="Found notes",
+            value=ToolPayload(answer=params.query),
+        )
+
+    tool = _build_idempotent_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    ledger = EffectLedger()
+    context = _context_with_ledger(tool, ledger)
+    tool_call = _tool_call({"query": "policies"})
+
+    # First call - should execute handler and record
+    with tool_execution(context=context, tool_call=tool_call) as outcome:
+        assert outcome.result.success is True
+        assert outcome.result.message == "Found notes"
+        assert call_count == 1
+
+    # Verify effect was recorded
+    assert len(ledger) == 1
+
+
+def test_idempotency_returns_cached_result_on_retry() -> None:
+    call_count = 0
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        nonlocal call_count
+        call_count += 1
+        return ToolResult(
+            message="Found notes",
+            value=ToolPayload(answer=params.query),
+        )
+
+    tool = _build_idempotent_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    ledger = EffectLedger()
+    context = _context_with_ledger(tool, ledger)
+    tool_call = _tool_call({"query": "policies"})
+
+    # First call - executes handler
+    with tool_execution(context=context, tool_call=tool_call) as outcome1:
+        assert outcome1.result.success is True
+        assert call_count == 1
+
+    # Second call with same params - should return cached result
+    with tool_execution(context=context, tool_call=tool_call) as outcome2:
+        assert outcome2.result.success is True
+        assert outcome2.result.message == "Found notes"
+        # Handler should NOT be called again
+        assert call_count == 1
+
+
+def test_idempotency_no_caching_for_failed_execution() -> None:
+    call_count = 0
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        nonlocal call_count
+        call_count += 1
+        return ToolResult(message="Failed", value=None, success=False)
+
+    tool = _build_idempotent_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    ledger = EffectLedger()
+    context = _context_with_ledger(tool, ledger)
+    tool_call = _tool_call({"query": "policies"})
+
+    # First call - fails
+    with tool_execution(context=context, tool_call=tool_call) as outcome1:
+        assert outcome1.result.success is False
+        assert call_count == 1
+
+    # Effect should NOT be recorded for failed execution
+    assert len(ledger) == 0
+
+    # Second call - should execute handler again
+    with tool_execution(context=context, tool_call=tool_call) as outcome2:
+        assert outcome2.result.success is False
+        assert call_count == 2
+
+
+def test_idempotency_disabled_without_ledger() -> None:
+    call_count = 0
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        nonlocal call_count
+        call_count += 1
+        return ToolResult(
+            message="Found notes",
+            value=ToolPayload(answer=params.query),
+        )
+
+    tool = _build_idempotent_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    context = _base_context(tool)  # No ledger
+    tool_call = _tool_call({"query": "policies"})
+
+    # Both calls execute handler since no ledger
+    with tool_execution(context=context, tool_call=tool_call) as outcome1:
+        assert outcome1.result.success is True
+        assert call_count == 1
+
+    with tool_execution(context=context, tool_call=tool_call) as outcome2:
+        assert outcome2.result.success is True
+        assert call_count == 2
+
+
+def test_idempotency_disabled_without_config() -> None:
+    call_count = 0
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        nonlocal call_count
+        call_count += 1
+        return ToolResult(
+            message="Found notes",
+            value=ToolPayload(answer=params.query),
+        )
+
+    # Tool without idempotency config
+    tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    ledger = EffectLedger()
+    context = _context_with_ledger(tool, ledger)
+    tool_call = _tool_call({"query": "policies"})
+
+    # Both calls execute handler since no idempotency config
+    with tool_execution(context=context, tool_call=tool_call) as outcome1:
+        assert outcome1.result.success is True
+        assert call_count == 1
+
+    with tool_execution(context=context, tool_call=tool_call) as outcome2:
+        assert outcome2.result.success is True
+        assert call_count == 2
+
+    # No effects recorded
+    assert len(ledger) == 0
+
+
+def test_idempotency_strategy_none_never_caches() -> None:
+    call_count = 0
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        nonlocal call_count
+        call_count += 1
+        return ToolResult(
+            message="Found notes",
+            value=ToolPayload(answer=params.query),
+        )
+
+    # Tool with strategy=none
+    tool = _build_idempotent_tool(
+        cast(ToolHandler[ToolParams, ToolPayload], handler),
+        strategy="none",
+    )
+    ledger = EffectLedger()
+    context = _context_with_ledger(tool, ledger)
+    tool_call = _tool_call({"query": "policies"})
+
+    # Both calls execute handler since strategy is NONE
+    with tool_execution(context=context, tool_call=tool_call) as outcome1:
+        assert outcome1.result.success is True
+        assert call_count == 1
+
+    with tool_execution(context=context, tool_call=tool_call) as outcome2:
+        assert outcome2.result.success is True
+        assert call_count == 2
+
+    # No effects recorded
+    assert len(ledger) == 0
