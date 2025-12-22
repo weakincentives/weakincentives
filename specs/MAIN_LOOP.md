@@ -230,84 +230,45 @@ config = MainLoopConfig(
 
 ## Restart Recovery
 
-MainLoop provides built-in facilities for resuming work after a process restart
-when an in-flight prompt was disrupted. This enables durable agent execution
-where crashes, OOM kills, or infrastructure restarts do not lose progress.
+MainLoop provides opt-in facilities for resuming work after process restarts.
+Checkpoints are persisted after each successful tool call, enabling recovery
+from crashes without losing progress.
 
 ### Guiding Principles
 
-- **Checkpoint at transaction boundaries**: State is persisted after each
-  successful tool call, not mid-tool.
-- **Idempotent recovery**: Resuming a disrupted run produces the same result
-  as if the run had never been interrupted.
-- **Explicit opt-in**: Recovery is disabled by default; callers enable it via
-  configuration.
-- **Backend-agnostic**: Persistence uses a `CheckpointBackend` protocol;
-  implementations may use filesystem, database, or remote storage.
+- **Checkpoint at transaction boundaries**: Persist after successful tool
+  calls, not mid-tool
+- **Explicit opt-in**: Disabled by default; enable via `RecoveryConfig`
+- **Backend-agnostic**: Pluggable `CheckpointBackend` protocol
 
 ### Components
 
-#### CheckpointBackend Protocol
-
 ```python
 class CheckpointBackend(Protocol):
-    """Storage backend for execution checkpoints."""
+    def save(self, run_id: UUID, checkpoint: Checkpoint) -> None: ...
+    def load(self, run_id: UUID) -> Checkpoint | None: ...
+    def delete(self, run_id: UUID) -> None: ...
+    def list_incomplete(self) -> Sequence[UUID]: ...
 
-    def save(self, run_id: UUID, checkpoint: Checkpoint) -> None:
-        """Persist a checkpoint. Overwrites any existing checkpoint for run_id."""
-        ...
 
-    def load(self, run_id: UUID) -> Checkpoint | None:
-        """Load the most recent checkpoint for a run, or None if not found."""
-        ...
-
-    def delete(self, run_id: UUID) -> None:
-        """Remove checkpoint for a completed or abandoned run."""
-        ...
-
-    def list_incomplete(self) -> Sequence[UUID]:
-        """Return run IDs with checkpoints that were never marked complete."""
-        ...
-```
-
-#### Checkpoint
-
-```python
 @dataclass(slots=True, frozen=True)
 class Checkpoint:
-    """Serializable execution state at a transaction boundary."""
-
     run_id: UUID
     request_id: UUID
     created_at: datetime
     composite_snapshot: CompositeSnapshot
-    request_payload: bytes          # Serialized UserRequestT
-    request_type: str               # Fully-qualified type name
-    tool_calls_completed: int       # Progress indicator
-    phase: CheckpointPhase
-    adapter_state: bytes | None     # Optional adapter-specific state
+    request_payload: bytes                      # Serialized request
+    request_type: str                           # Fully-qualified type
+    tool_calls_completed: int
+    phase: Literal["initialized", "post_tool", "completed", "failed"]
 
 
-class CheckpointPhase(Enum):
-    """Lifecycle phase when checkpoint was taken."""
-
-    INITIALIZED = "initialized"     # After session/prompt creation, before first eval
-    POST_TOOL = "post_tool"         # After successful tool execution
-    COMPLETED = "completed"         # Final checkpoint before cleanup
-    FAILED = "failed"               # Checkpoint taken on handled failure
-```
-
-#### RecoveryConfig
-
-```python
 @dataclass(slots=True, frozen=True)
 class RecoveryConfig:
-    """Configuration for restart recovery."""
-
     backend: CheckpointBackend
-    checkpoint_interval: int = 1    # Checkpoint every N successful tool calls
-    cleanup_on_success: bool = True # Delete checkpoint after successful completion
-    max_resume_age: timedelta = timedelta(hours=24)  # Ignore stale checkpoints
+    checkpoint_interval: int = 1                # Every N tool calls
+    cleanup_on_success: bool = True
+    max_resume_age: timedelta = timedelta(hours=24)
 ```
 
 ### MainLoop Integration
@@ -320,399 +281,64 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         adapter: ProviderAdapter[OutputT],
         bus: ControlBus,
         config: MainLoopConfig | None = None,
-        recovery: RecoveryConfig | None = None,  # New parameter
+        recovery: RecoveryConfig | None = None,
     ) -> None: ...
 
-    def execute(
-        self,
-        request: UserRequestT,
-        *,
-        run_id: UUID | None = None,  # Explicit run ID for tracking
-    ) -> tuple[PromptResponse[OutputT], Session]: ...
-
-    def recover(self, run_id: UUID) -> tuple[PromptResponse[OutputT], Session]:
-        """Resume an interrupted run from its last checkpoint."""
-        ...
-
-    def list_recoverable(self) -> Sequence[RecoverableRun]:
-        """List runs that can be recovered."""
-        ...
-
-    def abandon(self, run_id: UUID) -> None:
-        """Mark a run as abandoned and delete its checkpoint."""
-        ...
-```
-
-### Execution Flow with Recovery
-
-```mermaid
-flowchart TB
-    subgraph Execute["execute(request, run_id)"]
-        Start["Start"] --> CreateState["Create Session + Prompt"]
-        CreateState --> InitCheckpoint["Checkpoint(INITIALIZED)"]
-        InitCheckpoint --> Evaluate["Evaluate with Adapter"]
-
-        Evaluate --> ToolCall{"Tool Call?"}
-        ToolCall -->|Yes| ExecuteTool["Execute Tool"]
-        ExecuteTool --> ToolSuccess{"Success?"}
-        ToolSuccess -->|Yes| PostToolCheckpoint["Checkpoint(POST_TOOL)"]
-        PostToolCheckpoint --> MoreTools{"More Tools?"}
-        MoreTools -->|Yes| Evaluate
-        MoreTools -->|No| Complete
-        ToolSuccess -->|No| Rollback["Rollback State"]
-        Rollback --> Evaluate
-
-        ToolCall -->|No| Complete["Complete"]
-        Complete --> FinalCheckpoint["Checkpoint(COMPLETED)"]
-        FinalCheckpoint --> Cleanup["Delete Checkpoint"]
-    end
-
-    subgraph Recover["recover(run_id)"]
-        LoadCheckpoint["Load Checkpoint"] --> Validate["Validate Age"]
-        Validate --> RestoreState["Restore ExecutionState"]
-        RestoreState --> RecreatePrompt["Recreate Prompt"]
-        RecreatePrompt --> ResumeEvaluate["Resume Evaluation"]
-    end
+    def execute(self, request: UserRequestT, *, run_id: UUID | None = None) -> ...: ...
+    def recover(self, run_id: UUID) -> tuple[PromptResponse[OutputT], Session]: ...
+    def list_recoverable(self) -> Sequence[UUID]: ...
+    def abandon(self, run_id: UUID) -> None: ...
 ```
 
 ### Recovery Semantics
 
-#### What Gets Restored
+| Restored | From |
+|----------|------|
+| Session slices | `CompositeSnapshot.session` |
+| Filesystem | `CompositeSnapshot.resources` |
+| Request | `Checkpoint.request_payload` |
 
-| Component | Restored From | Notes |
-|-----------|---------------|-------|
-| Session slices | `CompositeSnapshot.session` | Full slice state |
-| Filesystem | `CompositeSnapshot.resources` | If `SnapshotableFilesystem` |
-| Request | `Checkpoint.request_payload` | Deserialized via serde |
-| Tool progress | `Checkpoint.tool_calls_completed` | Resume position |
-
-#### What Gets Recreated
-
-| Component | How | Notes |
-|-----------|-----|-------|
-| Prompt | `create_prompt(request)` | Must be deterministic |
-| Adapter | Constructor | Stateless by design |
-| Reducers | `create_session()` | Re-registered on restore |
-
-### Resume Behavior
-
-When `recover(run_id)` is called:
-
-1. Load checkpoint from backend
-2. Validate checkpoint age against `max_resume_age`
-3. Deserialize request from `request_payload`
-4. Create fresh session via `create_session()`
-5. Restore session state from `composite_snapshot.session`
-6. Restore snapshotable resources from `composite_snapshot.resources`
-7. Recreate prompt via `create_prompt(request)`
-8. Resume adapter evaluation with conversation prefix
-
-```python
-def recover(self, run_id: UUID) -> tuple[PromptResponse[OutputT], Session]:
-    checkpoint = self._recovery.backend.load(run_id)
-    if checkpoint is None:
-        raise RecoveryError(f"No checkpoint found for run {run_id}")
-
-    age = datetime.now(UTC) - checkpoint.created_at
-    if age > self._recovery.max_resume_age:
-        raise RecoveryError(f"Checkpoint too old: {age}")
-
-    # Deserialize request
-    request = deserialize(checkpoint.request_payload, checkpoint.request_type)
-
-    # Create fresh session and restore state
-    session = self.create_session()
-    execution_state = ExecutionState(session=session, resources=self._build_resources())
-    execution_state.restore(checkpoint.composite_snapshot)
-
-    # Recreate prompt (must be deterministic)
-    prompt = self.create_prompt(request)
-
-    # Resume evaluation
-    return self._execute_with_state(
-        request=request,
-        run_id=run_id,
-        execution_state=execution_state,
-        prompt=prompt,
-        resume_from=checkpoint,
-    )
-```
-
-### Adapter Resume Support
-
-Adapters must support resuming from a checkpoint:
-
-```python
-class ProviderAdapter(Protocol[OutputT]):
-    def evaluate(
-        self,
-        prompt: Prompt[OutputT],
-        *,
-        execution_state: ExecutionState,
-        deadline: Deadline | None = None,
-        budget_tracker: BudgetTracker | None = None,
-        resume_from: AdapterResumeState | None = None,  # New parameter
-    ) -> PromptResponse[OutputT]: ...
-
-
-@dataclass(slots=True, frozen=True)
-class AdapterResumeState:
-    """State needed to resume an interrupted adapter evaluation."""
-
-    conversation_prefix: tuple[Message, ...]  # Messages up to interruption
-    pending_tool_calls: tuple[ToolCall, ...]  # Unanswered tool calls
-```
-
-The adapter reconstructs its conversation state and continues from where it
-left off. Tool calls that were interrupted mid-execution are re-executed
-(idempotent handlers are recommended).
-
-### Filesystem Backend
-
-A reference implementation for local development:
-
-```python
-@dataclass(slots=True)
-class FilesystemCheckpointBackend:
-    """Checkpoint backend using local filesystem."""
-
-    root: Path
-
-    def save(self, run_id: UUID, checkpoint: Checkpoint) -> None:
-        path = self.root / f"{run_id}.checkpoint.json"
-        path.write_text(checkpoint.to_json())
-
-    def load(self, run_id: UUID) -> Checkpoint | None:
-        path = self.root / f"{run_id}.checkpoint.json"
-        if not path.exists():
-            return None
-        return Checkpoint.from_json(path.read_text())
-
-    def delete(self, run_id: UUID) -> None:
-        path = self.root / f"{run_id}.checkpoint.json"
-        path.unlink(missing_ok=True)
-
-    def list_incomplete(self) -> Sequence[UUID]:
-        return [
-            UUID(p.stem.replace(".checkpoint", ""))
-            for p in self.root.glob("*.checkpoint.json")
-            if Checkpoint.from_json(p.read_text()).phase != CheckpointPhase.COMPLETED
-        ]
-```
-
-### Events
-
-```python
-@FrozenDataclass()
-class CheckpointSaved:
-    """Published after a checkpoint is persisted."""
-
-    run_id: UUID
-    checkpoint_id: UUID
-    phase: CheckpointPhase
-    tool_calls_completed: int
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-@FrozenDataclass()
-class RecoveryStarted:
-    """Published when recovery begins for an interrupted run."""
-
-    run_id: UUID
-    checkpoint_created_at: datetime
-    tool_calls_completed: int
-    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-@FrozenDataclass()
-class RecoveryCompleted:
-    """Published when recovery finishes successfully."""
-
-    run_id: UUID
-    completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-@FrozenDataclass()
-class RecoveryFailed:
-    """Published when recovery fails."""
-
-    run_id: UUID
-    error: Exception
-    failed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-```
-
-### Error Handling
-
-```python
-class RecoveryError(WinkError, RuntimeError):
-    """Base class for recovery errors."""
-
-
-class CheckpointNotFoundError(RecoveryError):
-    """No checkpoint exists for the given run ID."""
-
-
-class CheckpointExpiredError(RecoveryError):
-    """Checkpoint is older than max_resume_age."""
-
-
-class CheckpointCorruptedError(RecoveryError):
-    """Checkpoint data is invalid or cannot be deserialized."""
-
-
-class RequestTypeMismatchError(RecoveryError):
-    """Checkpoint request type does not match MainLoop type parameters."""
-```
+| Recreated | How |
+|-----------|-----|
+| Prompt | `create_prompt(request)` — must be deterministic |
+| Reducers | `create_session()` |
 
 ### Usage
 
-#### Basic Recovery-Enabled Loop
-
-```python
-backend = FilesystemCheckpointBackend(root=Path("/var/lib/agent/checkpoints"))
-recovery = RecoveryConfig(backend=backend)
-
-loop = MyMainLoop(
-    adapter=adapter,
-    bus=bus,
-    recovery=recovery,
-)
-
-# Normal execution with explicit run_id
-run_id = uuid4()
-response, session = loop.execute(request, run_id=run_id)
-```
-
-#### Startup Recovery
-
-```python
-# On process startup, recover any incomplete runs
-for run_id in loop.list_recoverable():
-    try:
-        response, session = loop.recover(run_id)
-        bus.publish(MainLoopCompleted(request_id=..., response=response, ...))
-    except RecoveryError as e:
-        log.warning(f"Failed to recover run {run_id}: {e}")
-        loop.abandon(run_id)
-```
-
-#### Worker Entry Point Pattern
-
 ```python
 def worker_main():
-    """Entry point with automatic recovery."""
-    loop = create_main_loop(recovery=recovery_config)
+    loop = create_main_loop(recovery=RecoveryConfig(backend=backend))
 
-    # Phase 1: Recover interrupted work
+    # Recover interrupted runs on startup
     for run_id in loop.list_recoverable():
         try:
-            response, session = loop.recover(run_id)
-            publish_result(response, session)
+            loop.recover(run_id)
         except RecoveryError:
             loop.abandon(run_id)
 
-    # Phase 2: Process new work
-    while True:
-        request = receive_request()
-        run_id = uuid4()
-        try:
-            response, session = loop.execute(request, run_id=run_id)
-            publish_result(response, session)
-        except Exception:
-            # Checkpoint exists; will be recovered on restart
-            raise
+    # Process new work
+    for request in receive_requests():
+        loop.execute(request, run_id=uuid4())
 ```
 
 ### Constraints
 
-#### Deterministic Prompt Creation
+- **Deterministic prompts**: `create_prompt(request)` must produce equivalent
+  output for the same request
+- **Idempotent tools**: Handlers may re-execute after crash; use session state
+  to track completion for non-idempotent operations
 
-`create_prompt(request)` must be deterministic—given the same request, it must
-produce an equivalent prompt. If prompt creation depends on external state
-(timestamps, random values), that state must be captured in the request or
-session.
+### Error Hierarchy
 
-#### Idempotent Tool Handlers
-
-Tool handlers that interact with external systems should be idempotent. A
-handler may be re-executed after a crash if the checkpoint was taken before
-tool completion. Non-idempotent handlers should use the session to track
-completion state.
-
-```python
-def send_email_handler(params: SendEmailParams, *, context: ToolContext) -> ToolResult:
-    # Check if already sent (idempotency key in session)
-    sent_emails = context.session[SentEmails].all()
-    if params.idempotency_key in {e.key for e in sent_emails}:
-        return ToolResult(message="Email already sent", success=True)
-
-    # Send and record
-    send_email(params)
-    context.session[SentEmails].append(SentEmail(key=params.idempotency_key))
-    return ToolResult(message="Email sent", success=True)
-```
-
-### Acceptance Criteria
-
-#### Checkpoint Creation
-
-```python
-def test_checkpoint_created_after_tool_call(loop: MainLoop, backend: CheckpointBackend):
-    run_id = uuid4()
-    loop.execute(request_with_tool_calls, run_id=run_id)
-
-    # Checkpoint was created during execution
-    assert backend.load(run_id) is not None
-```
-
-#### Recovery Restores State
-
-```python
-def test_recovery_restores_state(loop: MainLoop, backend: CheckpointBackend):
-    run_id = uuid4()
-
-    # Execute partway, then simulate crash
-    with simulate_crash_after_n_tools(n=2):
-        loop.execute(request, run_id=run_id)
-
-    # Recover and verify state
-    response, session = loop.recover(run_id)
-    assert session[Plan].latest() is not None
-    assert response.output == expected_output
-```
-
-#### Stale Checkpoint Rejected
-
-```python
-def test_stale_checkpoint_rejected(loop: MainLoop, backend: CheckpointBackend):
-    run_id = uuid4()
-    old_checkpoint = Checkpoint(
-        run_id=run_id,
-        created_at=datetime.now(UTC) - timedelta(days=2),
-        ...
-    )
-    backend.save(run_id, old_checkpoint)
-
-    with pytest.raises(CheckpointExpiredError):
-        loop.recover(run_id)
-```
-
-#### Cleanup on Success
-
-```python
-def test_checkpoint_deleted_on_success(loop: MainLoop, backend: CheckpointBackend):
-    run_id = uuid4()
-    loop.execute(request, run_id=run_id)
-
-    # Checkpoint cleaned up after successful completion
-    assert backend.load(run_id) is None
-```
+- `RecoveryError` — base class
+  - `CheckpointNotFoundError`
+  - `CheckpointExpiredError`
+  - `CheckpointCorruptedError`
 
 ## Limitations
 
 - Synchronous execution
 - One adapter per loop instance
-- No mid-execution cancellation (but recovery handles crashes)
+- No mid-execution cancellation (recovery handles crashes)
 - Events local to process
 - Recovery requires deterministic `create_prompt()`
-- Non-idempotent tool handlers may cause duplicate side effects on recovery
