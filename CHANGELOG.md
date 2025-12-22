@@ -36,6 +36,7 @@ these guarantees:
   `SnapshotableFilesystem` satisfy this protocol.
 
 - **SlicePolicy enum**: Classifies session slices for selective rollback:
+
   - `STATE`: Working state restored on tool failure (Plan, VisibilityOverrides)
   - `LOG`: Append-only records preserved during restore (ToolInvoked events)
 
