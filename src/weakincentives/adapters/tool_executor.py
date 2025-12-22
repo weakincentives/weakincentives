@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -30,7 +30,7 @@ from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.tool import ResourceRegistry, Tool, ToolContext, ToolHandler, ToolResult
-from ..runtime.events import HandlerFailure, ToolInvoked
+from ..runtime.events import ToolInvoked
 from ..runtime.execution_state import CompositeSnapshot, ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse
@@ -108,7 +108,6 @@ class ToolExecutionContext:
     execution_state: ExecutionState
     prompt_name: str
     parse_arguments: ToolArgumentsParser
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
     deadline: Deadline | None
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
@@ -529,39 +528,11 @@ def publish_tool_invocation(
         call_id=outcome.call_id,
         event_id=uuid4(),
     )
-    publish_result = context.session.event_bus.publish(invocation)
-    if not publish_result.ok:
-        # Restore to pre-tool state if tool succeeded (not already restored)
-        if outcome.result.success:
-            _restore_snapshot_if_needed(
-                context.execution_state,
-                outcome.snapshot,
-                outcome.log,
-                reason="publish_failure",
-            )
-        outcome.log.warning(
-            "State rollback triggered after publish failure.",
-            event="state_rollback_due_to_publish_failure",
-        )
-        failure_handlers = [
-            getattr(failure.handler, "__qualname__", repr(failure.handler))
-            for failure in publish_result.errors
-        ]
-        outcome.log.error(
-            "Tool event publish failed.",
-            event="tool_event_publish_failed",
-            context={
-                "failure_count": len(publish_result.errors),
-                "failed_handlers": failure_handlers,
-            },
-        )
-        outcome.result.message = context.format_publish_failures(publish_result.errors)
-    else:
-        outcome.log.debug(
-            "Tool event published.",
-            event="tool_event_published",
-            context={"handler_count": publish_result.handled_count},
-        )
+    context.session.event_bus.publish(invocation)
+    outcome.log.debug(
+        "Tool event published.",
+        event="tool_event_published",
+    )
     return invocation
 
 
@@ -599,7 +570,6 @@ class ToolExecutor:
     execution_state: ExecutionState
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
     serialize_tool_message_fn: ToolMessageSerializer
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str]
     parse_arguments: ToolArgumentsParser
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
@@ -624,7 +594,6 @@ class ToolExecutor:
             execution_state=self.execution_state,
             prompt_name=self.prompt_name,
             parse_arguments=self.parse_arguments,
-            format_publish_failures=self.format_publish_failures,
             deadline=self.deadline,
             logger_override=self.logger_override,
             budget_tracker=self.budget_tracker,

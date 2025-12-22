@@ -25,11 +25,9 @@ from tests.helpers.events import NullEventBus
 from weakincentives.adapters.core import PromptResponse
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
-    HandlerFailure,
     InProcessEventBus,
     PromptExecuted,
     PromptRendered,
-    PublishResult,
     TokenUsage,
     ToolInvoked,
 )
@@ -56,7 +54,7 @@ def test_null_event_bus_is_noop() -> None:
         events.append(event)
 
     bus.subscribe(PromptExecuted, record_event)
-    result = bus.publish(
+    bus.publish(
         PromptExecuted(
             prompt_name="demo",
             adapter=TEST_ADAPTER_NAME,
@@ -66,15 +64,11 @@ def test_null_event_bus_is_noop() -> None:
         )
     )
 
+    # NullEventBus discards events
     assert events == []
-    assert isinstance(result, PublishResult)
-    assert result.ok
-    assert result.handlers_invoked == ()
-    assert result.handled_count == 0
-    assert result.errors == ()
 
 
-def test_publish_without_subscribers_returns_success_result() -> None:
+def test_publish_without_subscribers_succeeds() -> None:
     bus = InProcessEventBus()
 
     event = PromptExecuted(
@@ -85,17 +79,12 @@ def test_publish_without_subscribers_returns_success_result() -> None:
         created_at=datetime.now(UTC),
     )
 
-    result = bus.publish(event)
-
-    assert result.ok
-    assert result.handlers_invoked == ()
-    assert result.errors == ()
-    assert result.handled_count == 0
-    result.raise_if_errors()
+    # Should not raise
+    bus.publish(event)
     assert isinstance(event.event_id, UUID)
 
 
-def test_publish_prompt_rendered_returns_success() -> None:
+def test_publish_prompt_rendered_succeeds() -> None:
     bus = InProcessEventBus()
 
     event = PromptRendered(
@@ -109,10 +98,8 @@ def test_publish_prompt_rendered_returns_success() -> None:
         created_at=datetime.now(UTC),
     )
 
-    result = bus.publish(event)
-
-    assert result.ok
-    assert result.errors == ()
+    # Should not raise
+    bus.publish(event)
     assert isinstance(event.event_id, UUID)
 
 
@@ -138,13 +125,9 @@ def test_in_process_bus_delivers_in_order() -> None:
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
-    result = bus.publish(event)
+    bus.publish(event)
 
     assert delivered == [event, event]
-    assert result.handlers_invoked == (first_handler, second_handler)
-    assert result.errors == ()
-    assert result.ok
-    assert result.handled_count == 2
     assert isinstance(event.event_id, UUID)
 
 
@@ -173,56 +156,17 @@ def test_in_process_bus_isolates_handler_exceptions(
         created_at=datetime.now(UTC),
     )
     with caplog.at_level(logging.ERROR, logger="weakincentives.runtime.events"):
-        result = bus.publish(event)
+        bus.publish(event)
 
+    # Good handler still received the event despite bad handler raising
     assert received == [event]
+
+    # Error was logged
     assert any(
         getattr(record, "event", None) == "event_delivery_failed"
         and getattr(record, "context", {}).get("event_type") == "PromptExecuted"
         for record in caplog.records
     )
-    assert result.handlers_invoked == (bad_handler, good_handler)
-    assert len(result.errors) == 1
-    failure = result.errors[0]
-    assert isinstance(failure, HandlerFailure)
-    assert failure.handler is bad_handler
-    assert isinstance(failure.error, RuntimeError)
-    assert not result.ok
-    assert result.handled_count == 2
-
-
-def test_publish_result_raise_if_errors() -> None:
-    bus = InProcessEventBus()
-
-    def first_handler(_: object) -> None:
-        raise ValueError("first")
-
-    def second_handler(_: object) -> None:
-        raise RuntimeError("second")
-
-    bus.subscribe(PromptExecuted, first_handler)
-    bus.subscribe(PromptExecuted, second_handler)
-
-    result = bus.publish(
-        PromptExecuted(
-            prompt_name="demo",
-            adapter=TEST_ADAPTER_NAME,
-            result=make_prompt_response("demo"),
-            session_id=uuid4(),
-            created_at=datetime.now(UTC),
-        )
-    )
-
-    assert not result.ok
-    with pytest.raises(ExceptionGroup) as excinfo:
-        result.raise_if_errors()
-
-    group = excinfo.value
-    assert isinstance(group, ExceptionGroup)
-    assert len(group.exceptions) == 2
-    assert "first_handler" in str(group)
-    assert any(isinstance(error, ValueError) for error in group.exceptions)
-    assert any(isinstance(error, RuntimeError) for error in group.exceptions)
 
 
 @dataclass(slots=True)

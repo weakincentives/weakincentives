@@ -127,11 +127,9 @@ def test_tool_invoked_appends_payload_every_time(
     session, bus = session_factory()
 
     event = make_tool_event(1)
-    first_result = bus.publish(event)
-    second_result = bus.publish(event)
+    bus.publish(event)
+    bus.publish(event)
 
-    assert first_result.ok
-    assert second_result.ok
     # append_all uses ledger semantics - every publish appends
     assert session[ExamplePayload].all() == (
         ExamplePayload(value=1),
@@ -175,9 +173,8 @@ def test_prompt_rendered_appends_start_event(
         session_id=uuid4(),
     )
 
-    result = bus.publish(event)
+    bus.publish(event)
 
-    assert result.ok
     lifecycle = session[PromptRendered].all()
     assert lifecycle == (event,)
     assert lifecycle[0].rendered_prompt == "Rendered prompt text"
@@ -191,9 +188,8 @@ def test_prompt_executed_emits_multiple_dataclasses(
 
     session, bus = session_factory()
 
-    result = bus.publish(make_prompt_event(outputs))
+    bus.publish(make_prompt_event(outputs))
 
-    assert result.ok
     assert session[ExampleOutput].all() == tuple(outputs)
 
 
@@ -235,12 +231,11 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     session[FirstSlice].register(ExampleOutput, first)
     session[SecondSlice].register(ExampleOutput, second)
 
-    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
     assert call_order == ["first", "second"]
     assert session[FirstSlice].all() == (FirstSlice("hello"),)
     assert session[SecondSlice].all() == (SecondSlice("hello"),)
-    assert result.ok
 
 
 def test_default_append_used_when_no_custom_reducer(
@@ -248,9 +243,8 @@ def test_default_append_used_when_no_custom_reducer(
 ) -> None:
     session, bus = session_factory()
 
-    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
-    assert result.ok
     assert session[ExampleOutput].all() == (ExampleOutput(text="hello"),)
 
 
@@ -300,11 +294,9 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
         rendered_output=non_dataclass_result.render(),
     )
 
-    first_result = bus.publish(event)
-    second_result = bus.publish(non_dataclass_event)
+    bus.publish(event)
+    bus.publish(non_dataclass_event)
 
-    assert first_result.ok
-    assert second_result.ok
     assert session[ExamplePayload].all() == (ExamplePayload(value=1),)
 
 
@@ -315,13 +307,10 @@ def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> No
         ExamplePayload, upsert_by(lambda payload: payload.value)
     )
 
-    first_result = bus.publish(make_tool_event(1))
-    second_result = bus.publish(make_tool_event(1))
-    third_result = bus.publish(make_tool_event(2))
+    bus.publish(make_tool_event(1))
+    bus.publish(make_tool_event(1))
+    bus.publish(make_tool_event(2))
 
-    assert first_result.ok
-    assert second_result.ok
-    assert third_result.ok
     assert session[ExamplePayload].all() == (
         ExamplePayload(value=1),
         ExamplePayload(value=2),
@@ -335,11 +324,9 @@ def test_replace_latest_keeps_only_newest_value(
 
     session[ExamplePayload].register(ExamplePayload, replace_latest)
 
-    first_result = bus.publish(make_tool_event(1))
-    second_result = bus.publish(make_tool_event(2))
+    bus.publish(make_tool_event(1))
+    bus.publish(make_tool_event(2))
 
-    assert first_result.ok
-    assert second_result.ok
     assert session[ExamplePayload].all() == (ExamplePayload(value=2),)
 
 
@@ -391,16 +378,15 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 
     session[ExampleOutput].register(ExampleOutput, faulty)
 
-    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    # First reducer (append_all) runs successfully before faulty raises
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
-    assert first_result.handled_count == 1
 
     # Second publish adds another entry (append_all doesn't dedupe)
     # The faulty reducer fails but append_all already ran successfully
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
-    assert second_result.handled_count == 1
     assert session[ExampleOutput].all() == (
         ExampleOutput(text="first"),
         ExampleOutput(text="second"),
@@ -410,20 +396,17 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
 
-    assert first_result.ok
-    assert second_result.ok
     original_state = session[ExampleOutput].all()
 
     snapshot = session.snapshot(include_all=True)
     raw = snapshot.to_json()
     restored = Snapshot.from_json(raw)
 
-    third_result = bus.publish(make_prompt_event(ExampleOutput(text="third")))
+    bus.publish(make_prompt_event(ExampleOutput(text="third")))
     assert session[ExampleOutput].all() != original_state
-    assert third_result.ok
 
     session.restore(restored)
 
@@ -452,22 +435,19 @@ def test_snapshot_preserves_custom_reducer_behavior(
 
     session[Summary].register(ExampleOutput, aggregate)
 
-    first_result = bus.publish(make_prompt_event(ExampleOutput(text="start")))
+    bus.publish(make_prompt_event(ExampleOutput(text="start")))
     snapshot = session.snapshot(include_all=True)
 
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="after")))
+    bus.publish(make_prompt_event(ExampleOutput(text="after")))
     assert session[Summary].all()[0].entries == ("start", "after")
 
     session.restore(snapshot)
 
     assert session[Summary].all()[0].entries == ("start",)
 
-    third_result = bus.publish(make_prompt_event(ExampleOutput(text="again")))
+    bus.publish(make_prompt_event(ExampleOutput(text="again")))
 
     assert session[Summary].all()[0].entries == ("start", "again")
-    assert first_result.ok
-    assert second_result.ok
-    assert third_result.ok
 
 
 def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None:
@@ -596,9 +576,8 @@ def test_snapshot_rollback_requires_registered_slices(
     session_factory: SessionFactory,
 ) -> None:
     source, bus = session_factory()
-    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    bus.publish(make_prompt_event(ExampleOutput(text="hello")))
 
-    assert result.ok
     snapshot = source.snapshot()
 
     target = Session(bus=InProcessEventBus())
@@ -624,16 +603,14 @@ def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
-    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    assert first_result.ok
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
     assert session[ExampleOutput].all()
 
     session.reset()
 
     assert session[ExampleOutput].all() == ()
 
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
-    assert second_result.ok
+    bus.publish(make_prompt_event(ExampleOutput(text="second")))
     assert session[ExampleOutput].all() == (ExampleOutput(text="second"),)
 
 
@@ -648,8 +625,7 @@ def test_clone_preserves_state_and_reducer_registration(
 
     session[ExampleOutput].register(ExampleOutput, replace_latest)
 
-    result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    assert result.ok
+    bus.publish(make_prompt_event(ExampleOutput(text="first")))
 
     clone_bus = InProcessEventBus()
     clone = session.clone(bus=clone_bus)
@@ -1306,8 +1282,7 @@ def test_prompt_executed_with_mixed_iterable_output(
         created_at=datetime.now(UTC),
     )
 
-    result = bus.publish(event)
-    assert result.ok
+    bus.publish(event)
 
     # Only dataclass instances should be in the session state
     assert session[ExampleOutput].all() == (

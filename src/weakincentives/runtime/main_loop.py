@@ -272,7 +272,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 response=response,
                 session_id=session.session_id,
             )
-            _ = self._bus.publish(completed)
+            self._bus.publish(completed)
 
         except Exception as exc:
             failed = MainLoopFailed(
@@ -280,7 +280,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 error=exc,
                 session_id=None,
             )
-            _ = self._bus.publish(failed)
+            self._bus.publish(failed)
             raise
 
 

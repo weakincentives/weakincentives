@@ -26,7 +26,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.tool import ResourceRegistry
-from ..runtime.events import HandlerFailure, TokenUsage
+from ..runtime.events import TokenUsage
 from ..serde import schema
 from ..types.dataclass import (
     SupportsDataclass,
@@ -131,22 +131,6 @@ def raise_tool_deadline_error(
         phase=PROMPT_EVALUATION_PHASE_TOOL,
         provider_payload=deadline_provider_payload(deadline),
     )
-
-
-def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
-    """Summarize publish failures encountered while applying tool results."""
-
-    def _message_for(failure: HandlerFailure) -> str:
-        message = str(failure.error).strip()
-        return message or failure.error.__class__.__name__
-
-    messages = [_message_for(failure) for failure in failures]
-
-    if not messages:
-        return "Reducer errors prevented applying tool result."
-
-    joined = "; ".join(messages)
-    return f"Reducer errors prevented applying tool result: {joined}"
 
 
 def tool_to_spec(
@@ -385,7 +369,6 @@ __all__ = [
     "deadline_provider_payload",
     "extract_payload",
     "first_choice",
-    "format_publish_failures",
     "parse_tool_arguments",
     "prepare_adapter_conversation",
     "raise_tool_deadline_error",

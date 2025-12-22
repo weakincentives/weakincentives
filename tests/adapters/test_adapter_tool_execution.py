@@ -16,7 +16,6 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from types import MethodType
 from typing import Any, cast
 
 import pytest
@@ -70,10 +69,8 @@ from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
 from weakincentives.runtime.session import (
-    ReducerEvent,
     Session,
     SessionProtocol,
-    replace_latest,
 )
 from weakincentives.types.dataclass import SupportsDataclass
 
@@ -598,87 +595,6 @@ def test_adapter_tool_execution_unexpected_exception(
     message_text, rendered_text = _tool_message_parts(tool_message)
     assert message_text == "Tool 'search_notes' execution failed: handler crash"
     assert rendered_text is None
-
-
-def test_adapter_tool_execution_rolls_back_session(
-    adapter_harness: AdapterHarness,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
-        del context
-        return ToolResult(
-            message="completed",
-            value=ToolPayload(answer=params.query),
-        )
-
-    tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
-
-    tool = Tool[ToolParams, ToolPayload](
-        name="search_notes",
-        description="Search stored notes.",
-        handler=tool_handler,
-    )
-    prompt_template = _build_prompt(adapter_harness, tool)
-    tool_call = DummyToolCall(
-        call_id="call_1",
-        name="search_notes",
-        arguments=json.dumps({"query": "policies"}),
-    )
-    responses = _build_responses(
-        tool_call=tool_call,
-        final_message=DummyMessage(content="All done", tool_calls=None),
-    )
-    adapter, requests = adapter_harness.build(responses)
-
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    session[ToolPayload].register(ToolPayload, replace_latest)
-    session[ToolPayload].seed((ToolPayload(answer="baseline"),))
-
-    original_dispatch = session._dispatch_data_event
-
-    def failing_dispatch(
-        self: Session,
-        data_type: type[SupportsDataclass],
-        event: ReducerEvent,
-    ) -> None:
-        if data_type is not ToolPayload:
-            original_dispatch(data_type, event)
-            return
-        original_dispatch(data_type, event)
-        raise RuntimeError("Reducer crashed")
-
-    monkeypatch.setattr(
-        session,
-        "_dispatch_data_event",
-        MethodType(failing_dispatch, session),
-    )
-
-    events = _record_tool_events(bus)
-
-    bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
-
-    adapter.evaluate(
-        bound_prompt,
-        session=session,
-    )
-
-    assert len(events) == 1
-    invocation = events[0]
-    assert invocation.result.message.startswith(
-        "Reducer errors prevented applying tool result:"
-    )
-    assert invocation.result.success is True
-    assert invocation.result.value == ToolPayload(answer="policies")
-
-    latest_payload = session[ToolPayload].latest()
-    assert latest_payload == ToolPayload(answer="baseline")
-
-    tool_message = _second_tool_message(requests)
-    message_text, rendered_text = _tool_message_parts(tool_message)
-    assert message_text == invocation.result.message
-    assert rendered_text is not None
-    assert json.loads(rendered_text) == {"answer": "policies"}
 
 
 def test_adapter_tool_visibility_expansion_propagates(

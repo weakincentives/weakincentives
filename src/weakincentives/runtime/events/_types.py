@@ -15,9 +15,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import field
 from datetime import datetime
-from typing import Any, Protocol, cast, override
+from typing import Any, Protocol
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
@@ -40,8 +40,11 @@ class EventBus(Protocol):
         """
         ...
 
-    def publish(self, event: object) -> PublishResult:
-        """Publish an event instance to subscribers."""
+    def publish(self, event: object) -> None:
+        """Publish an event instance to subscribers.
+
+        Fire-and-forget: handler errors are logged but not returned.
+        """
         ...
 
 
@@ -60,50 +63,6 @@ type ControlBus = EventBus
 
 type TelemetryBus = EventBus
 """EventBus used for session telemetry and adapter observability events."""
-
-
-@FrozenDataclass()
-class HandlerFailure:
-    """Container describing a handler error captured during publish."""
-
-    handler: EventHandler
-    error: BaseException
-
-    @override
-    def __str__(self) -> str:
-        return f"{self.handler!r} -> {self.error!r}"
-
-
-@dataclass(slots=True, frozen=True)
-class PublishResult:
-    """Summary of an event publish invocation."""
-
-    event: object
-    handlers_invoked: tuple[EventHandler, ...]
-    errors: tuple[HandlerFailure, ...]
-    handled_count: int = field(init=False)
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "handled_count", len(self.handlers_invoked))
-
-    @property
-    def ok(self) -> bool:
-        """Return ``True`` when no handler failures were recorded."""
-
-        return not self.errors
-
-    def raise_if_errors(self) -> None:
-        """Raise an ``ExceptionGroup`` if any handlers failed."""
-
-        if not self.errors:
-            return
-
-        failures = ", ".join(str(failure) for failure in self.errors)
-        message = f"Errors while publishing {type(self.event).__name__}: {failures}"
-        raise ExceptionGroup(
-            message,
-            tuple(cast(Exception, failure.error) for failure in self.errors),
-        )
 
 
 @FrozenDataclass()
@@ -144,8 +103,6 @@ __all__ = [
     "ControlBus",
     "EventBus",
     "EventHandler",
-    "HandlerFailure",
-    "PublishResult",
     "TelemetryBus",
     "TokenUsage",
     "ToolInvoked",

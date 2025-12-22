@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from weakincentives.runtime.events import EventHandler, PublishResult
+from weakincentives.runtime.events import EventHandler
 
 
 class NullEventBus:
@@ -35,14 +35,9 @@ class NullEventBus:
         return False
 
     @staticmethod
-    def publish(event: object) -> PublishResult:
+    def publish(event: object) -> None:
         """Drop the provided event instance."""
-
-        return PublishResult(
-            event=event,
-            handlers_invoked=(),
-            errors=(),
-        )
+        del event
 
 
 __all__ = ["NullEventBus"]

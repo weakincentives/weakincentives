@@ -27,8 +27,6 @@ from ._types import (
     ControlBus,
     EventBus,
     EventHandler,
-    HandlerFailure,
-    PublishResult,
     TelemetryBus,
     TokenUsage,
     ToolInvoked,
@@ -77,16 +75,13 @@ class InProcessEventBus:
             else:
                 return True
 
-    def publish(self, event: object) -> PublishResult:
+    def publish(self, event: object) -> None:
         with self._lock:
             handlers = tuple(self._handlers.get(type(event), ()))
-        invoked: list[EventHandler] = []
-        failures: list[HandlerFailure] = []
         for handler in handlers:
-            invoked.append(handler)
             try:
                 handler(event)
-            except Exception as error:
+            except Exception:
                 logger.exception(
                     "Error delivering event.",
                     event="event_delivery_failed",
@@ -95,13 +90,6 @@ class InProcessEventBus:
                         "event_type": type(event).__name__,
                     },
                 )
-                failures.append(HandlerFailure(handler=handler, error=error))
-
-        return PublishResult(
-            event=event,
-            handlers_invoked=tuple(invoked),
-            errors=tuple(failures),
-        )
 
 
 @FrozenDataclass()
@@ -136,11 +124,9 @@ class PromptRendered:
 __all__ = [
     "ControlBus",
     "EventBus",
-    "HandlerFailure",
     "InProcessEventBus",
     "PromptExecuted",
     "PromptRendered",
-    "PublishResult",
     "TelemetryBus",
     "TokenUsage",
     "ToolInvoked",

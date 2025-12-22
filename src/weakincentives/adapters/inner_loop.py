@@ -32,7 +32,7 @@ from ..budget import BudgetExceededError, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt, RenderedPrompt
-from ..runtime.events import HandlerFailure, PromptExecuted, PromptRendered
+from ..runtime.events import PromptExecuted, PromptRendered
 from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import (
@@ -69,7 +69,6 @@ from .utilities import (
     ToolChoice,
     deadline_provider_payload,
     extract_payload,
-    format_publish_failures,
     parse_tool_arguments,
     serialize_tool_call,
     token_usage_from_payload,
@@ -130,9 +129,6 @@ class InnerLoopConfig:
     call_provider: ProviderCall
     select_choice: ChoiceSelector
     serialize_tool_message_fn: ToolMessageSerializer
-    format_publish_failures: Callable[[Sequence[HandlerFailure]], str] = (
-        format_publish_failures
-    )
     parse_arguments: ToolArgumentsParser = parse_tool_arguments
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
@@ -368,7 +364,6 @@ class InnerLoop[OutputT]:
             execution_state=self.config.execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=self.config.serialize_tool_message_fn,
-            format_publish_failures=self.config.format_publish_failures,
             parse_arguments=self.config.parse_arguments,
             logger_override=self.config.logger_override,
             deadline=self._deadline,
@@ -385,7 +380,7 @@ class InnerLoop[OutputT]:
     def _publish_rendered_event(self) -> None:
         """Publish the PromptRendered event."""
 
-        publish_result = self.config.session.event_bus.publish(
+        self.config.session.event_bus.publish(
             PromptRendered(
                 prompt_ns=self.inputs.prompt.ns,
                 prompt_key=self.inputs.prompt.key,
@@ -399,25 +394,10 @@ class InnerLoop[OutputT]:
                 event_id=uuid4(),
             )
         )
-        if not publish_result.ok:
-            failure_handlers = [
-                getattr(failure.handler, "__qualname__", repr(failure.handler))
-                for failure in publish_result.errors
-            ]
-            self._log.error(
-                "Prompt rendered publish failed.",
-                event="prompt_rendered_publish_failed",
-                context={
-                    "failure_count": len(publish_result.errors),
-                    "failed_handlers": failure_handlers,
-                },
-            )
-        else:
-            self._log.debug(
-                "Prompt rendered event published.",
-                event="prompt_rendered_published",
-                context={"handler_count": publish_result.handled_count},
-            )
+        self._log.debug(
+            "Prompt rendered event published.",
+            event="prompt_rendered_published",
+        )
 
     def _handle_tool_calls(
         self,
@@ -492,7 +472,7 @@ class InnerLoop[OutputT]:
 
         usage = token_usage_from_payload(self._provider_payload)
 
-        publish_result = self.config.session.event_bus.publish(
+        self.config.session.event_bus.publish(
             PromptExecuted(
                 prompt_name=self.inputs.prompt_name,
                 adapter=self.inputs.adapter_name,
@@ -503,20 +483,6 @@ class InnerLoop[OutputT]:
                 event_id=uuid4(),
             )
         )
-        if not publish_result.ok:
-            failure_handlers = [
-                getattr(failure.handler, "__qualname__", repr(failure.handler))
-                for failure in publish_result.errors
-            ]
-            self._log.error(
-                "Prompt execution publish failed.",
-                event="prompt_execution_publish_failed",
-                context={
-                    "failure_count": len(publish_result.errors),
-                    "failed_handlers": failure_handlers,
-                },
-            )
-            publish_result.raise_if_errors()
         self._log.info(
             "Prompt execution completed.",
             event="prompt_execution_succeeded",
@@ -527,7 +493,6 @@ class InnerLoop[OutputT]:
                 if response_payload.text
                 else 0,
                 "structured_output": self._response_parser.should_parse_structured_output,
-                "handler_count": publish_result.handled_count,
             },
         )
 

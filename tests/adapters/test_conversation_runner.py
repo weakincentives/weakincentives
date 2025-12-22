@@ -49,10 +49,8 @@ from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import (
     EventBus,
-    HandlerFailure,
     PromptExecuted,
     PromptRendered,
-    PublishResult,
     TokenUsage,
     ToolInvoked,
 )
@@ -119,17 +117,10 @@ def serialize_tool_message(
 
 
 class RecordingBus(EventBus):
-    def __init__(
-        self,
-        *,
-        fail_rendered: bool = False,
-        fail_tool: bool = False,
-        fail_prompt: bool = False,
-    ) -> None:
+    """Event bus that records all published events."""
+
+    def __init__(self) -> None:
         self.events: list[object] = []
-        self.fail_rendered = fail_rendered
-        self.fail_tool = fail_tool
-        self.fail_prompt = fail_prompt
         self.subscriptions: list[tuple[type[object], EventHandler]] = []
 
     def subscribe(
@@ -137,27 +128,14 @@ class RecordingBus(EventBus):
     ) -> None:  # pragma: no cover - unused
         self.subscriptions.append((event_type, handler))
 
-    def publish(self, event: object) -> PublishResult:
+    def unsubscribe(
+        self, event_type: type[object], handler: EventHandler
+    ) -> bool:  # pragma: no cover - unused
+        del event_type, handler
+        return False
+
+    def publish(self, event: object) -> None:
         self.events.append(event)
-        if self.fail_rendered and isinstance(event, PromptRendered):
-            return self._failure_result(event, "prompt rendered publish failure")
-        if self.fail_tool and isinstance(event, ToolInvoked):
-            return self._failure_result(event, "reducer failure")
-        if self.fail_prompt and isinstance(event, PromptExecuted):
-            return self._failure_result(event, "prompt publish failure")
-        return PublishResult(event=event, handlers_invoked=(), errors=())
-
-    @staticmethod
-    def _failure_result(event: object, message: str) -> PublishResult:
-        def failure_handler(_event: object) -> None:  # pragma: no cover - defensive
-            return None
-
-        failure = HandlerFailure(handler=failure_handler, error=RuntimeError(message))
-        return PublishResult(
-            event=event,
-            handlers_invoked=(failure_handler,),
-            errors=(failure,),
-        )
 
 
 def build_inner_loop(
@@ -525,14 +503,14 @@ def test_inner_loop_executes_tool_calls() -> None:
     assert tool_event.name == "echo"
 
 
-def test_inner_loop_continues_on_prompt_rendered_publish_failure() -> None:
-    """Test that InnerLoop continues when PromptRendered publish fails."""
+def test_inner_loop_publishes_events() -> None:
+    """Test that InnerLoop publishes PromptRendered and PromptExecuted events."""
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus(fail_rendered=True)
+    bus = RecordingBus()
     session = Session(bus=bus)
-    params = EchoParams(value="blocked")
+    params = EchoParams(value="test")
 
     loop = build_inner_loop(
         rendered=rendered,
@@ -546,70 +524,6 @@ def test_inner_loop_continues_on_prompt_rendered_publish_failure() -> None:
     assert provider.calls
     assert bus.events and isinstance(bus.events[0], PromptRendered)
     assert isinstance(bus.events[-1], PromptExecuted)
-
-
-def test_inner_loop_raises_on_prompt_publish_failure() -> None:
-    """Test that InnerLoop raises when PromptExecuted publish fails."""
-    rendered = RenderedPrompt(text="system")
-    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
-    provider = ProviderStub(responses)
-    bus = RecordingBus(fail_prompt=True)
-    session = Session(bus=bus)
-
-    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
-
-    with pytest.raises(ExceptionGroup) as exc_info:
-        loop.run()
-
-    assert "prompt publish failure" in str(exc_info.value)
-    assert isinstance(bus.events[-1], PromptExecuted)
-    assert provider.calls[0]["messages"][0]["content"] == "system"
-
-
-def test_inner_loop_formats_tool_publish_failures() -> None:
-    """Test that InnerLoop formats publish failures for tools."""
-    tool = Tool[EchoParams, EchoPayload](
-        name="echo",
-        description="Echo the provided value.",
-        handler=echo_handler,
-    )
-    rendered = tool_rendered_prompt(tool)
-    provider = ProviderStub(build_tool_responses())
-    bus = RecordingBus(fail_tool=True)
-    session = Session(bus=bus)
-
-    loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
-    response = loop.run()
-
-    assert response.text == "All done"
-    tool_event = next(event for event in bus.events if isinstance(event, ToolInvoked))
-    failure_message = tool_event.result.message
-    assert "Reducer errors prevented applying tool result" in failure_message
-
-
-def test_inner_loop_rolls_back_on_tool_publish_failure() -> None:
-    """Test that InnerLoop rolls back session on tool publish failure."""
-    tool = Tool[EchoParams, EchoPayload](
-        name="echo",
-        description="Echo the provided value.",
-        handler=echo_handler,
-    )
-    rendered = tool_rendered_prompt(tool)
-    provider = ProviderStub(build_tool_responses())
-    session = SessionStub(event_bus=RecordingBus(fail_tool=True))
-    execution_state = ExecutionState(session=session)
-
-    loop = build_inner_loop(
-        rendered=rendered,
-        provider=provider,
-        session=session,
-        execution_state=execution_state,
-    )
-    response = loop.run()
-
-    assert response.text == "All done"
-    assert session.snapshots and session.restores
-    assert session.restores == session.snapshots
 
 
 def test_inner_loop_includes_prompt_descriptor_in_event() -> None:

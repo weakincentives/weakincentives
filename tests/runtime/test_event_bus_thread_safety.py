@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from threading import Barrier, Lock, Thread
 
-from weakincentives.runtime.events import InProcessEventBus, PublishResult
+from weakincentives.runtime.events import InProcessEventBus
 
 
 @dataclass(slots=True)
@@ -64,14 +64,12 @@ def test_concurrent_publishes_invoke_all_handlers_once() -> None:
         bus.subscribe(_DummyEvent, _make_handler(handler_id, call_log, log_lock))
 
     start_barrier = Barrier(publisher_count)
-    results: list[PublishResult] = []
     errors: list[BaseException] = []
 
     def publish(index: int) -> None:
         try:
             start_barrier.wait()
-            result = bus.publish(_DummyEvent(event_id=index))
-            results.append(result)
+            bus.publish(_DummyEvent(event_id=index))
         except BaseException as error:  # pragma: no cover - defensive
             errors.append(error)
 
@@ -84,9 +82,6 @@ def test_concurrent_publishes_invoke_all_handlers_once() -> None:
         thread.join()
 
     assert not errors
-    assert len(results) == publisher_count
-    assert all(result.handlers_invoked for result in results)
-    assert all(len(result.handlers_invoked) == handler_count for result in results)
 
     _assert_all_handlers_called_once(call_log, handler_count, range(publisher_count))
 
@@ -103,7 +98,6 @@ def test_subscriptions_and_publishes_can_race_without_errors() -> None:
         bus.subscribe(_DummyEvent, _make_handler(handler_id, call_log, log_lock))
 
     start_barrier = Barrier(new_handler_count + publisher_count)
-    results: list[PublishResult] = []
     errors: list[BaseException] = []
 
     def subscribe(offset: int) -> None:
@@ -117,8 +111,7 @@ def test_subscriptions_and_publishes_can_race_without_errors() -> None:
     def publish(event_id: int) -> None:
         try:
             start_barrier.wait()
-            result = bus.publish(_DummyEvent(event_id=event_id))
-            results.append(result)
+            bus.publish(_DummyEvent(event_id=event_id))
         except BaseException as error:  # pragma: no cover - defensive
             errors.append(error)
 
@@ -135,15 +128,11 @@ def test_subscriptions_and_publishes_can_race_without_errors() -> None:
         thread.join()
 
     assert not errors
-    assert len(results) == publisher_count
-    assert all(len(result.handlers_invoked) >= base_handler_count for result in results)
 
     _assert_base_handlers_delivered(call_log, publisher_count, base_handler_count)
 
     final_event_id = publisher_count + 1
-    final_result = bus.publish(_DummyEvent(event_id=final_event_id))
-
-    assert len(final_result.handlers_invoked) == base_handler_count + new_handler_count
+    bus.publish(_DummyEvent(event_id=final_event_id))
 
     _assert_all_handlers_called_once(
         call_log, base_handler_count + new_handler_count, [final_event_id]
@@ -165,11 +154,11 @@ def test_concurrent_unsubscribes_and_publishes_can_race_without_errors() -> None
         bus.subscribe(_DummyEvent, handler)
 
     start_barrier = Barrier(unsubscribe_count + publisher_count)
-    results: list[PublishResult] = []
     unsubscribe_results: list[bool] = []
     errors: list[BaseException] = []
 
     def unsubscribe(handler_id: int, handler: object) -> None:
+        del handler_id  # unused
         try:
             start_barrier.wait()
             result = bus.unsubscribe(_DummyEvent, handler)
@@ -180,8 +169,7 @@ def test_concurrent_unsubscribes_and_publishes_can_race_without_errors() -> None
     def publish(event_id: int) -> None:
         try:
             start_barrier.wait()
-            result = bus.publish(_DummyEvent(event_id=event_id))
-            results.append(result)
+            bus.publish(_DummyEvent(event_id=event_id))
         except BaseException as error:  # pragma: no cover - defensive
             errors.append(error)
 
@@ -199,16 +187,19 @@ def test_concurrent_unsubscribes_and_publishes_can_race_without_errors() -> None
         thread.join()
 
     assert not errors
-    assert len(results) == publisher_count
     assert len(unsubscribe_results) == unsubscribe_count
     assert all(result is True for result in unsubscribe_results)
 
     remaining_handler_count = handler_count - unsubscribe_count
     final_event_id = publisher_count + 1
-    final_result = bus.publish(_DummyEvent(event_id=final_event_id))
-
-    assert len(final_result.handlers_invoked) == remaining_handler_count
+    bus.publish(_DummyEvent(event_id=final_event_id))
 
     counts = Counter(call_log)
     for handler_id in range(unsubscribe_count, handler_count):
         assert counts[handler_id, final_event_id] == 1
+
+    # The remaining handlers should have received the final event exactly once
+    assert (
+        sum(1 for h_id, e_id in call_log if e_id == final_event_id)
+        == remaining_handler_count
+    )

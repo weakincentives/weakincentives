@@ -153,8 +153,7 @@ def test_prompt_render_reducer_prints_full_prompt(
         event_id=uuid4(),
     )
 
-    publish_result = bus.publish(event)
-    assert publish_result.handled_count >= 1
+    bus.publish(event)
     del overrides_store  # Not needed for this test
 
     captured = capsys.readouterr()

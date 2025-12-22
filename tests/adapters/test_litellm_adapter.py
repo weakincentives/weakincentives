@@ -16,7 +16,6 @@ import sys
 import types
 from collections.abc import Mapping
 from importlib import import_module as std_import_module
-from types import MethodType
 from typing import Any, Literal, TypeVar, cast
 
 import pytest
@@ -43,7 +42,6 @@ from weakincentives.adapters.response_parser import (
     parse_schema_constrained_payload,
     parsed_payload_from_part,
 )
-from weakincentives.adapters.utilities import format_publish_failures
 from weakincentives.prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     StructuredOutputConfig,
@@ -100,16 +98,11 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.events import (
-    HandlerFailure,
     InProcessEventBus,
     PromptExecuted,
     ToolInvoked,
 )
-from weakincentives.runtime.session import (
-    ReducerEvent,
-    Session,
-    replace_latest,
-)
+from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
 
 MODULE_PATH = "weakincentives.adapters.litellm"
@@ -460,115 +453,6 @@ def test_litellm_adapter_executes_tools_and_parses_output() -> None:
     assert message_text == "completed"
     assert rendered_text is not None
     assert json.loads(rendered_text) == {"answer": "Policy summary"}
-
-
-def test_litellm_adapter_rolls_back_session_on_publish_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    module = cast(Any, _reload_module())
-
-    tool = Tool[ToolParams, ToolPayload](
-        name="search_notes",
-        description="Search stored notes.",
-        handler=simple_handler,
-    )
-
-    prompt = PromptTemplate[StructuredAnswer](
-        ns=PROMPT_NS,
-        key="litellm-session-rollback",
-        name="search",
-        sections=[
-            MarkdownSection[ToolParams](
-                title="Task",
-                key="task",
-                template="Look up ${query}",
-                tools=[tool],
-            )
-        ],
-    )
-
-    tool_call = DummyToolCall(
-        call_id="call_1",
-        name="search_notes",
-        arguments=json.dumps({"query": "policies"}),
-    )
-    first = DummyResponse(
-        [DummyChoice(DummyMessage(content="thinking", tool_calls=[tool_call]))]
-    )
-    second_message = DummyMessage(
-        content=json.dumps({"answer": "Policy summary"}), tool_calls=None
-    )
-    second = DummyResponse([DummyChoice(second_message)])
-    completion = RecordingCompletion([first, second])
-    adapter = module.LiteLLMAdapter(model="gpt-test", completion=completion)
-
-    bus = InProcessEventBus()
-    session = Session(bus=bus)
-    session[ToolPayload].register(ToolPayload, replace_latest)
-    session[ToolPayload].seed((ToolPayload(answer="baseline"),))
-
-    tool_events: list[ToolInvoked] = []
-    prompt_events: list[PromptExecuted] = []
-
-    def record_tool_event(event: object) -> None:
-        assert isinstance(event, ToolInvoked)
-        tool_events.append(event)
-
-    def record_prompt_event(event: object) -> None:
-        assert isinstance(event, PromptExecuted)
-        prompt_events.append(event)
-
-    bus.subscribe(ToolInvoked, record_tool_event)
-    bus.subscribe(PromptExecuted, record_prompt_event)
-
-    original_dispatch = session._dispatch_data_event
-
-    def failing_dispatch(
-        self: Session,
-        data_type: type[SupportsDataclass],
-        event: ReducerEvent,
-    ) -> None:
-        original_dispatch(data_type, event)
-        raise RuntimeError("Reducer crashed")
-
-    monkeypatch.setattr(
-        session,
-        "_dispatch_data_event",
-        MethodType(failing_dispatch, session),
-    )
-
-    with pytest.raises(ExceptionGroup) as exc_info:
-        _evaluate_with_session(
-            adapter,
-            prompt,
-            ToolParams(query="policies"),
-            session=session,
-        )
-
-    assert "Reducer crashed" in str(exc_info.value)
-
-    assert tool_events
-    tool_event = tool_events[0]
-    assert tool_event.result.message.startswith(
-        "Reducer errors prevented applying tool result:"
-    )
-    assert "Reducer crashed" in tool_event.result.message
-
-    latest_payload = session[ToolPayload].latest()
-    assert latest_payload == ToolPayload(answer="baseline")
-
-    assert prompt_events
-    prompt_result = prompt_events[0].result
-    assert prompt_result.output == StructuredAnswer(answer="Policy summary")
-
-
-def test_litellm_format_publish_failures_handles_defaults() -> None:
-    failure = HandlerFailure(handler=lambda _: None, error=RuntimeError(""))
-    message = format_publish_failures((failure,))
-    assert message == "Reducer errors prevented applying tool result: RuntimeError"
-    assert (
-        format_publish_failures(()) == "Reducer errors prevented applying tool result."
-    )
 
 
 def test_litellm_adapter_uses_parsed_payload_when_available() -> None:

@@ -48,7 +48,6 @@ from .utilities import (
     ToolChoice,
     call_provider_with_normalization,
     first_choice,
-    format_publish_failures,
     parse_tool_arguments,
     prepare_adapter_conversation,
 )
@@ -337,7 +336,6 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             call_provider=_call_provider,
             select_choice=_select_choice,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=logger,
             deadline=deadline,

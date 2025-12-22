@@ -56,7 +56,6 @@ from .throttle import ThrottleError, ThrottleKind, throttle_details
 from .utilities import (
     ToolChoice,
     deadline_provider_payload,
-    format_publish_failures,
     parse_tool_arguments,
 )
 
@@ -638,7 +637,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             call_provider=self._build_provider_invoker(context.prompt_name),
             select_choice=self._build_choice_selector(context.prompt_name),
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=format_publish_failures,
             parse_arguments=parse_tool_arguments,
             logger_override=self._conversation_logger(),
             deadline=deadline,

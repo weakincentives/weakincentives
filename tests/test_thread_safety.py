@@ -101,6 +101,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
     bus = InProcessEventBus()
     session = Session(bus=bus)
 
+    # Calling attach again should be idempotent (no duplicate subscriptions)
     session._attach_to_bus(bus)
 
     params = ExampleParams(value=999)
@@ -119,8 +120,14 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         rendered_output=rendered_output,
     )
 
-    publish_result = bus.publish(event)
-    assert publish_result.handled_count == 1
+    bus.publish(event)
+
+    # If _attach_to_bus wasn't idempotent, we'd have duplicate handlers
+    # which would cause duplicate entries in the session data.
+    # Verify we have exactly one entry (not two duplicates).
+    all_results = session[ExampleResult].all()
+    assert len(all_results) == 1
+    assert all_results[0] == result_payload
 
 
 @pytest.mark.threadstress(min_workers=2, max_workers=8)

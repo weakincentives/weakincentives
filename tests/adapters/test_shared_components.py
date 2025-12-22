@@ -61,8 +61,6 @@ from weakincentives.prompt.tool import ResourceRegistry, Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import (
     EventBus,
-    HandlerFailure,
-    PublishResult,
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
@@ -83,9 +81,11 @@ class RecordingBus(EventBus):
     def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
         pass
 
-    def publish(self, event: object) -> PublishResult:
+    def unsubscribe(self, event_type: type[object], handler: EventHandler) -> bool:
+        return False
+
+    def publish(self, event: object) -> None:
         self.events.append(event)
-        return PublishResult(event=event, handlers_invoked=(), errors=())
 
 
 @dataclass
@@ -194,7 +194,6 @@ def test_tool_executor_success() -> None:
         execution_state=execution_state,
         tool_registry=tool_registry,
         serialize_tool_message_fn=serialize_tool_message,
-        format_publish_failures=lambda x: "",
         parse_arguments=parse_tool_arguments,
     )
 
@@ -242,7 +241,6 @@ def testpublish_tool_invocation_attaches_usage() -> None:
         execution_state=execution_state,
         prompt_name="test",
         parse_arguments=parse_tool_arguments,
-        format_publish_failures=lambda errors: "",
         deadline=None,
     ).with_provider_payload(
         {
@@ -379,7 +377,6 @@ def test_tool_executor_raises_when_deadline_expired(
         execution_state=execution_state,
         tool_registry=tool_registry,
         serialize_tool_message_fn=serialize_tool_message,
-        format_publish_failures=lambda x: "",
         parse_arguments=parse_tool_arguments,
         deadline=deadline,
     )
@@ -551,7 +548,6 @@ class TestToolExecutionFilesystemIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -615,7 +611,6 @@ class TestToolExecutionFilesystemIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -676,7 +671,6 @@ class TestToolExecutionFilesystemIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -737,7 +731,6 @@ class TestToolExecutionFilesystemIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -750,169 +743,6 @@ class TestToolExecutionFilesystemIntegration:
 
         # File should keep the modified content since tool succeeded
         assert fs.read("/test.txt").content == "modified"
-
-
-class TestPublishInvocationFilesystemRestore:
-    """Tests for filesystem restore in publish_tool_invocation."""
-
-    def test_filesystem_restored_on_publish_failure(self) -> None:
-        """Verify filesystem is restored when event publishing fails."""
-        fs = InMemoryFilesystem()
-        fs.write("/test.txt", "before_tool")
-
-        def dummy_handler(e: object) -> None:
-            pass
-
-        class FailingBus(EventBus):
-            def subscribe(
-                self, event_type: type[object], handler: EventHandler
-            ) -> None:
-                pass
-
-            def publish(self, event: object) -> PublishResult:
-                return PublishResult(
-                    event=event,
-                    handlers_invoked=(),
-                    errors=(
-                        HandlerFailure(
-                            handler=dummy_handler, error=Exception("publish failed")
-                        ),
-                    ),
-                )
-
-        bus = FailingBus()
-        session = Session(bus=bus)
-
-        # Create ExecutionState and take snapshot BEFORE tool modifications
-        execution_state = _create_execution_state(session, fs)
-        composite_snapshot = execution_state.snapshot(tag="before_tool")
-
-        # Modify file to simulate what tool did
-        fs.write("/test.txt", "after_tool")
-
-        tool = Tool[EchoParams, EchoPayload](
-            name="echo",
-            description="Echo",
-            handler=echo_handler,
-        )
-        params = EchoParams(value="hello")
-        result = ToolResult(
-            message="echoed", value=EchoPayload(value="hello"), success=True
-        )
-        log = get_logger(__name__)
-
-        typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
-        tool_registry: Mapping[
-            str, Tool[SupportsDataclassOrNone, SupportsToolResult]
-        ] = {tool.name: typed_tool}
-
-        context = ToolExecutionContext(
-            adapter_name=TEST_ADAPTER_NAME,
-            adapter=cast(ProviderAdapter[Any], object()),
-            prompt=Prompt(PromptTemplate(ns="test", key="tool")),
-            rendered_prompt=None,
-            tool_registry=tool_registry,
-            execution_state=execution_state,
-            prompt_name="test",
-            parse_arguments=parse_tool_arguments,
-            format_publish_failures=lambda errors: "publish failed",
-            deadline=None,
-        )
-
-        outcome = ToolExecutionOutcome(
-            tool=typed_tool,
-            params=cast(SupportsDataclass, params),
-            result=cast(ToolResult[SupportsToolResult], result),
-            call_id="call-publish-fail",
-            log=log,
-            snapshot=composite_snapshot,
-        )
-
-        publish_tool_invocation(context=context, outcome=outcome)
-
-        # Filesystem should be restored because publish failed and tool succeeded
-        assert fs.read("/test.txt").content == "before_tool"
-
-    def test_filesystem_not_restored_if_tool_already_failed(self) -> None:
-        """Verify filesystem is NOT restored again if tool already failed."""
-        inner_fs = InMemoryFilesystem()
-        inner_fs.write("/test.txt", "original")
-        fs = _TrackingFilesystem(inner_fs)
-
-        def dummy_handler(e: object) -> None:
-            pass
-
-        class FailingBus(EventBus):
-            def subscribe(
-                self, event_type: type[object], handler: EventHandler
-            ) -> None:
-                pass
-
-            def publish(self, event: object) -> PublishResult:
-                return PublishResult(
-                    event=event,
-                    handlers_invoked=(),
-                    errors=(
-                        HandlerFailure(
-                            handler=dummy_handler, error=Exception("publish failed")
-                        ),
-                    ),
-                )
-
-        bus = FailingBus()
-        session = Session(bus=bus)
-
-        # Create ExecutionState and take snapshot
-        resources = ResourceRegistry.build({Filesystem: fs})
-        execution_state = ExecutionState(session=session, resources=resources)
-        composite_snapshot = execution_state.snapshot(tag="original")
-
-        # File is already restored (simulating what tool_execution did)
-        # by keeping original content
-
-        tool = Tool[EchoParams, EchoPayload](
-            name="echo",
-            description="Echo",
-            handler=echo_handler,
-        )
-        params = EchoParams(value="hello")
-        # Tool returned success=False, meaning filesystem was already restored
-        result = ToolResult(
-            message="failed", value=EchoPayload(value=""), success=False
-        )
-        log = get_logger(__name__)
-
-        typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
-        tool_registry: Mapping[
-            str, Tool[SupportsDataclassOrNone, SupportsToolResult]
-        ] = {tool.name: typed_tool}
-
-        context = ToolExecutionContext(
-            adapter_name=TEST_ADAPTER_NAME,
-            adapter=cast(ProviderAdapter[Any], object()),
-            prompt=Prompt(PromptTemplate(ns="test", key="tool")),
-            rendered_prompt=None,
-            tool_registry=tool_registry,
-            execution_state=execution_state,
-            prompt_name="test",
-            parse_arguments=parse_tool_arguments,
-            format_publish_failures=lambda errors: "publish failed",
-            deadline=None,
-        )
-
-        outcome = ToolExecutionOutcome(
-            tool=typed_tool,
-            params=cast(SupportsDataclass, params),
-            result=cast(ToolResult[SupportsToolResult], result),
-            call_id="call-already-failed",
-            log=log,
-            snapshot=composite_snapshot,
-        )
-
-        publish_tool_invocation(context=context, outcome=outcome)
-
-        # Restore should NOT have been called since tool.success=False
-        assert fs.restore_called is False
 
 
 # ================================================================================
@@ -992,7 +822,6 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1060,7 +889,6 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1132,7 +960,6 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1200,7 +1027,6 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1267,7 +1093,6 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1335,7 +1160,6 @@ class TestFilesystemSnapshotIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1410,7 +1234,6 @@ class TestHostFilesystemToolIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1474,7 +1297,6 @@ class TestHostFilesystemToolIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
@@ -1539,7 +1361,6 @@ class TestHostFilesystemToolIntegration:
             execution_state=execution_state,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
-            format_publish_failures=lambda x: "",
             parse_arguments=parse_tool_arguments,
         )
 
