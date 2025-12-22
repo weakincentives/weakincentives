@@ -27,7 +27,7 @@ focus on what you're feeding the model.
 ## What makes WINK different?
 
 Most agent frameworks treat prompts as an afterthought—templates glued to
-separately registered tool lists. WINK inverts this: **the prompt *is* the
+separately registered tool lists. WINK inverts this: **the prompt _is_ the
 agent**. You define an agent as a single hierarchical document where each
 section bundles its own instructions and tools together.
 
@@ -84,6 +84,13 @@ structure itself.
    an LLM.
 
 ### Other key features
+
+- **Transactional tool execution.** Tool calls are atomic transactions. When a
+  tool fails, WINK automatically rolls back session state and filesystem changes
+  to their pre-call state. No more wrestling with partial failures that leave
+  your agent's state corrupted or your filesystem in an inconsistent state. This
+  happens by default—failed tools simply don't leave traces in mutable state.
+  See [Execution State](specs/EXECUTION_STATE.md).
 
 - **Event-driven state management.** Every state change flows through pure
   functions called "reducers" that process published events. State is immutable;
