@@ -139,6 +139,26 @@ class ResourceRegistry:
         """
         return {k: v for k, v in self._entries.items() if isinstance(v, Snapshotable)}
 
+    def merge(self, other: ResourceRegistry) -> ResourceRegistry:
+        """Merge two registries, with ``other`` taking precedence on conflicts.
+
+        This enables layered resource injection where caller-provided resources
+        override workspace defaults:
+
+        .. code-block:: python
+
+            workspace = ResourceRegistry.build({Filesystem: InMemoryFilesystem()})
+            user = ResourceRegistry.build({HTTPClient: MyClient(), Filesystem: custom_fs})
+            merged = workspace.merge(user)  # user's Filesystem wins
+
+        Returns:
+            A new registry containing all resources from both registries.
+            When both registries contain the same type, ``other``'s value is used.
+        """
+        merged = dict(self._entries)
+        merged.update(other._entries)
+        return ResourceRegistry(_entries=MappingProxyType(merged))
+
     @staticmethod
     def build(mapping: Mapping[type[object], object]) -> ResourceRegistry:
         """Construct a registry from a type-to-instance mapping.

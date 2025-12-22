@@ -24,6 +24,7 @@ from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
+from ..prompt.tool import ResourceRegistry
 from ..prompt.visibility_overrides import SetVisibilityOverride
 from .events._types import ControlBus
 from .session import Session
@@ -37,19 +38,20 @@ if TYPE_CHECKING:
 class MainLoopConfig:
     """Configuration for MainLoop execution defaults.
 
-    Request-level ``budget`` and ``deadline`` override config defaults.
+    Request-level ``budget``, ``deadline``, and ``resources`` override config defaults.
     """
 
     deadline: Deadline | None = None
     budget: Budget | None = None
+    resources: ResourceRegistry | None = None
 
 
 @FrozenDataclass()
 class MainLoopRequest[UserRequestT]:
     """Event requesting MainLoop execution with optional constraints.
 
-    The ``budget`` and ``deadline`` fields override config defaults when set.
-    A fresh ``BudgetTracker`` is created per execution.
+    The ``budget``, ``deadline``, and ``resources`` fields override config defaults
+    when set. A fresh ``BudgetTracker`` is created per execution.
 
     Note: ``InProcessEventBus`` dispatches by ``type(event)``, not generic alias.
     ``MainLoopRequest[T]`` is for static type checking; at runtime all events are
@@ -60,6 +62,7 @@ class MainLoopRequest[UserRequestT]:
     request: UserRequestT
     budget: Budget | None = None
     deadline: Deadline | None = None
+    resources: ResourceRegistry | None = None
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -184,6 +187,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         *,
         budget: Budget | None = None,
         deadline: Deadline | None = None,
+        resources: ResourceRegistry | None = None,
     ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute the main loop for a request.
 
@@ -196,6 +200,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
             request: The user request to process.
             budget: Optional budget override (takes precedence over config).
             deadline: Optional deadline override (takes precedence over config).
+            resources: Optional resources to inject (merged with workspace resources,
+                user-provided resources take precedence).
 
         Returns:
             A tuple of (response, session) from evaluation.
@@ -209,6 +215,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         effective_budget = budget if budget is not None else self._config.budget
         effective_deadline = deadline if deadline is not None else self._config.deadline
+        effective_resources = (
+            resources if resources is not None else self._config.resources
+        )
 
         budget_tracker = (
             BudgetTracker(budget=effective_budget)
@@ -223,6 +232,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     session=session,
                     deadline=effective_deadline,
                     budget_tracker=budget_tracker,
+                    resources=effective_resources,
                 )
             except VisibilityExpansionRequired as e:
                 # Update session state with requested visibility overrides
@@ -254,6 +264,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 request_event.request,
                 budget=request_event.budget,
                 deadline=request_event.deadline,
+                resources=request_event.resources,
             )
 
             completed = MainLoopCompleted[OutputT](
@@ -279,4 +290,5 @@ __all__ = [
     "MainLoopConfig",
     "MainLoopFailed",
     "MainLoopRequest",
+    "ResourceRegistry",
 ]

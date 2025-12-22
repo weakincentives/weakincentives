@@ -29,7 +29,7 @@ from ..errors import DeadlineExceededError, ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
-from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from ..prompt.tool import ResourceRegistry, Tool, ToolContext, ToolHandler, ToolResult
 from ..runtime.events import HandlerFailure, ToolInvoked
 from ..runtime.execution_state import CompositeSnapshot, ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
@@ -49,7 +49,6 @@ from .core import (
 from .utilities import (
     ToolArgumentsParser,
     ToolChoice,
-    build_resources,
     deadline_provider_payload,
     raise_tool_deadline_error,
     token_usage_from_payload,
@@ -334,10 +333,17 @@ def _execute_tool_handler(  # noqa: PLR0913
         prompt_name=context.prompt_name,
         tool_name=tool_name,
     )
-    resources = build_resources(
-        filesystem=filesystem,
-        budget_tracker=context.budget_tracker,
-    )
+    # Get resources from ExecutionState (includes user-injected resources)
+    # and ensure budget_tracker is included if present
+    base_resources = context.execution_state.resources
+    if context.budget_tracker is not None:
+        # Merge budget tracker on top of existing resources
+        budget_resources = ResourceRegistry.build(
+            {BudgetTracker: context.budget_tracker}
+        )
+        resources = base_resources.merge(budget_resources)
+    else:
+        resources = base_resources
     tool_context = ToolContext(
         prompt=cast(PromptProtocol[Any], context.prompt),
         rendered_prompt=context.rendered_prompt,

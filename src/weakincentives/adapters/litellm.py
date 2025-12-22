@@ -260,6 +260,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[OutputT]:
         render_options = AdapterRenderOptions(
             enable_json_schema=True,
@@ -318,9 +319,15 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             effective_tracker = BudgetTracker(budget=budget)
 
         # Create ExecutionState for transactional tool execution
+        # Build workspace resources from prompt, then merge with user-provided resources
         filesystem = prompt.filesystem()
-        resources = ResourceRegistry.build({Filesystem: filesystem})
-        execution_state = ExecutionState(session=session, resources=resources)
+        workspace_resources = ResourceRegistry.build({Filesystem: filesystem})
+        effective_resources = (
+            workspace_resources.merge(resources)
+            if resources is not None
+            else workspace_resources
+        )
+        execution_state = ExecutionState(session=session, resources=effective_resources)
 
         config = InnerLoopConfig(
             execution_state=execution_state,
