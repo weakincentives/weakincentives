@@ -184,6 +184,41 @@ class TestClaudeAgentWorkspaceSectionCleanup:
         shutil.rmtree(section.temp_dir)
         section.cleanup()  # Should not raise
 
+    def test_cleanup_removes_filesystem_git_directory(self, session: Session) -> None:
+        section = ClaudeAgentWorkspaceSection(session=session)
+        fs = section.filesystem
+
+        # Write a file and take a snapshot to initialize the git directory
+        _ = fs.write("test.txt", "content")
+        _ = fs.snapshot(tag="test-snapshot")
+
+        # Get the git directory path
+        git_dir = fs.git_dir
+        assert git_dir is not None
+        assert Path(git_dir).exists()
+
+        # Cleanup should remove both temp dir and git dir
+        temp_dir = section.temp_dir
+        section.cleanup()
+
+        assert not temp_dir.exists()
+        assert not Path(git_dir).exists()
+
+    def test_cleanup_handles_non_host_filesystem(self, session: Session) -> None:
+        """Test that cleanup works when filesystem is not a HostFilesystem."""
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+
+        section = ClaudeAgentWorkspaceSection(session=session)
+        temp_dir = section.temp_dir
+        assert temp_dir.exists()
+
+        # Replace the filesystem with InMemoryFilesystem (which has no cleanup)
+        section._filesystem = InMemoryFilesystem()
+
+        # Cleanup should still work (just skip filesystem cleanup)
+        section.cleanup()
+        assert not temp_dir.exists()
+
     def test_clone_creates_new_section_with_same_workspace(
         self, session: Session
     ) -> None:
