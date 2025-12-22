@@ -622,11 +622,8 @@ response = adapter.evaluate(
 Progressive disclosure is managed via session state:
 
 ```python
-from weakincentives.prompt import (
-    SectionVisibility,
-    SetVisibilityOverride,
-    VisibilityOverrides,
-)
+from weakincentives.prompt import SectionVisibility
+from weakincentives.runtime.session import SetVisibilityOverride, VisibilityOverrides
 
 session[VisibilityOverrides].apply(
     SetVisibilityOverride(path=("details",), visibility=SectionVisibility.FULL)

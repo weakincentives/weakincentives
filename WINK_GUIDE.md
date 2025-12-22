@@ -1726,7 +1726,8 @@ Visibility overrides live in the `VisibilityOverrides` session slice and are
 applied at render time.
 
 ```python
-from weakincentives.prompt import VisibilityOverrides, SetVisibilityOverride, SectionVisibility
+from weakincentives.prompt import SectionVisibility
+from weakincentives.runtime.session import SetVisibilityOverride, VisibilityOverrides
 
 session[VisibilityOverrides].apply(
     SetVisibilityOverride(path=("reference",), visibility=SectionVisibility.FULL)
@@ -2428,14 +2429,16 @@ ToolResult(message, value, success=True, exclude_value_from_context=False)
 **Progressive disclosure:**
 
 - `VisibilityExpansionRequired`
-- `VisibilityOverrides`, `SetVisibilityOverride`, ...
 
 ### 16.3 weakincentives.runtime
 
 ```python
 Session(bus, tags=None, parent=None)
 session[Type].all() / latest() / where()
-session.broadcast(event)
+session.dispatch(event)
+
+# Visibility overrides (in runtime.session)
+VisibilityOverrides, SetVisibilityOverride, ClearVisibilityOverride
 session.snapshot(include_all=False)
 session.restore(snapshot, preserve_logs=True)
 ```

@@ -14,14 +14,6 @@
 
 from __future__ import annotations
 
-from ..runtime.session.visibility_overrides import (
-    ClearAllVisibilityOverrides,
-    ClearVisibilityOverride,
-    SetVisibilityOverride,
-    VisibilityOverrides,
-    get_session_visibility_override,
-    register_visibility_reducers,
-)
 from ._types import ToolRenderableResult
 from .errors import (
     PromptError,
@@ -69,8 +61,6 @@ from .tool import ResourceRegistry, Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
-    "ClearAllVisibilityOverrides",
-    "ClearVisibilityOverride",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",
@@ -99,7 +89,6 @@ __all__ = [
     "SectionOverride",
     "SectionPath",
     "SectionVisibility",
-    "SetVisibilityOverride",
     "StructuredOutputConfig",
     "TaskExample",
     "TaskExamplesSection",
@@ -113,12 +102,9 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "VisibilityExpansionRequired",
-    "VisibilityOverrides",
-    "get_session_visibility_override",
     "hash_json",
     "hash_text",
     "parse_structured_output",
-    "register_visibility_reducers",
 ]
 
 
