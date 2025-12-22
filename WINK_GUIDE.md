@@ -53,14 +53,12 @@ that tree.
 
 **Concept mapping:**
 
-| LangGraph / LangChain | WINK equivalent |
-| ------------------------- | ------------------------------------------ |
-| Graph / Chain | `PromptTemplate` (tree of sections) |
-| Node / Tool | `Tool` + handler function |
-| State / Memory | `Session` (typed slices + reducers) |
-| Router / Conditional edge | `enabled()` predicate on sections |
-| Checkpointing | `session.snapshot()` / `session.restore()` |
-| LangSmith tracing | Session events + debug UI |
+- **Graph / Chain** → `PromptTemplate` (tree of sections)
+- **Node / Tool** → `Tool` + handler function
+- **State / Memory** → `Session` (typed slices + reducers)
+- **Router / Conditional edge** → `enabled()` predicate on sections
+- **Checkpointing** → `session.snapshot()` / `session.restore()`
+- **LangSmith tracing** → Session events + debug UI
 
 **What's familiar:**
 
@@ -80,12 +78,12 @@ that tree.
   tool for searching" is the same section that registers the tool. They can't
   drift apart.
 
-- **Deterministic by default.** Prompt rendering is pure. State transitions
-  flow through reducers. Side effects are confined to tool handlers. You can
-  snapshot the entire state at any point and restore it later.
+- **Deterministic by default.** Prompt rendering is pure. State transitions flow
+  through reducers. Side effects are confined to tool handlers. You can snapshot
+  the entire state at any point and restore it later.
 
-- **No async (yet).** Adapters are synchronous. This simplifies debugging at
-  the cost of throughput. Async may come later.
+- **No async (yet).** Adapters are synchronous. This simplifies debugging at the
+  cost of throughput. Async may come later.
 
 **When to use WINK instead of LangGraph:**
 
@@ -102,6 +100,155 @@ that tree.
 
 You can also use both: WINK for prompt/tool/state management, LangGraph for
 higher-level orchestration.
+
+______________________________________________________________________
+
+## Coming from DSPy?
+
+If you've built LLM programs with DSPy, here's how WINK compares.
+
+**Different bets on where value lives.**
+
+DSPy centers on **automatic optimization**: you declare input/output signatures,
+compose modules, and let optimizers compile better prompts and few-shot
+examples. The framework treats prompts as implementation details that should be
+generated, not written.
+
+WINK centers on **explicit, inspectable prompts**: you write prompts as typed
+section trees, control exactly what the model sees, and iterate via
+version-controlled overrides. The framework treats prompts as first-class
+artifacts that should be readable, testable, and auditable.
+
+Both approaches have merit. DSPy shines when you have good metrics and want to
+automate prompt tuning. WINK shines when you need to understand exactly what's
+being sent to the model and why.
+
+**Concept mapping:**
+
+- **Signature** → Structured output dataclass + `PromptTemplate`
+- **Module** (`Predict`, `ChainOfThought`) → `Section` (instructions + tools)
+- **Program** (composed modules) → `PromptTemplate` (tree of sections)
+- **Optimizer / Teleprompter** → Prompt overrides + manual iteration
+- **Compilation** → No equivalent (prompts are explicit)
+- **`dspy.ReAct`** → `PlanningToolsSection` + tool sections
+- **Metric** → Evaluation framework (see `specs/EVALS.md`)
+- **Trace** → Session events + debug UI
+
+**What's familiar:**
+
+- **Typed inputs and outputs.** DSPy signatures declare input/output fields;
+  WINK uses frozen dataclasses for the same purpose. Both catch type mismatches
+  early.
+
+- **Composition.** DSPy composes modules into programs; WINK composes sections
+  into prompt templates. Both encourage modular, reusable components.
+
+- **Tool use.** DSPy modules like `ReAct` handle tool calling; WINK sections
+  register tools alongside their instructions.
+
+**What's different:**
+
+- **Prompts are visible.** In DSPy, prompts are generated artifacts—you don't
+  typically read or edit them directly. In WINK, `prompt.render()` returns the
+  exact markdown sent to the model. You can inspect, test, and version it.
+
+- **No automatic optimization.** DSPy's optimizers (BootstrapFewShot, MIPROv2,
+  etc.) generate prompts automatically. WINK uses hash-validated overrides for
+  manual iteration. You can build optimization workflows on top, but the
+  framework doesn't assume you want automated prompt generation.
+
+- **State is explicit.** DSPy traces execution but doesn't expose a structured
+  state model. WINK sessions are typed, reducer-managed state containers. Every
+  state change is an event you can query, snapshot, and restore.
+
+- **Tools and instructions are co-located.** In DSPy, tool definitions are
+  separate from module logic. In WINK, the section that explains "use this tool
+  for X" is the same section that registers the tool. They can't drift apart.
+
+- **Deterministic by default.** WINK prompt rendering is pure—same inputs
+  produce same outputs. You can write tests that assert on exact prompt text.
+  DSPy's compiled prompts depend on optimizer state and training data.
+
+**When to use WINK instead of DSPy:**
+
+- You need to inspect and understand exactly what prompts are being sent
+- You're building systems where auditability matters (compliance, debugging)
+- You want to iterate on prompts manually with version control
+- You value determinism and testability over automatic optimization
+- You're building tool-heavy agents where prompt/tool co-location helps
+
+**When to stick with DSPy:**
+
+- You have good metrics and want automated prompt optimization
+- You're doing research where prompt generation is part of the experiment
+- You want to bootstrap few-shot examples automatically
+- You prefer declaring intent (signatures) over writing prompts
+
+**Migration path:**
+
+If you're moving from DSPy to WINK:
+
+1. **Convert signatures to dataclasses.** A DSPy signature like
+   `"question -> answer"` becomes input and output dataclasses:
+
+   ```python
+   # DSPy
+   class QA(dspy.Signature):
+       question = dspy.InputField()
+       answer = dspy.OutputField()
+
+   # WINK
+   @dataclass(slots=True, frozen=True)
+   class QuestionParams:
+       question: str
+
+   @dataclass(slots=True, frozen=True)
+   class Answer:
+       answer: str
+   ```
+
+1. **Convert modules to sections.** A DSPy module becomes a WINK section that
+   renders instructions and optionally registers tools:
+
+   ```python
+   # DSPy
+   qa = dspy.ChainOfThought(QA)
+
+   # WINK
+   qa_section = MarkdownSection(
+       title="Question Answering",
+       key="qa",
+       template="Think step by step, then answer the question.\n\nQuestion: ${question}",
+   )
+   ```
+
+1. **Convert programs to templates.** Composed DSPy modules become a
+   `PromptTemplate` with nested sections:
+
+   ```python
+   template = PromptTemplate[Answer](
+       ns="qa",
+       key="chain-of-thought",
+       sections=(qa_section,),
+   )
+   ```
+
+1. **Replace optimizers with overrides.** Instead of compiled prompts, use
+   WINK's override system to iterate on prompt text:
+
+   ```python
+   prompt = Prompt(template, overrides_store=store, overrides_tag="v2")
+   ```
+
+1. **Add tools explicitly.** DSPy's `ReAct` handles tool use implicitly; WINK
+   requires explicit tool registration on sections. This is more verbose but
+   makes tool availability obvious from the prompt structure.
+
+The key mindset shift: DSPy optimizes prompts for you; WINK gives you tools to
+write and iterate on prompts yourself. If you've been frustrated by not knowing
+what DSPy is actually sending to the model, WINK's explicit approach may feel
+liberating. If you've relied heavily on DSPy's optimizers, you'll need to build
+or adopt optimization workflows separately.
 
 ______________________________________________________________________
 
@@ -130,8 +277,8 @@ system-of-record capabilities. The Claude Agent SDK adapter is an example: it
 delegates execution to Claude Code's native runtime while WINK owns the tool
 definitions and session state.
 
-**Build evaluation as your control plane.** Make model and runtime upgrades
-safe via scenario tests and structured output validation. When you can verify
+**Build evaluation as your control plane.** Make model and runtime upgrades safe
+via scenario tests and structured output validation. When you can verify
 behavior programmatically, you can improve without rewrites.
 
 The future points toward SDKs shaped like the Claude Agent SDK: sophisticated
@@ -145,6 +292,7 @@ ______________________________________________________________________
 ## Table of Contents
 
 0. [Coming from LangGraph or LangChain?](#coming-from-langgraph-or-langchain)
+1. [Coming from DSPy?](#coming-from-dspy)
 1. [Technical Strategy](#technical-strategy)
 1. [Philosophy](#1-philosophy)
    1. [What "weak incentives" means](#11-what-weak-incentives-means)
@@ -244,8 +392,8 @@ ______________________________________________________________________
 
 The name comes from mechanism design: a system with the right incentives is one
 where participants naturally gravitate toward intended behavior. Applied to
-agents, this means shaping the prompt, tools, and context so the model's
-easiest path is also the correct one.
+agents, this means shaping the prompt, tools, and context so the model's easiest
+path is also the correct one.
 
 This isn't about constraining the model or managing downside risk. It's about
 _encouraging_ correct behavior through structure:
@@ -257,8 +405,8 @@ _encouraging_ correct behavior through structure:
 
 The optimization process strengthens these incentives. When you refine a prompt
 override or add a tool example, you're making the correct path even more
-natural. Over iterations, the system becomes increasingly well-tuned—not
-through constraints, but through clarity.
+natural. Over iterations, the system becomes increasingly well-tuned—not through
+constraints, but through clarity.
 
 Concretely, WINK pushes you toward:
 
@@ -293,18 +441,17 @@ Hash-validated prompt overrides prevent accidental drift between "tested" and
 "running". When you override a section's text, the system validates that you're
 overriding the version you think you're overriding.
 
-The goal isn't to constrain the model—it's to give it the best possible
-starting point. When prompts are clear, tools are well-documented, and state is
-explicit, the model has strong signals about what to do. When something goes
-wrong, you can see exactly what happened and refine the incentives for next
-time.
+The goal isn't to constrain the model—it's to give it the best possible starting
+point. When prompts are clear, tools are well-documented, and state is explicit,
+the model has strong signals about what to do. When something goes wrong, you
+can see exactly what happened and refine the incentives for next time.
 
 ### 1.2 The shift: orchestration shrinks, context engineering grows
 
 Many early "agent frameworks" assumed the hard part would be workflow logic:
-routers, planners, branching graphs, and elaborate loops. These frameworks
-spent their complexity budget on orchestration—deciding which prompts to run
-when, routing between specialized agents, managing elaborate state machines.
+routers, planners, branching graphs, and elaborate loops. These frameworks spent
+their complexity budget on orchestration—deciding which prompts to run when,
+routing between specialized agents, managing elaborate state machines.
 
 WINK makes a different bet:
 
@@ -312,8 +459,8 @@ WINK makes a different bet:
 
 What required explicit multi-step orchestration yesterday often works in a
 single prompt today. The frontier models are increasingly capable of planning,
-reasoning, and self-correction within a single context window. Elaborate
-routing graphs often just get in the way.
+reasoning, and self-correction within a single context window. Elaborate routing
+graphs often just get in the way.
 
 **The durable part of agent systems is tools, retrieval, and context
 engineering.**
@@ -336,7 +483,9 @@ WINK's core abstractions exist to make that discipline real:
 - Safety is enforced at tool boundaries where side effects happen
 
 If you want the formal version of these behaviors, skim the specs:
-[specs/PROMPTS.md](specs/PROMPTS.md), [specs/TOOLS.md](specs/TOOLS.md), [specs/SESSIONS.md](specs/SESSIONS.md), [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md).
+[specs/PROMPTS.md](specs/PROMPTS.md), [specs/TOOLS.md](specs/TOOLS.md),
+[specs/SESSIONS.md](specs/SESSIONS.md),
+[specs/MAIN_LOOP.md](specs/MAIN_LOOP.md).
 
 ### 1.3 The core bet: prompts as first-class, typed programs
 
@@ -364,8 +513,8 @@ Each section can:
 - Optionally render as a summary to save tokens
 
 The section that explains "here's how to search files" is the same section that
-provides the `grep` tool. Documentation and capability live together. They
-can't drift.
+provides the `grep` tool. Documentation and capability live together. They can't
+drift.
 
 **A `Prompt` binds runtime configuration:**
 
@@ -416,8 +565,8 @@ Two "novel" properties fall out of this structure:
   library. Use it for the pieces that benefit from determinism.
 - A multi-agent coordination system. WINK focuses on single-agent patterns done
   well. Multi-agent is possible but not the primary design target.
-- An async-first streaming framework. Today the adapter contract is
-  synchronous. Streaming may come later.
+- An async-first streaming framework. Today the adapter contract is synchronous.
+  Streaming may come later.
 
 If you need a graph engine or multi-agent coordination, you can still use WINK
 for the pieces that benefit from determinism (prompt design, tool contracts,
@@ -430,9 +579,9 @@ ______________________________________________________________________
 
 ### 2.1 Install
 
-The core package has no mandatory third-party dependencies. This is
-intentional: you should be able to use WINK's prompt and session primitives
-without pulling in OpenAI or any other provider SDK.
+The core package has no mandatory third-party dependencies. This is intentional:
+you should be able to use WINK's prompt and session primitives without pulling
+in OpenAI or any other provider SDK.
 
 ```bash
 pip install weakincentives
@@ -450,8 +599,8 @@ pip install "weakincentives[podman]"           # Podman sandbox tools
 pip install "weakincentives[wink]"             # Debug UI (wink CLI)
 ```
 
-**Python requirement**: 3.12+. We use modern Python features liberally and
-don't maintain compatibility with older versions.
+**Python requirement**: 3.12+. We use modern Python features liberally and don't
+maintain compatibility with older versions.
 
 ### 2.2 End-to-end: a tiny structured agent
 
@@ -531,8 +680,8 @@ session = Session(bus=bus)
 Tools are registered by sections. Handlers receive immutable `ToolContext`
 (including session + resources) and return a `ToolResult`.
 
-Here's a toy tool that returns the current time. In a real agent this would be
-a filesystem read, an API call, or some other operation with side effects.
+Here's a toy tool that returns the current time. In a real agent this would be a
+filesystem read, an API call, or some other operation with side effects.
 
 ```python
 from dataclasses import dataclass
@@ -585,8 +734,8 @@ tools_section = MarkdownSection(
 )
 ```
 
-Once this section is included in your template, adapters will advertise `now`
-to the model and execute calls synchronously.
+Once this section is included in your template, adapters will advertise `now` to
+the model and execute calls synchronously.
 
 The pattern to notice: **tools and their documentation live together**. The
 section says "You may call tools when needed" and provides the `now` tool. The
@@ -696,8 +845,8 @@ if __name__ == "__main__":
    the `Answer` dataclass
 1. The `search` tool is registered on the Instructions section—the model sees
    the tool alongside the instructions for using it
-1. `adapter.evaluate()` sends the prompt to OpenAI, executes any tool calls,
-   and parses the structured response
+1. `adapter.evaluate()` sends the prompt to OpenAI, executes any tool calls, and
+   parses the structured response
 1. You get back `response.output` as a typed `Answer` instance
 
 This is the core loop. Everything else in WINK builds on this: sessions for
@@ -806,8 +955,9 @@ Every section has:
 - Optional `summary` + `visibility`: for progressive disclosure
 - `accepts_overrides`: whether the override system may replace its body
 
-A section must implement `render_body(...)`. Many sections use `MarkdownSection`,
-but contributed tool suites are also sections (planning, VFS, sandboxes, etc.).
+A section must implement `render_body(...)`. Many sections use
+`MarkdownSection`, but contributed tool suites are also sections (planning, VFS,
+sandboxes, etc.).
 
 ### 3.4 MarkdownSection
 
@@ -908,8 +1058,8 @@ debug_section = MarkdownSection(
 )
 ```
 
-Disabled sections don't just hide their text—their tools also disappear from
-the prompt. This lets you build a comprehensive template and enable only the
+Disabled sections don't just hide their text—their tools also disappear from the
+prompt. This lets you build a comprehensive template and enable only the
 capabilities relevant to the current context.
 
 ### 3.7 Session-bound sections and cloning
@@ -917,8 +1067,8 @@ capabilities relevant to the current context.
 Some sections are **pure**: they depend only on params and render the same text
 every time. You can safely store those in a module-level `PromptTemplate`.
 
-Other sections are **session-bound**: they capture runtime resources (a
-session, filesystem, sandbox connection, etc.). Examples:
+Other sections are **session-bound**: they capture runtime resources (a session,
+filesystem, sandbox connection, etc.). Examples:
 
 - `PlanningToolsSection(session=...)`
 - `VfsToolsSection(session=...)`
@@ -1026,8 +1176,8 @@ tool = Tool[MyParams, MyResult](
 ```
 
 The type parameters matter. `Tool[MyParams, MyResult]` tells WINK how to
-serialize parameters for the model and how to parse results. Type mismatches
-are caught at construction time.
+serialize parameters for the model and how to parse results. Type mismatches are
+caught at construction time.
 
 ### 4.2 ToolContext, resources, and Filesystem
 
@@ -1071,16 +1221,15 @@ ToolResult(
 **Key behaviors:**
 
 - If `value` is a dataclass and implements `render() -> str`, adapters use that
-  as the textual tool output. This lets you control exactly what the model
-  sees.
+  as the textual tool output. This lets you control exactly what the model sees.
 - If `render()` is missing, WINK logs a warning and serializes the dataclass to
   JSON. This works but is less controlled.
 - Exceptions raised by handlers are caught and converted into tool failures
   (with some safety exceptions; see [specs/TOOLS.md](specs/TOOLS.md)).
 
-The `exclude_value_from_context=True` flag is useful for tools that return
-large payloads (like file contents). The model sees a summary message, but the
-full value is recorded in the session for debugging.
+The `exclude_value_from_context=True` flag is useful for tools that return large
+payloads (like file contents). The model sees a summary message, but the full
+value is recorded in the session for debugging.
 
 ### 4.4 Tool examples
 
@@ -1105,8 +1254,8 @@ tool = Tool[NowParams, NowResult](
 ```
 
 If you've ever seen a tool-capable model "almost" do the right call—wrong
-parameter name, wrong format, etc.—examples tend to pay for themselves. One
-good example often beats three paragraphs of instructions.
+parameter name, wrong format, etc.—examples tend to pay for themselves. One good
+example often beats three paragraphs of instructions.
 
 ### 4.5 Tool suites as sections
 
@@ -1125,8 +1274,8 @@ Examples in `weakincentives.contrib.tools`:
 - VFS tools (`VfsToolsSection`)
 - Sandbox tools (`PodmanSandboxSection`, `AstevalSection`)
 
-Each section bundles the instructions ("here's how to use these tools") with
-the tools themselves. The model sees them together.
+Each section bundles the instructions ("here's how to use these tools") with the
+tools themselves. The model sees them together.
 
 ### 4.6 Transactional tool execution
 
@@ -1146,8 +1295,8 @@ wrapped in a transaction:
 1. **Commit or rollback**: If the tool succeeds, changes are kept. If it fails,
    WINK automatically restores the snapshot
 
-This happens by default—you don't need to opt in or write rollback logic.
-Failed tools simply don't leave traces in mutable state.
+This happens by default—you don't need to opt in or write rollback logic. Failed
+tools simply don't leave traces in mutable state.
 
 **What gets rolled back:**
 
@@ -1197,8 +1346,8 @@ If this tool raises an exception:
   inconsistent state
 - **Easier debugging**: When something fails, you know exactly what state you're
   in—the state from before the failed call
-- **Adapter parity**: OpenAI, LiteLLM, and Claude Agent SDK adapters all use
-  the same transaction semantics
+- **Adapter parity**: OpenAI, LiteLLM, and Claude Agent SDK adapters all use the
+  same transaction semantics
 
 This is especially valuable for agents that modify files, update plans, or
 maintain complex working state. A failed `write_file` or `update_plan` doesn't
@@ -1254,20 +1403,21 @@ Queries are read-only; they never mutate the session.
 
 ### 5.3 Reducers
 
-A **reducer** is a pure function that takes the current state and an event,
-and returns the new state. The name comes from functional programming (and was
+A **reducer** is a pure function that takes the current state and an event, and
+returns the new state. The name comes from functional programming (and was
 popularized by Redux in frontend development), but the concept is simple:
 
 ```
 new_state = reducer(current_state, event)
 ```
 
-Reducers never mutate state directly. They always return a new value. This
-makes state changes predictable: given the same inputs, you always get the same
+Reducers never mutate state directly. They always return a new value. This makes
+state changes predictable: given the same inputs, you always get the same
 output. It also makes debugging easier—you can log every event and trace the
 exact sequence that led to any state.
 
-In WINK, reducers have this signature: `(slice_values, event) -> new_slice_values`.
+In WINK, reducers have this signature:
+`(slice_values, event) -> new_slice_values`.
 
 WINK ships helper reducers:
 
@@ -1337,9 +1487,9 @@ session.restore(snapshot)
 - Implement "rollback" on risky operations
 - Attach snapshots to bug reports for reproduction
 
-Snapshots serialize to JSON. You can persist them to disk and reload them
-later. This is how the debug UI works: it reads snapshot files and displays the
-session state at each point.
+Snapshots serialize to JSON. You can persist them to disk and reload them later.
+This is how the debug UI works: it reads snapshot files and displays the session
+state at each point.
 
 ### 5.6 SlicePolicy: state vs logs
 
@@ -1395,8 +1545,8 @@ It returns `PromptResponse[OutputT]`:
 - `output`: parsed structured output (or `None`)
 
 The adapter handles all the provider-specific details: API formatting, tool
-schema translation, response parsing. Your code just calls `evaluate()` and
-gets back typed results.
+schema translation, response parsing. Your code just calls `evaluate()` and gets
+back typed results.
 
 ### 6.2 OpenAIAdapter
 
@@ -1455,8 +1605,8 @@ This adapter is different from OpenAI/LiteLLM: instead of WINK executing tools
 itself, it delegates to Claude Code's tool execution. This gives you Claude's
 native tooling with WINK's prompt composition and session management.
 
-See [specs/CLAUDE_AGENT_SDK.md](specs/CLAUDE_AGENT_SDK.md) for full configuration reference and isolation
-guarantees.
+See [specs/CLAUDE_AGENT_SDK.md](specs/CLAUDE_AGENT_SDK.md) for full
+configuration reference and isolation guarantees.
 
 ______________________________________________________________________
 
@@ -1468,8 +1618,8 @@ _Canonical spec: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)_
 
 > Make progressive disclosure and budgets/deadlines easy to handle correctly.
 
-You could write the loop yourself. MainLoop just does it in a tested,
-consistent way.
+You could write the loop yourself. MainLoop just does it in a tested, consistent
+way.
 
 ### 7.1 The minimal MainLoop
 
@@ -1492,10 +1642,9 @@ class MyLoop(MainLoop[RequestType, OutputType]):
         return Session(bus=self._bus)
 ```
 
-`MainLoop` also catches `VisibilityExpansionRequired` and retries
-automatically. When the model calls `open_sections`, MainLoop applies the
-visibility overrides and re-evaluates the prompt. You don't have to handle this
-yourself.
+`MainLoop` also catches `VisibilityExpansionRequired` and retries automatically.
+When the model calls `open_sections`, MainLoop applies the visibility overrides
+and re-evaluates the prompt. You don't have to handle this yourself.
 
 ### 7.2 Deadlines and budgets
 
@@ -1521,7 +1670,8 @@ ______________________________________________________________________
 
 ## 8. Progressive disclosure
 
-_Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md) (Progressive Disclosure section)_
+_Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md) (Progressive Disclosure
+section)_
 
 Long prompts are expensive. Progressive disclosure is WINK's first-class
 solution:
@@ -1566,9 +1716,9 @@ When summarized sections exist, WINK injects builtin tools:
 retrying. The model asks to expand a section, MainLoop applies the expansion,
 and evaluation continues with the full content visible.
 
-`read_section` is different: it returns the content without changing
-visibility. The section remains summarized in subsequent turns. Use this for
-reference material that the model only needs temporarily.
+`read_section` is different: it returns the content without changing visibility.
+The section remains summarized in subsequent turns. Use this for reference
+material that the model only needs temporarily.
 
 ### 8.3 Visibility overrides in session state
 
@@ -1614,8 +1764,7 @@ applies, and you're running something different than you tested.
 
 ### 9.2 LocalPromptOverridesStore
 
-The default store is `LocalPromptOverridesStore`, which writes JSON files
-under:
+The default store is `LocalPromptOverridesStore`, which writes JSON files under:
 
 ```
 .weakincentives/prompts/overrides/{ns}/{prompt_key}/{tag}.json
@@ -1677,8 +1826,8 @@ A workflow that works well in teams:
 1. **Commit** override files alongside code
 
 For "hardening", disable overrides on sensitive sections/tools with
-`accepts_overrides=False`. This prevents accidental changes to
-security-critical text.
+`accepts_overrides=False`. This prevents accidental changes to security-critical
+text.
 
 ______________________________________________________________________
 
@@ -1702,8 +1851,8 @@ inspect and manipulate a repository safely. They live in
 The plan is stored in session state and updated via reducers. Each step has an
 ID, title, details, and status.
 
-Use it when you want the model to externalize its plan without inventing its
-own format. Many models plan better when they have explicit tools for planning.
+Use it when you want the model to externalize its plan without inventing its own
+format. Many models plan better when they have explicit tools for planning.
 
 ### 10.2 VfsToolsSection
 
@@ -1736,8 +1885,8 @@ vfs = VfsToolsSection(
 
 ### 10.3 WorkspaceDigestSection
 
-Renders a cached repo digest stored in session state. The digest is a
-structured summary of the repository: file tree, key files, detected patterns.
+Renders a cached repo digest stored in session state. The digest is a structured
+summary of the repository: file tree, key files, detected patterns.
 
 It works well with progressive disclosure: default to `SUMMARY`, expand on
 demand. The model gets an overview without the full file contents.
@@ -1829,8 +1978,8 @@ logger = get_logger(__name__)
 logger.info("hello", event="demo.hello", context={"foo": "bar"})
 ```
 
-Logs include structured `event` and `context` fields for downstream routing
-and analysis. JSON mode makes logs machine-parseable.
+Logs include structured `event` and `context` fields for downstream routing and
+analysis. JSON mode makes logs machine-parseable.
 
 ### 11.2 Session events
 
@@ -1868,27 +2017,26 @@ is stable and human-readable.
 wink debug snapshots/<session_id>.jsonl
 ```
 
-This starts a local server that renders the prompt/tool timeline for
-inspection. You can see exactly what was sent to the model, what tools were
-called, and how state evolved.
+This starts a local server that renders the prompt/tool timeline for inspection.
+You can see exactly what was sent to the model, what tools were called, and how
+state evolved.
 
 ______________________________________________________________________
 
 ## 12. Testing and reliability
 
-WINK is designed so that most of your "agent logic" is testable without a
-model.
+WINK is designed so that most of your "agent logic" is testable without a model.
 
 **Practical approach:**
 
-1. **Prompt rendering tests**: render prompts with fixed params and assert
-   exact markdown (snapshot tests). These run fast and catch template regressions.
+1. **Prompt rendering tests**: render prompts with fixed params and assert exact
+   markdown (snapshot tests). These run fast and catch template regressions.
 
 1. **Tool handler tests**: call handlers directly with fake `ToolContext` +
    resources. No model needed. Test the business logic in isolation.
 
-1. **Reducer tests**: test state transitions as pure functions. Given this
-   slice and this event, expect this new slice.
+1. **Reducer tests**: test state transitions as pure functions. Given this slice
+   and this event, expect this new slice.
 
 1. **Integration tests**: run `adapter.evaluate` behind a flag (and record
    sessions). These are slow and cost money, so run them selectively.
@@ -1915,9 +2063,9 @@ calls, and security vulnerabilities in tool handlers can have serious
 consequences.
 
 The gates aren't bureaucracy—they're aligned with the "weak incentives"
-philosophy. Just as we design prompts to make correct model behavior natural,
-we design the codebase to make correct code natural. Strict types catch errors
-at construction time. Contracts document and enforce invariants. Coverage and
+philosophy. Just as we design prompts to make correct model behavior natural, we
+design the codebase to make correct code natural. Strict types catch errors at
+construction time. Contracts document and enforce invariants. Coverage and
 mutation testing ensure tests actually verify behavior.
 
 ### 13.1 Strict type checking
@@ -1934,10 +2082,10 @@ def handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
 
 - Tool params and results are serialized/deserialized automatically. Type
   mismatches that would cause runtime failures are caught at construction.
-- Session slices are keyed by type. A typo in a type annotation silently
-  creates a separate slice.
-- Adapters use type information to generate JSON schemas. Wrong types mean
-  wrong schemas sent to the model.
+- Session slices are keyed by type. A typo in a type annotation silently creates
+  a separate slice.
+- Adapters use type information to generate JSON schemas. Wrong types mean wrong
+  schemas sent to the model.
 
 **Practical implications:**
 
@@ -1992,9 +2140,9 @@ Read `specs/DBC.md` before modifying DbC-decorated modules.
 WINK requires 100% line coverage for `src/weakincentives/`. But coverage alone
 is insufficient—a test can execute a line without verifying its behavior.
 
-Mutation testing fills this gap. Mutmut modifies source code (e.g., changes
-`>` to `>=`, removes lines) and checks if tests catch the mutation. A high
-mutation score means tests actually verify behavior, not just execute it.
+Mutation testing fills this gap. Mutmut modifies source code (e.g., changes `>`
+to `>=`, removes lines) and checks if tests catch the mutation. A high mutation
+score means tests actually verify behavior, not just execute it.
 
 **Requirements:**
 
@@ -2052,8 +2200,8 @@ make check  # Runs: format, lint, typecheck, test, bandit, deptry, pip-audit
 **Before every commit:**
 
 1. Run `make check`
-2. Fix any failures
-3. Commit only when clean
+1. Fix any failures
+1. Commit only when clean
 
 **Pre-commit hooks enforce this.** After running `./install-hooks.sh`, commits
 are blocked unless `make check` passes.
@@ -2062,9 +2210,9 @@ are blocked unless `make check` passes.
 
 Agent systems have compounding failure modes. A type mismatch in a tool param
 causes a serialization error, which causes a tool failure, which causes the
-model to retry with bad assumptions, which causes a cascade of wasted tokens
-and incorrect behavior. Catching errors early—at the type level, at the
-contract level, at the test level—prevents these cascades.
+model to retry with bad assumptions, which causes a cascade of wasted tokens and
+incorrect behavior. Catching errors early—at the type level, at the contract
+level, at the test level—prevents these cascades.
 
 The 100% coverage requirement isn't about the number. It's about the habit:
 every line of code should have a reason to exist, and that reason should be
@@ -2114,8 +2262,8 @@ usage stays low for simple questions.
 - Require the model to output a diff as structured output
 - Optionally run tests in Podman before proposing the patch
 
-The model can experiment freely in the VFS. Only the final diff matters.
-Humans review the diff before applying it to the real repo.
+The model can experiment freely in the VFS. Only the final diff matters. Humans
+review the diff before applying it to the real repo.
 
 ### 14.4 A research agent with progressive disclosure
 
@@ -2389,15 +2537,13 @@ wink debug <snapshot_path> [options]
 
 **Options:**
 
-| Option | Default | Description |
-| ------------------- | ----------- | ------------------------------------------- |
-| `--host` | `127.0.0.1` | Host interface to bind |
-| `--port` | `8000` | Port to bind |
-| `--open-browser` | `true` | Open browser automatically |
-| `--no-open-browser` | - | Disable auto-open |
-| `--log-level` | `INFO` | Log verbosity (DEBUG, INFO, WARNING, ERROR) |
-| `--json-logs` | `true` | Emit structured JSON logs |
-| `--no-json-logs` | - | Emit plain text logs |
+| Option | Default | Description | | ------------------- | ----------- |
+------------------------------------------- | | `--host` | `127.0.0.1` | Host
+interface to bind | | `--port` | `8000` | Port to bind | | `--open-browser` |
+`true` | Open browser automatically | | `--no-open-browser` | - | Disable
+auto-open | | `--log-level` | `INFO` | Log verbosity (DEBUG, INFO, WARNING,
+ERROR) | | `--json-logs` | `true` | Emit structured JSON logs | |
+`--no-json-logs` | - | Emit plain text logs |
 
 **Exit codes:**
 
@@ -2414,6 +2560,8 @@ ______________________________________________________________________
 - **Sessions**: [specs/SESSIONS.md](specs/SESSIONS.md)
 - **MainLoop**: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)
 - **Workspace**: [specs/WORKSPACE.md](specs/WORKSPACE.md)
-- **Overrides & optimization**: [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)
-- **Code review example**: [guides/code-review-agent.md](guides/code-review-agent.md)
+- **Overrides & optimization**:
+  [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)
+- **Code review example**:
+  [guides/code-review-agent.md](guides/code-review-agent.md)
 - **Contributor guide**: [AGENTS.md](AGENTS.md)
