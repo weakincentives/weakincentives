@@ -2,60 +2,90 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.16.0 - 2025-12-21
 
-### Added
+### Transactional Tool Execution
 
-- **ExecutionState: unified runtime state root.** New `ExecutionState` class
-  provides transactional semantics for tool execution by owning both session
-  state and snapshotable resources. Failed or aborted tool calls automatically
-  restore state from composite snapshots:
+Tool calls in WINK are now **transactional by default**. When a tool fails or
+is aborted, both session state and filesystem changes are automatically rolled
+back to their pre-invocation state. No more partial failures corrupting your
+agent's working memory or leaving orphaned files on disk.
 
-  ```python
-  from weakincentives.runtime import ExecutionState
+```python
+from weakincentives.runtime import ExecutionState
 
-  state = ExecutionState(session=session, resources=resources)
-  snapshot = state.snapshot(tag="pre:tool_call")
+state = ExecutionState(session=session, resources=resources)
 
-  # Execute tool...
-  if not result.success:
-      state.restore(snapshot)  # Atomic rollback
-  ```
+# Tool execution is atomic - on failure, state is restored automatically
+result = runner.execute(tool_call, context=context)
+# If result.success is False, session and filesystem are unchanged
+```
 
-- **CompositeSnapshot for coordinated state capture.** `CompositeSnapshot`
-  captures session slices and all snapshotable resources (e.g., filesystem)
-  in a single point-in-time snapshot, enabling consistent rollback across
-  multiple state containers.
+This release introduces several new primitives that work together to provide
+these guarantees:
 
-- **Snapshotable protocol.** New `@runtime_checkable` protocol for objects
-  supporting `snapshot(tag=...)` and `restore(snapshot)` operations. Both
-  `Session` and `SnapshotableFilesystem` satisfy this protocol.
+- **ExecutionState**: Unified root for all mutable runtime state (session +
+  resources). Provides `snapshot()` and `restore()` for coordinated state
+  capture across all snapshotable resources.
 
-- **SlicePolicy enum.** Classifies session slices for selective rollback:
+- **CompositeSnapshot**: Captures session slices and all snapshotable resources
+  (e.g., filesystem) in a single point-in-time snapshot.
 
+- **Snapshotable protocol**: Runtime-checkable protocol for objects supporting
+  `snapshot(tag=...)` and `restore(snapshot)` operations. Both `Session` and
+  `SnapshotableFilesystem` satisfy this protocol.
+
+- **SlicePolicy enum**: Classifies session slices for selective rollback:
   - `STATE`: Working state restored on tool failure (Plan, VisibilityOverrides)
   - `LOG`: Append-only records preserved during restore (ToolInvoked events)
 
-- **ToolRunner for unified tool execution.** New `ToolRunner` provides
-  identical transaction semantics across all adapters - automatic snapshot
-  before execution and restore on failure:
+- **ToolRunner**: Shared tool execution with identical transaction semantics
+  across all adapters (OpenAI, LiteLLM, Claude Agent SDK). Automatic snapshot
+  before execution and restore on failure.
 
-  ```python
-  from weakincentives.adapters import ToolRunner
+- **Filesystem snapshots**: `HostFilesystem` uses git-based copy-on-write for
+  efficient snapshots. `InMemoryFilesystem` uses Python structural sharing.
+  Both implement `SnapshotableFilesystem` for coordinated rollback.
 
-  runner = ToolRunner(execution_state=state, tool_registry=tools, prompt_name="my_prompt")
-  result = runner.execute(tool_call, context=context)
-  # State automatically restored if result.success is False
-  ```
+New error classes for execution state operations:
 
-- **New error classes** for execution state operations:
+- `ExecutionStateError`: Base for execution state errors
+- `SnapshotMismatchError`: Snapshot incompatible with current state
+- `RestoreFailedError`: Failed to restore from snapshot
 
-  - `ExecutionStateError`: Base for execution state errors
-  - `SnapshotMismatchError`: Snapshot incompatible with current state
-  - `RestoreFailedError`: Failed to restore from snapshot
+### Added
 
-- **ResourceRegistry.snapshotable_resources()** returns all registered
-  resources implementing the `Snapshotable` protocol.
+- **`read_section` tool for summarized sections.** Models can now retrieve the
+  full markdown content of a summarized section without permanently changing
+  visibility state. This is a read-only operation—the section remains
+  summarized in subsequent turns. Sections with tools still use `open_sections`
+  for expansion; sections without tools use the new `read_section` for
+  token-efficient peek access.
+
+- **Workspace digest summary.** `WorkspaceDigest` now includes a `summary`
+  field with a short 1-paragraph overview. `WorkspaceDigestSection` defaults
+  to `SUMMARY` visibility, enabling token-efficient prompts while preserving
+  full digest access via `read_section`.
+
+- **WINK_GUIDE.md.** Comprehensive guide for engineers building deterministic,
+  typed, safe background agents. Covers philosophy, quickstart, prompts, tools,
+  sessions, adapters, orchestration, progressive disclosure, prompt overrides,
+  workspace tools, debugging, testing, and API reference.
+
+- **100% type coverage enforcement.** `make check` now includes
+  `pyright --verifytypes` to ensure all exported symbols have complete type
+  annotations. Type coverage is enforced at 100% (2417+ symbols with known
+  types).
+
+- **`is_dataclass_instance` helper** exported from `weakincentives.types` for
+  consistent dataclass instance checking with proper `TypeGuard` narrowing.
+
+### Changed
+
+- **Internal refactoring.** The contrib tools modules (filesystem, asteval,
+  podman, vfs) have been decomposed into smaller, focused modules. The adapter
+  `shared.py` has been split into focused components. These are internal
+  changes with no public API impact.
 
 ## v0.15.0 - 2025-12-17
 
