@@ -158,6 +158,7 @@ combine-as-imports = true
 "src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR6301", "ANN401", "TRY300"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904"]
+"src/weakincentives/runtime/mailbox/_testing.py" = ["PLR6301"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 8
