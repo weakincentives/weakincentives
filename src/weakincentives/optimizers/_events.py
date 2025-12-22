@@ -24,7 +24,7 @@ from uuid import UUID, uuid4
 class OptimizationStarted:
     """Event emitted when an optimizer begins work.
 
-    Published through the ``OptimizationContext.event_bus`` when
+    Published through the ``OptimizationContext.dispatcher`` when
     ``optimize()`` is invoked.
     """
 
@@ -54,7 +54,7 @@ class OptimizationStarted:
 class OptimizationCompleted:
     """Event emitted on successful optimization completion.
 
-    Published through the ``OptimizationContext.event_bus`` after
+    Published through the ``OptimizationContext.dispatcher`` after
     ``optimize()`` returns successfully.
     """
 
@@ -87,7 +87,7 @@ class OptimizationCompleted:
 class OptimizationFailed:
     """Event emitted when optimization raises an exception.
 
-    Published through the ``OptimizationContext.event_bus`` when
+    Published through the ``OptimizationContext.dispatcher`` when
     ``optimize()`` encounters an error.
     """
 

@@ -322,10 +322,10 @@ class RestoreFailedError(ExecutionStateError):
 Telemetry publish failures do not trigger restore:
 
 ```python
-def _publish_tool_invocation(self, event: ToolInvoked, *, bus: EventBus) -> None:
+def _publish_tool_invocation(self, event: ToolInvoked, *, bus: Dispatcher) -> None:
     """Publish tool invocation event (best-effort)."""
     try:
-        bus.publish(event)
+        bus.dispatch(event)
     except Exception:
         log.warning("Failed to publish tool invocation event", exc_info=True)
         # State remains committed; telemetry is best-effort

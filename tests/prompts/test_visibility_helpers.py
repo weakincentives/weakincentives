@@ -23,7 +23,7 @@ from weakincentives.prompt._visibility import (
     _visibility_requires_positional_argument,
     normalize_visibility_selector,
 )
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 if TYPE_CHECKING:
@@ -62,7 +62,7 @@ def test_visibility_requires_positional_argument_branches() -> None:
 
 
 def test_normalize_visibility_selector_with_session_kwarg() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     received_session: list[SessionProtocol | None] = []
@@ -81,7 +81,7 @@ def test_normalize_visibility_selector_with_session_kwarg() -> None:
 
 
 def test_normalize_visibility_selector_with_params_and_session() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     received: list[tuple[_VisibilityParams, SessionProtocol | None]] = []
@@ -108,7 +108,7 @@ def test_normalize_visibility_selector_constant() -> None:
         SectionVisibility.SUMMARY, params_type=None
     )
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     assert selector(None, None) == SectionVisibility.SUMMARY

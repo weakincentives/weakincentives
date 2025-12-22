@@ -37,7 +37,7 @@ from weakincentives.adapters.tool_executor import (
     tool_execution,
 )
 from weakincentives.adapters.utilities import (
-    format_publish_failures,
+    format_dispatch_failures,
     parse_tool_arguments,
 )
 from weakincentives.deadlines import Deadline
@@ -50,7 +50,7 @@ from weakincentives.prompt import (
     ToolHandler,
     ToolResult,
 )
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
@@ -78,7 +78,7 @@ def _base_context(
     deadline: Deadline | None = None,
     session: SessionProtocol | None = None,
 ) -> ToolExecutionContext:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     prompt_template = _build_prompt(tool)
     prompt = Prompt(prompt_template)
     effective_session = session or Session(bus=bus)
@@ -95,7 +95,7 @@ def _base_context(
         execution_state=execution_state,
         prompt_name=cast(str, prompt.name),
         parse_arguments=parse_tool_arguments,
-        format_publish_failures=format_publish_failures,
+        format_dispatch_failures=format_dispatch_failures,
         deadline=deadline,
         provider_payload={},
     )

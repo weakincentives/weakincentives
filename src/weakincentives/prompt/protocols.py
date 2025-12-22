@@ -122,7 +122,7 @@ class PromptProtocol(Protocol[PromptOutputT]):
 class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
     """Interface describing the subset of adapter behaviour required by tools.
 
-    Telemetry is published via session.event_bus, not a separate bus parameter.
+    Telemetry is dispatched via session.dispatcher.
     """
 
     def evaluate(

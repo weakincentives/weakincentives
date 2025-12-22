@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from ..deadlines import Deadline
 from ..prompt.overrides import PromptOverridesStore
-from ..runtime.events._types import EventBus
+from ..runtime.events._types import Dispatcher
 from ..runtime.session import Session
 
 if TYPE_CHECKING:
@@ -37,8 +37,8 @@ class OptimizationContext:
     adapter: ProviderAdapter[object]
     """Provider adapter for evaluating helper prompts."""
 
-    event_bus: EventBus
-    """Event bus for optimization telemetry."""
+    dispatcher: Dispatcher
+    """Dispatcher for optimization telemetry."""
 
     deadline: Deadline | None = None
     """Optional deadline enforced during optimization."""

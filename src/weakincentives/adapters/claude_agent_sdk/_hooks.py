@@ -348,7 +348,7 @@ def create_post_tool_use_hook(
 ) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording and state rollback.
 
-    The hook publishes ToolInvoked events to the session bus. It attempts to
+    The hook dispatches ToolInvoked events to the session dispatcher. It attempts to
     parse the input data into typed dataclasses (PostToolUseInput, ToolResponse)
     for better type safety, falling back to dict access if parsing fails.
 
@@ -372,7 +372,7 @@ def create_post_tool_use_hook(
         _ = sdk_context
         data = _parse_tool_data(input_data)
 
-        # Skip logging for MCP-bridged WINK tools - they publish their own
+        # Skip logging for MCP-bridged WINK tools - they dispatch their own
         # ToolInvoked events via BridgedTool with richer context (typed values).
         if data.tool_name.startswith("mcp__wink__"):
             return {}
@@ -391,7 +391,7 @@ def create_post_tool_use_hook(
             rendered_output=data.output_text[:1000] if data.output_text else "",
             call_id=tool_use_id,
         )
-        hook_context.session.event_bus.publish(event)
+        hook_context.session.dispatcher.dispatch(event)
 
         logger.debug(
             "claude_agent_sdk.hook.tool_invoked",
@@ -565,7 +565,7 @@ def create_subagent_start_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session.broadcast(notification)
+        hook_context.session.dispatch(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_start",
@@ -613,7 +613,7 @@ def create_subagent_stop_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session.broadcast(notification)
+        hook_context.session.dispatch(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
@@ -658,7 +658,7 @@ def create_pre_compact_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session.broadcast(notification)
+        hook_context.session.dispatch(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.pre_compact",
@@ -703,7 +703,7 @@ def create_notification_hook(
             created_at=_utcnow(),
         )
 
-        hook_context.session.broadcast(notification)
+        hook_context.session.dispatch(notification)
 
         logger.debug(
             "claude_agent_sdk.hook.notification",

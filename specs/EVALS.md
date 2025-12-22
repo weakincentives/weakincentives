@@ -279,14 +279,14 @@ def llm_judge(
     adapter: ProviderAdapter[JudgeOutput],
     criterion: str,
     *,
-    bus: EventBus,
+    bus: Dispatcher,
 ) -> Evaluator[str, str]:
     """Create evaluator that uses LLM to judge output.
 
     Args:
         adapter: Provider adapter configured for JudgeOutput
         criterion: What to evaluate (e.g., "factual accuracy", "clarity")
-        bus: EventBus for creating judge sessions
+        bus: Dispatcher for creating judge sessions
 
     Returns:
         Evaluator function that scores string outputs
@@ -313,7 +313,7 @@ def llm_judge(
 ```python
 # Use a smaller/cheaper model for judging
 judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
-judge_bus = InProcessEventBus()
+judge_bus = InProcessDispatcher()
 
 evaluator = all_of(
     contains,  # Must contain expected answer
@@ -408,7 +408,7 @@ def run_eval[I, O, E](
     dataset: tuple[Sample[I, E], ...],
     evaluator: Evaluator[O, E],
     *,
-    bus: EventBus | None = None,
+    bus: Dispatcher | None = None,
 ) -> EvalReport:
     """Run evaluation using MainLoop.
 
@@ -422,7 +422,7 @@ def run_eval[I, O, E](
         loop: MainLoop instance to run samples through
         dataset: Tuple of samples to evaluate
         evaluator: Scoring function for outputs
-        bus: Optional EventBus for progress notifications
+        bus: Optional Dispatcher for progress notifications
 
     Returns:
         EvalReport with all results and aggregate metrics
@@ -451,7 +451,7 @@ def run_eval[I, O, E](
 
         results.append(result)
         if bus is not None:
-            bus.publish(SampleEvaluated(sample_id=sample.id, result=result))
+            bus.dispatch(SampleEvaluated(sample_id=sample.id, result=result))
 
     return EvalReport(results=tuple(results))
 ```
@@ -463,7 +463,7 @@ def run_eval[I, O, E](
 ```python
 from weakincentives import MainLoop, PromptTemplate, Prompt, Session
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import InProcessEventBus
+from weakincentives.runtime import InProcessDispatcher
 from weakincentives.evals import Sample, run_eval, exact_match, load_jsonl
 
 # Define the loop under test
@@ -495,7 +495,7 @@ dataset = load_jsonl(Path("tests/fixtures/qa.jsonl"), str, str)
 
 # Run evaluation
 adapter = OpenAIAdapter(model="gpt-4o")
-loop = QALoop(adapter=adapter, bus=InProcessEventBus())
+loop = QALoop(adapter=adapter, bus=InProcessDispatcher())
 report = run_eval(loop, dataset, exact_match)
 
 # Inspect results
@@ -515,7 +515,7 @@ from weakincentives.evals import all_of, llm_judge
 
 # Create judge adapter and bus
 judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
-judge_bus = InProcessEventBus()
+judge_bus = InProcessDispatcher()
 
 # Compose multiple criteria
 evaluator = all_of(
@@ -545,7 +545,7 @@ report = run_eval(loop, dataset, contains)
 
 ## Observability
 
-Pass an `EventBus` to `run_eval` to receive progress notifications:
+Pass an `Dispatcher` to `run_eval` to receive progress notifications:
 
 ```python
 from weakincentives.evals import SampleEvaluated
@@ -554,10 +554,10 @@ def on_sample(event: SampleEvaluated) -> None:
     status = "PASS" if event.result.score.passed else "FAIL"
     print(f"[{status}] {event.sample_id}: {event.result.score.value:.2f}")
 
-bus = InProcessEventBus()
+bus = InProcessDispatcher()
 bus.subscribe(SampleEvaluated, on_sample)
 
-loop = QALoop(adapter=adapter, bus=InProcessEventBus())
+loop = QALoop(adapter=adapter, bus=InProcessDispatcher())
 report = run_eval(loop, dataset, evaluator, bus=bus)
 ```
 

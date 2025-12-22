@@ -254,7 +254,7 @@ from weakincentives.optimizers import OptimizationContext, PersistenceScope
 
 context = OptimizationContext(
     adapter=adapter,
-    event_bus=session.event_bus,
+    dispatcher=session.dispatcher,
     overrides_store=store,
     overrides_tag="v1",
 )
@@ -293,12 +293,12 @@ class WorkspaceDigestResult:
 ## Usage Example
 
 ```python
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
 from weakincentives.contrib.tools import vfs, podman
 
-bus = InProcessEventBus()
+bus = InProcessDispatcher()
 session = Session(bus=bus)
 
 # VFS-based prompt

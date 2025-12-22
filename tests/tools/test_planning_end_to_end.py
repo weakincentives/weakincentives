@@ -26,12 +26,12 @@ from weakincentives.contrib.tools import (
     UpdateStep,
 )
 from weakincentives.prompt.tool import Tool
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 
 def test_planning_end_to_end_flow() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = PlanningToolsSection(session=session)
     tools = {tool.name: tool for tool in section.tools()}

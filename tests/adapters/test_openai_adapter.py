@@ -39,7 +39,7 @@ from weakincentives.adapters.response_parser import (
     parse_schema_constrained_payload,
     parsed_payload_from_part,
 )
-from weakincentives.adapters.utilities import format_publish_failures
+from weakincentives.adapters.utilities import format_dispatch_failures
 from weakincentives.prompt.structured_output import (
     ARRAY_WRAPPER_KEY,
     StructuredOutputConfig,
@@ -82,7 +82,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
         WeirdResponse,
         simple_handler,
     )
-from tests.helpers.events import NullEventBus
+from tests.helpers.events import NullDispatcher
 from weakincentives import ToolValidationError
 from weakincentives.adapters import PromptEvaluationError
 from weakincentives.budget import Budget
@@ -98,7 +98,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.events import (
     HandlerFailure,
-    InProcessEventBus,
+    InProcessDispatcher,
     PromptExecuted,
     ToolInvoked,
 )
@@ -169,7 +169,7 @@ def _evaluate_with_session(
     target_session = (
         session
         if session is not None
-        else cast(SessionProtocol, Session(bus=NullEventBus()))
+        else cast(SessionProtocol, Session(bus=NullDispatcher()))
     )
     return _evaluate(adapter, prompt, *params, session=target_session)
 
@@ -393,7 +393,7 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
@@ -472,7 +472,7 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     session[ToolPayload].register(ToolPayload, replace_latest)
     session[ToolPayload].seed((ToolPayload(answer="baseline"),))
@@ -532,12 +532,12 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
     assert prompt_result.output == StructuredAnswer(answer="Policy summary")
 
 
-def test_openai_format_publish_failures_handles_defaults() -> None:
+def test_openai_format_dispatch_failures_handles_defaults() -> None:
     failure = HandlerFailure(handler=lambda _: None, error=RuntimeError(""))
-    message = format_publish_failures((failure,))
+    message = format_dispatch_failures((failure,))
     assert message == "Reducer errors prevented applying tool result: RuntimeError"
     assert (
-        format_publish_failures(()) == "Reducer errors prevented applying tool result."
+        format_dispatch_failures(()) == "Reducer errors prevented applying tool result."
     )
 
 
@@ -584,7 +584,7 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
 
@@ -675,7 +675,7 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
 
@@ -857,7 +857,7 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
@@ -983,7 +983,7 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
     client = DummyOpenAIClient([response_with_tool, final_response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
@@ -1346,7 +1346,7 @@ def test_openai_adapter_handles_invalid_tool_params() -> None:
     client = DummyOpenAIClient(responses)
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
     bus.subscribe(
@@ -1418,7 +1418,7 @@ def test_openai_adapter_records_handler_failures() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     tool_events: list[ToolInvoked] = []
 
@@ -1954,7 +1954,7 @@ def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     budget = Budget(max_total_tokens=1000)
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     result = adapter.evaluate(

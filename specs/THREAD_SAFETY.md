@@ -24,7 +24,7 @@ future improvements can be layered without guessing at implicit expectations.
 ```mermaid
 flowchart TB
     subgraph ThreadSafe["Thread-Safe Components"]
-        EventBus["InProcessEventBus<br/>(RLock on _handlers)"]
+        Dispatcher["InProcessDispatcher<br/>(RLock on _handlers)"]
         Session["Session<br/>(RLock on _state, _reducers)"]
         OverrideStore["LocalPromptOverridesStore<br/>(per-file locks)"]
     end
@@ -35,7 +35,7 @@ flowchart TB
         SnapshotFirst["Handler Snapshot<br/>before delivery"]
     end
 
-    EventBus --> SnapshotFirst
+    Dispatcher --> SnapshotFirst
     Session --> CopyOnWrite
     OverrideStore --> AtomicRename
 ```
@@ -67,10 +67,10 @@ to provide thread-based synchronization only.
 
 ### Event Bus Implementations
 
-- `InProcessEventBus` protects `_handlers` with a `threading.RLock`. Handler
+- `InProcessDispatcher` protects `_handlers` with a `threading.RLock`. Handler
   snapshots are taken under the lock before delivery so the lock is not held
   during handler execution. Both `subscribe` and `unsubscribe` are thread-safe.
-- The test helper `tests.helpers.events.NullEventBus` is effectively stateless
+- The test helper `tests.helpers.events.NullDispatcher` is effectively stateless
   and thread-safe today.
 
 ### Session State Store
@@ -141,7 +141,7 @@ to provide thread-based synchronization only.
 
 ## Guarantees
 
-- `InProcessEventBus` is safe for concurrent `subscribe`, `unsubscribe`, and
+- `InProcessDispatcher` is safe for concurrent `subscribe`, `unsubscribe`, and
   `publish` calls. It snapshots the handler list under an `RLock` before
   delivering events.
 - `Session` protects reducer registration, state mutation, and snapshot capture

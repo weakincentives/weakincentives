@@ -158,7 +158,7 @@ fields propagate alongside the traceback.
 ## Error Handling Expectations
 
 - Publishing events MUST NOT raise from subscriber failures; the bus records
-  each exception, logs it, and exposes failures through the `PublishResult`.
+  each exception, logs it, and exposes failures through the `DispatchResult`.
 - Reducers that raise are logged and skipped, leaving the previous state in
   place.
 - Tool handlers that raise are logged and converted into `ToolResult` instances

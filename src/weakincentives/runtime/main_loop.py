@@ -26,7 +26,7 @@ from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.tool import ResourceRegistry
 from ..prompt.visibility_overrides import SetVisibilityOverride
-from .events._types import ControlBus
+from .events._types import ControlDispatcher
 from .session import Session
 
 if TYPE_CHECKING:
@@ -53,7 +53,7 @@ class MainLoopRequest[UserRequestT]:
     The ``budget``, ``deadline``, and ``resources`` fields override config defaults
     when set. A fresh ``BudgetTracker`` is created per execution.
 
-    Note: ``InProcessEventBus`` dispatches by ``type(event)``, not generic alias.
+    Note: ``InProcessDispatcher`` dispatches by ``type(event)``, not generic alias.
     ``MainLoopRequest[T]`` is for static type checking; at runtime all events are
     ``MainLoopRequest``. For multiple loop types on one bus, filter by request type
     in the handler or use separate buses.
@@ -69,7 +69,7 @@ class MainLoopRequest[UserRequestT]:
 
 @FrozenDataclass()
 class MainLoopCompleted[OutputT]:
-    """Event published when MainLoop execution succeeds."""
+    """Event dispatched when MainLoop execution succeeds."""
 
     request_id: UUID
     response: PromptResponse[OutputT]
@@ -79,7 +79,7 @@ class MainLoopCompleted[OutputT]:
 
 @FrozenDataclass()
 class MainLoopFailed:
-    """Event published when MainLoop execution fails."""
+    """Event dispatched when MainLoop execution fails."""
 
     request_id: UUID
     error: Exception
@@ -91,7 +91,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
     """Abstract orchestrator for agent workflow execution.
 
     MainLoop standardizes agent workflow orchestration: receive request, build
-    prompt, evaluate, handle visibility expansion, publish result. Implementations
+    prompt, evaluate, handle visibility expansion, dispatch result. Implementations
     define only the domain-specific factories via ``create_prompt`` and
     ``create_session``.
 
@@ -107,7 +107,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
             def __init__(
-                self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlBus
+                self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlDispatcher
             ) -> None:
                 super().__init__(adapter=adapter, bus=bus)
                 self._template = PromptTemplate[ReviewResult](
@@ -122,30 +122,30 @@ class MainLoop[UserRequestT, OutputT](ABC):
             def create_session(self) -> Session:
                 return Session(bus=self._bus, tags={"loop": "code-review"})
 
-        # Bus-driven usage (subscription is automatic in __init__)
+        # Dispatcher-driven usage (subscription is automatic in __init__)
         loop = CodeReviewLoop(adapter=adapter, bus=bus)
-        bus.publish(MainLoopRequest(request=ReviewRequest(...)))
+        bus.dispatch(MainLoopRequest(request=ReviewRequest(...)))
 
         # Direct usage
         response, session = loop.execute(ReviewRequest(...))
     """
 
     _adapter: ProviderAdapter[OutputT]
-    _bus: ControlBus
+    _bus: ControlDispatcher
     _config: MainLoopConfig
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        bus: ControlBus,
+        bus: ControlDispatcher,
         config: MainLoopConfig | None = None,
     ) -> None:
-        """Initialize the MainLoop with an adapter, bus, and optional config.
+        """Initialize the MainLoop with an adapter, dispatcher, and optional config.
 
         Args:
             adapter: Provider adapter for prompt evaluation.
-            bus: Control bus for request/response event routing.
+            bus: Control dispatcher for request/response event routing.
             config: Optional configuration for default deadline/budget.
         """
         super().__init__()
@@ -237,7 +237,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             except VisibilityExpansionRequired as e:
                 # Update session state with requested visibility overrides
                 for path, visibility in e.requested_overrides.items():
-                    session.broadcast(
+                    _ = session.dispatch(
                         SetVisibilityOverride(path=path, visibility=visibility)
                     )
             else:
@@ -250,7 +250,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
             bus.subscribe(MainLoopRequest, loop.handle_request)
 
-        On success, publishes ``MainLoopCompleted``. On failure, publishes
+        On success, dispatches ``MainLoopCompleted``. On failure, dispatches
         ``MainLoopFailed`` and re-raises the exception.
 
         Args:
@@ -272,7 +272,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 response=response,
                 session_id=session.session_id,
             )
-            _ = self._bus.publish(completed)
+            _ = self._bus.dispatch(completed)
 
         except Exception as exc:
             failed = MainLoopFailed(
@@ -280,7 +280,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 error=exc,
                 session_id=None,
             )
-            _ = self._bus.publish(failed)
+            _ = self._bus.dispatch(failed)
             raise
 
 

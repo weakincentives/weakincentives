@@ -25,7 +25,7 @@ from weakincentives.adapters.core import PromptResponse
 from weakincentives.dbc import dbc_enabled
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
-    InProcessEventBus,
+    InProcessDispatcher,
     PromptExecuted,
     PromptRendered,
     ToolInvoked,
@@ -127,8 +127,8 @@ def test_tool_invoked_appends_payload_every_time(
     session, bus = session_factory()
 
     event = make_tool_event(1)
-    first_result = bus.publish(event)
-    second_result = bus.publish(event)
+    first_result = bus.dispatch(event)
+    second_result = bus.dispatch(event)
 
     assert first_result.ok
     assert second_result.ok
@@ -159,7 +159,7 @@ def test_tool_invoked_extracts_value_from_result(
         rendered_output=tool_result.render(),
     )
 
-    bus.publish(event)
+    bus.dispatch(event)
 
     # Session dispatches result.value to slice reducers
     assert session[ExamplePayload].all() == (payload,)
@@ -175,7 +175,7 @@ def test_prompt_rendered_appends_start_event(
         session_id=uuid4(),
     )
 
-    result = bus.publish(event)
+    result = bus.dispatch(event)
 
     assert result.ok
     lifecycle = session[PromptRendered].all()
@@ -191,7 +191,7 @@ def test_prompt_executed_emits_multiple_dataclasses(
 
     session, bus = session_factory()
 
-    result = bus.publish(make_prompt_event(outputs))
+    result = bus.dispatch(make_prompt_event(outputs))
 
     assert result.ok
     assert session[ExampleOutput].all() == tuple(outputs)
@@ -235,7 +235,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     session[FirstSlice].register(ExampleOutput, first)
     session[SecondSlice].register(ExampleOutput, second)
 
-    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    result = bus.dispatch(make_prompt_event(ExampleOutput(text="hello")))
 
     assert call_order == ["first", "second"]
     assert session[FirstSlice].all() == (FirstSlice("hello"),)
@@ -248,7 +248,7 @@ def test_default_append_used_when_no_custom_reducer(
 ) -> None:
     session, bus = session_factory()
 
-    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    result = bus.dispatch(make_prompt_event(ExampleOutput(text="hello")))
 
     assert result.ok
     assert session[ExampleOutput].all() == (ExampleOutput(text="hello"),)
@@ -276,7 +276,7 @@ def test_prompt_executed_extracts_value_from_result(
         created_at=datetime.now(UTC),
     )
 
-    bus.publish(event)
+    bus.dispatch(event)
 
     # Session dispatches result.output to slice reducers
     assert session[ExampleOutput].all() == (output,)
@@ -300,8 +300,8 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
         rendered_output=non_dataclass_result.render(),
     )
 
-    first_result = bus.publish(event)
-    second_result = bus.publish(non_dataclass_event)
+    first_result = bus.dispatch(event)
+    second_result = bus.dispatch(non_dataclass_event)
 
     assert first_result.ok
     assert second_result.ok
@@ -315,9 +315,9 @@ def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> No
         ExamplePayload, upsert_by(lambda payload: payload.value)
     )
 
-    first_result = bus.publish(make_tool_event(1))
-    second_result = bus.publish(make_tool_event(1))
-    third_result = bus.publish(make_tool_event(2))
+    first_result = bus.dispatch(make_tool_event(1))
+    second_result = bus.dispatch(make_tool_event(1))
+    third_result = bus.dispatch(make_tool_event(2))
 
     assert first_result.ok
     assert second_result.ok
@@ -335,8 +335,8 @@ def test_replace_latest_keeps_only_newest_value(
 
     session[ExamplePayload].register(ExamplePayload, replace_latest)
 
-    first_result = bus.publish(make_tool_event(1))
-    second_result = bus.publish(make_tool_event(2))
+    first_result = bus.dispatch(make_tool_event(1))
+    second_result = bus.dispatch(make_tool_event(2))
 
     assert first_result.ok
     assert second_result.ok
@@ -346,7 +346,7 @@ def test_replace_latest_keeps_only_newest_value(
 def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_tool_event(1))
+    bus.dispatch(make_tool_event(1))
 
     failure = cast(
         ToolResult[object],
@@ -362,7 +362,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
         created_at=datetime.now(UTC),
         rendered_output=failure.render(),
     )
-    bus.publish(failure_event)
+    bus.dispatch(failure_event)
 
     tool_events = session[ToolInvoked].all()
     assert len(tool_events) == 2
@@ -391,14 +391,14 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 
     session[ExampleOutput].register(ExampleOutput, faulty)
 
-    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    first_result = bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
 
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert first_result.handled_count == 1
 
     # Second publish adds another entry (append_all doesn't dedupe)
     # The faulty reducer fails but append_all already ran successfully
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    second_result = bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     assert second_result.handled_count == 1
     assert session[ExampleOutput].all() == (
@@ -410,8 +410,8 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    first_result = bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    second_result = bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     assert first_result.ok
     assert second_result.ok
@@ -421,7 +421,7 @@ def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> 
     raw = snapshot.to_json()
     restored = Snapshot.from_json(raw)
 
-    third_result = bus.publish(make_prompt_event(ExampleOutput(text="third")))
+    third_result = bus.dispatch(make_prompt_event(ExampleOutput(text="third")))
     assert session[ExampleOutput].all() != original_state
     assert third_result.ok
 
@@ -452,17 +452,17 @@ def test_snapshot_preserves_custom_reducer_behavior(
 
     session[Summary].register(ExampleOutput, aggregate)
 
-    first_result = bus.publish(make_prompt_event(ExampleOutput(text="start")))
+    first_result = bus.dispatch(make_prompt_event(ExampleOutput(text="start")))
     snapshot = session.snapshot(include_all=True)
 
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="after")))
+    second_result = bus.dispatch(make_prompt_event(ExampleOutput(text="after")))
     assert session[Summary].all()[0].entries == ("start", "after")
 
     session.restore(snapshot)
 
     assert session[Summary].all()[0].entries == ("start",)
 
-    third_result = bus.publish(make_prompt_event(ExampleOutput(text="again")))
+    third_result = bus.dispatch(make_prompt_event(ExampleOutput(text="again")))
 
     assert session[Summary].all()[0].entries == ("start", "again")
     assert first_result.ok
@@ -477,9 +477,9 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     executed_event = make_prompt_event(ExampleOutput(text="complete"))
     tool_event = make_tool_event(4)
 
-    bus.publish(rendered_event)
-    bus.publish(executed_event)
-    bus.publish(tool_event)
+    bus.dispatch(rendered_event)
+    bus.dispatch(executed_event)
+    bus.dispatch(tool_event)
 
     snapshot = session.snapshot(
         policies=frozenset({SlicePolicy.STATE, SlicePolicy.LOG})
@@ -525,8 +525,8 @@ def test_snapshot_filters_log_slices_by_default(
 ) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_tool_event(1))
-    bus.publish(make_prompt_event(ExampleOutput(text="state")))
+    bus.dispatch(make_tool_event(1))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="state")))
 
     snapshot = session.snapshot()
 
@@ -561,10 +561,10 @@ def test_rollback_preserves_log_slices(session_factory: SessionFactory) -> None:
     first_event = make_tool_event(1)
     second_event = make_tool_event(2)
 
-    bus.publish(first_event)
+    bus.dispatch(first_event)
     snapshot = session.snapshot()
 
-    bus.publish(second_event)
+    bus.dispatch(second_event)
 
     session.restore(snapshot)
 
@@ -596,12 +596,12 @@ def test_snapshot_rollback_requires_registered_slices(
     session_factory: SessionFactory,
 ) -> None:
     source, bus = session_factory()
-    result = bus.publish(make_prompt_event(ExampleOutput(text="hello")))
+    result = bus.dispatch(make_prompt_event(ExampleOutput(text="hello")))
 
     assert result.ok
     snapshot = source.snapshot()
 
-    target = Session(bus=InProcessEventBus())
+    target = Session(bus=InProcessDispatcher())
 
     with pytest.raises(SnapshotRestoreError):
         target.restore(snapshot)
@@ -624,7 +624,7 @@ def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
-    first_result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    first_result = bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
     assert first_result.ok
     assert session[ExampleOutput].all()
 
@@ -632,7 +632,7 @@ def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None
 
     assert session[ExampleOutput].all() == ()
 
-    second_result = bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    second_result = bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
     assert second_result.ok
     assert session[ExampleOutput].all() == (ExampleOutput(text="second"),)
 
@@ -648,10 +648,10 @@ def test_clone_preserves_state_and_reducer_registration(
 
     session[ExampleOutput].register(ExampleOutput, replace_latest)
 
-    result = bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    result = bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
     assert result.ok
 
-    clone_bus = InProcessEventBus()
+    clone_bus = InProcessDispatcher()
     clone = session.clone(bus=clone_bus)
 
     assert clone.session_id == provided_session_id
@@ -660,12 +660,12 @@ def test_clone_preserves_state_and_reducer_registration(
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert clone._reducers.keys() == session._reducers.keys()
 
-    clone_bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    clone_bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="second")
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="third")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="third")))
 
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="third")
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="second")
@@ -676,9 +676,9 @@ def test_clone_attaches_to_new_bus_when_provided(
 ) -> None:
     session, source_bus = session_factory()
 
-    source_bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    source_bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
 
-    target_bus = InProcessEventBus()
+    target_bus = InProcessDispatcher()
     clone_session_id = uuid4()
     clone_created_at = datetime.now(UTC)
     clone = session.clone(
@@ -689,18 +689,18 @@ def test_clone_attaches_to_new_bus_when_provided(
     assert clone.created_at == clone_created_at
     assert clone[ExampleOutput].all() == session[ExampleOutput].all()
 
-    target_bus.publish(make_prompt_event(ExampleOutput(text="from clone")))
+    target_bus.dispatch(make_prompt_event(ExampleOutput(text="from clone")))
 
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="from clone")
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="first")
 
-    source_bus.publish(make_prompt_event(ExampleOutput(text="original")))
+    source_bus.dispatch(make_prompt_event(ExampleOutput(text="original")))
 
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="original")
 
 
 def test_session_requires_timezone_aware_created_at() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     naive_timestamp = datetime.now()
 
     with pytest.raises(ValueError):
@@ -709,7 +709,7 @@ def test_session_requires_timezone_aware_created_at() -> None:
 
 def test_session_instantiates_default_bus_when_none_provided() -> None:
     session = Session()
-    assert isinstance(session.event_bus, InProcessEventBus)
+    assert isinstance(session.dispatcher, InProcessDispatcher)
 
 
 def test_indexing_returns_slice_accessor(session_factory: SessionFactory) -> None:
@@ -753,8 +753,8 @@ def test_query_where_returns_empty_tuple_when_no_values(
 def test_query_all_returns_all_values(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     result = session[ExampleOutput].all()
 
@@ -766,8 +766,8 @@ def test_query_latest_returns_most_recent_value(
 ) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     result = session[ExampleOutput].latest()
 
@@ -777,9 +777,9 @@ def test_query_latest_returns_most_recent_value(
 def test_query_where_filters_values(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="apple")))
-    bus.publish(make_prompt_event(ExampleOutput(text="banana")))
-    bus.publish(make_prompt_event(ExampleOutput(text="apricot")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="apple")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="banana")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="apricot")))
 
     result = session[ExampleOutput].where(lambda x: x.text.startswith("a"))
 
@@ -789,8 +789,8 @@ def test_query_where_filters_values(session_factory: SessionFactory) -> None:
 def test_query_respects_dbc_purity(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     with dbc_enabled():
         assert session[ExampleOutput].all() == (
@@ -808,7 +808,7 @@ def test_query_where_logs_violate_purity_contract(
 ) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
 
     logger = logging.getLogger(__name__)
 
@@ -852,8 +852,8 @@ def test_mutate_seed_iterable_values(session_factory: SessionFactory) -> None:
 def test_mutate_clear_removes_all_values(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
     assert session[ExampleOutput].all()
 
     session[ExampleOutput].clear()
@@ -864,9 +864,9 @@ def test_mutate_clear_removes_all_values(session_factory: SessionFactory) -> Non
 def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="apple")))
-    bus.publish(make_prompt_event(ExampleOutput(text="banana")))
-    bus.publish(make_prompt_event(ExampleOutput(text="apricot")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="apple")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="banana")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="apricot")))
 
     session[ExampleOutput].clear(lambda x: x.text.startswith("a"))
 
@@ -893,7 +893,7 @@ def test_broadcast_triggers_registered_reducer(
         return (ExampleOutput(text=value.text),)
 
     session[ExampleOutput].register(SetText, set_text_reducer)
-    session.broadcast(SetText(text="dispatched"))
+    session.dispatch(SetText(text="dispatched"))
 
     assert session[ExampleOutput].all() == (ExampleOutput(text="dispatched"),)
 
@@ -925,7 +925,7 @@ def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None
     session, bus = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
     assert session[ExampleOutput].all()
 
     session.reset()
@@ -937,11 +937,11 @@ def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> N
     session, bus = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
 
     snapshot = session.snapshot()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
     assert session[ExampleOutput].latest() == ExampleOutput(text="second")
 
     session.restore(snapshot)
@@ -978,7 +978,7 @@ def test_observer_called_on_state_change(session_factory: SessionFactory) -> Non
         calls.append((old, new))
 
     session.observe(ExampleOutput, observer)
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
 
     assert len(calls) == 1
     assert calls[0] == ((), (ExampleOutput(text="first"),))
@@ -998,8 +998,8 @@ def test_observer_receives_correct_old_and_new_values(
 
     session.observe(ExampleOutput, observer)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     assert len(calls) == 2
     assert calls[0] == ((), (ExampleOutput(text="first"),))
@@ -1028,7 +1028,7 @@ def test_multiple_observers_all_called(session_factory: SessionFactory) -> None:
     session.observe(ExampleOutput, first_observer)
     session.observe(ExampleOutput, second_observer)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="value")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="value")))
 
     assert first_calls == [(ExampleOutput(text="value"),)]
     assert second_calls == [(ExampleOutput(text="value"),)]
@@ -1048,13 +1048,13 @@ def test_subscription_unsubscribe_removes_observer(
 
     subscription = session.observe(ExampleOutput, observer)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
     assert len(calls) == 1
 
     result = subscription.unsubscribe()
     assert result is True
 
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
     assert len(calls) == 1  # Observer not called after unsubscribe
 
 
@@ -1097,7 +1097,7 @@ def test_observer_exception_does_not_break_other_observers(
     session.observe(ExampleOutput, failing_observer)
     session.observe(ExampleOutput, working_observer)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="value")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="value")))
 
     assert calls == ["called"]
     assert session[ExampleOutput].all() == (ExampleOutput(text="value"),)
@@ -1118,11 +1118,11 @@ def test_observer_called_on_every_append(
     session.observe(ExampleOutput, observer)
 
     # First publish adds the item
-    bus.publish(make_prompt_event(ExampleOutput(text="value")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="value")))
     assert len(calls) == 1
 
     # Second publish of same value - append_all always appends (ledger semantics)
-    bus.publish(make_prompt_event(ExampleOutput(text="value")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="value")))
     assert len(calls) == 2  # Observer called since state changed
 
 
@@ -1139,8 +1139,8 @@ def test_observer_works_with_custom_reducer(session_factory: SessionFactory) -> 
     session[ExampleOutput].register(ExampleOutput, replace_latest)
     session.observe(ExampleOutput, observer)
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     assert len(calls) == 2
     assert calls[0] == ((), (ExampleOutput(text="first"),))
@@ -1164,7 +1164,7 @@ def test_observer_called_for_tool_invoked_slice(
 
     session.observe(ExamplePayload, observer)
 
-    bus.publish(make_tool_event(42))
+    bus.dispatch(make_tool_event(42))
 
     assert len(calls) == 1
     assert calls[0] == (ExamplePayload(value=42),)
@@ -1215,8 +1215,8 @@ def test_getitem_returns_slice_accessor(session_factory: SessionFactory) -> None
 def test_slice_accessor_query_methods_work(session_factory: SessionFactory) -> None:
     session, bus = session_factory()
 
-    bus.publish(make_prompt_event(ExampleOutput(text="first")))
-    bus.publish(make_prompt_event(ExampleOutput(text="second")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     # Test all(), latest(), and where() work via SliceAccessor
     assert session[ExampleOutput].all() == (
@@ -1230,7 +1230,7 @@ def test_slice_accessor_query_methods_work(session_factory: SessionFactory) -> N
 
 
 def test_broadcast_dispatches_to_all_reducers(session_factory: SessionFactory) -> None:
-    """session.broadcast() dispatches to ALL reducers registered for that event type."""
+    """session.dispatch() dispatches to ALL reducers registered for that event type."""
 
     @dataclass(slots=True, frozen=True)
     class AddItem:
@@ -1275,7 +1275,7 @@ def test_broadcast_dispatches_to_all_reducers(session_factory: SessionFactory) -
     session[SliceB].register(AddItem, reducer_b)
 
     # Broadcast dispatch: runs ALL reducers for AddItem
-    session.broadcast(AddItem(value="broadcast"))
+    session.dispatch(AddItem(value="broadcast"))
 
     assert call_order == ["A", "B"]
     assert session[SliceA].all() == (SliceA("broadcast"),)
@@ -1306,7 +1306,7 @@ def test_prompt_executed_with_mixed_iterable_output(
         created_at=datetime.now(UTC),
     )
 
-    result = bus.publish(event)
+    result = bus.dispatch(event)
     assert result.ok
 
     # Only dataclass instances should be in the session state

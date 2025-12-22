@@ -83,4 +83,4 @@ def test_tool_clones_validate_session_and_bus() -> None:
 
     other_session = Session()
     with pytest.raises(TypeError):
-        _ = vfs.clone(session=base_session, bus=other_session.event_bus)
+        _ = vfs.clone(session=base_session, bus=other_session.dispatcher)

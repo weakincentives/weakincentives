@@ -133,8 +133,8 @@ def raise_tool_deadline_error(
     )
 
 
-def format_publish_failures(failures: Sequence[HandlerFailure]) -> str:
-    """Summarize publish failures encountered while applying tool results."""
+def format_dispatch_failures(failures: Sequence[HandlerFailure]) -> str:
+    """Summarize dispatch failures encountered while applying tool results."""
 
     def _message_for(failure: HandlerFailure) -> str:
         message = str(failure.error).strip()
@@ -385,7 +385,7 @@ __all__ = [
     "deadline_provider_payload",
     "extract_payload",
     "first_choice",
-    "format_publish_failures",
+    "format_dispatch_failures",
     "parse_tool_arguments",
     "prepare_adapter_conversation",
     "raise_tool_deadline_error",

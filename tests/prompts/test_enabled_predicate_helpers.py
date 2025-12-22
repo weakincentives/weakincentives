@@ -20,7 +20,7 @@ from weakincentives.prompt._enabled_predicate import (
     callable_requires_positional_argument,
     normalize_enabled_predicate,
 )
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 if TYPE_CHECKING:
@@ -82,7 +82,7 @@ def test_callable_accepts_session_kwarg_detects_keyword_only() -> None:
 
 
 def test_normalize_enabled_predicate_with_session_kwarg() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     received_session: list[SessionProtocol | None] = []
@@ -100,7 +100,7 @@ def test_normalize_enabled_predicate_with_session_kwarg() -> None:
 
 
 def test_normalize_enabled_predicate_with_params_and_session() -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     received: list[tuple[ToggleParams, SessionProtocol | None]] = []

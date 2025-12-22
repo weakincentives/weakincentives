@@ -10,15 +10,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Test utilities for working with event buses."""
+"""Test utilities for working with dispatchers."""
 
 from __future__ import annotations
 
-from weakincentives.runtime.events import EventHandler, PublishResult
+from weakincentives.runtime.events import DispatchResult
+from weakincentives.runtime.events._types import EventHandler
 
 
-class NullEventBus:
-    """Event bus implementation that discards all events."""
+class NullDispatcher:
+    """Dispatcher implementation that discards all events."""
 
     @staticmethod
     def subscribe(event_type: type[object], handler: EventHandler) -> None:
@@ -35,14 +36,14 @@ class NullEventBus:
         return False
 
     @staticmethod
-    def publish(event: object) -> PublishResult:
+    def dispatch(event: object) -> DispatchResult:
         """Drop the provided event instance."""
 
-        return PublishResult(
+        return DispatchResult(
             event=event,
             handlers_invoked=(),
             errors=(),
         )
 
 
-__all__ = ["NullEventBus"]
+__all__ = ["NullDispatcher"]

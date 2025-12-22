@@ -108,7 +108,7 @@ class ToolContext:
     def filesystem(self) -> Filesystem | None: ...
 ```
 
-Tool handlers that need an event bus should publish via `context.session.event_bus`.
+Tool handlers that need an event bus should publish via `context.session.dispatcher`.
 
 ### ResourceRegistry
 
@@ -196,7 +196,7 @@ Adapters drive tool invocation using a shared dispatcher:
 1. **Deadline check** - Refuse invocation if deadline elapsed
 1. **Context construction** - Build `ToolContext` from active state
 1. **Handler execution** - Run with params/context pair
-1. **Telemetry** - Publish `ToolInvoked` event to `session.event_bus`
+1. **Telemetry** - Publish `ToolInvoked` event to `session.dispatcher`
 1. **Response assembly** - Return result to calling loop
 
 ### Exception Handling

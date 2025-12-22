@@ -177,7 +177,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 
         Args:
             prompt: The prompt to evaluate.
-            session: Session for state management and event publishing.
+            session: Session for state management and event dispatching.
             deadline: Optional deadline for execution timeout.
             budget: Optional token budget constraints.
             budget_tracker: Optional shared budget tracker.
@@ -185,7 +185,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
                 user-provided resources take precedence).
 
         Returns:
-            PromptResponse with structured output and events published.
+            PromptResponse with structured output and events dispatched.
 
         Raises:
             PromptEvaluationError: If SDK execution fails.
@@ -229,7 +229,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
         )
         prompt_text = rendered.text
 
-        session.event_bus.publish(
+        session.dispatcher.dispatch(
             PromptRendered(
                 prompt_ns=prompt.ns,
                 prompt_key=prompt.key,
@@ -344,7 +344,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
             output=output,
         )
 
-        session.event_bus.publish(
+        session.dispatcher.dispatch(
             PromptExecuted(
                 prompt_name=prompt_name,
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,

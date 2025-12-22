@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, Self
 
 from ...types.dataclass import SupportsDataclass
-from ..events._types import TelemetryBus
+from ..events._types import DispatchResult, TelemetryDispatcher
 from ._observer_types import SliceObserver, Subscription
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import Snapshot
@@ -47,9 +47,9 @@ class SessionProtocol(Protocol):
         session[Plan].clear()
         session[Plan].register(AddStep, reducer)
 
-    For broadcast dispatch (routes to all reducers for the event type)::
+    For dispatch (routes to all reducers for the event type)::
 
-        session.broadcast(AddStep(step="x"))
+        session.dispatch(AddStep(step="x"))
 
     Global operations are available directly on the session::
 
@@ -67,7 +67,7 @@ class SessionProtocol(Protocol):
     ) -> SnapshotProtocol: ...
 
     @property
-    def event_bus(self) -> TelemetryBus: ...
+    def dispatcher(self) -> TelemetryDispatcher: ...
 
     def observe[T: SupportsDataclass](
         self,
@@ -86,8 +86,8 @@ class SessionProtocol(Protocol):
         initial: Callable[[], T] | None = None,
     ) -> None: ...
 
-    def broadcast(self, event: SupportsDataclass) -> None:
-        """Broadcast an event to all reducers registered for its type."""
+    def dispatch(self, event: SupportsDataclass) -> DispatchResult:
+        """Dispatch an event to all reducers registered for its type."""
         ...
 
     def reset(self) -> None:

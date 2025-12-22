@@ -70,7 +70,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
 )
 from weakincentives.runtime import (
-    EventBus,
+    Dispatcher,
     MainLoop,
     MainLoopCompleted,
     MainLoopRequest,
@@ -183,7 +183,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         self,
         *,
         adapter: ProviderAdapter[ReviewResponse],
-        bus: EventBus,
+        bus: Dispatcher,
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
         use_podman: bool = False,
@@ -252,7 +252,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         optimization_session = build_logged_session(parent=self._session)
         context = OptimizationContext(
             adapter=self._adapter,
-            event_bus=self._bus,
+            dispatcher=self._bus,
             overrides_store=self._overrides_store,
             overrides_tag=self._override_tag,
             optimization_session=optimization_session,
@@ -289,7 +289,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 class CodeReviewApp:
     """Owns the REPL loop and user interaction."""
 
-    _bus: EventBus
+    _bus: Dispatcher
     _loop: CodeReviewLoop
     _use_claude_agent: bool
     _workspace_section: ClaudeAgentWorkspaceSection | None
@@ -358,7 +358,7 @@ class CodeReviewApp:
                     request=request,
                     deadline=_default_deadline(),
                 )
-                self._bus.publish(request_event)
+                self._bus.dispatch(request_event)
         finally:
             self._cleanup()
 
@@ -372,12 +372,12 @@ class CodeReviewApp:
             _LOGGER.info("Cleaned up Claude Agent workspace.")
 
 
-def _create_bus_with_logging() -> EventBus:
-    """Create an event bus with logging subscribers attached."""
+def _create_bus_with_logging() -> Dispatcher:
+    """Create a dispatcher with logging subscribers attached."""
     from examples.logging import attach_logging_subscribers
-    from weakincentives.runtime.events import InProcessEventBus
+    from weakincentives.runtime.events import InProcessDispatcher
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     attach_logging_subscribers(bus)
     return bus
 
@@ -434,7 +434,7 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
 
 
 def build_claude_agent_adapter(
-    bus: EventBus,
+    bus: Dispatcher,
 ) -> tuple[ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection]:
     """Build the Claude Agent SDK adapter with workspace section and isolation.
 

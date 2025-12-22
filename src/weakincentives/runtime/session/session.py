@@ -28,7 +28,13 @@ from uuid import UUID, uuid4
 
 from ...dbc import invariant
 from ...types.dataclass import SupportsDataclass
-from ..events import PromptExecuted, PromptRendered, TelemetryBus, ToolInvoked
+from ..events import (
+    DispatchResult,
+    PromptExecuted,
+    PromptRendered,
+    TelemetryDispatcher,
+    ToolInvoked,
+)
 from ..logging import StructuredLogger, get_logger
 from ._observer_types import SliceObserver, Subscription
 from ._slice_types import SessionSlice, SessionSliceType
@@ -162,9 +168,9 @@ class Session(SessionProtocol):
         session[Plan].clear()
         session[Plan].register(AddStep, reducer)
 
-    For broadcast dispatch (routes to all reducers for the event type)::
+    For dispatch (routes to all reducers for the event type)::
 
-        session.broadcast(AddStep(step="x"))
+        session.dispatch(AddStep(step="x"))
 
     Global operations are available directly on the session::
 
@@ -176,7 +182,7 @@ class Session(SessionProtocol):
     def __init__(
         self,
         *,
-        bus: TelemetryBus | None = None,
+        bus: TelemetryDispatcher | None = None,
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -195,9 +201,9 @@ class Session(SessionProtocol):
         self.created_at: datetime = resolved_created_at.astimezone(UTC)
 
         if bus is None:
-            from ..events import InProcessEventBus
+            from ..events import InProcessDispatcher
 
-            self._bus: TelemetryBus = InProcessEventBus()
+            self._bus: TelemetryDispatcher = InProcessDispatcher()
         else:
             self._bus = bus
 
@@ -219,7 +225,7 @@ class Session(SessionProtocol):
             raise ValueError(msg)
         if parent is not None:
             parent._register_child(self)
-        self._attach_to_bus(self._bus)
+        self._attach_to_dispatcher(self._bus)
         self._register_builtin_reducers()
 
     @contextmanager
@@ -299,7 +305,7 @@ class Session(SessionProtocol):
     def clone(
         self,
         *,
-        bus: TelemetryBus,
+        bus: TelemetryDispatcher,
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -454,8 +460,8 @@ class Session(SessionProtocol):
     # ──────────────────────────────────────────────────────────────────────
 
     @override
-    def broadcast(self, event: SupportsDataclass) -> None:
-        """Broadcast an event to all reducers registered for its type.
+    def dispatch(self, event: SupportsDataclass) -> DispatchResult:
+        """Dispatch an event to all reducers registered for its type.
 
         This routes by event type and runs all registrations for that type,
         regardless of which slice they target. Use this for cross-cutting
@@ -465,13 +471,17 @@ class Session(SessionProtocol):
             event: The event to dispatch. All reducers registered for
                 ``type(event)`` will be executed.
 
+        Returns:
+            DispatchResult containing dispatch outcome and any handler errors.
+
         Example::
 
-            # Broadcasts to ALL reducers registered for AddStep
-            session.broadcast(AddStep(step="implement feature"))
+            # Dispatches to ALL reducers registered for AddStep
+            result = session.dispatch(AddStep(step="implement feature"))
 
         """
         self._dispatch_data_event(type(event), event)
+        return self._bus.dispatch(event)
 
     # ──────────────────────────────────────────────────────────────────────
     # Global Mutation Operations
@@ -605,8 +615,8 @@ class Session(SessionProtocol):
 
     @property
     @override
-    def event_bus(self) -> TelemetryBus:
-        """Return the telemetry bus backing this session."""
+    def dispatcher(self) -> TelemetryDispatcher:
+        """Return the dispatcher backing this session."""
 
         return self._bus
 
@@ -851,7 +861,7 @@ class Session(SessionProtocol):
                         },
                     )
 
-    def _attach_to_bus(self, bus: TelemetryBus) -> None:
+    def _attach_to_dispatcher(self, bus: TelemetryDispatcher) -> None:
         with self.locked():
             if self._subscriptions_attached and self._bus is bus:
                 return

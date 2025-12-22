@@ -17,7 +17,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from threading import Barrier, Lock, Thread
 
-from weakincentives.runtime.events import InProcessEventBus, PublishResult
+from weakincentives.runtime.events import DispatchResult, InProcessDispatcher
 
 
 @dataclass(slots=True)
@@ -56,7 +56,7 @@ def _assert_base_handlers_delivered(
 def test_concurrent_publishes_invoke_all_handlers_once() -> None:
     handler_count = 8
     publisher_count = 12
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     call_log: list[tuple[int, int]] = []
     log_lock = Lock()
 
@@ -64,13 +64,13 @@ def test_concurrent_publishes_invoke_all_handlers_once() -> None:
         bus.subscribe(_DummyEvent, _make_handler(handler_id, call_log, log_lock))
 
     start_barrier = Barrier(publisher_count)
-    results: list[PublishResult] = []
+    results: list[DispatchResult] = []
     errors: list[BaseException] = []
 
     def publish(index: int) -> None:
         try:
             start_barrier.wait()
-            result = bus.publish(_DummyEvent(event_id=index))
+            result = bus.dispatch(_DummyEvent(event_id=index))
             results.append(result)
         except BaseException as error:  # pragma: no cover - defensive
             errors.append(error)
@@ -95,7 +95,7 @@ def test_subscriptions_and_publishes_can_race_without_errors() -> None:
     base_handler_count = 4
     new_handler_count = 6
     publisher_count = 5
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     call_log: list[tuple[int, int]] = []
     log_lock = Lock()
 
@@ -103,7 +103,7 @@ def test_subscriptions_and_publishes_can_race_without_errors() -> None:
         bus.subscribe(_DummyEvent, _make_handler(handler_id, call_log, log_lock))
 
     start_barrier = Barrier(new_handler_count + publisher_count)
-    results: list[PublishResult] = []
+    results: list[DispatchResult] = []
     errors: list[BaseException] = []
 
     def subscribe(offset: int) -> None:
@@ -117,7 +117,7 @@ def test_subscriptions_and_publishes_can_race_without_errors() -> None:
     def publish(event_id: int) -> None:
         try:
             start_barrier.wait()
-            result = bus.publish(_DummyEvent(event_id=event_id))
+            result = bus.dispatch(_DummyEvent(event_id=event_id))
             results.append(result)
         except BaseException as error:  # pragma: no cover - defensive
             errors.append(error)
@@ -141,7 +141,7 @@ def test_subscriptions_and_publishes_can_race_without_errors() -> None:
     _assert_base_handlers_delivered(call_log, publisher_count, base_handler_count)
 
     final_event_id = publisher_count + 1
-    final_result = bus.publish(_DummyEvent(event_id=final_event_id))
+    final_result = bus.dispatch(_DummyEvent(event_id=final_event_id))
 
     assert len(final_result.handlers_invoked) == base_handler_count + new_handler_count
 
@@ -154,7 +154,7 @@ def test_concurrent_unsubscribes_and_publishes_can_race_without_errors() -> None
     handler_count = 10
     publisher_count = 5
     unsubscribe_count = 5
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     call_log: list[tuple[int, int]] = []
     log_lock = Lock()
     handlers: list[tuple[int, object]] = []
@@ -165,7 +165,7 @@ def test_concurrent_unsubscribes_and_publishes_can_race_without_errors() -> None
         bus.subscribe(_DummyEvent, handler)
 
     start_barrier = Barrier(unsubscribe_count + publisher_count)
-    results: list[PublishResult] = []
+    results: list[DispatchResult] = []
     unsubscribe_results: list[bool] = []
     errors: list[BaseException] = []
 
@@ -180,7 +180,7 @@ def test_concurrent_unsubscribes_and_publishes_can_race_without_errors() -> None
     def publish(event_id: int) -> None:
         try:
             start_barrier.wait()
-            result = bus.publish(_DummyEvent(event_id=event_id))
+            result = bus.dispatch(_DummyEvent(event_id=event_id))
             results.append(result)
         except BaseException as error:  # pragma: no cover - defensive
             errors.append(error)
@@ -205,7 +205,7 @@ def test_concurrent_unsubscribes_and_publishes_can_race_without_errors() -> None
 
     remaining_handler_count = handler_count - unsubscribe_count
     final_event_id = publisher_count + 1
-    final_result = bus.publish(_DummyEvent(event_id=final_event_id))
+    final_result = bus.dispatch(_DummyEvent(event_id=final_event_id))
 
     assert len(final_result.handlers_invoked) == remaining_handler_count
 

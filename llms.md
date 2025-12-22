@@ -30,8 +30,8 @@ An agent harness in WINK wires together five core components:
 
 1. **Session** (`weakincentives.runtime.Session`): Event-driven state
    container that records all prompt renders, tool invocations, and custom
-   state. State changes flow through pure reducers. Creates its own `EventBus`
-   internally (access via `session.event_bus`).
+   state. State changes flow through pure reducers. Creates its own `Dispatcher`
+   internally (access via `session.dispatcher`).
 
 1. **ProviderAdapter** (`OpenAIAdapter`, `LiteLLMAdapter`): Bridges prompts to
    LLM providers. Call `adapter.evaluate(prompt, session=session)` to execute.
@@ -233,12 +233,12 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `configure_logging`: Configure the root logger with sensible defaults.
     - `get_logger`: Return a `StructuredLogger` scoped to a name.
   - Events:
-    - `EventBus`: Interface for publishing events.
+    - `Dispatcher`: Interface for publishing events.
     - `HandlerFailure`: Event emitted when a handler fails.
-    - `InProcessEventBus`: Simple in-process event bus.
+    - `InProcessDispatcher`: Simple in-process event bus.
     - `PromptExecuted`: Event emitted when a prompt is executed.
     - `PromptRendered`: Event emitted when a prompt is rendered.
-    - `PublishResult`: Result of publishing an event.
+    - `DispatchResult`: Result of publishing an event.
     - `TokenUsage`: Token usage data from provider responses.
     - `ToolInvoked`: Event emitted when a tool is invoked.
   - Main loop orchestration:
@@ -363,7 +363,7 @@ template = PromptTemplate[TaskResponse](
     sections=[MarkdownSection(title="Instructions", template="...", key="instructions")],
 )
 
-session = Session()  # Creates event bus internally (access via session.event_bus)
+session = Session()  # Creates event bus internally (access via session.dispatcher)
 adapter = OpenAIAdapter(model="gpt-4o-mini")
 response = adapter.evaluate(Prompt(template), session=session)
 result: TaskResponse = response.output
@@ -384,7 +384,7 @@ class PatchResult:
     applied: bool
 
 def apply_patch(params: PatchArgs, *, context: ToolContext) -> ToolResult[PatchResult]:
-    # context.session, context.deadline, context.event_bus available
+    # context.session, context.deadline, context.dispatcher available
     return ToolResult(message="Applied", value=PatchResult(applied=True), success=True)
 
 patch_tool = Tool[PatchArgs, PatchResult](
@@ -463,7 +463,7 @@ Available in tool handlers via `context`:
 
 - `context.session` - Current Session
 - `context.deadline` - Optional Deadline (check with `deadline.remaining()`)
-- `context.event_bus` - EventBus for publishing
+- `context.dispatcher` - Dispatcher for publishing
 - `context.prompt` / `context.rendered_prompt` / `context.adapter`
 
 ### ToolResult fields
@@ -665,8 +665,8 @@ except ThrottleError as exc:
 - **Reducers**: Use `TypedReducer` with `ReducerContext` to manage typed state
   slices through event-driven mutations.
 - **Events**: `PromptExecuted` and `ToolInvoked` events capture every model
-  exchange. `EventBus`/`InProcessEventBus` publish events to reducers and
-  custom observers. `HandlerFailure` and `PublishResult` offer backpressure
+  exchange. `Dispatcher`/`InProcessDispatcher` publish events to reducers and
+  custom observers. `HandlerFailure` and `DispatchResult` offer backpressure
   and error reporting controls.
 - **MainLoop**: Abstract orchestrator for agent workflows with automatic
   visibility expansion handling and budget tracking.
@@ -779,7 +779,7 @@ from weakincentives.prompt import Prompt, PromptTemplate
 
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
     def __init__(
-        self, *, adapter: ProviderAdapter[ReviewResult], bus: EventBus
+        self, *, adapter: ProviderAdapter[ReviewResult], bus: Dispatcher
     ) -> None:
         super().__init__(
             adapter=adapter,
@@ -816,7 +816,7 @@ bus.subscribe(MainLoopCompleted, lambda e: print(f"Done: {e.response}"))
 bus.subscribe(MainLoopFailed, lambda e: print(f"Failed: {e.error}"))
 
 # Submit request with optional per-request constraints
-bus.publish(MainLoopRequest(
+bus.dispatch(MainLoopRequest(
     request=ReviewRequest(...),
     budget=Budget(max_total_tokens=10000),  # Overrides config default
     deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
@@ -837,13 +837,13 @@ from weakincentives.runtime import PromptRendered, PromptExecuted, ToolInvoked, 
 session = Session()
 
 # Subscribe to events
-session.event_bus.subscribe(ToolInvoked, lambda e: print(e.name))
-session.event_bus.subscribe(PromptExecuted, lambda e: print(e.usage))
+session.dispatcher.subscribe(ToolInvoked, lambda e: print(e.name))
+session.dispatcher.subscribe(PromptExecuted, lambda e: print(e.usage))
 
 # Unsubscribe handler (returns True if found and removed)
 handler = lambda e: print(e)
-session.event_bus.subscribe(PromptRendered, handler)
-session.event_bus.unsubscribe(PromptRendered, handler)
+session.dispatcher.subscribe(PromptRendered, handler)
+session.dispatcher.unsubscribe(PromptRendered, handler)
 ```
 
 ## Session Snapshots
@@ -951,7 +951,7 @@ from weakincentives.optimizers import OptimizationContext, PersistenceScope
 
 context = OptimizationContext(
     adapter=adapter,
-    event_bus=session.event_bus,
+    dispatcher=session.dispatcher,
     overrides_store=overrides_store,
 )
 optimizer = WorkspaceDigestOptimizer(context, store_scope=PersistenceScope.SESSION)

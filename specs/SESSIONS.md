@@ -15,7 +15,7 @@ event emission and subscription, deadline enforcement, and budget tracking.
   making state easy to reconstruct.
 - **Publisher isolation**: Event dispatch is fire-and-forget; handler failures
   are logged and isolated.
-- **Explicit buses**: Callers may provide an `EventBus`. When omitted,
+- **Explicit buses**: Callers may provide an `Dispatcher`. When omitted,
   `Session` creates an in-process bus for telemetry.
 
 ```mermaid
@@ -57,7 +57,7 @@ class Session:
     def __init__(
         self,
         *,
-        bus: EventBus | None = None,  # Creates InProcessEventBus if None
+        bus: Dispatcher | None = None,  # Creates InProcessDispatcher if None
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -66,7 +66,7 @@ class Session:
 
     # Properties
     @property
-    def event_bus(self) -> EventBus: ...
+    def dispatcher(self) -> Dispatcher: ...
     @property
     def parent(self) -> Session | None: ...
     @property
@@ -86,7 +86,7 @@ class Session:
     def clone(
         self,
         *,
-        bus: EventBus,
+        bus: Dispatcher,
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -169,11 +169,11 @@ class Subscription:
 
 ### Dispatch API
 
-Session provides broadcast dispatch via `session.broadcast()`:
+Session provides broadcast dispatch via `session.dispatch()`:
 
 ```python
 # Broadcast dispatch - runs ALL reducers registered for the event type
-session.broadcast(SetupPlan(objective="Build feature"))
+session.dispatch(SetupPlan(objective="Build feature"))
 ```
 
 Events are routed by type to all matching reducers across all slices.
@@ -280,7 +280,7 @@ session.install(AgentPlan)
 
 # Now use the slice
 session[AgentPlan].seed(AgentPlan(steps=("Research",)))
-session.broadcast(AddStep(step="Implement"))
+session.dispatch(AddStep(step="Implement"))
 latest = session[AgentPlan].latest()
 ```
 
@@ -389,13 +389,13 @@ for session in iter_sessions_bottom_up(root_session):
 ```mermaid
 sequenceDiagram
     participant A as Adapter
-    participant B as EventBus
+    participant B as Dispatcher
     participant H as Handlers
 
     A->>B: publish(PromptRendered)
     B->>H: dispatch to subscribers
     H-->>B: handler results
-    B-->>A: PublishResult
+    B-->>A: DispatchResult
 
     A->>B: publish(ToolInvoked)
     B->>H: dispatch to subscribers
@@ -409,11 +409,11 @@ sequenceDiagram
 In-process pub/sub for prompt lifecycle events:
 
 ```python
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 
-bus = InProcessEventBus()
+bus = InProcessDispatcher()
 bus.subscribe(PromptExecuted, handler)
-result = bus.publish(event)
+result = bus.dispatch(event)
 
 if not result.ok:
     result.raise_if_errors()  # Optional strict mode
@@ -476,7 +476,7 @@ class ToolInvoked:
 
 ```python
 @dataclass(slots=True, frozen=True)
-class PublishResult:
+class DispatchResult:
     event: object
     handlers_invoked: tuple[EventHandler, ...]
     errors: tuple[HandlerFailure, ...]
@@ -647,13 +647,13 @@ Converted to `PromptEvaluationError` with `phase="budget"` by runtime.
 ## Usage Example
 
 ```python
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.deadlines import Deadline
 from weakincentives.budget import Budget, BudgetTracker
 
 # Setup
-bus = InProcessEventBus()
+bus = InProcessDispatcher()
 session = Session(bus=bus)
 
 # Optional: register custom reducers

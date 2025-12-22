@@ -30,7 +30,7 @@ import pytest
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.runtime.events import InProcessEventBus, ToolInvoked
+from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
 
@@ -78,7 +78,7 @@ class _DummyPrompt:
         return self._sections
 
 
-def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
+def _publish_tool_event(bus: InProcessDispatcher, index: int) -> None:
     params = ExampleParams(value=index)
     result_payload = ExampleResult(value=index)
     result = ToolResult(message=f"ok-{index}", value=result_payload)
@@ -94,14 +94,14 @@ def _publish_tool_event(bus: InProcessEventBus, index: int) -> None:
         created_at=datetime.now(UTC),
         rendered_output=rendered_output,
     )
-    bus.publish(event)
+    bus.dispatch(event)
 
 
-def test_session_attach_to_bus_is_idempotent() -> None:
-    bus = InProcessEventBus()
+def test_session_attach_to_dispatcher_is_idempotent() -> None:
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
-    session._attach_to_bus(bus)
+    session._attach_to_dispatcher(bus)
 
     params = ExampleParams(value=999)
     result_payload = ExampleResult(value=999)
@@ -119,7 +119,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
         rendered_output=rendered_output,
     )
 
-    publish_result = bus.publish(event)
+    publish_result = bus.dispatch(event)
     assert publish_result.handled_count == 1
 
 
@@ -127,7 +127,7 @@ def test_session_attach_to_bus_is_idempotent() -> None:
 def test_session_collects_tool_data_across_threads(
     threadstress_workers: int,
 ) -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     max_workers = threadstress_workers
@@ -155,7 +155,7 @@ def test_session_collects_tool_data_across_threads(
 def test_session_snapshots_restore_across_threads(
     threadstress_workers: int,
 ) -> None:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     max_workers = threadstress_workers
@@ -191,7 +191,7 @@ def test_session_snapshots_restore_across_threads(
         expected_tool_events = snapshot.slices.get(ToolInvoked, ())
         expected_results = snapshot.slices.get(ExampleResult, ())
 
-        restored = Session(bus=InProcessEventBus())
+        restored = Session(bus=InProcessDispatcher())
         restored[ToolInvoked].seed(())
         restored[ExampleResult].seed(())
         restored.restore(snapshot, preserve_logs=False)
@@ -263,7 +263,7 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
 
 def test_session_reset_clears_runtime_state() -> None:
     """Session reset clears all slices."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     seeded_value = ExampleResult(value=1)
@@ -287,7 +287,7 @@ def test_session_reducer_optimistic_concurrency_retry() -> None:
     class CounterEvent:
         value: int
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
 
     # Track how many times the reducer is called (retries will increase this)
@@ -314,7 +314,7 @@ def test_session_reducer_optimistic_concurrency_retry() -> None:
 
     def broadcast_with_barrier(value: int) -> None:
         barrier.wait()  # All threads wait here until all are ready
-        session.broadcast(CounterEvent(value=value))
+        session.dispatch(CounterEvent(value=value))
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [

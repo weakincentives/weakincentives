@@ -95,7 +95,7 @@ from dataclasses import dataclass
 
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.runtime import InProcessEventBus, Session
+from weakincentives.runtime import InProcessDispatcher, Session
 
 
 @dataclass(frozen=True)
@@ -103,7 +103,7 @@ class Hello:
     message: str
 
 
-session = Session(bus=InProcessEventBus())
+session = Session(bus=InProcessDispatcher())
 
 template = PromptTemplate[Hello](
     ns="demo",
@@ -140,7 +140,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     SandboxConfig,
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.runtime import InProcessEventBus, Session
+from weakincentives.runtime import InProcessDispatcher, Session
 
 
 @dataclass(frozen=True)
@@ -149,7 +149,7 @@ class Review:
     findings: list[str]
 
 
-session = Session(bus=InProcessEventBus())
+session = Session(bus=InProcessDispatcher())
 
 workspace = ClaudeAgentWorkspaceSection(
     session=session,
@@ -246,7 +246,7 @@ from weakincentives.prompt import (
     ToolContext,
     ToolResult,
 )
-from weakincentives.runtime import InProcessEventBus, Session
+from weakincentives.runtime import InProcessDispatcher, Session
 
 
 @dataclass(frozen=True)
@@ -273,7 +273,7 @@ search_tool = Tool[SearchParams, SearchResult](
     handler=search,
 )
 
-session = Session(bus=InProcessEventBus())
+session = Session(bus=InProcessDispatcher())
 
 template = PromptTemplate[None](
     ns="demo",

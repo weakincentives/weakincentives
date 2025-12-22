@@ -847,8 +847,8 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             msg = "session is required to clone PodmanSandboxSection."
             raise TypeError(msg)
         provided_bus = kwargs.get("bus")
-        if provided_bus is not None and provided_bus is not session.event_bus:
-            msg = "Provided bus must match the target session's event bus."
+        if provided_bus is not None and provided_bus is not session.dispatcher:
+            msg = "Provided bus must match the target session's dispatcher."
             raise TypeError(msg)
         return PodmanSandboxSection(
             session=session,

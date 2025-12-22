@@ -228,7 +228,7 @@ invocations, and supports deadlines:
 
 ```python
 from weakincentives.runtime import MainLoop, Session
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.adapters.openai import OpenAIAdapter
 
 class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
@@ -243,7 +243,7 @@ class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     def create_session(self) -> Session:
         return self._session
 
-bus = InProcessEventBus()
+bus = InProcessDispatcher()
 adapter = OpenAIAdapter(model="gpt-5.1")
 loop = ReviewLoop(adapter, bus)
 

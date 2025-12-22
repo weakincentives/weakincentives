@@ -18,7 +18,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 pytest_plugins = (
@@ -36,20 +36,20 @@ class SessionFactory(Protocol):
         *,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
-    ) -> tuple[Session, InProcessEventBus]:
-        """Return a newly constructed session and bus pair."""
+    ) -> tuple[Session, InProcessDispatcher]:
+        """Return a newly constructed session and dispatcher pair."""
 
 
 @pytest.fixture
 def session_factory() -> SessionFactory:
-    """Return a factory that creates session and bus pairs."""
+    """Return a factory that creates session and dispatcher pairs."""
 
     def factory(
         *,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
-    ) -> tuple[Session, InProcessEventBus]:
-        bus = InProcessEventBus()
+    ) -> tuple[Session, InProcessDispatcher]:
+        bus = InProcessDispatcher()
         resolved_session_id = session_id if session_id is not None else uuid4()
         resolved_created_at = (
             created_at if created_at is not None else datetime.now(UTC)

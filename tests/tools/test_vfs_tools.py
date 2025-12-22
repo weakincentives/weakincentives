@@ -48,7 +48,7 @@ from weakincentives.contrib.tools import (
 )
 from weakincentives.contrib.tools.vfs import format_timestamp, path_from_string
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 
@@ -60,7 +60,7 @@ def _make_section(
     accepts_overrides: bool = False,
 ) -> VfsToolsSection:
     if session is None:
-        session = Session(bus=InProcessEventBus())
+        session = Session(bus=InProcessDispatcher())
     return VfsToolsSection(
         session=session,
         mounts=mounts,
@@ -70,8 +70,8 @@ def _make_section(
 
 
 @pytest.fixture()
-def session_and_bus() -> tuple[Session, InProcessEventBus]:
-    bus = InProcessEventBus()
+def session_and_bus() -> tuple[Session, InProcessDispatcher]:
+    bus = InProcessDispatcher()
     return Session(bus=bus), bus
 
 
@@ -207,7 +207,7 @@ def test_section_template_mentions_new_surface() -> None:
 
 
 def test_section_exposes_session_handle(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -287,7 +287,7 @@ def test_section_template_truncates_mount_preview(tmp_path: Path) -> None:
 
 
 def test_write_file_creates_snapshot(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session, _bus = session_and_bus
@@ -310,7 +310,7 @@ def test_write_file_creates_snapshot(
 
 
 def test_ls_lists_directories_and_files(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -338,7 +338,7 @@ def test_ls_lists_directories_and_files(
 
 
 def test_read_file_supports_pagination(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -368,7 +368,7 @@ def test_read_file_supports_pagination(
 
 
 def test_read_file_limit_reports_returned_slice(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -392,7 +392,7 @@ def test_read_file_limit_reports_returned_slice(
 
 
 def test_edit_file_replaces_occurrences(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -419,7 +419,7 @@ def test_edit_file_replaces_occurrences(
 
 
 def test_glob_filters_matches(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -443,7 +443,7 @@ def test_glob_filters_matches(
 
 
 def test_grep_reports_invalid_pattern(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -460,7 +460,7 @@ def test_grep_reports_invalid_pattern(
 
 
 def test_rm_removes_single_file(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -479,7 +479,7 @@ def test_rm_removes_single_file(
 
 
 def test_rm_removes_directory_tree(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -497,7 +497,7 @@ def test_rm_removes_directory_tree(
 
 
 def test_rm_removes_nested_directory_tree(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     """Test branch 963->966: directory with files in subdirectories (deleted_count > 0)."""
     session, _bus = session_and_bus
@@ -521,7 +521,7 @@ def test_rm_removes_nested_directory_tree(
 
 
 def test_rm_removes_empty_directory(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     """Test removing an empty directory sets deleted_count to at least 1."""
     session, _bus = session_and_bus
@@ -544,7 +544,7 @@ def test_rm_removes_empty_directory(
 
 
 def test_write_file_rejects_existing_target(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -563,7 +563,7 @@ def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
     file_path = docs / "intro.md"
     file_path.write_text("hello", encoding="utf-8")
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = _make_section(
         session=session,
@@ -590,7 +590,7 @@ def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
 
 
 def test_ls_rejects_file_path(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -603,7 +603,7 @@ def test_ls_rejects_file_path(
 
 
 def test_ls_rejects_nonexistent_directory(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -615,7 +615,7 @@ def test_ls_rejects_nonexistent_directory(
 
 
 def test_ls_ignores_unrelated_paths(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -634,7 +634,7 @@ def test_ls_ignores_unrelated_paths(
 
 
 def test_read_file_negative_offset(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -647,7 +647,7 @@ def test_read_file_negative_offset(
 
 
 def test_read_file_invalid_limit(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -660,7 +660,7 @@ def test_read_file_invalid_limit(
 
 
 def test_read_file_returns_empty_slice(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -678,7 +678,7 @@ def test_read_file_returns_empty_slice(
 
 
 def test_read_file_missing_path(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -689,7 +689,7 @@ def test_read_file_missing_path(
 
 
 def test_write_file_content_length_limit(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -700,7 +700,7 @@ def test_write_file_content_length_limit(
 
 
 def test_write_file_rejects_empty_path(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -711,7 +711,7 @@ def test_write_file_rejects_empty_path(
 
 
 def test_write_file_accepts_leading_slash(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -725,7 +725,7 @@ def test_write_file_accepts_leading_slash(
 
 
 def test_write_file_rejects_relative_segments(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -736,7 +736,7 @@ def test_write_file_rejects_relative_segments(
 
 
 def test_write_file_rejects_long_segment(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -747,7 +747,7 @@ def test_write_file_rejects_long_segment(
 
 
 def test_write_file_rejects_excessive_depth(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -759,7 +759,7 @@ def test_write_file_rejects_excessive_depth(
 
 
 def test_edit_file_empty_old_string(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -775,7 +775,7 @@ def test_edit_file_empty_old_string(
 
 
 def test_edit_file_requires_existing_pattern(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -791,7 +791,7 @@ def test_edit_file_requires_existing_pattern(
 
 
 def test_edit_file_requires_unique_match(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -813,7 +813,7 @@ def test_edit_file_requires_unique_match(
 
 
 def test_edit_file_single_occurrence_replace(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -834,7 +834,7 @@ def test_edit_file_single_occurrence_replace(
 
 
 def test_edit_file_replacement_length_guard(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -851,7 +851,7 @@ def test_edit_file_replacement_length_guard(
 
 
 def test_glob_requires_pattern(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -862,7 +862,7 @@ def test_glob_requires_pattern(
 
 
 def test_glob_filters_with_base_path(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -885,7 +885,7 @@ def test_glob_filters_with_base_path(
 
 
 def test_grep_matches_success(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -910,7 +910,7 @@ def test_grep_matches_success(
 
 
 def test_grep_no_matches_message(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -925,7 +925,7 @@ def test_grep_no_matches_message(
 
 
 def test_rm_requires_existing_path(
-    session_and_bus: tuple[Session, InProcessEventBus],
+    session_and_bus: tuple[Session, InProcessDispatcher],
 ) -> None:
     session, _bus = session_and_bus
     section = _make_section(session=session)
@@ -949,7 +949,7 @@ def test_host_mount_requires_allowed_root(tmp_path: Path) -> None:
     missing_root = tmp_path / "missing"
     with pytest.raises(ToolValidationError, match="Allowed host root does not exist"):
         VfsToolsSection(
-            session=Session(bus=InProcessEventBus()),
+            session=Session(bus=InProcessDispatcher()),
             allowed_host_roots=(missing_root,),
         )
 
@@ -957,7 +957,7 @@ def test_host_mount_requires_allowed_root(tmp_path: Path) -> None:
 def test_host_mount_rejects_empty_path(tmp_path: Path) -> None:
     with pytest.raises(ToolValidationError, match="must not be empty"):
         VfsToolsSection(
-            session=Session(bus=InProcessEventBus()),
+            session=Session(bus=InProcessDispatcher()),
             mounts=(HostMount(host_path=""),),
             allowed_host_roots=(tmp_path,),
         )
@@ -970,7 +970,7 @@ def test_host_mount_enforces_max_bytes(tmp_path: Path) -> None:
     file_path.write_text("hello", encoding="utf-8")
     with pytest.raises(ToolValidationError, match="byte budget"):
         VfsToolsSection(
-            session=Session(bus=InProcessEventBus()),
+            session=Session(bus=InProcessDispatcher()),
             mounts=(HostMount(host_path="docs", max_bytes=1, include_glob=("*.md",)),),
             allowed_host_roots=(tmp_path,),
         )
@@ -979,7 +979,7 @@ def test_host_mount_enforces_max_bytes(tmp_path: Path) -> None:
 def test_host_mount_defaults_to_relative_destination(tmp_path: Path) -> None:
     file_path = tmp_path / "readme.md"
     file_path.write_text("hi", encoding="utf-8")
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = _make_section(
         session=session,
@@ -1001,7 +1001,7 @@ def test_host_mount_glob_normalization(tmp_path: Path) -> None:
     docs.mkdir()
     (docs / "intro.md").write_text("hello", encoding="utf-8")
     (docs / "skip.tmp").write_text("ignore", encoding="utf-8")
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = _make_section(
         session=session,
@@ -1029,7 +1029,7 @@ def test_host_mount_exclude_glob_filters_matches(tmp_path: Path) -> None:
     docs.mkdir()
     (docs / "keep.txt").write_text("hello", encoding="utf-8")
     (docs / "skip.log").write_text("ignored", encoding="utf-8")
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = _make_section(
         session=session,
@@ -1066,7 +1066,7 @@ def test_host_mount_double_star_glob_includes_root_files(tmp_path: Path) -> None
     subdir.mkdir()
     (subdir / "nested.py").write_text("nested", encoding="utf-8")
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = _make_section(
         session=session,
@@ -1101,7 +1101,7 @@ def test_host_mount_double_star_glob_preserves_prefix(tmp_path: Path) -> None:
     other.mkdir()
     (other / "test_other.py").write_text("other", encoding="utf-8")
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = _make_section(
         session=session,
@@ -1209,7 +1209,7 @@ def test_host_mount_outside_allowed_root(tmp_path: Path) -> None:
     allowed.mkdir()
     with pytest.raises(ToolValidationError, match="outside the allowed roots"):
         VfsToolsSection(
-            session=Session(bus=InProcessEventBus()),
+            session=Session(bus=InProcessDispatcher()),
             mounts=(HostMount(host_path="../forbidden.txt"),),
             allowed_host_roots=(allowed,),
         )
@@ -1236,7 +1236,7 @@ def test_host_mount_read_error_is_reported(
 
     with pytest.raises(ToolValidationError, match="Failed to read mounted file"):
         VfsToolsSection(
-            session=Session(bus=InProcessEventBus()),
+            session=Session(bus=InProcessDispatcher()),
             mounts=(HostMount(host_path="docs"),),
             allowed_host_roots=(tmp_path,),
         )
@@ -1259,7 +1259,7 @@ def test_resolve_mount_path_requires_allowed_roots() -> None:
 
 def test_prompt_filesystem_returns_workspace_section_filesystem() -> None:
     """Test that Prompt.filesystem() returns filesystem from workspace section."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     template = PromptTemplate(
@@ -1294,7 +1294,7 @@ def test_prompt_filesystem_returns_none_when_no_workspace() -> None:
 
 def test_clone_preserves_filesystem_state() -> None:
     """Test that cloning VfsToolsSection preserves filesystem state."""
-    bus1 = InProcessEventBus()
+    bus1 = InProcessDispatcher()
     session1 = Session(bus=bus1)
     section1 = VfsToolsSection(session=session1)
 
@@ -1304,7 +1304,7 @@ def test_clone_preserves_filesystem_state() -> None:
     _ = fs.write("myfile.txt", "my content")
 
     # Clone the section into a new session
-    bus2 = InProcessEventBus()
+    bus2 = InProcessDispatcher()
     session2 = Session(bus=bus2)
     section2 = section1.clone(session=session2)
 
@@ -1318,7 +1318,7 @@ def test_clone_preserves_filesystem_state() -> None:
 
 def test_clone_requires_session() -> None:
     """Test that clone raises error when session is missing."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
 
@@ -1328,13 +1328,13 @@ def test_clone_requires_session() -> None:
 
 def test_clone_requires_matching_bus() -> None:
     """Test that clone raises error when bus doesn't match session's bus."""
-    bus1 = InProcessEventBus()
+    bus1 = InProcessDispatcher()
     session1 = Session(bus=bus1)
     section = VfsToolsSection(session=session1)
 
-    bus2 = InProcessEventBus()
+    bus2 = InProcessDispatcher()
     session2 = Session(bus=bus2)
-    bus3 = InProcessEventBus()  # Different bus than session2
+    bus3 = InProcessDispatcher()  # Different bus than session2
 
     with pytest.raises(TypeError, match="Provided bus must match"):
         section.clone(session=session2, bus=bus3)
@@ -1375,7 +1375,7 @@ def test_list_directory_result_render_empty_entries() -> None:
 
 def test_edit_file_nonexistent_raises_error() -> None:
     """Test that edit_file raises error for non-existent file."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     edit_tool = find_tool(section, "edit_file")
@@ -1395,7 +1395,7 @@ def test_edit_file_nonexistent_raises_error() -> None:
 
 def test_edit_file_preserves_content_beyond_default_read_limit() -> None:
     """Test that edit_file doesn't truncate files with more than 2000 lines."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     fs = section.filesystem
@@ -1434,7 +1434,7 @@ def test_path_from_string_returns_empty_for_root() -> None:
 
 def test_tool_handler_rejects_missing_filesystem() -> None:
     """Test that tool handlers raise error when filesystem is not in context."""
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = VfsToolsSection(session=session)
     tool = find_tool(section, "ls")
@@ -1457,7 +1457,7 @@ def test_config_accepts_overrides() -> None:
     """Test that config accepts_overrides is respected."""
     from weakincentives.contrib.tools import VfsConfig
 
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     config = VfsConfig(accepts_overrides=True)
     section = VfsToolsSection(session=session, config=config)
@@ -1494,7 +1494,7 @@ def test_resolve_mount_path_continues_when_file_not_in_first_root(
     (second_root / "test.txt").write_text("content", encoding="utf-8")
 
     # Use VfsToolsSection which calls _resolve_mount_path internally
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = _make_section(
         session=session,

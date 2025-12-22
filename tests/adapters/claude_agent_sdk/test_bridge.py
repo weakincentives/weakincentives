@@ -28,7 +28,7 @@ from weakincentives.adapters.claude_agent_sdk._bridge import (
 )
 from weakincentives.prompt import SectionVisibility, Tool, ToolContext, ToolResult
 from weakincentives.prompt.errors import VisibilityExpansionRequired
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session
 
@@ -93,7 +93,7 @@ no_handler_tool = Tool[SearchParams, SearchResult](
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     return Session(bus=bus)
 
 

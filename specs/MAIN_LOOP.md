@@ -131,13 +131,13 @@ loop = MyMainLoop(adapter=adapter, bus=bus)
 # MainLoop subscribes to MainLoopRequest in __init__
 
 # With request-specific constraints
-bus.publish(MainLoopRequest(
+bus.dispatch(MainLoopRequest(
     request=MyRequest(...),
     budget=Budget(max_total_tokens=10000),
 ))
 ```
 
-**Note:** `InProcessEventBus` dispatches by `type(event)`, not generic alias.
+**Note:** `InProcessDispatcher` dispatches by `type(event)`, not generic alias.
 `MainLoopRequest[T]` is for static type checking; at runtime all events are
 `MainLoopRequest`. For multiple loop types on one bus, filter by request type
 in the handler or use separate buses.
