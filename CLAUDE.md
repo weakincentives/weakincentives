@@ -153,6 +153,7 @@ Consult these specs before modifying related code:
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
+| `specs/WHOLE_STORY.md` | Three-loop architecture (MainLoop, EvalLoop, OptimizationLoop) |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/LOGGING.md` | Logging surfaces |

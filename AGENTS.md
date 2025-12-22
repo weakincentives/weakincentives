@@ -104,6 +104,8 @@ a goal at any time.
   helpers or shared state.
 - **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
   modifying tools.
+- **WHOLE_STORY.md**: Three-loop architecture (MainLoop, EvalLoop,
+  OptimizationLoop)—when understanding how loops compose or adding new loops.
 - **WORKSPACE.md**: VFS, Podman sandbox, asteval, and workspace digest—when
   editing workspace tooling.
 
