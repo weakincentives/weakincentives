@@ -55,7 +55,8 @@ flowchart TB
         Adapter["Provider Adapter"]
         Tools["Tool Handlers"]
         Session["Session State"]
-        Bus["Event Bus"]
+        Dispatcher["Dispatcher"]
+        Mailbox["Mailbox"]
     end
 
     Process --> Shared
@@ -205,11 +206,11 @@ provides significant advantages:
 ```python
 # All loops share the same adapter, tools, and session infrastructure
 adapter = OpenAIAdapter(model="gpt-4o")
-bus = InProcessEventBus()
+dispatcher = InProcessDispatcher()
 
-main_loop = MyMainLoop(adapter=adapter, bus=bus)
-eval_loop = EvalLoop(main_loop=main_loop, bus=bus)
-optimization_loop = OptimizationLoop(adapter=adapter, bus=bus)
+main_loop = MyMainLoop(adapter=adapter, dispatcher=dispatcher)
+eval_loop = EvalLoop(main_loop=main_loop, dispatcher=dispatcher)
+optimization_loop = OptimizationLoop(adapter=adapter, dispatcher=dispatcher)
 ```
 
 **Why this matters:**
@@ -240,17 +241,17 @@ improvements will transfer to production.
 # Integration test with real components
 def test_full_pipeline():
     adapter = OpenAIAdapter(model="gpt-4o")
-    bus = InProcessEventBus()
+    dispatcher = InProcessDispatcher()
 
     # Same setup as production
-    main_loop = CodeReviewLoop(adapter=adapter, bus=bus)
-    eval_loop = EvalLoop(main_loop=main_loop, bus=bus)
+    main_loop = CodeReviewLoop(adapter=adapter, dispatcher=dispatcher)
+    eval_loop = EvalLoop(main_loop=main_loop, dispatcher=dispatcher)
 
     # Real evaluation
     report = eval_loop.run(dataset, evaluator)
 
     # Optimization uses real trajectories
-    opt_loop = OptimizationLoop(adapter=adapter, bus=bus)
+    opt_loop = OptimizationLoop(adapter=adapter, dispatcher=dispatcher)
     result = opt_loop.run(report.trajectories, report)
 
     # Suggestions grounded in actual execution
@@ -269,21 +270,41 @@ Each loop defines a clean protocol boundary:
 | EvalLoop | `EvalRequest[I, E]` | `EvalCompleted` | Dataset → Report + Trajectories |
 | OptimizationLoop | `OptimizationRequest` | `OptimizationResult` | Trajectories → Suggestions |
 
-### Event-Driven Composition
+### Dispatcher vs Mailbox
 
-Loops communicate via events on a shared bus:
+Two communication patterns serve different needs:
+
+**Dispatcher** (pub/sub): Broadcast telemetry and lifecycle events to multiple
+observers. All subscribers receive every event. Used for logging, metrics, and
+cross-cutting concerns.
 
 ```python
-bus = InProcessEventBus()
+dispatcher = InProcessDispatcher()
 
 # Subscribe to loop lifecycle events
-bus.subscribe(MainLoopCompleted, on_main_loop_done)
-bus.subscribe(EvalCompleted, on_eval_done)
-bus.subscribe(OptimizationResult, on_optimization_done)
+dispatcher.subscribe(MainLoopCompleted, on_main_loop_done)
+dispatcher.subscribe(EvalCompleted, on_eval_done)
 
-# Trigger evaluation
-bus.publish(EvalRequest(dataset=dataset, evaluator=evaluator))
+# Broadcast event to all subscribers
+dispatcher.dispatch(OptimizationStarted(prompt_key="..."))
 ```
+
+**Mailbox** (point-to-point): Request/response with acknowledgment. One
+consumer processes each message. Used for MainLoop orchestration across
+processes.
+
+```python
+mailbox = InMemoryMailbox[MainLoopRequest, MainLoopResult]()
+
+# Client sends request expecting reply
+reply = mailbox.send_expecting_reply(MainLoopRequest(request=my_request))
+result = reply.wait(timeout=60)
+
+# Or fire-and-forget
+mailbox.send(MainLoopRequest(request=background_task))
+```
+
+See `specs/MAILBOX.md` for the full message queue abstraction.
 
 ### Direct Invocation
 
@@ -380,7 +401,7 @@ Optimizes section order for attention patterns:
 ```python
 from weakincentives import MainLoop, Prompt, Session
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import InProcessEventBus
+from weakincentives.runtime import InProcessDispatcher
 from weakincentives.evals import Sample, EvalLoop, exact_match
 from weakincentives.optimizers import OptimizationLoop, OptimizationStrategy
 
@@ -390,17 +411,17 @@ class TaskLoop(MainLoop[TaskRequest, TaskOutput]):
         return Prompt(self._template).bind(task=request.task)
 
     def create_session(self) -> Session:
-        return Session(bus=self._bus)
+        return Session(dispatcher=self._dispatcher)
 
 
 # 2. Create shared infrastructure
 adapter = OpenAIAdapter(model="gpt-4o")
-bus = InProcessEventBus()
+dispatcher = InProcessDispatcher()
 
 # 3. Instantiate all loops with shared resources
-main_loop = TaskLoop(adapter=adapter, bus=bus)
-eval_loop = EvalLoop(main_loop=main_loop, bus=bus)
-opt_loop = OptimizationLoop(adapter=adapter, bus=bus)
+main_loop = TaskLoop(adapter=adapter, dispatcher=dispatcher)
+eval_loop = EvalLoop(main_loop=main_loop, dispatcher=dispatcher)
+opt_loop = OptimizationLoop(adapter=adapter, dispatcher=dispatcher)
 
 
 # 4. Run evaluation

@@ -94,6 +94,10 @@ a goal at any time.
 - **LANGSMITH.md**: LangSmith integration—when implementing telemetry, prompt
   hub, or evaluation features.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
+- **MAILBOX.md**: Message queue abstraction, SQS/Redis semantics, MainLoop
+  request handling—when implementing cross-process communication.
+- **MAIN_LOOP.md**: MainLoop orchestration, visibility handling—when modifying
+  the main loop or adding new loop types.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.
 - **PROMPT_OPTIMIZATION.md**: Override system and optimizer abstraction—when
