@@ -53,8 +53,56 @@ Notes:
 - `network_policy: NetworkPolicy | None = None` (defaults to no tool network)
 - `sandbox: SandboxConfig | None = None` (defaults to `SandboxConfig()`)
 - `env: Mapping[str, str] | None = None`
-- `api_key: str | None = None`
+- `api_key: str | None = None` (mutually exclusive with `bedrock`)
+- `bedrock: BedrockConfig | None = None` (mutually exclusive with `api_key`)
 - `include_host_env: bool = False` (copies only non-sensitive vars)
+
+### `BedrockConfig`
+
+AWS Bedrock authentication. Mutually exclusive with `api_key` in
+`IsolationConfig`. Supports multiple authentication methods:
+
+**Static credentials:**
+
+- `region: str` (required)
+- `access_key_id: str`
+- `secret_access_key: str`
+- `session_token: str | None = None` (for temporary STS credentials)
+
+**Named profile:**
+
+- `region: str` (required)
+- `profile: str`
+
+**IAM role assumption:**
+
+- `region: str` (required)
+- `role_arn: str`
+- `role_session_name: str | None = None`
+- `external_id: str | None = None` (cross-account access)
+
+**Web identity / OIDC:**
+
+- `region: str` (required)
+- `role_arn: str`
+- `web_identity_token_file: str`
+- `role_session_name: str | None = None`
+
+**Default credential chain:**
+
+- `region: str` (required, all other fields None)
+
+**Optional:**
+
+- `endpoint_url: str | None = None` (VPC endpoints, LocalStack, moto)
+
+Factory methods:
+
+- `BedrockConfig.from_static_credentials(region, access_key_id, secret_access_key, ...)`
+- `BedrockConfig.from_profile(region, profile, ...)`
+- `BedrockConfig.from_role(region, role_arn, ...)`
+- `BedrockConfig.from_web_identity(region, role_arn, web_identity_token_file, ...)`
+- `BedrockConfig.from_environment(region)`
 
 ### `NetworkPolicy`
 
@@ -229,7 +277,48 @@ adapter = ClaudeAgentSDKAdapter(
 )
 ```
 
-### Story 4: Expose an internal `Tool` to Claude via MCP
+### Story 4: AWS Bedrock authentication
+
+As a developer, I want to use Claude via AWS Bedrock so I can leverage my
+existing AWS infrastructure and credentials.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    BedrockConfig,
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+
+# Uses default AWS credential chain (environment variables, ~/.aws/credentials,
+# instance profile, ECS task role, etc.)
+adapter = ClaudeAgentSDKAdapter(
+    model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            bedrock=BedrockConfig.from_environment(region="us-east-1"),
+        ),
+    ),
+)
+
+# Alternative: use a specific AWS profile
+adapter = ClaudeAgentSDKAdapter(
+    model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(
+            bedrock=BedrockConfig.from_profile(
+                region="us-west-2",
+                profile="bedrock-prod",
+            ),
+        ),
+    ),
+)
+```
+
+See `BedrockConfig` for additional authentication methods: static credentials,
+IAM role assumption, and web identity/OIDC federation.
+
+### Story 5: Expose an internal `Tool` to Claude via MCP
 
 As a platform team, I want the agent to call a typed internal tool so I can keep
 side effects and validation in Python, not in prompt text.

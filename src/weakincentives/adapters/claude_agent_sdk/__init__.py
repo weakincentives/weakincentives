@@ -81,6 +81,7 @@ from .config import (
     PermissionMode,
 )
 from .isolation import (
+    BedrockConfig,
     EphemeralHome,
     IsolationConfig,
     NetworkPolicy,
@@ -96,6 +97,7 @@ from .workspace import (
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
+    "BedrockConfig",
     "ClaudeAgentSDKAdapter",
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",

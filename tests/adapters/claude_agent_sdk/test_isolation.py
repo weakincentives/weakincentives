@@ -19,7 +19,10 @@ import os
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from weakincentives.adapters.claude_agent_sdk.isolation import (
+    BedrockConfig,
     EphemeralHome,
     IsolationConfig,
     NetworkPolicy,
@@ -347,3 +350,330 @@ class TestEphemeralHomeWorkspacePath:
             assert home._workspace_path == "/my/workspace"
         finally:
             home.cleanup()
+
+
+class TestBedrockConfig:
+    """Tests for BedrockConfig dataclass."""
+
+    def test_region_required(self) -> None:
+        config = BedrockConfig(region="us-east-1")
+        assert config.region == "us-east-1"
+
+    def test_static_credentials(self) -> None:
+        config = BedrockConfig(
+            region="us-east-1",
+            access_key_id="AKIAIOSFODNN7EXAMPLE",
+            secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+        )
+        assert config.access_key_id == "AKIAIOSFODNN7EXAMPLE"
+        assert config.secret_access_key == "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+        assert config.session_token is None
+
+    def test_static_credentials_with_session_token(self) -> None:
+        config = BedrockConfig(
+            region="us-east-1",
+            access_key_id="AKIAIOSFODNN7EXAMPLE",
+            secret_access_key="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            session_token="FwoGZXIvYXdzE...",
+        )
+        assert config.session_token == "FwoGZXIvYXdzE..."
+
+    def test_profile(self) -> None:
+        config = BedrockConfig(
+            region="us-west-2",
+            profile="bedrock-prod",
+        )
+        assert config.profile == "bedrock-prod"
+
+    def test_role_assumption(self) -> None:
+        config = BedrockConfig(
+            region="eu-west-1",
+            role_arn="arn:aws:iam::123456789012:role/BedrockRole",
+            role_session_name="test-session",
+        )
+        assert config.role_arn == "arn:aws:iam::123456789012:role/BedrockRole"
+        assert config.role_session_name == "test-session"
+
+    def test_role_with_external_id(self) -> None:
+        config = BedrockConfig(
+            region="us-east-1",
+            role_arn="arn:aws:iam::123456789012:role/CrossAccountRole",
+            external_id="my-external-id",
+        )
+        assert config.external_id == "my-external-id"
+
+    def test_web_identity(self) -> None:
+        config = BedrockConfig(
+            region="us-east-1",
+            role_arn="arn:aws:iam::123456789012:role/EKSRole",
+            web_identity_token_file="/var/run/secrets/token",
+        )
+        assert config.web_identity_token_file == "/var/run/secrets/token"
+
+    def test_endpoint_url(self) -> None:
+        config = BedrockConfig(
+            region="us-east-1",
+            endpoint_url="http://localhost:4566",
+        )
+        assert config.endpoint_url == "http://localhost:4566"
+
+
+class TestBedrockConfigValidation:
+    """Tests for BedrockConfig validation rules."""
+
+    def test_access_key_requires_secret(self) -> None:
+        with pytest.raises(
+            ValueError, match="Both access_key_id and secret_access_key"
+        ):
+            BedrockConfig(region="us-east-1", access_key_id="AKIAEXAMPLE")
+
+    def test_secret_requires_access_key(self) -> None:
+        with pytest.raises(
+            ValueError, match="Both access_key_id and secret_access_key"
+        ):
+            BedrockConfig(region="us-east-1", secret_access_key="secret")
+
+    def test_session_token_requires_static_credentials(self) -> None:
+        with pytest.raises(ValueError, match="session_token requires"):
+            BedrockConfig(region="us-east-1", session_token="token")
+
+    def test_web_identity_requires_role_arn(self) -> None:
+        with pytest.raises(
+            ValueError, match="web_identity_token_file requires role_arn"
+        ):
+            BedrockConfig(
+                region="us-east-1", web_identity_token_file="/var/run/secrets/token"
+            )
+
+    def test_external_id_requires_role_arn(self) -> None:
+        with pytest.raises(ValueError, match="external_id requires role_arn"):
+            BedrockConfig(region="us-east-1", external_id="my-external-id")
+
+    def test_role_session_name_requires_role_arn(self) -> None:
+        with pytest.raises(ValueError, match="role_session_name requires role_arn"):
+            BedrockConfig(region="us-east-1", role_session_name="my-session")
+
+
+class TestBedrockConfigFactoryMethods:
+    """Tests for BedrockConfig factory methods."""
+
+    def test_from_static_credentials(self) -> None:
+        config = BedrockConfig.from_static_credentials(
+            region="us-east-1",
+            access_key_id="AKIAEXAMPLE",
+            secret_access_key="secret",
+            session_token="token",
+            endpoint_url="http://localhost:4566",
+        )
+        assert config.region == "us-east-1"
+        assert config.access_key_id == "AKIAEXAMPLE"
+        assert config.secret_access_key == "secret"
+        assert config.session_token == "token"
+        assert config.endpoint_url == "http://localhost:4566"
+
+    def test_from_profile(self) -> None:
+        config = BedrockConfig.from_profile(
+            region="us-west-2",
+            profile="my-profile",
+            endpoint_url="http://localhost:4566",
+        )
+        assert config.region == "us-west-2"
+        assert config.profile == "my-profile"
+        assert config.endpoint_url == "http://localhost:4566"
+
+    def test_from_role(self) -> None:
+        config = BedrockConfig.from_role(
+            region="eu-west-1",
+            role_arn="arn:aws:iam::123456789012:role/MyRole",
+            role_session_name="my-session",
+            external_id="ext-id",
+            endpoint_url="http://localhost:4566",
+        )
+        assert config.region == "eu-west-1"
+        assert config.role_arn == "arn:aws:iam::123456789012:role/MyRole"
+        assert config.role_session_name == "my-session"
+        assert config.external_id == "ext-id"
+
+    def test_from_web_identity(self) -> None:
+        config = BedrockConfig.from_web_identity(
+            region="us-east-1",
+            role_arn="arn:aws:iam::123456789012:role/OIDCRole",
+            web_identity_token_file="/var/run/secrets/token",
+            role_session_name="oidc-session",
+        )
+        assert config.region == "us-east-1"
+        assert config.role_arn == "arn:aws:iam::123456789012:role/OIDCRole"
+        assert config.web_identity_token_file == "/var/run/secrets/token"
+        assert config.role_session_name == "oidc-session"
+
+    def test_from_environment(self) -> None:
+        config = BedrockConfig.from_environment(region="us-east-1")
+        assert config.region == "us-east-1"
+        assert config.access_key_id is None
+        assert config.profile is None
+        assert config.role_arn is None
+
+
+class TestIsolationConfigWithBedrock:
+    """Tests for IsolationConfig with BedrockConfig."""
+
+    def test_bedrock_field(self) -> None:
+        bedrock = BedrockConfig(region="us-east-1")
+        config = IsolationConfig(bedrock=bedrock)
+        assert config.bedrock is bedrock
+        assert config.api_key is None
+
+    def test_api_key_and_bedrock_mutually_exclusive(self) -> None:
+        with pytest.raises(ValueError, match="Cannot specify both api_key and bedrock"):
+            IsolationConfig(
+                api_key="sk-ant-test",
+                bedrock=BedrockConfig(region="us-east-1"),
+            )
+
+
+class TestEphemeralHomeBedrockEnv:
+    """Tests for EphemeralHome environment generation with Bedrock."""
+
+    def test_bedrock_sets_region(self) -> None:
+        config = IsolationConfig(bedrock=BedrockConfig(region="us-east-1"))
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_REGION"] == "us-east-1"
+            assert env["AWS_DEFAULT_REGION"] == "us-east-1"
+
+    def test_bedrock_static_credentials(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(
+                region="us-east-1",
+                access_key_id="AKIAEXAMPLE",
+                secret_access_key="secret",
+            )
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_ACCESS_KEY_ID"] == "AKIAEXAMPLE"
+            assert env["AWS_SECRET_ACCESS_KEY"] == "secret"
+            assert "AWS_SESSION_TOKEN" not in env
+
+    def test_bedrock_static_credentials_with_session_token(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(
+                region="us-east-1",
+                access_key_id="AKIAEXAMPLE",
+                secret_access_key="secret",
+                session_token="token123",
+            )
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_SESSION_TOKEN"] == "token123"
+
+    def test_bedrock_profile(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(region="us-west-2", profile="my-profile")
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_PROFILE"] == "my-profile"
+            assert "AWS_ACCESS_KEY_ID" not in env
+
+    def test_bedrock_role_arn(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(
+                region="eu-west-1",
+                role_arn="arn:aws:iam::123456789012:role/MyRole",
+            )
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_ROLE_ARN"] == "arn:aws:iam::123456789012:role/MyRole"
+
+    def test_bedrock_role_session_name(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(
+                region="us-east-1",
+                role_arn="arn:aws:iam::123456789012:role/MyRole",
+                role_session_name="my-session",
+            )
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_ROLE_SESSION_NAME"] == "my-session"
+
+    def test_bedrock_external_id(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(
+                region="us-east-1",
+                role_arn="arn:aws:iam::123456789012:role/MyRole",
+                external_id="ext-123",
+            )
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_EXTERNAL_ID"] == "ext-123"
+
+    def test_bedrock_web_identity(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(
+                region="us-east-1",
+                role_arn="arn:aws:iam::123456789012:role/OIDCRole",
+                web_identity_token_file="/var/run/secrets/token",
+            )
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_WEB_IDENTITY_TOKEN_FILE"] == "/var/run/secrets/token"
+
+    def test_bedrock_endpoint_url(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(
+                region="us-east-1",
+                endpoint_url="http://localhost:4566",
+            )
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_ENDPOINT_URL_BEDROCK_RUNTIME"] == "http://localhost:4566"
+
+    def test_bedrock_does_not_set_anthropic_api_key(self) -> None:
+        config = IsolationConfig(bedrock=BedrockConfig(region="us-east-1"))
+        # Clear the environment to ensure no fallback
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with EphemeralHome(config) as home:
+                env = home.get_env()
+                assert "ANTHROPIC_API_KEY" not in env
+
+    def test_bedrock_custom_env_overrides(self) -> None:
+        config = IsolationConfig(
+            bedrock=BedrockConfig(region="us-east-1"),
+            env={"AWS_REGION": "us-west-2"},
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            # Custom env should override generated values
+            assert env["AWS_REGION"] == "us-west-2"
+
+    def test_bedrock_full_configuration(self) -> None:
+        """Test a complete Bedrock configuration with multiple fields."""
+        config = IsolationConfig(
+            bedrock=BedrockConfig(
+                region="us-east-1",
+                access_key_id="AKIAEXAMPLE",
+                secret_access_key="secret",
+                session_token="token",
+                endpoint_url="http://localhost:4566",
+            ),
+            network_policy=NetworkPolicy.no_network(),
+            sandbox=SandboxConfig(enabled=True),
+        )
+        with EphemeralHome(config) as home:
+            env = home.get_env()
+            assert env["AWS_REGION"] == "us-east-1"
+            assert env["AWS_DEFAULT_REGION"] == "us-east-1"
+            assert env["AWS_ACCESS_KEY_ID"] == "AKIAEXAMPLE"
+            assert env["AWS_SECRET_ACCESS_KEY"] == "secret"
+            assert env["AWS_SESSION_TOKEN"] == "token"
+            assert env["AWS_ENDPOINT_URL_BEDROCK_RUNTIME"] == "http://localhost:4566"
+            assert env["HOME"] == home.home_path
+            # Should not have Anthropic API key
+            assert "ANTHROPIC_API_KEY" not in env

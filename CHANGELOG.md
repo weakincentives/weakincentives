@@ -36,6 +36,45 @@ response, session = loop.execute(request)
   `resources` parameter
 - All adapters (OpenAI, LiteLLM, Claude Agent SDK) support resource injection
 
+### Added
+
+- **AWS Bedrock integration for Claude Agent SDK adapter.** The adapter now
+  supports Claude models via Amazon Bedrock with multiple authentication
+  methods:
+
+  - Static IAM credentials (access key + secret key)
+  - Temporary credentials with session token (STS)
+  - Named AWS profiles from `~/.aws/credentials`
+  - IAM role assumption (cross-account access)
+  - Web identity / OIDC federation (EKS IRSA, GitHub Actions)
+  - Default AWS credential chain (EC2 instance profile, ECS task role, etc.)
+
+  Configure via `BedrockConfig` in `IsolationConfig`:
+
+  ```python
+  from weakincentives.adapters.claude_agent_sdk import (
+      BedrockConfig,
+      ClaudeAgentSDKAdapter,
+      ClaudeAgentSDKClientConfig,
+      IsolationConfig,
+  )
+
+  adapter = ClaudeAgentSDKAdapter(
+      model="anthropic.claude-3-5-sonnet-20241022-v2:0",
+      client_config=ClaudeAgentSDKClientConfig(
+          isolation=IsolationConfig(
+              bedrock=BedrockConfig.from_profile(
+                  region="us-east-1",
+                  profile="bedrock-prod",
+              ),
+          ),
+      ),
+  )
+  ```
+
+  See `specs/CLAUDE_AGENT_SDK.md` for detailed examples of each
+  authentication method.
+
 ## v0.16.0 - 2025-12-21
 
 ### Transactional Tool Execution

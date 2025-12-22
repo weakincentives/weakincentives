@@ -31,6 +31,7 @@ from examples import (
 )
 from weakincentives.adapters import PromptResponse, ProviderAdapter
 from weakincentives.adapters.claude_agent_sdk import (
+    BedrockConfig,
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     ClaudeAgentWorkspaceSection,
@@ -433,6 +434,57 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
+def _build_bedrock_config() -> BedrockConfig | None:
+    """Build BedrockConfig from environment variables if available.
+
+    Checks for AWS_BEDROCK_REGION to determine if Bedrock should be used.
+    Supports all standard AWS credential methods via environment variables.
+
+    Returns:
+        BedrockConfig if AWS_BEDROCK_REGION is set, None otherwise.
+    """
+    region = os.getenv("AWS_BEDROCK_REGION")
+    if not region:
+        return None
+
+    # Check for explicit profile first
+    profile = os.getenv("AWS_PROFILE")
+    if profile:
+        return BedrockConfig.from_profile(region=region, profile=profile)
+
+    # Check for static credentials
+    access_key = os.getenv("AWS_ACCESS_KEY_ID")
+    secret_key = os.getenv("AWS_SECRET_ACCESS_KEY")
+    if access_key and secret_key:
+        return BedrockConfig.from_static_credentials(
+            region=region,
+            access_key_id=access_key,
+            secret_access_key=secret_key,
+            session_token=os.getenv("AWS_SESSION_TOKEN"),
+        )
+
+    # Check for role assumption
+    role_arn = os.getenv("AWS_ROLE_ARN")
+    if role_arn:
+        web_identity_file = os.getenv("AWS_WEB_IDENTITY_TOKEN_FILE")
+        if web_identity_file:
+            return BedrockConfig.from_web_identity(
+                region=region,
+                role_arn=role_arn,
+                web_identity_token_file=web_identity_file,
+                role_session_name=os.getenv("AWS_ROLE_SESSION_NAME"),
+            )
+        return BedrockConfig.from_role(
+            region=region,
+            role_arn=role_arn,
+            role_session_name=os.getenv("AWS_ROLE_SESSION_NAME"),
+            external_id=os.getenv("AWS_EXTERNAL_ID"),
+        )
+
+    # Default: use AWS credential chain
+    return BedrockConfig.from_environment(region=region)
+
+
 def build_claude_agent_adapter(
     bus: EventBus,
 ) -> tuple[ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection]:
@@ -443,6 +495,10 @@ def build_claude_agent_adapter(
     isolation. The sandbox has network access to Python documentation sites
     for code quality reference.
 
+    Supports both Anthropic API and AWS Bedrock:
+    - Set ANTHROPIC_API_KEY for direct Anthropic API access
+    - Set AWS_BEDROCK_REGION for AWS Bedrock (uses standard AWS credential chain)
+
     Args:
         bus: Event bus for creating a temporary session to materialize the workspace.
 
@@ -450,8 +506,12 @@ def build_claude_agent_adapter(
         Tuple of (adapter, workspace_section). The workspace section should be
         cloned with the real session before use in prompts.
     """
-    if "ANTHROPIC_API_KEY" not in os.environ:
-        raise SystemExit("Set ANTHROPIC_API_KEY before running with --claude-agent.")
+    bedrock_config = _build_bedrock_config()
+
+    if bedrock_config is None and "ANTHROPIC_API_KEY" not in os.environ:
+        raise SystemExit(
+            "Set ANTHROPIC_API_KEY or AWS_BEDROCK_REGION before running with --claude-agent."
+        )
 
     _ensure_test_repository_available()
 
@@ -486,9 +546,15 @@ def build_claude_agent_adapter(
             # Auto-approve bash commands in sandbox (safe with network restrictions)
             bash_auto_allow=True,
         ),
+        bedrock=bedrock_config,
     )
 
-    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+    # Use Bedrock model ID if using Bedrock, otherwise Anthropic model
+    if bedrock_config:
+        model = os.getenv("BEDROCK_MODEL", "anthropic.claude-3-5-sonnet-20241022-v2:0")
+    else:
+        model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+
     adapter = ClaudeAgentSDKAdapter(
         model=model,
         client_config=ClaudeAgentSDKClientConfig(
