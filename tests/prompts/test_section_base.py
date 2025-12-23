@@ -381,3 +381,34 @@ def test_section_render_tool_examples_returns_empty_without_tools() -> None:
     examples = section.render_tool_examples()
 
     assert examples == ""
+
+
+def test_section_effective_visibility_accepts_custom_resolver() -> None:
+    """effective_visibility() accepts a custom resolver parameter."""
+    from weakincentives.prompt._visibility import VisibilityResolver
+
+    section = PlainSection(
+        title="Custom Resolver",
+        key="custom-resolver",
+        summary="Summary text",
+        visibility=SectionVisibility.FULL,
+    )
+    custom_resolver = VisibilityResolver()
+
+    result = section.effective_visibility(resolver=custom_resolver)
+
+    assert result == SectionVisibility.FULL
+
+
+def test_section_compute_predicate_visibility_returns_predicate_result() -> None:
+    """compute_predicate_visibility() returns visibility from the predicate."""
+    section = PlainSection(
+        title="Predicate Test",
+        key="predicate-test",
+        summary="Summary",
+        visibility=SectionVisibility.SUMMARY,
+    )
+
+    result = section.compute_predicate_visibility(params=None, session=None)
+
+    assert result == SectionVisibility.SUMMARY

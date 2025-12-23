@@ -35,11 +35,14 @@ from ._normalization import normalize_component_key
 from ._render_tool_examples import render_tool_examples_block
 from ._visibility import (
     NormalizedVisibilitySelector,
+    RenderContext,
     SectionVisibility,
+    VisibilityResolver,
     VisibilitySelector,
+    get_visibility_resolver,
     normalize_visibility_selector,
 )
-from .errors import PromptRenderError, PromptValidationError, SectionPath
+from .errors import PromptRenderError, SectionPath
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -115,6 +118,26 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         if self._enabled is None:
             return True
         return bool(self._enabled(params, session))
+
+    def compute_predicate_visibility(
+        self,
+        params: SupportsDataclass | None,
+        session: SessionProtocol | None,
+    ) -> SectionVisibility:
+        """Compute visibility using the section's predicate.
+
+        This method evaluates the section's visibility selector/predicate
+        without checking session overrides or explicit overrides. It is
+        used by :class:`VisibilityResolver` to get the base visibility.
+
+        Args:
+            params: Section parameters for the predicate.
+            session: Optional session for predicates that inspect state.
+
+        Returns:
+            The visibility determined by the section's predicate.
+        """
+        return self._visibility(params, session)
 
     def format_heading(
         self,
@@ -291,10 +314,13 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         *,
         session: SessionProtocol | None = None,
         path: SectionPath | None = None,
+        resolver: VisibilityResolver | None = None,
     ) -> SectionVisibility:
         """Return the visibility to use for rendering.
 
+        Delegates to :class:`VisibilityResolver` for unified visibility resolution.
         The visibility is resolved in the following order:
+
         1. Explicit ``override`` parameter (if provided)
         2. Session state override (if session has VisibilityOverrides with path)
         3. User-provided visibility selector/constant
@@ -306,6 +332,8 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             session: Optional session for visibility callables that inspect state.
                 Also used to query VisibilityOverrides from session state.
             path: Section path used to look up session-based overrides.
+            resolver: Optional custom VisibilityResolver. If not provided, uses
+                the default resolver from :func:`get_visibility_resolver`.
 
         Returns:
             The effective visibility to use.
@@ -314,28 +342,17 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             PromptValidationError: If SUMMARY visibility is requested but no
                 summary template is defined for this section.
         """
-        visibility = override
+        if resolver is None:
+            resolver = get_visibility_resolver()
 
-        # Check session state for override if no explicit override provided
-        if visibility is None and session is not None and path is not None:
-            from ..runtime.session.visibility_overrides import (
-                get_session_visibility_override,
-            )
+        context = RenderContext(
+            params=params,
+            session=session,
+            path=path,
+            override=override,
+        )
 
-            visibility = get_session_visibility_override(session, path)
-
-        # Fall back to user-provided selector
-        if visibility is None:
-            visibility = self._visibility(params, session)
-
-        # Raise if SUMMARY requested but no summary template
-        if visibility == SectionVisibility.SUMMARY and self.summary is None:
-            msg = (
-                f"SUMMARY visibility requested for section '{self.key}' "
-                "but no summary template is defined."
-            )
-            raise PromptValidationError(msg, section_path=path)
-        return visibility
+        return resolver.resolve(self, context)
 
     @staticmethod
     def _normalize_key(key: str) -> str:

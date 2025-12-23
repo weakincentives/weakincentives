@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from ._types import ToolRenderableResult
+from ._visibility import RenderContext, VisibilityResolver, get_visibility_resolver
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -80,6 +81,7 @@ __all__ = [
     "ProviderAdapterProtocol",
     "ReadSectionParams",
     "ReadSectionResult",
+    "RenderContext",
     "RenderedPrompt",
     "RenderedPromptProtocol",
     "ResourceRegistry",
@@ -102,6 +104,8 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "VisibilityExpansionRequired",
+    "VisibilityResolver",
+    "get_visibility_resolver",
     "hash_json",
     "hash_text",
     "parse_structured_output",
