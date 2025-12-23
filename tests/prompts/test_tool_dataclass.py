@@ -542,7 +542,7 @@ def test_tool_rejects_handler_missing_return_annotation() -> None:
 
 
 def test_tool_rejects_handler_missing_context_annotation() -> None:
-    def handler(params: ExampleParams, *, context) -> ToolResult[ExampleResult]:  # noqa: ANN001
+    def handler(params: ExampleParams, *, context) -> ToolResult[ExampleResult]:
         del context
         return ToolResult(
             message=params.message, value=ExampleResult(message=params.message)

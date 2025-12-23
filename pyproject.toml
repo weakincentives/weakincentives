@@ -51,6 +51,9 @@ litellm = [
 podman = [
     "podman>=5.6.0",
 ]
+redis = [
+    "redis>=5.0.0",
+]
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.15",
 ]
@@ -135,7 +138,8 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 # C901 is ignored because test functions can legitimately have higher complexity.
-"tests/**" = ["C901", "PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
+# ANN001/ANN201 ignored for test method fixture arguments and return types.
+"tests/**" = ["ANN001", "ANN201", "C901", "PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
 # Examples may use higher complexity for illustration purposes.
 "examples/**" = ["C901"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
@@ -256,7 +260,7 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "pyyaml"]
+DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "pyyaml", "redis"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
@@ -271,6 +275,7 @@ exclude = [
     ".ruff_cache",
     "dist",
     "src/weakincentives/adapters/claude_agent_sdk",
+    "src/weakincentives/runtime/mailbox/_redis.py",
 ]
 deprecateTypingAliases = true
 reportCallInDefaultInitializer = "error"
@@ -315,6 +320,19 @@ ignore_names = [
 
 [tool.ty.environment]
 python-version = "3.12"
+
+[[tool.ty.overrides]]
+# Redis library type stubs are incomplete; ignore errors for this file
+include = ["src/weakincentives/runtime/mailbox/_redis.py"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
+invalid-assignment = "ignore"
+
+[[tool.ty.overrides]]
+# Claude Agent SDK excluded due to incomplete type stubs
+include = ["src/weakincentives/adapters/claude_agent_sdk/**"]
+[tool.ty.overrides.rules]
+invalid-argument-type = "ignore"
 
 [tool.ty.rules]
 ambiguous-protocol-member = "error"

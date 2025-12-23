@@ -18,6 +18,14 @@ from .filesystem import (
     ReadOnlyFilesystemValidationSuite,
     SnapshotableFilesystemValidationSuite,
 )
+from .redis_utils import (
+    RedisClusterManager,
+    RedisStandalone,
+    redis_cluster,
+    redis_standalone,
+    skip_if_no_redis,
+    skip_if_no_redis_cluster,
+)
 from .time import FrozenUtcNow, frozen_utcnow
 
 __all__ = [
@@ -25,6 +33,12 @@ __all__ = [
     "FrozenUtcNow",
     "NullDispatcher",
     "ReadOnlyFilesystemValidationSuite",
+    "RedisClusterManager",
+    "RedisStandalone",
     "SnapshotableFilesystemValidationSuite",
     "frozen_utcnow",
+    "redis_cluster",
+    "redis_standalone",
+    "skip_if_no_redis",
+    "skip_if_no_redis_cluster",
 ]

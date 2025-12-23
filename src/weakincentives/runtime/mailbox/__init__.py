@@ -51,6 +51,8 @@ See ``specs/MAILBOX.md`` for the complete specification.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ._in_memory import InMemoryMailbox
 from ._testing import CollectingMailbox, FakeMailbox, NullMailbox
 from ._types import (
@@ -74,8 +76,30 @@ __all__ = [
     "Message",
     "NullMailbox",
     "ReceiptHandleExpiredError",
+    "RedisMailbox",
     "SerializationError",
 ]
+
+# RedisMailbox is only available if the redis package is installed
+if TYPE_CHECKING:
+    from ._redis import RedisMailbox
+
+
+def __getattr__(name: str) -> object:
+    if name == "RedisMailbox":
+        try:
+            from ._redis import RedisMailbox
+        except ImportError as e:  # pragma: no cover - optional dependency
+            msg = (
+                "RedisMailbox requires the 'redis' package. "
+                "Install with: pip install weakincentives[redis]"
+            )
+            raise ImportError(msg) from e
+        else:
+            return RedisMailbox
+    raise AttributeError(
+        f"module {__name__!r} has no attribute {name!r}"
+    )  # pragma: no cover
 
 
 def __dir__() -> list[str]:
