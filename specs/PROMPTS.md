@@ -217,6 +217,10 @@ template = PromptTemplate[Output](
 
 ## Progressive Disclosure
 
+> **Note**: This section documents the current two-tool design. See
+> `specs/DYNAMIC_TOOLS.md` for the planned unified `read_section` approach
+> with capability-based dynamic tool injection.
+
 Sections can render with `SUMMARY` visibility to reduce token usage. The
 framework provides two tools for accessing summarized content:
 
