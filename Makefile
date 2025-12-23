@@ -96,8 +96,8 @@ demo-claude-agent:
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
-# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, pip-audit, markdown, test)
-check: format-check lint typecheck type-coverage bandit vulture deptry pip-audit markdown-check test
+# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, pip-audit, markdown, test, filesystem integration tests)
+check: format-check lint typecheck type-coverage bandit vulture deptry pip-audit markdown-check test integration-tests-filesystem
 
 # Run all checks and fixes
 all: format lint-fix bandit deptry pip-audit typecheck test
