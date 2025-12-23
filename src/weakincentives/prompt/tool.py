@@ -30,7 +30,6 @@ from typing import (
     get_args,
     get_origin,
     get_type_hints,
-    overload,
 )
 
 from ..budget import BudgetTracker
@@ -81,8 +80,6 @@ ResultT_runtime = TypeVar("ResultT_runtime", bound=SupportsToolResult)
 type ParamsType = type[SupportsDataclass] | type[None]
 type ResultType = type[SupportsDataclass] | type[None]
 
-_ResourceT = TypeVar("_ResourceT")
-
 
 @dataclass(slots=True, frozen=True)
 class ResourceRegistry:
@@ -109,22 +106,12 @@ class ResourceRegistry:
         default_factory=lambda: MappingProxyType({}),
     )
 
-    @overload
-    def get(self, resource_type: type[_ResourceT]) -> _ResourceT | None: ...
-
-    @overload
-    def get(
-        self, resource_type: type[_ResourceT], default: _ResourceT
-    ) -> _ResourceT: ...
-
-    def get(
-        self, resource_type: type[_ResourceT], default: _ResourceT | None = None
-    ) -> _ResourceT | None:
+    def get[T](self, resource_type: type[T], default: T | None = None) -> T | None:
         """Return the resource of the given type, or ``default`` if absent."""
         value = self._entries.get(resource_type)
         if value is None:
             return default
-        return cast(_ResourceT, value)
+        return cast(T, value)
 
     def __contains__(self, resource_type: type[object]) -> bool:
         """Check if a resource of the given type is registered."""
