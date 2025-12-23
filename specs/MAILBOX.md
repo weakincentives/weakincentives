@@ -80,8 +80,8 @@ The Mailbox abstraction mirrors AWS SQS behavior:
 1. **Receipt handle**: Each delivery generates a unique receipt handle.
    Operations require the current handle; stale handles fail.
 
-1. **No ordering guarantee**: Messages may arrive out of order. Do not rely on
-   FIFO semantics.
+1. **Ordering varies by backend**: SQS provides best-effort ordering only. Redis
+   guarantees FIFO within a single queue. See backend-specific sections below.
 
 1. **Approximate count**: The count is eventually consistent, not exact.
 
@@ -102,7 +102,7 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
     def run(self, *, max_iterations: int | None = None) -> None:
         while should_continue:
             for msg in self._requests.receive(
-                visibility_timeout=300,
+                visibility_timeout=300,  # Must exceed max execution time
                 wait_time_seconds=20,
             ):
                 try:
@@ -113,12 +113,23 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
                     ))
                     msg.acknowledge()
                 except Exception as e:
-                    self._responses.send(MainLoopResult(
-                        request_id=msg.body.request_id,
-                        error=e,
-                    ))
-                    msg.acknowledge()
+                    try:
+                        self._responses.send(MainLoopResult(
+                            request_id=msg.body.request_id,
+                            error=e,
+                        ))
+                        msg.acknowledge()
+                    except Exception:
+                        # Response send failed - requeue for retry
+                        msg.nack(visibility_timeout=60)
 ```
+
+**Error handling notes:**
+
+- Set `visibility_timeout` higher than maximum expected execution time
+- Send response before acknowledging to avoid lost responses on crash
+- If response send fails, nack the request to retry later
+- For long-running tasks, call `msg.extend_visibility()` periodically
 
 ### Request/Response Events
 
@@ -150,21 +161,27 @@ requests.send(MainLoopRequest(
     request_id=request_id,
 ))
 
-# Poll for response
-while True:
+# Poll for response with timeout
+deadline = time.time() + timeout_seconds
+while time.time() < deadline:
     for msg in responses.receive(wait_time_seconds=5):
         if msg.body.request_id == request_id:
-            result = msg.body
             msg.acknowledge()
-            break
-    else:
-        continue
-    break
+            return msg.body
+        # Not our message - return immediately for other consumers
+        msg.nack(visibility_timeout=0)
+raise TimeoutError(f"No response within {timeout_seconds}s")
 ```
 
-For concurrent clients polling the same response queue, each client must filter
-by `request_id`. Unrelated messages should be left unacknowledged to return to
-the queue after visibility timeout.
+**Response queue strategies:**
+
+- **Shared queue with filtering**: Multiple clients poll the same queue and
+  filter by `request_id`. Unmatched messages are nacked immediately. Simple but
+  causes contention under high concurrency.
+
+- **Per-client response queues**: Each client uses a dedicated response queue.
+  No filtering needed. Better for high-throughput scenarios but requires queue
+  lifecycle management.
 
 ## Implementations
 
@@ -318,6 +335,34 @@ Direct mapping to SQS API. No additional data structures needed.
    persistence, messages lost on restart. In Cluster mode, also configure
    `min-replicas-to-write` for cross-replica durability.
 
+## Concurrency
+
+### Multiple Consumers
+
+Multiple processes can safely poll the same request queue. Visibility timeout
+ensures each message is processed by exactly one consumer at a time. If a
+consumer crashes, the message returns to the queue after timeout.
+
+### Thread Safety
+
+All implementations are safe for concurrent access:
+
+- `InMemoryMailbox`: Thread-safe via `RLock`
+- `RedisMailbox`: Thread-safe (Redis operations are atomic)
+- `SQSMailbox`: Thread-safe (SQS handles concurrency server-side)
+
+Multiple threads can call `receive()` concurrently on the same `Mailbox`
+instance.
+
+### Performance
+
+For high-throughput scenarios:
+
+- Increase `max_messages` in `receive()` to reduce round-trips
+- With Redis, operations use pipelining internally where possible
+- Monitor `invisible` set size to detect stuck messages (consumer crashes)
+- Consider per-client response queues to avoid filtering overhead
+
 ## Mailbox vs Dispatcher
 
 | Aspect | Dispatcher | Mailbox |
@@ -344,9 +389,32 @@ class SerializationError(MailboxError): ...
 - `NullMailbox`: Drops all messages on send, returns empty on receive
 - `CollectingMailbox`: Stores sent messages for assertion
 
+### Testing Request/Response Patterns
+
+```python
+# Setup
+requests = InMemoryMailbox[MainLoopRequest[MyRequest]]("requests")
+responses = InMemoryMailbox[MainLoopResult[MyOutput]]("responses")
+loop = MyLoop(adapter=adapter, requests=requests, responses=responses)
+
+# Send request
+request_id = uuid4()
+requests.send(MainLoopRequest(request=MyRequest(...), request_id=request_id))
+
+# Run single iteration
+loop.run(max_iterations=1)
+
+# Assert response
+msgs = responses.receive()
+assert len(msgs) == 1
+assert msgs[0].body.request_id == request_id
+assert msgs[0].body.error is None
+msgs[0].acknowledge()
+```
+
 ## Limitations
 
-- At-least-once delivery only (no exactly-once)
-- No FIFO ordering guarantee (except Redis single-instance)
+- At-least-once delivery only (all backends; no exactly-once semantics)
+- Ordering varies by backend (SQS best-effort, Redis FIFO per queue)
 - No message grouping or deduplication
 - No dead-letter queue (implement at application level)
