@@ -22,6 +22,7 @@ import argparse
 import json
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 INTEGRATION_TESTS_DIR = "integration-tests"
@@ -35,7 +36,7 @@ def main() -> int:
         action="store_true",
         help="Suppress output unless check fails.",
     )
-    args = parser.parse_args()
+    args: argparse.Namespace = parser.parse_args()
 
     integration_tests_path = Path(INTEGRATION_TESTS_DIR)
     if not integration_tests_path.exists():
@@ -51,9 +52,17 @@ def main() -> int:
         "include": [INTEGRATION_TESTS_DIR],
     }
 
-    # Place config in current directory so relative paths work
-    config_path = Path(".pyrightconfig-integration-tests.json")
-    config_path.write_text(json.dumps(config))
+    # Place config in current directory so relative paths work for pyright
+    # Use unique filename to avoid race conditions in parallel CI
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        suffix=".json",
+        prefix=".pyrightconfig-integration-tests-",
+        dir=".",
+        delete=False,
+    ) as f:
+        json.dump(config, f)
+        config_path = Path(f.name)
 
     try:
         cmd = ["pyright", "--project", str(config_path)]
@@ -62,8 +71,9 @@ def main() -> int:
             result = subprocess.run(cmd, capture_output=True, text=True, check=False)
             if result.returncode != 0:
                 print("Integration test validation failed:", file=sys.stderr)
-                print(result.stdout, file=sys.stderr)
-                print(result.stderr, file=sys.stderr)
+                combined_output = f"{result.stdout}{result.stderr}".strip()
+                if combined_output:
+                    print(combined_output, file=sys.stderr)
                 return result.returncode
         else:
             result = subprocess.run(cmd, check=False)
