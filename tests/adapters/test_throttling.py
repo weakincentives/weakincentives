@@ -24,8 +24,10 @@ from weakincentives.adapters.core import PROMPT_EVALUATION_PHASE_REQUEST
 from weakincentives.adapters.throttle import (
     ThrottleError,
     ThrottlePolicy,
+    ThrottleProviders,
     jittered_backoff,
     new_throttle_policy,
+    new_throttle_providers,
     sleep_for,
     throttle_details,
 )
@@ -33,22 +35,66 @@ from weakincentives.deadlines import Deadline
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.runtime.session import Session
 
+# ---------------------------------------------------------------------------
+# Test helper classes for deterministic testing
+# ---------------------------------------------------------------------------
 
-def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
+
+class FakeClock:
+    """A controllable clock for deterministic testing."""
+
+    def __init__(self, start: datetime) -> None:
+        self._now = start
+
+    def __call__(self) -> datetime:
+        return self._now
+
+    def advance(self, delta: timedelta) -> None:
+        self._now += delta
+
+
+class FakeSleeper:
+    """A sleeper that records delays and optionally advances a clock."""
+
+    def __init__(self, clock: FakeClock | None = None) -> None:
+        self.delays: list[timedelta] = []
+        self._clock = clock
+
+    def __call__(self, delay: timedelta) -> None:
+        self.delays.append(delay)
+        if self._clock is not None:
+            self._clock.advance(delay)
+
+
+class FakeJitter:
+    """A jitter provider that returns predictable values."""
+
+    def __init__(self, factor: float = 1.0) -> None:
+        """Initialize with a factor in [0, 1] to control jitter position."""
+        self._factor = factor
+
+    def __call__(self, low: float, high: float) -> float:
+        return low + (high - low) * self._factor
+
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+
+
+def test_runner_retries_after_throttle() -> None:
+    """Test retry behavior using injectable providers (no monkeypatch)."""
     rendered = RenderedPrompt(text="system")
     bus = RecordingBus()
     session = Session(bus=bus)
     response = DummyResponse([DummyChoice(DummyMessage(content="ok"))])
-    delays: list[timedelta] = []
+
+    # Use injectable providers for deterministic testing
+    sleeper = FakeSleeper()
+    jitter = FakeJitter(factor=1.0)  # max jitter
+    providers = new_throttle_providers(sleeper=sleeper, jitter=jitter)
+
     calls = 0
-
-    def _sleep(delay: timedelta) -> None:
-        delays.append(delay)
-
-    monkeypatch.setattr("weakincentives.adapters.inner_loop.sleep_for", _sleep)
-    monkeypatch.setattr(
-        "weakincentives.adapters.throttle.random.uniform", lambda _a, b: b
-    )
 
     def provider(
         messages: list[dict[str, Any]],
@@ -75,12 +121,13 @@ def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
         provider=provider,  # type: ignore[arg-type]
         session=session,
         throttle_policy=new_throttle_policy(max_attempts=5),
+        throttle_providers=providers,
     )
 
     result = loop.run()
 
     assert calls == 3
-    assert delays[0] >= timedelta(seconds=1)
+    assert sleeper.delays[0] >= timedelta(seconds=1)
     assert result.text == "ok"
 
 
@@ -441,3 +488,293 @@ def test_openai_additional_throttle_paths() -> None:
     assert (
         litellm._normalize_litellm_throttle(neutral_error, prompt_name="prompt") is None
     )
+
+
+# ---------------------------------------------------------------------------
+# Deterministic provider-based tests
+# ---------------------------------------------------------------------------
+
+
+def test_jittered_backoff_with_injectable_jitter() -> None:
+    """Test backoff calculation with injectable jitter provider."""
+    policy = new_throttle_policy(
+        base_delay=timedelta(seconds=1),
+        max_delay=timedelta(seconds=8),
+    )
+
+    # With factor=1.0, jitter returns high value (max jitter)
+    max_jitter = new_throttle_providers(jitter=FakeJitter(factor=1.0))
+    delay = jittered_backoff(
+        policy=policy, attempt=1, retry_after=None, providers=max_jitter
+    )
+    assert delay == timedelta(seconds=1)  # base_delay capped
+
+    # With factor=0.0, jitter returns low value (0), but clamped to base_delay
+    min_jitter = new_throttle_providers(jitter=FakeJitter(factor=0.0))
+    delay = jittered_backoff(
+        policy=policy, attempt=1, retry_after=None, providers=min_jitter
+    )
+    assert delay == timedelta(seconds=1)  # clamped to base_delay
+
+    # Attempt 3: base * 2^2 = 4 seconds capped delay
+    delay = jittered_backoff(
+        policy=policy, attempt=3, retry_after=None, providers=max_jitter
+    )
+    assert delay == timedelta(seconds=4)
+
+
+def test_jittered_backoff_exponential_sequence() -> None:
+    """Verify exponential backoff sequence with deterministic jitter."""
+    policy = new_throttle_policy(
+        base_delay=timedelta(milliseconds=100),
+        max_delay=timedelta(seconds=2),
+    )
+    providers = new_throttle_providers(jitter=FakeJitter(factor=1.0))
+
+    delays = [
+        jittered_backoff(
+            policy=policy, attempt=i, retry_after=None, providers=providers
+        )
+        for i in range(1, 6)
+    ]
+
+    # Expected: 100ms, 200ms, 400ms, 800ms, 1600ms (all capped at max_delay=2s)
+    expected = [
+        timedelta(milliseconds=100),
+        timedelta(milliseconds=200),
+        timedelta(milliseconds=400),
+        timedelta(milliseconds=800),
+        timedelta(milliseconds=1600),
+    ]
+    assert delays == expected
+
+
+def test_jittered_backoff_caps_at_max_delay() -> None:
+    """Verify backoff is capped at max_delay."""
+    policy = new_throttle_policy(
+        base_delay=timedelta(milliseconds=500),
+        max_delay=timedelta(seconds=1),
+    )
+    providers = new_throttle_providers(jitter=FakeJitter(factor=1.0))
+
+    # Attempt 5: 500ms * 2^4 = 8s, but capped at 1s
+    delay = jittered_backoff(
+        policy=policy, attempt=5, retry_after=None, providers=providers
+    )
+    assert delay == timedelta(seconds=1)
+
+
+def test_sleep_for_with_injectable_sleeper() -> None:
+    """Test sleep_for with injectable sleeper."""
+    sleeper = FakeSleeper()
+    providers = new_throttle_providers(sleeper=sleeper)
+
+    sleep_for(timedelta(milliseconds=250), providers=providers)
+    sleep_for(timedelta(seconds=1), providers=providers)
+
+    assert sleeper.delays == [timedelta(milliseconds=250), timedelta(seconds=1)]
+
+
+def test_inner_loop_retries_with_deterministic_providers() -> None:
+    """Test InnerLoop retry behavior with fully deterministic providers."""
+    rendered = RenderedPrompt(text="system")
+    bus = RecordingBus()
+    session = Session(bus=bus)
+    response = DummyResponse([DummyChoice(DummyMessage(content="success"))])
+
+    # Use a time in the future for consistency
+    start = datetime.now(UTC) + timedelta(hours=1)
+    clock = FakeClock(start)
+    sleeper = FakeSleeper(clock=clock)
+    jitter = FakeJitter(factor=1.0)
+    providers = ThrottleProviders(clock=clock, sleeper=sleeper, jitter=jitter)
+
+    calls = 0
+
+    def provider(
+        messages: list[dict[str, Any]],
+        tool_specs: list[dict[str, Any]],
+        tool_choice: object,
+        response_format: object,
+    ) -> DummyResponse:
+        del messages, tool_specs, tool_choice, response_format
+        nonlocal calls
+        calls += 1
+        if calls < 3:
+            raise ThrottleError(
+                "throttled",
+                prompt_name="example",
+                phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                details=throttle_details(kind="rate_limit"),
+            )
+        return response
+
+    loop = build_inner_loop(
+        rendered=rendered,
+        provider=provider,  # type: ignore[arg-type]
+        session=session,
+        throttle_policy=new_throttle_policy(
+            max_attempts=5,
+            base_delay=timedelta(milliseconds=100),
+            max_delay=timedelta(seconds=1),
+        ),
+        throttle_providers=providers,
+    )
+
+    result = loop.run()
+
+    assert calls == 3
+    assert result.text == "success"
+    # Verify exact backoff sequence: 100ms (attempt 1), 200ms (attempt 2)
+    assert sleeper.delays == [
+        timedelta(milliseconds=100),
+        timedelta(milliseconds=200),
+    ]
+
+
+def test_inner_loop_deadline_stops_retry_with_controlled_clock() -> None:
+    """Test deadline enforcement uses the injected clock."""
+    # Use a time in the future to satisfy Deadline validation
+    now = datetime.now(UTC)
+    start = now + timedelta(hours=1)  # Start 1 hour from now
+    clock = FakeClock(start)
+    sleeper = FakeSleeper(clock=clock)
+    jitter = FakeJitter(factor=1.0)
+    providers = ThrottleProviders(clock=clock, sleeper=sleeper, jitter=jitter)
+
+    # Deadline 5 seconds from fake clock start (must also be in future of real clock)
+    deadline = Deadline(expires_at=start + timedelta(seconds=5))
+
+    rendered = RenderedPrompt(text="system")
+    bus = RecordingBus()
+    session = Session(bus=bus)
+
+    calls = 0
+
+    def provider(
+        messages: list[dict[str, Any]],
+        tool_specs: list[dict[str, Any]],
+        tool_choice: object,
+        response_format: object,
+    ) -> DummyResponse:
+        del messages, tool_specs, tool_choice, response_format
+        nonlocal calls
+        calls += 1
+        # Always throttle with 2s retry_after
+        raise ThrottleError(
+            "throttled",
+            prompt_name="example",
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            details=throttle_details(
+                kind="rate_limit", retry_after=timedelta(seconds=2)
+            ),
+        )
+
+    loop = build_inner_loop(
+        rendered=rendered,
+        provider=provider,  # type: ignore[arg-type]
+        session=session,
+        throttle_policy=new_throttle_policy(
+            max_attempts=10,
+            base_delay=timedelta(seconds=2),
+            max_delay=timedelta(seconds=10),
+            max_total_delay=timedelta(seconds=60),
+        ),
+        throttle_providers=providers,
+        deadline=deadline,
+    )
+
+    with pytest.raises(ThrottleError) as excinfo:
+        loop.run()
+
+    assert "Deadline expired" in str(excinfo.value)
+    # First call at t=0 (attempt 1), throws throttle. delay=2s (base_delay).
+    # remaining=5s > 2s, so we sleep 2s, clock to t=2.
+    # Second call at t=2 (attempt 2), throws throttle. delay=4s (exponential: 2s*2).
+    # remaining=3s < 4s, so we stop and raise ThrottleError.
+    assert calls == 2
+    assert sleeper.delays == [timedelta(seconds=2)]
+
+
+def test_inner_loop_total_delay_budget_with_controlled_clock() -> None:
+    """Test max_total_delay enforcement with deterministic providers."""
+    start = datetime.now(UTC) + timedelta(hours=1)
+    clock = FakeClock(start)
+    sleeper = FakeSleeper(clock=clock)
+    jitter = FakeJitter(factor=1.0)
+    providers = ThrottleProviders(clock=clock, sleeper=sleeper, jitter=jitter)
+
+    rendered = RenderedPrompt(text="system")
+    bus = RecordingBus()
+    session = Session(bus=bus)
+
+    calls = 0
+
+    def provider(
+        messages: list[dict[str, Any]],
+        tool_specs: list[dict[str, Any]],
+        tool_choice: object,
+        response_format: object,
+    ) -> DummyResponse:
+        del messages, tool_specs, tool_choice, response_format
+        nonlocal calls
+        calls += 1
+        raise ThrottleError(
+            "throttled",
+            prompt_name="example",
+            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+            details=throttle_details(kind="rate_limit"),
+        )
+
+    loop = build_inner_loop(
+        rendered=rendered,
+        provider=provider,  # type: ignore[arg-type]
+        session=session,
+        throttle_policy=new_throttle_policy(
+            max_attempts=10,
+            base_delay=timedelta(milliseconds=500),
+            max_delay=timedelta(seconds=4),
+            max_total_delay=timedelta(seconds=2),  # 2s total budget
+        ),
+        throttle_providers=providers,
+    )
+
+    with pytest.raises(ThrottleError) as excinfo:
+        loop.run()
+
+    assert "budget" in str(excinfo.value).lower()
+    # Delays: 500ms (attempt 1), 1s (attempt 2), next would be 2s but total=1.5s
+    # Actually: 500ms + 1s = 1.5s total, next delay 2s would exceed budget
+    assert sleeper.delays == [
+        timedelta(milliseconds=500),
+        timedelta(seconds=1),
+    ]
+
+
+def test_throttle_providers_factory() -> None:
+    """Test new_throttle_providers factory with partial overrides."""
+    clock = FakeClock(datetime.now(UTC) + timedelta(hours=1))
+    sleeper = FakeSleeper()
+
+    # Partial override - only clock and sleeper
+    providers = new_throttle_providers(clock=clock, sleeper=sleeper)
+
+    assert providers.clock is clock
+    assert providers.sleeper is sleeper
+    # jitter should be the default
+    jitter_result = providers.jitter(0.0, 1.0)
+    assert 0.0 <= jitter_result <= 1.0
+
+
+def test_throttle_providers_defaults() -> None:
+    """Test ThrottleProviders default behavior matches original functions."""
+    providers = new_throttle_providers()
+
+    # Clock returns a datetime near now
+    now = providers.clock()
+    assert isinstance(now, datetime)
+    assert now.tzinfo is not None
+
+    # Jitter returns a value in range
+    jitter_val = providers.jitter(0.5, 1.5)
+    assert 0.5 <= jitter_val <= 1.5

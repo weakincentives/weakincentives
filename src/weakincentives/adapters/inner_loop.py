@@ -53,8 +53,10 @@ from .core import (
 )
 from .response_parser import ResponseParser
 from .throttle import (
+    DEFAULT_THROTTLE_PROVIDERS,
     ThrottleError,
     ThrottlePolicy,
+    ThrottleProviders,
     details_from_error,
     jittered_backoff,
     new_throttle_policy,
@@ -137,6 +139,7 @@ class InnerLoopConfig:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
+    throttle_providers: ThrottleProviders = DEFAULT_THROTTLE_PROVIDERS
     budget_tracker: BudgetTracker | None = None
 
     @property
@@ -201,7 +204,8 @@ class InnerLoop[OutputT]:
     ) -> None:
         if self._deadline is None:
             return
-        if self._deadline.remaining() <= timedelta(0):
+        now = self.config.throttle_providers.clock()
+        if self._deadline.remaining(now=now) <= timedelta(0):
             self._raise_deadline_error(message, phase=phase)
 
     def _record_and_check_budget(self) -> None:
@@ -262,6 +266,7 @@ class InnerLoop[OutputT]:
         attempts = 0
         total_delay = timedelta(0)
         throttle_policy = self.config.throttle_policy
+        throttle_providers = self.config.throttle_providers
 
         while True:
             attempts += 1
@@ -296,17 +301,20 @@ class InnerLoop[OutputT]:
                     policy=throttle_policy,
                     attempt=attempts,
                     retry_after=error.retry_after,
+                    providers=throttle_providers,
                 )
 
-                if self._deadline is not None and self._deadline.remaining() <= delay:
-                    raise ThrottleError(
-                        "Deadline expired before retrying after throttling.",
-                        prompt_name=self.inputs.prompt_name,
-                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        details=details_from_error(
-                            error, attempts=attempts, retry_safe=False
-                        ),
-                    ) from error
+                if self._deadline is not None:
+                    now = throttle_providers.clock()
+                    if self._deadline.remaining(now=now) <= delay:
+                        raise ThrottleError(
+                            "Deadline expired before retrying after throttling.",
+                            prompt_name=self.inputs.prompt_name,
+                            phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                            details=details_from_error(
+                                error, attempts=attempts, retry_safe=False
+                            ),
+                        ) from error
 
                 total_delay += delay
                 if total_delay > throttle_policy.max_total_delay:
@@ -331,7 +339,7 @@ class InnerLoop[OutputT]:
                         "delay_seconds": delay.total_seconds(),
                     },
                 )
-                sleep_for(delay)
+                sleep_for(delay, providers=throttle_providers)
 
     def _prepare(self) -> None:
         """Initialize execution state prior to the provider loop."""

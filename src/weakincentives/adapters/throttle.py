@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import random
 import time
-from datetime import timedelta
-from typing import Any, Literal
+from datetime import UTC, datetime, timedelta
+from typing import Any, Literal, Protocol
 
 from ..dataclasses import FrozenDataclass
 from .core import PromptEvaluationError, PromptEvaluationPhase
@@ -25,10 +25,84 @@ from .core import PromptEvaluationError, PromptEvaluationPhase
 ThrottleKind = Literal["rate_limit", "quota_exhausted", "timeout", "unknown"]
 """Classification for throttling scenarios."""
 
+
+class ClockProvider(Protocol):
+    """Protocol for obtaining the current time."""
+
+    def __call__(self) -> datetime:
+        """Return the current UTC timestamp."""
+        ...
+
+
+class SleeperProvider(Protocol):
+    """Protocol for sleeping for a duration."""
+
+    def __call__(self, delay: timedelta) -> None:
+        """Sleep for the specified duration."""
+        ...
+
+
+class JitterProvider(Protocol):
+    """Protocol for generating jitter values."""
+
+    def __call__(self, low: float, high: float) -> float:
+        """Return a random float in [low, high]."""
+        ...
+
+
+def _default_clock() -> datetime:
+    """Return the current UTC timestamp."""
+    return datetime.now(UTC)
+
+
+def _default_sleeper(delay: timedelta) -> None:
+    """Sleep for the specified duration using time.sleep."""
+    time.sleep(delay.total_seconds())
+
+
+def _default_jitter(low: float, high: float) -> float:
+    """Return a random float in [low, high] using random.uniform."""
+    return random.uniform(low, high)  # nosec B311
+
+
 _DEFAULT_MAX_ATTEMPTS = 5
 _DEFAULT_BASE_DELAY = timedelta(milliseconds=500)
 _DEFAULT_MAX_DELAY = timedelta(seconds=8)
 _DEFAULT_MAX_TOTAL_DELAY = timedelta(seconds=30)
+
+
+@FrozenDataclass()
+class ThrottleProviders:
+    """Injectable providers for throttle operations.
+
+    These providers enable deterministic testing by allowing clock, sleep,
+    and jitter functions to be replaced with controlled implementations.
+    """
+
+    clock: ClockProvider = _default_clock
+    sleeper: SleeperProvider = _default_sleeper
+    jitter: JitterProvider = _default_jitter
+
+
+def new_throttle_providers(
+    *,
+    clock: ClockProvider | None = None,
+    sleeper: SleeperProvider | None = None,
+    jitter: JitterProvider | None = None,
+) -> ThrottleProviders:
+    """Return a throttle providers instance with optional overrides.
+
+    Arguments default to the standard implementations when None.
+    """
+    return ThrottleProviders(
+        clock=clock or _default_clock,
+        sleeper=sleeper or _default_sleeper,
+        jitter=jitter or _default_jitter,
+    )
+
+
+# Singleton for default providers
+DEFAULT_THROTTLE_PROVIDERS = ThrottleProviders()
 
 
 @FrozenDataclass()
@@ -149,9 +223,19 @@ def details_from_error(
     )
 
 
-def sleep_for(delay: timedelta) -> None:
-    """Sleep for the specified duration."""
-    time.sleep(delay.total_seconds())
+def sleep_for(
+    delay: timedelta,
+    *,
+    providers: ThrottleProviders | None = None,
+) -> None:
+    """Sleep for the specified duration.
+
+    Args:
+        delay: The duration to sleep.
+        providers: Optional providers for testing. Uses defaults if None.
+    """
+    sleeper = (providers or DEFAULT_THROTTLE_PROVIDERS).sleeper
+    sleeper(delay)
 
 
 def jittered_backoff(
@@ -159,14 +243,27 @@ def jittered_backoff(
     policy: ThrottlePolicy,
     attempt: int,
     retry_after: timedelta | None,
+    providers: ThrottleProviders | None = None,
 ) -> timedelta:
-    """Calculate a jittered backoff delay based on policy and attempt number."""
+    """Calculate a jittered backoff delay based on policy and attempt number.
+
+    Args:
+        policy: The throttle policy configuration.
+        attempt: The current attempt number (1-indexed).
+        retry_after: Optional server-provided retry-after duration.
+        providers: Optional providers for testing. Uses defaults if None.
+
+    Returns:
+        The computed delay duration.
+    """
+    jitter_fn = (providers or DEFAULT_THROTTLE_PROVIDERS).jitter
+
     capped = min(policy.max_delay, policy.base_delay * 2 ** max(attempt - 1, 0))
     base = max(capped, retry_after or timedelta(0))
     if base <= timedelta(0):
         return policy.base_delay
 
-    jitter_seconds = random.uniform(0, base.total_seconds())  # nosec B311
+    jitter_seconds = jitter_fn(0, base.total_seconds())
     delay = timedelta(seconds=jitter_seconds)
     delay = max(delay, policy.base_delay)
     if retry_after is not None and delay < retry_after:
@@ -175,13 +272,19 @@ def jittered_backoff(
 
 
 __all__ = [
+    "DEFAULT_THROTTLE_PROVIDERS",
+    "ClockProvider",
+    "JitterProvider",
+    "SleeperProvider",
     "ThrottleDetails",
     "ThrottleError",
     "ThrottleKind",
     "ThrottlePolicy",
+    "ThrottleProviders",
     "details_from_error",
     "jittered_backoff",
     "new_throttle_policy",
+    "new_throttle_providers",
     "sleep_for",
     "throttle_details",
 ]

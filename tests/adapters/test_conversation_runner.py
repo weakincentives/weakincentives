@@ -37,7 +37,11 @@ from weakincentives.adapters.inner_loop import (
     InnerLoopInputs,
     run_inner_loop,
 )
-from weakincentives.adapters.throttle import ThrottlePolicy, new_throttle_policy
+from weakincentives.adapters.throttle import (
+    ThrottlePolicy,
+    ThrottleProviders,
+    new_throttle_policy,
+)
 from weakincentives.adapters.utilities import ToolChoice, token_usage_from_payload
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
@@ -169,6 +173,7 @@ def build_inner_loop(
     response_format: Mapping[str, Any] | None = None,
     render_inputs: tuple[SupportsDataclass, ...] | None = None,
     throttle_policy: ThrottlePolicy | None = None,
+    throttle_providers: ThrottleProviders | None = None,
     budget_tracker: BudgetTracker | None = None,
     deadline: Deadline | None = None,
     execution_state: ExecutionState | None = None,
@@ -186,18 +191,21 @@ def build_inner_loop(
         render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
-    config = InnerLoopConfig(
-        execution_state=execution_state or ExecutionState(session=session),
-        tool_choice=tool_choice,
-        response_format=response_format,
-        require_structured_output_text=False,
-        call_provider=provider,
-        select_choice=lambda response: response.choices[0],
-        serialize_tool_message_fn=serialize_tool_message,
-        throttle_policy=throttle_policy or new_throttle_policy(),
-        budget_tracker=budget_tracker,
-        deadline=deadline,
-    )
+    config_kwargs: dict[str, Any] = {
+        "execution_state": execution_state or ExecutionState(session=session),
+        "tool_choice": tool_choice,
+        "response_format": response_format,
+        "require_structured_output_text": False,
+        "call_provider": provider,
+        "select_choice": lambda response: response.choices[0],
+        "serialize_tool_message_fn": serialize_tool_message,
+        "throttle_policy": throttle_policy or new_throttle_policy(),
+        "budget_tracker": budget_tracker,
+        "deadline": deadline,
+    }
+    if throttle_providers is not None:
+        config_kwargs["throttle_providers"] = throttle_providers
+    config = InnerLoopConfig(**config_kwargs)
     return InnerLoop[object](inputs=inputs, config=config)
 
 
