@@ -426,3 +426,139 @@ def test_tracker_check_total_tokens_only() -> None:
     assert error.exceeded_dimension == "total_tokens"
     assert error.consumed.total_tokens == 110
     assert error.budget.max_total_tokens == 100
+
+
+# BudgetTracker.complete() tests
+
+
+def test_tracker_complete_removes_evaluation() -> None:
+    """complete() removes the specified evaluation from tracking."""
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=100, output_tokens=50))
+    tracker.record_cumulative("eval-2", TokenUsage(input_tokens=200, output_tokens=100))
+
+    consumed_before = tracker.consumed
+    assert consumed_before.input_tokens == 300
+    assert consumed_before.output_tokens == 150
+
+    tracker.complete("eval-1")
+
+    consumed_after = tracker.consumed
+    assert consumed_after.input_tokens == 200
+    assert consumed_after.output_tokens == 100
+
+
+def test_tracker_complete_ignores_unknown_evaluation() -> None:
+    """complete() does not raise for unknown evaluation IDs."""
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=100, output_tokens=50))
+
+    # Should not raise
+    tracker.complete("unknown-eval")
+
+    # Original data should be unchanged
+    consumed = tracker.consumed
+    assert consumed.input_tokens == 100
+    assert consumed.output_tokens == 50
+
+
+def test_tracker_complete_thread_safety() -> None:
+    """complete() is thread-safe for concurrent calls."""
+    budget = Budget(max_total_tokens=100000)
+    tracker = BudgetTracker(budget=budget)
+    num_threads = 10
+    updates_per_thread = 100
+
+    # First, populate the tracker
+    for thread_id in range(num_threads):
+        for i in range(updates_per_thread):
+            usage = TokenUsage(input_tokens=1, output_tokens=1)
+            tracker.record_cumulative(f"eval-{thread_id}-{i}", usage)
+
+    expected_total = num_threads * updates_per_thread * 2
+    assert tracker.consumed.total_tokens == expected_total
+
+    # Now concurrently complete all evaluations
+    def complete_evaluations(thread_id: int) -> None:
+        for i in range(updates_per_thread):
+            tracker.complete(f"eval-{thread_id}-{i}")
+
+    threads = [
+        threading.Thread(target=complete_evaluations, args=(tid,))
+        for tid in range(num_threads)
+    ]
+
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # All evaluations should be removed
+    consumed = tracker.consumed
+    assert consumed.total_tokens == 0
+
+
+# BudgetTracker.reset() tests
+
+
+def test_tracker_reset_clears_all_evaluations() -> None:
+    """reset() clears all tracked evaluations."""
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    tracker.record_cumulative("eval-1", TokenUsage(input_tokens=100, output_tokens=50))
+    tracker.record_cumulative("eval-2", TokenUsage(input_tokens=200, output_tokens=100))
+    tracker.record_cumulative("eval-3", TokenUsage(input_tokens=150, output_tokens=75))
+
+    consumed_before = tracker.consumed
+    assert consumed_before.total_tokens == 675
+
+    tracker.reset()
+
+    consumed_after = tracker.consumed
+    assert consumed_after.input_tokens == 0
+    assert consumed_after.output_tokens == 0
+    assert consumed_after.total_tokens == 0
+
+
+def test_tracker_reset_on_empty_tracker() -> None:
+    """reset() works correctly on an empty tracker."""
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    # Should not raise
+    tracker.reset()
+
+    consumed = tracker.consumed
+    assert consumed.total_tokens == 0
+
+
+def test_tracker_reset_thread_safety() -> None:
+    """reset() is thread-safe for concurrent calls."""
+    budget = Budget(max_total_tokens=100000)
+    tracker = BudgetTracker(budget=budget)
+    num_threads = 10
+
+    # Populate the tracker
+    for i in range(100):
+        tracker.record_cumulative(
+            f"eval-{i}", TokenUsage(input_tokens=1, output_tokens=1)
+        )
+
+    def reset_tracker() -> None:
+        tracker.reset()
+
+    threads = [threading.Thread(target=reset_tracker) for _ in range(num_threads)]
+
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Tracker should be empty
+    consumed = tracker.consumed
+    assert consumed.total_tokens == 0
