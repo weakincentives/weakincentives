@@ -292,12 +292,12 @@ class MainLoopRequest[UserRequestT]:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
 
-For Mailbox-based responses, define a unified result:
+The unified result type for all MainLoop responses:
 
 ```python
 @dataclass(frozen=True, slots=True)
 class MainLoopResult(Generic[OutputT]):
-    """Response to a MainLoopRequest, delivered via response mailbox."""
+    """Response to a MainLoopRequest."""
 
     request_id: UUID
     """Correlates with MainLoopRequest.request_id."""
@@ -306,17 +306,13 @@ class MainLoopResult(Generic[OutputT]):
     """Present on success."""
 
     error: str | None = None
-    """Error message on failure. Full exception not serialized."""
+    """Error message on failure."""
 
     session_id: UUID | None = None
     """Session that processed the request (if available)."""
 
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
-
-**Note:** For in-process dispatch, use `MainLoopCompleted` and `MainLoopFailed`
-(`src/weakincentives/runtime/main_loop.py:70-87`) which carry the full exception
-object. For cross-process Mailbox delivery, serialize error messages only.
 
 ### Worker Loop Pattern
 
