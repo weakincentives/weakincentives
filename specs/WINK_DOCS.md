@@ -75,26 +75,8 @@ src/weakincentives/
 
 ### Build-Time Synchronization
 
-A build hook or Makefile target synchronizes documentation from the repository
-root into `src/weakincentives/docs/` before packaging:
-
-```makefile
-# Makefile target
-sync-docs:
-	@mkdir -p src/weakincentives/docs/specs
-	@cp llms.md src/weakincentives/docs/
-	@cp WINK_GUIDE.md src/weakincentives/docs/
-	@cp specs/*.md src/weakincentives/docs/specs/
-	@touch src/weakincentives/docs/__init__.py
-```
-
-The `make dist` or `make build` target must depend on `sync-docs` to ensure
-documentation is current before packaging.
-
-### Hatch Build Hook Alternative
-
-For automatic synchronization during build, implement a custom Hatch build
-hook:
+A custom Hatch build hook synchronizes documentation from the repository root
+into `src/weakincentives/docs/` automatically during packaging:
 
 ```python
 # hatch_build.py
@@ -135,6 +117,28 @@ Configure in `pyproject.toml`:
 [tool.hatch.build.hooks.custom]
 path = "hatch_build.py"
 ```
+
+This approach is preferred because:
+
+1. **Automatic**: Documentation is always synchronized on `hatch build`
+2. **No manual steps**: Developers cannot forget to run a sync command
+3. **CI-friendly**: Works seamlessly in automated build pipelines
+
+### Manual Synchronization Alternative
+
+For local development or debugging, a Makefile target can synchronize docs
+manually:
+
+```makefile
+sync-docs:
+	@mkdir -p src/weakincentives/docs/specs
+	@cp llms.md src/weakincentives/docs/
+	@cp WINK_GUIDE.md src/weakincentives/docs/
+	@cp specs/*.md src/weakincentives/docs/specs/
+	@touch src/weakincentives/docs/__init__.py
+```
+
+This is useful for testing `wink docs` locally without a full build cycle.
 
 ## CLI Interface
 
