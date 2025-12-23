@@ -18,10 +18,12 @@ import argparse
 import logging
 import os
 import textwrap
+import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 
 from examples import (
     build_logged_session,
@@ -168,9 +170,9 @@ class ReferenceParams:
 class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     """MainLoop implementation for code review with auto-optimization.
 
-    This loop maintains a persistent session across all execute() calls and
-    automatically runs workspace digest optimization on first use. It uses
-    in-memory mailboxes internally for the mailbox-based MainLoop pattern.
+    This loop runs as a background worker processing requests from a mailbox.
+    It maintains a persistent session across all requests and automatically
+    runs workspace digest optimization on first use.
 
     Example::
 
@@ -181,7 +183,9 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             requests=requests,
             responses=responses,
         )
-        result = loop.execute(ReviewTurnParams(request="Review the code"))
+        # Run in background thread
+        thread = threading.Thread(target=lambda: loop.run(max_iterations=None))
+        thread.start()
     """
 
     _persistent_session: Session
@@ -190,6 +194,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     _override_tag: str
     _use_podman: bool
     _use_claude_agent: bool
+    _optimization_done: bool
 
     def __init__(  # noqa: PLR0913
         self,
@@ -210,6 +215,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         )
         self._use_podman = use_podman
         self._use_claude_agent = use_claude_agent
+        self._optimization_done = False
         # Create persistent session at construction time
         self._persistent_session = build_logged_session(tags={"app": "code-reviewer"})
         self._template = build_task_prompt(
@@ -233,52 +239,24 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     ) -> tuple[Prompt[ReviewResponse], Session]:
         """Initialize prompt and session for the given request.
 
-        Creates the review prompt and returns the persistent session
-        (reused across all turns).
+        Runs workspace optimization on first request if needed, then creates
+        the review prompt and returns the persistent session.
         """
+        # Run optimization once on first request
+        if not self._optimization_done:
+            needs_optimization = (
+                self._persistent_session[WorkspaceDigest].latest() is None
+            )
+            if needs_optimization:
+                self._run_optimization()
+            self._optimization_done = True
+
         prompt = Prompt(
             self._template,
             overrides_store=self._overrides_store,
             overrides_tag=self._override_tag,
         ).bind(request)
         return prompt, self._persistent_session
-
-    def execute(
-        self,
-        request: ReviewTurnParams,
-        *,
-        deadline: Deadline | None = None,
-    ) -> MainLoopResult[ReviewResponse]:
-        """Execute a review request synchronously.
-
-        Sends request to the mailbox, runs one iteration, and returns result.
-        If no WorkspaceDigest exists in the session, runs optimization first.
-        """
-        needs_optimization = self._persistent_session[WorkspaceDigest].latest() is None
-        if needs_optimization:
-            self._run_optimization()
-
-        effective_deadline = deadline or _default_deadline()
-        request_event = MainLoopRequest(
-            request=request,
-            deadline=effective_deadline,
-        )
-
-        # Send request and process immediately
-        self._requests.send(request_event)
-        self.run(max_iterations=1, wait_time_seconds=0)
-
-        # Retrieve result
-        result_msgs = self._responses.receive(max_messages=1, wait_time_seconds=0)
-        if not result_msgs:
-            # Should not happen in normal operation
-            return MainLoopResult[ReviewResponse](
-                request_id=request_event.request_id,
-                error="No response received",
-            )
-        result_msg = result_msgs[0]
-        result_msg.acknowledge()
-        return result_msg.body
 
     def _run_optimization(self) -> None:
         """Run workspace digest optimization."""
@@ -323,11 +301,18 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 
 
 class CodeReviewApp:
-    """Owns the REPL loop and user interaction."""
+    """Owns the REPL loop and user interaction.
+
+    Runs the MainLoop in a background thread while the main thread handles
+    user input. Requests are sent via the request mailbox and results are
+    received from the response mailbox.
+    """
 
     _requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]]
     _responses: InMemoryMailbox[MainLoopResult[ReviewResponse]]
     _loop: CodeReviewLoop
+    _worker_thread: threading.Thread | None
+    _pending_requests: dict[UUID, str]  # request_id -> user prompt for display
     _use_claude_agent: bool
     _workspace_section: ClaudeAgentWorkspaceSection | None
 
@@ -343,6 +328,8 @@ class CodeReviewApp:
     ) -> None:
         self._use_claude_agent = use_claude_agent
         self._workspace_section = workspace_section
+        self._worker_thread = None
+        self._pending_requests = {}
         # Create mailboxes for the loop
         self._requests = InMemoryMailbox(name="code-review-requests")
         self._responses = InMemoryMailbox(name="code-review-responses")
@@ -357,6 +344,15 @@ class CodeReviewApp:
             workspace_section=workspace_section,
         )
 
+    def _run_worker(self) -> None:
+        """Background worker that processes requests from the mailbox."""
+        try:
+            # Run indefinitely until mailbox is closed
+            self._loop.run(max_iterations=None, wait_time_seconds=5)
+        except Exception:
+            # Mailbox closed or other error - exit gracefully
+            _LOGGER.debug("Worker thread exiting")
+
     def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:
         """Render the result to console."""
         print("\n--- Agent Response ---")
@@ -369,8 +365,23 @@ class CodeReviewApp:
         print(render_plan_snapshot(self._loop.session))
         print("-" * 23 + "\n")
 
+    def _wait_for_response(self, request_id: UUID) -> MainLoopResult[ReviewResponse]:
+        """Poll the response mailbox until we get a response for our request."""
+        while True:
+            msgs = self._responses.receive(max_messages=1, wait_time_seconds=1)
+            if msgs:
+                msg = msgs[0]
+                result = msg.body
+                msg.acknowledge()
+                if result.request_id == request_id:
+                    return result
+                # Not our response - this shouldn't happen in single-user mode
+                _LOGGER.warning(
+                    "Received response for unknown request: %s", result.request_id
+                )
+
     def run(self) -> None:
-        """Start the interactive review session."""
+        """Start the interactive review session with background worker."""
         print(
             _build_intro(
                 self._loop.override_tag,
@@ -379,6 +390,15 @@ class CodeReviewApp:
             )
         )
         print("Type a review prompt to begin. (Type 'exit' to quit.)")
+
+        # Start background worker thread
+        self._worker_thread = threading.Thread(
+            target=self._run_worker,
+            name="code-review-worker",
+            daemon=True,
+        )
+        self._worker_thread.start()
+        _LOGGER.info("Started background worker thread")
 
         try:
             while True:
@@ -391,8 +411,19 @@ class CodeReviewApp:
                 if not user_prompt or user_prompt.lower() in {"exit", "quit"}:
                     break
 
+                # Send request to mailbox
                 request = ReviewTurnParams(request=user_prompt)
-                result = self._loop.execute(request)
+                request_event = MainLoopRequest(
+                    request=request,
+                    deadline=_default_deadline(),
+                )
+                self._pending_requests[request_event.request_id] = user_prompt
+                self._requests.send(request_event)
+                print("Processing request...")
+
+                # Wait for response
+                result = self._wait_for_response(request_event.request_id)
+                del self._pending_requests[request_event.request_id]
                 self._render_result(result)
         finally:
             self._cleanup()

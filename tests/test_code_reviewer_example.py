@@ -260,8 +260,8 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     assert "Override digest" not in rendered.text
 
 
-def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
-    """Auto-optimization runs when execute() is called without existing digest."""
+def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
+    """Auto-optimization runs when first request is processed."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
     requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
@@ -280,8 +280,14 @@ def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
 
         assert loop.override_tag == "latest"
 
-        # Execute triggers auto-optimization since no digest exists
-        loop.execute(ReviewTurnParams(request="test request"))
+        # Send request via mailbox
+        request_event = MainLoopRequest(
+            request=ReviewTurnParams(request="test request")
+        )
+        requests.send(request_event)
+
+        # Process one iteration
+        loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Verify optimization was called (adapter recorded the call)
         assert any("workspace-digest" in call for call in adapter.calls)
@@ -295,8 +301,9 @@ def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
         responses.close()
 
 
-def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
-    """Each execute() call builds a fresh default deadline."""
+def test_deadline_passed_per_request(tmp_path: Path) -> None:
+    """Each request gets a deadline from MainLoopRequest."""
+    from datetime import timedelta
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
@@ -316,18 +323,30 @@ def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
 
         set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
 
-        loop.execute(ReviewTurnParams(request="first"))
-        loop.execute(ReviewTurnParams(request="second"))
+        # Send requests with different deadlines
+        first_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
+        second_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10))
+
+        requests.send(
+            MainLoopRequest(
+                request=ReviewTurnParams(request="first"),
+                deadline=first_deadline,
+            )
+        )
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        requests.send(
+            MainLoopRequest(
+                request=ReviewTurnParams(request="second"),
+                deadline=second_deadline,
+            )
+        )
+        loop.run(max_iterations=1, wait_time_seconds=0)
 
         assert len(adapter.deadlines) == 2
-        first_deadline, second_deadline = adapter.deadlines
-        assert isinstance(first_deadline, Deadline)
-        assert isinstance(second_deadline, Deadline)
-        assert first_deadline is not second_deadline
-
-        now = datetime.now(UTC)
-        assert first_deadline.expires_at > now
-        assert second_deadline.expires_at > now
+        recorded_first, recorded_second = adapter.deadlines
+        assert recorded_first is first_deadline
+        assert recorded_second is second_deadline
     finally:
         requests.close()
         responses.close()
