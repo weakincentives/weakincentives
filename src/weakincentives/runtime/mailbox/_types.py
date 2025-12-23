@@ -157,6 +157,12 @@ class Mailbox[T](Protocol):
     until acknowledged, nacked, or visibility times out.
     """
 
+    @property
+    @abstractmethod
+    def closed(self) -> bool:
+        """Return True if the mailbox has been closed."""
+        ...
+
     @abstractmethod
     def send(self, body: T, *, delay_seconds: int = 0) -> str:
         """Enqueue a message, optionally delaying visibility.
@@ -196,8 +202,8 @@ class Mailbox[T](Protocol):
                 or timeout expires.
 
         Returns:
-            Sequence of messages (may be empty if no messages available
-            or long poll timed out).
+            Sequence of messages (may be empty if no messages available,
+            long poll timed out, or mailbox closed).
         """
         ...
 
@@ -220,6 +226,16 @@ class Mailbox[T](Protocol):
 
         The count includes both visible and invisible messages.
         Value is eventually consistent (SQS ~1 minute lag, Redis exact).
+        """
+        ...
+
+    @abstractmethod
+    def close(self) -> None:
+        """Close the mailbox and release resources.
+
+        After closing:
+        - receive() returns empty immediately
+        - send() behavior is implementation-defined
         """
         ...
 

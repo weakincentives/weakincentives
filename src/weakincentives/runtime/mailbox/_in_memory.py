@@ -49,7 +49,7 @@ class InMemoryMailbox[T]:
     Useful for testing and single-process development.
 
     Characteristics:
-    - Thread-safe via RLock
+    - Thread-safe via Lock
     - FIFO ordering guaranteed
     - Exact message counts
     - No persistence
@@ -70,7 +70,7 @@ class InMemoryMailbox[T]:
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited."""
 
-    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _condition: threading.Condition = field(init=False, repr=False)
     _pending: deque[_InFlightMessage[T]] = field(init=False, repr=False)
     _invisible: dict[str, _InFlightMessage[T]] = field(init=False, repr=False)
@@ -78,6 +78,7 @@ class InMemoryMailbox[T]:
     _reaper_thread: threading.Thread | None = field(
         default=None, repr=False, init=False
     )
+    _closed: bool = field(default=False, repr=False, init=False)
     _stop_reaper: threading.Event = field(
         default_factory=threading.Event, repr=False, init=False
     )
@@ -174,7 +175,7 @@ class InMemoryMailbox[T]:
             wait_time_seconds: Long poll duration. Zero returns immediately.
 
         Returns:
-            Sequence of messages (may be empty).
+            Sequence of messages (may be empty). Returns empty if mailbox closed.
         """
         max_messages = min(max(1, max_messages), 10)
         deadline = time.monotonic() + wait_time_seconds
@@ -183,6 +184,10 @@ class InMemoryMailbox[T]:
 
         with self._lock:
             while len(messages) < max_messages:
+                # Check closed state
+                if self._closed:
+                    break
+
                 # Try to get a message
                 if self._pending:
                     in_flight = self._pending.popleft()
@@ -221,7 +226,7 @@ class InMemoryMailbox[T]:
                     if remaining <= 0:
                         break
 
-                    # Wait for messages or timeout
+                    # Wait for messages, close signal, or timeout
                     _ = self._condition.wait(timeout=remaining)
 
         return messages
@@ -289,10 +294,21 @@ class InMemoryMailbox[T]:
             return len(self._pending) + len(self._invisible)
 
     def close(self) -> None:
-        """Stop the reaper thread and clean up resources."""
+        """Stop the reaper thread and wake any blocked receivers."""
+        # Set closed flag and wake all waiters
+        with self._lock:
+            self._closed = True
+            self._condition.notify_all()
+
+        # Stop reaper thread
         self._stop_reaper.set()
         if self._reaper_thread is not None:  # pragma: no branch
             self._reaper_thread.join(timeout=1.0)
+
+    @property
+    def closed(self) -> bool:
+        """Return True if mailbox has been closed."""
+        return self._closed
 
 
 __all__ = ["InMemoryMailbox"]

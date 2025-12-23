@@ -728,3 +728,99 @@ def test_fake_mailbox_is_mailbox() -> None:
     """FakeMailbox implements Mailbox protocol."""
     mailbox: FakeMailbox[str] = FakeMailbox()
     assert isinstance(mailbox, Mailbox)
+
+
+# =============================================================================
+# Closed State Tests
+# =============================================================================
+
+
+def test_in_memory_mailbox_closed_initially_false() -> None:
+    """InMemoryMailbox.closed is False initially."""
+    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    try:
+        assert mailbox.closed is False
+    finally:
+        mailbox.close()
+
+
+def test_in_memory_mailbox_closed_after_close() -> None:
+    """InMemoryMailbox.closed is True after close()."""
+    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    mailbox.close()
+    assert mailbox.closed is True
+
+
+def test_in_memory_mailbox_receive_returns_empty_when_closed() -> None:
+    """InMemoryMailbox.receive() returns empty when closed."""
+    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    mailbox.send("test")
+    mailbox.close()
+
+    # Should return empty even though there's a message
+    messages = mailbox.receive(max_messages=1)
+    assert len(messages) == 0
+
+
+def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
+    """InMemoryMailbox.close() wakes receivers blocked on wait."""
+    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    received: list[bool] = []
+
+    def receiver() -> None:
+        # This would block for 10 seconds normally
+        _ = mailbox.receive(max_messages=1, wait_time_seconds=10)
+        received.append(True)
+
+    thread = threading.Thread(target=receiver)
+    thread.start()
+
+    # Give thread time to start waiting
+    time.sleep(0.1)
+
+    # Close should wake the receiver
+    mailbox.close()
+
+    # Thread should exit quickly
+    thread.join(timeout=1.0)
+    assert not thread.is_alive()
+    assert len(received) == 1
+
+
+def test_null_mailbox_closed_initially_false() -> None:
+    """NullMailbox.closed is False initially."""
+    mailbox: NullMailbox[str] = NullMailbox()
+    assert mailbox.closed is False
+
+
+def test_null_mailbox_closed_after_close() -> None:
+    """NullMailbox.closed is True after close()."""
+    mailbox: NullMailbox[str] = NullMailbox()
+    mailbox.close()
+    assert mailbox.closed is True
+
+
+def test_collecting_mailbox_closed_initially_false() -> None:
+    """CollectingMailbox.closed is False initially."""
+    mailbox: CollectingMailbox[str] = CollectingMailbox()
+    assert mailbox.closed is False
+
+
+def test_collecting_mailbox_closed_after_close() -> None:
+    """CollectingMailbox.closed is True after close()."""
+    mailbox: CollectingMailbox[str] = CollectingMailbox()
+    mailbox.close()
+    assert mailbox.closed is True
+
+
+def test_fake_mailbox_closed_initially_false() -> None:
+    """FakeMailbox.closed is False initially."""
+    mailbox: FakeMailbox[str] = FakeMailbox()
+    assert mailbox.closed is False
+
+
+def test_fake_mailbox_closed_after_close() -> None:
+    """FakeMailbox.closed is True after close()."""
+    mailbox: FakeMailbox[str] = FakeMailbox()
+    mailbox.close()
+    assert mailbox.closed is True

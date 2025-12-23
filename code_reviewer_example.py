@@ -346,12 +346,9 @@ class CodeReviewApp:
 
     def _run_worker(self) -> None:
         """Background worker that processes requests from the mailbox."""
-        try:
-            # Run indefinitely until mailbox is closed
-            self._loop.run(max_iterations=None, wait_time_seconds=5)
-        except Exception:
-            # Mailbox closed or other error - exit gracefully
-            _LOGGER.debug("Worker thread exiting")
+        # Run indefinitely until mailbox is closed
+        self._loop.run(max_iterations=None, wait_time_seconds=5)
+        _LOGGER.debug("Worker thread exiting")
 
     def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:
         """Render the result to console."""
@@ -365,9 +362,14 @@ class CodeReviewApp:
         print(render_plan_snapshot(self._loop.session))
         print("-" * 23 + "\n")
 
-    def _wait_for_response(self, request_id: UUID) -> MainLoopResult[ReviewResponse]:
-        """Poll the response mailbox until we get a response for our request."""
-        while True:
+    def _wait_for_response(
+        self, request_id: UUID
+    ) -> MainLoopResult[ReviewResponse] | None:
+        """Poll the response mailbox until we get a response for our request.
+
+        Returns None if mailbox is closed before response received.
+        """
+        while not self._responses.closed:
             msgs = self._responses.receive(max_messages=1, wait_time_seconds=1)
             if msgs:
                 msg = msgs[0]
@@ -379,6 +381,7 @@ class CodeReviewApp:
                 _LOGGER.warning(
                     "Received response for unknown request: %s", result.request_id
                 )
+        return None
 
     def run(self) -> None:
         """Start the interactive review session with background worker."""
@@ -424,6 +427,9 @@ class CodeReviewApp:
                 # Wait for response
                 result = self._wait_for_response(request_event.request_id)
                 del self._pending_requests[request_event.request_id]
+                if result is None:
+                    print("Worker stopped unexpectedly.")
+                    break
                 self._render_result(result)
         finally:
             self._cleanup()
@@ -433,8 +439,14 @@ class CodeReviewApp:
 
     def _cleanup(self) -> None:
         """Clean up resources."""
+        # Close mailboxes first - this signals worker to exit
         self._requests.close()
         self._responses.close()
+
+        # Wait for worker thread to exit
+        if self._worker_thread is not None:
+            self._worker_thread.join(timeout=2.0)
+
         if self._workspace_section is not None:
             self._workspace_section.cleanup()
             _LOGGER.info("Cleaned up Claude Agent workspace.")

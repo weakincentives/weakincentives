@@ -42,6 +42,12 @@ class NullMailbox[T]:
     """
 
     name: str = "null"
+    _closed: bool = field(default=False, repr=False)
+
+    @property
+    def closed(self) -> bool:
+        """Return True if mailbox has been closed."""
+        return self._closed
 
     def send(self, body: T, *, delay_seconds: int = 0) -> str:
         """Accept and discard the message."""
@@ -69,6 +75,10 @@ class NullMailbox[T]:
         _ = self
         return 0
 
+    def close(self) -> None:
+        """Mark as closed."""
+        self._closed = True
+
 
 @dataclass(slots=True)
 class CollectingMailbox[T]:
@@ -92,10 +102,16 @@ class CollectingMailbox[T]:
     """List of all sent message bodies in send order."""
 
     _message_ids: list[str] = field(init=False, repr=False)
+    _closed: bool = field(default=False, repr=False, init=False)
 
     def __post_init__(self) -> None:
         self.sent = []
         self._message_ids = []
+
+    @property
+    def closed(self) -> bool:
+        """Return True if mailbox has been closed."""
+        return self._closed
 
     def send(self, body: T, *, delay_seconds: int = 0) -> str:
         """Store the message body for later inspection."""
@@ -126,6 +142,10 @@ class CollectingMailbox[T]:
     def approximate_count(self) -> int:
         """Return count of collected messages."""
         return len(self.sent)
+
+    def close(self) -> None:
+        """Mark as closed."""
+        self._closed = True
 
 
 @dataclass
@@ -165,10 +185,18 @@ class FakeMailbox[T]:
     _connection_error: MailboxError | None = field(default=None, repr=False)
     """Error to raise on next operation."""
 
+    _closed: bool = field(default=False, repr=False, init=False)
+    """Whether the mailbox has been closed."""
+
     def __post_init__(self) -> None:
         self._pending = []
         self._invisible = {}
         self._expired_handles = set()
+
+    @property
+    def closed(self) -> bool:
+        """Return True if mailbox has been closed."""
+        return self._closed
 
     def send(self, body: T, *, delay_seconds: int = 0) -> str:
         """Enqueue a message."""
@@ -306,6 +334,10 @@ class FakeMailbox[T]:
         msg_id = msg_id or str(uuid4())
         self._pending.append((msg_id, body, datetime.now(UTC), delivery_count))
         return msg_id
+
+    def close(self) -> None:
+        """Mark as closed."""
+        self._closed = True
 
 
 __all__ = [

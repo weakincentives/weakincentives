@@ -865,3 +865,41 @@ def test_no_budget_tracker_when_no_budget() -> None:
     finally:
         requests.close()
         responses.close()
+
+
+# =============================================================================
+# Mailbox Close Tests
+# =============================================================================
+
+
+def test_loop_exits_when_mailbox_closed() -> None:
+    """MainLoop.run() exits when requests mailbox is closed."""
+    import threading
+
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+    exited = []
+
+    def run_loop() -> None:
+        # Would run forever with max_iterations=None
+        loop.run(max_iterations=None, wait_time_seconds=1)
+        exited.append(True)
+
+    thread = threading.Thread(target=run_loop)
+    thread.start()
+
+    # Close the mailbox - should cause loop to exit
+    requests.close()
+    responses.close()
+
+    # Thread should exit quickly
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    assert len(exited) == 1

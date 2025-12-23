@@ -297,6 +297,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
         Messages are acknowledged after successful processing or after
         sending an error response.
 
+        The loop exits when:
+        - max_iterations is reached
+        - The requests mailbox is closed
+
         Args:
             max_iterations: Maximum polling iterations. None for unlimited.
             visibility_timeout: Seconds messages remain invisible during processing.
@@ -305,6 +309,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """
         iterations = 0
         while max_iterations is None or iterations < max_iterations:
+            # Exit if mailbox closed
+            if self._requests.closed:
+                break
+
             messages = self._requests.receive(
                 visibility_timeout=visibility_timeout,
                 wait_time_seconds=wait_time_seconds,
