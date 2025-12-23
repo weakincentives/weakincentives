@@ -33,7 +33,7 @@ from weakincentives.contrib.tools import (
     ReadFileResult,
     WriteFileParams,
 )
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 
@@ -45,7 +45,7 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
     assert connection is not None
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     connection_name = connection.get("connection_name")
     section = PodmanSandboxSection(
@@ -83,7 +83,7 @@ def test_podman_vfs_round_trip(tmp_path: Path) -> None:
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     section = PodmanSandboxSection(
         session=session, config=PodmanSandboxConfig(cache_dir=tmp_path)
@@ -121,7 +121,7 @@ def test_evaluate_python_writes_file(tmp_path: Path) -> None:
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     connection_name = connection.get("connection_name")
     section = PodmanSandboxSection(
@@ -158,7 +158,7 @@ def test_podman_container_has_no_network(tmp_path: Path) -> None:
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
-    bus = InProcessEventBus()
+    bus = InProcessDispatcher()
     session = Session(bus=bus)
     connection_name = connection.get("connection_name")
     section = PodmanSandboxSection(
