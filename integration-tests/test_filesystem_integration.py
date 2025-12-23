@@ -53,7 +53,7 @@ from weakincentives.contrib.tools import (
 from weakincentives.contrib.tools.vfs import FilesystemToolHandlers
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.tool import ToolContext
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 # ruff: noqa: PLR6301, PLR2004
@@ -66,7 +66,7 @@ from weakincentives.runtime.session import Session
 @pytest.fixture
 def session() -> Session:
     """Create a fresh session for each test."""
-    return Session(bus=InProcessEventBus())
+    return Session(bus=InProcessDispatcher())
 
 
 @pytest.fixture

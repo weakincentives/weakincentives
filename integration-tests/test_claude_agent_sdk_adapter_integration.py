@@ -51,7 +51,7 @@ pytestmark = [
 ]
 
 _MODEL_ENV_VAR = "CLAUDE_AGENT_SDK_TEST_MODEL"
-_DEFAULT_MODEL = "claude-sonnet-4-5-20250929"
+_DEFAULT_MODEL = "claude-opus-4-5-20250929"
 _PROMPT_NS = "integration/claude-agent-sdk"
 
 
@@ -403,7 +403,7 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     # Track ToolInvoked events
     tool_invoked_events: list[ToolInvoked] = []
     session = Session()
-    session.event_bus.subscribe(ToolInvoked, tool_invoked_events.append)
+    session.dispatcher.subscribe(ToolInvoked, tool_invoked_events.append)
 
     response = adapter.evaluate(prompt, session=session)
 
@@ -459,7 +459,7 @@ def test_claude_agent_sdk_adapter_publishes_prompt_rendered_event(
 
     prompt_rendered_events: list[PromptRendered] = []
     session = Session()
-    session.event_bus.subscribe(PromptRendered, prompt_rendered_events.append)
+    session.dispatcher.subscribe(PromptRendered, prompt_rendered_events.append)
 
     response = adapter.evaluate(prompt, session=session)
 
@@ -616,7 +616,7 @@ def test_claude_agent_sdk_adapter_multiple_tool_invocations(tmp_path: Path) -> N
 
     tool_invoked_events: list[ToolInvoked] = []
     session = Session()
-    session.event_bus.subscribe(ToolInvoked, tool_invoked_events.append)
+    session.dispatcher.subscribe(ToolInvoked, tool_invoked_events.append)
 
     response = adapter.evaluate(prompt, session=session)
 
@@ -679,7 +679,7 @@ def test_claude_agent_sdk_adapter_tracks_token_usage_across_tools(
 
     prompt_executed_events: list[PromptExecuted] = []
     session = Session()
-    session.event_bus.subscribe(PromptExecuted, prompt_executed_events.append)
+    session.dispatcher.subscribe(PromptExecuted, prompt_executed_events.append)
 
     response = adapter.evaluate(prompt, session=session)
 
@@ -2062,7 +2062,7 @@ def test_claude_agent_sdk_mcp_tool_writes_file_native_tool_reads(
     # Track tool invocations to verify both tools were called
     tool_invoked_events: list[ToolInvoked] = []
     session = Session()
-    session.event_bus.subscribe(ToolInvoked, tool_invoked_events.append)
+    session.dispatcher.subscribe(ToolInvoked, tool_invoked_events.append)
 
     # Execute
     response = adapter.evaluate(prompt, session=session)
