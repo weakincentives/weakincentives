@@ -51,7 +51,7 @@ pytestmark = [
 ]
 
 _MODEL_ENV_VAR = "CLAUDE_AGENT_SDK_TEST_MODEL"
-_DEFAULT_MODEL = "claude-opus-4-5-20250929"
+_DEFAULT_MODEL = "claude-opus-4-5-20251101"
 _PROMPT_NS = "integration/claude-agent-sdk"
 
 
