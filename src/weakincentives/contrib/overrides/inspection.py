@@ -20,9 +20,10 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any, cast
 
-from ...dataclasses import FrozenDataclass
+from weakincentives.dataclasses import FrozenDataclass
+from weakincentives.prompt.overrides import HexDigest, PromptOverridesError
+
 from .local_store import LocalPromptOverridesStore
-from .versioning import HexDigest, PromptOverridesError
 
 
 @FrozenDataclass()

@@ -18,11 +18,13 @@ are not part of the minimal core library.
 
 Subpackages:
 
+- ``contrib.overrides``: Filesystem-backed prompt overrides implementation
 - ``contrib.tools``: Planning tools, VFS, Podman sandbox, asteval, workspace digest
 - ``contrib.optimizers``: Workspace digest optimizer
 
 Example usage::
 
+    from weakincentives.contrib.overrides import LocalPromptOverridesStore
     from weakincentives.contrib.tools import (
         PlanningToolsSection,
         VfsToolsSection,

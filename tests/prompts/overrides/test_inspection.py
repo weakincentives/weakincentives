@@ -18,11 +18,13 @@ from pathlib import Path
 
 import pytest
 
+from weakincentives.contrib.overrides import (
+    iter_override_files,
+    resolve_overrides_root,
+)
 from weakincentives.prompt.overrides import (
     HexDigest,
     PromptOverridesError,
-    iter_override_files,
-    resolve_overrides_root,
 )
 
 

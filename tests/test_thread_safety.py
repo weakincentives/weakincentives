@@ -28,7 +28,8 @@ from uuid import uuid4
 import pytest
 
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
-from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
+from weakincentives.prompt.overrides import PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
 from weakincentives.runtime.session import Session

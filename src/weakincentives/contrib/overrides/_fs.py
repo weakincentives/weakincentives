@@ -25,7 +25,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any
 
-from .versioning import PromptOverridesError
+from weakincentives.prompt.overrides import PromptOverridesError
 
 _IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
 
