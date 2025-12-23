@@ -43,6 +43,11 @@ from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
+from weakincentives.runtime import (
+    InMemoryMailbox,
+    MainLoopRequest,
+    MainLoopResult,
+)
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
@@ -255,58 +260,96 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     assert "Override digest" not in rendered.text
 
 
-def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
-    """Auto-optimization runs when execute() is called without existing digest."""
+def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
+    """Auto-optimization runs when first request is processed."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    bus = InProcessDispatcher()
-    attach_logging_subscribers(bus)
-    loop = CodeReviewLoop(
-        adapter=cast(ProviderAdapter[ReviewResponse], adapter),
-        bus=bus,
-        overrides_store=overrides_store,
+    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
+        name="requests"
     )
+    responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        loop = CodeReviewLoop(
+            adapter=cast(ProviderAdapter[ReviewResponse], adapter),
+            requests=requests,
+            responses=responses,
+            overrides_store=overrides_store,
+        )
 
-    assert loop.override_tag == "latest"
+        assert loop.override_tag == "latest"
 
-    # Execute triggers auto-optimization since no digest exists
-    loop.execute(ReviewTurnParams(request="test request"))
+        # Send request via mailbox
+        request_event = MainLoopRequest(
+            request=ReviewTurnParams(request="test request")
+        )
+        requests.send(request_event)
 
-    # Verify optimization was called (adapter recorded the call)
-    assert any("workspace-digest" in call for call in adapter.calls)
+        # Process one iteration
+        loop.run(max_iterations=1, wait_time_seconds=0)
 
-    # Verify digest was persisted to session
-    session_digest = latest_workspace_digest(loop.session, "workspace-digest")
-    assert session_digest is not None
-    assert session_digest.body == "- Repo instructions from stub"
+        # Verify optimization was called (adapter recorded the call)
+        assert any("workspace-digest" in call for call in adapter.calls)
+
+        # Verify digest was persisted to session
+        session_digest = latest_workspace_digest(loop.session, "workspace-digest")
+        assert session_digest is not None
+        assert session_digest.body == "- Repo instructions from stub"
+    finally:
+        requests.close()
+        responses.close()
 
 
-def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
-    """Each execute() call builds a fresh default deadline."""
+def test_deadline_passed_per_request(tmp_path: Path) -> None:
+    """Each request gets a deadline from MainLoopRequest."""
+    from datetime import timedelta
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
-    bus = InProcessDispatcher()
-    loop = CodeReviewLoop(
-        adapter=adapter,
-        bus=bus,
-        overrides_store=overrides_store,
+    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
+        name="requests"
     )
+    responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        loop = CodeReviewLoop(
+            adapter=adapter,
+            requests=requests,
+            responses=responses,
+            overrides_store=overrides_store,
+        )
 
-    set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
+        set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
 
-    loop.execute(ReviewTurnParams(request="first"))
-    loop.execute(ReviewTurnParams(request="second"))
+        # Send requests with different deadlines
+        first_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
+        second_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10))
 
-    assert len(adapter.deadlines) == 2
-    first_deadline, second_deadline = adapter.deadlines
-    assert isinstance(first_deadline, Deadline)
-    assert isinstance(second_deadline, Deadline)
-    assert first_deadline is not second_deadline
+        requests.send(
+            MainLoopRequest(
+                request=ReviewTurnParams(request="first"),
+                deadline=first_deadline,
+            )
+        )
+        loop.run(max_iterations=1, wait_time_seconds=0)
 
-    now = datetime.now(UTC)
-    assert first_deadline.expires_at > now
-    assert second_deadline.expires_at > now
+        requests.send(
+            MainLoopRequest(
+                request=ReviewTurnParams(request="second"),
+                deadline=second_deadline,
+            )
+        )
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert len(adapter.deadlines) == 2
+        recorded_first, recorded_second = adapter.deadlines
+        assert recorded_first is first_deadline
+        assert recorded_second is second_deadline
+    finally:
+        requests.close()
+        responses.close()
 
 
 @pytest.fixture(autouse=True)

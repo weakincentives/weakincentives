@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from . import events, main_loop, session
+from . import events, mailbox, main_loop, session
 from .events import (
     ControlDispatcher,
     Dispatcher,
@@ -33,12 +33,24 @@ from .execution_state import (
     SnapshotMetadata,
 )
 from .logging import StructuredLogger, configure_logging, get_logger
+from .mailbox import (
+    CollectingMailbox,
+    FakeMailbox,
+    InMemoryMailbox,
+    Mailbox,
+    MailboxConnectionError,
+    MailboxError,
+    MailboxFullError,
+    Message,
+    NullMailbox,
+    ReceiptHandleExpiredError,
+    SerializationError,
+)
 from .main_loop import (
     MainLoop,
-    MainLoopCompleted,
     MainLoopConfig,
-    MainLoopFailed,
     MainLoopRequest,
+    MainLoopResult,
 )
 from .session import (
     DEFAULT_SNAPSHOT_POLICIES,
@@ -65,24 +77,34 @@ from .snapshotable import Snapshotable
 
 __all__ = [
     "DEFAULT_SNAPSHOT_POLICIES",
+    "CollectingMailbox",
     "CompositeSnapshot",
     "ControlDispatcher",
     "DataEvent",
     "DispatchResult",
     "Dispatcher",
     "ExecutionState",
+    "FakeMailbox",
     "HandlerFailure",
+    "InMemoryMailbox",
     "InProcessDispatcher",
+    "Mailbox",
+    "MailboxConnectionError",
+    "MailboxError",
+    "MailboxFullError",
     "MainLoop",
-    "MainLoopCompleted",
     "MainLoopConfig",
-    "MainLoopFailed",
     "MainLoopRequest",
+    "MainLoopResult",
+    "Message",
+    "NullMailbox",
     "PromptExecuted",
     "PromptRendered",
+    "ReceiptHandleExpiredError",
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
+    "SerializationError",
     "Session",
     "SessionProtocol",
     "SlicePolicy",
@@ -103,6 +125,7 @@ __all__ = [
     "events",
     "get_logger",
     "iter_sessions_bottom_up",
+    "mailbox",
     "main_loop",
     "replace_latest",
     "replace_latest_by",

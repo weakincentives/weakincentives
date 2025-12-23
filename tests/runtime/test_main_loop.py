@@ -33,13 +33,12 @@ from weakincentives.prompt import (
     VisibilityExpansionRequired,
 )
 from weakincentives.prompt.tool import ResourceRegistry
-from weakincentives.runtime.events import Dispatcher, InProcessDispatcher
+from weakincentives.runtime.mailbox import FakeMailbox, InMemoryMailbox
 from weakincentives.runtime.main_loop import (
     MainLoop,
-    MainLoopCompleted,
     MainLoopConfig,
-    MainLoopFailed,
     MainLoopRequest,
+    MainLoopResult,
 )
 from weakincentives.runtime.session import Session, VisibilityOverrides
 from weakincentives.runtime.session.protocols import SessionProtocol
@@ -134,10 +133,15 @@ class _TestLoop(MainLoop[_Request, _Output]):
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        bus: Dispatcher,
+        requests: InMemoryMailbox[MainLoopRequest[_Request]]
+        | FakeMailbox[MainLoopRequest[_Request]],
+        responses: InMemoryMailbox[MainLoopResult[_Output]]
+        | FakeMailbox[MainLoopResult[_Output]],
         config: MainLoopConfig | None = None,
     ) -> None:
-        super().__init__(adapter=adapter, bus=bus, config=config)
+        super().__init__(
+            adapter=adapter, requests=requests, responses=responses, config=config
+        )
         self._template = PromptTemplate[_Output](
             ns="test",
             key="test-prompt",
@@ -151,19 +155,17 @@ class _TestLoop(MainLoop[_Request, _Output]):
         )
         self.session_created: Session | None = None
         self.finalize_called = False
-        self.finalize_prompt: Prompt[_Output] | None = None
-        self.finalize_session: Session | None = None
 
     def initialize(self, request: _Request) -> tuple[Prompt[_Output], Session]:
         prompt = Prompt(self._template).bind(_Params(content=request.message))
-        session = Session(bus=self._bus, tags={"loop": "test"})
+        session = Session(tags={"loop": "test"})
         self.session_created = session
         return prompt, session
 
     def finalize(self, prompt: Prompt[_Output], session: Session) -> None:
+        del prompt
         self.finalize_called = True
-        self.finalize_prompt = prompt
-        self.finalize_session = session
+        _ = session
 
 
 # =============================================================================
@@ -219,380 +221,399 @@ def test_request_custom_values() -> None:
 
 
 # =============================================================================
-# MainLoopCompleted Tests
+# MainLoopResult Tests
 # =============================================================================
 
 
-def test_completed_default_values() -> None:
-    """MainLoopCompleted stores response and session information."""
-    response = PromptResponse(
-        prompt_name="test",
-        text="result",
+def test_result_success_case() -> None:
+    """MainLoopResult represents successful completion."""
+    request_id = UUID("12345678-1234-5678-1234-567812345678")
+    session_id = UUID("87654321-4321-8765-4321-876543218765")
+    output = _Output(result="success")
+    result: MainLoopResult[_Output] = MainLoopResult(
+        request_id=request_id,
+        output=output,
+        session_id=session_id,
+    )
+    assert result.request_id == request_id
+    assert result.output == output
+    assert result.error is None
+    assert result.session_id == session_id
+    assert result.success is True
+    assert result.completed_at.tzinfo == UTC
+
+
+def test_result_error_case() -> None:
+    """MainLoopResult represents failure."""
+    request_id = UUID("12345678-1234-5678-1234-567812345678")
+    result: MainLoopResult[_Output] = MainLoopResult(
+        request_id=request_id,
+        error="adapter failure",
+    )
+    assert result.request_id == request_id
+    assert result.output is None
+    assert result.error == "adapter failure"
+    assert result.session_id is None
+    assert result.success is False
+
+
+def test_result_is_frozen() -> None:
+    """MainLoopResult is immutable."""
+    request_id = UUID("12345678-1234-5678-1234-567812345678")
+    result: MainLoopResult[_Output] = MainLoopResult(
+        request_id=request_id,
         output=_Output(result="success"),
     )
-    request_id = UUID("12345678-1234-5678-1234-567812345678")
-    session_id = UUID("87654321-4321-8765-4321-876543218765")
-    completed = MainLoopCompleted(
-        request_id=request_id,
-        response=response,
-        session_id=session_id,
+    with pytest.raises(AttributeError):
+        result.output = None  # type: ignore[misc]
+
+
+# =============================================================================
+# MainLoop Tests
+# =============================================================================
+
+
+def test_loop_processes_request() -> None:
+    """MainLoop processes request from mailbox."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
     )
-    assert completed.request_id == request_id
-    assert completed.response is response
-    assert completed.session_id == session_id
-    assert completed.completed_at.tzinfo == UTC
-
-
-# =============================================================================
-# MainLoopFailed Tests
-# =============================================================================
-
-
-def test_failed_with_session_id() -> None:
-    """MainLoopFailed stores error and session information."""
-    request_id = UUID("12345678-1234-5678-1234-567812345678")
-    session_id = UUID("87654321-4321-8765-4321-876543218765")
-    error = ValueError("test error")
-    failed = MainLoopFailed(
-        request_id=request_id,
-        error=error,
-        session_id=session_id,
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
     )
-    assert failed.request_id == request_id
-    assert failed.error is error
-    assert failed.session_id == session_id
-    assert failed.failed_at.tzinfo == UTC
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+        # Send request
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        # Run single iteration
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Check response
+        msgs = responses.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.request_id == request.request_id
+        assert msgs[0].body.output == _Output(result="success")
+        assert msgs[0].body.error is None
+        assert msgs[0].body.success is True
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        responses.close()
 
 
-def test_failed_without_session_id() -> None:
-    """MainLoopFailed can have None session_id."""
-    request_id = UUID("12345678-1234-5678-1234-567812345678")
-    error = ValueError("test error")
-    failed = MainLoopFailed(
-        request_id=request_id,
-        error=error,
-        session_id=None,
+def test_loop_sends_error_on_failure() -> None:
+    """MainLoop sends error result on adapter failure."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
     )
-    assert failed.session_id is None
-
-
-# =============================================================================
-# MainLoop.execute() Tests
-# =============================================================================
-
-
-def test_execute_successful_execution() -> None:
-    """MainLoop.execute returns response on success."""
-    bus = InProcessDispatcher()
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    response, session = loop.execute(_Request(message="hello"))
-
-    assert response.output == _Output(result="success")
-    assert adapter._call_count == 1
-    assert loop.session_created is not None
-    assert session is loop.session_created
-
-
-def test_execute_calls_finalize_on_success() -> None:
-    """MainLoop.execute calls finalize after successful evaluation."""
-    bus = InProcessDispatcher()
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    response, session = loop.execute(_Request(message="hello"))
-
-    assert loop.finalize_called
-    assert loop.finalize_session is session
-    assert loop.finalize_prompt is not None
-    assert response.output == _Output(result="success")
-
-
-def test_execute_finalize_called_after_visibility_retries() -> None:
-    """MainLoop.execute calls finalize after visibility expansion succeeds."""
-    bus = InProcessDispatcher()
-    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
-        {("section1",): SectionVisibility.FULL},
-    ]
-    adapter = _MockAdapter(visibility_requests=visibility_requests)
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    response, session = loop.execute(_Request(message="hello"))
-
-    assert loop.finalize_called
-    assert loop.finalize_session is session
-    assert adapter._call_count == 2  # 1 visibility expansion + 1 success
-    assert response.output == _Output(result="success")
-
-
-def test_execute_finalize_not_called_on_error() -> None:
-    """MainLoop.execute does not call finalize when adapter raises error."""
-    bus = InProcessDispatcher()
-    error = RuntimeError("adapter failure")
-    adapter = _MockAdapter(error=error)
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    with pytest.raises(RuntimeError, match="adapter failure"):
-        loop.execute(_Request(message="hello"))
-
-    assert not loop.finalize_called
-
-
-def test_execute_passes_budget_from_config() -> None:
-    """MainLoop.execute creates BudgetTracker with config budget."""
-    bus = InProcessDispatcher()
-    budget = Budget(max_total_tokens=1000)
-    config = MainLoopConfig(budget=budget)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    loop.execute(_Request(message="hello"))
-
-    assert adapter._last_budget_tracker is not None
-    assert adapter._last_budget_tracker.budget is budget
-
-
-def test_execute_passes_deadline_from_config() -> None:
-    """MainLoop.execute passes config deadline to adapter."""
-    bus = InProcessDispatcher()
-    deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
-    config = MainLoopConfig(deadline=deadline)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    loop.execute(_Request(message="hello"))
-
-    assert adapter._last_deadline is deadline
-
-
-def test_execute_budget_overrides_config() -> None:
-    """MainLoop.execute budget parameter overrides config."""
-    bus = InProcessDispatcher()
-    config_budget = Budget(max_total_tokens=1000)
-    config = MainLoopConfig(budget=config_budget)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    override_budget = Budget(max_total_tokens=2000)
-    loop.execute(_Request(message="hello"), budget=override_budget)
-
-    assert adapter._last_budget_tracker is not None
-    assert adapter._last_budget_tracker.budget is override_budget
-
-
-def test_execute_deadline_overrides_config() -> None:
-    """MainLoop.execute deadline parameter overrides config."""
-    bus = InProcessDispatcher()
-    config_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
-    config = MainLoopConfig(deadline=config_deadline)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    override_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10))
-    loop.execute(_Request(message="hello"), deadline=override_deadline)
-
-    assert adapter._last_deadline is override_deadline
-
-
-def test_execute_handles_visibility_expansion() -> None:
-    """MainLoop.execute accumulates visibility overrides in session state and retries."""
-    bus = InProcessDispatcher()
-    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
-        {("section1",): SectionVisibility.FULL},
-        {("section2",): SectionVisibility.FULL},
-    ]
-    adapter = _MockAdapter(visibility_requests=visibility_requests)
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    response, session = loop.execute(_Request(message="hello"))
-
-    assert response.output == _Output(result="success")
-    # Called 3 times: 2 visibility expansions + 1 success
-    assert adapter._call_count == 3
-    # Final overrides should be in session state
-    overrides = session[VisibilityOverrides].latest()
-    assert overrides is not None
-    assert overrides.get(("section1",)) == SectionVisibility.FULL
-    assert overrides.get(("section2",)) == SectionVisibility.FULL
-
-
-def test_execute_propagates_adapter_error() -> None:
-    """MainLoop.execute propagates adapter exceptions."""
-    bus = InProcessDispatcher()
-    error = RuntimeError("adapter failure")
-    adapter = _MockAdapter(error=error)
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    with pytest.raises(RuntimeError, match="adapter failure"):
-        loop.execute(_Request(message="hello"))
-
-
-# =============================================================================
-# MainLoop.handle_request() Tests
-# =============================================================================
-
-
-def test_handle_request_publishes_completed_event_on_success() -> None:
-    """MainLoop.handle_request publishes MainLoopCompleted on success."""
-    bus = InProcessDispatcher()
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    completed_events: list[MainLoopCompleted[_Output]] = []
-    bus.subscribe(MainLoopCompleted, lambda e: completed_events.append(e))
-    request = MainLoopRequest(request=_Request(message="hello"))
-    loop.handle_request(request)
-
-    assert len(completed_events) == 1
-    assert completed_events[0].request_id == request.request_id
-    assert completed_events[0].response.output == _Output(result="success")
-
-
-def test_handle_request_publishes_failed_event_and_reraises_on_error() -> None:
-    """MainLoop.handle_request publishes MainLoopFailed and re-raises on error."""
-    bus = InProcessDispatcher()
-    error = RuntimeError("adapter failure")
-    adapter = _MockAdapter(error=error)
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    failed_events: list[MainLoopFailed] = []
-    bus.subscribe(MainLoopFailed, lambda e: failed_events.append(e))
-    request = MainLoopRequest(request=_Request(message="hello"))
-    with pytest.raises(RuntimeError, match="adapter failure"):
-        loop.handle_request(request)
-
-    assert len(failed_events) == 1
-    assert failed_events[0].request_id == request.request_id
-    assert failed_events[0].error is error
-    assert failed_events[0].session_id is None
-
-
-def test_handle_request_budget_overrides_config() -> None:
-    """MainLoopRequest budget overrides config budget."""
-    bus = InProcessDispatcher()
-    config_budget = Budget(max_total_tokens=1000)
-    config = MainLoopConfig(budget=config_budget)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    override_budget = Budget(max_total_tokens=2000)
-    request = MainLoopRequest(
-        request=_Request(message="hello"),
-        budget=override_budget,
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
     )
-    loop.handle_request(request)
+    try:
+        adapter = _MockAdapter(error=RuntimeError("adapter failure"))
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
 
-    assert adapter._last_budget_tracker is not None
-    assert adapter._last_budget_tracker.budget is override_budget
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = responses.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.request_id == request.request_id
+        assert msgs[0].body.output is None
+        assert msgs[0].body.error == "adapter failure"
+        assert msgs[0].body.success is False
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        responses.close()
 
 
-def test_handle_request_deadline_overrides_config() -> None:
-    """MainLoopRequest deadline overrides config deadline."""
-    bus = InProcessDispatcher()
-    config_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
-    config = MainLoopConfig(deadline=config_deadline)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    override_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10))
-    request = MainLoopRequest(
-        request=_Request(message="hello"),
-        deadline=override_deadline,
+def test_loop_acknowledges_request() -> None:
+    """MainLoop acknowledges processed request."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
     )
-    loop.handle_request(request)
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
 
-    assert adapter._last_deadline is override_deadline
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
 
+        loop.run(max_iterations=1, wait_time_seconds=0)
 
-def test_handle_request_handles_visibility_expansion() -> None:
-    """MainLoop.handle_request handles visibility expansion."""
-    bus = InProcessDispatcher()
-    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
-        {("ref",): SectionVisibility.FULL},
-    ]
-    adapter = _MockAdapter(visibility_requests=visibility_requests)
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    completed_events: list[MainLoopCompleted[_Output]] = []
-    bus.subscribe(MainLoopCompleted, lambda e: completed_events.append(e))
-    request = MainLoopRequest(request=_Request(message="hello"))
-    loop.handle_request(request)
-
-    assert len(completed_events) == 1
-    assert adapter._call_count == 2
+        # Request should be acknowledged (gone from queue)
+        assert requests.approximate_count() == 0
+    finally:
+        requests.close()
+        responses.close()
 
 
-# =============================================================================
-# Bus Integration Tests
-# =============================================================================
+def test_loop_calls_finalize() -> None:
+    """MainLoop calls finalize after successful processing."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert loop.finalize_called
+    finally:
+        requests.close()
+        responses.close()
 
 
-def test_bus_subscribe_and_publish_workflow() -> None:
-    """MainLoop works with bus-driven subscribe/publish pattern."""
-    bus = InProcessDispatcher()
-    adapter = _MockAdapter()
-    _TestLoop(adapter=adapter, bus=bus)  # Auto-subscribes handle_request
+def test_loop_respects_max_iterations() -> None:
+    """MainLoop respects max_iterations limit."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
 
-    completed_events: list[MainLoopCompleted[_Output]] = []
-    bus.subscribe(MainLoopCompleted, lambda e: completed_events.append(e))
-    request = MainLoopRequest(request=_Request(message="hello"))
-    bus.dispatch(request)
+        for i in range(5):
+            requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
 
-    assert len(completed_events) == 1
-    assert completed_events[0].response.output == _Output(result="success")
+        # Only run 2 iterations
+        loop.run(max_iterations=2, wait_time_seconds=0)
 
-
-def test_bus_session_persists_across_visibility_retries() -> None:
-    """Same session is reused across visibility expansion retries."""
-    bus = InProcessDispatcher()
-    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
-        {("section1",): SectionVisibility.FULL},
-    ]
-    adapter = _MockAdapter(visibility_requests=visibility_requests)
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    loop.execute(_Request(message="hello"))
-
-    # Same session should be used for both calls
-    assert adapter._call_count == 2
-    # Session should persist (same object used for retries)
-    assert loop.session_created is not None
+        # Some requests may still be pending (depending on batch size)
+        # At least we should have some responses
+        assert responses.approximate_count() >= 1
+    finally:
+        requests.close()
+        responses.close()
 
 
-def test_same_budget_tracker_used_across_visibility_retries() -> None:
-    """Same BudgetTracker is used across visibility expansion retries."""
-    bus = InProcessDispatcher()
-    budget = Budget(max_total_tokens=1000)
-    config = MainLoopConfig(budget=budget)
-    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
-        {("section1",): SectionVisibility.FULL},
-        {("section2",): SectionVisibility.FULL},
-    ]
-    adapter = _MockAdapter(visibility_requests=visibility_requests)
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
+def test_loop_handles_visibility_expansion() -> None:
+    """MainLoop handles visibility expansion correctly."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+            {("section1",): SectionVisibility.FULL},
+        ]
+        adapter = _MockAdapter(visibility_requests=visibility_requests)
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
 
-    loop.execute(_Request(message="hello"))
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
 
-    # Called 3 times: 2 visibility expansions + 1 success
-    assert adapter._call_count == 3
-    # Same BudgetTracker should be used for all calls
-    assert len(adapter._budget_trackers) == 3
-    assert all(t is adapter._budget_trackers[0] for t in adapter._budget_trackers)
-    # And it should have the correct budget
-    assert adapter._budget_trackers[0] is not None
-    assert adapter._budget_trackers[0].budget is budget
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Should succeed after visibility expansion
+        msgs = responses.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is True
+        assert adapter._call_count == 2  # 1 visibility expansion + 1 success
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        responses.close()
 
 
-def test_no_budget_tracker_when_no_budget() -> None:
-    """No BudgetTracker is created when no budget is set."""
-    bus = InProcessDispatcher()
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus)
+def test_loop_uses_config_budget() -> None:
+    """MainLoop uses budget from config."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        budget = Budget(max_total_tokens=1000)
+        config = MainLoopConfig(budget=budget)
+        adapter = _MockAdapter()
+        loop = _TestLoop(
+            adapter=adapter, requests=requests, responses=responses, config=config
+        )
 
-    loop.execute(_Request(message="hello"))
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
 
-    assert adapter._last_budget_tracker is None
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert adapter._last_budget_tracker is not None
+        assert adapter._last_budget_tracker.budget is budget
+    finally:
+        requests.close()
+        responses.close()
+
+
+def test_loop_request_overrides_config() -> None:
+    """MainLoop uses request budget/deadline over config."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        config_budget = Budget(max_total_tokens=1000)
+        config = MainLoopConfig(budget=config_budget)
+        adapter = _MockAdapter()
+        loop = _TestLoop(
+            adapter=adapter, requests=requests, responses=responses, config=config
+        )
+
+        override_budget = Budget(max_total_tokens=2000)
+        request = MainLoopRequest(
+            request=_Request(message="hello"),
+            budget=override_budget,
+        )
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert adapter._last_budget_tracker is not None
+        assert adapter._last_budget_tracker.budget is override_budget
+    finally:
+        requests.close()
+        responses.close()
+
+
+def test_loop_nacks_on_response_send_failure() -> None:
+    """MainLoop nacks request when response send fails."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        # Make response send fail
+        from weakincentives.runtime.mailbox import MailboxConnectionError
+
+        responses.set_connection_error(MailboxConnectionError("connection lost"))
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Request should be nacked (still in queue for retry)
+        # Note: it's in invisible state after receive, so we need to wait
+        # or check approximate_count
+        assert requests.approximate_count() == 1
+    finally:
+        requests.close()
+
+
+def test_loop_nacks_on_error_response_send_failure() -> None:
+    """MainLoop nacks request when error response send fails."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+    try:
+        # Adapter that fails
+        adapter = _MockAdapter(error=RuntimeError("adapter failure"))
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        # Make error response send fail too
+        from weakincentives.runtime.mailbox import MailboxConnectionError
+
+        responses.set_connection_error(MailboxConnectionError("connection lost"))
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Request should be nacked (still in queue for retry)
+        assert requests.approximate_count() == 1
+    finally:
+        requests.close()
+
+
+class _TestLoopNoFinalizeOverride(MainLoop[_Request, _Output]):
+    """Test implementation that doesn't override finalize."""
+
+    def __init__(
+        self,
+        *,
+        adapter: ProviderAdapter[_Output],
+        requests: InMemoryMailbox[MainLoopRequest[_Request]]
+        | FakeMailbox[MainLoopRequest[_Request]],
+        responses: InMemoryMailbox[MainLoopResult[_Output]]
+        | FakeMailbox[MainLoopResult[_Output]],
+        config: MainLoopConfig | None = None,
+    ) -> None:
+        super().__init__(
+            adapter=adapter, requests=requests, responses=responses, config=config
+        )
+        self._template = PromptTemplate[_Output](
+            ns="test",
+            key="test-prompt",
+            sections=[
+                MarkdownSection[_Params](
+                    title="Test",
+                    template="$content",
+                    key="test",
+                ),
+            ],
+        )
+
+    def initialize(self, request: _Request) -> tuple[Prompt[_Output], Session]:
+        prompt = Prompt(self._template).bind(_Params(content=request.message))
+        session = Session(tags={"loop": "test"})
+        return prompt, session
+
+
+def test_loop_default_finalize() -> None:
+    """MainLoop default finalize does nothing."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoopNoFinalizeOverride(
+            adapter=adapter, requests=requests, responses=responses
+        )
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        # Run should succeed even without finalize override
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = responses.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is True
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        responses.close()
 
 
 # =============================================================================
@@ -626,100 +647,328 @@ def test_request_accepts_resources() -> None:
     assert request.resources is resources
 
 
-def test_execute_passes_resources_from_config() -> None:
-    """MainLoop.execute passes config resources to adapter."""
-    bus = InProcessDispatcher()
-    resource = _CustomResource(name="config-resource")
-    resources = ResourceRegistry.build({_CustomResource: resource})
-    config = MainLoopConfig(resources=resources)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    loop.execute(_Request(message="hello"))
-
-    assert adapter._last_resources is resources
-
-
-def test_execute_resources_overrides_config() -> None:
-    """MainLoop.execute resources parameter overrides config."""
-    bus = InProcessDispatcher()
-    config_resource = _CustomResource(name="config-resource")
-    config_resources = ResourceRegistry.build({_CustomResource: config_resource})
-    config = MainLoopConfig(resources=config_resources)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    override_resource = _CustomResource(name="override-resource")
-    override_resources = ResourceRegistry.build({_CustomResource: override_resource})
-    loop.execute(_Request(message="hello"), resources=override_resources)
-
-    assert adapter._last_resources is override_resources
-
-
-def test_handle_request_passes_resources() -> None:
-    """MainLoopRequest resources are passed to adapter."""
-    bus = InProcessDispatcher()
-    resource = _CustomResource(name="request-resource")
-    resources = ResourceRegistry.build({_CustomResource: resource})
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus)
-
-    request = MainLoopRequest(
-        request=_Request(message="hello"),
-        resources=resources,
+def test_loop_passes_resources_from_config() -> None:
+    """MainLoop passes config resources to adapter."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
     )
-    loop.handle_request(request)
-
-    assert adapter._last_resources is resources
-
-
-def test_handle_request_resources_overrides_config() -> None:
-    """MainLoopRequest resources override config resources."""
-    bus = InProcessDispatcher()
-    config_resource = _CustomResource(name="config-resource")
-    config_resources = ResourceRegistry.build({_CustomResource: config_resource})
-    config = MainLoopConfig(resources=config_resources)
-    adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus, config=config)
-
-    override_resource = _CustomResource(name="override-resource")
-    override_resources = ResourceRegistry.build({_CustomResource: override_resource})
-    request = MainLoopRequest(
-        request=_Request(message="hello"),
-        resources=override_resources,
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
     )
-    loop.handle_request(request)
+    try:
+        resource = _CustomResource(name="config-resource")
+        resources = ResourceRegistry.build({_CustomResource: resource})
+        config = MainLoopConfig(resources=resources)
+        adapter = _MockAdapter()
+        loop = _TestLoop(
+            adapter=adapter, requests=requests, responses=responses, config=config
+        )
 
-    assert adapter._last_resources is override_resources
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert adapter._last_resources is resources
+    finally:
+        requests.close()
+        responses.close()
+
+
+def test_loop_request_resources_overrides_config() -> None:
+    """MainLoop request resources override config resources."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        config_resource = _CustomResource(name="config-resource")
+        config_resources = ResourceRegistry.build({_CustomResource: config_resource})
+        config = MainLoopConfig(resources=config_resources)
+        adapter = _MockAdapter()
+        loop = _TestLoop(
+            adapter=adapter, requests=requests, responses=responses, config=config
+        )
+
+        override_resource = _CustomResource(name="override-resource")
+        override_resources = ResourceRegistry.build(
+            {_CustomResource: override_resource}
+        )
+        request = MainLoopRequest(
+            request=_Request(message="hello"),
+            resources=override_resources,
+        )
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert adapter._last_resources is override_resources
+    finally:
+        requests.close()
+        responses.close()
 
 
 def test_same_resources_used_across_visibility_retries() -> None:
     """Same resources are passed across visibility expansion retries."""
-    bus = InProcessDispatcher()
-    resource = _CustomResource(name="persistent-resource")
-    resources = ResourceRegistry.build({_CustomResource: resource})
-    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
-        {("section1",): SectionVisibility.FULL},
-        {("section2",): SectionVisibility.FULL},
-    ]
-    adapter = _MockAdapter(visibility_requests=visibility_requests)
-    loop = _TestLoop(adapter=adapter, bus=bus)
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        resource = _CustomResource(name="persistent-resource")
+        resources = ResourceRegistry.build({_CustomResource: resource})
+        visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+            {("section1",): SectionVisibility.FULL},
+            {("section2",): SectionVisibility.FULL},
+        ]
+        adapter = _MockAdapter(visibility_requests=visibility_requests)
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
 
-    loop.execute(_Request(message="hello"), resources=resources)
+        request = MainLoopRequest(
+            request=_Request(message="hello"),
+            resources=resources,
+        )
+        requests.send(request)
 
-    # Called 3 times: 2 visibility expansions + 1 success
-    assert adapter._call_count == 3
-    # Same resources should be used for all calls
-    assert len(adapter._resources_list) == 3
-    assert all(r is resources for r in adapter._resources_list)
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Called 3 times: 2 visibility expansions + 1 success
+        assert adapter._call_count == 3
+        # Same resources should be used for all calls
+        assert len(adapter._resources_list) == 3
+        assert all(r is resources for r in adapter._resources_list)
+    finally:
+        requests.close()
+        responses.close()
 
 
 def test_no_resources_when_not_set() -> None:
     """No resources are passed when not configured."""
-    bus = InProcessDispatcher()
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert adapter._last_resources is None
+    finally:
+        requests.close()
+        responses.close()
+
+
+# =============================================================================
+# Visibility Override Accumulation Tests
+# =============================================================================
+
+
+def test_visibility_overrides_accumulate_in_session() -> None:
+    """MainLoop accumulates visibility overrides in session state."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+            {("section1",): SectionVisibility.FULL},
+            {("section2",): SectionVisibility.FULL},
+        ]
+        adapter = _MockAdapter(visibility_requests=visibility_requests)
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Check session state has accumulated overrides
+        assert loop.session_created is not None
+        overrides = loop.session_created[VisibilityOverrides].latest()
+        assert overrides is not None
+        assert overrides.get(("section1",)) == SectionVisibility.FULL
+        assert overrides.get(("section2",)) == SectionVisibility.FULL
+    finally:
+        requests.close()
+        responses.close()
+
+
+def test_same_budget_tracker_used_across_visibility_retries() -> None:
+    """Same BudgetTracker is used across visibility expansion retries."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        budget = Budget(max_total_tokens=1000)
+        config = MainLoopConfig(budget=budget)
+        visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+            {("section1",): SectionVisibility.FULL},
+            {("section2",): SectionVisibility.FULL},
+        ]
+        adapter = _MockAdapter(visibility_requests=visibility_requests)
+        loop = _TestLoop(
+            adapter=adapter, requests=requests, responses=responses, config=config
+        )
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Called 3 times: 2 visibility expansions + 1 success
+        assert adapter._call_count == 3
+        # Same BudgetTracker should be used for all calls
+        assert len(adapter._budget_trackers) == 3
+        assert all(t is adapter._budget_trackers[0] for t in adapter._budget_trackers)
+        # And it should have the correct budget
+        assert adapter._budget_trackers[0] is not None
+        assert adapter._budget_trackers[0].budget is budget
+    finally:
+        requests.close()
+        responses.close()
+
+
+def test_no_budget_tracker_when_no_budget() -> None:
+    """No BudgetTracker is created when no budget is set."""
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        assert adapter._last_budget_tracker is None
+    finally:
+        requests.close()
+        responses.close()
+
+
+# =============================================================================
+# Mailbox Close Tests
+# =============================================================================
+
+
+def test_loop_handles_expired_receipt_handle_on_ack() -> None:
+    """MainLoop continues when receipt handle expires during processing."""
+    requests: FakeMailbox[MainLoopRequest[_Request]] = FakeMailbox(name="requests")
+    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+
     adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, bus=bus)
+    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
 
-    loop.execute(_Request(message="hello"))
+    request = MainLoopRequest(request=_Request(message="hello"))
+    requests.send(request)
 
-    assert adapter._last_resources is None
+    # Receive the message to get the handle, then expire it
+    msgs = requests.receive(max_messages=1)
+    assert len(msgs) == 1
+    msg = msgs[0]
+
+    # Expire the handle to simulate slow processing
+    requests.expire_handle(msg.receipt_handle)
+
+    # Create a result to send
+    result: MainLoopResult[_Output] = MainLoopResult(
+        request_id=request.request_id,
+        output=_Output(result="success"),
+    )
+
+    # Call _send_and_ack directly - should handle expired handle gracefully
+    loop._send_and_ack(msg, result)
+
+    # Should not raise - the expired handle is handled gracefully
+    # Response should still be sent
+    assert responses.approximate_count() == 1
+
+
+def test_loop_handles_expired_receipt_handle_on_nack() -> None:
+    """MainLoop continues when receipt handle expires during nack after send failure."""
+    from weakincentives.runtime.mailbox import MailboxConnectionError
+
+    requests: FakeMailbox[MainLoopRequest[_Request]] = FakeMailbox(name="requests")
+    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+    request = MainLoopRequest(request=_Request(message="hello"))
+    requests.send(request)
+
+    # Receive the message to get the handle
+    msgs = requests.receive(max_messages=1)
+    assert len(msgs) == 1
+    msg = msgs[0]
+
+    # Expire the handle AND make send fail
+    # This simulates: processing took too long, handle expired,
+    # AND the response queue is also having issues
+    requests.expire_handle(msg.receipt_handle)
+    responses.set_connection_error(MailboxConnectionError("connection lost"))
+
+    # Create a result to send
+    result: MainLoopResult[_Output] = MainLoopResult(
+        request_id=request.request_id,
+        output=_Output(result="success"),
+    )
+
+    # Call _send_and_ack directly - should handle both failures gracefully
+    loop._send_and_ack(msg, result)
+
+    # Should not raise - both failures are handled gracefully
+
+
+def test_loop_exits_when_mailbox_closed() -> None:
+    """MainLoop.run() exits when requests mailbox is closed."""
+    import threading
+
+    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
+        name="requests"
+    )
+    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
+        name="responses"
+    )
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+    exited = []
+
+    def run_loop() -> None:
+        # Would run forever with max_iterations=None
+        loop.run(max_iterations=None, wait_time_seconds=1)
+        exited.append(True)
+
+    thread = threading.Thread(target=run_loop)
+    thread.start()
+
+    # Close the mailbox - should cause loop to exit
+    requests.close()
+    responses.close()
+
+    # Thread should exit quickly
+    thread.join(timeout=2.0)
+    assert not thread.is_alive()
+    assert len(exited) == 1

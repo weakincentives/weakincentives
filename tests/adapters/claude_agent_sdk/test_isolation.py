@@ -242,6 +242,16 @@ class TestEphemeralHomeEnv:
                 env = home.get_env()
                 assert env["ANTHROPIC_API_KEY"] == "sk-ant-from-config"
 
+    def test_no_api_key_in_config_or_environment(self) -> None:
+        config = IsolationConfig()
+        # Clear ANTHROPIC_API_KEY from environment
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with EphemeralHome(config) as home:
+                env = home.get_env()
+                # Should have HOME but no ANTHROPIC_API_KEY
+                assert "HOME" in env
+                assert "ANTHROPIC_API_KEY" not in env
+
     def test_custom_env_vars(self) -> None:
         config = IsolationConfig(env={"MY_CUSTOM_VAR": "custom_value"})
         with EphemeralHome(config) as home:

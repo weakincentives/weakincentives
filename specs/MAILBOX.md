@@ -188,7 +188,7 @@ send() ──► Queued ──► receive() ──► Invisible ──► acknow
 The Mailbox abstraction mirrors AWS SQS behavior for portability:
 
 | Mailbox Method | SQS API |
-|----------------|---------|
+| --------------------- | --------------------------------------------- |
 | `send()` | `SendMessage` |
 | `receive()` | `ReceiveMessage` |
 | `acknowledge()` | `DeleteMessage` |
@@ -353,18 +353,18 @@ def _handle_failure(self, msg: Message[MainLoopRequest], error: Exception) -> No
 1. **Set visibility_timeout higher than max execution time.** If processing
    takes up to 4 minutes, set visibility to 5+ minutes.
 
-2. **Send response before acknowledging.** If you acknowledge first and crash
+1. **Send response before acknowledging.** If you acknowledge first and crash
    before sending the response, the client never receives a reply.
 
-3. **Use delivery_count for backoff.** Exponential backoff on failure prevents
+1. **Use delivery_count for backoff.** Exponential backoff on failure prevents
    tight retry loops: `min(60 * delivery_count, 900)` gives 1, 2, 3... up to
    15 minute delays.
 
-4. **Consider dead-letter handling.** After N retries (e.g., `delivery_count > 5`),
+1. **Consider dead-letter handling.** After N retries (e.g., `delivery_count > 5`),
    acknowledge the message and log for manual intervention instead of infinite
    retry.
 
-5. **Extend visibility for long tasks.** For processing that may exceed the
+1. **Extend visibility for long tasks.** For processing that may exceed the
    visibility timeout, spawn a background task to call `extend_visibility()`
    periodically.
 
@@ -409,7 +409,7 @@ high-throughput but requires queue lifecycle management.
 ## Implementations
 
 | Implementation | Backend | Use Case |
-|----------------|---------|----------|
+| ----------------- | ------------------------- | ---------------------------------- |
 | `InMemoryMailbox` | Dict + deque | Testing, single process |
 | `RedisMailbox` | Redis lists + sorted sets | Multi-process, self-hosted |
 | `SQSMailbox` | AWS SQS | Production, managed infrastructure |
@@ -454,7 +454,7 @@ standalone mode.
 #### Operations
 
 | Operation | Redis Commands |
-|-----------|----------------|
+| --------------------- | ------------------------------------------ |
 | `send()` | `HSET data`, `LPUSH pending` |
 | `receive()` | `BRPOP pending`, `ZADD invisible` |
 | `acknowledge()` | `ZREM invisible`, `HDEL data`, `HDEL meta` |
@@ -502,7 +502,7 @@ return {msg_id, data, count}
 #### Standalone vs Cluster
 
 | Behavior | Standalone | Cluster |
-|----------|------------|---------|
+| ---------------- | ------------------ | -------------------- |
 | Key distribution | Single node | Sharded by hash slot |
 | Lua scripts | Any keys | Same-slot keys only |
 | BRPOP | Works normally | Works (single list) |
@@ -589,7 +589,7 @@ mailbox = SQSMailbox(
 ## Backend Semantic Differences
 
 | Aspect | SQS Standard | SQS FIFO | Redis | InMemory |
-|--------|--------------|----------|-------|----------|
+| ------------------------- | ------------- | ------------------ | ----------------- | --------- |
 | **Ordering** | Best-effort | Strict (per group) | FIFO | FIFO |
 | **Deduplication** | None | 5-min window | None | None |
 | **Retention** | 4 days (1-14) | 4 days (1-14) | Until ack | Until ack |
@@ -789,7 +789,7 @@ def test_mainloop_processes_request():
 ## Mailbox vs Dispatcher
 
 | Aspect | Dispatcher | Mailbox |
-|--------|------------|---------|
+| ------------------ | -------------------- | ------------------ |
 | **Pattern** | Pub/sub broadcast | Point-to-point |
 | **Delivery** | All subscribers | One consumer |
 | **Acknowledgment** | None | Required |
