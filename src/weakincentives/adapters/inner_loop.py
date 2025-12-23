@@ -242,31 +242,39 @@ class InnerLoop[OutputT]:
 
         self._prepare()
 
-        while True:
-            # Beat at start of each iteration
-            self._beat()
+        try:
+            while True:
+                # Beat at start of each iteration
+                self._beat()
 
-            response = self._issue_provider_request()
+                response = self._issue_provider_request()
 
-            self._provider_payload = extract_payload(response)
-            self._record_and_check_budget()
+                self._provider_payload = extract_payload(response)
+                self._record_and_check_budget()
 
-            choice = self.config.select_choice(response)
-            message = choice.message
-            if message is None:
-                raise PromptEvaluationError(
-                    "Provider response did not include a message payload.",
-                    prompt_name=self.inputs.prompt_name,
-                    phase=PROMPT_EVALUATION_PHASE_RESPONSE,
-                    provider_payload=self._provider_payload,
-                )
+                choice = self.config.select_choice(response)
+                message = choice.message
+                if message is None:
+                    raise PromptEvaluationError(
+                        "Provider response did not include a message payload.",
+                        prompt_name=self.inputs.prompt_name,
+                        phase=PROMPT_EVALUATION_PHASE_RESPONSE,
+                        provider_payload=self._provider_payload,
+                    )
 
-            tool_calls = list(message.tool_calls or [])
+                tool_calls = list(message.tool_calls or [])
 
-            if not tool_calls:
-                return self._finalize_response(message)
+                if not tool_calls:
+                    return self._finalize_response(message)
 
-            self._handle_tool_calls(message, tool_calls)
+                self._handle_tool_calls(message, tool_calls)
+        finally:
+            self._cleanup_budget_tracker()
+
+    def _cleanup_budget_tracker(self) -> None:
+        """Remove this evaluation's entry from the budget tracker."""
+        if self.config.budget_tracker is not None:
+            self.config.budget_tracker.complete(self._evaluation_id)
 
     def _issue_provider_request(self) -> object:
         attempts = 0

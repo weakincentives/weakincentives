@@ -163,3 +163,20 @@ class BudgetTracker:
                     consumed=consumed,
                     exceeded_dimension="total_tokens",
                 )
+
+    def complete(self, evaluation_id: str) -> None:
+        """Remove a completed evaluation from tracking.
+
+        Thread-safe removal of an evaluation entry. This reduces cumulative
+        totals by the usage previously recorded for that evaluation.
+        """
+        with self._lock:
+            _ = self._per_evaluation.pop(evaluation_id, None)
+
+    def reset(self) -> None:
+        """Clear all tracked evaluations.
+
+        Thread-safe reset that removes all per-evaluation usage data.
+        """
+        with self._lock:
+            self._per_evaluation.clear()

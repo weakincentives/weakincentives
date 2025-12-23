@@ -404,7 +404,11 @@ def test_inner_loop_parses_structured_output() -> None:
 
 
 def test_inner_loop_records_usage_to_budget_tracker() -> None:
-    """Test that InnerLoop records token usage to budget tracker."""
+    """Test that InnerLoop records token usage to budget tracker during execution.
+
+    The usage is recorded during execution and checked against budget limits,
+    but cleaned up when the evaluation completes successfully.
+    """
     rendered = RenderedPrompt(text="system")
     responses = [
         DummyResponse(
@@ -418,15 +422,21 @@ def test_inner_loop_records_usage_to_budget_tracker() -> None:
     budget = Budget(max_total_tokens=1000)
     tracker = BudgetTracker(budget=budget)
 
+    # Add existing usage from another evaluation to verify cleanup is per-evaluation
+    tracker.record_cumulative(
+        "other-eval", TokenUsage(input_tokens=50, output_tokens=25)
+    )
+
     loop = build_inner_loop(
         rendered=rendered, provider=provider, session=session, budget_tracker=tracker
     )
     loop.run()
 
+    # After successful completion, this evaluation's usage is cleaned up
+    # Only the other evaluation's usage should remain
     consumed = tracker.consumed
-    assert consumed.input_tokens == 100
-    assert consumed.output_tokens == 50
-    assert consumed.cached_tokens == 10
+    assert consumed.input_tokens == 50
+    assert consumed.output_tokens == 25
 
 
 def test_run_inner_loop_function() -> None:
@@ -912,3 +922,166 @@ def test_inner_loop_all_events_share_same_run_id() -> None:
     run_ids = {e.run_context.run_id for e in events_with_context}
     assert len(run_ids) == 1
     assert run_context.run_id in run_ids
+
+
+# =============================================================================
+# Budget cleanup tests
+# =============================================================================
+
+
+def test_inner_loop_cleans_up_budget_on_success() -> None:
+    """Test that InnerLoop removes evaluation from budget tracker on success."""
+    rendered = RenderedPrompt(text="system")
+    responses = [
+        DummyResponse(
+            [DummyChoice(DummyMessage(content="Hello"))],
+            usage={"input_tokens": 100, "output_tokens": 50, "cached_tokens": 10},
+        )
+    ]
+    provider = ProviderStub(responses)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    loop = build_inner_loop(
+        rendered=rendered, provider=provider, session=session, budget_tracker=tracker
+    )
+    loop.run()
+
+    # After successful run, the evaluation should be removed
+    consumed = tracker.consumed
+    assert consumed.input_tokens == 0
+    assert consumed.output_tokens == 0
+    assert consumed.total_tokens == 0
+
+
+def test_inner_loop_cleans_up_budget_on_budget_exceeded() -> None:
+    """Test that InnerLoop removes evaluation from budget tracker on budget error."""
+    rendered = RenderedPrompt(text="system")
+    responses = [
+        DummyResponse(
+            [DummyChoice(DummyMessage(content="Hello"))],
+            usage={"input_tokens": 600, "output_tokens": 500, "cached_tokens": 0},
+        )
+    ]
+    provider = ProviderStub(responses)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+    budget = Budget(max_total_tokens=500)
+    tracker = BudgetTracker(budget=budget)
+
+    loop = build_inner_loop(
+        rendered=rendered, provider=provider, session=session, budget_tracker=tracker
+    )
+
+    with pytest.raises(PromptEvaluationError):
+        loop.run()
+
+    # After exception, the evaluation should still be cleaned up
+    consumed = tracker.consumed
+    assert consumed.input_tokens == 0
+    assert consumed.output_tokens == 0
+    assert consumed.total_tokens == 0
+
+
+def test_inner_loop_cleans_up_budget_on_provider_error() -> None:
+    """Test that InnerLoop removes evaluation from budget tracker on provider error."""
+    rendered = RenderedPrompt(text="system")
+
+    class ErrorProvider:
+        def __call__(self, *args: object, **kwargs: object) -> object:
+            raise RuntimeError("Provider failure")
+
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    template = PromptTemplate(ns="tests", key="example")
+    prompt = Prompt(template)
+
+    inputs = InnerLoopInputs[object](
+        adapter_name=DUMMY_ADAPTER_NAME,
+        adapter=DummyAdapter(),
+        prompt=prompt,
+        prompt_name="example",
+        rendered=rendered,
+        render_inputs=prompt.params,
+        initial_messages=[{"role": "system", "content": rendered.text}],
+    )
+    config = InnerLoopConfig(
+        session=session,
+        tool_choice="auto",
+        response_format=None,
+        require_structured_output_text=False,
+        call_provider=ErrorProvider(),
+        select_choice=lambda response: response.choices[0],
+        serialize_tool_message_fn=serialize_tool_message,
+        budget_tracker=tracker,
+    )
+    loop = InnerLoop[object](inputs=inputs, config=config)
+
+    with pytest.raises(RuntimeError, match="Provider failure"):
+        loop.run()
+
+    # After exception, the evaluation should still be cleaned up
+    consumed = tracker.consumed
+    assert consumed.input_tokens == 0
+    assert consumed.output_tokens == 0
+    assert consumed.total_tokens == 0
+
+
+def test_inner_loop_cleanup_without_budget_tracker() -> None:
+    """Test that InnerLoop cleanup works when no budget tracker is set."""
+    rendered = RenderedPrompt(text="system")
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
+    provider = ProviderStub(responses)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+
+    loop = build_inner_loop(
+        rendered=rendered, provider=provider, session=session, budget_tracker=None
+    )
+
+    # Should not raise - cleanup handles None budget_tracker gracefully
+    response = loop.run()
+    assert response.text == "Hello"
+
+
+def test_inner_loop_cleanup_cumulative_totals_drop() -> None:
+    """Test that cumulative totals drop after evaluation cleanup."""
+    rendered = RenderedPrompt(text="system")
+    budget = Budget(max_total_tokens=1000)
+    tracker = BudgetTracker(budget=budget)
+
+    # Add some existing usage from another evaluation
+    tracker.record_cumulative(
+        "other-eval", TokenUsage(input_tokens=200, output_tokens=100)
+    )
+
+    responses = [
+        DummyResponse(
+            [DummyChoice(DummyMessage(content="Hello"))],
+            usage={"input_tokens": 100, "output_tokens": 50, "cached_tokens": 0},
+        )
+    ]
+    provider = ProviderStub(responses)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+
+    loop = build_inner_loop(
+        rendered=rendered, provider=provider, session=session, budget_tracker=tracker
+    )
+
+    # Before run - only the other evaluation's usage
+    consumed_before = tracker.consumed
+    assert consumed_before.input_tokens == 200
+    assert consumed_before.output_tokens == 100
+
+    loop.run()
+
+    # After run - only the other evaluation's usage remains (current was cleaned up)
+    consumed_after = tracker.consumed
+    assert consumed_after.input_tokens == 200
+    assert consumed_after.output_tokens == 100
