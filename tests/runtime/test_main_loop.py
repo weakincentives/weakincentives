@@ -872,6 +872,75 @@ def test_no_budget_tracker_when_no_budget() -> None:
 # =============================================================================
 
 
+def test_loop_handles_expired_receipt_handle_on_ack() -> None:
+    """MainLoop continues when receipt handle expires during processing."""
+    requests: FakeMailbox[MainLoopRequest[_Request]] = FakeMailbox(name="requests")
+    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+    request = MainLoopRequest(request=_Request(message="hello"))
+    requests.send(request)
+
+    # Receive the message to get the handle, then expire it
+    msgs = requests.receive(max_messages=1)
+    assert len(msgs) == 1
+    msg = msgs[0]
+
+    # Expire the handle to simulate slow processing
+    requests.expire_handle(msg.receipt_handle)
+
+    # Create a result to send
+    result: MainLoopResult[_Output] = MainLoopResult(
+        request_id=request.request_id,
+        output=_Output(result="success"),
+    )
+
+    # Call _send_and_ack directly - should handle expired handle gracefully
+    loop._send_and_ack(msg, result)
+
+    # Should not raise - the expired handle is handled gracefully
+    # Response should still be sent
+    assert responses.approximate_count() == 1
+
+
+def test_loop_handles_expired_receipt_handle_on_nack() -> None:
+    """MainLoop continues when receipt handle expires during nack after send failure."""
+    from weakincentives.runtime.mailbox import MailboxConnectionError
+
+    requests: FakeMailbox[MainLoopRequest[_Request]] = FakeMailbox(name="requests")
+    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+
+    request = MainLoopRequest(request=_Request(message="hello"))
+    requests.send(request)
+
+    # Receive the message to get the handle
+    msgs = requests.receive(max_messages=1)
+    assert len(msgs) == 1
+    msg = msgs[0]
+
+    # Expire the handle AND make send fail
+    # This simulates: processing took too long, handle expired,
+    # AND the response queue is also having issues
+    requests.expire_handle(msg.receipt_handle)
+    responses.set_connection_error(MailboxConnectionError("connection lost"))
+
+    # Create a result to send
+    result: MainLoopResult[_Output] = MainLoopResult(
+        request_id=request.request_id,
+        output=_Output(result="success"),
+    )
+
+    # Call _send_and_ack directly - should handle both failures gracefully
+    loop._send_and_ack(msg, result)
+
+    # Should not raise - both failures are handled gracefully
+
+
 def test_loop_exits_when_mailbox_closed() -> None:
     """MainLoop.run() exits when requests mailbox is closed."""
     import threading

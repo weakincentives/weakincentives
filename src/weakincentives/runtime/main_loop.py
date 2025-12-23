@@ -54,7 +54,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.tool import ResourceRegistry
-from .mailbox import Mailbox, Message
+from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
 from .session import Session
 from .session.visibility_overrides import SetVisibilityOverride
 
@@ -264,12 +264,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 session_id=session.session_id,
             )
 
-            try:
-                _ = self._responses.send(result)
-                msg.acknowledge()
-            except Exception:
-                backoff = min(60 * msg.delivery_count, 900)
-                msg.nack(visibility_timeout=backoff)
+            self._send_and_ack(msg, result)
 
         except Exception as exc:
             result = MainLoopResult[OutputT](
@@ -277,12 +272,30 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 error=str(exc),
             )
 
+            self._send_and_ack(msg, result)
+
+    def _send_and_ack(
+        self,
+        msg: Message[MainLoopRequest[UserRequestT]],
+        result: MainLoopResult[OutputT],
+    ) -> None:
+        """Send result and acknowledge message, handling expired handles gracefully."""
+        try:
+            _ = self._responses.send(result)
+            msg.acknowledge()
+        except ReceiptHandleExpiredError:
+            # Handle expired during processing - message already requeued by reaper.
+            # This is expected for long-running requests. The duplicate response
+            # will be sent when the message is reprocessed.
+            pass
+        except Exception:
+            # Response send failed - nack so message is retried
             try:
-                _ = self._responses.send(result)
-                msg.acknowledge()
-            except Exception:
                 backoff = min(60 * msg.delivery_count, 900)
                 msg.nack(visibility_timeout=backoff)
+            except ReceiptHandleExpiredError:
+                # Handle expired - message already requeued, nothing to do
+                pass
 
     def run(
         self,
