@@ -18,8 +18,9 @@ are not part of the minimal core library.
 
 Subpackages:
 
-- ``contrib.tools``: Planning tools, VFS, Podman sandbox, asteval, workspace digest
+- ``contrib.mailbox``: Redis-backed mailbox implementation
 - ``contrib.optimizers``: Workspace digest optimizer
+- ``contrib.tools``: Planning tools, VFS, Podman sandbox, asteval, workspace digest
 
 Example usage::
 
@@ -29,10 +30,12 @@ Example usage::
         AstevalSection,
         PodmanSandboxSection,
     )
+
+    from weakincentives.contrib.mailbox import RedisMailbox
 """
 
 from __future__ import annotations
 
-from . import optimizers, tools
+from . import mailbox, optimizers, tools
 
-__all__ = ["optimizers", "tools"]
+__all__ = ["mailbox", "optimizers", "tools"]

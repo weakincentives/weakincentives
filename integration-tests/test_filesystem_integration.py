@@ -56,8 +56,6 @@ from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
-# ruff: noqa: PLR6301, PLR2004
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
