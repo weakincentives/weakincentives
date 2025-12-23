@@ -18,6 +18,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from ..core import PromptEvaluationError
+from ..exceptions import ClaudeAgentSDKError
 
 if TYPE_CHECKING:
     from ..throttle import ThrottleError, ThrottleKind
@@ -62,19 +63,20 @@ def normalize_sdk_error(
         prompt_name: Name of the prompt being evaluated.
 
     Returns:
-        A normalized PromptEvaluationError or subclass.
+        A normalized ClaudeAgentSDKError or subclass.
     """
     error_type = type(error).__name__
     error_module = type(error).__module__
 
     if error_type == "CLINotFoundError":
-        return PromptEvaluationError(
+        return ClaudeAgentSDKError(
             message=(
                 "Claude Code CLI not found. Install: "
                 "npm install -g @anthropic-ai/claude-code"
             ),
             prompt_name=prompt_name,
             phase="request",
+            error_type=error_type,
         )
 
     if error_type == "CLIConnectionError":
@@ -92,32 +94,36 @@ def normalize_sdk_error(
         if hasattr(error, "stderr"):
             provider_payload["stderr"] = error.stderr
 
-        return PromptEvaluationError(
+        return ClaudeAgentSDKError(
             message=f"Claude Code process failed: {error}",
             prompt_name=prompt_name,
             phase="request",
+            error_type=error_type,
             provider_payload=provider_payload if provider_payload else None,
         )
 
     if error_type == "CLIJSONDecodeError":
-        return PromptEvaluationError(
+        return ClaudeAgentSDKError(
             message=f"Failed to parse SDK response: {error}",
             prompt_name=prompt_name,
             phase="response",
+            error_type=error_type,
         )
 
     if error_type == "MaxTurnsExceededError":
-        return PromptEvaluationError(
+        return ClaudeAgentSDKError(
             message=f"SDK exceeded maximum turns: {error}",
             prompt_name=prompt_name,
             phase="response",
+            error_type=error_type,
         )
 
     # Handle unknown SDK errors or general errors
     is_sdk_error = "claude_agent_sdk" in error_module or "claude_code" in error_module
     message = f"Claude Agent SDK error: {error}" if is_sdk_error else str(error)
-    return PromptEvaluationError(
+    return ClaudeAgentSDKError(
         message=message,
         prompt_name=prompt_name,
         phase="request",
+        error_type=error_type if is_sdk_error else None,
     )
