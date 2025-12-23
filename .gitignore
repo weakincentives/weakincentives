@@ -198,6 +198,9 @@ cython_debug/
 .ruff_cache/
 mutants/
 
+# Pyright temp config (integration test validation)
+.pyrightconfig-integration-tests-*.json
+
 # PyPI configuration file
 .pypirc
 
