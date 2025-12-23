@@ -49,6 +49,7 @@ from .core import (
     ProviderAdapter,
     SessionProtocol,
 )
+from .exceptions import OpenAIError
 from .inner_loop import InnerLoopConfig, InnerLoopInputs, run_inner_loop
 from .response_parser import build_json_schema_response_format
 from .throttle import ThrottleError, ThrottleKind, throttle_details
@@ -847,10 +848,12 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                         },
                     )
                     raise throttle_error from error
-                raise PromptEvaluationError(
-                    "OpenAI request failed.",
+                error_code = getattr(error, "code", None)
+                raise OpenAIError(
+                    str(error) or "OpenAI request failed.",
                     prompt_name=prompt_name,
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
+                    error_code=str(error_code) if error_code is not None else None,
                     provider_payload=_error_payload(error),
                 ) from error
             else:
@@ -887,6 +890,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
 __all__ = [
     "OpenAIAdapter",
     "OpenAIClientConfig",
+    "OpenAIError",
     "OpenAIModelConfig",
     "OpenAIProtocol",
 ]
