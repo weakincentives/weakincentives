@@ -227,14 +227,16 @@ def _read_specs() -> str:
     specs_dir = files("weakincentives.docs.specs")
     parts: list[str] = []
 
-    # Get all .md files, sorted alphabetically
-    spec_files = sorted(
-        name for name in specs_dir.iterdir() if name.endswith(".md")
+    # Get all .md files, sorted alphabetically by name
+    # Note: iterdir() yields Traversable objects, use .name for the filename
+    spec_entries = sorted(
+        (entry for entry in specs_dir.iterdir() if entry.name.endswith(".md")),
+        key=lambda entry: entry.name,
     )
 
-    for name in spec_files:
-        header = f"<!-- specs/{name} -->"
-        content = specs_dir.joinpath(name).read_text(encoding="utf-8")
+    for entry in spec_entries:
+        header = f"<!-- specs/{entry.name} -->"
+        content = entry.read_text(encoding="utf-8")
         parts.append(f"{header}\n{content}")
 
     return "\n\n".join(parts)
