@@ -148,7 +148,7 @@ combine-as-imports = true
 "integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
 # Examples may use higher complexity for illustration purposes.
 "examples/**" = ["C901", "CPY001", "ANN201", "ANN204"]
-"src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
+"src/weakincentives/contrib/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
 "src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]

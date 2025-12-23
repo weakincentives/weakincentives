@@ -16,8 +16,21 @@ import json
 from pathlib import Path
 from typing import cast, override
 
-from ...runtime.logging import StructuredLogger, get_logger
-from ...types import JSONValue
+from weakincentives.prompt.overrides import (
+    HexDigest,
+    PromptDescriptor,
+    PromptLike,
+    PromptOverride,
+    PromptOverridesError,
+    PromptOverridesStore,
+    SectionOverride,
+    TaskExampleOverride,
+    ToolOverride,
+    descriptor_for_prompt,
+)
+from weakincentives.runtime.logging import StructuredLogger, get_logger
+from weakincentives.types import JSONValue
+
 from ._fs import OverrideFilesystem
 from .validation import (
     FORMAT_VERSION,
@@ -33,18 +46,6 @@ from .validation import (
     validate_header,
     validate_sections_for_write,
     validate_tools_for_write,
-)
-from .versioning import (
-    HexDigest,
-    PromptDescriptor,
-    PromptLike,
-    PromptOverride,
-    PromptOverridesError,
-    PromptOverridesStore,
-    SectionOverride,
-    TaskExampleOverride,
-    ToolOverride,
-    descriptor_for_prompt,
 )
 
 _LOGGER: StructuredLogger = get_logger(
@@ -139,7 +140,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             )
             return None
 
-        override = PromptOverride(
+        prompt_override = PromptOverride(
             ns=descriptor.ns,
             prompt_key=descriptor.key,
             tag=tag,
@@ -159,7 +160,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "task_example_count": len(task_example_overrides),
             },
         )
-        return override
+        return prompt_override
 
     @override
     def upsert(

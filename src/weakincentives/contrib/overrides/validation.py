@@ -17,9 +17,7 @@ from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import Literal, cast
 
-from ...runtime.logging import StructuredLogger, get_logger
-from ...types import JSONValue
-from .versioning import (
+from weakincentives.prompt.overrides import (
     HexDigest,
     PromptDescriptor,
     PromptLike,
@@ -34,6 +32,8 @@ from .versioning import (
     ToolOverride,
     ensure_hex_digest,
 )
+from weakincentives.runtime.logging import StructuredLogger, get_logger
+from weakincentives.types import JSONValue
 
 _LOGGER: StructuredLogger = get_logger(
     __name__, context={"component": "prompt_overrides"}

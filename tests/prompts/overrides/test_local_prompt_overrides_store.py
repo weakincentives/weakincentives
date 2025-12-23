@@ -20,10 +20,17 @@ from typing import Any, cast
 
 import pytest
 
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
+from weakincentives.contrib.overrides._fs import OverrideFilesystem
+from weakincentives.contrib.overrides.validation import (
+    load_sections,
+    load_tools,
+    seed_sections,
+    seed_tools,
+)
 from weakincentives.prompt import MarkdownSection, PromptTemplate, Tool
 from weakincentives.prompt.overrides import (
     HexDigest,
-    LocalPromptOverridesStore,
     PromptDescriptor,
     PromptOverride,
     PromptOverridesError,
@@ -31,13 +38,6 @@ from weakincentives.prompt.overrides import (
     SectionOverride,
     TaskExampleOverride,
     ToolOverride,
-)
-from weakincentives.prompt.overrides._fs import OverrideFilesystem
-from weakincentives.prompt.overrides.validation import (
-    load_sections,
-    load_tools,
-    seed_sections,
-    seed_tools,
 )
 from weakincentives.types import JSONValue
 

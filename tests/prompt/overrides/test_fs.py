@@ -17,8 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from weakincentives.prompt.overrides._fs import OverrideFilesystem
-from weakincentives.prompt.overrides.versioning import PromptOverridesError
+from weakincentives.contrib.overrides._fs import OverrideFilesystem
+from weakincentives.prompt.overrides import PromptOverridesError
 
 
 def _build_filesystem(tmp_path: Path) -> OverrideFilesystem:
@@ -78,7 +78,7 @@ def test_git_toplevel_returns_path(
         stdout = str(tmp_path)
 
     monkeypatch.setattr(
-        "weakincentives.prompt.overrides._fs.subprocess.run",
+        "weakincentives.contrib.overrides._fs.subprocess.run",
         lambda *_args, **_kwargs: _Result(),
     )
 
@@ -94,7 +94,7 @@ def test_git_toplevel_handles_missing_command(
         raise FileNotFoundError
 
     monkeypatch.setattr(
-        "weakincentives.prompt.overrides._fs.subprocess.run",
+        "weakincentives.contrib.overrides._fs.subprocess.run",
         _raise,
     )
 
@@ -110,7 +110,7 @@ def test_git_toplevel_handles_empty_output(
         stdout = ""
 
     monkeypatch.setattr(
-        "weakincentives.prompt.overrides._fs.subprocess.run",
+        "weakincentives.contrib.overrides._fs.subprocess.run",
         lambda *_args, **_kwargs: _BlankResult(),
     )
 

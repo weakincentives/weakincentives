@@ -36,7 +36,6 @@ from .feedback import (
 from .feedback_providers import DeadlineFeedback
 from .markdown import MarkdownSection
 from .overrides import (
-    LocalPromptOverridesStore,
     PromptDescriptor,
     PromptLike,
     PromptOverride,
@@ -88,7 +87,6 @@ __all__ = [
     "FeedbackProvider",
     "FeedbackProviderConfig",
     "FeedbackTrigger",
-    "LocalPromptOverridesStore",
     "MarkdownSection",
     "Observation",
     "OpenSectionsParams",
