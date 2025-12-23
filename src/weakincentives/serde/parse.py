@@ -12,8 +12,6 @@
 
 """Dataclass parsing helpers."""
 
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportUnnecessaryIsInstance=false, reportCallIssue=false, reportArgumentType=false, reportPossiblyUnboundVariable=false, reportPrivateUsage=false
-
 from __future__ import annotations
 
 import dataclasses
@@ -35,15 +33,15 @@ from uuid import UUID
 
 from ..types import JSONValue
 from ._utils import (
-    _UNION_TYPE,
+    _UNION_TYPE,  # pyright: ignore[reportPrivateUsage]
     TYPE_REF_KEY,
-    _AnyType,
-    _apply_constraints,
-    _merge_annotated_meta,
-    _ParseConfig,
-    _resolve_type_identifier,
-    _set_extras,
-    _type_identifier,
+    _AnyType,  # pyright: ignore[reportPrivateUsage]
+    _apply_constraints,  # pyright: ignore[reportPrivateUsage]
+    _merge_annotated_meta,  # pyright: ignore[reportPrivateUsage]
+    _ParseConfig,  # pyright: ignore[reportPrivateUsage]
+    _resolve_type_identifier,  # pyright: ignore[reportPrivateUsage]
+    _set_extras,  # pyright: ignore[reportPrivateUsage]
+    _type_identifier,  # pyright: ignore[reportPrivateUsage]
 )
 
 # typing.Union origin (for Optional[X] and Union[X, Y] constructs from type aliases)
@@ -167,11 +165,12 @@ def _try_coerce_literal(
 ) -> tuple[object | None, Exception | None]:
     """Attempt to coerce value to match a literal. Returns (coerced, error)."""
     literal_type = type(literal)
+    coercer = cast(Callable[[object], object], literal_type)
     try:
         if isinstance(literal, bool) and isinstance(value, str):
             coerced = _bool_from_str(value)
         else:
-            coerced = literal_type(value)
+            coerced = coercer(value)
     except (TypeError, ValueError) as error:
         return None, error
     else:
@@ -479,8 +478,10 @@ def _coerce_to_type(
         if result is not _NOT_HANDLED:
             return result
 
+    # Fallback: try calling base_type as a constructor
+    constructor = cast(Callable[[object], object], base_type)
     try:
-        coerced = base_type(value)
+        coerced = constructor(value)
     except Exception as error:
         raise type(error)(str(error)) from error
     return _apply_constraints(coerced, merged_meta, path)
@@ -500,7 +501,8 @@ def _build_lowered_key_map(data: Mapping[str, object]) -> dict[str, str]:
     """Build a case-insensitive key lookup map."""
     lowered_map: dict[str, str] = {}
     for key in data:
-        if isinstance(key, str):
+        # Defensive check: Mapping type doesn't enforce str keys at runtime
+        if isinstance(key, str):  # pyright: ignore[reportUnnecessaryIsInstance]
             _ = lowered_map.setdefault(key.lower(), key)
     return lowered_map
 
@@ -563,7 +565,8 @@ def _collect_field_kwargs(
     kwargs: dict[str, object] = {}
     used_keys: set[str] = set()
 
-    for field in dataclasses.fields(cls):
+    # cls is validated as a dataclass before this call
+    for field in dataclasses.fields(cls):  # pyright: ignore[reportArgumentType]
         if not field.init:
             continue
         field_meta = dict(field.metadata)
@@ -651,7 +654,8 @@ def _resolve_target_dataclass[T](
             raise TypeError("parse() requires a dataclass type")
         target_cls = cast(type[T], referenced_cls)
 
-    if not dataclasses.is_dataclass(target_cls) or not isinstance(target_cls, type):
+    # Defensive: is_dataclass() returns True for instances too; verify it's a type
+    if not dataclasses.is_dataclass(target_cls) or not isinstance(target_cls, type):  # pyright: ignore[reportUnnecessaryIsInstance]
         raise TypeError("parse() requires a dataclass type")
 
     if referenced_cls is not None and referenced_cls is not target_cls:
