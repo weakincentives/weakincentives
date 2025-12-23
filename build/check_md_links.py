@@ -23,7 +23,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Exclude test repos and bundled docs (copies of root-level files where links don't apply)
 EXCLUDED_PARTS = {"test-repositories"}
+EXCLUDED_PREFIXES = (Path("src") / "weakincentives" / "docs",)
 
 # Match markdown links: [text](target)
 LINK_PATTERN = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
@@ -56,6 +58,8 @@ def _collect_markdown_files(root: Path) -> list[Path]:
 
         path = Path(line)
         if EXCLUDED_PARTS.intersection(path.parts):
+            continue
+        if any(path.is_relative_to(prefix) for prefix in EXCLUDED_PREFIXES):
             continue
 
         candidate = root / path

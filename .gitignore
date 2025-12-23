@@ -1,6 +1,9 @@
 # Prompt overrides
 .weakincentives/
 
+# Bundled documentation (generated at build time)
+src/weakincentives/docs/
+
 # Session snapshots
 snapshots/*.jsonl
 

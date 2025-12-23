@@ -22,8 +22,8 @@ access to the repository's documentation files. The `docs` subcommand solves
 this by:
 
 1. **Bundling documentation** inside the package at build time
-2. **Exposing documentation** via CLI for easy access
-3. **Supporting LLM workflows** by outputting plain text to stdout
+1. **Exposing documentation** via CLI for easy access
+1. **Supporting LLM workflows** by outputting plain text to stdout
 
 Common use cases:
 
@@ -121,8 +121,8 @@ path = "hatch_build.py"
 This approach is preferred because:
 
 1. **Automatic**: Documentation is always synchronized on `hatch build`
-2. **No manual steps**: Developers cannot forget to run a sync command
-3. **CI-friendly**: Works seamlessly in automated build pipelines
+1. **No manual steps**: Developers cannot forget to run a sync command
+1. **CI-friendly**: Works seamlessly in automated build pipelines
 
 ### Manual Synchronization Alternative
 
@@ -161,18 +161,20 @@ wink docs [--reference] [--guide] [--specs]
 1. **At least one flag required**: If no flags are provided, print usage help
    and exit with code 1.
 
-2. **Multiple flags allowed**: Flags can be combined. Output is printed in
+1. **Multiple flags allowed**: Flags can be combined. Output is printed in
    order: reference, guide, specs.
 
-3. **Separator between sections**: When multiple flags are used, print a
+1. **Separator between sections**: When multiple flags are used, print a
    separator line between sections:
+
    ```
    ---
    ```
 
-4. **Spec ordering**: Specs are printed in alphabetical order by filename.
+1. **Spec ordering**: Specs are printed in alphabetical order by filename.
 
-5. **Spec headers**: Each spec file is prefixed with a header comment:
+1. **Spec headers**: Each spec file is prefixed with a header comment:
+
    ```
    <!-- specs/ADAPTERS.md -->
    ```
@@ -404,8 +406,8 @@ def test_docs_available_in_installed_package(tmp_path):
 Documentation files are versioned with the package. When documentation changes:
 
 1. Update the source files (`llms.md`, `WINK_GUIDE.md`, `specs/*.md`)
-2. Run `make sync-docs` (or let the build hook handle it)
-3. Bump version and release
+1. Run `make sync-docs` (or let the build hook handle it)
+1. Bump version and release
 
 The bundled documentation always matches the installed package version.
 
@@ -460,6 +462,6 @@ excluded from wheels.
 Potential enhancements (not in scope for initial implementation):
 
 1. **`--list`**: List available documentation files without printing content
-2. **`--spec NAME`**: Print a single spec by name
-3. **`--format json`**: Output as JSON with metadata
-4. **`--search QUERY`**: Search documentation content
+1. **`--spec NAME`**: Print a single spec by name
+1. **`--format json`**: Output as JSON with metadata
+1. **`--search QUERY`**: Search documentation content
