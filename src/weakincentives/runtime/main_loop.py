@@ -187,7 +187,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             prompt: The prompt that was evaluated.
             session: The session used for evaluation.
         """
-        _ = self, prompt, session  # Default implementation does nothing
+        _ = (self, prompt, session)  # Default implementation does nothing
 
     def execute(
         self,

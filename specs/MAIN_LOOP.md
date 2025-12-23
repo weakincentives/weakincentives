@@ -23,7 +23,7 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        bus: ControlBus,
+        bus: ControlDispatcher,
         config: MainLoopConfig | None = None,
     ) -> None: ...
 
@@ -151,7 +151,7 @@ response, session = loop.execute(MyRequest(...))
 
 ```python
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
-    def __init__(self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlBus) -> None:
+    def __init__(self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlDispatcher) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._template = PromptTemplate[ReviewResult](
             ns="reviews",
@@ -202,9 +202,10 @@ def initialize(self, request: Request) -> tuple[Prompt[Output], Session]:
 
 ## Error Handling
 
-| Exception | Behavior | |-----------|----------| |
-`VisibilityExpansionRequired` | Retry with updated overrides | | All others |
-Publish `MainLoopFailed`, re-raise |
+| Exception | Behavior |
+|-----------|----------|
+| `VisibilityExpansionRequired` | Retry with updated overrides |
+| All others | Publish `MainLoopFailed`, re-raise |
 
 ## Code Reviewer Integration
 
