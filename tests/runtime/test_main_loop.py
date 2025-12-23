@@ -151,14 +151,20 @@ class _TestLoop(MainLoop[_Request, _Output]):
             ],
         )
         self.session_created: Session | None = None
+        self.finalize_called = False
+        self.finalize_prompt: Prompt[_Output] | None = None
+        self.finalize_session: Session | None = None
 
-    def create_prompt(self, request: _Request) -> Prompt[_Output]:
-        return Prompt(self._template).bind(_Params(content=request.message))
-
-    def create_session(self) -> Session:
+    def initialize(self, request: _Request) -> tuple[Prompt[_Output], Session]:
+        prompt = Prompt(self._template).bind(_Params(content=request.message))
         session = Session(bus=self._bus, tags={"loop": "test"})
         self.session_created = session
-        return session
+        return prompt, session
+
+    def finalize(self, prompt: Prompt[_Output], session: Session) -> None:
+        self.finalize_called = True
+        self.finalize_prompt = prompt
+        self.finalize_session = session
 
 
 # =============================================================================
@@ -288,6 +294,50 @@ def test_execute_successful_execution() -> None:
     assert adapter._call_count == 1
     assert loop.session_created is not None
     assert session is loop.session_created
+
+
+def test_execute_calls_finalize_on_success() -> None:
+    """MainLoop.execute calls finalize after successful evaluation."""
+    bus = InProcessDispatcher()
+    adapter = _MockAdapter()
+    loop = _TestLoop(adapter=adapter, bus=bus)
+
+    response, session = loop.execute(_Request(message="hello"))
+
+    assert loop.finalize_called
+    assert loop.finalize_session is session
+    assert loop.finalize_prompt is not None
+    assert response.output == _Output(result="success")
+
+
+def test_execute_finalize_called_after_visibility_retries() -> None:
+    """MainLoop.execute calls finalize after visibility expansion succeeds."""
+    bus = InProcessDispatcher()
+    visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
+        {("section1",): SectionVisibility.FULL},
+    ]
+    adapter = _MockAdapter(visibility_requests=visibility_requests)
+    loop = _TestLoop(adapter=adapter, bus=bus)
+
+    response, session = loop.execute(_Request(message="hello"))
+
+    assert loop.finalize_called
+    assert loop.finalize_session is session
+    assert adapter._call_count == 2  # 1 visibility expansion + 1 success
+    assert response.output == _Output(result="success")
+
+
+def test_execute_finalize_not_called_on_error() -> None:
+    """MainLoop.execute does not call finalize when adapter raises error."""
+    bus = InProcessDispatcher()
+    error = RuntimeError("adapter failure")
+    adapter = _MockAdapter(error=error)
+    loop = _TestLoop(adapter=adapter, bus=bus)
+
+    with pytest.raises(RuntimeError, match="adapter failure"):
+        loop.execute(_Request(message="hello"))
+
+    assert not loop.finalize_called
 
 
 def test_execute_passes_budget_from_config() -> None:
