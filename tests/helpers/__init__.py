@@ -13,6 +13,18 @@
 """Test-only helper utilities for weakincentives."""
 
 from .events import NullDispatcher
+from .filesystem import (
+    FilesystemValidationSuite,
+    ReadOnlyFilesystemValidationSuite,
+    SnapshotableFilesystemValidationSuite,
+)
 from .time import FrozenUtcNow, frozen_utcnow
 
-__all__ = ["FrozenUtcNow", "NullDispatcher", "frozen_utcnow"]
+__all__ = [
+    "FilesystemValidationSuite",
+    "FrozenUtcNow",
+    "NullDispatcher",
+    "ReadOnlyFilesystemValidationSuite",
+    "SnapshotableFilesystemValidationSuite",
+    "frozen_utcnow",
+]
