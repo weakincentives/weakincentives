@@ -302,7 +302,7 @@ class MainLoopResult(Generic[OutputT]):
     request_id: UUID
     """Correlates with MainLoopRequest.request_id."""
 
-    response: PromptResponse[OutputT] | None = None
+    output: OutputT | None = None
     """Present on success."""
 
     error: str | None = None
@@ -328,7 +328,7 @@ def run(self, *, max_iterations: int | None = None) -> None:
                 response, session = self._execute(msg.body)
                 self._responses.send(MainLoopResult(
                     request_id=msg.body.request_id,
-                    response=response,
+                    output=response.output,
                     session_id=session.session_id,
                 ))
                 msg.acknowledge()
@@ -391,7 +391,7 @@ while time.time() < deadline:
             msg.acknowledge()
             if msg.body.error:
                 raise RemoteError(msg.body.error)
-            return msg.body.response
+            return msg.body.output
         # Not our message - return to queue for other clients
         msg.nack(visibility_timeout=0)
 raise TimeoutError(f"No response within {timeout_seconds}s")
