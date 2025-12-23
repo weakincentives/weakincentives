@@ -14,16 +14,16 @@
 
 from __future__ import annotations
 
-from weakincentives.prompt import (
+from weakincentives.prompt import SectionVisibility
+from weakincentives.runtime.events import InProcessDispatcher
+from weakincentives.runtime.session import (
     ClearAllVisibilityOverrides,
     ClearVisibilityOverride,
-    SectionVisibility,
+    Session,
     SetVisibilityOverride,
     VisibilityOverrides,
     get_session_visibility_override,
 )
-from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.runtime.session import Session
 
 
 def test_visibility_overrides_get() -> None:
@@ -213,7 +213,7 @@ def test_builtin_reducer_registration_is_idempotent() -> None:
 
 def test_register_visibility_reducers_is_idempotent() -> None:
     """Calling register_visibility_reducers on a session adds reducers (idempotent)."""
-    from weakincentives.prompt import register_visibility_reducers
+    from weakincentives.runtime.session import register_visibility_reducers
 
     bus = InProcessDispatcher()
     session = Session(bus=bus)

@@ -10,8 +10,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# pyright: reportImportCycles=false
-
 """Session-managed visibility overrides for prompt sections.
 
 This module provides the VisibilityOverrides dataclass for storing
@@ -25,15 +23,15 @@ from __future__ import annotations
 from dataclasses import field, replace
 from typing import TYPE_CHECKING
 
-from ..dataclasses import FrozenDataclass
-from ..runtime.session.state_slice import reducer
-from ._visibility import SectionVisibility
-from .errors import SectionPath
+from ...dataclasses import FrozenDataclass
+from ...prompt._visibility import SectionVisibility
+from ...prompt.errors import SectionPath
+from .state_slice import reducer
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from ..runtime.session.protocols import SessionProtocol
+    from .protocols import SessionProtocol
 
 
 @FrozenDataclass()
@@ -71,7 +69,8 @@ class VisibilityOverrides:
 
     Usage::
 
-        from weakincentives.prompt import VisibilityOverrides, SectionVisibility
+        from weakincentives.runtime.session import VisibilityOverrides, SetVisibilityOverride
+        from weakincentives.prompt import SectionVisibility
 
         # Set initial overrides
         overrides = VisibilityOverrides(

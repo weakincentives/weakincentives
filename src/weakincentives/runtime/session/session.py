@@ -877,7 +877,7 @@ class Session(SessionProtocol):
         Called once during Session initialization. Safe to call multiple times
         as it guards against re-registration.
         """
-        from ...prompt.visibility_overrides import (
+        from .visibility_overrides import (
             SetVisibilityOverride,
             register_visibility_reducers,
         )

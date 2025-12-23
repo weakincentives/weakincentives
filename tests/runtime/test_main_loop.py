@@ -31,7 +31,6 @@ from weakincentives.prompt import (
     SectionPath,
     SectionVisibility,
     VisibilityExpansionRequired,
-    VisibilityOverrides,
 )
 from weakincentives.prompt.tool import ResourceRegistry
 from weakincentives.runtime.events import Dispatcher, InProcessDispatcher
@@ -42,7 +41,7 @@ from weakincentives.runtime.main_loop import (
     MainLoopFailed,
     MainLoopRequest,
 )
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.session import Session, VisibilityOverrides
 from weakincentives.runtime.session.protocols import SessionProtocol
 
 

@@ -25,7 +25,6 @@ from weakincentives.prompt import (
     MarkdownSection,
     PromptValidationError,
     SectionVisibility,
-    SetVisibilityOverride,
     VisibilityExpansionRequired,
 )
 from weakincentives.prompt.progressive_disclosure import (
@@ -43,7 +42,7 @@ from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.section import Section
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.session import Session, SetVisibilityOverride
 from weakincentives.types.dataclass import SupportsDataclass
 
 

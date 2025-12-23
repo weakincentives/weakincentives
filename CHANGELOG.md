@@ -366,16 +366,16 @@ Visibility overrides are now managed through session state using Redux-style
 events:
 
 ```python
-from weakincentives.prompt import (
-    SectionVisibility,
+from weakincentives.prompt import SectionVisibility
+from weakincentives.runtime.session import (
+    Session,
     SetVisibilityOverride,
     VisibilityOverrides,
 )
-from weakincentives.runtime import Session
 
 session = Session()
 
-session.mutate(VisibilityOverrides).dispatch(
+session[VisibilityOverrides].apply(
     SetVisibilityOverride(path=("section",), visibility=SectionVisibility.FULL)
 )
 response = adapter.evaluate(prompt, session=session)

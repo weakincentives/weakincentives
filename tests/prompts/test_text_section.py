@@ -24,14 +24,13 @@ from weakincentives.prompt import (
     PromptValidationError,
     Section,
     SectionVisibility,
-    SetVisibilityOverride,
     Tool,
 )
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.rendering import PromptRenderer
 from weakincentives.prompt.tool import ToolContext, ToolExample, ToolResult
 from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.session import Session, SetVisibilityOverride
 from weakincentives.types import SupportsDataclass
 
 

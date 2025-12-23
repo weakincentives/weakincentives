@@ -25,9 +25,9 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.tool import ResourceRegistry
-from ..prompt.visibility_overrides import SetVisibilityOverride
 from .events._types import ControlDispatcher
 from .session import Session
+from .session.visibility_overrides import SetVisibilityOverride
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
