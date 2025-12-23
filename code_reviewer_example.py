@@ -44,6 +44,7 @@ from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
 from weakincentives.contrib.tools import (
     AstevalSection,
     HostMount,
+    Plan,
     PlanningStrategy,
     PlanningToolsSection,
     PodmanSandboxConfig,
@@ -220,15 +221,36 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     ) -> tuple[Prompt[ReviewResponse], Session]:
         """Initialize prompt and session for the given request.
 
-        Creates the review prompt and returns the persistent session
-        (reused across all turns).
+        Runs workspace digest optimization on first use if needed, then creates
+        the review prompt and returns the persistent session (reused across all
+        turns).
         """
+        # Auto-optimize workspace digest on first request
+        if self._session[WorkspaceDigest].latest() is None:
+            self._run_optimization()
+
         prompt = Prompt(
             self._template,
             overrides_store=self._overrides_store,
             overrides_tag=self._override_tag,
         ).bind(request)
         return prompt, self._session
+
+    def finalize(self, prompt: Prompt[ReviewResponse], session: Session) -> None:
+        """Finalize after evaluation completes.
+
+        Logs a summary of the evaluation for debugging and observability.
+        Verifies the session matches the persistent session (sanity check).
+        """
+        _ = prompt  # Prompt available for inspection if needed
+        if session is not self._session:
+            _LOGGER.warning("Session mismatch in finalize; expected persistent session")
+        plan_count = len(session[Plan].all())
+        _LOGGER.debug(
+            "Turn completed: session=%s, plan_steps=%d",
+            session.session_id,
+            plan_count,
+        )
 
     def execute(
         self,
@@ -237,14 +259,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         budget: None = None,
         deadline: Deadline | None = None,
     ) -> tuple[PromptResponse[ReviewResponse], Session]:
-        """Execute with auto-optimization for workspace digest.
-
-        If no WorkspaceDigest exists in the session, runs optimization first.
-        All modes now support workspace optimization: VFS, Podman, and Claude Agent SDK.
-        """
-        needs_optimization = self._session[WorkspaceDigest].latest() is None
-        if needs_optimization:
-            self._run_optimization()
+        """Execute with a default deadline if none provided."""
         effective_deadline = deadline or _default_deadline()
         return super().execute(request, budget=budget, deadline=effective_deadline)
 

@@ -47,16 +47,17 @@ Implements the `MainLoop` protocol with these responsibilities:
 
 - **Persistent Session**: Creates a single `Session` at construction time,
   reused across all `execute()` calls
-- **Auto-Optimization**: Runs workspace digest optimization automatically on
-  first request if no `WorkspaceDigest` exists in the session
+- **Auto-Optimization**: Runs workspace digest optimization in `initialize()`
+  on first request if no `WorkspaceDigest` exists in the session
 - **Deadline Management**: Applies a default 5-minute deadline to each request
-- **Prompt Binding**: Creates and binds prompts via `create_prompt()`
+- **Prompt Binding**: Creates and binds prompts via `initialize()`
+- **Post-processing**: Logs evaluation summaries via `finalize()`
 
 ```python
 class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
-    def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]: ...
-    def create_session(self) -> Session: ...
-    def execute(self, request: ReviewTurnParams, *, budget=None, deadline=None) -> PromptResponse[ReviewResponse]: ...
+    def initialize(self, request: ReviewTurnParams) -> tuple[Prompt[ReviewResponse], Session]: ...
+    def finalize(self, prompt: Prompt[ReviewResponse], session: Session) -> None: ...
+    def execute(self, request: ReviewTurnParams, *, budget=None, deadline=None) -> tuple[PromptResponse[ReviewResponse], Session]: ...
 ```
 
 ### CodeReviewApp
@@ -87,9 +88,11 @@ Each turn:
 1. Handles exit commands (`exit`, `quit`, empty input)
 1. Creates `ReviewTurnParams(request=...)` from user input
 1. Calls `loop.execute()` which:
-   - Auto-optimizes workspace digest if needed (first request only)
    - Applies default deadline
-   - Delegates to `MainLoop.execute()` for prompt evaluation
+   - Delegates to `MainLoop.execute()` which calls:
+     - `initialize()` to set up prompt/session (auto-optimizes on first request)
+     - Adapter evaluation
+     - `finalize()` for post-processing
 1. Renders response via `_render_response_payload`
 1. Prints plan snapshot via `render_plan_snapshot`
 
@@ -207,14 +210,15 @@ The Reference Documentation section demonstrates progressive disclosure:
 
 The example automatically optimizes the workspace digest on first use:
 
-1. `CodeReviewLoop.execute()` checks if `WorkspaceDigest` exists in session
-1. If missing, calls `_run_optimization()` before processing the request
+1. `CodeReviewLoop.initialize()` checks if `WorkspaceDigest` exists in session
+1. If missing, calls `_run_optimization()` before building the prompt
 1. Creates a child session via `build_logged_session(parent=...)`
 1. Builds `OptimizationContext` with adapter, bus, store, tag
 1. Runs `WorkspaceDigestOptimizer` with `PersistenceScope.SESSION`
 1. Digest is stored in the session for subsequent requests
 
-This eliminates the need for manual optimization commands.
+This eliminates the need for manual optimization commands and ensures the
+workspace is ready before evaluation begins.
 
 ## Overrides
 

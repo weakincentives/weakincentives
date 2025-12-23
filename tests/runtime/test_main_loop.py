@@ -724,3 +724,49 @@ def test_no_resources_when_not_set() -> None:
     loop.execute(_Request(message="hello"))
 
     assert adapter._last_resources is None
+
+
+# =============================================================================
+# Default Finalize Tests
+# =============================================================================
+
+
+class _TestLoopWithDefaultFinalize(MainLoop[_Request, _Output]):
+    """Test implementation that uses the default finalize method."""
+
+    def __init__(
+        self,
+        *,
+        adapter: ProviderAdapter[_Output],
+        bus: Dispatcher,
+    ) -> None:
+        super().__init__(adapter=adapter, bus=bus)
+        self._template = PromptTemplate[_Output](
+            ns="test",
+            key="test-prompt",
+            sections=[
+                MarkdownSection[_Params](
+                    title="Test",
+                    template="$content",
+                    key="test",
+                ),
+            ],
+        )
+
+    def initialize(self, request: _Request) -> tuple[Prompt[_Output], Session]:
+        prompt = Prompt(self._template).bind(_Params(content=request.message))
+        session = Session(bus=self._bus, tags={"loop": "test"})
+        return prompt, session
+
+
+def test_default_finalize_does_nothing() -> None:
+    """Default finalize implementation does nothing and does not error."""
+    bus = InProcessDispatcher()
+    adapter = _MockAdapter()
+    loop = _TestLoopWithDefaultFinalize(adapter=adapter, bus=bus)
+
+    # Should complete without error; default finalize is a no-op
+    response, session = loop.execute(_Request(message="hello"))
+
+    assert response.output == _Output(result="success")
+    assert session is not None
