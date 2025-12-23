@@ -1158,3 +1158,389 @@ class TestExecutionStateNonSnapshotableResource:
 
         # Resource should still be modified (not restored)
         assert resource.value == "modified"
+
+
+# --- Concurrency Tests ---
+
+
+class TestExecutionStateConcurrency:
+    """Concurrency-focused tests for ExecutionState thread safety."""
+
+    def test_concurrent_begin_tool_execution_no_lost_snapshots(self) -> None:
+        """Multiple threads calling begin_tool_execution don't lose snapshots."""
+        import threading
+
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        num_threads = 10
+        tool_ids = [f"tool_{i}" for i in range(num_threads)]
+        errors: list[Exception] = []
+        barrier = threading.Barrier(num_threads)
+
+        def begin_tool(tool_id: str) -> None:
+            try:
+                barrier.wait()  # Synchronize all threads to start together
+                state.begin_tool_execution(tool_use_id=tool_id, tool_name="TestTool")
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=begin_tool, args=(tool_id,)) for tool_id in tool_ids
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors occurred: {errors}"
+        # All tool executions should be registered
+        pending = state.pending_tool_executions
+        assert len(pending) == num_threads
+        for tool_id in tool_ids:
+            assert tool_id in pending
+            assert pending[tool_id].snapshot is not None
+
+    def test_concurrent_end_tool_execution_deterministic_restore(self) -> None:
+        """Multiple threads calling end_tool_execution restore deterministically."""
+        import threading
+
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        num_threads = 10
+        tool_ids = [f"tool_{i}" for i in range(num_threads)]
+        results: dict[str, bool] = {}
+        errors: list[Exception] = []
+        barrier = threading.Barrier(num_threads)
+        results_lock = threading.Lock()
+
+        # Setup: begin all tool executions first
+        for i, tool_id in enumerate(tool_ids):
+            fs.write(f"/file_{i}.txt", f"initial_{i}")
+            state.begin_tool_execution(tool_use_id=tool_id, tool_name="TestTool")
+            # Modify fs after each begin to have something to restore
+            fs.write(f"/file_{i}.txt", f"modified_{i}")
+
+        def end_tool(tool_id: str, index: int) -> None:
+            try:
+                barrier.wait()  # Synchronize all threads to start together
+                restored = state.end_tool_execution(
+                    tool_use_id=tool_id,
+                    success=False,  # Should trigger restore
+                )
+                with results_lock:
+                    results[tool_id] = restored
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=end_tool, args=(tool_id, i))
+            for i, tool_id in enumerate(tool_ids)
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors occurred: {errors}"
+        # All tool executions should have been ended with restore
+        assert len(results) == num_threads
+        for tool_id in tool_ids:
+            assert results[tool_id] is True
+
+        # No pending executions should remain
+        assert len(state.pending_tool_executions) == 0
+
+    def test_concurrent_abort_tool_execution(self) -> None:
+        """Multiple threads calling abort_tool_execution don't corrupt state."""
+        import threading
+
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        num_threads = 10
+        tool_ids = [f"tool_{i}" for i in range(num_threads)]
+        results: dict[str, bool] = {}
+        errors: list[Exception] = []
+        barrier = threading.Barrier(num_threads)
+        results_lock = threading.Lock()
+
+        # Setup: begin all tool executions first
+        for tool_id in tool_ids:
+            state.begin_tool_execution(tool_use_id=tool_id, tool_name="TestTool")
+
+        def abort_tool(tool_id: str) -> None:
+            try:
+                barrier.wait()  # Synchronize all threads to start together
+                restored = state.abort_tool_execution(tool_use_id=tool_id)
+                with results_lock:
+                    results[tool_id] = restored
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=abort_tool, args=(tool_id,)) for tool_id in tool_ids
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors occurred: {errors}"
+        # All aborts should have succeeded
+        assert len(results) == num_threads
+        for tool_id in tool_ids:
+            assert results[tool_id] is True
+
+        # No pending executions should remain
+        assert len(state.pending_tool_executions) == 0
+
+    def test_mixed_concurrent_hook_calls(self) -> None:
+        """Mixed begin/end/abort calls from multiple threads don't corrupt state."""
+        import threading
+        import time
+
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        errors: list[Exception] = []
+        operations_completed = threading.Event()
+        counter = {"value": 0}
+        counter_lock = threading.Lock()
+
+        num_operations = 100
+
+        def run_operation(op_id: int) -> None:
+            try:
+                tool_id = f"tool_{op_id}"
+                state.begin_tool_execution(tool_use_id=tool_id, tool_name="TestTool")
+
+                # Small delay to increase chance of overlap
+                time.sleep(0.001)
+
+                # Alternate between end with success, end with failure, and abort
+                if op_id % 3 == 0:
+                    state.end_tool_execution(tool_use_id=tool_id, success=True)
+                elif op_id % 3 == 1:
+                    state.end_tool_execution(tool_use_id=tool_id, success=False)
+                else:
+                    state.abort_tool_execution(tool_use_id=tool_id)
+
+                with counter_lock:
+                    counter["value"] += 1
+                    if counter["value"] == num_operations:
+                        operations_completed.set()
+            except Exception as e:
+                errors.append(e)
+
+        threads = [
+            threading.Thread(target=run_operation, args=(i,))
+            for i in range(num_operations)
+        ]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors occurred: {errors}"
+        # All operations should complete
+        assert counter["value"] == num_operations
+
+        # No pending executions should remain
+        assert len(state.pending_tool_executions) == 0
+
+    def test_concurrent_pending_tool_executions_read(self) -> None:
+        """Reading pending_tool_executions while modifying is thread-safe."""
+        import threading
+
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        errors: list[Exception] = []
+        stop_event = threading.Event()
+        reads_completed = {"count": 0}
+        reads_lock = threading.Lock()
+
+        # Reader thread that continuously reads pending_tool_executions
+        def reader() -> None:
+            try:
+                while not stop_event.is_set():
+                    pending = state.pending_tool_executions
+                    # Just accessing the data should not raise
+                    _ = len(pending)
+                    for v in pending.values():
+                        _ = v.tool_use_id
+                        _ = v.snapshot
+                    with reads_lock:
+                        reads_completed["count"] += 1
+            except Exception as e:
+                errors.append(e)
+
+        # Writer thread that adds and removes tool executions
+        def writer() -> None:
+            try:
+                for i in range(50):
+                    tool_id = f"tool_{i}"
+                    state.begin_tool_execution(
+                        tool_use_id=tool_id, tool_name="TestTool"
+                    )
+                    state.end_tool_execution(tool_use_id=tool_id, success=True)
+            except Exception as e:
+                errors.append(e)
+            finally:
+                stop_event.set()
+
+        reader_threads = [threading.Thread(target=reader) for _ in range(5)]
+        writer_thread = threading.Thread(target=writer)
+
+        for r in reader_threads:
+            r.start()
+        writer_thread.start()
+
+        writer_thread.join()
+        for r in reader_threads:
+            r.join()
+
+        assert not errors, f"Errors occurred: {errors}"
+        # Readers should have completed at least some reads
+        assert reads_completed["count"] > 0
+
+    def test_concurrent_double_end_returns_false(self) -> None:
+        """Concurrent calls to end_tool_execution for same ID return False once."""
+        import threading
+
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        fs = InMemoryFilesystem()
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        tool_id = "unique_tool"
+        state.begin_tool_execution(tool_use_id=tool_id, tool_name="TestTool")
+
+        results: list[bool] = []
+        errors: list[Exception] = []
+        barrier = threading.Barrier(10)
+        results_lock = threading.Lock()
+
+        def end_tool() -> None:
+            try:
+                barrier.wait()
+                restored = state.end_tool_execution(tool_use_id=tool_id, success=False)
+                with results_lock:
+                    results.append(restored)
+            except Exception as e:
+                errors.append(e)
+
+        threads = [threading.Thread(target=end_tool) for _ in range(10)]
+
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert not errors, f"Errors occurred: {errors}"
+        # Only one thread should have successfully restored
+        assert results.count(True) == 1
+        # Others should return False
+        assert results.count(False) == 9
+
+    def test_snapshot_preserved_across_concurrent_operations(self) -> None:
+        """Snapshots captured in begin_tool_execution are preserved correctly."""
+        import threading
+
+        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
+        from weakincentives.prompt.tool import ResourceRegistry
+
+        session = Session()
+        session[SamplePlan].seed([SamplePlan(objective="initial")])
+        fs = InMemoryFilesystem()
+        fs.write("/data.txt", "original_content")
+        resources = ResourceRegistry.build({Filesystem: fs})
+        state = ExecutionState(session=session, resources=resources)
+
+        errors: list[Exception] = []
+        barrier = threading.Barrier(2)
+
+        def tool_that_fails() -> None:
+            """Tool that modifies state then fails."""
+            try:
+                barrier.wait()
+                state.begin_tool_execution(
+                    tool_use_id="fail_tool", tool_name="FailTool"
+                )
+                # Modify state
+                fs.write("/data.txt", "modified_by_fail_tool")
+                session[SamplePlan].seed(
+                    [SamplePlan(objective="modified_by_fail_tool")]
+                )
+                # Fail and restore
+                state.end_tool_execution(tool_use_id="fail_tool", success=False)
+            except Exception as e:
+                errors.append(e)
+
+        def tool_that_succeeds() -> None:
+            """Tool that modifies state and succeeds."""
+            try:
+                barrier.wait()
+                state.begin_tool_execution(
+                    tool_use_id="success_tool", tool_name="SuccessTool"
+                )
+                # Modify state
+                fs.write("/other.txt", "success_content")
+                session[SamplePlan].seed([SamplePlan(objective="modified_by_success")])
+                # Succeed
+                state.end_tool_execution(tool_use_id="success_tool", success=True)
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=tool_that_fails)
+        t2 = threading.Thread(target=tool_that_succeeds)
+
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        assert not errors, f"Errors occurred: {errors}"
+        # No pending executions should remain
+        assert len(state.pending_tool_executions) == 0
