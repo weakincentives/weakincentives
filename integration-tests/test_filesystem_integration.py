@@ -98,6 +98,7 @@ def _make_context(session: Session, filesystem: Filesystem) -> ToolContext:
 
 
 @pytest.mark.integration
+@pytest.mark.filesystem
 class TestVfsToolsSectionFilesystem:
     """Integration tests for VfsToolsSection filesystem operations."""
 
@@ -298,6 +299,7 @@ class TestVfsToolsSectionFilesystem:
 
 
 @pytest.mark.integration
+@pytest.mark.filesystem
 class TestInMemoryFilesystemDirect:
     """Integration tests for InMemoryFilesystem used directly."""
 
@@ -357,6 +359,7 @@ class TestInMemoryFilesystemDirect:
 
 
 @pytest.mark.integration
+@pytest.mark.filesystem
 class TestHostFilesystemDirect:
     """Integration tests for HostFilesystem used directly."""
 
@@ -779,6 +782,7 @@ class TestPodmanFilesystem:
 
 
 @pytest.mark.integration
+@pytest.mark.filesystem
 class TestVfsWithHostMounts:
     """Integration tests for VfsToolsSection with host mounts."""
 

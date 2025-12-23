@@ -39,6 +39,7 @@ pytest.importorskip("litellm")
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.litellm,
     pytest.mark.skipif(
         "LITELLM_API_KEY" not in os.environ,
         reason="LITELLM_API_KEY not set; skipping LiteLLM integration tests.",
