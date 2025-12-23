@@ -25,20 +25,16 @@ from ..types.dataclass import (
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
-from ._enabled_predicate import (
-    EnabledPredicate,
-    NormalizedEnabledPredicate,
-    normalize_enabled_predicate,
-)
 from ._generic_params_specializer import GenericParamsSpecializer
 from ._normalization import normalize_component_key
 from ._render_tool_examples import render_tool_examples_block
-from ._visibility import (
-    NormalizedVisibilitySelector,
-    SectionVisibility,
+from ._section_guards import (
+    EnabledPredicate,
+    NormalizedEnabledPredicate,
+    SectionGuards,
     VisibilitySelector,
-    normalize_visibility_selector,
 )
+from ._visibility import SectionVisibility
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 
 SectionParamsT = TypeVar("SectionParamsT", bound=SupportsDataclass, covariant=True)
@@ -92,13 +88,17 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
                 raise TypeError("Section children must be Section instances.")
             normalized_children.append(cast(Section[SupportsDataclass], child))
         self.children = tuple(normalized_children)
-        self._enabled: NormalizedEnabledPredicate | None = normalize_enabled_predicate(
-            enabled, params_type
+        self._guards: SectionGuards[SectionParamsT] = SectionGuards.create(
+            enabled=enabled,
+            visibility=visibility,
+            params_type=self.params_type,
         )
         self._tools = self._normalize_tools(tools)
-        self._visibility: NormalizedVisibilitySelector = normalize_visibility_selector(
-            visibility, params_type
-        )
+
+    @property
+    def _enabled(self) -> NormalizedEnabledPredicate | None:
+        """Access the normalized enabled predicate for clone operations."""
+        return self._guards.enabled_predicate
 
     def is_enabled(
         self,
@@ -112,9 +112,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             params: The section parameters.
             session: Optional session for visibility callables that inspect state.
         """
-        if self._enabled is None:
-            return True
-        return bool(self._enabled(params, session))
+        return self._guards.is_enabled(params, session)
 
     def format_heading(
         self,
@@ -326,7 +324,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
         # Fall back to user-provided selector
         if visibility is None:
-            visibility = self._visibility(params, session)
+            visibility = self._guards.get_visibility(params, session)
 
         # Raise if SUMMARY requested but no summary template
         if visibility == SectionVisibility.SUMMARY and self.summary is None:

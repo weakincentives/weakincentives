@@ -27,7 +27,8 @@ from ..types.dataclass import (
     SupportsToolResult,
 )
 from ._enabled_predicate import EnabledPredicate
-from ._visibility import SectionVisibility, VisibilitySelector
+from ._section_guards import VisibilitySelector
+from ._visibility import SectionVisibility
 from .errors import PromptValidationError
 from .section import Section
 from .tool import ToolExample
