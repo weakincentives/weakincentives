@@ -13,11 +13,17 @@
 """Inner loop orchestration for provider adapters.
 
 This module provides the InnerLoop class that coordinates the conversation
-lifecycle with a provider:
-1. Prepare initial messages and tool specifications
-2. Call the provider repeatedly until a final response is produced
-3. Execute tools as requested by the provider
-4. Parse and return structured output when configured
+lifecycle with a provider. The loop is organized into explicit phases:
+
+1. **Prepare**: Initialize messages, tool specs, and phase components
+2. **Call**: Invoke the provider via ProviderCaller (handles throttle/retry)
+3. **Execute**: Run tools via ToolExecutor when provider requests them
+4. **Parse**: Extract structured output via ResponseParser
+
+Each phase is handled by a dedicated component:
+- ProviderCaller: Provider invocation with throttle retry logic
+- ToolExecutor: Tool execution with transactional rollback
+- ResponseParser: Response parsing and structured output extraction
 """
 
 from __future__ import annotations
@@ -44,22 +50,15 @@ from ..types.dataclass import (
 from ._provider_protocols import ProviderChoice, ProviderMessage, ProviderToolCall
 from .core import (
     PROMPT_EVALUATION_PHASE_BUDGET,
-    PROMPT_EVALUATION_PHASE_REQUEST,
     PROMPT_EVALUATION_PHASE_RESPONSE,
     PromptEvaluationError,
     PromptEvaluationPhase,
     PromptResponse,
     SessionProtocol,
 )
+from .provider_caller import ProviderCall, ProviderCaller
 from .response_parser import ResponseParser
-from .throttle import (
-    ThrottleError,
-    ThrottlePolicy,
-    details_from_error,
-    jittered_backoff,
-    new_throttle_policy,
-    sleep_for,
-)
+from .throttle import ThrottlePolicy, new_throttle_policy
 from .tool_executor import (
     ToolExecutor,
     ToolMessageSerializer,
@@ -85,18 +84,6 @@ if TYPE_CHECKING:
 logger: StructuredLogger = get_logger(
     __name__, context={"component": "adapters.inner_loop"}
 )
-
-
-ProviderCall = Callable[
-    [
-        list[dict[str, Any]],
-        Sequence[Mapping[str, Any]],
-        ToolChoice | None,
-        Mapping[str, Any] | None,
-    ],
-    object,
-]
-"""Callable responsible for invoking the provider with assembled payloads."""
 
 
 ChoiceSelector = Callable[[object], ProviderChoice]
@@ -156,13 +143,19 @@ class InnerLoopConfig:
 class InnerLoop[OutputT]:
     """Coordinate the inner loop of a conversational exchange with a provider.
 
-    This class orchestrates the conversation lifecycle:
-    1. Prepare initial messages and tool specifications
-    2. Call the provider repeatedly until a final response is produced
-    3. Execute tools as requested by the provider
-    4. Parse and return structured output when configured
+    This class orchestrates the conversation lifecycle through explicit phases:
 
-    The loop handles throttling, deadline enforcement, and budget tracking.
+    1. **Prepare**: Initialize messages, tool specs, and phase components
+    2. **Call**: Invoke the provider via ProviderCaller (handles throttle/retry)
+    3. **Execute**: Run tools via ToolExecutor when provider requests them
+    4. **Parse**: Extract structured output via ResponseParser
+
+    Each phase is handled by a dedicated component:
+    - ProviderCaller: Provider invocation with throttle retry logic
+    - ToolExecutor: Tool execution with transactional rollback
+    - ResponseParser: Response parsing and structured output extraction
+
+    The loop also handles deadline enforcement and budget tracking at each stage.
     """
 
     inputs: InnerLoopInputs[OutputT]
@@ -173,6 +166,8 @@ class InnerLoop[OutputT]:
     _tool_specs: list[dict[str, Any]] = field(init=False)
     _provider_payload: dict[str, Any] | None = field(init=False, default=None)
     _next_tool_choice: ToolChoice = field(init=False)
+    # Phase components
+    _provider_caller: ProviderCaller = field(init=False)
     _tool_executor: ToolExecutor = field(init=False)
     _response_parser: ResponseParser[OutputT] = field(init=False)
     _rendered: RenderedPrompt[OutputT] = field(init=False)
@@ -238,15 +233,27 @@ class InnerLoop[OutputT]:
             ) from error
 
     def run(self) -> PromptResponse[OutputT]:
-        """Execute the inner loop and return the final response."""
+        """Execute the inner loop and return the final response.
 
+        The main loop follows this pattern:
+        1. Call provider via ProviderCaller (handles throttle/retry)
+        2. Extract and validate response
+        3. If tool calls present, execute via ToolExecutor and loop back
+        4. Otherwise, parse final response via ResponseParser
+        """
         self._prepare()
 
         while True:
             # Beat at start of each iteration
             self._beat()
 
-            response = self._issue_provider_request()
+            # Phase: Call provider (with throttle/retry handling)
+            response = self._provider_caller.call(
+                self._messages,
+                self._tool_specs,
+                self._next_tool_choice,
+                self.config.response_format,
+            )
 
             self._provider_payload = extract_payload(response)
             self._record_and_check_budget()
@@ -264,88 +271,20 @@ class InnerLoop[OutputT]:
             tool_calls = list(message.tool_calls or [])
 
             if not tool_calls:
+                # Phase: Parse final response
                 return self._finalize_response(message)
 
+            # Phase: Execute tools
             self._handle_tool_calls(message, tool_calls)
 
-    def _issue_provider_request(self) -> object:
-        attempts = 0
-        total_delay = timedelta(0)
-        throttle_policy = self.config.throttle_policy
-
-        while True:
-            attempts += 1
-            self._ensure_deadline_remaining(
-                "Deadline expired before provider request.",
-                phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            )
-
-            try:
-                return self.config.call_provider(
-                    self._messages,
-                    self._tool_specs,
-                    self._next_tool_choice if self._tool_specs else None,
-                    self.config.response_format,
-                )
-            except ThrottleError as error:
-                attempts = max(error.attempts, attempts)
-                if not error.retry_safe:
-                    raise
-
-                if attempts >= throttle_policy.max_attempts:
-                    raise ThrottleError(
-                        "Throttle retry budget exhausted.",
-                        prompt_name=self.inputs.prompt_name,
-                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        details=details_from_error(
-                            error, attempts=attempts, retry_safe=False
-                        ),
-                    ) from error
-
-                delay = jittered_backoff(
-                    policy=throttle_policy,
-                    attempt=attempts,
-                    retry_after=error.retry_after,
-                )
-
-                if self._deadline is not None and self._deadline.remaining() <= delay:
-                    raise ThrottleError(
-                        "Deadline expired before retrying after throttling.",
-                        prompt_name=self.inputs.prompt_name,
-                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        details=details_from_error(
-                            error, attempts=attempts, retry_safe=False
-                        ),
-                    ) from error
-
-                total_delay += delay
-                if total_delay > throttle_policy.max_total_delay:
-                    raise ThrottleError(
-                        "Throttle retry window exceeded configured budget.",
-                        prompt_name=self.inputs.prompt_name,
-                        phase=PROMPT_EVALUATION_PHASE_REQUEST,
-                        details=details_from_error(
-                            error, attempts=attempts, retry_safe=False
-                        ),
-                    ) from error
-
-                self._log.warning(
-                    "Provider throttled request.",
-                    event="prompt_throttled",
-                    context={
-                        "attempt": attempts,
-                        "retry_after_seconds": error.retry_after.total_seconds()
-                        if error.retry_after
-                        else None,
-                        "kind": error.kind,
-                        "delay_seconds": delay.total_seconds(),
-                    },
-                )
-                sleep_for(delay)
-
     def _prepare(self) -> None:
-        """Initialize execution state prior to the provider loop."""
+        """Initialize execution state and phase components prior to the loop.
 
+        Creates the three phase components:
+        - ProviderCaller: Handles provider invocation with throttle retry
+        - ToolExecutor: Handles tool execution with transactional rollback
+        - ResponseParser: Handles response parsing and structured output
+        """
         self._evaluation_id = str(uuid4())
         self._messages = list(self.inputs.initial_messages)
         self._log = (self.config.logger_override or logger).bind(
@@ -369,6 +308,16 @@ class InnerLoop[OutputT]:
         self._provider_payload = None
         self._next_tool_choice = self.config.tool_choice
 
+        # Phase component: ProviderCaller (handles throttle/retry)
+        self._provider_caller = ProviderCaller(
+            call_provider=self.config.call_provider,
+            prompt_name=self.inputs.prompt_name,
+            throttle_policy=self.config.throttle_policy,
+            deadline=self._deadline,
+            log=self._log,
+        )
+
+        # Phase component: ToolExecutor (handles tool execution)
         self._tool_executor = ToolExecutor(
             adapter_name=self.inputs.adapter_name,
             adapter=self.inputs.adapter,
@@ -386,6 +335,8 @@ class InnerLoop[OutputT]:
             heartbeat=self.config.heartbeat,
             run_context=self.config.run_context,
         )
+
+        # Phase component: ResponseParser (handles structured output)
         self._response_parser = ResponseParser[OutputT](
             prompt_name=self.inputs.prompt_name,
             rendered=self._rendered,
@@ -569,5 +520,6 @@ __all__ = [
     "InnerLoopConfig",
     "InnerLoopInputs",
     "ProviderCall",
+    "ProviderCaller",
     "run_inner_loop",
 ]
