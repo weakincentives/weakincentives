@@ -34,7 +34,7 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from ...runtime.mailbox import (
@@ -285,10 +285,11 @@ class RedisMailbox[T]:
                 # Use parse() only for dataclass types
                 if hasattr(self.body_type, "__dataclass_fields__"):
                     return parse(self.body_type, json_data)
-                # For primitive types, just cast the JSON data
-                return self.body_type(json_data)  # type: ignore[return-value]
+                # For primitive types (str, int, etc.), construct directly
+                body_type: Any = self.body_type
+                return body_type(json_data)
             # Without a type hint, return raw JSON data
-            return json_data  # type: ignore[return-value]
+            return cast(T, json_data)
         except Exception as e:
             raise SerializationError(f"Failed to deserialize message body: {e}") from e
 

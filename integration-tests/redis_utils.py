@@ -235,18 +235,19 @@ def _build_cluster_command(
 def redis_cluster(
     base_port: int | None = None,
     node_count: int = 6,
-    replicas: int = 1,
+    replicas: int = 2,
     image: str = "grokzen/redis-cluster:7.0.10",
 ) -> Iterator[RedisCluster[bytes]]:
     """Context manager that starts a Redis Cluster.
 
     This uses a pre-built Redis Cluster image that handles cluster setup.
-    The cluster runs with 3 masters and 3 replicas by default (6 nodes).
+    The cluster runs with 2 shards (masters) and 2 replicas per shard by default
+    (6 nodes total). This configuration provides good fault tolerance for testing.
 
     Args:
         base_port: Base port for cluster nodes. If None, finds a free range.
-        node_count: Number of cluster nodes (default 6).
-        replicas: Number of replicas per master (default 1).
+        node_count: Number of cluster nodes (default 6 = 2 masters x 3).
+        replicas: Number of replicas per master (default 2).
         image: Docker image to use for Redis Cluster.
 
     Yields:
