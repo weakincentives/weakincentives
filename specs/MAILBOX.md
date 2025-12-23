@@ -658,20 +658,6 @@ All implementations are safe for concurrent access from multiple threads:
 
 A single `Mailbox` instance can be shared across threads.
 
-### Async Support
-
-Mailbox implementations provide both sync and async interfaces:
-
-```python
-# Sync
-messages = mailbox.receive(wait_time_seconds=20)
-
-# Async
-messages = await mailbox.receive_async(wait_time_seconds=20)
-```
-
-For async Redis, use `redis.asyncio.Redis` as the client.
-
 ### Performance Tuning
 
 **Batch receive.** Increase `max_messages` to reduce round-trips:
