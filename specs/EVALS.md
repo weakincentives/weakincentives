@@ -7,16 +7,16 @@ this spec adds datasets and scoring.
 
 ## Guiding Principles
 
-- **MainLoop is the runner** - No parallel orchestration; reuse existing infra
+- **EvalLoop mirrors MainLoop** - Factory-based, event-driven, type-safe
 - **Evaluators are functions** - Pure `(output, expected) -> Score`
-- **Datasets are tuples** - Immutable, typed, serializable
+- **Datasets are immutable** - Frozen dataclass with typed samples
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌──────────┐     ┌───────────┐     ┌────────────┐
-│   Dataset   │────▶│ run_eval │────▶│ MainLoop  │────▶│  Adapter   │
-│  (samples)  │     │          │     │ .execute()│     │            │
+│   Dataset   │────▶│ EvalLoop │────▶│ MainLoop  │────▶│  Adapter   │
+│  (samples)  │     │.execute()│     │ .execute()│     │            │
 └─────────────┘     └────┬─────┘     └───────────┘     └────────────┘
                          │
                          ▼
@@ -26,9 +26,9 @@ this spec adds datasets and scoring.
                    └───────────┘     └────────────┘
 ```
 
-The eval framework wraps MainLoop: for each sample, it calls `loop.execute()`,
-then passes the output to an evaluator for scoring. Results aggregate into a
-report.
+`EvalLoop` orchestrates evaluation: for each sample, it creates a `MainLoop`
+via the abstract factory, executes the sample, scores the output, and
+aggregates results into a report.
 
 ## Core Types
 
@@ -412,9 +412,85 @@ class EvalReport:
         return tuple(r for r in self.results if r.success and not r.score.passed)
 ```
 
-### run_eval
+### EvalLoop
 
-The core function that ties everything together:
+The core abstraction for running evaluations. Like `MainLoop`, it uses abstract
+factory methods that subclasses implement:
+
+```python
+class EvalLoop(ABC, Generic[InputT, OutputT, ExpectedT]):
+    """Abstract base for evaluation loops.
+
+    Subclasses implement create_loop() to provide the MainLoop that
+    processes each sample.
+    """
+
+    def __init__(
+        self,
+        *,
+        dataset: Dataset[InputT, ExpectedT],
+        evaluator: Evaluator[OutputT, ExpectedT],
+        bus: Dispatcher | None = None,
+    ) -> None:
+        self._dataset = dataset
+        self._evaluator = evaluator
+        self._bus = bus
+
+    @abstractmethod
+    def create_loop(self) -> MainLoop[InputT, OutputT]:
+        """Create the MainLoop for executing samples.
+
+        Called once before iterating through the dataset. The returned
+        loop is reused for all samples.
+        """
+        ...
+
+    def execute(self) -> EvalReport:
+        """Run evaluation on all samples.
+
+        For each sample:
+        1. Execute through MainLoop
+        2. Score with evaluator
+        3. Record timing
+        4. Publish SampleEvaluated event
+
+        Returns:
+            EvalReport with all results and aggregate metrics
+        """
+        loop = self.create_loop()
+        results: list[EvalResult] = []
+
+        for sample in self._dataset:
+            start = time.monotonic()
+            try:
+                response, _ = loop.execute(sample.input)
+                latency_ms = int((time.monotonic() - start) * 1000)
+                score = self._evaluator(response.output, sample.expected)
+                result = EvalResult(
+                    sample_id=sample.id,
+                    score=score,
+                    latency_ms=latency_ms,
+                )
+            except Exception as e:
+                latency_ms = int((time.monotonic() - start) * 1000)
+                result = EvalResult(
+                    sample_id=sample.id,
+                    score=Score(value=0.0, passed=False, reason=str(e)),
+                    latency_ms=latency_ms,
+                    error=str(e),
+                )
+
+            results.append(result)
+            if self._bus is not None:
+                self._bus.dispatch(SampleEvaluated(sample_id=sample.id, result=result))
+
+        report = EvalReport(results=tuple(results))
+        if self._bus is not None:
+            self._bus.dispatch(EvalCompleted(report=report))
+        return report
+```
+
+### Events
 
 ```python
 @dataclass(slots=True, frozen=True)
@@ -424,57 +500,10 @@ class SampleEvaluated:
     result: EvalResult
 
 
-def run_eval[I, O, E](
-    loop: MainLoop[I, O],
-    dataset: Dataset[I, E],
-    evaluator: Evaluator[O, E],
-    *,
-    bus: Dispatcher | None = None,
-) -> EvalReport:
-    """Run evaluation using MainLoop.
-
-    For each sample in the dataset:
-    1. Execute the sample input through MainLoop
-    2. Score the output using the evaluator
-    3. Record timing
-    4. Publish SampleEvaluated event (if bus provided)
-
-    Args:
-        loop: MainLoop instance to run samples through
-        dataset: Tuple of samples to evaluate
-        evaluator: Scoring function for outputs
-        bus: Optional Dispatcher for progress notifications
-
-    Returns:
-        EvalReport with all results and aggregate metrics
-    """
-    results: list[EvalResult] = []
-
-    for sample in dataset:
-        start = time.monotonic()
-        try:
-            response, _ = loop.execute(sample.input)
-            latency_ms = int((time.monotonic() - start) * 1000)
-            score = evaluator(response.output, sample.expected)
-            result = EvalResult(
-                sample_id=sample.id,
-                score=score,
-                latency_ms=latency_ms,
-            )
-        except Exception as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            result = EvalResult(
-                sample_id=sample.id,
-                score=Score(value=0.0, passed=False, reason=str(e)),
-                latency_ms=latency_ms,
-                error=str(e),
-            )
-
-        results.append(result)
-        if bus is not None:
-            bus.dispatch(SampleEvaluated(sample_id=sample.id, result=result))
-
-    return EvalReport(results=tuple(results))
+@dataclass(slots=True, frozen=True)
+class EvalCompleted:
+    """Emitted when evaluation finishes successfully."""
+    report: EvalReport
 ```
 
 ## Usage Examples
@@ -485,9 +514,9 @@ def run_eval[I, O, E](
 from weakincentives import MainLoop, PromptTemplate, Prompt, Session
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.runtime import InProcessDispatcher
-from weakincentives.evals import Dataset, Sample, run_eval, exact_match
+from weakincentives.evals import Dataset, EvalLoop, exact_match
 
-# Define the loop under test
+# Define the MainLoop for QA
 class QALoop(MainLoop[str, str]):
     def __init__(self, adapter, bus):
         super().__init__(adapter=adapter, bus=bus)
@@ -511,13 +540,29 @@ class QALoop(MainLoop[str, str]):
         return Session(bus=self._bus)
 
 
-# Load dataset
-dataset = Dataset.load(Path("tests/fixtures/qa.jsonl"), str, str)
+# Define the EvalLoop
+class QAEvalLoop(EvalLoop[str, str, str]):
+    def __init__(
+        self,
+        *,
+        dataset: Dataset[str, str],
+        adapter: OpenAIAdapter[str],
+        bus: Dispatcher | None = None,
+    ):
+        super().__init__(dataset=dataset, evaluator=exact_match, bus=bus)
+        self._adapter = adapter
+        self._loop_bus = InProcessDispatcher()
 
-# Run evaluation
+    def create_loop(self) -> MainLoop[str, str]:
+        return QALoop(adapter=self._adapter, bus=self._loop_bus)
+
+
+# Load dataset and run
+dataset = Dataset.load(Path("tests/fixtures/qa.jsonl"), str, str)
 adapter = OpenAIAdapter(model="gpt-4o")
-loop = QALoop(adapter=adapter, bus=InProcessDispatcher())
-report = run_eval(loop, dataset, exact_match)
+
+eval_loop = QAEvalLoop(dataset=dataset, adapter=adapter)
+report = eval_loop.execute()
 
 # Inspect results
 print(f"Pass rate: {report.pass_rate:.1%}")
@@ -532,7 +577,7 @@ for result in report.failed_samples():
 ### Multi-Criteria Evaluation
 
 ```python
-from weakincentives.evals import all_of, llm_judge
+from weakincentives.evals import EvalLoop, all_of, llm_judge, contains
 
 # Create judge adapter and bus
 judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
@@ -545,12 +590,26 @@ evaluator = all_of(
     llm_judge(judge_adapter, "Well-structured response", bus=judge_bus),
 )
 
-report = run_eval(loop, dataset, evaluator)
+
+# EvalLoop with custom evaluator
+class MultiCriteriaEvalLoop(EvalLoop[str, str, str]):
+    def __init__(self, *, dataset: Dataset[str, str], adapter, evaluator):
+        super().__init__(dataset=dataset, evaluator=evaluator)
+        self._adapter = adapter
+
+    def create_loop(self) -> MainLoop[str, str]:
+        return QALoop(adapter=self._adapter, bus=InProcessDispatcher())
+
+
+eval_loop = MultiCriteriaEvalLoop(dataset=dataset, adapter=adapter, evaluator=evaluator)
+report = eval_loop.execute()
 ```
 
 ### Programmatic Dataset
 
 ```python
+from weakincentives.evals import Dataset, Sample
+
 # Build dataset in code
 samples = tuple(
     Sample(
@@ -562,25 +621,31 @@ samples = tuple(
 )
 dataset = Dataset(samples=samples)
 
-report = run_eval(loop, dataset, contains)
+# Use with any EvalLoop subclass
+eval_loop = QAEvalLoop(dataset=dataset, adapter=adapter)
+report = eval_loop.execute()
 ```
 
 ## Observability
 
-Pass an `Dispatcher` to `run_eval` to receive progress notifications:
+Pass a `Dispatcher` to `EvalLoop` to receive progress notifications:
 
 ```python
-from weakincentives.evals import SampleEvaluated
+from weakincentives.evals import SampleEvaluated, EvalCompleted
 
 def on_sample(event: SampleEvaluated) -> None:
     status = "PASS" if event.result.score.passed else "FAIL"
     print(f"[{status}] {event.sample_id}: {event.result.score.value:.2f}")
 
+def on_complete(event: EvalCompleted) -> None:
+    print(f"Evaluation complete: {event.report.pass_rate:.1%} pass rate")
+
 bus = InProcessDispatcher()
 bus.subscribe(SampleEvaluated, on_sample)
+bus.subscribe(EvalCompleted, on_complete)
 
-loop = QALoop(adapter=adapter, bus=InProcessDispatcher())
-report = run_eval(loop, dataset, evaluator, bus=bus)
+eval_loop = QAEvalLoop(dataset=dataset, adapter=adapter, bus=bus)
+report = eval_loop.execute()
 ```
 
 With LangSmith enabled, MainLoop executions are automatically traced.
@@ -627,4 +692,4 @@ def test_any_of_requires_one():
 - **Sequential execution** - MainLoop is synchronous; samples run one at a time
 - **No caching** - Repeated samples re-execute; add caching at adapter level
 - **No checkpoints** - Cannot resume interrupted runs
-- **Single loop** - Cannot compare multiple loops in one `run_eval` call
+- **Single loop** - Each `EvalLoop.execute()` uses one MainLoop instance
