@@ -28,10 +28,9 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
     ) -> None: ...
 
     @abstractmethod
-    def create_prompt(self, request: UserRequestT) -> Prompt[OutputT]: ...
+    def initialize(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]: ...
 
-    @abstractmethod
-    def create_session(self) -> Session: ...
+    def finalize(self, prompt: Prompt[OutputT], session: Session) -> None: ...
 
     def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Session]: ...
 ```
@@ -80,26 +79,25 @@ Request-level `budget` and `deadline` override config defaults. A fresh
 
 ```mermaid
 flowchart LR
-    Request --> Session --> Prompt --> Evaluate
-    Evaluate --> Result
+    Request --> Initialize --> Evaluate
+    Evaluate --> Finalize --> Result
     Evaluate --> Visibility["VisibilityExpansion"]
     Visibility -->|retry| Evaluate
 ```
 
 1. Receive `MainLoopRequest` via bus or direct `execute()` call
-1. Create session via `create_session()`
-1. Create prompt via `create_prompt(request)`
+1. Initialize prompt and session via `initialize(request)`
 1. Evaluate with adapter
 1. On `VisibilityExpansionRequired`: write overrides into session state, retry
-   step 4
+   step 3
+1. Call `finalize(prompt, session)` for post-processing
 1. Publish `MainLoopCompleted` or `MainLoopFailed`
 
 ### Visibility Handling
 
 ```python
 def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Session]:
-    session = self.create_session()
-    prompt = self.create_prompt(request)
+    prompt, session = self.initialize(request)
     budget_tracker = BudgetTracker(budget=self._effective_budget) if self._effective_budget else None
 
     while True:
@@ -110,6 +108,7 @@ def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Sessi
                 deadline=self._effective_deadline,
                 budget_tracker=budget_tracker,
             )
+            self.finalize(prompt, session)
             return response, session
         except VisibilityExpansionRequired as e:
             for path, visibility in e.requested_overrides.items():
@@ -119,7 +118,7 @@ def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Sessi
 ```
 
 Overrides are stored in the session; session persists across retries; prompt
-is not recreated.
+is not recreated. The `finalize` hook is called only on successful evaluation.
 
 ## Usage
 
@@ -160,27 +159,31 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
             sections=[...],
         )
 
-    def create_prompt(self, request: ReviewRequest) -> Prompt[ReviewResult]:
-        return Prompt(self._template).bind(ReviewParams.from_request(request))
+    def initialize(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
+        prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
+        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        return prompt, session
 
-    def create_session(self) -> Session:
-        return Session(bus=self._bus, tags={"loop": "code-review"})
+    def finalize(self, prompt: Prompt[ReviewResult], session: Session) -> None:
+        # Optional: cleanup, logging, or post-processing
+        pass
 ```
 
 ### With Reducers
 
 ```python
-def create_session(self) -> Session:
+def initialize(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
+    prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
     session = Session(bus=self._bus)
     session[Plan].register(SetupPlan, plan_reducer)
-    return session
+    return prompt, session
 ```
 
 ### With Progressive Disclosure
 
 ```python
-def create_prompt(self, request: Request) -> Prompt[Output]:
-    return Prompt(PromptTemplate[Output](
+def initialize(self, request: Request) -> tuple[Prompt[Output], Session]:
+    prompt = Prompt(PromptTemplate[Output](
         ns="agent",
         key="task",
         sections=[
@@ -193,6 +196,8 @@ def create_prompt(self, request: Request) -> Prompt[Output]:
             ),
         ],
     )).bind(Params.from_request(request))
+    session = Session(bus=self._bus)
+    return prompt, session
 ```
 
 ## Error Handling
@@ -206,7 +211,7 @@ Publish `MainLoopFailed`, re-raise |
 The code reviewer agent uses `MainLoop` with these specifics:
 
 **Session reuse:** A single session is created at loop construction and reused
-across all `execute()` calls. State accumulates across turns.
+across all `initialize()` calls. State accumulates across turns.
 
 **Auto-optimization:** The explicit `optimize` command is removed. Before each
 evaluation, the loop checks for `WorkspaceDigest` in session state. If absent,

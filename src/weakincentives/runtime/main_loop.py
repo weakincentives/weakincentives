@@ -92,15 +92,14 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
     MainLoop standardizes agent workflow orchestration: receive request, build
     prompt, evaluate, handle visibility expansion, dispatch result. Implementations
-    define only the domain-specific factories via ``create_prompt`` and
-    ``create_session``.
+    define only the domain-specific factory via ``initialize``.
 
     Execution flow:
         1. Receive ``MainLoopRequest`` via bus or direct ``execute()`` call
-        2. Create session via ``create_session()``
-        3. Create prompt via ``create_prompt(request)``
-        4. Evaluate with adapter
-        5. On ``VisibilityExpansionRequired``: accumulate overrides, retry step 4
+        2. Initialize prompt and session via ``initialize(request)``
+        3. Evaluate with adapter
+        4. On ``VisibilityExpansionRequired``: accumulate overrides, retry step 3
+        5. Call ``finalize(prompt, session)`` for post-processing
         6. Publish ``MainLoopCompleted`` or ``MainLoopFailed``
 
     Usage::
@@ -116,11 +115,18 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     sections=[...],
                 )
 
-            def create_prompt(self, request: ReviewRequest) -> Prompt[ReviewResult]:
-                return Prompt(self._template).bind(ReviewParams.from_request(request))
+            def initialize(
+                self, request: ReviewRequest
+            ) -> tuple[Prompt[ReviewResult], Session]:
+                prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
+                session = Session(bus=self._bus, tags={"loop": "code-review"})
+                return prompt, session
 
-            def create_session(self) -> Session:
-                return Session(bus=self._bus, tags={"loop": "code-review"})
+            def finalize(
+                self, prompt: Prompt[ReviewResult], session: Session
+            ) -> None:
+                # Optional: cleanup or logging
+                pass
 
         # Dispatcher-driven usage (subscription is automatic in __init__)
         loop = CodeReviewLoop(adapter=adapter, bus=bus)
@@ -155,31 +161,33 @@ class MainLoop[UserRequestT, OutputT](ABC):
         bus.subscribe(MainLoopRequest, self.handle_request)
 
     @abstractmethod
-    def create_prompt(self, request: UserRequestT) -> Prompt[OutputT]:
-        """Create a prompt for the given request.
+    def initialize(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]:
+        """Initialize prompt and session for the given request.
 
         Subclasses must implement this method to construct the prompt
-        appropriate for their domain.
+        and session appropriate for their domain. This consolidates
+        the setup phase into a single method.
 
         Args:
-            request: The user request to create a prompt for.
+            request: The user request to process.
 
         Returns:
-            A bound prompt ready for evaluation.
+            A tuple of (prompt, session) ready for evaluation.
         """
         ...
 
-    @abstractmethod
-    def create_session(self) -> Session:
-        """Create a session for execution.
+    def finalize(self, prompt: Prompt[OutputT], session: Session) -> None:
+        """Finalize after execution completes.
 
-        Subclasses must implement this method to construct the session
-        with appropriate tags, reducers, and initial state.
+        Called after successful evaluation with the prompt and session used.
+        Subclasses can override this method to perform cleanup, logging,
+        or post-processing tasks.
 
-        Returns:
-            A session configured for the loop's domain.
+        Args:
+            prompt: The prompt that was evaluated.
+            session: The session used for evaluation.
         """
-        ...
+        _ = self, prompt, session  # Default implementation does nothing
 
     def execute(
         self,
@@ -191,10 +199,11 @@ class MainLoop[UserRequestT, OutputT](ABC):
     ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute the main loop for a request.
 
-        Creates a session and prompt, then evaluates with the adapter.
-        Visibility expansion exceptions are handled automatically by
-        accumulating overrides and retrying. A shared ``BudgetTracker`` is
-        used across retries to enforce budget limits cumulatively.
+        Initializes prompt and session via ``initialize()``, then evaluates
+        with the adapter. Visibility expansion exceptions are handled
+        automatically by accumulating overrides and retrying. A shared
+        ``BudgetTracker`` is used across retries to enforce budget limits
+        cumulatively. After successful evaluation, ``finalize()`` is called.
 
         Args:
             request: The user request to process.
@@ -207,11 +216,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
             A tuple of (response, session) from evaluation.
 
         Raises:
-            Any exception from prompt creation, session creation, or evaluation
+            Any exception from initialization or evaluation
             (except VisibilityExpansionRequired which is handled internally).
         """
-        session = self.create_session()
-        prompt = self.create_prompt(request)
+        prompt, session = self.initialize(request)
 
         effective_budget = budget if budget is not None else self._config.budget
         effective_deadline = deadline if deadline is not None else self._config.deadline
@@ -241,6 +249,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                         SetVisibilityOverride(path=path, visibility=visibility)
                     )
             else:
+                self.finalize(prompt, session)
                 return response, session
 
     def handle_request(self, event: object) -> None:

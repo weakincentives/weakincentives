@@ -215,18 +215,20 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         except PromptOverridesError as exc:  # pragma: no cover
             raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
 
-    def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]:
-        """Create and bind the review prompt for the given request."""
-        # Use overrides for all modes - custom MCP tools now work with streaming mode
-        return Prompt(
+    def initialize(
+        self, request: ReviewTurnParams
+    ) -> tuple[Prompt[ReviewResponse], Session]:
+        """Initialize prompt and session for the given request.
+
+        Creates the review prompt and returns the persistent session
+        (reused across all turns).
+        """
+        prompt = Prompt(
             self._template,
             overrides_store=self._overrides_store,
             overrides_tag=self._override_tag,
         ).bind(request)
-
-    def create_session(self) -> Session:
-        """Return the persistent session (reused across all turns)."""
-        return self._session
+        return prompt, self._session
 
     def execute(
         self,
