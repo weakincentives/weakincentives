@@ -118,21 +118,18 @@ class Message(Generic[T]):
     attributes: Mapping[str, str]
     """Backend-specific message attributes (e.g., SQS MessageAttributes)."""
 
-    def acknowledge(self) -> bool:
+    def acknowledge(self) -> None:
         """Delete the message from the queue.
 
         Call after successfully processing the message. The receipt handle
         must still be valid (message not timed out or already acknowledged).
-
-        Returns:
-            True if acknowledged successfully, False if receipt handle expired.
 
         Raises:
             ReceiptHandleExpiredError: Handle no longer valid.
         """
         ...
 
-    def nack(self, *, visibility_timeout: int = 0) -> bool:
+    def nack(self, *, visibility_timeout: int = 0) -> None:
         """Return message to queue immediately or after delay.
 
         Use when processing fails and the message should be retried.
@@ -142,15 +139,12 @@ class Message(Generic[T]):
         Args:
             visibility_timeout: Seconds before message becomes visible again.
 
-        Returns:
-            True if nacked successfully, False if receipt handle expired.
-
         Raises:
             ReceiptHandleExpiredError: Handle no longer valid.
         """
         ...
 
-    def extend_visibility(self, timeout: int) -> bool:
+    def extend_visibility(self, timeout: int) -> None:
         """Extend the visibility timeout for long-running processing.
 
         Call periodically during long processing to prevent timeout.
@@ -158,9 +152,6 @@ class Message(Generic[T]):
 
         Args:
             timeout: New visibility timeout in seconds from now.
-
-        Returns:
-            True if extended successfully, False if receipt handle expired.
 
         Raises:
             ReceiptHandleExpiredError: Handle no longer valid.
