@@ -30,7 +30,7 @@ from .core import (
 )
 
 if TYPE_CHECKING:
-    from ..prompt.tool import Tool
+    from ..prompt.tool import ToolSpec
 
 
 ToolChoice = str | Mapping[str, Any] | None
@@ -55,7 +55,7 @@ _EMPTY_TOOL_PARAMETERS_SCHEMA: dict[str, Any] = {
 
 
 def tool_to_spec(
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool: ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
 ) -> dict[str, Any]:
     """Return a provider-agnostic tool specification payload."""
 

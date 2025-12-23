@@ -57,7 +57,14 @@ from .structured_output import (
     parse_structured_output,
 )
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
-from .tool import ResourceRegistry, Tool, ToolContext, ToolExample, ToolHandler
+from .tool import (
+    ResourceRegistry,
+    Tool,
+    ToolContext,
+    ToolExample,
+    ToolHandler,
+    ToolSpec,
+)
 from .tool_result import ToolResult
 
 __all__ = [
@@ -101,6 +108,7 @@ __all__ = [
     "ToolOverride",
     "ToolRenderableResult",
     "ToolResult",
+    "ToolSpec",
     "VisibilityExpansionRequired",
     "hash_json",
     "hash_text",

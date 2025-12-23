@@ -37,7 +37,7 @@ from .progressive_disclosure import (
 from .registry import RegistrySnapshot, SectionNode
 from .section import Section
 from .structured_output import StructuredOutputConfig
-from .tool import Tool
+from .tool import ToolSpec
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..runtime.session.protocols import SessionProtocol
@@ -58,7 +58,7 @@ class RenderedPrompt[OutputT_co]:
     structured_output: StructuredOutputConfig[SupportsDataclass] | None = None
     deadline: Deadline | None = None
     descriptor: PromptDescriptor | None = None
-    _tools: tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...] = field(
+    _tools: tuple[ToolSpec[SupportsDataclassOrNone, SupportsToolResult], ...] = field(
         default_factory=tuple
     )
     _tool_param_descriptions: Mapping[str, Mapping[str, str]] = field(
@@ -70,7 +70,9 @@ class RenderedPrompt[OutputT_co]:
         return self.text
 
     @property
-    def tools(self) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
+    def tools(
+        self,
+    ) -> tuple[ToolSpec[SupportsDataclassOrNone, SupportsToolResult], ...]:
         """Tools contributed by enabled sections in traversal order."""
 
         return self._tools
@@ -173,7 +175,9 @@ class PromptRenderer[OutputT]:
         session: SessionProtocol | None = None,
     ) -> RenderedPrompt[OutputT]:
         rendered_sections: list[str] = []
-        collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
+        collected_tools: list[
+            ToolSpec[SupportsDataclassOrNone, SupportsToolResult]
+        ] = []
         override_lookup = dict(overrides or {})
         tool_override_lookup = dict(tool_overrides or {})
         field_description_patches: dict[str, dict[str, str]] = {}
@@ -257,7 +261,7 @@ class PromptRenderer[OutputT]:
             )
             collected_tools.append(
                 cast(
-                    Tool[SupportsDataclassOrNone, SupportsToolResult],
+                    ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
                     open_sections_tool,
                 )
             )
@@ -272,7 +276,7 @@ class PromptRenderer[OutputT]:
             )
             collected_tools.append(
                 cast(
-                    Tool[SupportsDataclassOrNone, SupportsToolResult],
+                    ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
                     read_section_tool,
                 )
             )
@@ -346,7 +350,7 @@ class PromptRenderer[OutputT]:
         self,
         section: Section[SupportsDataclass],
         tool_override_lookup: dict[str, ToolOverride],
-        collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        collected_tools: list[ToolSpec[SupportsDataclassOrNone, SupportsToolResult]],
         field_description_patches: dict[str, dict[str, str]],
     ) -> None:
         section_tools = section.tools()
@@ -357,11 +361,15 @@ class PromptRenderer[OutputT]:
             override = (
                 tool_override_lookup.get(tool.name) if tool.accepts_overrides else None
             )
-            patched_tool = tool
+            patched_tool: ToolSpec[SupportsDataclassOrNone, SupportsToolResult] = tool
             if override is not None:
+                # Only patch if the tool is a dataclass (like Tool)
+                # Non-dataclass ToolSpec implementations cannot be patched
                 if (
                     override.description is not None
                     and override.description != tool.description
+                    and is_dataclass(tool)
+                    and not isinstance(tool, type)
                 ):
                     patched_tool = replace(tool, description=override.description)
                 if override.param_descriptions:

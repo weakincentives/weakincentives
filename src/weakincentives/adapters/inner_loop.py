@@ -77,7 +77,7 @@ from .utilities import (
 )
 
 if TYPE_CHECKING:
-    from ..prompt.tool import Tool
+    from ..prompt.tool import ToolSpec
     from .core import ProviderAdapter
 
 
@@ -354,7 +354,7 @@ class InnerLoop[OutputT]:
         tools = list(self._rendered.tools)
         self._tool_specs = [tool_to_spec(tool) for tool in tools]
         tool_registry: Mapping[
-            str, Tool[SupportsDataclassOrNone, SupportsToolResult]
+            str, ToolSpec[SupportsDataclassOrNone, SupportsToolResult]
         ] = {tool.name: tool for tool in tools}
         self._provider_payload = None
         self._next_tool_choice = self.config.tool_choice

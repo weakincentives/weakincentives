@@ -28,11 +28,11 @@ from ..types.dataclass import (
 from .tool_result import render_tool_payload
 
 if TYPE_CHECKING:
-    from .tool import Tool
+    from .tool import ToolSpec
 
 
 def render_tool_examples_block(
-    tools: Sequence[Tool[SupportsDataclassOrNone, SupportsToolResult]],
+    tools: Sequence[ToolSpec[SupportsDataclassOrNone, SupportsToolResult]],
 ) -> str:
     """Render tool examples as a markdown block.
 
@@ -64,7 +64,7 @@ def render_tool_examples_block(
 
 
 def _render_examples_for_tool(
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool: ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
 ) -> str:
     """Render examples for a single tool."""
     lines: list[str] = [f"- {tool.name} examples:"]

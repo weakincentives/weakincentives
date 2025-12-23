@@ -29,7 +29,13 @@ from ..filesystem import Filesystem
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
-from ..prompt.tool import ResourceRegistry, Tool, ToolContext, ToolHandler, ToolResult
+from ..prompt.tool import (
+    ResourceRegistry,
+    ToolContext,
+    ToolHandler,
+    ToolResult,
+    ToolSpec,
+)
 from ..runtime.events import HandlerFailure, ToolInvoked
 from ..runtime.execution_state import CompositeSnapshot, ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
@@ -84,7 +90,7 @@ class RejectedToolParams:
 class ToolExecutionOutcome:
     """Result of executing a tool handler."""
 
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult]
+    tool: ToolSpec[SupportsDataclassOrNone, SupportsToolResult]
     params: SupportsDataclass | None
     result: ToolResult[SupportsToolResult]
     call_id: str | None
@@ -104,7 +110,7 @@ class ToolExecutionContext:
     adapter: ProviderAdapter[Any]
     prompt: Prompt[Any]
     rendered_prompt: RenderedPrompt[Any] | None
-    tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
+    tool_registry: Mapping[str, ToolSpec[SupportsDataclassOrNone, SupportsToolResult]]
     execution_state: ExecutionState
     prompt_name: str
     parse_arguments: ToolArgumentsParser
@@ -131,11 +137,11 @@ class ToolExecutionContext:
 def _resolve_tool_and_handler(
     *,
     tool_call: ProviderToolCall,
-    tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+    tool_registry: Mapping[str, ToolSpec[SupportsDataclassOrNone, SupportsToolResult]],
     prompt_name: str,
     provider_payload: dict[str, Any] | None,
 ) -> tuple[
-    Tool[SupportsDataclassOrNone, SupportsToolResult],
+    ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
     ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
 ]:
     function = tool_call.function
@@ -192,7 +198,7 @@ def _build_tool_logger(
 
 def parse_tool_params(
     *,
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool: ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
     arguments_mapping: Mapping[str, Any],
 ) -> SupportsDataclass | None:
     if tool.params_type is type(None):
@@ -321,7 +327,7 @@ def _restore_snapshot_if_needed(
 def _execute_tool_handler(  # noqa: PLR0913
     *,
     context: ToolExecutionContext,
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool: ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
     handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
     tool_name: str,
     tool_params: SupportsDataclass | None,
@@ -396,7 +402,7 @@ def _handle_tool_exception(  # noqa: PLR0913
 def _execute_tool_with_snapshot(  # noqa: PLR0913
     *,
     context: ToolExecutionContext,
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool: ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
     handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
     tool_name: str,
     arguments_mapping: Mapping[str, Any],
@@ -599,7 +605,7 @@ class ToolExecutor:
     prompt_name: str
     rendered: RenderedPrompt[Any]
     execution_state: ExecutionState
-    tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
+    tool_registry: Mapping[str, ToolSpec[SupportsDataclassOrNone, SupportsToolResult]]
     serialize_tool_message_fn: ToolMessageSerializer
     format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str]
     parse_arguments: ToolArgumentsParser

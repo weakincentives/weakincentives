@@ -28,7 +28,7 @@ from ..types.dataclass import (
 )
 from .errors import PromptRenderError, PromptValidationError, SectionPath
 from .section import Section
-from .tool import Tool
+from .tool import ToolSpec
 
 
 @FrozenDataclass()
@@ -418,13 +418,15 @@ class PromptRegistry:
             return
 
         for tool in section_tools:
-            if not isinstance(tool, Tool):
+            if not isinstance(tool, ToolSpec):
                 raise PromptValidationError(
-                    "Section tools must be Tool instances.",
+                    "Section tools must implement the ToolSpec protocol.",
                     section_path=path,
                     dataclass_type=params_type,
                 )
-            typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
+            typed_tool = cast(
+                ToolSpec[SupportsDataclassOrNone, SupportsToolResult], tool
+            )
             self._register_section_tools(
                 typed_tool,
                 path,
@@ -457,7 +459,7 @@ class PromptRegistry:
         ResultT: SupportsToolResult,
     ](
         self,
-        tool: Tool[ParamsT, ResultT],
+        tool: ToolSpec[ParamsT, ResultT],
         path: SectionPath,
     ) -> None:
         params_type = tool.params_type
@@ -517,9 +519,9 @@ class PromptRegistry:
         # Import here to avoid circular imports
         from .task_examples import TaskExample
 
-        # Build a map from tool name to Tool instance
+        # Build a map from tool name to ToolSpec instance
         tool_instances: dict[
-            str, Tool[SupportsDataclassOrNone, SupportsToolResult]
+            str, ToolSpec[SupportsDataclassOrNone, SupportsToolResult]
         ] = {}
         for node in self._section_nodes:
             for tool in node.section.tools():
@@ -581,7 +583,9 @@ class PromptRegistry:
         self,
         task_example: object,
         path: SectionPath,
-        tool_instances: dict[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        tool_instances: dict[
+            str, ToolSpec[SupportsDataclassOrNone, SupportsToolResult]
+        ],
     ) -> None:
         """Validate steps in a task example."""
         available_tools = sorted(self._tool_name_registry.keys())
@@ -618,7 +622,7 @@ class PromptRegistry:
     def _validate_step_type_coherence(
         step: object,
         step_idx: int,
-        tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+        tool: ToolSpec[SupportsDataclassOrNone, SupportsToolResult],
         path: SectionPath,
     ) -> None:
         """Validate that step example types match the tool's types."""

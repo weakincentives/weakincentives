@@ -26,6 +26,7 @@ from .prompt import (
     ToolContext,
     ToolHandler,
     ToolResult,
+    ToolSpec,
     parse_structured_output,
 )
 from .runtime import StructuredLogger, configure_logging, get_logger
@@ -48,6 +49,7 @@ __all__ = [
     "ToolContext",
     "ToolHandler",
     "ToolResult",
+    "ToolSpec",
     "ToolValidationError",
     "WinkError",
     "configure_logging",

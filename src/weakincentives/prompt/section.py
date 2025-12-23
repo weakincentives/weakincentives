@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
     from ..runtime.session.protocols import SessionProtocol
-    from .tool import Tool
+    from .tool import ToolSpec
 
 from ..types.dataclass import (
     SupportsDataclass,
@@ -60,7 +60,9 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         default_params: SectionParamsT | None = None,
         children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: EnabledPredicate | None = None,
-        tools: Sequence[object] | None = None,
+        tools: (
+            Sequence[ToolSpec[SupportsDataclassOrNone, SupportsToolResult]] | None
+        ) = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
         visibility: VisibilitySelector = SectionVisibility.FULL,
@@ -269,7 +271,9 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
     def clone(self: Self, **kwargs: object) -> Self:
         """Return a deep copy of the section and its children."""
 
-    def tools(self) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
+    def tools(
+        self,
+    ) -> tuple[ToolSpec[SupportsDataclassOrNone, SupportsToolResult], ...]:
         """Return the tools exposed by this section."""
 
         return self._tools
@@ -343,21 +347,19 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
     @staticmethod
     def _normalize_tools(
-        tools: Sequence[object] | None,
-    ) -> tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...]:
+        tools: Sequence[ToolSpec[SupportsDataclassOrNone, SupportsToolResult]] | None,
+    ) -> tuple[ToolSpec[SupportsDataclassOrNone, SupportsToolResult], ...]:
         if not tools:
             return ()
 
-        from .tool import Tool
+        # Late import to avoid circular import
+        from .tool import ToolSpec as ToolSpecRuntime
 
-        normalized: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
         for tool in tools:
-            if not isinstance(tool, Tool):
-                raise TypeError("Section tools must be Tool instances.")
-            normalized.append(
-                cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
-            )
-        return tuple(normalized)
+            # Runtime check for invalid tools (type annotation doesn't guarantee runtime type)
+            if not isinstance(tool, ToolSpecRuntime):  # pyright: ignore[reportUnnecessaryIsInstance]
+                raise TypeError("Section tools must implement the ToolSpec protocol.")
+        return tuple(tools)
 
 
 __all__ = ["Section", "SectionVisibility"]

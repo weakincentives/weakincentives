@@ -31,6 +31,7 @@ from typing import (
     get_origin,
     get_type_hints,
     overload,
+    runtime_checkable,
 )
 
 from ..budget import BudgetTracker
@@ -44,6 +45,14 @@ from ..types.dataclass import (
 )
 from .errors import PromptValidationError
 from .tool_result import ToolResult
+
+# Covariant type variables for ToolSpec protocol
+_ToolSpecParamsT_co = TypeVar(
+    "_ToolSpecParamsT_co", bound=SupportsDataclassOrNone, covariant=True
+)
+_ToolSpecResultT_co = TypeVar(
+    "_ToolSpecResultT_co", bound=SupportsToolResult, covariant=True
+)
 
 _NAME_MIN_LENGTH: Final = 1
 _NAME_MAX_LENGTH: Final = 64
@@ -273,6 +282,95 @@ class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
     def __call__(
         self, params: ParamsT_contra, *, context: ToolContext
     ) -> ToolResult[ResultT_co]: ...
+
+
+@runtime_checkable
+class ToolSpec(Protocol[_ToolSpecParamsT_co, _ToolSpecResultT_co]):
+    """Minimal protocol for tool objects used by registry and rendering.
+
+    This protocol captures the read-only attributes needed by the prompt
+    registry for validation and by the rendering layer for tool examples.
+    It allows external tool implementations to participate in the prompt
+    system without inheriting from :class:`Tool`.
+
+    The protocol is covariant in both type parameters, allowing subtypes
+    to be used where supertypes are expected.
+
+    Example:
+        A custom tool adapter can implement this protocol::
+
+            @dataclass(slots=True, frozen=True)
+            class MCPToolAdapter:
+                name: str
+                description: str
+                params_type: type[MyParams]
+                result_type: type[MyResult]
+                result_container: Literal["object", "array"] = "object"
+                examples: tuple[ToolExample[MyParams, MyResult], ...] = ()
+                accepts_overrides: bool = True
+
+    Attributes:
+        name: Tool identifier matching OpenAI function name constraints.
+        description: Tool description (1-200 ASCII characters).
+        params_type: Parameter dataclass type or ``type(None)`` for parameterless tools.
+        result_type: Result dataclass type or ``type(None)`` for void tools.
+        result_container: Whether result is a single object or array of objects.
+        examples: Representative invocations documenting tool usage.
+        accepts_overrides: Whether the tool accepts description overrides.
+    """
+
+    @property
+    def name(self) -> str:
+        """Tool identifier matching OpenAI function name constraints."""
+        ...
+
+    @property
+    def description(self) -> str:
+        """Tool description (1-200 ASCII characters)."""
+        ...
+
+    @property
+    def params_type(self) -> type[_ToolSpecParamsT_co]:
+        """Parameter dataclass type or ``type(None)`` for parameterless tools."""
+        ...
+
+    @property
+    def result_type(self) -> type[SupportsDataclass] | type[None]:
+        """Result dataclass type or ``type(None)`` for void tools."""
+        ...
+
+    @property
+    def result_container(self) -> Literal["object", "array"]:
+        """Whether result is a single object or array of objects."""
+        ...
+
+    @property
+    def examples(
+        self,
+    ) -> tuple[ToolExample[_ToolSpecParamsT_co, _ToolSpecResultT_co], ...]:
+        """Representative invocations documenting tool usage."""
+        ...
+
+    @property
+    def accepts_overrides(self) -> bool:
+        """Whether the tool accepts description overrides."""
+        ...
+
+    @property
+    def handler(
+        self,
+    ) -> ToolHandler[Any, Any] | None:
+        """Optional handler for tool execution.
+
+        Returns the tool handler if available for execution, or ``None``
+        if this tool specification is for documentation purposes only.
+        Execution code should check for ``None`` before calling.
+
+        Note: The return type uses ``Any`` for type parameters to avoid
+        variance issues with Protocol structural subtyping. The actual
+        handler type is preserved at runtime.
+        """
+        ...
 
 
 @dataclass(slots=True)
@@ -928,4 +1026,5 @@ __all__ = [
     "ToolExample",
     "ToolHandler",
     "ToolResult",
+    "ToolSpec",
 ]

@@ -16,14 +16,19 @@ import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any, Self, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass
 from ..types.dataclass import (
     SupportsDataclass,
+    SupportsDataclassOrNone,
+    SupportsToolResult,
 )
 from .errors import PromptRenderError
 from .section import Section, SectionVisibility, VisibilitySelector
+
+if TYPE_CHECKING:
+    from .tool import ToolSpec
 
 MarkdownParamsT = TypeVar(
     "MarkdownParamsT",
@@ -44,7 +49,9 @@ class MarkdownSection(Section[MarkdownParamsT]):
         default_params: MarkdownParamsT | None = None,
         children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: Callable[[SupportsDataclass], bool] | None = None,
-        tools: Sequence[object] | None = None,
+        tools: (
+            Sequence[ToolSpec[SupportsDataclassOrNone, SupportsToolResult]] | None
+        ) = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
         visibility: VisibilitySelector = SectionVisibility.FULL,

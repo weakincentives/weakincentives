@@ -23,7 +23,7 @@ from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...filesystem import Filesystem
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from ...prompt.tool import ToolContext, ToolHandler, ToolResult, ToolSpec
 from ...runtime.events import ToolInvoked
 from ...runtime.execution_state import CompositeSnapshot, ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
@@ -81,7 +81,7 @@ class BridgedTool:
         name: str,
         description: str,
         input_schema: dict[str, Any],
-        tool: Tool[Any, Any],
+        tool: ToolSpec[Any, Any],
         execution_state: ExecutionState,
         adapter: ProviderAdapter[Any],
         prompt: PromptProtocol[Any],
@@ -281,7 +281,7 @@ class BridgedTool:
 
 
 def create_bridged_tools(
-    tools: tuple[Tool[Any, Any], ...],
+    tools: tuple[ToolSpec[Any, Any], ...],
     *,
     execution_state: ExecutionState,
     adapter: ProviderAdapter[Any],
@@ -295,7 +295,7 @@ def create_bridged_tools(
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
     Args:
-        tools: Tuple of weakincentives Tool instances.
+        tools: Tuple of weakincentives ToolSpec instances.
         execution_state: ExecutionState for transactional tool execution.
             Session and filesystem are accessed from this state container.
         adapter: Adapter for tool context.
