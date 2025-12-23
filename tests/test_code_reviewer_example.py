@@ -43,6 +43,11 @@ from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
+from weakincentives.runtime import (
+    InMemoryMailbox,
+    MainLoopRequest,
+    MainLoopResult,
+)
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
@@ -259,26 +264,35 @@ def test_auto_optimization_runs_on_first_execute(tmp_path: Path) -> None:
     """Auto-optimization runs when execute() is called without existing digest."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    bus = InProcessDispatcher()
-    attach_logging_subscribers(bus)
-    loop = CodeReviewLoop(
-        adapter=cast(ProviderAdapter[ReviewResponse], adapter),
-        bus=bus,
-        overrides_store=overrides_store,
+    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
+        name="requests"
     )
+    responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        loop = CodeReviewLoop(
+            adapter=cast(ProviderAdapter[ReviewResponse], adapter),
+            requests=requests,
+            responses=responses,
+            overrides_store=overrides_store,
+        )
 
-    assert loop.override_tag == "latest"
+        assert loop.override_tag == "latest"
 
-    # Execute triggers auto-optimization since no digest exists
-    loop.execute(ReviewTurnParams(request="test request"))
+        # Execute triggers auto-optimization since no digest exists
+        loop.execute(ReviewTurnParams(request="test request"))
 
-    # Verify optimization was called (adapter recorded the call)
-    assert any("workspace-digest" in call for call in adapter.calls)
+        # Verify optimization was called (adapter recorded the call)
+        assert any("workspace-digest" in call for call in adapter.calls)
 
-    # Verify digest was persisted to session
-    session_digest = latest_workspace_digest(loop.session, "workspace-digest")
-    assert session_digest is not None
-    assert session_digest.body == "- Repo instructions from stub"
+        # Verify digest was persisted to session
+        session_digest = latest_workspace_digest(loop.session, "workspace-digest")
+        assert session_digest is not None
+        assert session_digest.body == "- Repo instructions from stub"
+    finally:
+        requests.close()
+        responses.close()
 
 
 def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
@@ -286,27 +300,37 @@ def test_default_deadline_refreshed_per_execute(tmp_path: Path) -> None:
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
-    bus = InProcessDispatcher()
-    loop = CodeReviewLoop(
-        adapter=adapter,
-        bus=bus,
-        overrides_store=overrides_store,
+    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
+        name="requests"
     )
+    responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
+        name="responses"
+    )
+    try:
+        loop = CodeReviewLoop(
+            adapter=adapter,
+            requests=requests,
+            responses=responses,
+            overrides_store=overrides_store,
+        )
 
-    set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
+        set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
 
-    loop.execute(ReviewTurnParams(request="first"))
-    loop.execute(ReviewTurnParams(request="second"))
+        loop.execute(ReviewTurnParams(request="first"))
+        loop.execute(ReviewTurnParams(request="second"))
 
-    assert len(adapter.deadlines) == 2
-    first_deadline, second_deadline = adapter.deadlines
-    assert isinstance(first_deadline, Deadline)
-    assert isinstance(second_deadline, Deadline)
-    assert first_deadline is not second_deadline
+        assert len(adapter.deadlines) == 2
+        first_deadline, second_deadline = adapter.deadlines
+        assert isinstance(first_deadline, Deadline)
+        assert isinstance(second_deadline, Deadline)
+        assert first_deadline is not second_deadline
 
-    now = datetime.now(UTC)
-    assert first_deadline.expires_at > now
-    assert second_deadline.expires_at > now
+        now = datetime.now(UTC)
+        assert first_deadline.expires_at > now
+        assert second_deadline.expires_at > now
+    finally:
+        requests.close()
+        responses.close()
 
 
 @pytest.fixture(autouse=True)

@@ -29,7 +29,7 @@ from examples import (
     render_plan_snapshot,
     resolve_override_tag,
 )
-from weakincentives.adapters import PromptResponse, ProviderAdapter
+from weakincentives.adapters import ProviderAdapter
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
@@ -70,11 +70,8 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
 )
 from weakincentives.runtime import (
-    Dispatcher,
     InMemoryMailbox,
-    MailboxMainLoop,
     MainLoop,
-    MainLoopCompleted,
     MainLoopRequest,
     MainLoopResult,
     Session,
@@ -172,10 +169,22 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     """MainLoop implementation for code review with auto-optimization.
 
     This loop maintains a persistent session across all execute() calls and
-    automatically runs workspace digest optimization on first use.
+    automatically runs workspace digest optimization on first use. It uses
+    in-memory mailboxes internally for the mailbox-based MainLoop pattern.
+
+    Example::
+
+        requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox()
+        responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox()
+        loop = CodeReviewLoop(
+            adapter=adapter,
+            requests=requests,
+            responses=responses,
+        )
+        result = loop.execute(ReviewTurnParams(request="Review the code"))
     """
 
-    _session: Session
+    _persistent_session: Session
     _template: PromptTemplate[ReviewResponse]
     _overrides_store: LocalPromptOverridesStore
     _override_tag: str
@@ -186,14 +195,15 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         self,
         *,
         adapter: ProviderAdapter[ReviewResponse],
-        bus: Dispatcher,
+        requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]],
+        responses: InMemoryMailbox[MainLoopResult[ReviewResponse]],
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
         use_podman: bool = False,
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
     ) -> None:
-        super().__init__(adapter=adapter, bus=bus)
+        super().__init__(adapter=adapter, requests=requests, responses=responses)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = resolve_override_tag(
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
@@ -201,14 +211,14 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         self._use_podman = use_podman
         self._use_claude_agent = use_claude_agent
         # Create persistent session at construction time
-        self._session = build_logged_session(tags={"app": "code-reviewer"})
+        self._persistent_session = build_logged_session(tags={"app": "code-reviewer"})
         self._template = build_task_prompt(
-            session=self._session,
+            session=self._persistent_session,
             use_podman=use_podman,
             use_claude_agent=use_claude_agent,
             workspace_section=workspace_section,
         )
-        # Seed overrides for all modes - custom MCP tools now work with streaming mode
+        # Seed overrides for all modes
         self._seed_overrides()
 
     def _seed_overrides(self) -> None:
@@ -231,33 +241,54 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             overrides_store=self._overrides_store,
             overrides_tag=self._override_tag,
         ).bind(request)
-        return prompt, self._session
+        return prompt, self._persistent_session
 
     def execute(
         self,
         request: ReviewTurnParams,
         *,
-        budget: None = None,
         deadline: Deadline | None = None,
-    ) -> tuple[PromptResponse[ReviewResponse], Session]:
-        """Execute with auto-optimization for workspace digest.
+    ) -> MainLoopResult[ReviewResponse]:
+        """Execute a review request synchronously.
 
+        Sends request to the mailbox, runs one iteration, and returns result.
         If no WorkspaceDigest exists in the session, runs optimization first.
-        All modes now support workspace optimization: VFS, Podman, and Claude Agent SDK.
         """
-        needs_optimization = self._session[WorkspaceDigest].latest() is None
+        needs_optimization = self._persistent_session[WorkspaceDigest].latest() is None
         if needs_optimization:
             self._run_optimization()
+
         effective_deadline = deadline or _default_deadline()
-        return super().execute(request, budget=budget, deadline=effective_deadline)
+        request_event = MainLoopRequest(
+            request=request,
+            deadline=effective_deadline,
+        )
+
+        # Send request and process immediately
+        self._requests.send(request_event)
+        self.run(max_iterations=1, wait_time_seconds=0)
+
+        # Retrieve result
+        result_msgs = self._responses.receive(max_messages=1, wait_time_seconds=0)
+        if not result_msgs:
+            # Should not happen in normal operation
+            return MainLoopResult[ReviewResponse](
+                request_id=request_event.request_id,
+                error="No response received",
+            )
+        result_msg = result_msgs[0]
+        result_msg.acknowledge()
+        return result_msg.body
 
     def _run_optimization(self) -> None:
         """Run workspace digest optimization."""
+        from weakincentives.runtime.events import InProcessDispatcher
+
         _LOGGER.info("Running workspace digest optimization...")
-        optimization_session = build_logged_session(parent=self._session)
+        optimization_session = build_logged_session(parent=self._persistent_session)
         context = OptimizationContext(
             adapter=self._adapter,
-            dispatcher=self._bus,
+            dispatcher=InProcessDispatcher(),
             overrides_store=self._overrides_store,
             overrides_tag=self._override_tag,
             optimization_session=optimization_session,
@@ -271,14 +302,14 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             overrides_store=self._overrides_store,
             overrides_tag=self._override_tag,
         )
-        result = optimizer.optimize(prompt, session=self._session)
+        result = optimizer.optimize(prompt, session=self._persistent_session)
         _LOGGER.info("Workspace digest optimization complete.")
         _LOGGER.debug("Digest: %s", result.digest.strip())
 
     @property
     def session(self) -> Session:
         """Expose session for external inspection."""
-        return self._session
+        return self._persistent_session
 
     @property
     def override_tag(self) -> str:
@@ -291,85 +322,11 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         return self._use_podman
 
 
-# =============================================================================
-# Alternative: Mailbox-based MainLoop for durable, distributed processing
-# =============================================================================
-#
-# The MailboxMainLoop pattern provides at-least-once delivery semantics for
-# durable work queues. Use this when:
-# - Requests must survive process restarts
-# - Work is distributed across multiple consumers
-# - Explicit acknowledgment is needed
-#
-# Example usage:
-#
-#     requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox()
-#     responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox()
-#     loop = MailboxCodeReviewLoop(adapter=adapter, requests=requests, responses=responses)
-#     loop.run(max_iterations=100)  # Process up to 100 messages
-#
-# For production, replace InMemoryMailbox with SQS or Redis implementations.
-# =============================================================================
-
-
-class MailboxCodeReviewLoop(MailboxMainLoop[ReviewTurnParams, ReviewResponse]):
-    """Mailbox-based MainLoop variant for durable code review processing.
-
-    This demonstrates the mailbox pattern where requests come from a queue
-    and results are sent to a response queue. The pattern supports:
-    - At-least-once delivery semantics
-    - Visibility timeouts for processing guarantees
-    - Message acknowledgment after successful processing
-    - Automatic retry on failure via nack
-    """
-
-    _template: PromptTemplate[ReviewResponse]
-    _overrides_store: LocalPromptOverridesStore
-    _override_tag: str
-
-    def __init__(
-        self,
-        *,
-        adapter: ProviderAdapter[ReviewResponse],
-        requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]],
-        responses: InMemoryMailbox[MainLoopResult[ReviewResponse]],
-        overrides_store: LocalPromptOverridesStore | None = None,
-        override_tag: str | None = None,
-    ) -> None:
-        super().__init__(adapter=adapter, requests=requests, responses=responses)
-        self._overrides_store = overrides_store or LocalPromptOverridesStore()
-        self._override_tag = resolve_override_tag(
-            override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
-        )
-        # Note: For simplicity, this uses VFS mode without Podman
-        temp_session = Session(tags={"app": "code-reviewer-mailbox"})
-        self._template = build_task_prompt(
-            session=temp_session,
-            use_podman=False,
-            use_claude_agent=False,
-        )
-
-    def initialize(
-        self, request: ReviewTurnParams
-    ) -> tuple[Prompt[ReviewResponse], Session]:
-        """Initialize prompt and session for each request.
-
-        Unlike the dispatcher-based loop, each request gets a fresh session
-        since mailbox workers are stateless.
-        """
-        session = Session(tags={"app": "code-reviewer-mailbox"})
-        prompt = Prompt(
-            self._template,
-            overrides_store=self._overrides_store,
-            overrides_tag=self._override_tag,
-        ).bind(request)
-        return prompt, session
-
-
 class CodeReviewApp:
     """Owns the REPL loop and user interaction."""
 
-    _bus: Dispatcher
+    _requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]]
+    _responses: InMemoryMailbox[MainLoopResult[ReviewResponse]]
     _loop: CodeReviewLoop
     _use_claude_agent: bool
     _workspace_section: ClaudeAgentWorkspaceSection | None
@@ -384,29 +341,30 @@ class CodeReviewApp:
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
     ) -> None:
-        bus = _create_bus_with_logging()
-        self._bus = bus
         self._use_claude_agent = use_claude_agent
         self._workspace_section = workspace_section
+        # Create mailboxes for the loop
+        self._requests = InMemoryMailbox(name="code-review-requests")
+        self._responses = InMemoryMailbox(name="code-review-responses")
         self._loop = CodeReviewLoop(
             adapter=adapter,
-            bus=bus,
+            requests=self._requests,
+            responses=self._responses,
             overrides_store=overrides_store,
             override_tag=override_tag,
             use_podman=use_podman,
             use_claude_agent=use_claude_agent,
             workspace_section=workspace_section,
         )
-        bus.subscribe(MainLoopCompleted, self._on_loop_completed)
 
-    def _on_loop_completed(self, event: object) -> None:
-        """Handle completed response from event bus."""
-        completed: MainLoopCompleted[ReviewResponse] = event  # type: ignore[assignment]
-        answer = _render_response_payload(completed.response)
-
+    def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:
+        """Render the result to console."""
         print("\n--- Agent Response ---")
-        print(answer)
-        # Plan snapshot available for all modes - custom MCP tools now work with streaming mode
+        if result.success and result.output is not None:
+            answer = _render_response(result.output)
+            print(answer)
+        else:
+            print(f"Error: {result.error}")
         print("\n--- Plan Snapshot ---")
         print(render_plan_snapshot(self._loop.session))
         print("-" * 23 + "\n")
@@ -434,11 +392,8 @@ class CodeReviewApp:
                     break
 
                 request = ReviewTurnParams(request=user_prompt)
-                request_event = MainLoopRequest(
-                    request=request,
-                    deadline=_default_deadline(),
-                )
-                self._bus.dispatch(request_event)
+                result = self._loop.execute(request)
+                self._render_result(result)
         finally:
             self._cleanup()
 
@@ -447,19 +402,11 @@ class CodeReviewApp:
 
     def _cleanup(self) -> None:
         """Clean up resources."""
+        self._requests.close()
+        self._responses.close()
         if self._workspace_section is not None:
             self._workspace_section.cleanup()
             _LOGGER.info("Cleaned up Claude Agent workspace.")
-
-
-def _create_bus_with_logging() -> Dispatcher:
-    """Create a dispatcher with logging subscribers attached."""
-    from examples.logging import attach_logging_subscribers
-    from weakincentives.runtime.events import InProcessDispatcher
-
-    bus = InProcessDispatcher()
-    attach_logging_subscribers(bus)
-    return bus
 
 
 def parse_args() -> argparse.Namespace:
@@ -489,9 +436,7 @@ def main() -> None:
     configure_logging()
 
     if args.claude_agent:
-        # Create bus first since build_claude_agent_adapter needs it to materialize workspace
-        bus = _create_bus_with_logging()
-        adapter, workspace_section = build_claude_agent_adapter(bus)
+        adapter, workspace_section = build_claude_agent_adapter()
         app = CodeReviewApp(
             adapter,
             use_podman=False,
@@ -513,18 +458,15 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
-def build_claude_agent_adapter(
-    bus: Dispatcher,
-) -> tuple[ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection]:
+def build_claude_agent_adapter() -> tuple[
+    ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection
+]:
     """Build the Claude Agent SDK adapter with workspace section and isolation.
 
     Creates a workspace section with the test repository mounted, and configures
     the adapter to use the SDK's native agentic capabilities with hermetic
     isolation. The sandbox has network access to Python documentation sites
     for code quality reference.
-
-    Args:
-        bus: Event bus for creating a temporary session to materialize the workspace.
 
     Returns:
         Tuple of (adapter, workspace_section). The workspace section should be
@@ -536,7 +478,7 @@ def build_claude_agent_adapter(
     _ensure_test_repository_available()
 
     # Create a temporary session for workspace materialization
-    temp_session = Session(bus=bus)
+    temp_session = Session(tags={"purpose": "workspace-materialization"})
 
     # Create workspace section with test repository mounted
     sunfish_path = TEST_REPOSITORIES_ROOT / "sunfish"
@@ -861,20 +803,16 @@ def _build_intro(
     ).strip()
 
 
-def _render_response_payload(response: PromptResponse[ReviewResponse]) -> str:
-    if response.output is not None:
-        output = response.output
-        lines = [f"Summary: {output.summary}"]
-        if output.issues:
-            lines.append("Issues:")
-            lines.extend(f"- {issue}" for issue in output.issues)
-        if output.next_steps:
-            lines.append("Next Steps:")
-            lines.extend(f"- {step}" for step in output.next_steps)
-        return "\n".join(lines)
-    if response.text:
-        return response.text
-    return "(no response from assistant)"
+def _render_response(output: ReviewResponse) -> str:
+    """Render a ReviewResponse as formatted text."""
+    lines = [f"Summary: {output.summary}"]
+    if output.issues:
+        lines.append("Issues:")
+        lines.extend(f"- {issue}" for issue in output.issues)
+    if output.next_steps:
+        lines.append("Next Steps:")
+        lines.extend(f"- {step}" for step in output.next_steps)
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

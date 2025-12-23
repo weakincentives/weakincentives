@@ -47,11 +47,8 @@ from .mailbox import (
     SerializationError,
 )
 from .main_loop import (
-    MailboxMainLoop,
     MainLoop,
-    MainLoopCompleted,
     MainLoopConfig,
-    MainLoopFailed,
     MainLoopRequest,
     MainLoopResult,
 )
@@ -95,11 +92,8 @@ __all__ = [
     "MailboxConnectionError",
     "MailboxError",
     "MailboxFullError",
-    "MailboxMainLoop",
     "MainLoop",
-    "MainLoopCompleted",
     "MainLoopConfig",
-    "MainLoopFailed",
     "MainLoopRequest",
     "MainLoopResult",
     "Message",
