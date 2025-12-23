@@ -12,8 +12,6 @@
 
 """Dataclass serialization helpers."""
 
-# pyright: reportUnknownArgumentType=false, reportUnknownVariableType=false, reportUnknownMemberType=false, reportUnknownParameterType=false, reportCallIssue=false, reportArgumentType=false, reportPrivateUsage=false
-
 from __future__ import annotations
 
 import dataclasses
@@ -27,7 +25,12 @@ from uuid import UUID
 
 from ..types import JSONValue
 from ..types.dataclass import SupportsDataclass
-from ._utils import MISSING_SENTINEL, TYPE_REF_KEY, _set_extras, _type_identifier
+from ._utils import (
+    MISSING_SENTINEL,
+    TYPE_REF_KEY,
+    _set_extras,  # pyright: ignore[reportPrivateUsage]
+    _type_identifier,  # pyright: ignore[reportPrivateUsage]
+)
 
 
 def _serialize(
@@ -63,7 +66,9 @@ def _serialize(
             alias_generator,
         )
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return _serialize_sequence(value, by_alias, exclude_none, alias_generator)
+        return _serialize_sequence(
+            cast(Sequence[object], value), by_alias, exclude_none, alias_generator
+        )
     return value
 
 
@@ -264,9 +269,10 @@ def _extract_extras(obj: object, field_names: set[str]) -> dict[str, object]:
     extras_attr = getattr(obj, "__extras__", None)
     obj_dict = getattr(obj, "__dict__", None)
     if isinstance(obj_dict, dict):
-        return {key: value for key, value in obj_dict.items() if key not in field_names}
+        typed_dict = cast(dict[str, object], obj_dict)
+        return {key: value for key, value in typed_dict.items() if key not in field_names}
     if isinstance(extras_attr, Mapping):
-        return dict(extras_attr)
+        return dict(cast(Mapping[str, object], extras_attr))
     return {}  # pragma: no cover - defensive fallback for unusual dataclasses
 
 
