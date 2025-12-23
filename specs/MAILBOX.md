@@ -183,15 +183,20 @@ the queue after visibility timeout.
 
 ### Redis
 
-Uses Redis data structures to approximate SQS semantics:
+Supports both standalone Redis and Redis Cluster deployments.
+
+#### Data Structures
 
 ```
-queue:{name}:pending    # LIST - pending messages (LPUSH/RPOP)
-queue:{name}:invisible  # SORTED SET - invisible messages by expiry time
-queue:{name}:data       # HASH - message ID → serialized message
+{queue:name}:pending    # LIST - pending messages (LPUSH/RPOP)
+{queue:name}:invisible  # SORTED SET - invisible messages by expiry time
+{queue:name}:data       # HASH - message ID → serialized message
 ```
 
-**Operations:**
+The `{queue:name}` hash tag ensures all keys for a queue hash to the same slot,
+required for Cluster mode and harmless in standalone mode.
+
+#### Operations
 
 - `send()` → `HSET` data + `LPUSH` pending
 - `receive()` → `BRPOP` pending + `ZADD` invisible
@@ -201,6 +206,58 @@ queue:{name}:data       # HASH - message ID → serialized message
 
 **Visibility reaper:** Background task scans `invisible` sorted set for expired
 entries and moves them back to `pending`.
+
+#### Standalone vs Cluster
+
+| Behavior | Standalone | Cluster |
+|----------|------------|---------|
+| Key distribution | Single node | Sharded by hash slot |
+| Lua scripts | Any keys | Same-slot keys only |
+| BRPOP | Single list | Single list per slot |
+| Ordering | FIFO guaranteed | FIFO per queue only |
+| Failover | Manual or Sentinel | Automatic |
+
+#### Redis Cluster Requirements
+
+1. **Hash tags mandatory**: All keys for a queue must include the same hash tag
+   (e.g., `{queue:name}`) to ensure co-location on the same shard. Without
+   hash tags, multi-key operations fail with `CROSSSLOT` error.
+
+1. **Lua script constraints**: Scripts that touch multiple keys only work when
+   all keys hash to the same slot. The hash tag pattern ensures this.
+
+1. **No cross-queue atomicity**: Operations spanning multiple queues (different
+   hash tags) cannot be atomic. Each queue operates independently.
+
+1. **BRPOP behavior**: In Cluster mode, `BRPOP` works normally since it
+   operates on a single list. The client library handles slot routing.
+
+1. **Replication lag**: During failover, recently written messages on the old
+   primary may be lost if not yet replicated. Configure `min-replicas-to-write`
+   for stronger durability guarantees.
+
+1. **Scaling**: Adding/removing shards triggers slot migration. In-flight
+   messages remain safe but `READONLY` errors may occur briefly during
+   migration. Retry with backoff.
+
+#### Configuration
+
+```python
+# Standalone
+RedisMailbox(
+    name="requests",
+    client=Redis(host="localhost", port=6379),
+)
+
+# Cluster
+RedisMailbox(
+    name="requests",
+    client=RedisCluster(host="localhost", port=7000),
+)
+```
+
+The `RedisMailbox` implementation auto-detects cluster mode and adjusts
+behavior accordingly. No code changes required beyond the client type.
 
 ### SQS
 
@@ -241,7 +298,8 @@ Direct mapping to SQS API. No additional data structures needed.
 **Ordering:**
 
 - SQS: Best-effort (not guaranteed)
-- Redis: FIFO within single instance
+- Redis standalone: FIFO guaranteed
+- Redis Cluster: FIFO per queue (each queue on one shard)
 
 **Message deduplication:**
 
@@ -254,13 +312,11 @@ Direct mapping to SQS API. No additional data structures needed.
    reaper. Use sorted set scores for expiry timestamps.
 
 1. **Atomic visibility**: Lua scripts ensure atomic receive (RPOP + ZADD) and
-   acknowledge (ZREM + HDEL).
-
-1. **Cluster mode**: With Redis Cluster, all keys for a queue must hash to the
-   same slot. Use hash tags: `{queue:name}:pending`.
+   acknowledge (ZREM + HDEL). Works in Cluster mode when keys share a hash tag.
 
 1. **Persistence**: Redis persistence (RDB/AOF) affects durability. With no
-   persistence, messages lost on restart.
+   persistence, messages lost on restart. In Cluster mode, also configure
+   `min-replicas-to-write` for cross-replica durability.
 
 ## Mailbox vs Dispatcher
 
