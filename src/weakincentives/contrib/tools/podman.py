@@ -31,6 +31,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
+from weakincentives.filesystem import Filesystem
+
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
@@ -42,9 +44,6 @@ from ._context import ensure_context_uses_session
 from .asteval import (
     EvalParams,
     EvalResult,
-)
-from .filesystem import (
-    Filesystem,
 )
 from .filesystem_host import HostFilesystem
 from .podman_connection import (

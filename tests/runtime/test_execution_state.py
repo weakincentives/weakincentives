@@ -20,8 +20,8 @@ from uuid import UUID
 
 import pytest
 
-from weakincentives.contrib.tools.filesystem import Filesystem
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.tool import ResourceRegistry
 from weakincentives.runtime.execution_state import (
     CompositeSnapshot,
@@ -540,7 +540,7 @@ class TestCompositeSnapshotFromJsonErrors:
         data = json.loads(json_str)
         data["resources"] = [
             {
-                "resource_type": "weakincentives.contrib.tools.filesystem:Filesystem",
+                "resource_type": "weakincentives.filesystem:Filesystem",
                 "snapshot": "not-an-object",
             }
         ]
@@ -564,7 +564,7 @@ class TestCompositeSnapshotFromJsonErrors:
         data = json.loads(json_str)
         data["resources"] = [
             {
-                "resource_type": "weakincentives.contrib.tools.filesystem:Filesystem",
+                "resource_type": "weakincentives.filesystem:Filesystem",
                 "snapshot": {},  # Missing __type__
             }
         ]
@@ -588,7 +588,7 @@ class TestCompositeSnapshotFromJsonErrors:
         data = json.loads(json_str)
         data["resources"] = [
             {
-                "resource_type": "weakincentives.contrib.tools.filesystem:Filesystem",
+                "resource_type": "weakincentives.filesystem:Filesystem",
                 "snapshot": {"__type__": "unknown.module:UnknownSnapshot"},
             }
         ]
@@ -612,11 +612,9 @@ class TestCompositeSnapshotFromJsonErrors:
         data = json.loads(json_str)
         data["resources"] = [
             {
-                "resource_type": "weakincentives.contrib.tools.filesystem:Filesystem",
+                "resource_type": "weakincentives.filesystem:Filesystem",
                 "snapshot": {
-                    "__type__": (
-                        "weakincentives.contrib.tools.filesystem:FilesystemSnapshot"
-                    ),
+                    "__type__": ("weakincentives.filesystem:FilesystemSnapshot"),
                     "invalid_field": "missing required fields",
                 },
             }
@@ -889,8 +887,8 @@ class TestToolTransactionMethods:
 
     def test_begin_tool_execution_creates_snapshot(self) -> None:
         """begin_tool_execution takes a snapshot and stores pending execution."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
 
         session = Session()
@@ -910,8 +908,8 @@ class TestToolTransactionMethods:
 
     def test_end_tool_execution_success_no_restore(self) -> None:
         """end_tool_execution with success=True doesn't restore state."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
 
         session = Session()
@@ -935,8 +933,8 @@ class TestToolTransactionMethods:
 
     def test_end_tool_execution_failure_restores(self) -> None:
         """end_tool_execution with success=False restores state."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
 
         session = Session()
@@ -969,8 +967,8 @@ class TestToolTransactionMethods:
 
     def test_abort_tool_execution_restores(self) -> None:
         """abort_tool_execution always restores state."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
 
         session = Session()
@@ -1032,8 +1030,8 @@ class TestToolTransactionContextManager:
 
     def test_tool_transaction_restores_on_exception(self) -> None:
         """tool_transaction restores state when an exception is raised."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
 
         session = Session()
@@ -1052,8 +1050,8 @@ class TestToolTransactionContextManager:
 
     def test_tool_transaction_preserves_state_on_success(self) -> None:
         """tool_transaction preserves state changes on successful exit."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
 
         session = Session()
@@ -1070,8 +1068,8 @@ class TestToolTransactionContextManager:
 
     def test_tool_transaction_manual_restore_on_failure_result(self) -> None:
         """tool_transaction allows manual restore for result.success=False."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
 
         session = Session()

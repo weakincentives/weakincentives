@@ -41,7 +41,8 @@ from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
-from weakincentives.contrib.tools._filesystem_utils import (
+from weakincentives.errors import SnapshotError, SnapshotRestoreError
+from weakincentives.filesystem import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
     MAX_WRITE_LENGTH,
@@ -57,7 +58,6 @@ from weakincentives.contrib.tools._filesystem_utils import (
     normalize_path,
     validate_path,
 )
-from weakincentives.errors import SnapshotError, SnapshotRestoreError
 
 __all__ = ["HostFilesystem"]
 

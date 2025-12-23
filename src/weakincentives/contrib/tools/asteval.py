@@ -27,13 +27,14 @@ from importlib import import_module
 from types import MappingProxyType, ModuleType
 from typing import Final, Literal, Protocol, TextIO, cast, override
 
+from weakincentives.filesystem import READ_ENTIRE_FILE, Filesystem
+
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
-from .filesystem import READ_ENTIRE_FILE, Filesystem
 from .filesystem_memory import InMemoryFilesystem
 from .vfs_types import (
     MAX_WRITE_LENGTH as _MAX_WRITE_LENGTH,

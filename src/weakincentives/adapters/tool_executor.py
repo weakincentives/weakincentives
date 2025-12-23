@@ -22,10 +22,10 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import uuid4
 
 from ..budget import BudgetTracker
-from ..contrib.tools.filesystem import Filesystem
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
+from ..filesystem import Filesystem
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol

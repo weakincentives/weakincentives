@@ -10,7 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Internal shared utilities and types for filesystem implementations."""
+"""Core filesystem types and result dataclasses.
+
+This module defines the data structures used by the Filesystem protocol.
+These types are used throughout the codebase for filesystem operations.
+"""
 
 from __future__ import annotations
 
@@ -188,3 +192,28 @@ def glob_match(path: str, pattern: str, base: str) -> bool:
     else:
         relative = path
     return fnmatch.fnmatch(relative, pattern)
+
+
+__all__ = [
+    "ASCII",
+    "DEFAULT_READ_LIMIT",
+    "MAX_GREP_MATCHES",
+    "MAX_PATH_DEPTH",
+    "MAX_SEGMENT_LENGTH",
+    "MAX_WRITE_LENGTH",
+    "READ_ENTIRE_FILE",
+    "FileEncoding",
+    "FileEntry",
+    "FileStat",
+    "FilesystemSnapshot",
+    "GlobMatch",
+    "GrepMatch",
+    "ReadResult",
+    "WriteMode",
+    "WriteResult",
+    "glob_match",
+    "is_path_under",
+    "normalize_path",
+    "now",
+    "validate_path",
+]

@@ -21,8 +21,8 @@ from importlib import import_module
 from typing import Any, Final, Protocol, TypeVar, cast, override
 
 from ..budget import Budget, BudgetTracker
-from ..contrib.tools.filesystem import Filesystem
 from ..deadlines import Deadline
+from ..filesystem import Filesystem
 from ..prompt.prompt import Prompt
 from ..prompt.tool import ResourceRegistry
 from ..runtime.execution_state import ExecutionState

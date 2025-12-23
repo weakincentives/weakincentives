@@ -50,8 +50,8 @@ from weakincentives.contrib.tools import (
     WriteFile,
     WriteFileParams,
 )
-from weakincentives.contrib.tools.filesystem import Filesystem
 from weakincentives.contrib.tools.vfs import FilesystemToolHandlers
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessEventBus
 from weakincentives.runtime.session import Session

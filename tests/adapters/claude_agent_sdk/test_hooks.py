@@ -1109,8 +1109,8 @@ class TestPreToolUseHookTransactional:
 
     def test_takes_snapshot_with_execution_state(self, session: Session) -> None:
         """Pre-tool hook takes snapshot when execution_state is present."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
@@ -1135,8 +1135,8 @@ class TestPreToolUseHookTransactional:
 
     def test_skips_snapshot_for_mcp_wink_tools(self, session: Session) -> None:
         """Pre-tool hook skips snapshot for MCP WINK tools."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
@@ -1162,8 +1162,8 @@ class TestPostToolUseHookTransactional:
 
     def test_restores_state_on_tool_failure(self, session: Session) -> None:
         """Post-tool hook restores state when tool fails."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
@@ -1205,8 +1205,8 @@ class TestPostToolUseHookTransactional:
 
     def test_no_restore_on_success(self, session: Session) -> None:
         """Post-tool hook doesn't restore state on success."""
-        from weakincentives.contrib.tools.filesystem import Filesystem
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+        from weakincentives.filesystem import Filesystem
         from weakincentives.prompt.tool import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 

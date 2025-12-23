@@ -22,8 +22,8 @@ from weakincentives.adapters.core import (
     PromptResponse,
     ProviderAdapter,
 )
-from weakincentives.contrib.tools.filesystem import Filesystem
 from weakincentives.deadlines import Deadline
+from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import (
     Prompt,
     PromptTemplate,

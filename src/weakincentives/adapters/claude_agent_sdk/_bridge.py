@@ -20,8 +20,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
-from ...contrib.tools.filesystem import Filesystem
 from ...deadlines import Deadline
+from ...filesystem import Filesystem
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ...runtime.events import ToolInvoked

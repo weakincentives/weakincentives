@@ -64,7 +64,7 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 
 if TYPE_CHECKING:
-    from ..contrib.tools.filesystem import Filesystem
+    from ..filesystem import Filesystem
     from ..runtime.session.protocols import SessionProtocol
     from .protocols import (
         PromptProtocol,
@@ -229,7 +229,7 @@ class ToolContext:
         This is sugar for ``self.resources.get(Filesystem)``.
         """
         # Import here to avoid circular import at module load time
-        from ..contrib.tools.filesystem import Filesystem
+        from ..filesystem import Filesystem
 
         return self.resources.get(Filesystem)
 

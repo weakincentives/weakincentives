@@ -38,7 +38,7 @@ from .section import Section
 from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:
-    from ..contrib.tools.filesystem import Filesystem
+    from ..filesystem import Filesystem
     from ..runtime.session.protocols import SessionProtocol
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot

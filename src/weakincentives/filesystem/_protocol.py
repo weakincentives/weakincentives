@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Filesystem protocol and result types for workspace operations.
+"""Filesystem protocol for workspace operations.
 
 This module provides a unified `Filesystem` protocol that abstracts over
 workspace backends (in-memory VFS, Podman containers, host filesystem) so
@@ -18,29 +18,12 @@ tool handlers can perform file operations without coupling to a specific
 storage implementation.
 
 The protocol uses simple `str` paths throughout - tool handlers convert these
-to structured result types (with VfsPath) for serialization to the LLM.
+to structured result types for serialization to the LLM.
 
-Implementations are in separate modules:
+Implementations are in `weakincentives.contrib.tools`:
 
 - `filesystem_memory.InMemoryFilesystem`: Session-scoped in-memory storage
 - `filesystem_host.HostFilesystem`: Sandboxed host directory access
-
-Example usage::
-
-    from weakincentives.contrib.tools.filesystem import Filesystem
-    from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-
-    # Create an in-memory filesystem
-    fs = InMemoryFilesystem()
-
-    # Write and read files
-    fs.write("src/main.py", "print('hello')")
-    result = fs.read("src/main.py")
-    assert result.content == "print('hello')"
-
-    # Use glob and grep
-    matches = fs.glob("**/*.py")
-    grep_results = fs.grep(r"print", path="src")
 """
 
 from __future__ import annotations
@@ -48,25 +31,15 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Literal, Protocol, runtime_checkable
 
-# Re-export types from internal utils module
-from weakincentives.contrib.tools._filesystem_utils import (
-    READ_ENTIRE_FILE as READ_ENTIRE_FILE,
-    FileEncoding as FileEncoding,
-    FileEntry as FileEntry,
-    FileStat as FileStat,
-    FilesystemSnapshot as FilesystemSnapshot,
-    GlobMatch as GlobMatch,
-    GrepMatch as GrepMatch,
-    ReadResult as ReadResult,
-    WriteMode as WriteMode,
-    WriteResult as WriteResult,
-    normalize_path as normalize_path,
-    validate_path as validate_path,
+from ._types import (
+    FileEntry,
+    FileStat,
+    FilesystemSnapshot,
+    GlobMatch,
+    GrepMatch,
+    ReadResult,
+    WriteResult,
 )
-
-# ---------------------------------------------------------------------------
-# Filesystem Protocol
-# ---------------------------------------------------------------------------
 
 
 @runtime_checkable
@@ -298,18 +271,6 @@ class SnapshotableFilesystem(Filesystem, Protocol):
 
 
 __all__ = [
-    "READ_ENTIRE_FILE",
-    "FileEncoding",
-    "FileEntry",
-    "FileStat",
     "Filesystem",
-    "FilesystemSnapshot",
-    "GlobMatch",
-    "GrepMatch",
-    "ReadResult",
     "SnapshotableFilesystem",
-    "WriteMode",
-    "WriteResult",
-    "normalize_path",
-    "validate_path",
 ]
