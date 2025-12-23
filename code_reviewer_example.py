@@ -71,9 +71,12 @@ from weakincentives.prompt.overrides import (
 )
 from weakincentives.runtime import (
     Dispatcher,
+    InMemoryMailbox,
+    MailboxMainLoop,
     MainLoop,
     MainLoopCompleted,
     MainLoopRequest,
+    MainLoopResult,
     Session,
 )
 from weakincentives.types import SupportsDataclass
@@ -286,6 +289,81 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     def use_podman(self) -> bool:
         """Expose workspace mode for display."""
         return self._use_podman
+
+
+# =============================================================================
+# Alternative: Mailbox-based MainLoop for durable, distributed processing
+# =============================================================================
+#
+# The MailboxMainLoop pattern provides at-least-once delivery semantics for
+# durable work queues. Use this when:
+# - Requests must survive process restarts
+# - Work is distributed across multiple consumers
+# - Explicit acknowledgment is needed
+#
+# Example usage:
+#
+#     requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox()
+#     responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox()
+#     loop = MailboxCodeReviewLoop(adapter=adapter, requests=requests, responses=responses)
+#     loop.run(max_iterations=100)  # Process up to 100 messages
+#
+# For production, replace InMemoryMailbox with SQS or Redis implementations.
+# =============================================================================
+
+
+class MailboxCodeReviewLoop(MailboxMainLoop[ReviewTurnParams, ReviewResponse]):
+    """Mailbox-based MainLoop variant for durable code review processing.
+
+    This demonstrates the mailbox pattern where requests come from a queue
+    and results are sent to a response queue. The pattern supports:
+    - At-least-once delivery semantics
+    - Visibility timeouts for processing guarantees
+    - Message acknowledgment after successful processing
+    - Automatic retry on failure via nack
+    """
+
+    _template: PromptTemplate[ReviewResponse]
+    _overrides_store: LocalPromptOverridesStore
+    _override_tag: str
+
+    def __init__(
+        self,
+        *,
+        adapter: ProviderAdapter[ReviewResponse],
+        requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]],
+        responses: InMemoryMailbox[MainLoopResult[ReviewResponse]],
+        overrides_store: LocalPromptOverridesStore | None = None,
+        override_tag: str | None = None,
+    ) -> None:
+        super().__init__(adapter=adapter, requests=requests, responses=responses)
+        self._overrides_store = overrides_store or LocalPromptOverridesStore()
+        self._override_tag = resolve_override_tag(
+            override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
+        )
+        # Note: For simplicity, this uses VFS mode without Podman
+        temp_session = Session(tags={"app": "code-reviewer-mailbox"})
+        self._template = build_task_prompt(
+            session=temp_session,
+            use_podman=False,
+            use_claude_agent=False,
+        )
+
+    def initialize(
+        self, request: ReviewTurnParams
+    ) -> tuple[Prompt[ReviewResponse], Session]:
+        """Initialize prompt and session for each request.
+
+        Unlike the dispatcher-based loop, each request gets a fresh session
+        since mailbox workers are stateless.
+        """
+        session = Session(tags={"app": "code-reviewer-mailbox"})
+        prompt = Prompt(
+            self._template,
+            overrides_store=self._overrides_store,
+            overrides_tag=self._override_tag,
+        ).bind(request)
+        return prompt, session
 
 
 class CodeReviewApp:
