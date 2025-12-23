@@ -414,36 +414,29 @@ class EvalReport:
 
 ### EvalLoop
 
-The core abstraction for running evaluations. Like `MainLoop`, it uses abstract
-factory methods that subclasses implement:
+The core class for running evaluations. Takes a `MainLoop` instance for
+executing samples:
 
 ```python
-class EvalLoop(ABC, Generic[InputT, OutputT, ExpectedT]):
-    """Abstract base for evaluation loops.
+class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
+    """Orchestrates evaluation over a dataset.
 
-    Subclasses implement create_loop() to provide the MainLoop that
-    processes each sample.
+    Uses the provided MainLoop to execute each sample, then scores
+    the output with the evaluator.
     """
 
     def __init__(
         self,
         *,
+        loop: MainLoop[InputT, OutputT],
         dataset: Dataset[InputT, ExpectedT],
         evaluator: Evaluator[OutputT, ExpectedT],
         bus: Dispatcher | None = None,
     ) -> None:
+        self._loop = loop
         self._dataset = dataset
         self._evaluator = evaluator
         self._bus = bus
-
-    @abstractmethod
-    def create_loop(self) -> MainLoop[InputT, OutputT]:
-        """Create the MainLoop for executing samples.
-
-        Called once before iterating through the dataset. The returned
-        loop is reused for all samples.
-        """
-        ...
 
     def execute(self) -> EvalReport:
         """Run evaluation on all samples.
@@ -457,13 +450,12 @@ class EvalLoop(ABC, Generic[InputT, OutputT, ExpectedT]):
         Returns:
             EvalReport with all results and aggregate metrics
         """
-        loop = self.create_loop()
         results: list[EvalResult] = []
 
         for sample in self._dataset:
             start = time.monotonic()
             try:
-                response, _ = loop.execute(sample.input)
+                response, _ = self._loop.execute(sample.input)
                 latency_ms = int((time.monotonic() - start) * 1000)
                 score = self._evaluator(response.output, sample.expected)
                 result = EvalResult(
@@ -540,28 +532,14 @@ class QALoop(MainLoop[str, str]):
         return Session(bus=self._bus)
 
 
-# Define the EvalLoop
-class QAEvalLoop(EvalLoop[str, str, str]):
-    def __init__(
-        self,
-        *,
-        dataset: Dataset[str, str],
-        adapter: OpenAIAdapter[str],
-        bus: Dispatcher | None = None,
-    ):
-        super().__init__(dataset=dataset, evaluator=exact_match, bus=bus)
-        self._adapter = adapter
-        self._loop_bus = InProcessDispatcher()
-
-    def create_loop(self) -> MainLoop[str, str]:
-        return QALoop(adapter=self._adapter, bus=self._loop_bus)
-
-
-# Load dataset and run
+# Load dataset
 dataset = Dataset.load(Path("tests/fixtures/qa.jsonl"), str, str)
-adapter = OpenAIAdapter(model="gpt-4o")
 
-eval_loop = QAEvalLoop(dataset=dataset, adapter=adapter)
+# Create loop and run evaluation
+adapter = OpenAIAdapter(model="gpt-4o")
+loop = QALoop(adapter=adapter, bus=InProcessDispatcher())
+
+eval_loop = EvalLoop(loop=loop, dataset=dataset, evaluator=exact_match)
 report = eval_loop.execute()
 
 # Inspect results
@@ -590,18 +568,8 @@ evaluator = all_of(
     llm_judge(judge_adapter, "Well-structured response", bus=judge_bus),
 )
 
-
-# EvalLoop with custom evaluator
-class MultiCriteriaEvalLoop(EvalLoop[str, str, str]):
-    def __init__(self, *, dataset: Dataset[str, str], adapter, evaluator):
-        super().__init__(dataset=dataset, evaluator=evaluator)
-        self._adapter = adapter
-
-    def create_loop(self) -> MainLoop[str, str]:
-        return QALoop(adapter=self._adapter, bus=InProcessDispatcher())
-
-
-eval_loop = MultiCriteriaEvalLoop(dataset=dataset, adapter=adapter, evaluator=evaluator)
+# Run with composite evaluator
+eval_loop = EvalLoop(loop=loop, dataset=dataset, evaluator=evaluator)
 report = eval_loop.execute()
 ```
 
@@ -621,8 +589,8 @@ samples = tuple(
 )
 dataset = Dataset(samples=samples)
 
-# Use with any EvalLoop subclass
-eval_loop = QAEvalLoop(dataset=dataset, adapter=adapter)
+# Run evaluation
+eval_loop = EvalLoop(loop=loop, dataset=dataset, evaluator=contains)
 report = eval_loop.execute()
 ```
 
@@ -644,7 +612,7 @@ bus = InProcessDispatcher()
 bus.subscribe(SampleEvaluated, on_sample)
 bus.subscribe(EvalCompleted, on_complete)
 
-eval_loop = QAEvalLoop(dataset=dataset, adapter=adapter, bus=bus)
+eval_loop = EvalLoop(loop=loop, dataset=dataset, evaluator=exact_match, bus=bus)
 report = eval_loop.execute()
 ```
 
