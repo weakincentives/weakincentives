@@ -7,7 +7,7 @@ this spec adds datasets and scoring.
 
 ## Guiding Principles
 
-- **EvalLoop mirrors MainLoop** - Factory-based, event-driven, type-safe
+- **EvalLoop wraps MainLoop** - Composition-based, event-driven, type-safe
 - **Evaluators are functions** - Pure `(output, expected) -> Score`
 - **Datasets are immutable** - Frozen dataclass with typed samples
 
@@ -26,9 +26,8 @@ this spec adds datasets and scoring.
                    └───────────┘     └────────────┘
 ```
 
-`EvalLoop` orchestrates evaluation: for each sample, it creates a `MainLoop`
-via the abstract factory, executes the sample, scores the output, and
-aggregates results into a report.
+`EvalLoop` orchestrates evaluation: for each sample, it executes through the
+provided `MainLoop`, scores the output, and aggregates results into a report.
 
 ## Core Types
 
@@ -525,11 +524,10 @@ class QALoop(MainLoop[str, str]):
             ],
         )
 
-    def create_prompt(self, question: str) -> Prompt[str]:
-        return Prompt(self._template).bind(question=question)
-
-    def create_session(self) -> Session:
-        return Session(bus=self._bus)
+    def initialize(self, question: str) -> tuple[Prompt[str], Session]:
+        prompt = Prompt(self._template).bind(question=question)
+        session = Session(bus=self._bus)
+        return prompt, session
 
 
 # Load dataset
