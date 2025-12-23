@@ -24,7 +24,6 @@ from .errors import (
 )
 from .markdown import MarkdownSection
 from .overrides import (
-    LocalPromptOverridesStore,
     PromptDescriptor,
     PromptLike,
     PromptOverride,
@@ -61,7 +60,6 @@ from .tool import ResourceRegistry, Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
-    "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",
     "OutputParseError",

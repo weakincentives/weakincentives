@@ -15,6 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from weakincentives.contrib.overrides import filter_override_for_descriptor
 from weakincentives.prompt import (
     MarkdownSection,
     Prompt,
@@ -31,7 +32,6 @@ from weakincentives.prompt.overrides import (
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
-    filter_override_for_descriptor,
     hash_json,
     hash_text,
 )
