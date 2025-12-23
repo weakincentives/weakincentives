@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent all clean
 
 # Format code with ruff
 format:
@@ -76,6 +76,10 @@ integration-tests:
 	fi
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
 
+# Validate integration tests (typecheck without running)
+validate-integration-tests:
+	@uv run --all-extras python build/validate_integration_tests.py -q
+
 # Launch the interactive code reviewer demo
 demo:
 	@uv run --all-extras python code_reviewer_example.py
@@ -92,8 +96,8 @@ demo-claude-agent:
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
-# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, pip-audit, markdown, test)
-check: format-check lint typecheck type-coverage bandit vulture deptry pip-audit markdown-check test
+# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, pip-audit, markdown, validate-integration-tests, test)
+check: format-check lint typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-integration-tests test
 
 # Run all checks and fixes
 all: format lint-fix bandit deptry pip-audit typecheck test
