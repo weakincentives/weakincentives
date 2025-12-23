@@ -50,15 +50,59 @@ evals, `Sample[str, str]` for QA, etc.
 
 ### Dataset
 
-A dataset is a tuple of samples. Using a tuple (not list) ensures immutability:
+An immutable collection of samples. The class provides a clean API for loading
+and accessing evaluation data:
 
 ```python
-Dataset = tuple[Sample[InputT, ExpectedT], ...]
-```
+@dataclass(slots=True, frozen=True)
+class Dataset[InputT, ExpectedT]:
+    """Immutable collection of evaluation samples."""
+    samples: tuple[Sample[InputT, ExpectedT], ...]
 
-**Loading from JSONL:**
+    def __len__(self) -> int:
+        """Return number of samples."""
+        return len(self.samples)
 
-```python
+    def __iter__(self) -> Iterator[Sample[InputT, ExpectedT]]:
+        """Iterate over samples."""
+        return iter(self.samples)
+
+    def __getitem__(self, index: int) -> Sample[InputT, ExpectedT]:
+        """Get sample by index."""
+        return self.samples[index]
+
+    @staticmethod
+    def load[I, E](
+        path: Path,
+        input_type: type[I],
+        expected_type: type[E],
+    ) -> Dataset[I, E]:
+        """Load dataset from JSONL file.
+
+        Each line must be a JSON object with "id", "input", and "expected" keys.
+        Primitives (str, int, float, bool) are used directly; mappings are
+        deserialized into dataclasses via serde.parse.
+
+        Args:
+            path: Path to JSONL file
+            input_type: Type for deserializing input field
+            expected_type: Type for deserializing expected field
+
+        Returns:
+            Dataset containing all samples from the file
+        """
+        samples: list[Sample[I, E]] = []
+        with path.open() as f:
+            for line in f:
+                obj = json.loads(line)
+                samples.append(Sample(
+                    id=obj["id"],
+                    input=_coerce(obj["input"], input_type),
+                    expected=_coerce(obj["expected"], expected_type),
+                ))
+        return Dataset(samples=tuple(samples))
+
+
 def _coerce[T](value: object, target: type[T]) -> T:
     """Coerce JSON value to target type.
 
@@ -72,29 +116,6 @@ def _coerce[T](value: object, target: type[T]) -> T:
     if isinstance(value, Mapping):
         return parse(target, value)
     raise TypeError(f"cannot coerce {type(value).__name__} to {target.__name__}")
-
-
-def load_jsonl[I, E](
-    path: Path,
-    input_type: type[I],
-    expected_type: type[E],
-) -> tuple[Sample[I, E], ...]:
-    """Load samples from JSONL file.
-
-    Each line must be a JSON object with "id", "input", and "expected" keys.
-    Primitives (str, int, float, bool) are used directly; mappings are
-    deserialized into dataclasses via serde.parse.
-    """
-    samples: list[Sample[I, E]] = []
-    with path.open() as f:
-        for line in f:
-            obj = json.loads(line)
-            samples.append(Sample(
-                id=obj["id"],
-                input=_coerce(obj["input"], input_type),
-                expected=_coerce(obj["expected"], expected_type),
-            ))
-    return tuple(samples)
 ```
 
 **JSONL format:**
@@ -405,7 +426,7 @@ class SampleEvaluated:
 
 def run_eval[I, O, E](
     loop: MainLoop[I, O],
-    dataset: tuple[Sample[I, E], ...],
+    dataset: Dataset[I, E],
     evaluator: Evaluator[O, E],
     *,
     bus: Dispatcher | None = None,
@@ -464,7 +485,7 @@ def run_eval[I, O, E](
 from weakincentives import MainLoop, PromptTemplate, Prompt, Session
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.runtime import InProcessDispatcher
-from weakincentives.evals import Sample, run_eval, exact_match, load_jsonl
+from weakincentives.evals import Dataset, Sample, run_eval, exact_match
 
 # Define the loop under test
 class QALoop(MainLoop[str, str]):
@@ -491,7 +512,7 @@ class QALoop(MainLoop[str, str]):
 
 
 # Load dataset
-dataset = load_jsonl(Path("tests/fixtures/qa.jsonl"), str, str)
+dataset = Dataset.load(Path("tests/fixtures/qa.jsonl"), str, str)
 
 # Run evaluation
 adapter = OpenAIAdapter(model="gpt-4o")
@@ -531,7 +552,7 @@ report = run_eval(loop, dataset, evaluator)
 
 ```python
 # Build dataset in code
-dataset = tuple(
+samples = tuple(
     Sample(
         id=str(i),
         input=f"What is {a} + {b}?",
@@ -539,6 +560,7 @@ dataset = tuple(
     )
     for i, (a, b) in enumerate([(1, 1), (2, 3), (10, 20)])
 )
+dataset = Dataset(samples=samples)
 
 report = run_eval(loop, dataset, contains)
 ```
