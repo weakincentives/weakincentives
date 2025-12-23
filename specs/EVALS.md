@@ -414,14 +414,15 @@ class EvalReport:
 ### EvalLoop
 
 The core class for running evaluations. Takes a `MainLoop` instance for
-executing samples:
+executing samples and an optional `Mailbox` for durable result delivery:
 
 ```python
 class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
     """Orchestrates evaluation over a dataset.
 
     Uses the provided MainLoop to execute each sample, then scores
-    the output with the evaluator.
+    the output with the evaluator. Results are sent to a Mailbox for
+    durable, at-least-once delivery.
     """
 
     def __init__(
@@ -430,12 +431,12 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
         loop: MainLoop[InputT, OutputT],
         dataset: Dataset[InputT, ExpectedT],
         evaluator: Evaluator[OutputT, ExpectedT],
-        bus: Dispatcher | None = None,
+        results: Mailbox[EvalResult] | None = None,
     ) -> None:
         self._loop = loop
         self._dataset = dataset
         self._evaluator = evaluator
-        self._bus = bus
+        self._results = results
 
     def execute(self) -> EvalReport:
         """Run evaluation on all samples.
@@ -444,7 +445,10 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
         1. Execute through MainLoop
         2. Score with evaluator
         3. Record timing
-        4. Publish SampleEvaluated event
+        4. Send result to mailbox (if provided)
+
+        Results are sent to the mailbox before being added to the report,
+        ensuring durability even if the process crashes mid-evaluation.
 
         Returns:
             EvalReport with all results and aggregate metrics
@@ -471,31 +475,21 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
                     error=str(e),
                 )
 
+            # Send to mailbox first for durability
+            if self._results is not None:
+                self._results.send(result)
+
             results.append(result)
-            if self._bus is not None:
-                self._bus.dispatch(SampleEvaluated(sample_id=sample.id, result=result))
 
-        report = EvalReport(results=tuple(results))
-        if self._bus is not None:
-            self._bus.dispatch(EvalCompleted(report=report))
-        return report
+        return EvalReport(results=tuple(results))
 ```
 
-### Events
+**Why Mailbox over Dispatcher?**
 
-```python
-@dataclass(slots=True, frozen=True)
-class SampleEvaluated:
-    """Emitted after each sample is evaluated."""
-    sample_id: str
-    result: EvalResult
-
-
-@dataclass(slots=True, frozen=True)
-class EvalCompleted:
-    """Emitted when evaluation finishes successfully."""
-    report: EvalReport
-```
+- **Durability**: Results survive process crashes with persistent backends
+- **At-least-once delivery**: Results won't be lost in transit
+- **Distributed consumption**: Multiple consumers can process results
+- **Cross-process**: Works in distributed deployments (Redis, SQS)
 
 ## Usage Examples
 
@@ -504,8 +498,8 @@ class EvalCompleted:
 ```python
 from weakincentives import MainLoop, PromptTemplate, Prompt, Session
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import InProcessDispatcher
-from weakincentives.evals import Dataset, EvalLoop, exact_match
+from weakincentives.runtime import InProcessDispatcher, InMemoryMailbox
+from weakincentives.evals import Dataset, EvalLoop, EvalResult, exact_match
 
 # Define the MainLoop for QA
 class QALoop(MainLoop[str, str]):
@@ -594,23 +588,54 @@ report = eval_loop.execute()
 
 ## Observability
 
-Pass a `Dispatcher` to `EvalLoop` to receive progress notifications:
+### Durable Result Collection
+
+Pass a `Mailbox` to `EvalLoop` for durable result delivery:
 
 ```python
-from weakincentives.evals import SampleEvaluated, EvalCompleted
+from weakincentives.runtime import InMemoryMailbox
+from weakincentives.evals import EvalResult
 
-def on_sample(event: SampleEvaluated) -> None:
-    status = "PASS" if event.result.score.passed else "FAIL"
-    print(f"[{status}] {event.sample_id}: {event.result.score.value:.2f}")
+# Create mailbox for results
+results_mailbox: Mailbox[EvalResult] = InMemoryMailbox(name="eval-results")
 
-def on_complete(event: EvalCompleted) -> None:
-    print(f"Evaluation complete: {event.report.pass_rate:.1%} pass rate")
+# Run evaluation with durable results
+eval_loop = EvalLoop(
+    loop=loop,
+    dataset=dataset,
+    evaluator=exact_match,
+    results=results_mailbox,
+)
+report = eval_loop.execute()
 
-bus = InProcessDispatcher()
-bus.subscribe(SampleEvaluated, on_sample)
-bus.subscribe(EvalCompleted, on_complete)
+# Results are available in the mailbox for downstream processing
+for msg in results_mailbox.receive(max_messages=10):
+    result = msg.body
+    status = "PASS" if result.score.passed else "FAIL"
+    print(f"[{status}] {result.sample_id}: {result.score.value:.2f}")
+    msg.acknowledge()
+```
 
-eval_loop = EvalLoop(loop=loop, dataset=dataset, evaluator=exact_match, bus=bus)
+### Distributed Processing
+
+For production deployments, use `RedisMailbox` or `SQSMailbox`:
+
+```python
+from weakincentives.runtime import RedisMailbox
+from redis import Redis
+
+# Redis-backed mailbox for cross-process durability
+results_mailbox = RedisMailbox[EvalResult](
+    name="eval-results",
+    client=Redis(host="localhost", port=6379),
+)
+
+eval_loop = EvalLoop(
+    loop=loop,
+    dataset=dataset,
+    evaluator=exact_match,
+    results=results_mailbox,
+)
 report = eval_loop.execute()
 ```
 
