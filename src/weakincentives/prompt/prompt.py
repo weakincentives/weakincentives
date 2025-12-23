@@ -180,6 +180,25 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
             raise PromptValidationError("Prompt key must be a non-empty string.")
 
         sections_tuple = tuple(sections_input or ())
+
+        # Validate at most one distinct filesystem across workspace sections
+        # Import here to avoid circular imports; the protocol is runtime_checkable
+        from ..contrib.tools.workspace import WorkspaceSection
+
+        workspace_sections = [
+            section
+            for section in sections_tuple
+            if isinstance(section, WorkspaceSection)
+        ]
+        if len(workspace_sections) > 1:
+            filesystems = {id(section.filesystem) for section in workspace_sections}
+            if len(filesystems) > 1:
+                msg = (
+                    f"PromptTemplate has {len(workspace_sections)} workspace sections with "
+                    f"{len(filesystems)} distinct filesystems, but at most one filesystem is allowed."
+                )
+                raise PromptValidationError(msg)
+
         registry = PromptRegistry()
         registry.register_sections(sections_tuple)
 
@@ -397,6 +416,10 @@ class Prompt(Generic[OutputT]):  # noqa: UP046
         WorkspaceSection and returns its filesystem property.
 
         Returns None if no workspace section exists in the template.
+
+        Note:
+            If multiple workspace sections exist, they must share the same
+            filesystem (validated during PromptTemplate construction).
         """
         # Import here to avoid circular imports; the protocol is runtime_checkable
         from ..contrib.tools.workspace import WorkspaceSection
