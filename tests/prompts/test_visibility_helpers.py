@@ -18,11 +18,11 @@ from typing import TYPE_CHECKING, cast
 
 import pytest
 
-from weakincentives.prompt._visibility import (
-    SectionVisibility,
-    _visibility_requires_positional_argument,
+from weakincentives.prompt._section_guards import (
+    callable_requires_positional_argument,
     normalize_visibility_selector,
 )
+from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
@@ -44,17 +44,16 @@ def test_visibility_selector_rejects_invalid_return_type() -> None:
         selector(_VisibilityParams(), None)
 
 
-def test_visibility_requires_positional_argument_branches() -> None:
+def test_callable_requires_positional_argument_branches() -> None:
     assert (
-        _visibility_requires_positional_argument(lambda: SectionVisibility.FULL)
-        is False
+        callable_requires_positional_argument(lambda: SectionVisibility.FULL) is False
     )
     assert (
-        _visibility_requires_positional_argument(lambda params: SectionVisibility.FULL)
+        callable_requires_positional_argument(lambda params: SectionVisibility.FULL)
         is True
     )
     assert (
-        _visibility_requires_positional_argument(
+        callable_requires_positional_argument(
             cast(Callable[..., SectionVisibility], object())
         )
         is True

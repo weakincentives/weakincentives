@@ -22,8 +22,9 @@ from ..serde import clone as clone_dataclass
 from ..types.dataclass import (
     SupportsDataclass,
 )
+from ._section_guards import VisibilitySelector
 from .errors import PromptRenderError
-from .section import Section, SectionVisibility, VisibilitySelector
+from .section import Section, SectionVisibility
 
 MarkdownParamsT = TypeVar(
     "MarkdownParamsT",
