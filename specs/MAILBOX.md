@@ -314,6 +314,10 @@ class MainLoopResult(Generic[OutputT]):
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
 
+**Migration:** `MainLoopCompleted` and `MainLoopFailed`
+(`src/weakincentives/runtime/main_loop.py:70-87`) should be deleted. Use
+`MainLoopResult` for all response handling.
+
 ### Worker Loop Pattern
 
 ```python
