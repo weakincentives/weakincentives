@@ -43,6 +43,7 @@ pytest.importorskip("claude_agent_sdk")
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.claude,
     pytest.mark.skipif(
         "ANTHROPIC_API_KEY" not in os.environ,
         reason="ANTHROPIC_API_KEY not set; skipping Claude Agent SDK integration tests.",

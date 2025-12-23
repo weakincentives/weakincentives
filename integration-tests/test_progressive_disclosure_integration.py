@@ -43,6 +43,7 @@ pytest.importorskip("openai")
 
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.openai,
     pytest.mark.skipif(
         "OPENAI_API_KEY" not in os.environ,
         reason="OPENAI_API_KEY not set; skipping OpenAI integration tests.",

@@ -53,7 +53,7 @@ from weakincentives.contrib.tools import (
 from weakincentives.contrib.tools.vfs import FilesystemToolHandlers
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.tool import ToolContext
-from weakincentives.runtime.events import InProcessEventBus
+from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 # ruff: noqa: PLR6301, PLR2004
@@ -66,7 +66,7 @@ from weakincentives.runtime.session import Session
 @pytest.fixture
 def session() -> Session:
     """Create a fresh session for each test."""
-    return Session(bus=InProcessEventBus())
+    return Session(bus=InProcessDispatcher())
 
 
 @pytest.fixture
@@ -98,6 +98,7 @@ def _make_context(session: Session, filesystem: Filesystem) -> ToolContext:
 
 
 @pytest.mark.integration
+@pytest.mark.filesystem
 class TestVfsToolsSectionFilesystem:
     """Integration tests for VfsToolsSection filesystem operations."""
 
@@ -298,6 +299,7 @@ class TestVfsToolsSectionFilesystem:
 
 
 @pytest.mark.integration
+@pytest.mark.filesystem
 class TestInMemoryFilesystemDirect:
     """Integration tests for InMemoryFilesystem used directly."""
 
@@ -357,6 +359,7 @@ class TestInMemoryFilesystemDirect:
 
 
 @pytest.mark.integration
+@pytest.mark.filesystem
 class TestHostFilesystemDirect:
     """Integration tests for HostFilesystem used directly."""
 
@@ -779,6 +782,7 @@ class TestPodmanFilesystem:
 
 
 @pytest.mark.integration
+@pytest.mark.filesystem
 class TestVfsWithHostMounts:
     """Integration tests for VfsToolsSection with host mounts."""
 
