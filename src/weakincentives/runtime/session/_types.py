@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Protocol
 from ...types.dataclass import SupportsDataclass
 
 if TYPE_CHECKING:
-    from .protocols import SessionProtocol
+    from .protocols import SessionViewProtocol
 
 
 ReducerEvent = SupportsDataclass
@@ -30,7 +30,7 @@ ReducerEvent = SupportsDataclass
 class ReducerContextProtocol(Protocol):
     """Protocol implemented by reducer context objects."""
 
-    session: SessionProtocol
+    session: SessionViewProtocol
 
 
 class TypedReducer[S: SupportsDataclass](Protocol):

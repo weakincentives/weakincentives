@@ -16,19 +16,29 @@ from __future__ import annotations
 
 from ...dataclasses import FrozenDataclass
 from ._types import ReducerContextProtocol
-from .protocols import SessionProtocol
+from .protocols import SessionViewProtocol
 
 
 @FrozenDataclass()
 class ReducerContext(ReducerContextProtocol):
-    """Immutable bundle of runtime services shared with reducers."""
+    """Immutable bundle of runtime services shared with reducers.
 
-    session: SessionProtocol
+    Provides read-only access to session state via :class:`SessionViewProtocol`.
+    """
+
+    session: SessionViewProtocol
 
 
-def build_reducer_context(*, session: SessionProtocol) -> ReducerContext:
-    """Return a :class:`ReducerContext` for the provided session."""
+def build_reducer_context(*, session: SessionViewProtocol) -> ReducerContext:
+    """Return a :class:`ReducerContext` for the provided session view.
 
+    Args:
+        session: A SessionViewProtocol providing read-only session access.
+
+    Returns:
+        A ReducerContext wrapping the provided session view.
+
+    """
     return ReducerContext(session=session)
 
 
