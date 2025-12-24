@@ -25,11 +25,7 @@ from ..types.dataclass import (
 from .errors import PromptRenderError
 from .section import Section, SectionVisibility, VisibilitySelector
 
-MarkdownParamsT = TypeVar(
-    "MarkdownParamsT",
-    bound=SupportsDataclass,
-    covariant=True,
-)
+MarkdownParamsT = TypeVar("MarkdownParamsT", bound=SupportsDataclass, covariant=True)
 
 
 class MarkdownSection(Section[MarkdownParamsT]):

@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Literal, TypeVar
+from typing import Any, Literal
 
 from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
@@ -24,8 +24,6 @@ from ..errors import WinkError
 from ..prompt import Prompt
 from ..prompt.tool import ResourceRegistry
 from ..runtime.session.protocols import SessionProtocol
-
-OutputT = TypeVar("OutputT")
 
 
 @FrozenDataclass()
@@ -45,7 +43,7 @@ class ProviderAdapter(ABC):
         return cls
 
     @abstractmethod
-    def evaluate(
+    def evaluate[OutputT](
         self,
         prompt: Prompt[OutputT],
         *,

@@ -16,7 +16,7 @@ import json
 import re
 from dataclasses import field
 from hashlib import sha256
-from typing import Literal, Protocol, TypeVar, cast, overload
+from typing import Literal, Protocol, Self, cast, overload
 
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
@@ -70,15 +70,13 @@ class PromptLike(Protocol):
 
 _HEX_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 
-_HexDigestT = TypeVar("_HexDigestT", bound="HexDigest")
-
 
 class HexDigest(str):
     """A validated lowercase hexadecimal SHA-256 digest."""
 
     __slots__ = ()
 
-    def __new__(cls: type[_HexDigestT], value: object) -> _HexDigestT:
+    def __new__(cls, value: object) -> Self:
         if not isinstance(value, str):
             msg = "HexDigest value must be a string."
             raise TypeError(msg)

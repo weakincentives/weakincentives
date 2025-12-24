@@ -18,7 +18,7 @@ from collections.abc import Callable, Mapping, Sequence
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
-from typing import Any, Final, Protocol, TypeVar, cast, override
+from typing import Any, Final, Protocol, cast, override
 
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
@@ -52,8 +52,6 @@ from .utilities import (
     parse_tool_arguments,
     prepare_adapter_conversation,
 )
-
-OutputT = TypeVar("OutputT")
 
 _ERROR_MESSAGE: Final[str] = (
     "LiteLLM support requires the optional 'litellm' dependency. "
@@ -252,7 +250,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         self._tool_choice: ToolChoice = tool_choice
 
     @override
-    def evaluate(
+    def evaluate[OutputT](
         self,
         prompt: Prompt[OutputT],
         *,

@@ -21,15 +21,12 @@ from typing import (
     Protocol,
     Self,
     TypedDict,
-    TypeVar,
     Unpack,
     cast,
     dataclass_transform,
 )
 
 __all__ = ["FrozenDataclass"]
-
-T = TypeVar("T")
 
 
 class _SupportsUpdate(Protocol):
@@ -61,7 +58,7 @@ class DataclassOptions(TypedDict, total=False):
 
 
 @dataclass_transform(field_specifiers=(field,))
-def FrozenDataclass(
+def FrozenDataclass[T](
     **dataclass_kwargs: Unpack[DataclassOptions],
 ) -> Callable[[type[T]], type[T]]:
     """Dataclass decorator with frozen, slotted defaults plus helpers.

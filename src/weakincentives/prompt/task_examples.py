@@ -44,8 +44,6 @@ TaskExampleParamsT = TypeVar(
 TaskExamplesParamsT = TypeVar(
     "TaskExamplesParamsT", bound=SupportsDataclass, covariant=True
 )
-
-# Outcome type - either string (for unstructured prompts) or a dataclass
 OutcomeT = TypeVar("OutcomeT", bound="str | SupportsDataclass", covariant=True)
 
 

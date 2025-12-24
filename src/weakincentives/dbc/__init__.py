@@ -182,7 +182,9 @@ def require(
     return decorator
 
 
-def ensure(*predicates: ContractCallable) -> Callable[[Callable[P, R]], Callable[P, R]]:
+def ensure(
+    *predicates: ContractCallable,
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
     """Validate postconditions once the callable returns or raises."""
 
     if not predicates:

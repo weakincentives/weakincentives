@@ -14,16 +14,13 @@
 
 from __future__ import annotations
 
-from typing import Protocol, TypeVar
+from typing import Protocol
 
 from ..prompt import Prompt
 from ..runtime.session.protocols import SessionProtocol
 
-InputT = TypeVar("InputT", contravariant=True)
-OutputT = TypeVar("OutputT", covariant=True)
 
-
-class PromptOptimizer(Protocol[InputT, OutputT]):
+class PromptOptimizer[InputT, OutputT](Protocol):
     """Protocol for prompt optimization algorithms.
 
     The protocol is parameterized by:

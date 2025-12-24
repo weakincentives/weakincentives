@@ -25,7 +25,6 @@ from typing import (
     Final,
     Literal,
     Protocol,
-    TypeVar,
     cast,
     get_args,
     get_origin,
@@ -71,12 +70,6 @@ if TYPE_CHECKING:
         RenderedPromptProtocol,
     )
 
-ParamsT_contra = TypeVar(
-    "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
-)
-ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
-ParamsT_runtime = TypeVar("ParamsT_runtime", bound=SupportsDataclassOrNone)
-ResultT_runtime = TypeVar("ResultT_runtime", bound=SupportsToolResult)
 type ParamsType = type[SupportsDataclass] | type[None]
 type ResultType = type[SupportsDataclass] | type[None]
 
@@ -254,12 +247,14 @@ def _coerce_none_type(candidate: object) -> object:
     return candidate
 
 
-class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
+class ToolHandler[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
+    Protocol
+):
     """Callable protocol implemented by tool handlers."""
 
     def __call__(
-        self, params: ParamsT_contra, *, context: ToolContext
-    ) -> ToolResult[ResultT_co]: ...
+        self, params: ParamsT, *, context: ToolContext
+    ) -> ToolResult[ResultT]: ...
 
 
 @dataclass(slots=True)
@@ -800,7 +795,10 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         )
 
     @staticmethod
-    def _resolve_wrapped_description(
+    def _resolve_wrapped_description[
+        ParamsT_runtime: SupportsDataclassOrNone,
+        ResultT_runtime: SupportsToolResult,
+    ](
         fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
     ) -> str:
         description = inspect.getdoc(fn)
@@ -869,7 +867,10 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         return cast(SupportsToolResult, _coerce_none_type(result_arg))
 
     @staticmethod
-    def wrap(
+    def wrap[
+        ParamsT_runtime: SupportsDataclassOrNone,
+        ResultT_runtime: SupportsToolResult,
+    ](
         fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
     ) -> Tool[ParamsT_runtime, ResultT_runtime]:
         """Create a Tool from a handler using its name and docstring."""
