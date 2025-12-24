@@ -4,6 +4,78 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Mailbox Message Queue Abstraction
+
+A new `Mailbox` protocol provides SQS-compatible semantics for durable,
+at-least-once message delivery between processes. Unlike the pub/sub
+`Dispatcher`, Mailbox delivers messages point-to-point with visibility timeout
+and explicit acknowledgment.
+
+```python
+from weakincentives.mailbox import InMemoryMailbox, Message
+
+# Create a typed mailbox
+mailbox: Mailbox[WorkRequest] = InMemoryMailbox()
+
+# Send a message
+message_id = mailbox.send(WorkRequest(task="analyze"))
+
+# Receive with visibility timeout
+messages = mailbox.receive(visibility_timeout=30, wait_time_seconds=5)
+for msg in messages:
+    process(msg.body)
+    msg.acknowledge()  # Remove from queue
+```
+
+**Implementations:**
+
+- `InMemoryMailbox`: Single-process queues for testing and development
+- `RedisMailbox`: Distributed queues using Redis lists and sorted sets for
+  visibility timeout management
+
+**Key features:**
+
+- Point-to-point delivery with acknowledgment semantics
+- Visibility timeout for in-flight message protection (redelivery on failure)
+- Long polling support for efficient message retrieval
+- Message metadata including delivery count for dead-letter handling
+- Bidirectional communication via request/result mailbox pairs
+
+### Evaluation Framework
+
+A minimal evaluation framework built on MainLoop for testing agent behavior.
+MainLoop handles orchestration; evals add datasets and scoring.
+
+```python
+from weakincentives.evals import Dataset, EvalLoop, exact_match
+
+# Load a dataset
+dataset = Dataset.load(Path("qa.jsonl"), str, str)
+
+# Run evaluation
+loop = EvalLoop(main_loop=my_loop, evaluator=exact_match)
+report = loop.execute(dataset)
+
+print(f"Accuracy: {report.accuracy:.2%}")
+```
+
+**Core types:**
+
+- `Sample[InputT, ExpectedT]`: Single evaluation case with input and expected
+  output
+- `Dataset[InputT, ExpectedT]`: Immutable collection of samples with JSONL
+  loading
+- `Score`: Result from evaluating a single sample (0.0–1.0 with optional
+  metadata)
+- `EvalResult`: Pairs a sample with its output and score
+- `EvalReport`: Aggregated metrics across all samples
+
+**Built-in evaluators:**
+
+- `exact_match`: Strict equality comparison
+- `contains`: Substring matching with `all_of`/`any_of` combinators
+- `llm_judge`: LLM-as-Judge with categorical ratings using a judge template
+
 ### First-Class Resource Injection
 
 You can now pass custom resources into `adapter.evaluate()` and
@@ -35,6 +107,58 @@ response, session = loop.execute(request)
 - `MainLoopConfig`, `MainLoopRequest`, and `MainLoop.execute()` all accept
   `resources` parameter
 - All adapters (OpenAI, LiteLLM, Claude Agent SDK) support resource injection
+
+### Added
+
+- **`wink docs` CLI command.** Exposes bundled documentation: `--reference`
+  prints llms.md (API reference), `--guide` prints WINK_GUIDE.md, and `--specs`
+  prints all spec files concatenated. Uses `importlib.resources` for reliable
+  access when the package is installed outside the repository.
+
+- **`MainLoop.execute()` direct execution.** MainLoop now supports direct
+  execution without mailbox routing, making it easier to run single evaluations
+  or integrate with external orchestrators.
+
+- **DSPy migration guide.** WINK_GUIDE.md now includes a comprehensive migration
+  guide for users coming from DSPy, covering philosophy differences, concept
+  mapping, and step-by-step migration paths with code examples.
+
+- **Generic filesystem validation suite.** A reusable test suite validates
+  filesystem implementations against the protocol contract.
+
+### Changed
+
+- **MainLoop initialization refactored.** The two abstract methods
+  `create_session()` and `create_prompt(request)` have been replaced with a
+  single `initialize(request)` method returning `(prompt, session)`. A new
+  optional `finalize(prompt, session)` hook is called after successful
+  evaluation for cleanup or post-processing.
+
+- **Filesystem protocol moved to core.** The `Filesystem` and
+  `SnapshotableFilesystem` protocols now live in `weakincentives.filesystem`.
+  Implementations (`InMemoryFilesystem`, `HostFilesystem`) remain in contrib.
+  Backward-compatible re-exports are provided.
+
+- **ResourceRegistry simplified.** Now implemented as a dataclass instead of a
+  custom class, reducing complexity while preserving the same API.
+
+### Fixed
+
+- **Workspace cleanup removes git directories.** Temporary workspaces now
+  properly clean up `.git` directories on teardown.
+
+- **Snapshot errors propagated correctly.** `HostFilesystem.snapshot()` now
+  raises `SnapshotError` when git commit fails instead of silently returning a
+  stale commit hash. This ensures transactional rollback works correctly.
+
+### Internal
+
+- Decomposed `shared.py`, `utilities.py`, VFS module, asteval tool suite, and
+  Podman tool file into smaller, focused modules.
+- Moved `visibility_overrides` to break circular dependency between modules.
+- Added integration test reference validation during build.
+- Identified PEP 695 adoption gaps for future migration.
+- Added code quality approach documentation.
 
 ## v0.16.0 - 2025-12-21
 
