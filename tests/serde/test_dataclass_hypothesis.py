@@ -199,6 +199,13 @@ _nonempty_text = st.text(
     max_size=20,
 )
 
+# Text that remains non-empty after stripping (for fields with strip=True, min_length=1)
+_nonempty_after_strip = st.text(
+    alphabet=st.characters(min_codepoint=33, max_codepoint=126),  # Excludes space (32)
+    min_size=1,
+    max_size=20,
+)
+
 
 def simple_record_strategy() -> st.SearchStrategy[SimpleRecord]:
     return st.builds(
@@ -215,7 +222,7 @@ def simple_record_strategy() -> st.SearchStrategy[SimpleRecord]:
 def constrained_record_strategy() -> st.SearchStrategy[ConstrainedRecord]:
     return st.builds(
         ConstrainedRecord,
-        text=_nonempty_text,
+        text=_nonempty_after_strip,  # Must be non-empty after strip
         value=st.integers(min_value=0, max_value=100),
         tags=st.lists(
             st.from_regex(r"^tag-[a-z]+$", fullmatch=True),
@@ -316,10 +323,10 @@ def collection_record_strategy() -> st.SearchStrategy[CollectionRecord]:
 def optional_fields_strategy() -> st.SearchStrategy[OptionalFieldsRecord]:
     return st.builds(
         OptionalFieldsRecord,
-        required=_nonempty_text,
-        optional_str=st.one_of(_nonempty_text, st.none()),
+        required=_nonempty_after_strip,  # Must survive stripping
+        optional_str=st.one_of(_nonempty_after_strip, st.none()),  # Use non-whitespace to survive coercion
         optional_int=st.one_of(st.integers(), st.none()),
-        optional_list=st.one_of(st.lists(_nonempty_text, max_size=3), st.none()),
+        optional_list=st.one_of(st.lists(_nonempty_after_strip, max_size=3), st.none()),
     )
 
 
