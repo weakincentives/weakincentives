@@ -1,0 +1,684 @@
+# Slice Storage Specification
+
+## Purpose
+
+This specification defines a `Slice` protocol that abstracts the storage
+backend for session state slices. The protocol enables different storage
+implementations (in-memory, file-backed) while maintaining the same
+Redux-style semantics. Slice factories can be configured per `SlicePolicy`,
+allowing logs to persist to disk while keeping working state in memory.
+
+## Guiding Principles
+
+- **Single access pattern**: Session operations work identically regardless
+  of storage backend.
+- **Policy-driven configuration**: `SlicePolicy.STATE` and `SlicePolicy.LOG`
+  can use different factories.
+- **Immutable semantics preserved**: All backends present tuple-like immutable
+  views; mutations create new versions.
+- **Backend-managed persistence**: File-backed slices handle their own I/O;
+  no special session logic required.
+- **Serialization via serde**: File backends use `weakincentives.serde` for
+  consistent dataclass serialization.
+
+```mermaid
+flowchart TB
+    subgraph Session["Session"]
+        State["_slices: dict[type, Slice]"]
+        Factory["SliceFactoryConfig"]
+    end
+
+    subgraph Config["Factory Configuration"]
+        StateFactory["state_factory"]
+        LogFactory["log_factory"]
+    end
+
+    subgraph Backends["Slice Implementations"]
+        Memory["MemorySlice"]
+        Jsonl["JsonlSlice"]
+    end
+
+    subgraph Operations["Slice Protocol"]
+        All["all()"]
+        Latest["latest()"]
+        Replace["replace()"]
+        Append["append()"]
+        Clear["clear()"]
+    end
+
+    Session --> Factory
+    Factory --> StateFactory
+    Factory --> LogFactory
+    StateFactory --> Memory
+    LogFactory --> Jsonl
+    LogFactory --> Memory
+    Memory --> Operations
+    Jsonl --> Operations
+```
+
+## Protocol Definition
+
+### Slice Protocol
+
+```python
+from typing import Protocol, Callable, Iterable, runtime_checkable
+from weakincentives.types.dataclass import SupportsDataclass
+
+@runtime_checkable
+class Slice[T: SupportsDataclass](Protocol):
+    """Protocol for slice storage backends.
+
+    Slices store immutable tuples of dataclass instances. All read operations
+    return tuples; mutations replace the underlying storage atomically.
+    """
+
+    def all(self) -> tuple[T, ...]:
+        """Return all items in the slice as an immutable tuple."""
+        ...
+
+    def latest(self) -> T | None:
+        """Return the most recent item, or None if empty."""
+        ...
+
+    def append(self, item: T) -> None:
+        """Append a single item to the slice."""
+        ...
+
+    def extend(self, items: Iterable[T]) -> None:
+        """Append multiple items to the slice."""
+        ...
+
+    def replace(self, items: tuple[T, ...]) -> None:
+        """Replace all items atomically.
+
+        Used by reducers after transforming state. The tuple is the
+        complete new state for the slice.
+        """
+        ...
+
+    def clear(self, predicate: Callable[[T], bool] | None = None) -> None:
+        """Remove items from the slice.
+
+        Args:
+            predicate: If provided, only items where predicate returns True
+                are removed. If None, all items are removed.
+        """
+        ...
+
+    def __len__(self) -> int:
+        """Return the number of items in the slice."""
+        ...
+
+    def snapshot(self) -> tuple[T, ...]:
+        """Create a snapshot of current state for serialization.
+
+        Returns the same as all() but signals intent for snapshot use.
+        Backends may optimize for this (e.g., flush pending writes).
+        """
+        ...
+```
+
+### SliceFactory Protocol
+
+```python
+from typing import Protocol
+from weakincentives.types.dataclass import SupportsDataclass
+
+class SliceFactory(Protocol):
+    """Factory for creating slice storage backends."""
+
+    def create[T: SupportsDataclass](self, slice_type: type[T]) -> Slice[T]:
+        """Create a new slice for the given dataclass type.
+
+        Args:
+            slice_type: The dataclass type this slice will store.
+
+        Returns:
+            A new empty Slice instance.
+        """
+        ...
+```
+
+### SliceFactoryConfig
+
+```python
+from dataclasses import dataclass
+from weakincentives.runtime.session.slice_policy import SlicePolicy
+
+@dataclass(slots=True, frozen=True)
+class SliceFactoryConfig:
+    """Configuration mapping slice policies to factories.
+
+    Allows different storage backends for STATE vs LOG slices:
+    - STATE: Working state rolled back on failure (default: memory)
+    - LOG: Append-only records preserved during restore (default: memory)
+
+    Example::
+
+        config = SliceFactoryConfig(
+            state_factory=MemorySliceFactory(),
+            log_factory=JsonlSliceFactory(base_dir=Path("./logs")),
+        )
+        session = Session(slice_config=config)
+    """
+
+    state_factory: SliceFactory
+    log_factory: SliceFactory
+
+    def factory_for_policy(self, policy: SlicePolicy) -> SliceFactory:
+        """Return the factory for the given policy."""
+        if policy == SlicePolicy.LOG:
+            return self.log_factory
+        return self.state_factory
+```
+
+## Implementations
+
+### MemorySlice
+
+In-memory tuple-backed slice providing the current default behavior:
+
+```python
+from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable
+from weakincentives.types.dataclass import SupportsDataclass
+
+@dataclass(slots=True)
+class MemorySlice[T: SupportsDataclass]:
+    """In-memory tuple-backed slice.
+
+    Provides O(1) reads and O(n) appends. All operations are performed
+    on immutable tuples, matching current Session semantics.
+    """
+
+    _data: tuple[T, ...] = ()
+
+    def all(self) -> tuple[T, ...]:
+        return self._data
+
+    def latest(self) -> T | None:
+        return self._data[-1] if self._data else None
+
+    def append(self, item: T) -> None:
+        self._data = (*self._data, item)
+
+    def extend(self, items: Iterable[T]) -> None:
+        self._data = (*self._data, *items)
+
+    def replace(self, items: tuple[T, ...]) -> None:
+        self._data = items
+
+    def clear(self, predicate: Callable[[T], bool] | None = None) -> None:
+        if predicate is None:
+            self._data = ()
+        else:
+            self._data = tuple(v for v in self._data if not predicate(v))
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def snapshot(self) -> tuple[T, ...]:
+        return self._data
+```
+
+### MemorySliceFactory
+
+```python
+@dataclass(slots=True, frozen=True)
+class MemorySliceFactory:
+    """Factory that creates in-memory slices."""
+
+    def create[T: SupportsDataclass](self, slice_type: type[T]) -> MemorySlice[T]:
+        return MemorySlice()
+```
+
+### JsonlSlice
+
+JSONL file-backed slice for persistent storage:
+
+```python
+from dataclasses import dataclass
+from pathlib import Path
+from collections.abc import Callable, Iterable
+import json
+import fcntl
+from weakincentives.serde import dump, parse
+from weakincentives.types.dataclass import SupportsDataclass
+
+@dataclass(slots=True)
+class JsonlSlice[T: SupportsDataclass]:
+    """JSONL file-backed slice for persistence.
+
+    Each item is stored as a single JSON line. Reads load the entire file;
+    appends are O(1) file operations. Includes type information for
+    polymorphic deserialization.
+
+    Thread safety: Uses file locking (fcntl.flock) for concurrent access.
+    Cache invalidation: Cache cleared on any write operation.
+    """
+
+    path: Path
+    item_type: type[T]
+    _cache: tuple[T, ...] | None = None
+
+    def _read_all(self) -> tuple[T, ...]:
+        """Read all items from the JSONL file."""
+        if not self.path.exists():
+            return ()
+        items: list[T] = []
+        with self.path.open() as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            try:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        data = json.loads(line)
+                        items.append(
+                            parse(self.item_type, data, allow_dataclass_type=True)
+                        )
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        return tuple(items)
+
+    def all(self) -> tuple[T, ...]:
+        if self._cache is not None:
+            return self._cache
+        result = self._read_all()
+        self._cache = result
+        return result
+
+    def latest(self) -> T | None:
+        items = self.all()
+        return items[-1] if items else None
+
+    def _write_item(self, f, item: T) -> None:
+        """Write a single item as a JSON line."""
+        data = dump(item, include_dataclass_type=True)
+        f.write(json.dumps(data, separators=(",", ":")) + "\n")
+
+    def append(self, item: T) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                self._write_item(f, item)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        self._cache = None
+
+    def extend(self, items: Iterable[T]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                for item in items:
+                    self._write_item(f, item)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        self._cache = None
+
+    def replace(self, items: tuple[T, ...]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("w") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                for item in items:
+                    self._write_item(f, item)
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        self._cache = items
+
+    def clear(self, predicate: Callable[[T], bool] | None = None) -> None:
+        if predicate is None:
+            self.path.unlink(missing_ok=True)
+            self._cache = ()
+        else:
+            remaining = tuple(v for v in self.all() if not predicate(v))
+            self.replace(remaining)
+
+    def __len__(self) -> int:
+        return len(self.all())
+
+    def snapshot(self) -> tuple[T, ...]:
+        # Ensure cache is populated for consistent snapshot
+        return self.all()
+```
+
+### JsonlSliceFactory
+
+```python
+from dataclasses import dataclass
+from pathlib import Path
+
+@dataclass(slots=True, frozen=True)
+class JsonlSliceFactory:
+    """Factory that creates JSONL file-backed slices.
+
+    Each slice type gets its own file based on the qualified class name.
+    """
+
+    base_dir: Path
+
+    def create[T: SupportsDataclass](self, slice_type: type[T]) -> JsonlSlice[T]:
+        # Use qualified name for unique file paths
+        filename = f"{slice_type.__module__}.{slice_type.__qualname__}.jsonl"
+        # Sanitize module path for filesystem
+        safe_filename = filename.replace(":", "_")
+        return JsonlSlice(
+            path=self.base_dir / safe_filename,
+            item_type=slice_type,
+        )
+```
+
+## Session Integration
+
+### Constructor Changes
+
+```python
+class Session:
+    def __init__(
+        self,
+        *,
+        bus: TelemetryDispatcher | None = None,
+        parent: Session | None = None,
+        session_id: UUID | None = None,
+        created_at: datetime | None = None,
+        tags: Mapping[object, object] | None = None,
+        slice_config: SliceFactoryConfig | None = None,  # NEW
+    ) -> None:
+        # ...
+        self._slice_config = slice_config or SliceFactoryConfig(
+            state_factory=MemorySliceFactory(),
+            log_factory=MemorySliceFactory(),
+        )
+        self._slices: dict[SessionSliceType, Slice[Any]] = {}
+        # ...
+```
+
+### Slice Access
+
+```python
+def _get_or_create_slice[T: SupportsDataclass](
+    self, slice_type: type[T]
+) -> Slice[T]:
+    """Get existing slice or create one using the appropriate factory."""
+    if slice_type not in self._slices:
+        policy = self._slice_policies.get(slice_type, SlicePolicy.STATE)
+        factory = self._slice_config.factory_for_policy(policy)
+        self._slices[slice_type] = factory.create(slice_type)
+    return cast(Slice[T], self._slices[slice_type])
+```
+
+### State Operations
+
+Replace direct tuple manipulation with slice protocol calls:
+
+```python
+# Before
+self._state[slice_type] = tuple(values)
+
+# After
+self._get_or_create_slice(slice_type).replace(tuple(values))
+```
+
+```python
+# Before
+existing = self._state.get(slice_type, EMPTY_SLICE)
+
+# After
+existing = self._get_or_create_slice(slice_type).all()
+```
+
+## Usage Examples
+
+### Default Configuration (Backward Compatible)
+
+```python
+from weakincentives.runtime.session import Session
+
+# All slices use in-memory storage (current behavior)
+session = Session(bus=bus)
+```
+
+### Persistent Logs with In-Memory State
+
+```python
+from pathlib import Path
+from weakincentives.runtime.session import Session
+from weakincentives.runtime.session.slices import (
+    MemorySliceFactory,
+    JsonlSliceFactory,
+    SliceFactoryConfig,
+)
+
+config = SliceFactoryConfig(
+    state_factory=MemorySliceFactory(),
+    log_factory=JsonlSliceFactory(base_dir=Path("./session_logs")),
+)
+
+session = Session(bus=bus, slice_config=config)
+
+# ToolInvoked, PromptRendered, PromptExecuted write to JSONL files
+# Plan, custom state slices stay in memory
+```
+
+### All Slices Persistent
+
+```python
+jsonl_factory = JsonlSliceFactory(base_dir=Path("./session_data"))
+
+config = SliceFactoryConfig(
+    state_factory=jsonl_factory,
+    log_factory=jsonl_factory,
+)
+
+session = Session(bus=bus, slice_config=config)
+```
+
+### Custom Factory per Slice Type
+
+For advanced use cases, extend `SliceFactoryConfig`:
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass(slots=True, frozen=True)
+class CustomSliceFactoryConfig(SliceFactoryConfig):
+    """Factory config with per-type overrides."""
+
+    overrides: dict[type, SliceFactory] = field(default_factory=dict)
+
+    def factory_for_type(
+        self, slice_type: type, policy: SlicePolicy
+    ) -> SliceFactory:
+        if slice_type in self.overrides:
+            return self.overrides[slice_type]
+        return self.factory_for_policy(policy)
+```
+
+## Snapshot and Restore Behavior
+
+### Snapshot Creation
+
+Snapshots call `slice.snapshot()` for each slice:
+
+```python
+def snapshot(self) -> Snapshot:
+    state: dict[SessionSliceType, tuple[SupportsDataclass, ...]] = {}
+    for slice_type, slice_instance in self._slices.items():
+        policy = self._slice_policies.get(slice_type, SlicePolicy.STATE)
+        if policy in snapshot_policies:
+            state[slice_type] = slice_instance.snapshot()
+    return Snapshot(state=state, ...)
+```
+
+### Restore Behavior
+
+Restore uses `slice.replace()` to set state:
+
+```python
+def restore(self, snapshot: Snapshot) -> None:
+    for slice_type, items in snapshot.state.items():
+        policy = self._slice_policies.get(slice_type, SlicePolicy.STATE)
+        if policy == SlicePolicy.LOG:
+            continue  # Logs are preserved, not restored
+        self._get_or_create_slice(slice_type).replace(items)
+```
+
+### File-Backed Snapshot Considerations
+
+For `JsonlSlice`:
+- `snapshot()` returns the current in-memory view (after loading from disk)
+- `replace()` rewrites the entire file atomically
+- Session snapshots are still JSON; file contents are separate persistence
+
+## Thread Safety
+
+### MemorySlice
+
+Thread safety delegated to Session's RLock. Slice operations are simple
+tuple reassignments protected by the session lock.
+
+### JsonlSlice
+
+Uses `fcntl.flock()` for file-level locking:
+- `LOCK_SH` (shared) for reads
+- `LOCK_EX` (exclusive) for writes
+
+Combined with Session's RLock, this provides:
+- Session-level atomicity for reducer execution
+- File-level atomicity for disk operations
+
+### Cross-Platform File Locking
+
+For Windows compatibility, use `msvcrt.locking()` or the `filelock` library:
+
+```python
+try:
+    import fcntl
+    HAS_FCNTL = True
+except ImportError:
+    import msvcrt
+    HAS_FCNTL = False
+
+def lock_shared(f):
+    if HAS_FCNTL:
+        fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+    else:
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+
+def lock_exclusive(f):
+    if HAS_FCNTL:
+        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    else:
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+
+def unlock(f):
+    if HAS_FCNTL:
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+    else:
+        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+```
+
+## Performance Characteristics
+
+| Operation | MemorySlice | JsonlSlice (cached) | JsonlSlice (cold) |
+|-----------|-------------|---------------------|-------------------|
+| `all()` | O(1) | O(1) | O(n) file read |
+| `latest()` | O(1) | O(1) | O(n) file read |
+| `append()` | O(n) copy | O(1) file append | O(1) file append |
+| `replace()` | O(1) | O(n) file write | O(n) file write |
+| `clear()` | O(1) or O(n) | O(1) delete or O(n) | O(1) delete or O(n) |
+| Memory | O(n) | O(n) when cached | O(1) base |
+
+### Recommendations
+
+- **Short-lived sessions**: Use `MemorySliceFactory` for everything
+- **Debug/audit needs**: Use `JsonlSliceFactory` for LOG slices only
+- **Crash recovery**: Use `JsonlSliceFactory` for both (accept performance cost)
+- **Large slices**: Consider custom streaming implementation
+
+## File Format
+
+JSONL files use one JSON object per line:
+
+```jsonl
+{"__type__":"myapp.events:ToolInvoked","name":"search","params":{"query":"test"},"result":"..."}
+{"__type__":"myapp.events:ToolInvoked","name":"read","params":{"path":"/foo"},"result":"..."}
+```
+
+The `__type__` field enables polymorphic deserialization when slice types
+use union types or inheritance.
+
+## Error Handling
+
+### File I/O Errors
+
+`JsonlSlice` propagates I/O errors (permission denied, disk full, etc.).
+Callers should handle:
+
+```python
+try:
+    session.dispatch(event)
+except OSError as e:
+    logger.error(f"Slice persistence failed: {e}")
+    # Consider falling back to memory-only mode
+```
+
+### Serialization Errors
+
+Non-serializable dataclass fields raise during `dump()`. Ensure slice types
+use serializable fields only (primitives, nested dataclasses, standard
+collections).
+
+### Deserialization Errors
+
+Corrupt JSONL files or missing types raise during `parse()`. The error
+includes the problematic line for debugging:
+
+```python
+try:
+    items = slice.all()
+except (json.JSONDecodeError, TypeError, ValueError) as e:
+    logger.error(f"Failed to load {slice.path}: {e}")
+    # Consider clearing and starting fresh
+    slice.clear()
+```
+
+## Migration Path
+
+### Phase 1: Add Protocol (Non-Breaking)
+
+1. Define `Slice` protocol and implementations
+2. Add `SliceFactoryConfig` to Session constructor (optional, defaults to memory)
+3. Internal refactor to use slice protocol
+4. All existing code continues to work unchanged
+
+### Phase 2: Deprecate Direct State Access
+
+1. Mark `session._state` as private implementation detail
+2. Document slice configuration options
+3. Add recipes for common persistence patterns
+
+### Phase 3: Advanced Backends (Future)
+
+Potential future implementations:
+- `SqliteSlice` - Indexed queries, better for large slices
+- `RedisSlice` - Distributed session state
+- `S3Slice` - Cloud persistence for long-running agents
+
+## Limitations
+
+- **No partial reads**: `all()` loads entire slice; large slices may be slow
+- **No indexing**: File-backed slices don't support indexed queries
+- **Single-process locking**: `fcntl.flock` doesn't work across NFS/distributed
+- **Eager caching**: `JsonlSlice` caches all items; very large slices may
+  exhaust memory
+- **No streaming writes**: Each append is a separate file operation; high-
+  frequency appends may bottleneck on I/O
+
+## Related Specifications
+
+- `specs/SESSIONS.md` - Session lifecycle, reducers, snapshots
+- `specs/DATACLASSES.md` - Serde utilities for serialization
+- `specs/THREAD_SAFETY.md` - Concurrency patterns
