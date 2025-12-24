@@ -1,6 +1,7 @@
 ![Sunfish logo](https://raw.github.com/thomasahle/sunfish/master/docs/logo/sunfish_large.png)
 
 ## Introduction
+
 Sunfish is a simple, but strong chess engine, written in Python. With its simple [UCI](http://wbec-ridderkerk.nl/html/UCIProtocol.html) interface, and removing comments and whitespace, it takes up just 131 lines of code! (`build/clean.sh sunfish.py | wc -l`).
 Yet [it plays at ratings above 2000 at Lichess](https://lichess.org/@/sunfish-engine).
 
@@ -9,6 +10,7 @@ Because Sunfish is small and strives to be simple, the code provides a great pla
 # Play against sunfish!
 
 The simplest way to run sufish is through the "fancy" terminal interface:
+
 <pre>
 $ <b>tools/fancy.py -cmd ./sunfish.py</b>
 Playing against sunfish 2023.
@@ -59,6 +61,7 @@ The terminal interface also supports explicit notation. This is where the source
 
 Note this requires the [python-chess](https://github.com/niklasf/python-chess/) package.
 For a true minimalist experience, first we can "pack" sunfish into a compressed executable (less than 3KB!) and run it directly:
+
 <pre>
 $ <b>build/pack.sh sunfish.py packed.sh</b>
 Total length: 2953
@@ -67,6 +70,7 @@ $ <b>./packed.sh</b>
 info depth 1 score cp 0 pv d2d4
 bestmove d2d4
 </pre>
+
 (See the [UCI specification](http://wbec-ridderkerk.nl/html/UCIProtocol.html) for the full set of commands.)
 
 ### Playing with a graphical interface
@@ -90,7 +94,7 @@ Using NNUE, sunfish will play better positionally, but worse tactically, since t
 
 # Features
 
-1. Built around the simple, but efficient MTD-bi search algorithm, also known as [C*](https://www.chessprogramming.org/NegaC*).
+1. Built around the simple, but efficient MTD-bi search algorithm, also known as [C\*](https://www.chessprogramming.org/NegaC*).
 2. Filled with classic "chess engine tricks" for simpler and faster code.
 3. Efficiently updatedable evaluation function through [Piece Square Tables](https://www.chessprogramming.org/Piece-Square_Tables).
 4. Uses standard Python collections and data structures for clarity and efficiency.
@@ -110,7 +114,6 @@ An easy way to get a strong Sunfish is to run with with the [PyPy Just-In-Time i
        2 pypy3.6 (7.1)            47      35     300   56.7%   21.3%
        3 python3.7               -97      36     300   36.3%   20.7%
        4 python2.7              -109      35     300   34.8%   24.3%
-
 
 # Why Sunfish?
 
