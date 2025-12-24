@@ -25,6 +25,7 @@ from typing import (
     Final,
     Literal,
     Protocol,
+    TypeVar,
     cast,
     get_args,
     get_origin,
@@ -72,6 +73,13 @@ if TYPE_CHECKING:
 
 type ParamsType = type[SupportsDataclass] | type[None]
 type ResultType = type[SupportsDataclass] | type[None]
+
+# Contravariance for ParamsT allows a handler accepting broader param types
+# to substitute for one requiring narrower types (Liskov substitution).
+ParamsT_contra = TypeVar(
+    "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
+)
+ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
 
 
 @dataclass(slots=True, frozen=True)
@@ -247,14 +255,12 @@ def _coerce_none_type(candidate: object) -> object:
     return candidate
 
 
-class ToolHandler[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult](
-    Protocol
-):
+class ToolHandler(Protocol[ParamsT_contra, ResultT_co]):
     """Callable protocol implemented by tool handlers."""
 
     def __call__(
-        self, params: ParamsT, *, context: ToolContext
-    ) -> ToolResult[ResultT]: ...
+        self, params: ParamsT_contra, *, context: ToolContext
+    ) -> ToolResult[ResultT_co]: ...
 
 
 @dataclass(slots=True)
