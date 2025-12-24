@@ -260,12 +260,20 @@ class JudgeOutput:
     reason: str     # Brief explanation
 
 
+@dataclass(slots=True, frozen=True)
+class JudgeParams:
+    """Parameters for the judge prompt."""
+    criterion: str
+    output: str
+    expected: str
+
+
 JUDGE_TEMPLATE = PromptTemplate[JudgeOutput](
     ns="wink.evals",
     key="llm-judge",
     name="llm_judge",
     sections=[
-        MarkdownSection(
+        MarkdownSection[JudgeParams](
             title="Evaluation Task",
             template="""You are an evaluation judge. Rate the output on the given criterion.
 
@@ -298,27 +306,23 @@ Select one rating and explain your reasoning briefly.""",
 def llm_judge(
     adapter: ProviderAdapter[JudgeOutput],
     criterion: str,
-    *,
-    bus: Dispatcher,
 ) -> Evaluator[str, str]:
     """Create evaluator that uses LLM to judge output.
 
     Args:
         adapter: Provider adapter configured for JudgeOutput
         criterion: What to evaluate (e.g., "factual accuracy", "clarity")
-        bus: Dispatcher for creating judge sessions
 
     Returns:
         Evaluator function that scores string outputs
     """
     def evaluate(output: str, expected: str) -> Score:
-        prompt = Prompt(JUDGE_TEMPLATE).bind(
+        prompt = Prompt(JUDGE_TEMPLATE).bind(JudgeParams(
             criterion=criterion,
             output=output,
             expected=expected,
-        )
-        session = Session(bus=bus, tags={"judge_criterion": criterion})
-        response = adapter.evaluate(prompt, session=session)
+        ))
+        response = adapter.evaluate(prompt)
         rating = response.output.rating
         return Score(
             value=RATING_VALUES[rating],
@@ -332,13 +336,12 @@ def llm_judge(
 
 ```python
 # Use a smaller/cheaper model for judging
-judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
-judge_bus = InProcessDispatcher()
+judge_adapter: OpenAIAdapter[JudgeOutput] = OpenAIAdapter(model="gpt-4o-mini")
 
 evaluator = all_of(
     contains,  # Must contain expected answer
-    llm_judge(judge_adapter, "Response is helpful and well-formatted", bus=judge_bus),
-    llm_judge(judge_adapter, "No hallucinated information", bus=judge_bus),
+    llm_judge(judge_adapter, "Response is helpful and well-formatted"),
+    llm_judge(judge_adapter, "No hallucinated information"),
 )
 ```
 
@@ -563,24 +566,32 @@ def collect_results(
 ### Basic Evaluation
 
 ```python
+from dataclasses import dataclass
 from weakincentives import MainLoop, PromptTemplate, Prompt, Session
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import InProcessDispatcher, InMemoryMailbox
+from weakincentives.runtime import ControlDispatcher, InMemoryMailbox, Mailbox
 from weakincentives.evals import (
     Dataset, EvalLoop, EvalRequest, EvalResult,
     exact_match, submit_dataset, collect_results,
 )
 
+
+@dataclass(slots=True, frozen=True)
+class QAParams:
+    """Parameters for the QA prompt."""
+    question: str
+
+
 # Define the MainLoop for QA
 class QALoop(MainLoop[str, str]):
-    def __init__(self, adapter, bus):
+    def __init__(self, *, adapter: OpenAIAdapter[str], bus: ControlDispatcher) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._template = PromptTemplate[str](
             ns="qa",
             key="answer",
             name="qa",
             sections=[
-                MarkdownSection(
+                MarkdownSection[QAParams](
                     title="Question",
                     template="Answer concisely: $question",
                     key="q",
@@ -589,7 +600,7 @@ class QALoop(MainLoop[str, str]):
         )
 
     def initialize(self, question: str) -> tuple[Prompt[str], Session]:
-        prompt = Prompt(self._template).bind(question=question)
+        prompt = Prompt(self._template).bind(QAParams(question=question))
         session = Session(bus=self._bus)
         return prompt, session
 
@@ -602,8 +613,9 @@ requests: Mailbox[EvalRequest[str, str]] = InMemoryMailbox(name="eval-requests")
 results: Mailbox[EvalResult] = InMemoryMailbox(name="eval-results")
 
 # Create MainLoop and EvalLoop
-adapter = OpenAIAdapter(model="gpt-4o")
-main_loop = QALoop(adapter=adapter, bus=InProcessDispatcher())
+adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
+bus = ControlDispatcher()
+main_loop = QALoop(adapter=adapter, bus=bus)
 eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=exact_match,
@@ -633,15 +645,14 @@ for result in report.failed_samples():
 ```python
 from weakincentives.evals import EvalLoop, all_of, llm_judge, contains
 
-# Create judge adapter and bus
-judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
-judge_bus = InProcessDispatcher()
+# Create judge adapter
+judge_adapter: OpenAIAdapter[JudgeOutput] = OpenAIAdapter(model="gpt-4o-mini")
 
 # Compose multiple criteria
 evaluator = all_of(
     contains,  # Must contain expected substring
-    llm_judge(judge_adapter, "Factually accurate", bus=judge_bus),
-    llm_judge(judge_adapter, "Well-structured response", bus=judge_bus),
+    llm_judge(judge_adapter, "Factually accurate"),
+    llm_judge(judge_adapter, "Well-structured response"),
 )
 
 # Create EvalLoop with composite evaluator
@@ -686,19 +697,25 @@ report = collect_results(results, expected_count=len(dataset))
 EvalLoop workers run alongside MainLoop workers, polling the requests mailbox:
 
 ```python
-from weakincentives.runtime import RedisMailbox
 from redis import Redis
+from weakincentives.runtime import RedisMailbox, ControlDispatcher
+from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match
 
 # Redis-backed mailboxes for cross-process durability
 redis_client = Redis(host="localhost", port=6379)
-requests = RedisMailbox[EvalRequest[str, str]](
+requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
     name="eval-requests",
     client=redis_client,
 )
-results = RedisMailbox[EvalResult](
+results: Mailbox[EvalResult] = RedisMailbox(
     name="eval-results",
     client=redis_client,
 )
+
+# Create MainLoop (same as basic example)
+adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
+bus = ControlDispatcher()
+main_loop = QALoop(adapter=adapter, bus=bus)
 
 # Create and run worker (runs forever)
 eval_loop = EvalLoop(
@@ -715,6 +732,23 @@ eval_loop.run()  # Blocks, processing requests
 Submit samples and collect results from a separate process:
 
 ```python
+from redis import Redis
+from weakincentives.runtime import RedisMailbox, Mailbox
+from weakincentives.evals import (
+    Dataset, EvalRequest, EvalResult, submit_dataset, collect_results,
+)
+
+# Connect to same Redis mailboxes
+redis_client = Redis(host="localhost", port=6379)
+requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
+    name="eval-requests",
+    client=redis_client,
+)
+results: Mailbox[EvalResult] = RedisMailbox(
+    name="eval-results",
+    client=redis_client,
+)
+
 # Submit dataset
 dataset = Dataset.load(Path("qa.jsonl"), str, str)
 submit_dataset(dataset, requests)
