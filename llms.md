@@ -180,6 +180,8 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `MarkdownSection`: Render markdown content using `string.Template`.
     - `Prompt`: Coordinate prompt sections and their parameter bindings.
     - `RenderedPrompt`: Result of rendering a prompt.
+    - `ResourceRegistry`: Typed container for runtime resources available to
+      tool handlers. Supports `build()`, `merge()`, and typed `get()`.
     - `Section`: Base class for prompt sections.
     - `SectionNode`: Node in section tree.
     - `SectionPath`: Path to a section.
@@ -244,8 +246,9 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - Main loop orchestration:
     - `MainLoop`: Abstract base class for standardized agent workflow
       orchestration.
-    - `MainLoopConfig`: Configuration for default deadline/budget.
-    - `MainLoopRequest`: Event requesting execution with optional constraints.
+    - `MainLoopConfig`: Configuration for default deadline/budget/resources.
+    - `MainLoopRequest`: Event requesting execution with optional constraints
+      (budget, deadline, resources).
     - `MainLoopCompleted`: Success event published via bus.
     - `MainLoopFailed`: Failure event published via bus.
   - Session ledger:
@@ -463,7 +466,9 @@ Available in tool handlers via `context`:
 
 - `context.session` - Current Session
 - `context.deadline` - Optional Deadline (check with `deadline.remaining()`)
-- `context.dispatcher` - Dispatcher for publishing
+- `context.resources` - `ResourceRegistry` for runtime services
+- `context.filesystem` - Sugar for `context.resources.get(Filesystem)`
+- `context.budget_tracker` - Sugar for `context.resources.get(BudgetTracker)`
 - `context.prompt` / `context.rendered_prompt` / `context.adapter`
 
 ### ToolResult fields
@@ -616,8 +621,13 @@ response = adapter.evaluate(
     deadline=deadline,                           # Optional timeout
     budget=budget,                               # Token/time limits
     budget_tracker=budget_tracker,               # Shared tracker across evaluations
+    resources=resources,                         # Custom runtime resources
 )
 ```
+
+When `resources` is provided, it is merged with workspace resources (like
+filesystem from prompt) to create the final resource registry. User-provided
+resources take precedence over workspace defaults.
 
 Progressive disclosure is managed via session state:
 
@@ -817,6 +827,7 @@ bus.dispatch(MainLoopRequest(
     request=ReviewRequest(...),
     budget=Budget(max_total_tokens=10000),  # Overrides config default
     deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+    resources=resources,                     # Custom resources for this request
 ))
 ```
 
@@ -955,6 +966,44 @@ optimizer = WorkspaceDigestOptimizer(context, store_scope=PersistenceScope.SESSI
 result = optimizer.optimize(prompt, session=session)
 # result.digest contains the workspace summary
 ```
+
+### Resource injection
+
+Pass custom runtime resources to adapters and MainLoop for cleaner, more
+testable tool handlers:
+
+```python
+from weakincentives.prompt import ResourceRegistry
+from myapp.http import HTTPClient
+
+# Build a resource registry with your dependencies
+http_client = HTTPClient(base_url="https://api.example.com")
+resources = ResourceRegistry.build({HTTPClient: http_client})
+
+# Pass to adapter - merged with workspace resources (e.g., filesystem)
+response = adapter.evaluate(prompt, session=session, resources=resources)
+
+# Or configure at MainLoop level for all requests
+config = MainLoopConfig(resources=resources)
+loop = MyLoop(adapter=adapter, requests=requests, responses=responses, config=config)
+```
+
+In tool handlers, access resources via the typed registry:
+
+```python
+def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
+    # Access via typed registry
+    client = context.resources.get(HTTPClient)
+
+    # Common resources have sugar properties
+    fs = context.filesystem       # context.resources.get(Filesystem)
+    budget = context.budget_tracker  # context.resources.get(BudgetTracker)
+    ...
+```
+
+`ResourceRegistry.merge()` combines registries with the second taking
+precedence on conflicts, enabling layered resource injection where
+caller-provided resources override workspace defaults.
 
 ## CLI
 
