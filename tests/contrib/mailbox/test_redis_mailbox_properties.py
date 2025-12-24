@@ -233,8 +233,8 @@ if HAS_HYPOTHESIS:
             if hasattr(self, "client"):
                 self.client.close()
 
-        @rule(target=sent_ids, body=st.binary(min_size=1, max_size=100))
-        def send_message(self, body: bytes) -> str:
+        @rule(target=sent_ids, body=st.text(min_size=1, max_size=100))
+        def send_message(self, body: str) -> str:
             """Send a message and track it."""
             msg_id = self.mailbox.send(body)
             self.model.send(msg_id, body)

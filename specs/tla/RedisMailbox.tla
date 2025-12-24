@@ -23,8 +23,8 @@ CONSTANTS
     NumConsumers,       \* Number of concurrent consumers (e.g., 2)
     VisibilityTimeout   \* Timeout value in abstract time units
 
-\* Special value for null/none
-NULL == CHOOSE x : x \notin 1..MaxMessages
+\* Special value for null/none (0 is outside the message ID range 1..MaxMessages)
+NULL == 0
 
 VARIABLES
     pending,            \* Sequence of message IDs in pending list
@@ -58,7 +58,7 @@ TypeOK ==
     /\ nextMsgId \in 1..(MaxMessages + 1)
     /\ nextHandle \in Nat
     /\ consumerState \in [1..NumConsumers ->
-            [holding: {NULL} \cup 1..MaxMessages, handle: Nat]]
+            [holding: 0..MaxMessages, handle: Nat]]
     /\ deliveryCounts \in [DOMAIN deliveryCounts -> Nat]
     /\ DOMAIN deliveryCounts \subseteq 1..MaxMessages
     /\ deliveryHistory \in [DOMAIN deliveryHistory ->

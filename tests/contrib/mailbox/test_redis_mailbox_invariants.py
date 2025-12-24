@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from weakincentives.contrib.mailbox import RedisMailbox
 
 try:
-    from hypothesis import given, settings, strategies as st
+    from hypothesis import HealthCheck, given, settings, strategies as st
 
     HAS_HYPOTHESIS = True
 except ImportError:
@@ -50,7 +50,7 @@ class TestReceiptHandleFreshness:
         self, mailbox: RedisMailbox[Any]
     ) -> None:
         """Each delivery of the same message gets a unique handle."""
-        mailbox.send(b"test")
+        mailbox.send('test')
 
         # First receive
         msgs1 = mailbox.receive(visibility_timeout=1)
@@ -72,7 +72,7 @@ class TestReceiptHandleFreshness:
         """Stale handles from previous delivery are rejected."""
         from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
 
-        mailbox.send(b"test")
+        mailbox.send('test')
 
         # First consumer receives
         msgs1 = mailbox.receive(visibility_timeout=1)
@@ -96,7 +96,7 @@ class TestReceiptHandleFreshness:
 
     @pytest.mark.skipif(not HAS_HYPOTHESIS, reason="hypothesis not installed")
     @given(st.integers(min_value=2, max_value=5))  # type: ignore[misc]
-    @settings(max_examples=10, deadline=None)  # type: ignore[misc]
+    @settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])  # type: ignore[misc]
     def test_handle_unique_across_n_deliveries(
         self, redis_client: Redis[bytes], n: int
     ) -> None:
@@ -110,7 +110,7 @@ class TestReceiptHandleFreshness:
         )
 
         try:
-            mailbox.send(b"test")
+            mailbox.send('test')
             handles = []
 
             for _ in range(n):
@@ -135,7 +135,7 @@ class TestMessageStateExclusivity:
         self, mailbox: RedisMailbox[Any], redis_client: Redis[bytes]
     ) -> None:
         """Receive atomically moves message from pending to invisible."""
-        mailbox.send(b"test")
+        mailbox.send('test')
 
         # Receive
         msgs = mailbox.receive(visibility_timeout=30)
@@ -154,7 +154,7 @@ class TestMessageStateExclusivity:
         """Parallel receives never return the same message twice."""
         # Send 100 messages
         for i in range(100):
-            mailbox.send(f"msg-{i}".encode())
+            mailbox.send(f"msg-{i}")
 
         received: list[str] = []
         lock = threading.Lock()
@@ -190,7 +190,7 @@ class TestMessageStateExclusivity:
         3. Consumer calls receive
         """
         # Send and receive with short timeout
-        mailbox.send(b"test")
+        mailbox.send('test')
         msgs = mailbox.receive(visibility_timeout=1)
         msg_id = msgs[0].id
 
@@ -215,11 +215,11 @@ class TestNoMessageLoss:
 
     @pytest.mark.skipif(not HAS_HYPOTHESIS, reason="hypothesis not installed")
     @given(  # type: ignore[misc]
-        st.lists(st.binary(min_size=1, max_size=50), min_size=1, max_size=20)
+        st.lists(st.text(min_size=1, max_size=50), min_size=1, max_size=20)
     )
-    @settings(max_examples=20, deadline=None)  # type: ignore[misc]
+    @settings(max_examples=20, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])  # type: ignore[misc]
     def test_all_messages_accounted_for(
-        self, redis_client: Redis[bytes], bodies: list[bytes]
+        self, redis_client: Redis[bytes], bodies: list[str]
     ) -> None:
         """Every sent message is acked or remains in queue."""
         from weakincentives.contrib.mailbox import RedisMailbox
@@ -261,7 +261,7 @@ class TestNoMessageLoss:
         # First mailbox instance sends messages
         mb1: RedisMailbox[Any] = RedisMailbox(name=name, client=redis_client)
         for i in range(10):
-            mb1.send(f"msg-{i}".encode())
+            mb1.send(f"msg-{i}")
         mb1.close()
 
         # Second instance sees all messages
@@ -278,7 +278,7 @@ class TestDeliveryCountMonotonicity:
 
     def test_delivery_count_increments(self, mailbox: RedisMailbox[Any]) -> None:
         """Each delivery increments the count."""
-        mailbox.send(b"test")
+        mailbox.send('test')
 
         counts = []
         for _ in range(3):
@@ -295,7 +295,7 @@ class TestDeliveryCountMonotonicity:
         self, mailbox: RedisMailbox[Any]
     ) -> None:
         """Delivery count persists across timeout and requeue."""
-        mailbox.send(b"test")
+        mailbox.send('test')
 
         # First delivery
         msgs1 = mailbox.receive(visibility_timeout=1)
@@ -323,7 +323,7 @@ class TestDeliveryCountMonotonicity:
         self, mailbox: RedisMailbox[Any]
     ) -> None:
         """Delivery count persists across nack and requeue."""
-        mailbox.send(b"test")
+        mailbox.send('test')
 
         # First delivery
         msgs1 = mailbox.receive(visibility_timeout=30)
@@ -342,7 +342,7 @@ class TestVisibilityTimeout:
         self, mailbox: RedisMailbox[Any]
     ) -> None:
         """Expired messages return to pending."""
-        mailbox.send(b"test")
+        mailbox.send('test')
 
         # Receive with short timeout
         msgs = mailbox.receive(visibility_timeout=1)
@@ -362,7 +362,7 @@ class TestVisibilityTimeout:
 
     def test_extend_prevents_requeue(self, mailbox: RedisMailbox[Any]) -> None:
         """Extended visibility prevents timeout requeue."""
-        mailbox.send(b"test")
+        mailbox.send('test')
 
         msgs = mailbox.receive(visibility_timeout=1)
         msg = msgs[0]
@@ -392,7 +392,7 @@ class TestFIFOOrdering:
         # Send in order
         ids = []
         for i in range(10):
-            msg_id = mailbox.send(f"msg-{i}".encode())
+            msg_id = mailbox.send(f"msg-{i}")
             ids.append(msg_id)
 
         # Receive and verify order

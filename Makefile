@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check property-tests stress-tests verify-mailbox demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check property-tests stress-tests verify-mailbox setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -93,6 +93,43 @@ validate-integration-tests:
 	@uv run --all-extras python build/validate_integration_tests.py -q
 
 # =============================================================================
+# Setup
+# =============================================================================
+
+# Download TLA+ tools (requires Java)
+setup-tlaplus:
+	@echo "Setting up TLA+ tools..."
+	@mkdir -p tools
+	@if [ ! -f tools/tla2tools.jar ]; then \
+		echo "Downloading TLA+ tools..."; \
+		curl -sL -o tools/tla2tools.jar \
+			https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar; \
+	else \
+		echo "TLA+ tools already installed"; \
+	fi
+
+# Start Redis server for testing (if not running)
+setup-redis:
+	@echo "Setting up Redis..."
+	@if redis-cli ping >/dev/null 2>&1; then \
+		echo "Redis already running"; \
+	elif command -v redis-server >/dev/null 2>&1; then \
+		echo "Starting Redis server..."; \
+		redis-server --daemonize yes; \
+		sleep 1; \
+		redis-cli ping; \
+	else \
+		echo "Redis not installed. Install with: apt install redis-server"; \
+		exit 1; \
+	fi
+
+# Setup all verification dependencies
+setup: setup-tlaplus setup-redis
+	@echo "Syncing Python dependencies..."
+	@uv sync --all-extras
+	@echo "Setup complete!"
+
+# =============================================================================
 # Formal Verification
 # =============================================================================
 
@@ -101,8 +138,11 @@ tlaplus-check:
 	@echo "Running TLC model checker..."
 	@if command -v tlc >/dev/null 2>&1; then \
 		cd specs/tla && tlc RedisMailboxMC.tla -config RedisMailboxMC.cfg -workers auto; \
+	elif [ -f tools/tla2tools.jar ]; then \
+		cd specs/tla && java -jar ../../tools/tla2tools.jar \
+			-config RedisMailboxMC.cfg RedisMailboxMC.tla -workers auto; \
 	else \
-		echo "TLC not installed. Install with: brew install tlaplus"; \
+		echo "TLC not installed. Run: make setup-tlaplus"; \
 		exit 1; \
 	fi
 

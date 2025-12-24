@@ -69,7 +69,7 @@ class TestConcurrentStress:
 
         def producer(producer_id: int) -> None:
             for i in range(messages_per_producer):
-                body = f"p{producer_id}-m{i}".encode()
+                body = f"p{producer_id}-m{i}"
                 msg_id = mailbox.send(body)
                 with sent_lock:
                     sent.append(msg_id)
@@ -154,7 +154,7 @@ class TestConcurrentStress:
         try:
             # Send messages
             for i in range(num_messages):
-                mailbox.send(f"msg-{i}".encode())
+                mailbox.send(f"msg-{i}")
 
             # Receive but don't ack (let them expire)
             received_handles = []
@@ -198,7 +198,7 @@ class TestConcurrentStress:
         )
 
         try:
-            mailbox.send(b"test")
+            mailbox.send("test")
 
             # Consumer 1 receives
             msgs1 = mailbox.receive(visibility_timeout=1)

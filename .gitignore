@@ -218,3 +218,12 @@ mutants/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Downloaded tools (TLA+, etc.)
+tools/
+
+# TLA+ model checker generated files
+specs/tla/states/
+
+# Redis dump
+dump.rdb
