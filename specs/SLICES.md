@@ -289,19 +289,16 @@ class Clear[T: SupportsDataclass]:
     predicate: Callable[[T], bool] | None = None
 
 
-# Union of all slice operations
+# Union of all slice operations - reducers must return one of these
 type SliceOp[T: SupportsDataclass] = Append[T] | Extend[T] | Replace[T] | Clear[T]
-
-# Reducer can return an operation OR a tuple (backward compatibility)
-type ReducerResult[T: SupportsDataclass] = SliceOp[T] | tuple[T, ...]
 ```
 
 ## Reducer Contract
 
-The reducer signature changes to use `SliceView` for input and `ReducerResult`
-for output:
+Reducers receive a lazy `SliceView` and return a `SliceOp` describing
+the mutation:
 
-### New Signature
+### Signature
 
 ```python
 from weakincentives.runtime.session import ReducerContext
@@ -311,7 +308,7 @@ def reducer[S: SupportsDataclass](
     event: SupportsDataclass,
     *,
     context: ReducerContext,
-) -> ReducerResult[S]:
+) -> SliceOp[S]:
     """Transform slice state in response to an event.
 
     Args:
@@ -321,13 +318,12 @@ def reducer[S: SupportsDataclass](
         context: Reducer context with session metadata.
 
     Returns:
-        A SliceOp describing the mutation, or a tuple for full replacement.
-        Returning a tuple is equivalent to Replace(items=tuple).
+        A SliceOp describing the mutation to apply.
     """
     ...
 ```
 
-### Built-in Reducers (Updated)
+### Built-in Reducers
 
 ```python
 def append_all[S: SupportsDataclass](
@@ -358,7 +354,7 @@ def replace_latest[S: SupportsDataclass](
 
 def upsert_by[S: SupportsDataclass](
     key_fn: Callable[[S], object],
-) -> Callable[[SliceView[S], S, ReducerContext], ReducerResult[S]]:
+) -> Callable[[SliceView[S], S, ReducerContext], SliceOp[S]]:
     """Create reducer that upserts by derived key.
 
     Must access view to find existing item - O(n) for any backend.
@@ -376,7 +372,7 @@ def upsert_by[S: SupportsDataclass](
     return reducer
 ```
 
-### Declarative Reducers (Updated)
+### Declarative Reducers
 
 The `@reducer` decorator adapts method-style reducers:
 
@@ -404,16 +400,16 @@ The decorator wrapper:
 3. If result is a SliceOp, returns it directly
 4. If result is an instance, wraps as `Replace((result,))`
 
-### Session Dispatch (Updated)
+### Session Dispatch
 
 ```python
-def _apply_reducer_result[S: SupportsDataclass](
+def _apply_slice_op[S: SupportsDataclass](
     self,
-    result: ReducerResult[S],
+    op: SliceOp[S],
     slice: Slice[S],
 ) -> None:
-    """Apply reducer result to slice using optimal operation."""
-    match result:
+    """Apply slice operation using optimal method."""
+    match op:
         case Append(item=item):
             slice.append(item)
         case Extend(items=items):
@@ -422,9 +418,6 @@ def _apply_reducer_result[S: SupportsDataclass](
             slice.replace(items)
         case Clear(predicate=pred):
             slice.clear(pred)
-        case tuple() as items:
-            # Backward compatibility: tuple means Replace
-            slice.replace(items)
 ```
 
 ### Performance Characteristics
@@ -440,26 +433,6 @@ def _apply_reducer_result[S: SupportsDataclass](
 
 **Key insight**: Append-only reducers (the common case) become O(1) for
 file-backed slices because they never access the view.
-
-### Backward Compatibility
-
-Existing reducers returning `tuple[S, ...]` continue to work:
-
-```python
-# Old style - still works, treated as Replace
-def old_reducer(
-    view: SliceView[S],
-    event: S,
-    *,
-    context: ReducerContext,
-) -> tuple[S, ...]:
-    return (*view.all(), event)  # Equivalent to Append, but loads everything
-```
-
-The migration path:
-1. Change signature from `tuple[S, ...]` input to `SliceView[S]`
-2. Optionally return `SliceOp` instead of tuple for efficiency
-3. For append-only reducers, return `Append(event)` without accessing view
 
 ## Implementations
 
