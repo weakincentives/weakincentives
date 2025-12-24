@@ -201,6 +201,36 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """
         _ = (self, prompt, session)
 
+    def execute(
+        self,
+        request: UserRequestT,
+        *,
+        budget: Budget | None = None,
+        deadline: Deadline | None = None,
+        resources: ResourceRegistry | None = None,
+    ) -> tuple[PromptResponse[OutputT], Session]:
+        """Execute directly without mailbox routing.
+
+        Convenience method for synchronous execution. For durable processing
+        with at-least-once semantics, use ``run()`` with mailboxes instead.
+
+        Args:
+            request: The user request to process.
+            budget: Optional budget override (takes precedence over config).
+            deadline: Optional deadline override (takes precedence over config).
+            resources: Optional resource registry override.
+
+        Returns:
+            Tuple of (PromptResponse, Session) from the evaluation.
+        """
+        request_event = MainLoopRequest(
+            request=request,
+            budget=budget,
+            deadline=deadline,
+            resources=resources,
+        )
+        return self._execute(request_event)
+
     def _execute(
         self,
         request_event: MainLoopRequest[UserRequestT],
