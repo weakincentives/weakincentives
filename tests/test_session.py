@@ -658,7 +658,10 @@ def test_clone_preserves_state_and_reducer_registration(
     assert clone.created_at == provided_created_at
     assert clone[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
-    assert clone._reducers.keys() == session._reducers.keys()
+    assert (
+        clone.state_manager.registered_slice_types()
+        == session.state_manager.registered_slice_types()
+    )
 
     clone_bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
 

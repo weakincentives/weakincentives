@@ -27,6 +27,12 @@ from .reducers import (
     upsert_by,
 )
 from .session import DataEvent, Session, iter_sessions_bottom_up
+from .session_state import (
+    EMPTY_SLICE,
+    ObserverRegistration,
+    ReducerRegistration,
+    SessionState,
+)
 from .slice_accessor import SliceAccessor
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import (
@@ -50,15 +56,19 @@ from .visibility_overrides import (
 
 __all__ = [
     "DEFAULT_SNAPSHOT_POLICIES",
+    "EMPTY_SLICE",
     "ClearAllVisibilityOverrides",
     "ClearVisibilityOverride",
     "DataEvent",
+    "ObserverRegistration",
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
     "ReducerMeta",
+    "ReducerRegistration",
     "Session",
     "SessionProtocol",
+    "SessionState",
     "SetVisibilityOverride",
     "SliceAccessor",
     "SliceObserver",
