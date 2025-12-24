@@ -374,7 +374,9 @@ def upsert_by[S: SupportsDataclass](
 
 ### Declarative Reducers
 
-The `@reducer` decorator adapts method-style reducers:
+The `@reducer` decorator enables method-style reducers on frozen dataclasses.
+Methods must return `SliceOp`, maintaining consistency with the functional
+reducer API:
 
 ```python
 @dataclass(frozen=True)
@@ -383,22 +385,48 @@ class AgentPlan:
     current_step: int = 0
 
     @reducer(on=AddStep)
-    def add_step(self, event: AddStep) -> "AgentPlan":
+    def add_step(self, event: AddStep) -> Replace["AgentPlan"]:
         # self is the current state (from view.latest())
-        # Return new instance - wrapper converts to Replace((result,))
-        return replace(self, steps=(*self.steps, event.step))
+        # Must return a SliceOp - typically Replace for state slices
+        new_plan = replace(self, steps=(*self.steps, event.step))
+        return Replace((new_plan,))
 
-    @reducer(on=ClearSteps)
-    def clear(self, event: ClearSteps) -> SliceOp["AgentPlan"]:
-        # Can also return SliceOp directly for optimization
+    @reducer(on=CompleteStep)
+    def complete(self, event: CompleteStep) -> Replace["AgentPlan"]:
+        new_plan = replace(self, current_step=self.current_step + 1)
+        return Replace((new_plan,))
+
+    @reducer(on=ResetPlan)
+    def reset(self, event: ResetPlan) -> Replace["AgentPlan"]:
+        # Can create entirely new state
         return Replace((AgentPlan(steps=(), current_step=0),))
 ```
 
 The decorator wrapper:
 1. Calls `view.latest()` to get current state (or uses initial factory)
-2. Invokes the method with the event
-3. If result is a SliceOp, returns it directly
-4. If result is an instance, wraps as `Replace((result,))`
+2. Invokes the method with `self` bound to current state
+3. Returns the `SliceOp` from the method directly
+
+**Why SliceOp for declarative reducers?**
+
+- **Consistency**: Same return type as functional reducers
+- **Explicitness**: Clear intent - Replace, Append, etc.
+- **Flexibility**: Methods can return Append for ledger-style slices
+- **No magic**: No implicit wrapping or type inspection
+
+**Ledger-style declarative slice:**
+
+```python
+@dataclass(frozen=True)
+class AuditEntry:
+    action: str
+    timestamp: datetime
+
+    @reducer(on=UserAction)
+    def log_action(self, event: UserAction) -> Append["AuditEntry"]:
+        # Append new entry without loading existing ones
+        return Append(AuditEntry(action=event.name, timestamp=event.at))
+```
 
 ### Session Dispatch
 
