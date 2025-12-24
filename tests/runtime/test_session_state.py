@@ -54,15 +54,15 @@ class TestSessionStateInit:
     def test_initializes_with_empty_state(self) -> None:
         state = SessionState()
 
-        assert state._state == {}
-        assert state._reducers == {}
-        assert state._observers == {}
+        assert state.get_state_snapshot() == {}
+        assert state.get_reducers_snapshot() == []
+        assert state.registered_slice_types() == set()
 
     def test_initializes_with_provided_policies(self) -> None:
         policies = {ExamplePayload: SlicePolicy.LOG}
         state = SessionState(initial_policies=policies)
 
-        assert state._slice_policies[ExamplePayload] == SlicePolicy.LOG
+        assert state.get_policy(ExamplePayload) == SlicePolicy.LOG
 
 
 class TestSessionStateQueryOperations:
@@ -164,23 +164,26 @@ class TestSessionStateReducerRegistration:
 
         state.register_reducer(ExamplePayload, append_all)
 
-        assert ExamplePayload in state._state
-        assert state._state[ExamplePayload] == EMPTY_SLICE
+        assert ExamplePayload in state.registered_slice_types()
+        assert state.select_all(ExamplePayload) == EMPTY_SLICE
 
     def test_register_reducer_sets_policy(self) -> None:
         state = SessionState()
 
         state.register_reducer(ExamplePayload, append_all, policy=SlicePolicy.LOG)
 
-        assert state._slice_policies[ExamplePayload] == SlicePolicy.LOG
+        assert state.get_policy(ExamplePayload) == SlicePolicy.LOG
 
     def test_register_reducer_allows_different_slice_type(self) -> None:
         state = SessionState()
 
         state.register_reducer(ExampleOutput, append_all, slice_type=ExamplePayload)
 
-        registrations = state._reducers[ExampleOutput]
-        assert registrations[0].slice_type is ExamplePayload
+        # Verify via get_reducers_snapshot
+        reducer_snapshot = state.get_reducers_snapshot()
+        output_reducers = [r for t, r in reducer_snapshot if t is ExampleOutput]
+        assert len(output_reducers) == 1
+        assert output_reducers[0][0].slice_type is ExamplePayload
 
     def test_has_reducer_returns_true_when_registered(self) -> None:
         state = SessionState()
@@ -218,12 +221,16 @@ class TestSessionStateObservers:
             calls.append(new)
 
         subscription = state.register_observer(ExamplePayload, observer)
-        assert len(state._observers[ExamplePayload]) == 1
+        # Verify observer is registered by calling notify
+        state.notify_observers({ExamplePayload: ((), (ExamplePayload(1),))})
+        assert len(calls) == 1
 
         result = subscription.unsubscribe()
-
         assert result is True
-        assert len(state._observers[ExamplePayload]) == 0
+
+        # Verify observer is removed by calling notify again
+        state.notify_observers({ExamplePayload: ((), (ExamplePayload(2),))})
+        assert len(calls) == 1  # Still only 1 call
 
     def test_notify_observers_calls_registered_observers(self) -> None:
         state = SessionState()
@@ -281,8 +288,8 @@ class TestSessionStateReset:
 
         state.reset()
 
-        # Slice exists but is empty
-        assert ExamplePayload in state._state
+        # Slice type still registered but is empty
+        assert ExamplePayload in state.registered_slice_types()
         assert state.select_all(ExamplePayload) == ()
 
 
@@ -306,8 +313,11 @@ class TestSessionStateCloneSupport:
         reducer_snapshot = source.get_reducers_snapshot()
         target.copy_reducers_from(reducer_snapshot)
 
-        # Only one registration (the original)
-        assert len(target._reducers[ExamplePayload]) == 1
+        # Only one registration (the original replace_latest, not append_all)
+        target_snapshot = target.get_reducers_snapshot()
+        payload_registrations = [r for t, r in target_snapshot if t is ExamplePayload]
+        assert len(payload_registrations) == 1
+        assert len(payload_registrations[0]) == 1
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -556,82 +566,3 @@ class TestSnapshotPoliciesAfterRefactor:
 
         # LOG slices restored when preserve_logs=False
         assert session[ExamplePayload].all() == (ExamplePayload(1),)
-
-
-class TestBackwardCompatibilityProperties:
-    """Tests for backward compatibility properties on Session."""
-
-    def test_observers_property_delegates_to_state_manager(self) -> None:
-        session = Session(bus=InProcessDispatcher())
-        calls: list[tuple[ExamplePayload, ...]] = []
-
-        def observer(
-            old: tuple[ExamplePayload, ...], new: tuple[ExamplePayload, ...]
-        ) -> None:
-            calls.append(new)
-
-        session.observe(ExamplePayload, observer)
-
-        # Access via backward compat property
-        assert ExamplePayload in session._observers
-        assert len(session._observers[ExamplePayload]) == 1
-
-    def test_state_getter_delegates_to_state_manager(self) -> None:
-        session = Session(bus=InProcessDispatcher())
-        session[ExamplePayload].seed([ExamplePayload(1)])
-
-        # Access via backward compat property
-        assert ExamplePayload in session._state
-        assert session._state[ExamplePayload] == (ExamplePayload(1),)
-
-    def test_state_setter_delegates_to_state_manager(self) -> None:
-        session = Session(bus=InProcessDispatcher())
-        session[ExamplePayload].seed([ExamplePayload(1)])
-
-        # Set via backward compat property
-        session._state = {ExamplePayload: (ExamplePayload(2),)}
-
-        assert session[ExamplePayload].all() == (ExamplePayload(2),)
-
-    def test_slice_policies_getter_delegates_to_state_manager(self) -> None:
-        session = Session(bus=InProcessDispatcher())
-        session[ExamplePayload].register(
-            ExamplePayload, append_all, policy=SlicePolicy.LOG
-        )
-
-        # Access via backward compat property
-        assert session._slice_policies[ExamplePayload] == SlicePolicy.LOG
-
-    def test_slice_policies_setter_delegates_to_state_manager(self) -> None:
-        session = Session(bus=InProcessDispatcher())
-        session[ExamplePayload].register(ExamplePayload, append_all)
-
-        # Set via backward compat property
-        session._slice_policies = {ExamplePayload: SlicePolicy.LOG}
-
-        assert session.state_manager.get_policy(ExamplePayload) == SlicePolicy.LOG
-
-    def test_registered_slice_types_delegates_to_state_manager(self) -> None:
-        session = Session(bus=InProcessDispatcher())
-        session[ExamplePayload].register(ExamplePayload, append_all)
-
-        types = session._registered_slice_types()
-
-        assert ExamplePayload in types
-
-    def test_notify_observers_delegates_to_state_manager(self) -> None:
-        session = Session(bus=InProcessDispatcher())
-        calls: list[tuple[ExamplePayload, ...]] = []
-
-        def observer(
-            old: tuple[ExamplePayload, ...], new: tuple[ExamplePayload, ...]
-        ) -> None:
-            calls.append(new)
-
-        session.observe(ExamplePayload, observer)
-
-        # Call _notify_observers directly
-        session._notify_observers({ExamplePayload: ((), (ExamplePayload(1),))})
-
-        assert len(calls) == 1
-        assert calls[0] == (ExamplePayload(1),)

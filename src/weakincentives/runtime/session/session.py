@@ -214,37 +214,6 @@ class Session(SessionProtocol):
         """
         return self._state_manager
 
-    # Expose internal dicts for backward compatibility with existing tests
-    @property
-    def _reducers(self) -> dict[SessionSliceType, list[Any]]:
-        """Return reducers dict for backward compatibility."""
-        return self._state_manager._reducers  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _observers(self) -> dict[SessionSliceType, list[Any]]:
-        """Return observers dict for backward compatibility."""
-        return self._state_manager._observers  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _state(self) -> dict[SessionSliceType, SessionSlice]:
-        """Return state dict for backward compatibility."""
-        return self._state_manager._state  # pyright: ignore[reportPrivateUsage]
-
-    @_state.setter
-    def _state(self, value: dict[SessionSliceType, SessionSlice]) -> None:
-        """Set state dict for backward compatibility."""
-        self._state_manager._state = value  # pyright: ignore[reportPrivateUsage]
-
-    @property
-    def _slice_policies(self) -> dict[SessionSliceType, SlicePolicy]:
-        """Return slice policies dict for backward compatibility."""
-        return self._state_manager._slice_policies  # pyright: ignore[reportPrivateUsage]
-
-    @_slice_policies.setter
-    def _slice_policies(self, value: dict[SessionSliceType, SlicePolicy]) -> None:
-        """Set slice policies dict for backward compatibility."""
-        self._state_manager._slice_policies = value  # pyright: ignore[reportPrivateUsage]
-
     # ──────────────────────────────────────────────────────────────────────
     # Clone Operations
     # ──────────────────────────────────────────────────────────────────────
@@ -267,7 +236,7 @@ class Session(SessionProtocol):
         """Create a snapshot of reducers and state while holding the lock."""
         reducer_snapshot = self._state_manager.get_reducers_snapshot()
         state_snapshot = self._state_manager.get_state_snapshot()
-        policy_snapshot = dict(self._state_manager._slice_policies)  # pyright: ignore[reportPrivateUsage]
+        policy_snapshot = self._state_manager.get_policies_snapshot()
         return reducer_snapshot, state_snapshot, policy_snapshot
 
     def _resolve_clone_parent(self, parent: Session | None) -> Session | None:
@@ -638,9 +607,6 @@ class Session(SessionProtocol):
     # Private Methods
     # ──────────────────────────────────────────────────────────────────────
 
-    def _registered_slice_types(self) -> set[SessionSliceType]:
-        return self._state_manager.registered_slice_types()
-
     def _register_child(self, child: Session) -> None:
         with self.locked():
             for registered in self._children:
@@ -717,12 +683,6 @@ class Session(SessionProtocol):
         event: ReducerEvent,
     ) -> None:
         self._state_manager.dispatch_data_event(data_type, event, session=self)
-
-    def _notify_observers(
-        self, state_changes: dict[SessionSliceType, tuple[SessionSlice, SessionSlice]]
-    ) -> None:
-        """Call registered observers for slices that changed."""
-        self._state_manager.notify_observers(state_changes)
 
     def _attach_to_dispatcher(self, bus: TelemetryDispatcher) -> None:
         with self.locked():
