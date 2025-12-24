@@ -227,8 +227,7 @@ class ClearSlice(Generic[T]):
 ```
 
 These events are handled by the session before normal reducer dispatch,
-ensuring they always succeed regardless of registered reducers. Observers are
-still notified when state changes.
+ensuring they always succeed regardless of registered reducers.
 
 **SliceAccessor mutation methods:**
 

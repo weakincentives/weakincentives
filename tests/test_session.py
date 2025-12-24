@@ -937,7 +937,7 @@ def test_dispatch_clear_slice_with_predicate(session_factory: SessionFactory) ->
 def test_clear_slice_with_no_matching_predicate(
     session_factory: SessionFactory,
 ) -> None:
-    """Test that ClearSlice with a predicate that matches nothing doesn't notify observers."""
+    """Test that ClearSlice with a predicate that matches nothing leaves values unchanged."""
     from weakincentives.runtime.session import ClearSlice
 
     session, bus = session_factory()
@@ -945,17 +945,6 @@ def test_clear_slice_with_no_matching_predicate(
     # Add some initial data (none starts with 'z')
     bus.dispatch(make_prompt_event(ExampleOutput(text="apple")))
     bus.dispatch(make_prompt_event(ExampleOutput(text="banana")))
-
-    observer_calls: list[
-        tuple[tuple[ExampleOutput, ...], tuple[ExampleOutput, ...]]
-    ] = []
-
-    def observer(
-        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
-    ) -> None:
-        observer_calls.append((old, new))
-
-    session.observe(ExampleOutput, observer)
 
     # Dispatch ClearSlice with predicate that matches nothing
     session.dispatch(
@@ -965,69 +954,11 @@ def test_clear_slice_with_no_matching_predicate(
         )
     )
 
-    # Observer should NOT be called since state didn't change
-    assert len(observer_calls) == 0
     # Values should be unchanged
     assert session[ExampleOutput].all() == (
         ExampleOutput(text="apple"),
         ExampleOutput(text="banana"),
     )
-
-
-def test_initialize_slice_triggers_observer(session_factory: SessionFactory) -> None:
-    """Test that InitializeSlice triggers observers."""
-    from weakincentives.runtime.session import InitializeSlice
-
-    session, _ = session_factory()
-
-    observer_calls: list[
-        tuple[tuple[ExampleOutput, ...], tuple[ExampleOutput, ...]]
-    ] = []
-
-    def observer(
-        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
-    ) -> None:
-        observer_calls.append((old, new))
-
-    session.observe(ExampleOutput, observer)
-
-    session.dispatch(
-        InitializeSlice(
-            slice_type=ExampleOutput,
-            values=(ExampleOutput(text="init"),),
-        )
-    )
-
-    assert len(observer_calls) == 1
-    assert observer_calls[0][0] == ()
-    assert observer_calls[0][1] == (ExampleOutput(text="init"),)
-
-
-def test_clear_slice_triggers_observer(session_factory: SessionFactory) -> None:
-    """Test that ClearSlice triggers observers."""
-    from weakincentives.runtime.session import ClearSlice
-
-    session, bus = session_factory()
-
-    # Add initial data
-    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
-
-    observer_calls: list[
-        tuple[tuple[ExampleOutput, ...], tuple[ExampleOutput, ...]]
-    ] = []
-
-    def observer(
-        old: tuple[ExampleOutput, ...], new: tuple[ExampleOutput, ...]
-    ) -> None:
-        observer_calls.append((old, new))
-
-    session.observe(ExampleOutput, observer)
-
-    session.dispatch(ClearSlice(slice_type=ExampleOutput))
-
-    assert len(observer_calls) == 1
-    assert observer_calls[0][0] == (ExampleOutput(text="first"),)
-    assert observer_calls[0][1] == ()
 
 
 def test_broadcast_triggers_registered_reducer(
