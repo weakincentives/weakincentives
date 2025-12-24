@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING
 from ...dataclasses import FrozenDataclass
 from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import SectionPath
+from .slices import Replace
 from .state_slice import reducer
 
 if TYPE_CHECKING:
@@ -114,22 +115,24 @@ class VisibilityOverrides:
         return VisibilityOverrides(overrides=new_overrides)
 
     @reducer(on=SetVisibilityOverride)
-    def handle_set(self, event: SetVisibilityOverride) -> VisibilityOverrides:
+    def handle_set(self, event: SetVisibilityOverride) -> Replace[VisibilityOverrides]:
         """Handle SetVisibilityOverride event."""
-        return self.with_override(event.path, event.visibility)
+        return Replace((self.with_override(event.path, event.visibility),))
 
     @reducer(on=ClearVisibilityOverride)
-    def handle_clear(self, event: ClearVisibilityOverride) -> VisibilityOverrides:
+    def handle_clear(
+        self, event: ClearVisibilityOverride
+    ) -> Replace[VisibilityOverrides]:
         """Handle ClearVisibilityOverride event."""
-        return self.without_override(event.path)
+        return Replace((self.without_override(event.path),))
 
     @reducer(on=ClearAllVisibilityOverrides)
     def handle_clear_all(
         self, event: ClearAllVisibilityOverrides
-    ) -> VisibilityOverrides:
+    ) -> Replace[VisibilityOverrides]:
         """Handle ClearAllVisibilityOverrides event."""
         del event
-        return replace(self, overrides={})
+        return Replace((replace(self, overrides={}),))
 
 
 def register_visibility_reducers(session: SessionProtocol) -> None:

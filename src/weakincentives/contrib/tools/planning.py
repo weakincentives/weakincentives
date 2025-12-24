@@ -25,7 +25,7 @@ from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import PromptRenderError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
-from ...runtime.session import Session, reducer, replace_latest
+from ...runtime.session import Replace, Session, reducer, replace_latest
 from ...types import SupportsDataclass, SupportsToolResult
 from ._context import ensure_context_uses_session
 
@@ -141,31 +141,33 @@ class Plan:
         return "\n".join(lines)
 
     @reducer(on=SetupPlan)
-    def handle_setup(self, event: SetupPlan) -> Plan:
+    def handle_setup(self, event: SetupPlan) -> Replace[Plan]:
         """Create or replace the plan with a new objective and initial steps."""
         del self  # SetupPlan creates a new plan, ignoring current state
         steps = tuple(
             PlanStep(step_id=index + 1, title=title, status="pending")
             for index, title in enumerate(event.initial_steps)
         )
-        return Plan(objective=event.objective, status="active", steps=steps)
+        new_plan = Plan(objective=event.objective, status="active", steps=steps)
+        return Replace((new_plan,))
 
     @reducer(on=AddStep)
-    def handle_add_step(self, event: AddStep) -> Plan:
+    def handle_add_step(self, event: AddStep) -> Replace[Plan]:
         """Append new steps to the current plan."""
         existing = list(self.steps)
         next_id = max((step.step_id for step in existing), default=0) + 1
         for title in event.steps:
             existing.append(PlanStep(step_id=next_id, title=title, status="pending"))
             next_id += 1
-        return Plan(
+        new_plan = Plan(
             objective=self.objective,
             status="active",
             steps=tuple(existing),
         )
+        return Replace((new_plan,))
 
     @reducer(on=UpdateStep)
-    def handle_update_step(self, event: UpdateStep) -> Plan:
+    def handle_update_step(self, event: UpdateStep) -> Replace[Plan]:
         """Modify a step's title or status."""
         updated_steps: list[PlanStep] = []
         for step in self.steps:
@@ -182,11 +184,12 @@ class Plan:
             plan_status = "completed"
         else:
             plan_status = "active"
-        return Plan(
+        new_plan = Plan(
             objective=self.objective,
             status=plan_status,
             steps=tuple(updated_steps),
         )
+        return Replace((new_plan,))
 
 
 @FrozenDataclass()

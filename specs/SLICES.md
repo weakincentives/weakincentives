@@ -403,9 +403,10 @@ class AgentPlan:
 ```
 
 The decorator wrapper:
+
 1. Calls `view.latest()` to get current state (or uses initial factory)
-2. Invokes the method with `self` bound to current state
-3. Returns the `SliceOp` from the method directly
+1. Invokes the method with `self` bound to current state
+1. Returns the `SliceOp` from the method directly
 
 **Why SliceOp for declarative reducers?**
 
@@ -972,6 +973,7 @@ def restore(self, snapshot: Snapshot) -> None:
 ### File-Backed Snapshot Considerations
 
 For `JsonlSlice`:
+
 - `snapshot()` returns the current in-memory view (after loading from disk)
 - `replace()` rewrites the entire file atomically
 - Session snapshots are still JSON; file contents are separate persistence
@@ -986,10 +988,12 @@ tuple reassignments protected by the session lock.
 ### JsonlSlice
 
 Uses `fcntl.flock()` for file-level locking:
+
 - `LOCK_SH` (shared) for reads
 - `LOCK_EX` (exclusive) for writes
 
 Combined with Session's RLock, this provides:
+
 - Session-level atomicity for reducer execution
 - File-level atomicity for disk operations
 

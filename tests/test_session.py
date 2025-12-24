@@ -31,11 +31,14 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.session import (
+    Append,
     ReducerContextProtocol,
     ReducerEvent,
+    Replace,
     Session,
     SliceAccessor,
     SlicePolicy,
+    SliceView,
     Snapshot,
     SnapshotRestoreError,
     SnapshotSerializationError,
@@ -209,26 +212,26 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     call_order: list[str] = []
 
     def first(
-        slice_values: tuple[FirstSlice, ...],
+        view: SliceView[FirstSlice],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[FirstSlice, ...]:
-        del context
+    ) -> Append[FirstSlice]:
+        del context, view
         call_order.append("first")
         value = cast(ExampleOutput, event)
-        return (*slice_values, FirstSlice(value.text))
+        return Append(FirstSlice(value.text))
 
     def second(
-        slice_values: tuple[SecondSlice, ...],
+        view: SliceView[SecondSlice],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[SecondSlice, ...]:
-        del context
+    ) -> Append[SecondSlice]:
+        del context, view
         call_order.append("second")
         value = cast(ExampleOutput, event)
-        return (*slice_values, SecondSlice(value.text))
+        return Append(SecondSlice(value.text))
 
     session[FirstSlice].register(ExampleOutput, first)
     session[SecondSlice].register(ExampleOutput, second)
@@ -379,12 +382,12 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
     session[ExampleOutput].register(ExampleOutput, append_all)
 
     def faulty(
-        slice_values: tuple[ExampleOutput, ...],
+        view: SliceView[ExampleOutput],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[ExampleOutput, ...]:
-        del context
+    ) -> Append[ExampleOutput]:
+        del context, view
         raise RuntimeError("boom")
 
     session[ExampleOutput].register(ExampleOutput, faulty)
@@ -438,15 +441,16 @@ def test_snapshot_preserves_custom_reducer_behavior(
     session, bus = session_factory()
 
     def aggregate(
-        slice_values: tuple[Summary, ...],
+        view: SliceView[Summary],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[Summary, ...]:
+    ) -> Replace[Summary]:
         del context
         value = cast(ExampleOutput, event)
-        entries = slice_values[-1].entries if slice_values else ()
-        return (Summary((*entries, value.text)),)
+        latest = view.latest()
+        entries = latest.entries if latest else ()
+        return Replace((Summary((*entries, value.text)),))
 
     session[Summary].register(ExampleOutput, aggregate)
 
@@ -881,14 +885,14 @@ def test_broadcast_triggers_registered_reducer(
         text: str
 
     def set_text_reducer(
-        slice_values: tuple[ExampleOutput, ...],
+        view: SliceView[ExampleOutput],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[ExampleOutput, ...]:
-        del context, slice_values
+    ) -> Replace[ExampleOutput]:
+        del context, view
         value = cast(SetText, event)
-        return (ExampleOutput(text=value.text),)
+        return Replace((ExampleOutput(text=value.text),))
 
     session[ExampleOutput].register(SetText, set_text_reducer)
     session.dispatch(SetText(text="dispatched"))
@@ -997,26 +1001,26 @@ def test_broadcast_dispatches_to_all_reducers(session_factory: SessionFactory) -
     call_order: list[str] = []
 
     def reducer_a(
-        slice_values: tuple[SliceA, ...],
+        view: SliceView[SliceA],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[SliceA, ...]:
-        del context
+    ) -> Append[SliceA]:
+        del context, view
         call_order.append("A")
         value = cast(AddItem, event)
-        return (*slice_values, SliceA(value.value))
+        return Append(SliceA(value.value))
 
     def reducer_b(
-        slice_values: tuple[SliceB, ...],
+        view: SliceView[SliceB],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[SliceB, ...]:
-        del context
+    ) -> Append[SliceB]:
+        del context, view
         call_order.append("B")
         value = cast(AddItem, event)
-        return (*slice_values, SliceB(value.value))
+        return Append(SliceB(value.value))
 
     # Register reducers for the same event type targeting different slices
     session[SliceA].register(AddItem, reducer_a)

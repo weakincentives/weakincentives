@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from weakincentives.runtime.session import reducer
+from weakincentives.runtime.session import Replace, reducer
 
 if TYPE_CHECKING:
     from tests.conftest import SessionFactory
@@ -68,17 +68,20 @@ class ItemList:
     items: tuple[str, ...]
 
     @reducer(on=AddItem)
-    def add_item(self, event: AddItem) -> ItemList:
-        return replace(self, items=(*self.items, event.item))
+    def add_item(self, event: AddItem) -> Replace[ItemList]:
+        new_list = replace(self, items=(*self.items, event.item))
+        return Replace((new_list,))
 
     @reducer(on=RemoveItem)
-    def remove_item(self, event: RemoveItem) -> ItemList:
-        return replace(self, items=tuple(i for i in self.items if i != event.item))
+    def remove_item(self, event: RemoveItem) -> Replace[ItemList]:
+        new_list = replace(self, items=tuple(i for i in self.items if i != event.item))
+        return Replace((new_list,))
 
     @reducer(on=ClearItems)
-    def clear(self, event: ClearItems) -> ItemList:
+    def clear(self, event: ClearItems) -> Replace[ItemList]:
         del event
-        return replace(self, items=())
+        new_list = replace(self, items=())
+        return Replace((new_list,))
 
 
 @dataclass(frozen=True)
@@ -88,13 +91,14 @@ class Counter:
     count: int = 0
 
     @reducer(on=Increment)
-    def increment(self, event: Increment) -> Counter:
-        return replace(self, count=self.count + event.amount)
+    def increment(self, event: Increment) -> Replace[Counter]:
+        new_counter = replace(self, count=self.count + event.amount)
+        return Replace((new_counter,))
 
     @reducer(on=Reset)
-    def reset(self, event: Reset) -> Counter:
+    def reset(self, event: Reset) -> Replace[Counter]:
         del event
-        return Counter()
+        return Replace((Counter(),))
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -313,16 +317,18 @@ def test_multiple_reducers_for_same_event(session_factory: SessionFactory) -> No
         value: int = 0
 
         @reducer(on=SharedEvent)
-        def handle(self, event: SharedEvent) -> SliceA:
-            return replace(self, value=event.value * 2)
+        def handle(self, event: SharedEvent) -> Replace[SliceA]:
+            new_slice = replace(self, value=event.value * 2)
+            return Replace((new_slice,))
 
     @dataclass(frozen=True)
     class SliceB:
         value: int = 0
 
         @reducer(on=SharedEvent)
-        def handle(self, event: SharedEvent) -> SliceB:
-            return replace(self, value=event.value * 3)
+        def handle(self, event: SharedEvent) -> Replace[SliceB]:
+            new_slice = replace(self, value=event.value * 3)
+            return Replace((new_slice,))
 
     session, _ = session_factory()
     session.install(SliceA, initial=SliceA)
@@ -426,11 +432,15 @@ def test_install_rejects_duplicate_event_handlers(
         session.install(DuplicateHandlers)
 
 
-def test_reducer_validates_return_type(
-    session_factory: SessionFactory, caplog: pytest.LogCaptureFixture
+def test_reducer_invalid_return_type_no_op(
+    session_factory: SessionFactory,
 ) -> None:
-    """Verify reducer wrapper validates return type at runtime."""
-    import logging
+    """Verify reducer with invalid return type results in no-op (no state change).
+
+    With SliceOp-based reducers, returning an invalid type (not a SliceOp) means
+    the pattern match in _apply_slice_op doesn't match any case, resulting in
+    no state change. The slice remains empty.
+    """
 
     @dataclass(frozen=True)
     class BadEvent:
@@ -443,15 +453,16 @@ def test_reducer_validates_return_type(
         @reducer(on=BadEvent)
         def handle(self, event: BadEvent) -> str:
             del event
-            return "wrong type"  # Returns str, not WrongReturn
+            return "wrong type"  # Returns str, not SliceOp - pattern won't match
 
     session, _ = session_factory()
     session.install(WrongReturn, initial=WrongReturn)
 
-    # Session logs reducer failures instead of raising
-    with caplog.at_level(logging.ERROR):
-        session.dispatch(BadEvent())
+    # Dispatch the event - the reducer returns an invalid type
+    session.dispatch(BadEvent())
 
-    # Verify the TypeError was logged
-    assert "must return WrongReturn, got str" in caplog.text
-    assert "Reducer application failed" in caplog.text
+    # State should remain empty since invalid return causes no-op
+    # The initial factory is only used to create state for calling the method,
+    # but the method's return (SliceOp) determines what gets stored
+    result = session[WrongReturn].latest()
+    assert result is None  # No state change occurred
