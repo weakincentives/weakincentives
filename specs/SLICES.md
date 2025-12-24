@@ -347,17 +347,37 @@ class JsonlSlice[T: SupportsDataclass]:
 ### JsonlSliceFactory
 
 ```python
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+import tempfile
 
-@dataclass(slots=True, frozen=True)
+@dataclass(slots=True)
 class JsonlSliceFactory:
     """Factory that creates JSONL file-backed slices.
 
     Each slice type gets its own file based on the qualified class name.
+    When base_dir is not provided, creates a temporary directory that
+    persists for the lifetime of the factory.
+
+    Example::
+
+        # Explicit directory for persistent storage
+        factory = JsonlSliceFactory(base_dir=Path("./logs"))
+
+        # Temporary directory (auto-created, useful for debugging/testing)
+        factory = JsonlSliceFactory()
     """
 
-    base_dir: Path
+    base_dir: Path | None = None
+    _resolved_dir: Path = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.base_dir is not None:
+            object.__setattr__(self, "_resolved_dir", self.base_dir)
+        else:
+            # Create a temporary directory that persists for factory lifetime
+            temp_dir = tempfile.mkdtemp(prefix="wink_slices_")
+            object.__setattr__(self, "_resolved_dir", Path(temp_dir))
 
     def create[T: SupportsDataclass](self, slice_type: type[T]) -> JsonlSlice[T]:
         # Use qualified name for unique file paths
@@ -365,9 +385,14 @@ class JsonlSliceFactory:
         # Sanitize module path for filesystem
         safe_filename = filename.replace(":", "_")
         return JsonlSlice(
-            path=self.base_dir / safe_filename,
+            path=self._resolved_dir / safe_filename,
             item_type=slice_type,
         )
+
+    @property
+    def directory(self) -> Path:
+        """Return the resolved directory path (useful for debugging)."""
+        return self._resolved_dir
 ```
 
 ## Session Integration
@@ -438,6 +463,29 @@ from weakincentives.runtime.session import Session
 
 # All slices use in-memory storage (current behavior)
 session = Session(bus=bus)
+```
+
+### Temporary Logs for Debugging
+
+```python
+from weakincentives.runtime.session import Session
+from weakincentives.runtime.session.slices import (
+    MemorySliceFactory,
+    JsonlSliceFactory,
+    SliceFactoryConfig,
+)
+
+# JsonlSliceFactory() with no arguments uses a temporary directory
+log_factory = JsonlSliceFactory()
+config = SliceFactoryConfig(
+    state_factory=MemorySliceFactory(),
+    log_factory=log_factory,
+)
+
+session = Session(bus=bus, slice_config=config)
+
+# Logs written to temp directory (e.g., /tmp/wink_slices_abc123/)
+print(f"Logs at: {log_factory.directory}")
 ```
 
 ### Persistent Logs with In-Memory State
