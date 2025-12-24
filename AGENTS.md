@@ -100,6 +100,8 @@ a goal at any time.
   altering prompt overrides or optimization.
 - **SESSIONS.md**: Session lifecycle, events, deadlines, and budgets—when
   modifying runtime session code.
+- **SLICES.md**: Slice storage protocol, factory configuration, and JSONL
+  persistence—when modifying slice storage or adding persistence backends.
 - **THREAD_SAFETY.md**: Thread safety guarantees—when touching concurrency
   helpers or shared state.
 - **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
