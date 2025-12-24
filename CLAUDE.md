@@ -154,6 +154,7 @@ Consult these specs before modifying related code:
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
+| `specs/VERIFICATION.md` | Redis mailbox formal verification, TLA+, property tests |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/LOGGING.md` | Logging surfaces |
