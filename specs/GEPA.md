@@ -4,16 +4,16 @@
 
 Enable automated prompt optimization through **Generalist-to-Expert Prompt
 Adaptation (GEPA)**, a population-based evolutionary algorithm that evolves
-prompt instructions across multiple target sections. This specification covers
-the integration of GEPA into Weak Incentives' existing optimizer framework,
-the required core store extensions, and the algorithm implementation.
+prompt instructions and examples across multiple target sections. GEPA
+integrates with the existing optimizer framework and **EVALS** infrastructure
+to provide scored feedback for mutation decisions.
 
 ## Guiding Principles
 
 - **Native integration**: GEPA modules map to prompt section paths, leveraging
   existing override stores and session primitives.
-- **Minimal new abstractions**: Extend core stores only where broadly useful;
-  algorithm-specific logic lives in contrib.
+- **EVALS-based scoring**: Uses `Dataset`, `Sample`, `Score`, and `Evaluator`
+  from the EVALS spec for consistent evaluation.
 - **Observable execution**: Rollouts emit standard session events for tracing.
 - **Deterministic reproducibility**: Seeded RNG ensures repeatable optimization
   runs.
@@ -27,6 +27,12 @@ flowchart TB
         C1["Candidate 1"]
         C2["Candidate 2"]
         Cn["..."]
+    end
+
+    subgraph Eval["EVALS Integration"]
+        Dataset["Dataset[InputT, ExpectedT]"]
+        Evaluator["Evaluator[OutputT, ExpectedT]"]
+        Score["Score"]
     end
 
     subgraph Selection["Selection (Algorithm 2)"]
@@ -47,8 +53,12 @@ flowchart TB
         Persist["Persist to<br/>overrides store"]
     end
 
+    Dataset --> Pareto
+    Dataset --> Minibatch
     Population --> ParetoSelect
     Pareto --> Scores
+    Evaluator --> Score
+    Score --> Scores
     Scores --> ParetoSelect
     ParetoSelect --> Minibatch
     Minibatch --> Rollouts
@@ -70,7 +80,7 @@ to a single best candidate.
 ### Algorithm Overview
 
 1. **Initialize** a candidate pool with the baseline prompt configuration
-2. **Evaluate** candidates on a small validation subset (D_pareto)
+2. **Evaluate** candidates on a small validation subset (D_pareto) using EVALS
 3. **Select** a candidate using Pareto coverage (diverse specialists)
 4. **Mutate** a module (section) via LLM reflection on feedback from D_feedback
 5. **Accept** mutation if minibatch score improves
@@ -82,6 +92,119 @@ to a single best candidate.
 The merge extension (Algorithms 3/4 in the paper) recombines improvements from
 different candidates by tracking ancestry and selectively merging module
 overrides. This is optional and disabled by default.
+
+## EVALS Integration
+
+GEPA uses the primitives from `specs/EVALS.md` for evaluation:
+
+| EVALS Primitive | GEPA Usage |
+|-----------------|------------|
+| `Sample[InputT, ExpectedT]` | Training/validation examples |
+| `Dataset[InputT, ExpectedT]` | Collection of samples split into D_pareto and D_feedback |
+| `Score` | Evaluation result with `value`, `passed`, `reason` |
+| `Evaluator[OutputT, ExpectedT]` | Scoring function `(output, expected) -> Score` |
+
+### Feedback Generation
+
+GEPA extends the basic `Evaluator` concept with textual feedback for the
+meta-prompt. The `FeedbackEvaluator` protocol wraps an evaluator and produces
+explanation text:
+
+```python
+@dataclass(slots=True, frozen=True)
+class RolloutFeedback:
+    """Extended evaluation result for GEPA mutation guidance."""
+
+    score: Score           # From EVALS
+    feedback: str          # Textual explanation for meta-prompt
+    trace_repr: str = ""   # Formatted tool trace
+```
+
+```python
+class FeedbackEvaluator(Protocol[OutputT, ExpectedT]):
+    """Evaluator that provides textual feedback for mutation guidance."""
+
+    def __call__(
+        self,
+        output: OutputT,
+        expected: ExpectedT,
+        *,
+        session: SessionProtocol,
+    ) -> RolloutFeedback: ...
+```
+
+### Using EVALS Evaluators
+
+Wrap existing evaluators to add feedback:
+
+```python
+def with_feedback(
+    evaluator: Evaluator[OutputT, ExpectedT],
+    feedback_fn: Callable[[OutputT, ExpectedT, Score], str] | None = None,
+) -> FeedbackEvaluator[OutputT, ExpectedT]:
+    """Wrap an EVALS evaluator with feedback generation."""
+
+    def evaluate(
+        output: OutputT,
+        expected: ExpectedT,
+        *,
+        session: SessionProtocol,
+    ) -> RolloutFeedback:
+        score = evaluator(output, expected)
+        if feedback_fn is not None:
+            feedback = feedback_fn(output, expected, score)
+        else:
+            feedback = score.reason or ("Pass" if score.passed else "Fail")
+        return RolloutFeedback(score=score, feedback=feedback)
+
+    return evaluate
+```
+
+### LLM-as-Judge for Feedback
+
+For rich textual feedback, use the LLM judge pattern from EVALS with an
+extended prompt that requests explanation:
+
+```python
+@dataclass(slots=True, frozen=True)
+class GepaJudgeOutput:
+    """Extended judge output with improvement suggestions."""
+
+    rating: Rating
+    reason: str
+    suggestions: str  # What should change to improve
+
+
+def gepa_judge(
+    adapter: ProviderAdapter[GepaJudgeOutput],
+    criterion: str,
+) -> FeedbackEvaluator[str, str]:
+    """Create evaluator with detailed feedback for GEPA."""
+
+    def evaluate(
+        output: str,
+        expected: str,
+        *,
+        session: SessionProtocol,
+    ) -> RolloutFeedback:
+        prompt = Prompt(GEPA_JUDGE_TEMPLATE).bind(GepaJudgeParams(
+            criterion=criterion,
+            output=output,
+            expected=expected,
+        ))
+        response = adapter.evaluate(prompt)
+        judge_output = response.output
+        return RolloutFeedback(
+            score=Score(
+                value=RATING_VALUES[judge_output.rating],
+                passed=judge_output.rating in PASSING_RATINGS,
+                reason=judge_output.reason,
+            ),
+            feedback=f"{judge_output.reason}\n\nSuggestions: {judge_output.suggestions}",
+        )
+
+    return evaluate
+```
 
 ## Mapping GEPA to Weak Incentives
 
@@ -387,89 +510,11 @@ When rendering a prompt with example overrides:
 - Step indices must be valid (0 to len(steps)-1)
 - Hash mismatches log warnings and skip the override (same as section overrides)
 
-## GEPA Data Types
-
-### Example and Feedback
-
-```python
-@dataclass(slots=True, frozen=True)
-class GepaExample:
-    """A single training/validation example."""
-
-    id: str
-    params: tuple[SupportsDataclass, ...]  # Arguments to prompt.bind()
-    label: object                           # Ground truth for scoring
-```
-
-```python
-@dataclass(slots=True, frozen=True)
-class RolloutFeedback:
-    """Evaluation result for a single rollout."""
-
-    score: float        # Numeric quality signal
-    feedback: str       # Textual explanation for meta-prompt
-    eval_trace: str | None = None  # Optional test/eval logs
-```
-
-```python
-@dataclass(slots=True, frozen=True)
-class RolloutRecord:
-    """Complete record of a single evaluation rollout."""
-
-    example_id: str
-    inputs_repr: str      # Formatted input params
-    output_repr: str      # Formatted model output
-    tool_trace_repr: str  # Formatted tool invocation trace
-    feedback: RolloutFeedback
-```
-
-### Feedback Function Protocol
-
-```python
-class FeedbackFn(Protocol):
-    """User-provided scoring and feedback generation."""
-
-    def __call__(
-        self,
-        example: GepaExample,
-        response: PromptResponse[object],
-        session: SessionProtocol,
-    ) -> RolloutFeedback: ...
-```
-
-### Formatting Hooks
-
-```python
-class ExampleFormatter(Protocol):
-    """Format example inputs/outputs for meta-prompt inclusion."""
-
-    def __call__(
-        self,
-        example: GepaExample,
-        response: PromptResponse[object],
-    ) -> tuple[str, str]:  # (inputs_repr, output_repr)
-        ...
-
-
-class TraceFormatter(Protocol):
-    """Format tool traces for meta-prompt inclusion."""
-
-    def __call__(
-        self,
-        session: SessionProtocol,
-    ) -> str: ...
-```
-
-Default implementations:
-
-- `ExampleFormatter`: JSON dump of params + response text/output
-- `TraceFormatter`: Iterate `ToolInvoked` events, render name/params/result
-
 ## GepaConfig
 
 ```python
 @dataclass(slots=True, frozen=True)
-class GepaConfig:
+class GepaConfig(Generic[InputT, OutputT, ExpectedT]):
     """Configuration for GEPA optimization."""
 
     # Budget and batching
@@ -480,31 +525,33 @@ class GepaConfig:
     # Target sections (instruction modules)
     target_section_paths: tuple[tuple[str, ...], ...]
 
-    # Target examples (example modules) - NEW
+    # Target examples (example modules)
     target_tool_examples: tuple[ToolExampleTarget, ...] = ()
     target_task_examples: tuple[tuple[str, ...], ...] = ()  # Paths to TaskExample sections
 
-    # Dataset
-    training_examples: Sequence[GepaExample]
+    # Dataset (from EVALS)
+    dataset: Dataset[InputT, ExpectedT]
 
-    # Scoring
-    feedback_fn: FeedbackFn
+    # Scoring (from EVALS, extended with feedback)
+    evaluator: FeedbackEvaluator[OutputT, ExpectedT]
+
+    # Input binding
+    bind_input: Callable[[InputT], tuple[SupportsDataclass, ...]]
 
     # Optional formatting hooks
-    example_formatter: ExampleFormatter | None = None
     trace_formatter: TraceFormatter | None = None
 
     # Hyperparameters
     seed: int = 0
     enable_merge: bool = False  # Enable GEPA+Merge (Algorithm 3/4)
 
-    # Example optimization settings - NEW
+    # Example optimization settings
     enable_example_generation: bool = False  # Allow generating new TaskExamples
     max_task_examples_per_section: int = 5   # Cap on examples per TaskExamplesSection
     example_mutation_rate: float = 0.3       # Probability of mutating examples vs instructions
 
     # Robustness
-    max_example_chars: int = 6_000
+    max_feedback_chars: int = 6_000
     max_trace_chars: int = 6_000
     escape_dollar_signs: bool = True  # Escape $ in MarkdownSection bodies
 
@@ -525,12 +572,16 @@ class ToolExampleTarget:
 
 
 @dataclass(slots=True, frozen=True)
-class ExampleModule:
-    """Union type for GEPA example modules."""
+class Module:
+    """A GEPA optimization target."""
 
-    kind: Literal["tool_example", "task_example"]
-    tool_target: ToolExampleTarget | None = None
-    task_example_path: tuple[str, ...] | None = None
+    kind: Literal["section", "tool_example", "task_example"]
+    path: tuple[str, ...] | None = None        # For sections and task_examples
+    tool_target: ToolExampleTarget | None = None  # For tool_examples
+
+    @property
+    def is_example(self) -> bool:
+        return self.kind in ("tool_example", "task_example")
 ```
 
 ## GepaResult
@@ -543,17 +594,17 @@ class GepaResult:
     # Section overrides
     best_section_overrides: dict[tuple[str, ...], str]  # path -> body
 
-    # Example overrides - NEW
+    # Example overrides
     best_tool_example_overrides: dict[tuple[str, int], ToolExampleOverride]
     best_task_example_overrides: dict[tuple[str, ...], TaskExampleOverride]
     generated_task_examples: list[GeneratedTaskExample]  # Newly created examples
 
-    # Metrics
+    # Metrics (using EVALS Score.value)
     best_pareto_mean: float
     scores_matrix: list[list[float]]  # candidates x D_pareto
     ancestry: list[int | None]        # Parent index per candidate
     accepted_mutations: int
-    accepted_example_mutations: int   # NEW
+    accepted_example_mutations: int
     total_rollouts: int
 ```
 
@@ -572,20 +623,23 @@ class GeneratedTaskExample:
 ## GepaOptimizer
 
 ```python
-class GepaOptimizer(BasePromptOptimizer[object, GepaResult]):
-    """GEPA-based prompt section optimization."""
+class GepaOptimizer(
+    BasePromptOptimizer[object, GepaResult],
+    Generic[InputT, OutputT, ExpectedT],
+):
+    """GEPA-based prompt section optimization using EVALS infrastructure."""
 
     def __init__(
         self,
         context: OptimizationContext,
-        config: GepaConfig,
+        config: GepaConfig[InputT, OutputT, ExpectedT],
         *,
         optimizer_config: OptimizerConfig | None = None,
     ) -> None: ...
 
     def optimize(
         self,
-        prompt: Prompt[object],
+        prompt: Prompt[OutputT],
         *,
         session: SessionProtocol,
     ) -> GepaResult: ...
@@ -597,8 +651,9 @@ class GepaOptimizer(BasePromptOptimizer[object, GepaResult]):
 src/weakincentives/contrib/optimizers/
   gepa/
     __init__.py
-    config.py        # GepaConfig, GepaExample
-    types.py         # RolloutFeedback, RolloutRecord, protocols
+    config.py        # GepaConfig, ToolExampleTarget
+    types.py         # RolloutFeedback, RolloutRecord, Module
+    feedback.py      # FeedbackEvaluator, with_feedback, gepa_judge
     trace_format.py  # Default formatters
     selection.py     # Algorithm 2 (Pareto selection)
     mutation.py      # Reflection meta-prompt
@@ -619,7 +674,7 @@ class Candidate:
     # Section body overrides
     section_overrides: dict[tuple[str, ...], str]  # section_path -> body
 
-    # Example overrides - NEW
+    # Example overrides
     tool_example_overrides: dict[tuple[str, int], ToolExampleOverride] = field(
         default_factory=dict
     )
@@ -633,10 +688,32 @@ class Candidate:
 
 ### Dataset Splitting
 
-At initialization, split `training_examples` into:
+At initialization, split the EVALS `Dataset` into:
 
-- **D_pareto**: First `pareto_set_size` examples (validation for selection)
-- **D_feedback**: Remaining examples (minibatch source for mutation)
+- **D_pareto**: First `pareto_set_size` samples (validation for selection)
+- **D_feedback**: Remaining samples (minibatch source for mutation)
+
+```python
+def _split_dataset(
+    self,
+    dataset: Dataset[InputT, ExpectedT],
+) -> tuple[tuple[Sample[InputT, ExpectedT], ...], tuple[Sample[InputT, ExpectedT], ...]]:
+    samples = dataset.samples
+    pareto_size = min(self.config.pareto_set_size, len(samples))
+    return samples[:pareto_size], samples[pareto_size:]
+```
+
+### Rollout Record
+
+```python
+@dataclass(slots=True, frozen=True)
+class RolloutRecord(Generic[InputT, ExpectedT]):
+    """Complete record of a single evaluation rollout."""
+
+    sample: Sample[InputT, ExpectedT]
+    output_repr: str          # Formatted model output
+    feedback: RolloutFeedback  # Score + textual feedback
+```
 
 ### Main Loop (Algorithm 1)
 
@@ -644,8 +721,8 @@ At initialization, split `training_examples` into:
 def optimize(self, prompt, *, session):
     # 1. Initialize
     rng = random.Random(self.config.seed)
-    D_pareto, D_feedback = self._split_dataset()
-    candidates = [Candidate(overrides={}, parent_index=None)]
+    D_pareto, D_feedback = self._split_dataset(self.config.dataset)
+    candidates = [Candidate(section_overrides={}, parent_index=None)]
     scores_matrix = [self._evaluate_on_pareto(candidates[0], D_pareto)]
     module_idx = 0
     rollouts_used = 0
@@ -655,31 +732,24 @@ def optimize(self, prompt, *, session):
         # Select candidate via Pareto coverage
         k = self._select_candidate(scores_matrix, rng)
 
-        # Round-robin module selection
-        module_path = self.config.target_section_paths[module_idx]
-        module_idx = (module_idx + 1) % len(self.config.target_section_paths)
+        # Select module (instruction or example)
+        module = self._select_module(rng)
 
         # Sample minibatch
         minibatch = rng.sample(D_feedback, min(self.config.minibatch_size, len(D_feedback)))
 
         # Evaluate parent on minibatch
-        parent_rollouts = [self._run_rollout(candidates[k], ex) for ex in minibatch]
+        parent_rollouts = [self._run_rollout(candidates[k], sample) for sample in minibatch]
         rollouts_used += len(parent_rollouts)
-        sigma = mean(r.feedback.score for r in parent_rollouts)
+        sigma = mean(r.feedback.score.value for r in parent_rollouts)
 
         # Generate mutation via meta-prompt
-        current_body = self._get_effective_body(candidates[k], module_path, prompt)
-        new_body = self._propose_mutation(current_body, parent_rollouts, module_path)
-
-        # Build child candidate
-        child_overrides = dict(candidates[k].overrides)
-        child_overrides[module_path] = new_body
-        child = Candidate(overrides=child_overrides, parent_index=k)
+        child = self._propose_mutation(candidates[k], module, parent_rollouts, prompt)
 
         # Evaluate child on same minibatch
-        child_rollouts = [self._run_rollout(child, ex) for ex in minibatch]
+        child_rollouts = [self._run_rollout(child, sample) for sample in minibatch]
         rollouts_used += len(child_rollouts)
-        sigma_prime = mean(r.feedback.score for r in child_rollouts)
+        sigma_prime = mean(r.feedback.score.value for r in child_rollouts)
 
         # Accept if improved
         if sigma_prime > sigma:
@@ -748,38 +818,79 @@ Candidate `a` dominates `b` if:
 - `scores[a][i] >= scores[b][i]` for all i
 - `scores[a][i] > scores[b][i]` for at least one i
 
+### Rollout Execution
+
+Each rollout creates an isolated session and evaluates the prompt:
+
+```python
+def _run_rollout(
+    self,
+    candidate: Candidate,
+    sample: Sample[InputT, ExpectedT],
+) -> RolloutRecord[InputT, ExpectedT]:
+    # 1. Create isolated session
+    rollout_session = Session(tags={"scope": "gepa_rollout"})
+
+    # 2. Clone prompt sections for isolation
+    cloned_prompt = self._clone_prompt_for_session(prompt, rollout_session)
+
+    # 3. Build overlay store with candidate overrides
+    candidate_store = InMemoryPromptOverridesStore()
+    for path, body in candidate.section_overrides.items():
+        candidate_store.set_section_override(cloned_prompt, path=path, body=body)
+
+    overlay_store = OverlayPromptOverridesStore(
+        base=self._context.overrides_store,
+        overlay=candidate_store,
+    )
+
+    # 4. Create prompt with overlay store and bind input
+    params = self.config.bind_input(sample.input)
+    eval_prompt = Prompt(
+        cloned_prompt.template,
+        overrides_store=overlay_store,
+        overrides_tag=self._context.overrides_tag,
+    ).bind(*params)
+
+    # 5. Evaluate
+    try:
+        response = self._context.adapter.evaluate(
+            eval_prompt,
+            session=rollout_session,
+            deadline=self._context.deadline,
+        )
+        # Use FeedbackEvaluator from config
+        feedback = self.config.evaluator(
+            response.output,
+            sample.expected,
+            session=rollout_session,
+        )
+        # Add trace
+        trace_formatter = self.config.trace_formatter or default_trace_formatter
+        feedback = RolloutFeedback(
+            score=feedback.score,
+            feedback=feedback.feedback,
+            trace_repr=trace_formatter(rollout_session)[:self.config.max_trace_chars],
+        )
+    except PromptEvaluationError as exc:
+        feedback = RolloutFeedback(
+            score=Score(value=0.0, passed=False, reason=str(exc)),
+            feedback=f"Evaluation failed: {exc}",
+        )
+        response = None
+
+    output_repr = dump(response.output) if response and response.output else "<no output>"
+
+    return RolloutRecord(
+        sample=sample,
+        output_repr=output_repr[:self.config.max_feedback_chars],
+        feedback=feedback,
+    )
+```
+
 ### Mutation via Meta-Prompt
 
 The reflection prompt asks the LLM to improve an instruction based on feedback:
-
-```python
-def _propose_mutation(
-    self,
-    current_body: str,
-    rollouts: list[RolloutRecord],
-    module_path: tuple[str, ...],
-) -> str:
-    # Build meta-prompt
-    meta_prompt = self._build_meta_prompt(current_body, rollouts)
-
-    # Evaluate via adapter
-    response = self._context.adapter.evaluate(
-        meta_prompt,
-        session=self._create_optimization_session(prompt),
-        deadline=self._context.deadline,
-    )
-
-    # Parse new instruction from response
-    new_body = self._parse_instruction_block(response.text)
-
-    # Sanitize for MarkdownSection compatibility
-    if self.config.escape_dollar_signs:
-        new_body = self._escape_dollars(new_body, module_path)
-
-    return new_body
-```
-
-**Meta-prompt structure:**
 
 ````markdown
 ## Current Instruction
@@ -793,15 +904,17 @@ The following instruction is used in a prompt section:
 ## Training Examples with Feedback
 
 {for each rollout in rollouts}
-### Example {rollout.example_id}
+### Sample {rollout.sample.id}
 
-**Input:** {rollout.inputs_repr}
+**Input:** {rollout.sample.input}
+
+**Expected:** {rollout.sample.expected}
 
 **Output:** {rollout.output_repr}
 
-**Tool Trace:** {rollout.tool_trace_repr}
+**Tool Trace:** {rollout.feedback.trace_repr}
 
-**Score:** {rollout.feedback.score}
+**Score:** {rollout.feedback.score.value} ({rollout.feedback.score.passed})
 
 **Feedback:** {rollout.feedback.feedback}
 
@@ -814,129 +927,6 @@ identified issues. Return ONLY the updated instruction in a fenced block:
 
 ```instruction
 <your improved instruction here>
-```
-````
-
-**Parsing:**
-
-1. Find first `` ```instruction `` block
-2. Fallback: first `` ``` `` block
-3. Fallback: entire response stripped
-
-### Example Mutation via Meta-Prompt
-
-When the module selection picks an example target, GEPA uses specialized
-meta-prompts for example mutation.
-
-#### ToolExample Mutation
-
-````markdown
-## Current Tool Example
-
-Tool: {tool_name}
-Description: {tool_description}
-
-Example {example_index}:
-- Description: {example.description}
-- Input: {json(example.input)}
-- Output: {json(example.output)}
-
-## Training Examples with Feedback
-
-{rollouts with scores and feedback}
-
-## Task
-
-Based on the feedback above, improve this tool example to better demonstrate
-correct usage. The example should help the model understand when and how to
-use this tool effectively.
-
-Return the improved example in this format:
-
-```tool_example
-description: <improved description>
-input: <JSON input matching tool params>
-output: <JSON output matching tool result>
-```
-````
-
-#### TaskExample Mutation
-
-````markdown
-## Current Task Example
-
-Objective: {task_example.objective}
-
-Steps:
-{for step in task_example.steps}
-{step_index}. {step.tool_name}: {step.example.description}
-   Input: {json(step.example.input)}
-   Output: {json(step.example.output)}
-{end for}
-
-Outcome: {task_example.outcome}
-
-## Training Examples with Feedback
-
-{rollouts with scores and feedback}
-
-## Task
-
-Based on the feedback above, improve this task example to better demonstrate
-the workflow. Consider:
-- Is the objective clear and achievable?
-- Are the steps in logical order?
-- Do the intermediate results flow correctly?
-- Does the outcome match what the steps produce?
-
-Return the improved example:
-
-```task_example
-objective: <improved objective>
-steps:
-  - tool: <tool_name>
-    description: <step description>
-    input: <JSON>
-    output: <JSON>
-  - ...
-outcome: <improved outcome>
-```
-````
-
-#### TaskExample Generation
-
-When `enable_example_generation=True` and feedback indicates missing coverage:
-
-````markdown
-## Existing Task Examples
-
-{summaries of current TaskExamples in the section}
-
-## Training Examples with Feedback
-
-{rollouts showing gaps in coverage}
-
-## Task
-
-The feedback indicates scenarios not covered by existing examples. Generate
-a new task example that demonstrates the missing workflow.
-
-Requirements:
-- Use only tools available in the prompt: {available_tools}
-- The objective should be specific and achievable
-- Steps should use realistic input/output values
-- The outcome should reflect successful completion
-
-```new_task_example
-key: <unique_key>
-objective: <specific objective>
-steps:
-  - tool: <tool_name>
-    description: <why this step>
-    input: <JSON>
-    output: <JSON>
-  - ...
-outcome: <expected result>
 ```
 ````
 
@@ -960,236 +950,143 @@ def _select_module(self, rng: random.Random) -> Module:
     return all_modules[self._module_idx]
 ```
 
-Where `Module` is:
+## Usage Examples
+
+### Basic: With EVALS exact_match
 
 ```python
-@dataclass(slots=True, frozen=True)
-class Module:
-    """A GEPA optimization target."""
+from pathlib import Path
+from weakincentives.contrib.optimizers.gepa import (
+    GepaConfig,
+    GepaOptimizer,
+    with_feedback,
+)
+from weakincentives.evals import Dataset, exact_match
+from weakincentives.optimizers import OptimizationContext
+from weakincentives.prompt.overrides import LocalPromptOverridesStore
 
-    kind: Literal["section", "tool_example", "task_example"]
-    path: tuple[str, ...] | None = None        # For sections and task_examples
-    tool_target: ToolExampleTarget | None = None  # For tool_examples
+# Load dataset from JSONL (EVALS format)
+dataset = Dataset.load(Path("training_data.jsonl"), str, str)
 
-    @property
-    def is_example(self) -> bool:
-        return self.kind in ("tool_example", "task_example")
+# Wrap EVALS evaluator with feedback
+evaluator = with_feedback(
+    exact_match,
+    feedback_fn=lambda out, exp, score: (
+        "Correct!" if score.passed else f"Expected '{exp}', got '{out}'"
+    ),
+)
+
+# Configure GEPA
+config = GepaConfig(
+    rollout_budget=500,
+    minibatch_size=4,
+    pareto_set_size=10,
+    target_section_paths=(
+        ("instructions",),
+        ("tool-guidance",),
+    ),
+    dataset=dataset,
+    evaluator=evaluator,
+    bind_input=lambda question: (QuestionParams(question=question),),
+    seed=42,
+)
+
+# Run optimization
+store = LocalPromptOverridesStore()
+context = OptimizationContext(
+    adapter=adapter,
+    dispatcher=bus,
+    overrides_store=store,
+    overrides_tag="gepa-v1",
+)
+optimizer = GepaOptimizer(context, config)
+result = optimizer.optimize(prompt, session=session)
+
+print(f"Best Pareto mean: {result.best_pareto_mean}")
+print(f"Accepted mutations: {result.accepted_mutations}")
 ```
 
-### System-Aware Merge (Optional)
-
-When `enable_merge=True`, attempt to combine improvements from different
-candidates:
+### Advanced: With LLM-as-Judge
 
 ```python
-def _attempt_merge(
-    self,
-    candidates: list[Candidate],
-    scores_matrix: list[list[float]],
-    rng: random.Random,
-) -> None:
-    # Select two candidates with good performance
-    i, j = self._select_merge_pair(scores_matrix, rng)
-    if i == j:
-        return
+from weakincentives.contrib.optimizers.gepa import (
+    GepaConfig,
+    GepaOptimizer,
+    gepa_judge,
+    ToolExampleTarget,
+)
+from weakincentives.evals import Dataset, all_of, contains
 
-    # Find common ancestor
-    ancestor_idx = self._find_common_ancestor(candidates, i, j)
-    if ancestor_idx is None:
-        return
+# Create LLM judge for detailed feedback
+judge_adapter: OpenAIAdapter[GepaJudgeOutput] = OpenAIAdapter(model="gpt-4o-mini")
 
-    ancestor = candidates[ancestor_idx]
+# Combine evaluators
+evaluator = all_of(
+    with_feedback(contains),
+    gepa_judge(judge_adapter, "Response is accurate and complete"),
+    gepa_judge(judge_adapter, "Response uses tools appropriately"),
+)
 
-    # Build merged candidate
-    merged_overrides = dict(ancestor.overrides)
-    for path in self.config.target_section_paths:
-        i_changed = candidates[i].overrides.get(path) != ancestor.overrides.get(path)
-        j_changed = candidates[j].overrides.get(path) != ancestor.overrides.get(path)
+# Configure GEPA with example optimization
+config = GepaConfig(
+    rollout_budget=1000,
+    minibatch_size=4,
+    pareto_set_size=15,
 
-        if i_changed and not j_changed:
-            merged_overrides[path] = candidates[i].overrides.get(path, merged_overrides.get(path))
-        elif j_changed and not i_changed:
-            merged_overrides[path] = candidates[j].overrides.get(path, merged_overrides.get(path))
-        elif i_changed and j_changed:
-            # Both changed: pick from higher-scoring candidate
-            if mean(scores_matrix[i]) >= mean(scores_matrix[j]):
-                merged_overrides[path] = candidates[i].overrides.get(path, merged_overrides.get(path))
-            else:
-                merged_overrides[path] = candidates[j].overrides.get(path, merged_overrides.get(path))
+    # Instruction modules
+    target_section_paths=(
+        ("instructions",),
+        ("tool-guidance",),
+    ),
 
-    # Add merged candidate if novel
-    if merged_overrides not in [c.overrides for c in candidates]:
-        merged = Candidate(overrides=merged_overrides, parent_index=None)
-        candidates.append(merged)
-        scores_matrix.append(self._evaluate_on_pareto(merged, D_pareto))
+    # Example modules
+    target_tool_examples=(
+        ToolExampleTarget(tool_name="search_code", example_index=0),
+    ),
+    target_task_examples=(
+        ("task-examples", "security-review"),
+    ),
+
+    # Example optimization settings
+    enable_example_generation=True,
+    max_task_examples_per_section=5,
+    example_mutation_rate=0.3,
+
+    dataset=dataset,
+    evaluator=evaluator,
+    bind_input=lambda inp: (inp,),
+    seed=42,
+)
+
+optimizer = GepaOptimizer(context, config)
+result = optimizer.optimize(prompt, session=session)
+
+print(f"Accepted instruction mutations: {result.accepted_mutations}")
+print(f"Accepted example mutations: {result.accepted_example_mutations}")
+print(f"Generated new examples: {len(result.generated_task_examples)}")
 ```
 
-## Rollout Execution
-
-Each rollout creates an isolated session and evaluates the prompt:
+### Programmatic Dataset
 
 ```python
-def _run_rollout(
-    self,
-    candidate: Candidate,
-    example: GepaExample,
-) -> RolloutRecord:
-    # 1. Create isolated session
-    rollout_session = Session(tags={"scope": "gepa_rollout"})
+from weakincentives.evals import Dataset, Sample
 
-    # 2. Clone prompt sections for isolation
-    cloned_prompt = self._clone_prompt_for_session(prompt, rollout_session)
-
-    # 3. Build overlay store with candidate overrides
-    candidate_store = InMemoryPromptOverridesStore()
-    for path, body in candidate.overrides.items():
-        candidate_store.set_section_override(cloned_prompt, path=path, body=body)
-
-    overlay_store = OverlayPromptOverridesStore(
-        base=self._context.overrides_store,
-        overlay=candidate_store,
+# Build dataset in code
+samples = tuple(
+    Sample(
+        id=str(i),
+        input=CodeReviewInput(file_path=path, content=code),
+        expected=ExpectedReview(issues=issues),
     )
+    for i, (path, code, issues) in enumerate(test_cases)
+)
+dataset = Dataset(samples=samples)
 
-    # 4. Create prompt with overlay store
-    eval_prompt = Prompt(
-        cloned_prompt.template,
-        overrides_store=overlay_store,
-        overrides_tag=self._context.overrides_tag,
-    ).bind(*example.params)
-
-    # 5. Evaluate
-    try:
-        response = self._context.adapter.evaluate(
-            eval_prompt,
-            session=rollout_session,
-            deadline=self._context.deadline,
-        )
-        feedback = self.config.feedback_fn(example, response, rollout_session)
-    except PromptEvaluationError as exc:
-        feedback = RolloutFeedback(
-            score=0.0,
-            feedback=f"Evaluation failed: {exc}",
-        )
-        response = None
-
-    # 6. Format trace
-    formatter = self.config.example_formatter or default_example_formatter
-    trace_formatter = self.config.trace_formatter or default_trace_formatter
-
-    inputs_repr, output_repr = formatter(example, response) if response else ("", "")
-    tool_trace_repr = trace_formatter(rollout_session)
-
-    return RolloutRecord(
-        example_id=example.id,
-        inputs_repr=inputs_repr[:self.config.max_example_chars],
-        output_repr=output_repr[:self.config.max_example_chars],
-        tool_trace_repr=tool_trace_repr[:self.config.max_trace_chars],
-        feedback=feedback,
-    )
-```
-
-## Trace Formatting
-
-### Default Tool Trace Formatter
-
-```python
-def default_trace_formatter(session: SessionProtocol) -> str:
-    events = session.select_all(ToolInvoked)
-    lines = []
-    for event in events:
-        lines.append(f"[{event.name}]")
-        lines.append(f"  params: {_truncate(dump(event.params), 500)}")
-        lines.append(f"  result: {_truncate(str(event.result), 500)}")
-    return "\n".join(lines)
-```
-
-### Default Example Formatter
-
-```python
-def default_example_formatter(
-    example: GepaExample,
-    response: PromptResponse[object] | None,
-) -> tuple[str, str]:
-    inputs = dump(example.params) if example.params else "{}"
-    if response is None:
-        return inputs, "<no response>"
-    if response.output is not None:
-        output = dump(response.output)
-    else:
-        output = response.text or "<empty>"
-    return inputs, output
-```
-
-## Robustness Considerations
-
-### Dollar Sign Handling
-
-`MarkdownSection` uses `string.Template` which treats `$` as special. When
-`escape_dollar_signs=True` (default), the optimizer escapes `$` as `$$` in
-mutated bodies to prevent rendering failures.
-
-```python
-def _escape_dollars(self, body: str, path: tuple[str, ...]) -> str:
-    # Escape all $ not part of original placeholders
-    # For safety, escape all $ as $$ in optimizer-generated content
-    return body.replace("$", "$$")
-```
-
-### Validation of Mutations
-
-Before accepting a mutation, validate it renders correctly:
-
-```python
-def _validate_mutation(self, prompt: Prompt, candidate: Candidate) -> bool:
-    try:
-        # Attempt dry-run render
-        test_prompt = self._build_prompt_with_overrides(prompt, candidate)
-        _ = test_prompt.render(session=Session())
-        return True
-    except Exception:
-        return False
-```
-
-Mutations that fail validation are rejected immediately.
-
-### Trace Truncation
-
-Large tool results can overwhelm the meta-prompt. Apply truncation:
-
-- Per-tool result: 500-2000 characters
-- Total trace: `max_trace_chars` (default 6000)
-- Example inputs/outputs: `max_example_chars` (default 6000)
-
-### Determinism
-
-For reproducibility:
-
-- Use a single `random.Random(seed)` instance
-- Stable sort by candidate index when comparing floats
-- Deterministic iteration order (sorted keys)
-
-## Persistence
-
-When `persist=True` and the context has an `overrides_store`:
-
-```python
-def _persist_result(
-    self,
-    prompt: Prompt,
-    best_candidate: Candidate,
-) -> None:
-    if not self.config.persist:
-        return
-    if self._context.overrides_store is None:
-        return
-
-    for path, body in best_candidate.overrides.items():
-        self._context.overrides_store.set_section_override(
-            prompt,
-            tag=self._context.overrides_tag,
-            path=path,
-            body=body,
-        )
+config = GepaConfig(
+    # ...
+    dataset=dataset,
+    bind_input=lambda inp: (ReviewParams(file=inp.file_path, code=inp.content),),
+)
 ```
 
 ## Multiple TaskExamplesSection Patterns
@@ -1254,141 +1151,6 @@ GEPA may:
 - Generate new examples when coverage gaps are detected
 - Specialize examples within each section for its category
 
-### Pattern: Progressive Complexity
-
-```python
-# Examples ordered by complexity
-basic_examples = TaskExamplesSection(
-    key="basic-examples",
-    title="Basic Workflows",
-    summary="Simple single-tool examples for common tasks.",
-    examples=[...],  # 1-2 step workflows
-)
-
-advanced_examples = TaskExamplesSection(
-    key="advanced-examples",
-    title="Advanced Workflows",
-    summary="Multi-step examples with tool chaining.",
-    visibility=SectionVisibility.SUMMARY,  # Collapsed by default
-    examples=[...],  # 3+ step workflows
-)
-```
-
-## Usage Example
-
-### Basic: Instruction Optimization Only
-
-```python
-from weakincentives.contrib.optimizers.gepa import (
-    GepaConfig,
-    GepaExample,
-    GepaOptimizer,
-    RolloutFeedback,
-)
-from weakincentives.optimizers import OptimizationContext, PersistenceScope
-from weakincentives.prompt.overrides import LocalPromptOverridesStore
-
-# Define training examples
-examples = [
-    GepaExample(id="1", params=(QueryParams(query="..."),), label=expected_output_1),
-    GepaExample(id="2", params=(QueryParams(query="..."),), label=expected_output_2),
-    # ... more examples
-]
-
-# Define feedback function
-def score_response(
-    example: GepaExample,
-    response: PromptResponse[object],
-    session: SessionProtocol,
-) -> RolloutFeedback:
-    score = compute_similarity(response.output, example.label)
-    feedback = generate_feedback(response.output, example.label)
-    return RolloutFeedback(score=score, feedback=feedback)
-
-# Configure GEPA for instruction-only optimization
-config = GepaConfig(
-    rollout_budget=500,
-    minibatch_size=4,
-    pareto_set_size=10,
-    target_section_paths=(
-        ("instructions",),
-        ("tool-guidance",),
-    ),
-    training_examples=examples,
-    feedback_fn=score_response,
-    seed=42,
-)
-
-# Run optimization
-store = LocalPromptOverridesStore()
-context = OptimizationContext(
-    adapter=adapter,
-    event_bus=bus,
-    overrides_store=store,
-    overrides_tag="gepa-v1",
-)
-optimizer = GepaOptimizer(context, config)
-result = optimizer.optimize(prompt, session=session)
-
-print(f"Best Pareto mean: {result.best_pareto_mean}")
-print(f"Accepted mutations: {result.accepted_mutations}")
-```
-
-### Advanced: Combined Instruction and Example Optimization
-
-```python
-from weakincentives.contrib.optimizers.gepa import (
-    GepaConfig,
-    GepaExample,
-    GepaOptimizer,
-    ToolExampleTarget,
-)
-
-# Configure GEPA with example optimization
-config = GepaConfig(
-    rollout_budget=1000,
-    minibatch_size=4,
-    pareto_set_size=15,
-
-    # Instruction modules
-    target_section_paths=(
-        ("instructions",),
-        ("tool-guidance",),
-    ),
-
-    # Example modules
-    target_tool_examples=(
-        ToolExampleTarget(tool_name="search_code", example_index=0),
-        ToolExampleTarget(tool_name="read_file", example_index=0),
-    ),
-    target_task_examples=(
-        ("task-examples", "security-review"),
-        ("task-examples", "refactoring"),
-    ),
-
-    # Example optimization settings
-    enable_example_generation=True,
-    max_task_examples_per_section=5,
-    example_mutation_rate=0.3,  # 30% chance to mutate examples
-
-    training_examples=examples,
-    feedback_fn=score_response,
-    seed=42,
-)
-
-optimizer = GepaOptimizer(context, config)
-result = optimizer.optimize(prompt, session=session)
-
-# Inspect example optimization results
-print(f"Accepted instruction mutations: {result.accepted_mutations}")
-print(f"Accepted example mutations: {result.accepted_example_mutations}")
-print(f"Generated new examples: {len(result.generated_task_examples)}")
-
-# Review generated examples
-for gen_ex in result.generated_task_examples:
-    print(f"  - {gen_ex.key}: {gen_ex.objective[:50]}...")
-```
-
 ## Testing Strategy
 
 ### Unit Tests
@@ -1412,11 +1174,11 @@ for gen_ex in result.generated_task_examples:
 - Parse new TaskExample generation responses
 - Handle malformed JSON in example inputs/outputs
 
-**Merge algorithm (`test_gepa_merge.py`):**
+**EVALS integration (`test_gepa_evals.py`):**
 
-- Ancestry tracking
-- Module-level override selection (including examples)
-- Novel candidate detection
+- `with_feedback` wraps evaluators correctly
+- `gepa_judge` produces RolloutFeedback
+- Score values flow through correctly
 
 ### Integration Tests
 
@@ -1426,7 +1188,7 @@ for gen_ex in result.generated_task_examples:
 def test_gepa_improves_score():
     # Trivial prompt with one optimizable section
     # Fake adapter: returns output based on instruction keyword
-    # Feedback: score 1 if keyword present, 0 otherwise
+    # EVALS evaluator: exact_match wrapped with feedback
 
     # Assert:
     # - At least one mutation accepted
@@ -1457,20 +1219,6 @@ def test_gepa_generates_task_examples():
     # - Generated example persisted to store
 ```
 
-**Store integration (`test_gepa_stores.py`):**
-
-- InMemoryPromptOverridesStore CRUD operations
-- OverlayPromptOverridesStore merging behavior
-- Thread safety under parallel access
-- Example override storage and retrieval
-
-**Example override integration (`test_example_overrides.py`):**
-
-- ToolExampleOverride applied during tool rendering
-- TaskExampleOverride applied during section rendering
-- Generated TaskExample appended to container
-- Hash validation for stale example overrides
-
 ### Robustness Tests
 
 - Mutation validation catches rendering errors
@@ -1481,13 +1229,13 @@ def test_gepa_generates_task_examples():
 
 ## Events
 
-GEPA optimization emits events through the context event bus:
+GEPA optimization emits events through the context dispatcher:
 
 - `GepaOptimizationStarted` - Configuration and prompt descriptor
-- `GepaRolloutCompleted` - Individual rollout feedback
+- `GepaRolloutCompleted` - Individual rollout with Score
 - `GepaMutationProposed` - Before/after content (instruction or example)
 - `GepaMutationAccepted` / `GepaMutationRejected` - Acceptance decision
-- `GepaExampleGenerated` - New TaskExample created (NEW)
+- `GepaExampleGenerated` - New TaskExample created
 - `GepaOptimizationCompleted` - Final result summary
 
 ## Limitations
