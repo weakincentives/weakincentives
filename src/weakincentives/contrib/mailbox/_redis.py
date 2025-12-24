@@ -340,8 +340,8 @@ class RedisMailbox[T]:
         Args:
             max_messages: Maximum messages to receive (1-10).
             visibility_timeout: Seconds message remains invisible (0-43200).
-            wait_time_seconds: Long poll duration. Zero returns immediately.
-                For Redis, uses BRPOP for efficient blocking when > 0.
+            wait_time_seconds: Long poll duration in seconds. Zero returns
+                immediately if no messages are available.
 
         Returns:
             Sequence of messages (may be empty). Returns empty if mailbox closed.
@@ -359,19 +359,11 @@ class RedisMailbox[T]:
         try:
             while len(messages) < max_messages and not self._closed:
                 remaining = deadline - time.time()
-                if remaining <= 0 and wait_time_seconds > 0 and not messages:
-                    # Timeout expired during long poll
-                    break
-
-                # Try to receive a message
                 msg = self._receive_one(visibility_timeout, remaining)
                 if msg is not None:
                     messages.append(msg)
-                elif wait_time_seconds <= 0:
-                    # No wait - return immediately
-                    break
-                elif remaining <= 0:
-                    # Timeout expired
+                elif wait_time_seconds <= 0 or remaining <= 0:
+                    # No wait requested, or timeout expired
                     break
 
             return messages
