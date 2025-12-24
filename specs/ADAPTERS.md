@@ -107,7 +107,7 @@ adapter = OpenAIAdapter(
 **Configuration:**
 
 | Field | Type | Description |
-|-------|------|-------------|
+| -------------- | --------------- | --------------------------- |
 | `api_key` | `str \| None` | API key (falls back to env) |
 | `base_url` | `str \| None` | Custom API endpoint |
 | `organization` | `str \| None` | Organization ID |
@@ -117,7 +117,7 @@ adapter = OpenAIAdapter(
 **Model Parameters (OpenAIModelConfig):**
 
 | Field | Type | Description |
-|-------|------|-------------|
+| --------------------- | -------------- | ------------------------- |
 | `logprobs` | `bool \| None` | Return log probabilities |
 | `top_logprobs` | `int \| None` | Number of top logprobs |
 | `parallel_tool_calls` | `bool \| None` | Allow parallel tool calls |
@@ -127,7 +127,7 @@ adapter = OpenAIAdapter(
 **Constructor Parameters:**
 
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
+| --------------- | ---------------------------- | -------- | ---------------- |
 | `model` | `str` | required | Model identifier |
 | `client_config` | `OpenAIClientConfig \| None` | `None` | Client settings |
 | `model_config` | `OpenAIModelConfig \| None` | `None` | Model parameters |
@@ -163,7 +163,7 @@ adapter = LiteLLMAdapter(
 **Constructor Parameters:**
 
 | Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
+| -------------------- | ----------------------------- | -------- | ------------------------- |
 | `model` | `str` | required | Model identifier |
 | `completion_config` | `LiteLLMClientConfig \| None` | `None` | Client settings |
 | `model_config` | `LiteLLMModelConfig \| None` | `None` | Model parameters |
@@ -174,7 +174,7 @@ adapter = LiteLLMAdapter(
 **Configuration:**
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ------------- | --------------- | ----------------------- |
 | `api_key` | `str \| None` | Provider API key |
 | `api_base` | `str \| None` | Custom API endpoint |
 | `timeout` | `float \| None` | Request timeout seconds |
@@ -209,7 +209,7 @@ policy = new_throttle_policy(
 ```
 
 | Field | Default | Description |
-|-------|---------|-------------|
+| ----------------- | ------- | ------------------------ |
 | `max_attempts` | `5` | Maximum retry attempts |
 | `base_delay` | `500ms` | Initial backoff delay |
 | `max_delay` | `8s` | Cap on individual delays |
@@ -218,7 +218,7 @@ policy = new_throttle_policy(
 ### Signal Classification
 
 | Signal | Examples | Behavior |
-|--------|----------|----------|
+| -------------------- | -------------------------- | ------------------------- |
 | **Rate limit** | HTTP 429, `RateLimitError` | Retry with backoff |
 | **Quota exhaustion** | `insufficient_quota` | Longer backoff, alerting |
 | **Timeout** | Connection/read timeout | Retry if deadline permits |
@@ -430,7 +430,7 @@ def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
 Adapters emit events through `session.dispatcher`:
 
 | Event | When | Payload |
-|-------|------|---------|
+| ---------------- | -------------- | ------------------------ |
 | `PromptRendered` | After render | Text, tools, metadata |
 | `PromptExecuted` | After parse | Response, tokens, timing |
 | `ToolInvoked` | After dispatch | Name, params, result |

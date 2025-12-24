@@ -123,7 +123,7 @@ class Snapshotable(Protocol[SnapshotT]):
 ### Implementations
 
 | Component | Snapshot Type | Storage Strategy |
-|-----------|--------------|------------------|
+| -------------------- | -------------------- | -------------------------------- |
 | `Session` | `Snapshot` | Slice values as frozen tuples |
 | `InMemoryFilesystem` | `FilesystemSnapshot` | Structural sharing of file dicts |
 | `HostFilesystem` | `FilesystemSnapshot` | Git commits |
@@ -187,7 +187,7 @@ session[ToolInvoked].register(ToolInvoked, append_all, policy=SlicePolicy.LOG)
 Default policies:
 
 | Slice Type | Policy | Rationale |
-|------------|--------|-----------|
+| --------------------- | ------ | ----------------- |
 | `Plan` | STATE | Working state |
 | `VisibilityOverrides` | STATE | Working state |
 | `WorkspaceDigest` | STATE | Working state |
@@ -266,7 +266,7 @@ sequenceDiagram
 ### Restore Triggers
 
 | Condition | Behavior |
-|-----------|----------|
+| ----------------------------- | -------------------------------------------- |
 | Handler raises exception | Restore, wrap in `ToolResult(success=False)` |
 | `ToolResult.success == False` | Restore, return result |
 | `ToolValidationError` | Restore, wrap in `ToolResult(success=False)` |

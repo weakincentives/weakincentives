@@ -28,6 +28,7 @@ from .reducers import (
 from .session import DataEvent, Session, iter_sessions_bottom_up
 from .session_view import SessionView, as_view
 from .slice_accessor import ReadOnlySliceAccessor, SliceAccessor
+from .slice_mutations import ClearSlice, InitializeSlice
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .slices import (
     Append,
@@ -70,10 +71,12 @@ __all__ = [  # noqa: RUF022
     "Append",
     "Clear",
     "ClearAllVisibilityOverrides",
+    "ClearSlice",
     "ClearVisibilityOverride",
     "DEFAULT_SNAPSHOT_POLICIES",
     "DataEvent",
     "Extend",
+    "InitializeSlice",
     "JsonlSlice",
     "JsonlSliceFactory",
     "JsonlSliceView",

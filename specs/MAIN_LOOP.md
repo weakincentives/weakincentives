@@ -203,7 +203,7 @@ def initialize(self, request: Request) -> tuple[Prompt[Output], Session]:
 ## Error Handling
 
 | Exception | Behavior |
-|-----------|----------|
+| ----------------------------- | ---------------------------------- |
 | `VisibilityExpansionRequired` | Retry with updated overrides |
 | All others | Publish `MainLoopFailed`, re-raise |
 

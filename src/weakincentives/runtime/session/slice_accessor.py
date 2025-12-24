@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
+from .slice_mutations import ClearSlice, InitializeSlice
 from .slice_policy import SlicePolicy
 
 if TYPE_CHECKING:
@@ -43,16 +44,6 @@ class _SliceAccessorProvider(Protocol):
         self, slice_type: type[S]
     ) -> tuple[S, ...]: ...
 
-    def _mutation_seed_slice[S: SupportsDataclass](
-        self, slice_type: type[S], values: Iterable[S]
-    ) -> None: ...
-
-    def _mutation_clear_slice[S: SupportsDataclass](
-        self,
-        slice_type: type[S],
-        predicate: Callable[[S], bool] | None = None,
-    ) -> None: ...
-
     def _mutation_register_reducer[S: SupportsDataclass](
         self,
         data_type: type[SupportsDataclass],
@@ -73,7 +64,7 @@ class SliceAccessor[T: SupportsDataclass]:
     Accessed via ``session[SliceType]``, providing:
 
     - **Query operations**: Retrieve state from the slice
-    - **Mutation operations**: Directly modify slice state (bypassing reducers)
+    - **Mutation operations**: Modify slice state (all via dispatch)
 
     Usage::
 
@@ -82,10 +73,10 @@ class SliceAccessor[T: SupportsDataclass]:
         session[Plan].latest()
         session[Plan].where(lambda p: p.active)
 
-        # Direct mutations (bypass reducers)
-        session[Plan].seed(initial_plan)
-        session[Plan].clear()
-        session[Plan].append(new_plan)
+        # Mutations (all go through dispatch)
+        session[Plan].seed(initial_plan)   # Dispatches InitializeSlice
+        session[Plan].clear()              # Dispatches ClearSlice
+        session[Plan].append(new_plan)     # Dispatches to reducers
 
         # Reducer registration
         session[Plan].register(AddStep, add_step_reducer)
@@ -130,13 +121,13 @@ class SliceAccessor[T: SupportsDataclass]:
         )
 
     # ──────────────────────────────────────────────────────────────────────
-    # Mutation Operations (bypass reducers)
+    # Mutation Operations (all via dispatch)
     # ──────────────────────────────────────────────────────────────────────
 
     def seed(self, values: T | Iterable[T]) -> None:
         """Initialize or replace the stored tuple for the slice type.
 
-        Bypasses reducers; useful for initial state setup or restoration.
+        Dispatches an ``InitializeSlice`` event for auditability.
 
         Args:
             values: A single value or iterable of values to seed the slice.
@@ -148,16 +139,18 @@ class SliceAccessor[T: SupportsDataclass]:
 
         """
         if isinstance(values, self._slice_type):
-            self._provider._mutation_seed_slice(self._slice_type, (values,))
+            values_tuple: tuple[T, ...] = (values,)
         else:
-            self._provider._mutation_seed_slice(
-                self._slice_type, cast(Iterable[T], values)
-            )
+            values_tuple = tuple(cast(Iterable[T], values))
+        event: InitializeSlice[T] = InitializeSlice(
+            slice_type=self._slice_type, values=values_tuple
+        )
+        self._provider._mutation_dispatch_event(InitializeSlice, event)
 
     def clear(self, predicate: Callable[[T], bool] | None = None) -> None:
         """Remove items from the slice, optionally filtering by predicate.
 
-        Bypasses reducers; useful for cache invalidation or cleanup.
+        Dispatches a ``ClearSlice`` event for auditability.
 
         Args:
             predicate: If provided, only items where predicate returns True
@@ -169,7 +162,10 @@ class SliceAccessor[T: SupportsDataclass]:
             session[Plan].clear(lambda p: not p.active)  # Remove inactive
 
         """
-        self._provider._mutation_clear_slice(self._slice_type, predicate)
+        event: ClearSlice[T] = ClearSlice(
+            slice_type=self._slice_type, predicate=predicate
+        )
+        self._provider._mutation_dispatch_event(ClearSlice, event)
 
     def append(self, value: T) -> None:
         """Append a value to the slice using the default append reducer.

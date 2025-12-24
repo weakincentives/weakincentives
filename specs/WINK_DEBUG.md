@@ -15,7 +15,7 @@ wink debug <snapshot_path> [--host HOST] [--port PORT] [--open-browser|--no-open
 ### Arguments
 
 | Argument | Required | Default | Description |
-|----------|----------|---------|-------------|
+| ---------------- | -------- | ----------- | --------------------------------------------------------------- |
 | `snapshot_path` | Yes | - | Path to a JSONL snapshot file or directory containing snapshots |
 | `--host` | No | `127.0.0.1` | Host interface to bind the server |
 | `--port` | No | `8000` | Port to bind the server |
@@ -26,14 +26,14 @@ wink debug <snapshot_path> [--host HOST] [--port PORT] [--open-browser|--no-open
 The CLI inherits global options from the `wink` command:
 
 | Option | Default | Description |
-|--------|---------|-------------|
+| ------------- | ------- | ------------------------------------------------------------------ |
 | `--log-level` | `None` | Override log level (CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET) |
 | `--json-logs` | `True` | Emit structured JSON logs (disable with `--no-json-logs`) |
 
 ### Exit Codes
 
 | Code | Meaning |
-|------|---------|
+| ---- | ------------------------------------- |
 | `0` | Server stopped normally |
 | `2` | Snapshot validation failed at startup |
 | `3` | Server failed to start |
@@ -92,10 +92,10 @@ Returns metadata for the currently selected snapshot entry.
   "path": "/path/to/snapshot.jsonl",
   "session_id": "abc123",
   "line_number": 1,
-  "tags": {"session_id": "abc123", "custom_tag": "value"},
+  "tags": { "session_id": "abc123", "custom_tag": "value" },
   "validation_error": null,
   "slices": [
-    {"slice_type": "mymodule.Plan", "item_type": "mymodule.Plan", "count": 3}
+    { "slice_type": "mymodule.Plan", "item_type": "mymodule.Plan", "count": 3 }
   ]
 }
 ```
@@ -112,7 +112,7 @@ Lists all snapshot entries in the current file.
     "path": "/path/to/snapshot.jsonl",
     "line_number": 1,
     "created_at": "2024-01-15T10:30:00+00:00",
-    "tags": {"session_id": "abc123"},
+    "tags": { "session_id": "abc123" },
     "selected": true
   }
 ]
@@ -133,7 +133,10 @@ Query parameters:
   "slice_type": "mymodule.Plan",
   "item_type": "mymodule.Plan",
   "items": [
-    {"field": "value", "__markdown__": {"text": "# Header", "html": "<h1>Header</h1>"}}
+    {
+      "field": "value",
+      "__markdown__": { "text": "# Header", "html": "<h1>Header</h1>" }
+    }
   ]
 }
 ```
@@ -267,7 +270,7 @@ Thread-safe in-memory store for loaded snapshots with support for:
 The web UI is served from `src/weakincentives/cli/static/`:
 
 | File | Purpose |
-|------|---------|
+| ------------ | ---------------------- |
 | `index.html` | Main HTML page |
 | `style.css` | Stylesheet |
 | `app.js` | Client-side JavaScript |
@@ -277,7 +280,7 @@ Static files are mounted at `/static/`.
 ## Logging
 
 | Event | Level | Context |
-|-------|-------|---------|
+| ---------------------------- | ------- | ------------------------------ |
 | `wink.debug.snapshot_error` | WARNING | `path`, `line_number`, `error` |
 | `debug.server.start` | INFO | `url` |
 | `debug.server.reload` | INFO | `path` |

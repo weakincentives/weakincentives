@@ -42,6 +42,7 @@ from .dataclasses import is_dataclass_instance
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append_all
 from .slice_accessor import SliceAccessor
+from .slice_mutations import ClearSlice, InitializeSlice
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .slices import (
     Append,
@@ -536,24 +537,6 @@ class Session(SessionProtocol):
     # ──────────────────────────────────────────────────────────────────────
 
     @_locked_method
-    def _mutation_seed_slice[S: SupportsDataclass](
-        self, slice_type: type[S], values: Iterable[S]
-    ) -> None:
-        """Initialize or replace the stored tuple for the provided type."""
-        slice_instance = self._get_or_create_slice(slice_type)
-        slice_instance.replace(tuple(values))
-
-    @_locked_method
-    def _mutation_clear_slice[S: SupportsDataclass](
-        self,
-        slice_type: type[S],
-        predicate: Callable[[S], bool] | None = None,
-    ) -> None:
-        """Remove items from the slice, optionally filtering by predicate."""
-        slice_instance = self._get_or_create_slice(slice_type)
-        slice_instance.clear(predicate)
-
-    @_locked_method
     def _mutation_register_reducer[S: SupportsDataclass](
         self,
         data_type: SessionSliceType,
@@ -584,6 +567,38 @@ class Session(SessionProtocol):
     ) -> None:
         """Dispatch an event to be processed by registered reducers."""
         self._dispatch_data_event(slice_type, event)
+
+    def _handle_system_mutation_event(self, event: ReducerEvent) -> bool:
+        """Handle system mutation events (InitializeSlice, ClearSlice).
+
+        These events bypass normal reducer dispatch and directly mutate state,
+        ensuring consistent behavior regardless of registered reducers.
+
+        Returns:
+            True if the event was a system mutation event and was handled,
+            False otherwise.
+        """
+        if isinstance(event, InitializeSlice):
+            # Use cast to work around generic type parameter inference
+            init_event = cast("InitializeSlice[Any]", event)
+            slice_type: SessionSliceType = init_event.slice_type
+            values: SessionSlice = init_event.values
+            with self.locked():
+                slice_instance = self._get_or_create_slice(slice_type)
+                slice_instance.replace(values)
+            return True
+
+        if isinstance(event, ClearSlice):
+            # Use cast to work around generic type parameter inference
+            clear_event = cast("ClearSlice[Any]", event)
+            slice_type = clear_event.slice_type
+            predicate: Callable[[Any], bool] | None = clear_event.predicate
+            with self.locked():
+                slice_instance = self._get_or_create_slice(slice_type)
+                slice_instance.clear(predicate)
+            return True
+
+        return False
 
     # ──────────────────────────────────────────────────────────────────────
     # Properties
@@ -762,6 +777,10 @@ class Session(SessionProtocol):
         data_type: SessionSliceType,
         event: ReducerEvent,
     ) -> None:
+        # Handle system mutation events specially
+        if self._handle_system_mutation_event(event):
+            return
+
         from .reducer_context import build_reducer_context
         from .session_view import SessionView
 

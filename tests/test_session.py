@@ -875,6 +875,92 @@ def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
     assert session[ExampleOutput].all() == (ExampleOutput(text="banana"),)
 
 
+def test_dispatch_initialize_slice(session_factory: SessionFactory) -> None:
+    """Test that dispatching InitializeSlice directly works."""
+    from weakincentives.runtime.session import InitializeSlice
+
+    session, _ = session_factory()
+
+    # Dispatch InitializeSlice directly
+    session.dispatch(
+        InitializeSlice(
+            slice_type=ExampleOutput,
+            values=(ExampleOutput(text="first"), ExampleOutput(text="second")),
+        )
+    )
+
+    assert session[ExampleOutput].all() == (
+        ExampleOutput(text="first"),
+        ExampleOutput(text="second"),
+    )
+
+
+def test_dispatch_clear_slice(session_factory: SessionFactory) -> None:
+    """Test that dispatching ClearSlice directly works."""
+    from weakincentives.runtime.session import ClearSlice
+
+    session, bus = session_factory()
+
+    # Add some initial data
+    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    assert len(session[ExampleOutput].all()) == 2
+
+    # Dispatch ClearSlice directly
+    session.dispatch(ClearSlice(slice_type=ExampleOutput))
+
+    assert session[ExampleOutput].all() == ()
+
+
+def test_dispatch_clear_slice_with_predicate(session_factory: SessionFactory) -> None:
+    """Test that dispatching ClearSlice with a predicate works."""
+    from weakincentives.runtime.session import ClearSlice
+
+    session, bus = session_factory()
+
+    # Add some initial data
+    bus.dispatch(make_prompt_event(ExampleOutput(text="apple")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="banana")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="apricot")))
+
+    # Dispatch ClearSlice with predicate
+    session.dispatch(
+        ClearSlice(
+            slice_type=ExampleOutput,
+            predicate=lambda x: x.text.startswith("a"),
+        )
+    )
+
+    assert session[ExampleOutput].all() == (ExampleOutput(text="banana"),)
+
+
+def test_clear_slice_with_no_matching_predicate(
+    session_factory: SessionFactory,
+) -> None:
+    """Test that ClearSlice with a predicate that matches nothing leaves values unchanged."""
+    from weakincentives.runtime.session import ClearSlice
+
+    session, bus = session_factory()
+
+    # Add some initial data (none starts with 'z')
+    bus.dispatch(make_prompt_event(ExampleOutput(text="apple")))
+    bus.dispatch(make_prompt_event(ExampleOutput(text="banana")))
+
+    # Dispatch ClearSlice with predicate that matches nothing
+    session.dispatch(
+        ClearSlice(
+            slice_type=ExampleOutput,
+            predicate=lambda x: x.text.startswith("z"),
+        )
+    )
+
+    # Values should be unchanged
+    assert session[ExampleOutput].all() == (
+        ExampleOutput(text="apple"),
+        ExampleOutput(text="banana"),
+    )
+
+
 def test_broadcast_triggers_registered_reducer(
     session_factory: SessionFactory,
 ) -> None:

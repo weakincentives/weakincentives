@@ -38,7 +38,7 @@ class TaskStep(Generic[ParamsT, ResultT]):
 **Fields:**
 
 | Field | Type | Description |
-|-------|------|-------------|
+| ----------- | ------------------------------- | ---------------------------------------------------------------- |
 | `tool_name` | `str` | Name of the tool being invoked (must match `^[a-z0-9_-]{1,64}$`) |
 | `example` | `ToolExample[ParamsT, ResultT]` | The invocation details (description, input, output) |
 
@@ -71,7 +71,7 @@ class TaskExample(Section[TaskExampleParamsT]):
 **Constructor Arguments:**
 
 | Argument | Required | Description |
-|----------|----------|-------------|
+| ----------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `key` | Yes | Section identifier (e.g., `"example-auth-review"`) |
 | `objective` | Yes | The task goal (1-500 ASCII chars) |
 | `outcome` | Yes | Expected outcome. For prompts without structured output, this must be a `str`. For prompts with structured output, this must be an instance of the prompt's output dataclass type. |
@@ -106,7 +106,7 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
 **Constructor Arguments:**
 
 | Argument | Required | Description |
-|----------|----------|-------------|
+| ---------- | -------- | ----------------------------------------------- |
 | `key` | No | Section identifier (default: `"task-examples"`) |
 | `title` | No | Display title (default: `"Task Examples"`) |
 | `examples` | Yes | One or more `TaskExample` instances |
@@ -358,7 +358,7 @@ Each `TaskExample` renders its trajectory:
 1. **read_file** - Read the auth module source
    - input:
      ```json
-     {"path": "src/auth.py"}
+     { "path": "src/auth.py" }
      ```
    - output:
      ```
@@ -368,7 +368,7 @@ Each `TaskExample` renders its trajectory:
 2. **search_patterns** - Search for common vulnerability patterns
    - input:
      ```json
-     {"pattern": "sql.*\\+.*user", "path": "src/"}
+     { "pattern": "sql.*\\+.*user", "path": "src/" }
      ```
    - output:
      ```
@@ -378,7 +378,7 @@ Each `TaskExample` renders its trajectory:
 3. **report_issue** - Report the SQL injection vulnerability
    - input:
      ```json
-     {"severity": "high", "title": "SQL injection in auth module"}
+     { "severity": "high", "title": "SQL injection in auth module" }
      ```
    - output:
      ```
@@ -579,7 +579,7 @@ All validation errors raise `PromptValidationError` with:
 ### Error Scenarios
 
 | Scenario | Error Message |
-|----------|---------------|
+| --------------------- | -------------------------------------------------------------- |
 | Empty objective | `"objective must not be empty"` |
 | Objective too long | `"objective must be <= 500 characters"` |
 | Outcome type mismatch | `"Task example outcome type mismatch. Expected: X, got: Y."` |

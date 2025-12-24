@@ -83,7 +83,7 @@ class VirtualFileSystem:
 ### Tools
 
 | Tool | Parameters | Description |
-|------|------------|-------------|
+| ------------ | ------------------------------------------------------ | ------------------------- |
 | `ls` | `path: str` | List directory entries |
 | `read_file` | `file_path`, `offset`, `limit` | Read file with pagination |
 | `write_file` | `file_path`, `content` | Create new file |
@@ -157,7 +157,7 @@ stateDiagram-v2
 All VFS tools plus:
 
 | Tool | Description |
-|------|-------------|
+| ----------------- | --------------------------------------- |
 | `shell_execute` | Run command in container (\<=120s) |
 | `evaluate_python` | Execute Python via `python3 -c` (\<=5s) |
 

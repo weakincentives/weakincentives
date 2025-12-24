@@ -57,7 +57,7 @@ The following patterns are automatically excluded from coverage:
 Mutation testing protects correctness-critical modules. Expand scope beyond current hotspots:
 
 | Module | Minimum Score | Rationale |
-|--------|---------------|-----------|
+| ---------------------- | ------------- | ----------------------------------------- |
 | `runtime/session/*.py` | 90% | State management core |
 | `serde/*.py` | 85% | Snapshot integrity depends on round-trips |
 | `dbc/decorators.py` | 85% | Contract enforcement must be watertight |
@@ -160,7 +160,7 @@ jobs:
 ### Gate Enforcement
 
 | Gate | Threshold | Where |
-|------|-----------|-------|
+| ------------------ | --------------- | ------------ |
 | Line coverage | 100% | `make check` |
 | Branch coverage | 100% | `make check` |
 | Type errors | 0 | `make check` |
