@@ -116,6 +116,14 @@ class Slice[T: SupportsDataclass](Protocol):
         Backends may optimize for this (e.g., flush pending writes).
         """
         ...
+
+    def view(self) -> "SliceView[T]":
+        """Return a lazy readonly view for reducer input.
+
+        The view provides lazy access to slice contents, enabling
+        efficient append-only reducers that never load existing data.
+        """
+        ...
 ```
 
 ### SliceFactory Protocol
@@ -172,15 +180,298 @@ class SliceFactoryConfig:
         return self.state_factory
 ```
 
+### SliceView Protocol
+
+```python
+from typing import Protocol, Iterator
+from collections.abc import Callable
+from weakincentives.types.dataclass import SupportsDataclass
+
+class SliceView[T: SupportsDataclass](Protocol):
+    """Readonly lazy view of a slice for reducer input.
+
+    SliceView provides lazy access to slice contents, enabling reducers
+    that only append to avoid loading existing data entirely. For
+    file-backed slices, methods like `is_empty` and `latest()` can be
+    optimized to avoid full file reads.
+
+    This is the input type for reducers, replacing the eager tuple.
+    """
+
+    @property
+    def is_empty(self) -> bool:
+        """Check if slice is empty without loading all items.
+
+        For file-backed slices, this can check file existence/size
+        without parsing contents.
+        """
+        ...
+
+    def __len__(self) -> int:
+        """Return item count.
+
+        May require loading for some backends, but can be optimized
+        (e.g., counting newlines in JSONL without parsing).
+        """
+        ...
+
+    def __iter__(self) -> Iterator[T]:
+        """Iterate items lazily.
+
+        Enables streaming for large slices without loading all into memory.
+        """
+        ...
+
+    def all(self) -> tuple[T, ...]:
+        """Load and return all items as a tuple.
+
+        This is the expensive operation - avoid if possible.
+        Results may be cached by the implementation.
+        """
+        ...
+
+    def latest(self) -> T | None:
+        """Return most recent item, or None if empty.
+
+        Can be optimized for file-backed slices (e.g., read last line).
+        """
+        ...
+
+    def where(self, predicate: Callable[[T], bool]) -> Iterator[T]:
+        """Yield items matching predicate.
+
+        Enables filtered iteration without materializing full tuple.
+        """
+        ...
+```
+
+### SliceOp Types
+
+```python
+from dataclasses import dataclass
+from typing import Callable
+from weakincentives.types.dataclass import SupportsDataclass
+
+@dataclass(frozen=True, slots=True)
+class Append[T: SupportsDataclass]:
+    """Append a single item to the slice.
+
+    Most efficient operation for file-backed slices - just appends
+    to the file without reading existing contents.
+    """
+    item: T
+
+
+@dataclass(frozen=True, slots=True)
+class Extend[T: SupportsDataclass]:
+    """Append multiple items to the slice."""
+    items: tuple[T, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Replace[T: SupportsDataclass]:
+    """Replace entire slice contents.
+
+    Required when reducer transforms existing state. For file-backed
+    slices, this rewrites the entire file.
+    """
+    items: tuple[T, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class Clear[T: SupportsDataclass]:
+    """Clear items from the slice.
+
+    Args:
+        predicate: If provided, only items where predicate returns True
+            are removed. If None, all items are removed.
+    """
+    predicate: Callable[[T], bool] | None = None
+
+
+# Union of all slice operations
+type SliceOp[T: SupportsDataclass] = Append[T] | Extend[T] | Replace[T] | Clear[T]
+
+# Reducer can return an operation OR a tuple (backward compatibility)
+type ReducerResult[T: SupportsDataclass] = SliceOp[T] | tuple[T, ...]
+```
+
+## Reducer Contract
+
+The reducer signature changes to use `SliceView` for input and `ReducerResult`
+for output:
+
+### New Signature
+
+```python
+from weakincentives.runtime.session import ReducerContext
+
+def reducer[S: SupportsDataclass](
+    view: SliceView[S],
+    event: SupportsDataclass,
+    *,
+    context: ReducerContext,
+) -> ReducerResult[S]:
+    """Transform slice state in response to an event.
+
+    Args:
+        view: Lazy readonly view of current slice state. Access only
+            what you need - for append-only reducers, don't access at all.
+        event: The dispatched event triggering this reducer.
+        context: Reducer context with session metadata.
+
+    Returns:
+        A SliceOp describing the mutation, or a tuple for full replacement.
+        Returning a tuple is equivalent to Replace(items=tuple).
+    """
+    ...
+```
+
+### Built-in Reducers (Updated)
+
+```python
+def append_all[S: SupportsDataclass](
+    view: SliceView[S],
+    event: S,
+    *,
+    context: ReducerContext,
+) -> Append[S]:
+    """Append event to slice (ledger semantics).
+
+    Never accesses view - O(1) for file-backed slices.
+    """
+    return Append(event)
+
+
+def replace_latest[S: SupportsDataclass](
+    view: SliceView[S],
+    event: S,
+    *,
+    context: ReducerContext,
+) -> Replace[S]:
+    """Keep only the most recent value.
+
+    Never accesses view - always replaces with singleton.
+    """
+    return Replace((event,))
+
+
+def upsert_by[S: SupportsDataclass](
+    key_fn: Callable[[S], object],
+) -> Callable[[SliceView[S], S, ReducerContext], ReducerResult[S]]:
+    """Create reducer that upserts by derived key.
+
+    Must access view to find existing item - O(n) for any backend.
+    """
+    def reducer(
+        view: SliceView[S],
+        event: S,
+        *,
+        context: ReducerContext,
+    ) -> Replace[S]:
+        event_key = key_fn(event)
+        items = [item for item in view if key_fn(item) != event_key]
+        items.append(event)
+        return Replace(tuple(items))
+    return reducer
+```
+
+### Declarative Reducers (Updated)
+
+The `@reducer` decorator adapts method-style reducers:
+
+```python
+@dataclass(frozen=True)
+class AgentPlan:
+    steps: tuple[str, ...]
+    current_step: int = 0
+
+    @reducer(on=AddStep)
+    def add_step(self, event: AddStep) -> "AgentPlan":
+        # self is the current state (from view.latest())
+        # Return new instance - wrapper converts to Replace((result,))
+        return replace(self, steps=(*self.steps, event.step))
+
+    @reducer(on=ClearSteps)
+    def clear(self, event: ClearSteps) -> SliceOp["AgentPlan"]:
+        # Can also return SliceOp directly for optimization
+        return Replace((AgentPlan(steps=(), current_step=0),))
+```
+
+The decorator wrapper:
+1. Calls `view.latest()` to get current state (or uses initial factory)
+2. Invokes the method with the event
+3. If result is a SliceOp, returns it directly
+4. If result is an instance, wraps as `Replace((result,))`
+
+### Session Dispatch (Updated)
+
+```python
+def _apply_reducer_result[S: SupportsDataclass](
+    self,
+    result: ReducerResult[S],
+    slice: Slice[S],
+) -> None:
+    """Apply reducer result to slice using optimal operation."""
+    match result:
+        case Append(item=item):
+            slice.append(item)
+        case Extend(items=items):
+            slice.extend(items)
+        case Replace(items=items):
+            slice.replace(items)
+        case Clear(predicate=pred):
+            slice.clear(pred)
+        case tuple() as items:
+            # Backward compatibility: tuple means Replace
+            slice.replace(items)
+```
+
+### Performance Characteristics
+
+| Reducer Pattern | MemorySlice | JsonlSlice |
+|-----------------|-------------|------------|
+| `Append(item)` | O(n) copy | **O(1) file append** |
+| `Extend(items)` | O(n) copy | **O(k) file append** |
+| `Replace(items)` | O(1) | O(n) file rewrite |
+| `view.all()` + transform | O(1) read | O(n) file read |
+| `view.latest()` | O(1) | O(n) or **O(1) optimized** |
+| `view.is_empty` | O(1) | **O(1) file stat** |
+
+**Key insight**: Append-only reducers (the common case) become O(1) for
+file-backed slices because they never access the view.
+
+### Backward Compatibility
+
+Existing reducers returning `tuple[S, ...]` continue to work:
+
+```python
+# Old style - still works, treated as Replace
+def old_reducer(
+    view: SliceView[S],
+    event: S,
+    *,
+    context: ReducerContext,
+) -> tuple[S, ...]:
+    return (*view.all(), event)  # Equivalent to Append, but loads everything
+```
+
+The migration path:
+1. Change signature from `tuple[S, ...]` input to `SliceView[S]`
+2. Optionally return `SliceOp` instead of tuple for efficiency
+3. For append-only reducers, return `Append(event)` without accessing view
+
 ## Implementations
 
 ### MemorySlice
 
-In-memory tuple-backed slice providing the current default behavior:
+In-memory tuple-backed slice providing the current default behavior.
+MemorySlice implements both `Slice` and `SliceView` protocols, serving
+as its own view since all data is already in memory:
 
 ```python
-from dataclasses import dataclass, field
-from collections.abc import Callable, Iterable
+from dataclasses import dataclass
+from collections.abc import Callable, Iterable, Iterator
 from weakincentives.types.dataclass import SupportsDataclass
 
 @dataclass(slots=True)
@@ -189,15 +480,34 @@ class MemorySlice[T: SupportsDataclass]:
 
     Provides O(1) reads and O(n) appends. All operations are performed
     on immutable tuples, matching current Session semantics.
+
+    Implements both Slice (mutable) and SliceView (readonly) protocols.
     """
 
     _data: tuple[T, ...] = ()
+
+    # --- SliceView protocol (readonly) ---
+
+    @property
+    def is_empty(self) -> bool:
+        return len(self._data) == 0
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def __iter__(self) -> Iterator[T]:
+        return iter(self._data)
 
     def all(self) -> tuple[T, ...]:
         return self._data
 
     def latest(self) -> T | None:
         return self._data[-1] if self._data else None
+
+    def where(self, predicate: Callable[[T], bool]) -> Iterator[T]:
+        return (item for item in self._data if predicate(item))
+
+    # --- Slice protocol (mutable) ---
 
     def append(self, item: T) -> None:
         self._data = (*self._data, item)
@@ -214,11 +524,12 @@ class MemorySlice[T: SupportsDataclass]:
         else:
             self._data = tuple(v for v in self._data if not predicate(v))
 
-    def __len__(self) -> int:
-        return len(self._data)
-
     def snapshot(self) -> tuple[T, ...]:
         return self._data
+
+    def view(self) -> "MemorySlice[T]":
+        # MemorySlice is its own view - all data in memory
+        return self
 ```
 
 ### MemorySliceFactory
@@ -234,16 +545,92 @@ class MemorySliceFactory:
 
 ### JsonlSlice
 
-JSONL file-backed slice for persistent storage:
+JSONL file-backed slice for persistent storage. Uses a separate
+`JsonlSliceView` for lazy access to avoid loading data when not needed:
 
 ```python
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 import json
 import fcntl
 from weakincentives.serde import dump, parse
 from weakincentives.types.dataclass import SupportsDataclass
+
+
+@dataclass(slots=True)
+class JsonlSliceView[T: SupportsDataclass]:
+    """Lazy readonly view of a JsonlSlice.
+
+    Provides optimized access patterns that avoid loading the entire
+    file when not necessary. Key optimizations:
+    - is_empty: O(1) file stat
+    - latest(): Can read just the last line (seek to end)
+    - __iter__: Streams items without loading all into memory
+    """
+
+    path: Path
+    item_type: type[T]
+    _slice: "JsonlSlice[T]"
+
+    @property
+    def is_empty(self) -> bool:
+        """O(1) check using file existence and size."""
+        if not self.path.exists():
+            return True
+        return self.path.stat().st_size == 0
+
+    def __len__(self) -> int:
+        """Count items. Uses cache if available, else counts lines."""
+        if self._slice._cache is not None:
+            return len(self._slice._cache)
+        if not self.path.exists():
+            return 0
+        # Count newlines without parsing
+        with self.path.open("rb") as f:
+            return sum(1 for _ in f)
+
+    def __iter__(self) -> Iterator[T]:
+        """Stream items lazily without loading all into memory."""
+        if not self.path.exists():
+            return
+        with self.path.open() as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
+            try:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        data = json.loads(line)
+                        yield parse(
+                            self.item_type, data, allow_dataclass_type=True
+                        )
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+
+    def all(self) -> tuple[T, ...]:
+        """Load all items. Uses slice's cache for efficiency."""
+        return self._slice.all()
+
+    def latest(self) -> T | None:
+        """Return last item. Can be optimized to read only last line."""
+        # Use cache if available
+        if self._slice._cache is not None:
+            cache = self._slice._cache
+            return cache[-1] if cache else None
+        # Optimization: read last line only (seek from end)
+        if not self.path.exists():
+            return None
+        if self.path.stat().st_size == 0:
+            return None
+        # For simplicity, fall back to full read with caching
+        # A production impl could seek to find last newline
+        items = self._slice.all()
+        return items[-1] if items else None
+
+    def where(self, predicate: Callable[[T], bool]) -> Iterator[T]:
+        """Stream filtered items."""
+        return (item for item in self if predicate(item))
+
 
 @dataclass(slots=True)
 class JsonlSlice[T: SupportsDataclass]:
@@ -342,6 +729,14 @@ class JsonlSlice[T: SupportsDataclass]:
     def snapshot(self) -> tuple[T, ...]:
         # Ensure cache is populated for consistent snapshot
         return self.all()
+
+    def view(self) -> JsonlSliceView[T]:
+        """Return a lazy readonly view for reducer input."""
+        return JsonlSliceView(
+            path=self.path,
+            item_type=self.item_type,
+            _slice=self,
+        )
 ```
 
 ### JsonlSliceFactory
