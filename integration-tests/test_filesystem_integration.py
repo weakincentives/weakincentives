@@ -20,6 +20,8 @@ glob, grep, rm) work correctly across all workspace implementations:
 - Standalone HostFilesystem
 """
 
+# pyright: reportOptionalCall=false, reportInvalidTypeForm=false
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -55,8 +57,6 @@ from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
-
-# ruff: noqa: PLR6301, PLR2004
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -51,6 +51,9 @@ litellm = [
 podman = [
     "podman>=5.6.0",
 ]
+redis = [
+    "redis>=5.0.0",
+]
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.15",
 ]
@@ -139,6 +142,7 @@ combine-as-imports = true
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 # C901 is ignored because test functions can legitimately have higher complexity.
 "tests/**" = ["C901", "PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
+"integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
 # Examples may use higher complexity for illustration purposes.
 "examples/**" = ["C901"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
@@ -161,6 +165,7 @@ combine-as-imports = true
 "src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300"]
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR6301", "ANN401", "TRY300"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904"]
+"src/weakincentives/contrib/mailbox/_redis.py" = ["PLR0914", "PLR6301", "C901", "TRY300", "TRY301", "SIM108"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 8
@@ -191,6 +196,9 @@ markers = [
     "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
     "threadstress: repeat tests under randomized thread-pool conditions.",
     "podman: marks tests that exercise the Podman tool against a live daemon.",
+    "redis: marks all Redis integration tests (standalone and cluster).",
+    "redis_standalone: marks tests using standalone Redis.",
+    "redis_cluster: marks tests using Redis Cluster.",
 ]
 norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 reruns = 2
@@ -244,6 +252,10 @@ debug = false
 [tool.coverage.run]
 branch = true
 source = ["src/weakincentives"]
+omit = [
+    # Redis mailbox requires integration tests with a real Redis server
+    "src/weakincentives/contrib/mailbox/_redis.py",
+]
 
 [tool.coverage.report]
 fail_under = 100
@@ -259,7 +271,7 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "pyyaml"]
+DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "pyyaml", "redis"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

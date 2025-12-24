@@ -30,6 +30,7 @@ Example usage::
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess  # nosec: B404
@@ -103,6 +104,16 @@ class HostFilesystem:
         """Virtual mount point prefix for path normalization."""
         return self._mount_point
 
+    @staticmethod
+    def _git_env() -> dict[str, str]:
+        """Create a clean environment for git subprocesses.
+
+        Removes GIT_* environment variables to prevent conflicts when running
+        inside git hooks (e.g., pre-commit) where these variables are set by
+        the parent git process.
+        """
+        return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
     def _resolve_path(self, path: str) -> Path:
         """Resolve a relative path to an absolute path within root.
 
@@ -159,6 +170,7 @@ class HostFilesystem:
             check=check,
             capture_output=True,
             text=text,
+            env=self._git_env(),
         )
 
     def read(
@@ -521,12 +533,14 @@ class HostFilesystem:
             needs_init = True
 
         if needs_init:
+            env = self._git_env()
             # Initialize bare repository in external directory
             _ = subprocess.run(  # nosec B603 B607
                 ["git", "init", "--bare"],
                 cwd=self._git_dir,
                 check=True,
                 capture_output=True,
+                env=env,
             )
             # Configure for snapshot use (local config only)
             # Use --git-dir since it's a bare repo
@@ -541,6 +555,7 @@ class HostFilesystem:
                 ],
                 check=True,
                 capture_output=True,
+                env=env,
             )
             _ = subprocess.run(  # nosec B603 B607
                 [
@@ -553,6 +568,7 @@ class HostFilesystem:
                 ],
                 check=True,
                 capture_output=True,
+                env=env,
             )
         self._git_initialized = True
 

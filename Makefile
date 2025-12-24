@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -75,6 +75,18 @@ integration-tests:
 		exit 1; \
 	fi
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
+
+# Run all Redis integration tests (standalone + cluster)
+redis-tests:
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis integration-tests
+
+# Run Redis standalone tests only
+redis-standalone-tests:
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis_standalone integration-tests
+
+# Run Redis cluster tests only
+redis-cluster-tests:
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis_cluster integration-tests
 
 # Validate integration tests (typecheck without running)
 validate-integration-tests:

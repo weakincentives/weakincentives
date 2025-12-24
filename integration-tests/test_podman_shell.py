@@ -12,6 +12,8 @@
 
 """End-to-end smoke tests for the Podman shell tool."""
 
+# pyright: reportInvalidTypeForm=false, reportArgumentType=false
+
 from __future__ import annotations
 
 import subprocess
