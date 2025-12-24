@@ -12,6 +12,8 @@
 
 """Integration tests for the Claude Agent SDK adapter."""
 
+# pyright: reportArgumentType=false
+
 from __future__ import annotations
 
 import os

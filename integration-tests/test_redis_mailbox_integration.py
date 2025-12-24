@@ -252,6 +252,112 @@ class TestRedisMailboxStandalone:
             finally:
                 mailbox.close()
 
+    def test_stale_receipt_handle_rejected_after_redelivery(self) -> None:
+        """Stale receipt handles are rejected after message is redelivered.
+
+        This tests the critical invariant that after a visibility timeout expires
+        and a message is redelivered, the old receipt handle becomes invalid.
+        Without this, a slow consumer could acknowledge a message that's been
+        handed to a different consumer.
+        """
+        with redis_standalone() as client:
+            mailbox: RedisMailbox[str] = RedisMailbox(
+                name="test-stale-handle",
+                client=client,
+                body_type=str,
+                reaper_interval=0.1,
+            )
+            try:
+                mailbox.send("hello")
+
+                # First consumer receives message
+                first_delivery = mailbox.receive(max_messages=1, visibility_timeout=1)
+                assert len(first_delivery) == 1
+                old_msg = first_delivery[0]
+
+                # Wait for visibility timeout to expire
+                time.sleep(1.5)
+
+                # Second consumer receives the redelivered message
+                second_delivery = mailbox.receive(max_messages=1)
+                assert len(second_delivery) == 1
+                new_msg = second_delivery[0]
+                assert new_msg.delivery_count == 2
+
+                # Old receipt handle should be rejected
+                with pytest.raises(ReceiptHandleExpiredError):
+                    old_msg.acknowledge()
+
+                # New receipt handle should work
+                new_msg.acknowledge()
+                assert mailbox.approximate_count() == 0
+            finally:
+                mailbox.close()
+
+    def test_stale_receipt_handle_rejected_for_nack(self) -> None:
+        """Stale receipt handles are rejected for nack after redelivery."""
+        with redis_standalone() as client:
+            mailbox: RedisMailbox[str] = RedisMailbox(
+                name="test-stale-nack",
+                client=client,
+                body_type=str,
+                reaper_interval=0.1,
+            )
+            try:
+                mailbox.send("hello")
+
+                # First consumer receives message
+                first_delivery = mailbox.receive(max_messages=1, visibility_timeout=1)
+                old_msg = first_delivery[0]
+
+                # Wait for visibility timeout to expire
+                time.sleep(1.5)
+
+                # Second consumer receives the redelivered message
+                second_delivery = mailbox.receive(max_messages=1)
+                new_msg = second_delivery[0]
+
+                # Old receipt handle should be rejected for nack
+                with pytest.raises(ReceiptHandleExpiredError):
+                    old_msg.nack(visibility_timeout=0)
+
+                # New message can still be processed
+                new_msg.acknowledge()
+            finally:
+                mailbox.close()
+
+    def test_stale_receipt_handle_rejected_for_extend(self) -> None:
+        """Stale receipt handles are rejected for extend_visibility after redelivery."""
+        with redis_standalone() as client:
+            mailbox: RedisMailbox[str] = RedisMailbox(
+                name="test-stale-extend",
+                client=client,
+                body_type=str,
+                reaper_interval=0.1,
+            )
+            try:
+                mailbox.send("hello")
+
+                # First consumer receives message
+                first_delivery = mailbox.receive(max_messages=1, visibility_timeout=1)
+                old_msg = first_delivery[0]
+
+                # Wait for visibility timeout to expire
+                time.sleep(1.5)
+
+                # Second consumer receives the redelivered message
+                second_delivery = mailbox.receive(max_messages=1)
+                new_msg = second_delivery[0]
+
+                # Old receipt handle should be rejected for extend
+                with pytest.raises(ReceiptHandleExpiredError):
+                    old_msg.extend_visibility(60)
+
+                # New message can still be processed
+                new_msg.acknowledge()
+            finally:
+                mailbox.close()
+
     def test_purge_removes_all_messages(self) -> None:
         """purge() removes all messages from queue."""
         with redis_standalone() as client:

@@ -57,6 +57,7 @@ _LUA_RECEIVE = """
 local msg_id = redis.call('RPOP', KEYS[1])
 if not msg_id then return nil end
 redis.call('ZADD', KEYS[2], ARGV[1], msg_id)
+redis.call('HSET', KEYS[4], msg_id .. ':handle', ARGV[2])
 local data = redis.call('HGET', KEYS[3], msg_id)
 local count = redis.call('HINCRBY', KEYS[4], msg_id .. ':count', 1)
 local enqueued = redis.call('HGET', KEYS[4], msg_id .. ':enqueued')
@@ -64,27 +65,35 @@ return {msg_id, data, count, enqueued}
 """
 
 _LUA_ACKNOWLEDGE = """
+local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
+if expected ~= ARGV[2] then return 0 end
 local removed = redis.call('ZREM', KEYS[1], ARGV[1])
 if removed == 0 then return 0 end
 redis.call('HDEL', KEYS[2], ARGV[1])
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':count')
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':enqueued')
+redis.call('HDEL', KEYS[3], ARGV[1] .. ':handle')
 return 1
 """
 
 _LUA_NACK = """
+local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
+if expected ~= ARGV[2] then return 0 end
 local removed = redis.call('ZREM', KEYS[1], ARGV[1])
 if removed == 0 then return 0 end
-if tonumber(ARGV[2]) <= 0 then
+redis.call('HDEL', KEYS[3], ARGV[1] .. ':handle')
+if tonumber(ARGV[3]) <= 0 then
     redis.call('LPUSH', KEYS[2], ARGV[1])
 else
-    redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+    redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
 end
 return 1
 """
 
 _LUA_EXTEND = """
-redis.call('ZADD', KEYS[1], 'XX', ARGV[2], ARGV[1])
+local expected = redis.call('HGET', KEYS[2], ARGV[1] .. ':handle')
+if expected ~= ARGV[2] then return 0 end
+redis.call('ZADD', KEYS[1], 'XX', ARGV[3], ARGV[1])
 local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
 return score and 1 or 0
 """
@@ -95,6 +104,7 @@ local count = 0
 for i, msg_id in ipairs(expired) do
     redis.call('ZREM', KEYS[1], msg_id)
     redis.call('LPUSH', KEYS[2], msg_id)
+    redis.call('HDEL', KEYS[3], msg_id .. ':handle')
     count = count + 1
 end
 return count
@@ -147,7 +157,8 @@ class RedisMailbox[T]:
         {queue:name}:invisible  # ZSET - in-flight messages scored by expiry timestamp
         {queue:name}:data       # HASH - message ID → serialized message body
         {queue:name}:meta       # HASH - message ID:count → delivery count,
-                                #        message ID:enqueued → enqueued timestamp
+                                #        message ID:enqueued → enqueued timestamp,
+                                #        message ID:handle → current receipt handle suffix
 
     Example::
 
@@ -228,11 +239,14 @@ class RedisMailbox[T]:
     def _reap_expired(self) -> int:
         """Move expired messages from invisible back to pending.
 
+        Also clears receipt handles so stale handles cannot acknowledge
+        messages after they're redelivered.
+
         Returns:
             Number of messages requeued.
         """
         now = time.time()
-        keys = [self._keys.invisible, self._keys.pending]
+        keys = [self._keys.invisible, self._keys.pending, self._keys.meta]
         result = self._scripts["reap"](keys=keys, args=[now])
         return int(result) if result else 0
 
@@ -382,6 +396,9 @@ class RedisMailbox[T]:
         keys = self._keys
         expiry_score = time.time() + visibility_timeout
 
+        # Generate receipt handle suffix upfront - stored in Redis for validation
+        receipt_suffix = str(uuid4())
+
         # Use blocking pop if waiting, otherwise use Lua script
         if wait_seconds > 0:
             # BRPOP for efficient long polling
@@ -395,18 +412,21 @@ class RedisMailbox[T]:
             # Now atomically process the message
             pipe = self.client.pipeline()
             pipe.zadd(keys.invisible, {msg_id: expiry_score})
+            pipe.hset(keys.meta, f"{msg_id}:handle", receipt_suffix)
             pipe.hget(keys.data, msg_id)
             pipe.hincrby(keys.meta, f"{msg_id}:count", 1)
             pipe.hget(keys.meta, f"{msg_id}:enqueued")
             results = pipe.execute()
 
-            data = results[1]
-            delivery_count = results[2]
-            enqueued_raw = results[3]
+            data = results[2]
+            delivery_count = results[3]
+            enqueued_raw = results[4]
         else:
             # Use Lua script for atomic non-blocking receive
             lua_keys = [keys.pending, keys.invisible, keys.data, keys.meta]
-            result = self._scripts["receive"](keys=lua_keys, args=[expiry_score, 0])
+            result = self._scripts["receive"](
+                keys=lua_keys, args=[expiry_score, receipt_suffix]
+            )
 
             if result is None:
                 return None
@@ -435,12 +455,13 @@ class RedisMailbox[T]:
         else:
             enqueued_at = datetime.now(UTC)
 
-        # Generate receipt handle
-        receipt_handle = f"{msg_id}:{uuid4()}"
+        # Compose receipt handle from msg_id and suffix
+        receipt_handle = f"{msg_id}:{receipt_suffix}"
 
         # Deserialize body
         body = self._deserialize(data)
 
+        # Bind callbacks with both msg_id and receipt_suffix for validation
         return Message(
             id=msg_id,
             body=body,
@@ -448,39 +469,75 @@ class RedisMailbox[T]:
             delivery_count=delivery_count,
             enqueued_at=enqueued_at,
             attributes={},
-            _acknowledge_fn=lambda mid=msg_id: self._acknowledge(mid),
-            _nack_fn=lambda t, mid=msg_id: self._nack(mid, t),
-            _extend_fn=lambda t, mid=msg_id: self._extend(mid, t),
+            _acknowledge_fn=lambda mid=msg_id, suf=receipt_suffix: self._acknowledge(
+                mid, suf
+            ),
+            _nack_fn=lambda t, mid=msg_id, suf=receipt_suffix: self._nack(mid, suf, t),
+            _extend_fn=lambda t, mid=msg_id, suf=receipt_suffix: self._extend(
+                mid, suf, t
+            ),
         )
 
-    def _acknowledge(self, msg_id: str) -> None:
-        """Delete message from queue."""
+    def _acknowledge(self, msg_id: str, receipt_suffix: str) -> None:
+        """Delete message from queue.
+
+        Args:
+            msg_id: The message ID.
+            receipt_suffix: The receipt handle suffix for validation.
+
+        Raises:
+            ReceiptHandleExpiredError: If the receipt handle doesn't match
+                the current delivery (message was redelivered or already acked).
+        """
         keys = [self._keys.invisible, self._keys.data, self._keys.meta]
-        result = self._scripts["acknowledge"](keys=keys, args=[msg_id])
+        result = self._scripts["acknowledge"](keys=keys, args=[msg_id, receipt_suffix])
         if result == 0:
             raise ReceiptHandleExpiredError(
-                f"Message '{msg_id}' not found or already acknowledged"
+                f"Message '{msg_id}' not found or receipt handle expired"
             )
 
-    def _nack(self, msg_id: str, visibility_timeout: int) -> None:
-        """Return message to queue."""
+    def _nack(self, msg_id: str, receipt_suffix: str, visibility_timeout: int) -> None:
+        """Return message to queue.
+
+        Args:
+            msg_id: The message ID.
+            receipt_suffix: The receipt handle suffix for validation.
+            visibility_timeout: Seconds before message becomes visible again.
+
+        Raises:
+            ReceiptHandleExpiredError: If the receipt handle doesn't match
+                the current delivery.
+        """
         new_score = time.time() + visibility_timeout if visibility_timeout > 0 else 0
-        keys = [self._keys.invisible, self._keys.pending]
-        result = self._scripts["nack"](keys=keys, args=[msg_id, new_score])
+        keys = [self._keys.invisible, self._keys.pending, self._keys.meta]
+        result = self._scripts["nack"](
+            keys=keys, args=[msg_id, receipt_suffix, new_score]
+        )
         if result == 0:
             raise ReceiptHandleExpiredError(
-                f"Message '{msg_id}' not found or already acknowledged"
+                f"Message '{msg_id}' not found or receipt handle expired"
             )
 
-    def _extend(self, msg_id: str, timeout: int) -> None:
-        """Extend visibility timeout."""
+    def _extend(self, msg_id: str, receipt_suffix: str, timeout: int) -> None:
+        """Extend visibility timeout.
+
+        Args:
+            msg_id: The message ID.
+            receipt_suffix: The receipt handle suffix for validation.
+            timeout: New visibility timeout in seconds from now.
+
+        Raises:
+            ReceiptHandleExpiredError: If the receipt handle doesn't match
+                the current delivery.
+        """
         new_score = time.time() + timeout
         result = self._scripts["extend"](
-            keys=[self._keys.invisible], args=[msg_id, new_score]
+            keys=[self._keys.invisible, self._keys.meta],
+            args=[msg_id, receipt_suffix, new_score],
         )
         if result == 0:
             raise ReceiptHandleExpiredError(
-                f"Message '{msg_id}' not found or already acknowledged"
+                f"Message '{msg_id}' not found or receipt handle expired"
             )
 
     def purge(self) -> int:

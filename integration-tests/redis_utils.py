@@ -30,6 +30,8 @@ Example::
         assert client.get("key") == b"value"
 """
 
+# pyright: reportInvalidTypeArguments=false
+
 from __future__ import annotations
 
 import os
