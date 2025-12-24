@@ -5,12 +5,15 @@
 Integrate DSPy as a foundational library for prompt optimization. This spec
 defines the core building blocks: a language model adapter that routes DSPy
 calls through weakincentives adapters, and the bridge layer that translates
-between DSPy programs and weakincentives prompts.
+between DSPy programs and weakincentives prompts. Training data uses the
+`Dataset` type from evals; metrics bridge to `Evaluator`.
 
 ## Guiding Principles
 
 - **Adapter-first**: All DSPy LLM calls flow through weakincentives adapters,
   inheriting throttling, deadlines, and observability.
+- **Evals-native data**: Training data uses `Dataset[InputT, ExpectedT]`;
+  metrics use `Evaluator[OutputT, ExpectedT]`.
 - **Override-native persistence**: Optimized prompts persist through the
   existing override system.
 - **Minimal surface area**: Expose only what's needed to run DSPy optimizers;
@@ -30,11 +33,9 @@ class WeakIncentivesLM(dspy.LM):
     def __init__(
         self,
         adapter: ProviderAdapter[object],
-        bus: EventBus,
         session: SessionProtocol,
     ) -> None:
         self._adapter = adapter
-        self._bus = bus
         self._session = session
 
     def __call__(
@@ -45,10 +46,9 @@ class WeakIncentivesLM(dspy.LM):
         # Build a simple prompt from the DSPy request
         wink_prompt = self._build_prompt(prompt, **kwargs)
 
-        # Execute through the adapter
+        # Execute through the adapter (telemetry via session.dispatcher)
         response = self._adapter.evaluate(
             wink_prompt,
-            bus=self._bus,
             session=self._session,
         )
 
@@ -67,7 +67,7 @@ class WeakIncentivesLM(dspy.LM):
 This ensures DSPy operations get:
 - Throttle protection and retry logic
 - Deadline enforcement
-- Event emission for observability
+- Event emission via `session.dispatcher`
 - Budget tracking
 
 **Usage:**
@@ -75,15 +75,15 @@ This ensures DSPy operations get:
 ```python
 import dspy
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import Session, InProcessEventBus
+from weakincentives.runtime import Session, ControlDispatcher
 from weakincentives.optimizers.dspy import WeakIncentivesLM
 
 adapter = OpenAIAdapter(model="gpt-4o")
-bus = InProcessEventBus()
-session = Session(bus=bus)
+dispatcher = ControlDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # Configure DSPy to use our adapter
-lm = WeakIncentivesLM(adapter, bus, session)
+lm = WeakIncentivesLM(adapter, session)
 dspy.configure(lm=lm)
 
 # Now DSPy programs run through weakincentives
@@ -149,9 +149,68 @@ def persist_to_overrides(
         )
 ```
 
+### Dataset Bridge
+
+Convert between evals `Dataset` and DSPy trainset:
+
+```python
+def dataset_to_trainset(
+    dataset: Dataset[InputT, ExpectedT],
+    input_field: str = "input",
+    output_field: str = "expected",
+) -> list[dspy.Example]:
+    """
+    Convert a weakincentives Dataset to DSPy training examples.
+
+    Args:
+        dataset: Evals dataset with samples
+        input_field: Name for the input field in DSPy Example
+        output_field: Name for the output field in DSPy Example
+
+    Returns:
+        List of DSPy Examples with .with_inputs() called
+    """
+    examples = []
+    for sample in dataset:
+        ex = dspy.Example(**{
+            input_field: sample.input,
+            output_field: sample.expected,
+        }).with_inputs(input_field)
+        examples.append(ex)
+    return examples
+```
+
+### Evaluator Bridge
+
+Wrap an evals `Evaluator` as a DSPy metric:
+
+```python
+def evaluator_to_metric(
+    evaluator: Evaluator[OutputT, ExpectedT],
+    output_field: str = "expected",
+) -> Callable[[dspy.Example, dspy.Prediction], bool]:
+    """
+    Wrap a weakincentives Evaluator as a DSPy metric function.
+
+    Args:
+        evaluator: Evals evaluator (output, expected) -> Score
+        output_field: Field name containing expected value in Example
+
+    Returns:
+        DSPy-compatible metric function
+    """
+    def metric(example: dspy.Example, prediction: dspy.Prediction) -> bool:
+        expected = getattr(example, output_field)
+        output = prediction.get(output_field, "")
+        score = evaluator(output, expected)
+        return score.passed
+    return metric
+```
+
 ## BootstrapFewShotOptimizer
 
-A `BasePromptOptimizer` implementation that wraps DSPy's BootstrapFewShot:
+A `BasePromptOptimizer` implementation that wraps DSPy's BootstrapFewShot,
+accepting evals `Dataset` and `Evaluator`:
 
 ```python
 @dataclass(slots=True, frozen=True)
@@ -167,20 +226,23 @@ class BootstrapFewShotOptimizer(BasePromptOptimizer[object, BootstrapFewShotResu
 
     Wraps DSPy optimization in the weakincentives optimizer protocol,
     handling LM configuration, event emission, and override persistence.
+    Accepts evals Dataset and Evaluator types.
     """
 
     def __init__(
         self,
         context: OptimizationContext,
         *,
-        trainset: Sequence[dspy.Example],
-        metric: Callable[[dspy.Example, dspy.Prediction], bool | float],
+        dataset: Dataset[Any, Any],
+        evaluator: Evaluator[Any, Any],
+        input_field: str = "input",
+        output_field: str = "expected",
         max_bootstrapped_demos: int = 4,
         max_labeled_demos: int = 16,
     ) -> None:
         super().__init__(context)
-        self._trainset = trainset
-        self._metric = metric
+        self._trainset = dataset_to_trainset(dataset, input_field, output_field)
+        self._metric = evaluator_to_metric(evaluator, output_field)
         self._max_bootstrapped_demos = max_bootstrapped_demos
         self._max_labeled_demos = max_labeled_demos
 
@@ -195,11 +257,7 @@ class BootstrapFewShotOptimizer(BasePromptOptimizer[object, BootstrapFewShotResu
         session: SessionProtocol,
     ) -> BootstrapFewShotResult:
         # Configure DSPy to use our adapter
-        lm = WeakIncentivesLM(
-            self._context.adapter,
-            self._context.event_bus,
-            session,
-        )
+        lm = WeakIncentivesLM(self._context.adapter, session)
         dspy.configure(lm=lm)
 
         # Convert prompt to DSPy module
@@ -236,23 +294,25 @@ class BootstrapFewShotOptimizer(BasePromptOptimizer[object, BootstrapFewShotResu
 ```python
 from weakincentives.optimizers import OptimizationContext
 from weakincentives.optimizers.dspy import BootstrapFewShotOptimizer
+from weakincentives.evals import Dataset, Sample, exact_match
+
+# Create dataset using evals types
+dataset = Dataset(samples=(
+    Sample(id="1", input="What is 2+2?", expected="4"),
+    Sample(id="2", input="Capital of France?", expected="Paris"),
+))
 
 context = OptimizationContext(
     adapter=adapter,
-    event_bus=bus,
+    dispatcher=dispatcher,
     overrides_store=store,
     overrides_tag="bootstrap-v1",
 )
 
-trainset = [
-    dspy.Example(question="What is 2+2?", answer="4").with_inputs("question"),
-    dspy.Example(question="Capital of France?", answer="Paris").with_inputs("question"),
-]
-
 optimizer = BootstrapFewShotOptimizer(
     context,
-    trainset=trainset,
-    metric=lambda ex, pred: ex.answer == pred.answer,
+    dataset=dataset,
+    evaluator=exact_match,  # From weakincentives.evals
 )
 
 result = optimizer.optimize(my_prompt, session=session)
@@ -267,35 +327,40 @@ For more control, use the building blocks directly:
 import dspy
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
-from weakincentives.runtime import Session, InProcessEventBus
+from weakincentives.runtime import Session, ControlDispatcher
+from weakincentives.evals import Dataset, Sample, exact_match
 from weakincentives.optimizers.dspy import (
     WeakIncentivesLM,
     prompt_to_module,
     extract_optimized_sections,
     persist_to_overrides,
+    dataset_to_trainset,
+    evaluator_to_metric,
 )
 
 # Setup
 adapter = OpenAIAdapter(model="gpt-4o")
-bus = InProcessEventBus()
-session = Session(bus=bus)
+dispatcher = ControlDispatcher()
+session = Session(dispatcher=dispatcher)
 store = LocalPromptOverridesStore()
 
 # Configure DSPy with our adapter
-lm = WeakIncentivesLM(adapter, bus, session)
+lm = WeakIncentivesLM(adapter, session)
 dspy.configure(lm=lm)
 
-# Training examples
-trainset = [
-    dspy.Example(question="What is 2+2?", answer="4").with_inputs("question"),
-    dspy.Example(question="Capital of France?", answer="Paris").with_inputs("question"),
-]
+# Training data using evals Dataset
+dataset = Dataset(samples=(
+    Sample(id="1", input="What is 2+2?", expected="4"),
+    Sample(id="2", input="Capital of France?", expected="Paris"),
+))
+trainset = dataset_to_trainset(dataset)
+metric = evaluator_to_metric(exact_match)
 
 # Convert prompt to DSPy module
 module = prompt_to_module(my_prompt)
 
 # Run DSPy optimization
-optimizer = dspy.BootstrapFewShot(metric=lambda ex, pred: ex.answer == pred.answer)
+optimizer = dspy.BootstrapFewShot(metric=metric)
 optimized = optimizer.compile(module, trainset=trainset)
 
 # Extract and persist
@@ -303,32 +368,41 @@ sections = extract_optimized_sections(my_prompt, optimized)
 persist_to_overrides(my_prompt, sections, store, tag="bootstrap-v1")
 
 # Use optimized prompt
-response = adapter.evaluate(
-    my_prompt,
-    bus=bus,
-    session=session,
+optimized_prompt = Prompt(
+    my_template,
     overrides_store=store,
     overrides_tag="bootstrap-v1",
-)
+).bind(params)
+response = adapter.evaluate(optimized_prompt, session=session)
 ```
 
-## Metric Functions
+## Metrics via Evals
 
-DSPy optimizers require a metric. Use simple callables:
+Use built-in evaluators from `weakincentives.evals`:
 
 ```python
+from weakincentives.evals import exact_match, contains, all_of, llm_judge
+
 # Exact match
-def exact_match(example, prediction) -> bool:
-    return example.answer == prediction.answer
+optimizer = BootstrapFewShotOptimizer(
+    context,
+    dataset=dataset,
+    evaluator=exact_match,
+)
 
-# Fuzzy match
-def contains_answer(example, prediction) -> bool:
-    return example.answer.lower() in prediction.answer.lower()
+# Substring match
+optimizer = BootstrapFewShotOptimizer(
+    context,
+    dataset=dataset,
+    evaluator=contains,
+)
 
-# LLM-as-judge (uses the same adapter)
-def llm_judge(example, prediction) -> float:
-    # Evaluate using a separate prompt through the adapter
-    ...
+# Composite criteria
+optimizer = BootstrapFewShotOptimizer(
+    context,
+    dataset=dataset,
+    evaluator=all_of(contains, llm_judge(judge_adapter, "factually accurate")),
+)
 ```
 
 ## File Layout
@@ -338,6 +412,7 @@ src/weakincentives/optimizers/dspy/
 ├── __init__.py              # Public exports
 ├── _lm.py                   # WeakIncentivesLM
 ├── _bridge.py               # prompt_to_module, extract_optimized_sections
+├── _data.py                 # dataset_to_trainset, evaluator_to_metric
 ├── _persist.py              # persist_to_overrides
 └── _bootstrap_few_shot.py   # BootstrapFewShotOptimizer
 ```
