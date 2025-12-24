@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check property-tests stress-tests verify-mailbox demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -91,6 +91,35 @@ redis-cluster-tests:
 # Validate integration tests (typecheck without running)
 validate-integration-tests:
 	@uv run --all-extras python build/validate_integration_tests.py -q
+
+# =============================================================================
+# Formal Verification
+# =============================================================================
+
+# Run TLC model checker on Redis mailbox spec
+tlaplus-check:
+	@echo "Running TLC model checker..."
+	@if command -v tlc >/dev/null 2>&1; then \
+		cd specs/tla && tlc RedisMailboxMC.tla -config RedisMailboxMC.cfg -workers auto; \
+	else \
+		echo "TLC not installed. Install with: brew install tlaplus"; \
+		exit 1; \
+	fi
+
+# Run Hypothesis property-based tests
+property-tests:
+	@uv run --all-extras pytest tests/contrib/mailbox/test_redis_mailbox_properties.py \
+		tests/contrib/mailbox/test_redis_mailbox_invariants.py \
+		--no-cov -v --hypothesis-show-statistics
+
+# Run concurrent stress tests
+stress-tests:
+	@uv run --all-extras pytest tests/contrib/mailbox/test_redis_mailbox_stress.py \
+		--no-cov -v -m slow --timeout=120
+
+# Run all mailbox verification
+verify-mailbox: tlaplus-check property-tests
+	@echo "All mailbox verification checks passed"
 
 # Launch the interactive code reviewer demo
 demo:

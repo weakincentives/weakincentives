@@ -1,0 +1,86 @@
+# Formal Verification Workflow
+#
+# Runs TLA+ model checking and property-based tests when Redis mailbox
+# code or verification specs change.
+
+name: Formal Verification
+
+on:
+  push:
+    paths:
+      - 'src/weakincentives/contrib/mailbox/_redis.py'
+      - 'specs/tla/**'
+      - 'tests/contrib/mailbox/test_redis_mailbox_*.py'
+  pull_request:
+    paths:
+      - 'src/weakincentives/contrib/mailbox/_redis.py'
+      - 'specs/tla/**'
+      - 'tests/contrib/mailbox/test_redis_mailbox_*.py'
+
+jobs:
+  tlaplus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache TLA+ Tools
+        id: cache-tlaplus
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/tla2tools.jar
+          key: tlaplus-v1.8.0
+
+      - name: Install TLA+ Tools
+        if: steps.cache-tlaplus.outputs.cache-hit != 'true'
+        run: |
+          wget -q https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+          sudo mv tla2tools.jar /usr/local/lib/
+
+      - name: Run TLC
+        run: |
+          cd specs/tla
+          java -jar /usr/local/lib/tla2tools.jar \
+            -config RedisMailboxMC.cfg \
+            RedisMailboxMC.tla \
+            -workers auto
+
+  property-tests:
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run property tests
+        run: |
+          uv run --all-extras pytest \
+            tests/contrib/mailbox/test_redis_mailbox_properties.py \
+            tests/contrib/mailbox/test_redis_mailbox_invariants.py \
+            --no-cov -v --hypothesis-show-statistics
+
+      - name: Run stress tests
+        run: |
+          uv run --all-extras pytest \
+            tests/contrib/mailbox/test_redis_mailbox_stress.py \
+            --no-cov -v -m slow --timeout=120
