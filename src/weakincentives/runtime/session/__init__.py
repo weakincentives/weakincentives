@@ -12,7 +12,6 @@
 
 """Session state container for agent runs."""
 
-from ._observer_types import SliceObserver, Subscription
 from ._types import (
     ReducerContextProtocol,
     ReducerEvent,
@@ -61,13 +60,11 @@ __all__ = [
     "SessionProtocol",
     "SetVisibilityOverride",
     "SliceAccessor",
-    "SliceObserver",
     "SlicePolicy",
     "Snapshot",
     "SnapshotProtocol",
     "SnapshotRestoreError",
     "SnapshotSerializationError",
-    "Subscription",
     "TypedReducer",
     "VisibilityOverrides",
     "append_all",

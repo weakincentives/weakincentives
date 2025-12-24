@@ -1356,7 +1356,7 @@ def risky_handler(params, *, context):
     session = context.session
 
     # Update session state
-    session.broadcast(UpdatePlan(status="in-progress"))
+    session.dispatch(UpdatePlan(status="in-progress"))
 
     # Write to filesystem
     fs.write("output.txt", "partial results")
@@ -1474,8 +1474,8 @@ class Plan:
     steps: tuple[str, ...]
 
 session[Plan].register(Plan, replace_latest)
-session.broadcast(Plan(steps=("step 1",)))
-session.broadcast(Plan(steps=("step 2",)))
+session.dispatch(Plan(steps=("step 1",)))
+session.dispatch(Plan(steps=("step 2",)))
 assert session[Plan].all() == (Plan(steps=("step 2",)),)
 ```
 
@@ -1500,8 +1500,8 @@ class AgentPlan:
         return replace(self, steps=(*self.steps, event.step))
 
 session.install(AgentPlan, initial=lambda: AgentPlan(steps=()))
-session.broadcast(AddStep(step="read README"))
-session.broadcast(AddStep(step="run tests"))
+session.dispatch(AddStep(step="read README"))
+session.dispatch(AddStep(step="run tests"))
 ```
 
 This pattern keeps reducer logic close to the data it operates on. The
@@ -1704,8 +1704,7 @@ response, session = loop.execute(request)
 ```
 
 Resources configured this way are available to all tool handlers during
-execution. You can also pass resources directly to `loop.execute(request,
-resources=...)` for per-request overrides.
+execution. You can also pass resources directly to `loop.execute(request, resources=...)` for per-request overrides.
 
 ### 7.2 Deadlines and budgets
 
@@ -2636,7 +2635,7 @@ registered reducers for your event types:
 
 ```python
 session[Plan].register(AddStep, my_reducer)
-session.broadcast(AddStep(step="do thing"))
+session.dispatch(AddStep(step="do thing"))
 ```
 
 ### Debugging prompts
