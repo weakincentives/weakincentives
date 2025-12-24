@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping, MutableMapping
 from dataclasses import field, is_dataclass, replace
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, Literal, cast, override
 
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
@@ -45,9 +45,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
-
-
-OutputT_co = TypeVar("OutputT_co", covariant=True)
 
 
 @FrozenDataclass()
@@ -117,9 +114,6 @@ def _freeze_tool_param_descriptions(
     for name, field_mapping in descriptions.items():
         frozen[name] = MappingProxyType(dict(field_mapping))
     return MappingProxyType(frozen)
-
-
-OutputT = TypeVar("OutputT")
 
 
 class PromptRenderer[OutputT]:

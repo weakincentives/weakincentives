@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, TypeVar
+from typing import TYPE_CHECKING, Protocol
 
 from ...types.dataclass import SupportsDataclass
 
@@ -27,16 +27,13 @@ if TYPE_CHECKING:
 ReducerEvent = SupportsDataclass
 
 
-S = TypeVar("S", bound=SupportsDataclass)
-
-
 class ReducerContextProtocol(Protocol):
     """Protocol implemented by reducer context objects."""
 
     session: SessionProtocol
 
 
-class TypedReducer(Protocol[S]):
+class TypedReducer[S: SupportsDataclass](Protocol):
     """Protocol for reducer callables maintained by :class:`Session`."""
 
     def __call__(

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypeVar, cast, override
+from typing import Any, cast, override
 
 from ...budget import Budget, BudgetTracker
 from ...contrib.tools.filesystem_host import HostFilesystem
@@ -61,8 +61,6 @@ logger: StructuredLogger = get_logger(
     __name__, context={"component": "claude_agent_sdk"}
 )
 
-OutputT = TypeVar("OutputT")
-
 CLAUDE_AGENT_SDK_ADAPTER_NAME: AdapterName = "claude_agent_sdk"
 """Canonical label for the Claude Agent SDK adapter."""
 
@@ -84,7 +82,7 @@ def _import_sdk() -> Any:  # pragma: no cover
         ) from error
 
 
-class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
+class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
     """Adapter using Claude Agent SDK with hook-based state synchronization.
 
     This adapter uses the Claude Agent SDK's ClaudeSDKClient to execute

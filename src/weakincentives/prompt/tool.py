@@ -71,14 +71,15 @@ if TYPE_CHECKING:
         RenderedPromptProtocol,
     )
 
+type ParamsType = type[SupportsDataclass] | type[None]
+type ResultType = type[SupportsDataclass] | type[None]
+
+# Contravariance for ParamsT allows a handler accepting broader param types
+# to substitute for one requiring narrower types (Liskov substitution).
 ParamsT_contra = TypeVar(
     "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
 )
 ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
-ParamsT_runtime = TypeVar("ParamsT_runtime", bound=SupportsDataclassOrNone)
-ResultT_runtime = TypeVar("ResultT_runtime", bound=SupportsToolResult)
-type ParamsType = type[SupportsDataclass] | type[None]
-type ResultType = type[SupportsDataclass] | type[None]
 
 
 @dataclass(slots=True, frozen=True)
@@ -800,7 +801,10 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         )
 
     @staticmethod
-    def _resolve_wrapped_description(
+    def _resolve_wrapped_description[
+        ParamsT_runtime: SupportsDataclassOrNone,
+        ResultT_runtime: SupportsToolResult,
+    ](
         fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
     ) -> str:
         description = inspect.getdoc(fn)
@@ -869,7 +873,10 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         return cast(SupportsToolResult, _coerce_none_type(result_arg))
 
     @staticmethod
-    def wrap(
+    def wrap[
+        ParamsT_runtime: SupportsDataclassOrNone,
+        ResultT_runtime: SupportsToolResult,
+    ](
         fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
     ) -> Tool[ParamsT_runtime, ResultT_runtime]:
         """Create a Tool from a handler using its name and docstring."""

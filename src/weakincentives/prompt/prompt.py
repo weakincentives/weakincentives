@@ -19,9 +19,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
-    Generic,
     Literal,
-    TypeVar,
     cast,
     get_args,
     get_origin,
@@ -42,8 +40,6 @@ if TYPE_CHECKING:
     from ..runtime.session.protocols import SessionProtocol
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
-
-OutputT = TypeVar("OutputT", covariant=True)
 
 
 def _format_specialization_argument(argument: object | None) -> str:
@@ -90,7 +86,7 @@ def _resolve_output_spec(
 
 
 @FrozenDataclass(slots=False)
-class PromptTemplate(Generic[OutputT]):  # noqa: UP046
+class PromptTemplate[OutputT]:
     """Coordinate prompt sections and their parameter bindings.
 
     PromptTemplate is an immutable dataclass that coordinates prompt sections
@@ -251,7 +247,7 @@ class PromptTemplate(Generic[OutputT]):  # noqa: UP046
         )
 
 
-class Prompt(Generic[OutputT]):  # noqa: UP046
+class Prompt[OutputT]:
     """Bind a prompt template with overrides and parameters for rendering.
 
     Prompt is the only way to render a PromptTemplate. It holds the runtime

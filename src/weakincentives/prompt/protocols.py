@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from ..deadlines import Deadline
 from ._overrides_protocols import PromptOverridesStore
@@ -27,19 +27,14 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
 
-PromptOutputT = TypeVar("PromptOutputT")
-TemplateOutputT = TypeVar("TemplateOutputT", covariant=True)
-RenderedOutputT = TypeVar("RenderedOutputT", covariant=True)
-AdapterOutputT = TypeVar("AdapterOutputT")
 
-
-class PromptResponseProtocol(Protocol[AdapterOutputT]):
+class PromptResponseProtocol[AdapterOutputT](Protocol):
     prompt_name: str
     text: str | None
     output: AdapterOutputT | None
 
 
-class RenderedPromptProtocol(Protocol[RenderedOutputT]):
+class RenderedPromptProtocol[RenderedOutputT](Protocol):
     """Interface satisfied by rendered prompt snapshots."""
 
     @property
@@ -72,7 +67,7 @@ class RenderedPromptProtocol(Protocol[RenderedOutputT]):
     ) -> StructuredOutputConfig[SupportsDataclass] | None: ...
 
 
-class PromptTemplateProtocol(Protocol[TemplateOutputT]):
+class PromptTemplateProtocol[TemplateOutputT](Protocol):
     """Interface describing the subset of prompt template state exposed to tools.
 
     Note: PromptTemplate does NOT have a render() method. Rendering is performed
@@ -92,7 +87,7 @@ class PromptTemplateProtocol(Protocol[TemplateOutputT]):
     ) -> StructuredOutputConfig[SupportsDataclass] | None: ...
 
 
-class PromptProtocol(Protocol[PromptOutputT]):
+class PromptProtocol[PromptOutputT](Protocol):
     """Interface describing the bound prompt wrapper used at runtime."""
 
     template: PromptTemplateProtocol[PromptOutputT]
@@ -119,7 +114,7 @@ class PromptProtocol(Protocol[PromptOutputT]):
     def render(self) -> RenderedPromptProtocol[PromptOutputT]: ...
 
 
-class ProviderAdapterProtocol(Protocol[AdapterOutputT]):
+class ProviderAdapterProtocol[AdapterOutputT](Protocol):
     """Interface describing the subset of adapter behaviour required by tools.
 
     Telemetry is dispatched via session.dispatcher.

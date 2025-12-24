@@ -19,7 +19,10 @@ from typing import Protocol, TypeVar
 from ..prompt import Prompt
 from ..runtime.session.protocols import SessionProtocol
 
-InputT = TypeVar("InputT", contravariant=True)
+# OutputT is covariant: optimizer can return more specific result types.
+# InputT is invariant (pyright requirement): Prompt[InputT] in parameter position
+# with invariant Prompt type parameter requires InputT to be invariant.
+InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT", covariant=True)
 
 

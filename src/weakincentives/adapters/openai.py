@@ -20,7 +20,7 @@ from dataclasses import dataclass, replace
 from datetime import timedelta
 from http import HTTPStatus
 from importlib import import_module
-from typing import Any, Final, Protocol, TypeVar, cast, override
+from typing import Any, Final, Protocol, cast, override
 
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
@@ -59,8 +59,6 @@ from .utilities import (
     format_dispatch_failures,
     parse_tool_arguments,
 )
-
-OutputT = TypeVar("OutputT")
 
 _ERROR_MESSAGE: Final[str] = (
     "OpenAI support requires the optional 'openai' dependency. "
@@ -598,7 +596,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._tool_choice: ToolChoice = tool_choice
 
     @override
-    def evaluate(
+    def evaluate[OutputT](
         self,
         prompt: Prompt[OutputT],
         *,
@@ -657,7 +655,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
 
         return run_inner_loop(inputs=inputs, config=config)
 
-    def _setup_evaluation(
+    def _setup_evaluation[OutputT](
         self,
         prompt: Prompt[OutputT],
         *,
@@ -696,7 +694,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             )
 
     @staticmethod
-    def _render_prompt(
+    def _render_prompt[OutputT](
         prompt: Prompt[OutputT],
         *,
         deadline: Deadline | None,

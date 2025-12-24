@@ -12,30 +12,22 @@
 
 from __future__ import annotations
 
-from typing import ClassVar, Generic, TypeVar, cast
+from typing import ClassVar, Self, cast
 
 from ._types import SupportsDataclass
 
-ParamsT = TypeVar("ParamsT", bound=SupportsDataclass, covariant=True)
 
-SelfClass = TypeVar(
-    "SelfClass",
-    bound="GenericParamsSpecializer[SupportsDataclass]",
-    covariant=True,
-)
-
-
-class GenericParamsSpecializer(Generic[ParamsT]):  # noqa: UP046
+class GenericParamsSpecializer[ParamsT: SupportsDataclass]:
     """Mixin providing ``ParamsT`` specialization for prompt components."""
 
     _params_type: ClassVar[type[SupportsDataclass] | None] = None
     _generic_owner_name: ClassVar[str | None] = None
 
     @classmethod
-    def __class_getitem__(cls: type[SelfClass], item: object) -> type[SelfClass]:
+    def __class_getitem__(cls, item: object) -> type[Self]:
         params_type = cls._normalize_generic_argument(item)
         specialized = cast(
-            "type[SelfClass]",
+            "type[Self]",
             type(cls.__name__, (cls,), {}),
         )
         specialized.__name__ = cls.__name__
