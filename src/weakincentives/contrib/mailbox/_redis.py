@@ -368,6 +368,8 @@ class RedisMailbox[T]:
 
             return messages
 
+        except SerializationError:
+            raise
         except Exception as e:
             if self._closed:
                 return messages
