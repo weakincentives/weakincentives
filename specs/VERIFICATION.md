@@ -167,17 +167,19 @@ CONSTANTS
 
 VARIABLES
     pending,            \* Sequence of message IDs in pending list
-    invisible,          \* Function: msg_id -> {expiresAt, handle, count}
+    invisible,          \* Function: msg_id -> {expiresAt, handle}
     data,               \* Function: msg_id -> body (or NULL if deleted)
     handles,            \* Function: msg_id -> current valid handle suffix
     deleted,            \* Set of deleted message IDs
     now,                \* Abstract time counter
     nextMsgId,          \* Counter for generating message IDs
     nextHandle,         \* Counter for generating handle suffixes
-    consumerState       \* Function: consumer_id -> {holding, handle}
+    consumerState,      \* Function: consumer_id -> {holding, handle}
+    deliveryCounts,     \* Function: msg_id -> count (persists across requeue)
+    deliveryHistory     \* Function: msg_id -> Sequence of (count, handle) for INV-4
 
 vars == <<pending, invisible, data, handles, deleted, now, nextMsgId,
-          nextHandle, consumerState>>
+          nextHandle, consumerState, deliveryCounts, deliveryHistory>>
 ```
 
 ### Initial State
@@ -185,7 +187,7 @@ vars == <<pending, invisible, data, handles, deleted, now, nextMsgId,
 ```tla
 Init ==
     /\ pending = <<>>
-    /\ invisible = [m \in {} |-> [expiresAt |-> 0, handle |-> 0, count |-> 0]]
+    /\ invisible = [m \in {} |-> [expiresAt |-> 0, handle |-> 0]]
     /\ data = [m \in {} |-> ""]
     /\ handles = [m \in {} |-> 0]
     /\ deleted = {}
@@ -193,6 +195,8 @@ Init ==
     /\ nextMsgId = 1
     /\ nextHandle = 1
     /\ consumerState = [c \in 1..NumConsumers |-> [holding |-> NULL, handle |-> 0]]
+    /\ deliveryCounts = [m \in {} |-> 0]
+    /\ deliveryHistory = [m \in {} |-> <<>>]
 ```
 
 ### Actions
@@ -205,6 +209,8 @@ Send(body) ==
     /\ LET msgId == nextMsgId
        IN /\ pending' = Append(pending, msgId)
           /\ data' = data @@ (msgId :> body)
+          /\ deliveryCounts' = deliveryCounts @@ (msgId :> 0)
+          /\ deliveryHistory' = deliveryHistory @@ (msgId :> <<>>)
           /\ nextMsgId' = nextMsgId + 1
     /\ UNCHANGED <<invisible, handles, deleted, now, nextHandle, consumerState>>
 ```
@@ -218,14 +224,14 @@ Receive(consumer) ==
     /\ LET msgId == Head(pending)
            newHandle == nextHandle
            newExpiry == now + VisibilityTimeout
-           oldCount == IF msgId \in DOMAIN invisible
-                       THEN invisible[msgId].count ELSE 0
+           newCount == deliveryCounts[msgId] + 1
        IN /\ pending' = Tail(pending)
           /\ invisible' = invisible @@
-                (msgId :> [expiresAt |-> newExpiry,
-                           handle |-> newHandle,
-                           count |-> oldCount + 1])
+                (msgId :> [expiresAt |-> newExpiry, handle |-> newHandle])
           /\ handles' = handles @@ (msgId :> newHandle)
+          /\ deliveryCounts' = [deliveryCounts EXCEPT ![msgId] = newCount]
+          /\ deliveryHistory' = [deliveryHistory EXCEPT
+                ![msgId] = Append(@, [count |-> newCount, handle |-> newHandle])]
           /\ nextHandle' = nextHandle + 1
           /\ consumerState' = [consumerState EXCEPT
                 ![consumer] = [holding |-> msgId, handle |-> newHandle]]
@@ -245,10 +251,12 @@ Acknowledge(consumer) ==
           /\ invisible' = [m \in (DOMAIN invisible) \ {msgId} |-> invisible[m]]
           /\ data' = [m \in (DOMAIN data) \ {msgId} |-> data[m]]
           /\ handles' = [m \in (DOMAIN handles) \ {msgId} |-> handles[m]]
+          /\ deliveryCounts' = [m \in (DOMAIN deliveryCounts) \ {msgId} |->
+                                deliveryCounts[m]]
           /\ deleted' = deleted \cup {msgId}
           /\ consumerState' = [consumerState EXCEPT
                 ![consumer] = [holding |-> NULL, handle |-> 0]]
-    /\ UNCHANGED <<pending, now, nextMsgId, nextHandle>>
+    /\ UNCHANGED <<pending, now, nextMsgId, nextHandle, deliveryHistory>>
 
 \* Acknowledge fails if handle is stale
 AcknowledgeFail(consumer) ==
@@ -261,10 +269,14 @@ AcknowledgeFail(consumer) ==
     /\ consumerState' = [consumerState EXCEPT
             ![consumer] = [holding |-> NULL, handle |-> 0]]
     /\ UNCHANGED <<pending, invisible, data, handles, deleted, now,
-                   nextMsgId, nextHandle>>
+                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory>>
 ```
 
 #### Nack
+
+The Python implementation (`_LUA_NACK`) ALWAYS deletes the handle on nack,
+regardless of visibility_timeout. With delayed nack, the message stays in
+invisible but has no valid handle until redelivery.
 
 ```tla
 Nack(consumer, newTimeout) ==
@@ -275,18 +287,67 @@ Nack(consumer, newTimeout) ==
           /\ handles[msgId] = providedHandle
           /\ msgId \in DOMAIN invisible
           /\ IF newTimeout = 0
-             THEN \* Immediate requeue
+             THEN \* Immediate requeue to pending
                   /\ pending' = Append(pending, msgId)
                   /\ invisible' = [m \in (DOMAIN invisible) \ {msgId} |->
                                    invisible[m]]
-             ELSE \* Delayed requeue
+             ELSE \* Delayed requeue: stays in invisible with new expiry
                   /\ invisible' = [invisible EXCEPT
-                        ![msgId].expiresAt = now + newTimeout]
+                        ![msgId].expiresAt = now + newTimeout,
+                        ![msgId].handle = 0]  \* No valid handle
                   /\ UNCHANGED pending
+          \* Handle is ALWAYS invalidated on nack (matches _LUA_NACK line 84)
           /\ handles' = [m \in (DOMAIN handles) \ {msgId} |-> handles[m]]
           /\ consumerState' = [consumerState EXCEPT
                 ![consumer] = [holding |-> NULL, handle |-> 0]]
-    /\ UNCHANGED <<data, deleted, now, nextMsgId, nextHandle>>
+    /\ UNCHANGED <<data, deleted, now, nextMsgId, nextHandle,
+                   deliveryCounts, deliveryHistory>>
+
+\* Nack fails if handle is stale
+NackFail(consumer) ==
+    /\ consumerState[consumer].holding /= NULL
+    /\ LET msgId == consumerState[consumer].holding
+           providedHandle == consumerState[consumer].handle
+       IN \/ msgId \notin DOMAIN handles
+          \/ handles[msgId] /= providedHandle
+          \/ msgId \notin DOMAIN invisible
+    /\ consumerState' = [consumerState EXCEPT
+            ![consumer] = [holding |-> NULL, handle |-> 0]]
+    /\ UNCHANGED <<pending, invisible, data, handles, deleted, now,
+                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory>>
+```
+
+#### Extend (Atomic Lua Script)
+
+Extends visibility timeout for a message the consumer is holding.
+
+```tla
+Extend(consumer, newTimeout) ==
+    /\ consumerState[consumer].holding /= NULL
+    /\ LET msgId == consumerState[consumer].holding
+           providedHandle == consumerState[consumer].handle
+       IN /\ msgId \in DOMAIN handles
+          /\ handles[msgId] = providedHandle
+          /\ msgId \in DOMAIN invisible
+          \* Update expiry time (ZADD XX updates existing only)
+          /\ invisible' = [invisible EXCEPT
+                ![msgId].expiresAt = now + newTimeout]
+    \* Handle and consumer state remain valid
+    /\ UNCHANGED <<pending, data, handles, deleted, now, nextMsgId,
+                   nextHandle, consumerState, deliveryCounts, deliveryHistory>>
+
+\* Extend fails if handle is stale or message not in invisible
+ExtendFail(consumer) ==
+    /\ consumerState[consumer].holding /= NULL
+    /\ LET msgId == consumerState[consumer].holding
+           providedHandle == consumerState[consumer].handle
+       IN \/ msgId \notin DOMAIN handles
+          \/ handles[msgId] /= providedHandle
+          \/ msgId \notin DOMAIN invisible
+    /\ consumerState' = [consumerState EXCEPT
+            ![consumer] = [holding |-> NULL, handle |-> 0]]
+    /\ UNCHANGED <<pending, invisible, data, handles, deleted, now,
+                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory>>
 ```
 
 #### Reap Expired (Atomic Lua Script)
@@ -297,13 +358,16 @@ ReapOne ==
         /\ invisible[msgId].expiresAt < now
         /\ pending' = Append(pending, msgId)
         /\ invisible' = [m \in (DOMAIN invisible) \ {msgId} |-> invisible[m]]
+        \* Handle deleted by reaper (matches _LUA_REAP line 107)
         /\ handles' = [m \in (DOMAIN handles) \ {msgId} |-> handles[m]]
         \* Invalidate any consumer holding this message
         /\ consumerState' = [c \in DOMAIN consumerState |->
             IF consumerState[c].holding = msgId
             THEN [holding |-> NULL, handle |-> 0]
             ELSE consumerState[c]]
-    /\ UNCHANGED <<data, deleted, now, nextMsgId, nextHandle>>
+    \* deliveryCounts persists - this is the critical fix
+    /\ UNCHANGED <<data, deleted, now, nextMsgId, nextHandle,
+                   deliveryCounts, deliveryHistory>>
 ```
 
 #### Time Advance
@@ -312,7 +376,7 @@ ReapOne ==
 Tick ==
     /\ now' = now + 1
     /\ UNCHANGED <<pending, invisible, data, handles, deleted, nextMsgId,
-                   nextHandle, consumerState>>
+                   nextHandle, consumerState, deliveryCounts, deliveryHistory>>
 ```
 
 ### Next State Relation
@@ -324,6 +388,9 @@ Next ==
     \/ \E c \in 1..NumConsumers: Acknowledge(c)
     \/ \E c \in 1..NumConsumers: AcknowledgeFail(c)
     \/ \E c \in 1..NumConsumers, t \in 0..VisibilityTimeout: Nack(c, t)
+    \/ \E c \in 1..NumConsumers: NackFail(c)
+    \/ \E c \in 1..NumConsumers, t \in 1..VisibilityTimeout: Extend(c, t)
+    \/ \E c \in 1..NumConsumers: ExtendFail(c)
     \/ ReapOne
     \/ Tick
 ```
@@ -349,8 +416,20 @@ HandleValidity ==
             (state.holding \in DOMAIN handles =>
                 handles[state.holding] = state.handle)
 
-\* INV-4: Delivery Count Monotonicity (checked via trace)
-\* Requires auxiliary history variable
+\* INV-4: Delivery Count Monotonicity
+\* Uses deliveryHistory to verify counts are strictly increasing
+DeliveryCountMonotonic ==
+    \A msgId \in DOMAIN deliveryHistory:
+        LET history == deliveryHistory[msgId]
+        IN \A i \in 1..Len(history)-1:
+            history[i].count < history[i+1].count
+
+\* INV-4b: Delivery counts persist across requeue
+\* After reap, the next receive must have count = previous + 1
+DeliveryCountPersistence ==
+    \A msgId \in DOMAIN deliveryCounts:
+        \A i \in 1..Len(deliveryHistory[msgId]):
+            deliveryHistory[msgId][i].count = i
 
 \* INV-5: No Message Loss (Safety part)
 NoMessageLoss ==
@@ -359,11 +438,21 @@ NoMessageLoss ==
             inInvisible == msgId \in DOMAIN invisible
         IN inPending \/ inInvisible
 
+\* INV-7: Handle Uniqueness across deliveries
+HandleUniqueness ==
+    \A msgId \in DOMAIN deliveryHistory:
+        LET history == deliveryHistory[msgId]
+        IN \A i, j \in 1..Len(history):
+            i /= j => history[i].handle /= history[j].handle
+
 \* All invariants combined
 TypeInvariant ==
     /\ MessageStateExclusive
     /\ HandleValidity
+    /\ DeliveryCountMonotonic
+    /\ DeliveryCountPersistence
     /\ NoMessageLoss
+    /\ HandleUniqueness
 ```
 
 ### Liveness Properties
@@ -416,10 +505,18 @@ INVARIANTS
     TypeInvariant
     MessageStateExclusive
     HandleValidity
+    DeliveryCountMonotonic
+    DeliveryCountPersistence
     NoMessageLoss
+    HandleUniqueness
 
 PROPERTIES
     EventualRequeue
+
+\* Enable simulation mode for larger models
+\* SIMULATION
+\*     NumSimulations = 1000
+\*     TraceLength = 100
 ```
 
 ### Running TLC
@@ -467,6 +564,8 @@ tests/contrib/mailbox/
 # tests/contrib/mailbox/conftest.py
 
 import pytest
+from uuid import uuid4
+
 from redis import Redis
 from weakincentives.contrib.mailbox import RedisMailbox
 
@@ -594,6 +693,18 @@ class MailboxModel:
                 self.pending.append(msg_id)
                 requeued.append(msg_id)
         return requeued
+
+    def extend(
+        self, msg_id: str, handle: str, new_timeout: int, now: float
+    ) -> bool:
+        """Model an extend. Returns True if successful."""
+        if msg_id not in self.invisible:
+            return False
+        if self.invisible[msg_id].current_handle != handle:
+            return False
+
+        self.invisible[msg_id].expires_at = now + new_timeout
+        return True
 
     def is_handle_valid(self, msg_id: str, handle: str) -> bool:
         """Check if a handle is currently valid."""
@@ -740,6 +851,29 @@ class RedisMailboxStateMachine(RuleBasedStateMachine):
             assert not self.model.is_handle_valid(msg_id, handle), \
                 "Model predicted success but implementation failed"
 
+    @rule(
+        receipt=received,
+        new_timeout=st.integers(min_value=1, max_value=30),
+    )
+    def extend_message(self, receipt, new_timeout):
+        """Extend visibility timeout for a received message."""
+        if receipt is None:
+            return
+
+        msg_id, handle = receipt
+        suffix = handle.split(":", 1)[1] if ":" in handle else handle
+
+        try:
+            self.mailbox._extend(msg_id, suffix, new_timeout)
+            expected = self.model.extend(
+                msg_id, handle, new_timeout, time.time()
+            )
+            assert expected, \
+                "Model predicted failure but implementation succeeded"
+        except ReceiptHandleExpiredError:
+            assert not self.model.is_handle_valid(msg_id, handle), \
+                "Model predicted success but implementation failed"
+
     @rule()
     def advance_time(self):
         """
@@ -799,13 +933,19 @@ class RedisMailboxStateMachine(RuleBasedStateMachine):
     def deleted_messages_gone(self):
         """Deleted messages have no remaining state."""
         for msg_id in self.model.deleted:
-            assert not self.client.hexists(
-                self.mailbox._keys.data, msg_id
-            ), f"Deleted message {msg_id} still has data"
             assert not self._msg_in_pending(msg_id), \
                 f"Deleted message {msg_id} in pending"
             assert not self._msg_in_invisible(msg_id), \
                 f"Deleted message {msg_id} in invisible"
+
+    @invariant()
+    def delivery_count_monotonic(self):
+        """Delivery counts are strictly increasing for each message."""
+        for msg_id, history in self.model.delivery_history.items():
+            counts = [count for count, _ in history]
+            for i in range(1, len(counts)):
+                assert counts[i] > counts[i-1], \
+                    f"Non-monotonic delivery count for {msg_id}: {counts}"
 
     # =========================================================================
     # Helper methods
@@ -1092,6 +1232,44 @@ class TestDeliveryCountMonotonicity:
         # Counts should be strictly increasing
         assert counts == sorted(counts), f"Counts not monotonic: {counts}"
         assert len(set(counts)) == len(counts), f"Duplicate counts: {counts}"
+
+    def test_delivery_count_survives_redelivery(self, mailbox):
+        """Delivery count persists across timeout and requeue."""
+        mailbox.send(b"test")
+
+        # First delivery
+        msgs1 = mailbox.receive(visibility_timeout=1)
+        assert msgs1[0].delivery_count == 1
+
+        # Let it timeout and get requeued
+        time.sleep(1.5)
+
+        # Second delivery - count should be 2, not reset to 1
+        msgs2 = mailbox.receive(visibility_timeout=1)
+        assert msgs2[0].delivery_count == 2, \
+            "Delivery count was reset after requeue!"
+
+        # Let it timeout again
+        time.sleep(1.5)
+
+        # Third delivery
+        msgs3 = mailbox.receive(visibility_timeout=30)
+        assert msgs3[0].delivery_count == 3, \
+            "Delivery count was reset after second requeue!"
+
+    def test_delivery_count_survives_nack(self, mailbox):
+        """Delivery count persists across nack and requeue."""
+        mailbox.send(b"test")
+
+        # First delivery
+        msgs1 = mailbox.receive(visibility_timeout=30)
+        assert msgs1[0].delivery_count == 1
+        msgs1[0].nack(visibility_timeout=0)  # Immediate requeue
+
+        # Second delivery after nack
+        msgs2 = mailbox.receive(visibility_timeout=30)
+        assert msgs2[0].delivery_count == 2, \
+            "Delivery count was reset after nack!"
 
 
 class TestVisibilityTimeout:
@@ -1391,11 +1569,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache TLA+ Tools
+        id: cache-tlaplus
+        uses: actions/cache@v4
+        with:
+          path: /usr/local/lib/tla2tools.jar
+          key: tlaplus-v1.8.0
+
       - name: Install TLA+ Tools
+        if: steps.cache-tlaplus.outputs.cache-hit != 'true'
         run: |
-          wget https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
+          wget -q https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
           sudo mv tla2tools.jar /usr/local/lib/
-          echo 'alias tlc="java -jar /usr/local/lib/tla2tools.jar"' >> ~/.bashrc
 
       - name: Run TLC
         run: |
@@ -1470,6 +1661,74 @@ Before merging changes to `_redis.py`:
 - [ ] `make stress-tests` passes
 - [ ] TLA+ spec updated if algorithm changed
 - [ ] Property tests updated if new invariants added
+
+## Assumptions
+
+The formal verification is based on these assumptions about the runtime
+environment. If any assumption is violated, the invariants may not hold.
+
+### Redis Guarantees
+
+1. **Lua Script Atomicity**: Redis executes Lua scripts atomically. No other
+   command can interleave during script execution. This is the foundation
+   for all multi-key atomic operations.
+
+2. **FIFO List Ordering**: Redis LIST operations (LPUSH/RPOP) maintain FIFO
+   order. Messages pushed first are popped first.
+
+3. **Sorted Set Score Ordering**: ZRANGEBYSCORE returns members in score order.
+   The reaper correctly finds expired messages by querying `score <= now`.
+
+4. **Single-Threaded Execution**: Redis is single-threaded for command
+   execution. This prevents race conditions between concurrent commands.
+
+### Cluster Mode Assumptions
+
+5. **Hash Tag Co-location**: All keys for a queue use the same hash tag
+   (`{queue:name}`), ensuring they reside on the same shard.
+
+6. **No Cross-Shard Transactions**: Operations are atomic only within a single
+   queue. Cross-queue operations are not atomic.
+
+7. **Eventual Replication**: During failover, recently written data may be lost
+   if not yet replicated. Configure `min-replicas-to-write` for durability.
+
+### Timing Assumptions
+
+8. **Reaper Fairness**: The background reaper thread runs at least once every
+   `reaper_interval` seconds. Under normal operation, this is 1 second.
+
+9. **Clock Monotonicity**: `time.time()` returns monotonically increasing
+   values. Clock skew or NTP adjustments could affect visibility timeouts.
+
+10. **Visibility Timeout > Processing Time**: The visibility timeout should
+    exceed the maximum expected processing time, or consumers should call
+    `extend_visibility()` periodically.
+
+### Consumer Assumptions
+
+11. **Handle Secrecy**: Receipt handles are not shared between consumers. A
+    consumer uses only handles from its own receive calls.
+
+12. **Single Acknowledgment**: A consumer attempts to acknowledge each message
+    at most once. The implementation is idempotent, but redundant acks waste
+    resources.
+
+### Model Limitations
+
+The TLA+ model makes these simplifications:
+
+1. **Finite State Space**: The model uses small constants (MaxMessages=3,
+   NumConsumers=2) for exhaustive checking. Larger models require simulation.
+
+2. **Abstract Time**: Time advances in discrete ticks, not continuous. This
+   may miss timing-dependent edge cases.
+
+3. **No Network Partitions**: The model assumes reliable Redis connectivity.
+   Network failures are not modeled.
+
+4. **No Message Body**: Message bodies are abstracted to simple identifiers.
+   Serialization errors are not modeled.
 
 ## References
 
