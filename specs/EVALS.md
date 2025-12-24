@@ -7,16 +7,16 @@ this spec adds datasets and scoring.
 
 ## Guiding Principles
 
-- **MainLoop is the runner** - No parallel orchestration; reuse existing infra
+- **EvalLoop wraps MainLoop** - Composition-based, event-driven, type-safe
 - **Evaluators are functions** - Pure `(output, expected) -> Score`
-- **Datasets are tuples** - Immutable, typed, serializable
+- **Datasets are immutable** - Frozen dataclass with typed samples
 
 ## Architecture
 
 ```
 ┌─────────────┐     ┌──────────┐     ┌───────────┐     ┌────────────┐
-│   Dataset   │────▶│ run_eval │────▶│ MainLoop  │────▶│  Adapter   │
-│  (samples)  │     │          │     │ .execute()│     │            │
+│   Dataset   │────▶│ EvalLoop │────▶│ MainLoop  │────▶│  Adapter   │
+│  (samples)  │     │.execute()│     │ .execute()│     │            │
 └─────────────┘     └────┬─────┘     └───────────┘     └────────────┘
                          │
                          ▼
@@ -26,9 +26,8 @@ this spec adds datasets and scoring.
                    └───────────┘     └────────────┘
 ```
 
-The eval framework wraps MainLoop: for each sample, it calls `loop.execute()`,
-then passes the output to an evaluator for scoring. Results aggregate into a
-report.
+`EvalLoop` orchestrates evaluation: for each sample, it executes through the
+provided `MainLoop`, scores the output, and aggregates results into a report.
 
 ## Core Types
 
@@ -50,15 +49,59 @@ evals, `Sample[str, str]` for QA, etc.
 
 ### Dataset
 
-A dataset is a tuple of samples. Using a tuple (not list) ensures immutability:
+An immutable collection of samples. The class provides a clean API for loading
+and accessing evaluation data:
 
 ```python
-Dataset = tuple[Sample[InputT, ExpectedT], ...]
-```
+@dataclass(slots=True, frozen=True)
+class Dataset[InputT, ExpectedT]:
+    """Immutable collection of evaluation samples."""
+    samples: tuple[Sample[InputT, ExpectedT], ...]
 
-**Loading from JSONL:**
+    def __len__(self) -> int:
+        """Return number of samples."""
+        return len(self.samples)
 
-```python
+    def __iter__(self) -> Iterator[Sample[InputT, ExpectedT]]:
+        """Iterate over samples."""
+        return iter(self.samples)
+
+    def __getitem__(self, index: int) -> Sample[InputT, ExpectedT]:
+        """Get sample by index."""
+        return self.samples[index]
+
+    @staticmethod
+    def load[I, E](
+        path: Path,
+        input_type: type[I],
+        expected_type: type[E],
+    ) -> Dataset[I, E]:
+        """Load dataset from JSONL file.
+
+        Each line must be a JSON object with "id", "input", and "expected" keys.
+        Primitives (str, int, float, bool) are used directly; mappings are
+        deserialized into dataclasses via serde.parse.
+
+        Args:
+            path: Path to JSONL file
+            input_type: Type for deserializing input field
+            expected_type: Type for deserializing expected field
+
+        Returns:
+            Dataset containing all samples from the file
+        """
+        samples: list[Sample[I, E]] = []
+        with path.open() as f:
+            for line in f:
+                obj = json.loads(line)
+                samples.append(Sample(
+                    id=obj["id"],
+                    input=_coerce(obj["input"], input_type),
+                    expected=_coerce(obj["expected"], expected_type),
+                ))
+        return Dataset(samples=tuple(samples))
+
+
 def _coerce[T](value: object, target: type[T]) -> T:
     """Coerce JSON value to target type.
 
@@ -72,29 +115,6 @@ def _coerce[T](value: object, target: type[T]) -> T:
     if isinstance(value, Mapping):
         return parse(target, value)
     raise TypeError(f"cannot coerce {type(value).__name__} to {target.__name__}")
-
-
-def load_jsonl[I, E](
-    path: Path,
-    input_type: type[I],
-    expected_type: type[E],
-) -> tuple[Sample[I, E], ...]:
-    """Load samples from JSONL file.
-
-    Each line must be a JSON object with "id", "input", and "expected" keys.
-    Primitives (str, int, float, bool) are used directly; mappings are
-    deserialized into dataclasses via serde.parse.
-    """
-    samples: list[Sample[I, E]] = []
-    with path.open() as f:
-        for line in f:
-            obj = json.loads(line)
-            samples.append(Sample(
-                id=obj["id"],
-                input=_coerce(obj["input"], input_type),
-                expected=_coerce(obj["expected"], expected_type),
-            ))
-    return tuple(samples)
 ```
 
 **JSONL format:**
@@ -240,12 +260,20 @@ class JudgeOutput:
     reason: str     # Brief explanation
 
 
+@dataclass(slots=True, frozen=True)
+class JudgeParams:
+    """Parameters for the judge prompt."""
+    criterion: str
+    output: str
+    expected: str
+
+
 JUDGE_TEMPLATE = PromptTemplate[JudgeOutput](
     ns="wink.evals",
     key="llm-judge",
     name="llm_judge",
     sections=[
-        MarkdownSection(
+        MarkdownSection[JudgeParams](
             title="Evaluation Task",
             template="""You are an evaluation judge. Rate the output on the given criterion.
 
@@ -278,27 +306,23 @@ Select one rating and explain your reasoning briefly.""",
 def llm_judge(
     adapter: ProviderAdapter[JudgeOutput],
     criterion: str,
-    *,
-    bus: Dispatcher,
 ) -> Evaluator[str, str]:
     """Create evaluator that uses LLM to judge output.
 
     Args:
         adapter: Provider adapter configured for JudgeOutput
         criterion: What to evaluate (e.g., "factual accuracy", "clarity")
-        bus: Dispatcher for creating judge sessions
 
     Returns:
         Evaluator function that scores string outputs
     """
     def evaluate(output: str, expected: str) -> Score:
-        prompt = Prompt(JUDGE_TEMPLATE).bind(
+        prompt = Prompt(JUDGE_TEMPLATE).bind(JudgeParams(
             criterion=criterion,
             output=output,
             expected=expected,
-        )
-        session = Session(bus=bus, tags={"judge_criterion": criterion})
-        response = adapter.evaluate(prompt, session=session)
+        ))
+        response = adapter.evaluate(prompt)
         rating = response.output.rating
         return Score(
             value=RATING_VALUES[rating],
@@ -312,13 +336,12 @@ def llm_judge(
 
 ```python
 # Use a smaller/cheaper model for judging
-judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
-judge_bus = InProcessDispatcher()
+judge_adapter: OpenAIAdapter[JudgeOutput] = OpenAIAdapter(model="gpt-4o-mini")
 
 evaluator = all_of(
     contains,  # Must contain expected answer
-    llm_judge(judge_adapter, "Response is helpful and well-formatted", bus=judge_bus),
-    llm_judge(judge_adapter, "No hallucinated information", bus=judge_bus),
+    llm_judge(judge_adapter, "Response is helpful and well-formatted"),
+    llm_judge(judge_adapter, "No hallucinated information"),
 )
 ```
 
@@ -391,69 +414,151 @@ class EvalReport:
         return tuple(r for r in self.results if r.success and not r.score.passed)
 ```
 
-### run_eval
+### EvalRequest
 
-The core function that ties everything together:
+Request to evaluate a single sample:
 
 ```python
 @dataclass(slots=True, frozen=True)
-class SampleEvaluated:
-    """Emitted after each sample is evaluated."""
-    sample_id: str
-    result: EvalResult
+class EvalRequest(Generic[InputT, ExpectedT]):
+    """Request to evaluate a sample."""
+    sample: Sample[InputT, ExpectedT]
+    request_id: UUID = field(default_factory=uuid4)
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+```
 
+### EvalLoop
 
-def run_eval[I, O, E](
-    loop: MainLoop[I, O],
-    dataset: tuple[Sample[I, E], ...],
-    evaluator: Evaluator[O, E],
+Mailbox-driven evaluation loop. Follows the same two-mailbox pattern as
+`MainLoop` for distributed deployments:
+
+```python
+class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
+    """Mailbox-driven evaluation loop.
+
+    Receives EvalRequest messages, executes through MainLoop, scores
+    with evaluator, and sends EvalResult to results mailbox. Designed
+    to run alongside MainLoop workers in distributed deployments.
+    """
+
+    def __init__(
+        self,
+        *,
+        loop: MainLoop[InputT, OutputT],
+        evaluator: Evaluator[OutputT, ExpectedT],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT]],
+        results: Mailbox[EvalResult],
+    ) -> None:
+        self._loop = loop
+        self._evaluator = evaluator
+        self._requests = requests
+        self._results = results
+
+    def run(self, *, max_iterations: int | None = None) -> None:
+        """Process evaluation requests from mailbox.
+
+        Polls the requests mailbox, evaluates each sample through
+        MainLoop, and sends results to the results mailbox.
+
+        Args:
+            max_iterations: Stop after N iterations (None = run forever)
+        """
+        iterations = 0
+        while max_iterations is None or iterations < max_iterations:
+            for msg in self._requests.receive(
+                visibility_timeout=300,  # 5 min - must exceed max execution time
+                wait_time_seconds=20,    # Long poll for efficiency
+            ):
+                try:
+                    result = self._evaluate_sample(msg.body)
+                    self._results.send(result)
+                    msg.acknowledge()
+                except Exception as e:
+                    self._handle_failure(msg, e)
+            iterations += 1
+
+    def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
+        """Execute and score a single sample."""
+        sample = request.sample
+        start = time.monotonic()
+
+        response, _ = self._loop.execute(sample.input)
+        latency_ms = int((time.monotonic() - start) * 1000)
+        score = self._evaluator(response.output, sample.expected)
+
+        return EvalResult(
+            sample_id=sample.id,
+            score=score,
+            latency_ms=latency_ms,
+        )
+
+    def _handle_failure(
+        self,
+        msg: Message[EvalRequest[InputT, ExpectedT]],
+        error: Exception,
+    ) -> None:
+        """Handle evaluation failure with backoff retry."""
+        latency_ms = 0  # Unknown on failure
+        try:
+            self._results.send(EvalResult(
+                sample_id=msg.body.sample.id,
+                score=Score(value=0.0, passed=False, reason=str(error)),
+                latency_ms=latency_ms,
+                error=str(error),
+            ))
+            msg.acknowledge()  # Error result sent - don't retry
+        except Exception:
+            # Result send failed - nack for retry with backoff
+            msg.nack(visibility_timeout=min(60 * msg.delivery_count, 900))
+```
+
+### Submitting Samples
+
+Submit samples to the requests mailbox for evaluation:
+
+```python
+def submit_dataset(
+    dataset: Dataset[InputT, ExpectedT],
+    requests: Mailbox[EvalRequest[InputT, ExpectedT]],
+) -> None:
+    """Submit all samples in a dataset for evaluation."""
+    for sample in dataset:
+        requests.send(EvalRequest(sample=sample))
+```
+
+### Collecting Results
+
+Collect results from the results mailbox:
+
+```python
+def collect_results(
+    results: Mailbox[EvalResult],
+    expected_count: int,
     *,
-    bus: Dispatcher | None = None,
+    timeout_seconds: float = 300,
 ) -> EvalReport:
-    """Run evaluation using MainLoop.
-
-    For each sample in the dataset:
-    1. Execute the sample input through MainLoop
-    2. Score the output using the evaluator
-    3. Record timing
-    4. Publish SampleEvaluated event (if bus provided)
+    """Collect evaluation results into a report.
 
     Args:
-        loop: MainLoop instance to run samples through
-        dataset: Tuple of samples to evaluate
-        evaluator: Scoring function for outputs
-        bus: Optional Dispatcher for progress notifications
+        results: Mailbox to receive results from
+        expected_count: Number of results to collect
+        timeout_seconds: Maximum time to wait for all results
 
     Returns:
-        EvalReport with all results and aggregate metrics
+        EvalReport with all collected results
     """
-    results: list[EvalResult] = []
+    collected: list[EvalResult] = []
+    deadline = time.time() + timeout_seconds
 
-    for sample in dataset:
-        start = time.monotonic()
-        try:
-            response, _ = loop.execute(sample.input)
-            latency_ms = int((time.monotonic() - start) * 1000)
-            score = evaluator(response.output, sample.expected)
-            result = EvalResult(
-                sample_id=sample.id,
-                score=score,
-                latency_ms=latency_ms,
-            )
-        except Exception as e:
-            latency_ms = int((time.monotonic() - start) * 1000)
-            result = EvalResult(
-                sample_id=sample.id,
-                score=Score(value=0.0, passed=False, reason=str(e)),
-                latency_ms=latency_ms,
-                error=str(e),
-            )
+    while len(collected) < expected_count and time.time() < deadline:
+        remaining = timeout_seconds - (deadline - time.time())
+        wait_time = min(20, max(1, int(remaining)))
 
-        results.append(result)
-        if bus is not None:
-            bus.dispatch(SampleEvaluated(sample_id=sample.id, result=result))
+        for msg in results.receive(wait_time_seconds=wait_time):
+            collected.append(msg.body)
+            msg.acknowledge()
 
-    return EvalReport(results=tuple(results))
+    return EvalReport(results=tuple(collected))
 ```
 
 ## Usage Examples
@@ -461,21 +566,32 @@ def run_eval[I, O, E](
 ### Basic Evaluation
 
 ```python
+from dataclasses import dataclass
 from weakincentives import MainLoop, PromptTemplate, Prompt, Session
 from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import InProcessDispatcher
-from weakincentives.evals import Sample, run_eval, exact_match, load_jsonl
+from weakincentives.runtime import ControlDispatcher, InMemoryMailbox, Mailbox
+from weakincentives.evals import (
+    Dataset, EvalLoop, EvalRequest, EvalResult,
+    exact_match, submit_dataset, collect_results,
+)
 
-# Define the loop under test
+
+@dataclass(slots=True, frozen=True)
+class QAParams:
+    """Parameters for the QA prompt."""
+    question: str
+
+
+# Define the MainLoop for QA
 class QALoop(MainLoop[str, str]):
-    def __init__(self, adapter, bus):
+    def __init__(self, *, adapter: OpenAIAdapter[str], bus: ControlDispatcher) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._template = PromptTemplate[str](
             ns="qa",
             key="answer",
             name="qa",
             sections=[
-                MarkdownSection(
+                MarkdownSection[QAParams](
                     title="Question",
                     template="Answer concisely: $question",
                     key="q",
@@ -483,20 +599,36 @@ class QALoop(MainLoop[str, str]):
             ],
         )
 
-    def create_prompt(self, question: str) -> Prompt[str]:
-        return Prompt(self._template).bind(question=question)
-
-    def create_session(self) -> Session:
-        return Session(bus=self._bus)
+    def initialize(self, question: str) -> tuple[Prompt[str], Session]:
+        prompt = Prompt(self._template).bind(QAParams(question=question))
+        session = Session(bus=self._bus)
+        return prompt, session
 
 
 # Load dataset
-dataset = load_jsonl(Path("tests/fixtures/qa.jsonl"), str, str)
+dataset = Dataset.load(Path("tests/fixtures/qa.jsonl"), str, str)
 
-# Run evaluation
-adapter = OpenAIAdapter(model="gpt-4o")
-loop = QALoop(adapter=adapter, bus=InProcessDispatcher())
-report = run_eval(loop, dataset, exact_match)
+# Create mailboxes
+requests: Mailbox[EvalRequest[str, str]] = InMemoryMailbox(name="eval-requests")
+results: Mailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+
+# Create MainLoop and EvalLoop
+adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
+bus = ControlDispatcher()
+main_loop = QALoop(adapter=adapter, bus=bus)
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=exact_match,
+    requests=requests,
+    results=results,
+)
+
+# Submit samples and run worker
+submit_dataset(dataset, requests)
+eval_loop.run(max_iterations=1)
+
+# Collect results
+report = collect_results(results, expected_count=len(dataset))
 
 # Inspect results
 print(f"Pass rate: {report.pass_rate:.1%}")
@@ -511,27 +643,38 @@ for result in report.failed_samples():
 ### Multi-Criteria Evaluation
 
 ```python
-from weakincentives.evals import all_of, llm_judge
+from weakincentives.evals import EvalLoop, all_of, llm_judge, contains
 
-# Create judge adapter and bus
-judge_adapter = OpenAIAdapter[JudgeOutput](model="gpt-4o-mini")
-judge_bus = InProcessDispatcher()
+# Create judge adapter
+judge_adapter: OpenAIAdapter[JudgeOutput] = OpenAIAdapter(model="gpt-4o-mini")
 
 # Compose multiple criteria
 evaluator = all_of(
     contains,  # Must contain expected substring
-    llm_judge(judge_adapter, "Factually accurate", bus=judge_bus),
-    llm_judge(judge_adapter, "Well-structured response", bus=judge_bus),
+    llm_judge(judge_adapter, "Factually accurate"),
+    llm_judge(judge_adapter, "Well-structured response"),
 )
 
-report = run_eval(loop, dataset, evaluator)
+# Create EvalLoop with composite evaluator
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=evaluator,
+    requests=requests,
+    results=results,
+)
+
+submit_dataset(dataset, requests)
+eval_loop.run(max_iterations=1)
+report = collect_results(results, expected_count=len(dataset))
 ```
 
 ### Programmatic Dataset
 
 ```python
+from weakincentives.evals import Dataset, Sample
+
 # Build dataset in code
-dataset = tuple(
+samples = tuple(
     Sample(
         id=str(i),
         input=f"What is {a} + {b}?",
@@ -539,27 +682,114 @@ dataset = tuple(
     )
     for i, (a, b) in enumerate([(1, 1), (2, 3), (10, 20)])
 )
+dataset = Dataset(samples=samples)
 
-report = run_eval(loop, dataset, contains)
+# Submit and evaluate
+submit_dataset(dataset, requests)
+eval_loop.run(max_iterations=1)
+report = collect_results(results, expected_count=len(dataset))
 ```
 
-## Observability
+## Distributed Deployment
 
-Pass an `Dispatcher` to `run_eval` to receive progress notifications:
+### Worker Process
+
+EvalLoop workers run alongside MainLoop workers, polling the requests mailbox:
 
 ```python
-from weakincentives.evals import SampleEvaluated
+from redis import Redis
+from weakincentives.runtime import RedisMailbox, ControlDispatcher
+from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match
 
-def on_sample(event: SampleEvaluated) -> None:
-    status = "PASS" if event.result.score.passed else "FAIL"
-    print(f"[{status}] {event.sample_id}: {event.result.score.value:.2f}")
+# Redis-backed mailboxes for cross-process durability
+redis_client = Redis(host="localhost", port=6379)
+requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
+    name="eval-requests",
+    client=redis_client,
+)
+results: Mailbox[EvalResult] = RedisMailbox(
+    name="eval-results",
+    client=redis_client,
+)
 
-bus = InProcessDispatcher()
-bus.subscribe(SampleEvaluated, on_sample)
+# Create MainLoop (same as basic example)
+adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
+bus = ControlDispatcher()
+main_loop = QALoop(adapter=adapter, bus=bus)
 
-loop = QALoop(adapter=adapter, bus=InProcessDispatcher())
-report = run_eval(loop, dataset, evaluator, bus=bus)
+# Create and run worker (runs forever)
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=exact_match,
+    requests=requests,
+    results=results,
+)
+eval_loop.run()  # Blocks, processing requests
 ```
+
+### Client Process
+
+Submit samples and collect results from a separate process:
+
+```python
+from redis import Redis
+from weakincentives.runtime import RedisMailbox, Mailbox
+from weakincentives.evals import (
+    Dataset, EvalRequest, EvalResult, submit_dataset, collect_results,
+)
+
+# Connect to same Redis mailboxes
+redis_client = Redis(host="localhost", port=6379)
+requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
+    name="eval-requests",
+    client=redis_client,
+)
+results: Mailbox[EvalResult] = RedisMailbox(
+    name="eval-results",
+    client=redis_client,
+)
+
+# Submit dataset
+dataset = Dataset.load(Path("qa.jsonl"), str, str)
+submit_dataset(dataset, requests)
+
+# Wait for results (workers process in background)
+report = collect_results(
+    results,
+    expected_count=len(dataset),
+    timeout_seconds=600,  # 10 minute timeout
+)
+
+print(f"Completed {report.total} evaluations")
+print(f"Pass rate: {report.pass_rate:.1%}")
+```
+
+### Multiple Workers
+
+Scale horizontally by running multiple EvalLoop workers:
+
+```
+                    ┌─────────────────┐
+                    │ Requests Queue  │
+                    │ (Redis/SQS)     │
+                    └────────┬────────┘
+           ┌─────────────────┼─────────────────┐
+           ▼                 ▼                 ▼
+    ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
+    │  EvalLoop   │   │  EvalLoop   │   │  EvalLoop   │
+    │  Worker #1  │   │  Worker #2  │   │  Worker #3  │
+    └──────┬──────┘   └──────┬──────┘   └──────┬──────┘
+           │                 │                 │
+           └─────────────────┼─────────────────┘
+                             ▼
+                    ┌─────────────────┐
+                    │ Results Queue   │
+                    │ (Redis/SQS)     │
+                    └─────────────────┘
+```
+
+Visibility timeout ensures each sample is processed by exactly one worker.
+Failed evaluations retry automatically with exponential backoff.
 
 With LangSmith enabled, MainLoop executions are automatically traced.
 
@@ -605,4 +835,4 @@ def test_any_of_requires_one():
 - **Sequential execution** - MainLoop is synchronous; samples run one at a time
 - **No caching** - Repeated samples re-execute; add caching at adapter level
 - **No checkpoints** - Cannot resume interrupted runs
-- **Single loop** - Cannot compare multiple loops in one `run_eval` call
+- **Single loop** - Each `EvalLoop.execute()` uses one MainLoop instance
