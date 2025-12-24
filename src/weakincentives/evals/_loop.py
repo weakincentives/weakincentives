@@ -83,11 +83,19 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         Polls the requests mailbox, evaluates each sample through
         MainLoop, and sends results to the results mailbox.
 
+        The loop exits when:
+        - max_iterations is reached
+        - The requests mailbox is closed
+
         Args:
             max_iterations: Stop after N iterations (None = run forever).
         """
         iterations = 0
         while max_iterations is None or iterations < max_iterations:
+            # Exit if mailbox closed
+            if self._requests.closed:
+                break
+
             for msg in self._requests.receive(
                 visibility_timeout=300,  # 5 min - must exceed max execution time
                 wait_time_seconds=20,  # Long poll for efficiency

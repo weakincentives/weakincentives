@@ -671,10 +671,7 @@ class _NackExpiresRequestMailbox(InMemoryMailbox[EvalRequest[str, str]]):
             wait_time_seconds=wait_time_seconds,
         )
         # Wrap each message's nack method to raise ReceiptHandleExpiredError
-        wrapped = []
-        for msg in msgs:
-            wrapped.append(_NackExpiresMessage(msg))
-        return wrapped
+        return [_NackExpiresMessage(msg) for msg in msgs]
 
 
 class _NackExpiresMessage:
@@ -724,3 +721,45 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
     finally:
         requests.close()
         failing_results.close()
+
+
+def test_eval_loop_exits_when_mailbox_closed() -> None:
+    """EvalLoop exits cleanly when requests mailbox is closed."""
+    import threading
+
+    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+        name="eval-requests"
+    )
+    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+
+    try:
+        main_loop = _create_test_loop(result="correct")
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            results=results,
+        )
+
+        # Close the mailbox before running
+        requests.close()
+
+        # Run with no max_iterations - should exit immediately due to closed mailbox
+        # If the closed check is missing, this would spin forever
+        loop_completed = threading.Event()
+
+        def run_loop() -> None:
+            eval_loop.run(max_iterations=None)
+            loop_completed.set()
+
+        thread = threading.Thread(target=run_loop)
+        thread.start()
+
+        # Wait up to 1 second for the loop to exit
+        completed = loop_completed.wait(timeout=1.0)
+        assert completed, "EvalLoop did not exit when mailbox was closed"
+
+        thread.join(timeout=1.0)
+        assert not thread.is_alive(), "EvalLoop thread still running"
+    finally:
+        results.close()
