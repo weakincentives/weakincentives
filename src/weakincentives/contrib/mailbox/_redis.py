@@ -386,6 +386,10 @@ class RedisMailbox[T]:
     ) -> Message[T] | None:
         """Attempt to receive a single message.
 
+        Uses an atomic Lua script to pop from pending and move to invisible
+        in a single operation. For long-polling, polls with 300ms intervals
+        to avoid the atomicity gap that would exist with BRPOP + pipeline.
+
         Args:
             visibility_timeout: Seconds message remains invisible.
             wait_seconds: Max seconds to wait for a message.
@@ -394,51 +398,38 @@ class RedisMailbox[T]:
             A Message if one was received, None otherwise.
         """
         keys = self._keys
-        expiry_score = time.time() + visibility_timeout
+        lua_keys = [keys.pending, keys.invisible, keys.data, keys.meta]
+        poll_interval = 0.3  # 300ms between poll attempts
 
-        # Generate receipt handle suffix upfront - stored in Redis for validation
-        receipt_suffix = str(uuid4())
+        deadline = time.time() + wait_seconds
 
-        # Use blocking pop if waiting, otherwise use Lua script
-        if wait_seconds > 0:
-            # BRPOP for efficient long polling
-            result = self.client.brpop(keys.pending, timeout=int(wait_seconds) or 1)
-            if result is None:
-                return None
+        while True:
+            expiry_score = time.time() + visibility_timeout
+            receipt_suffix = str(uuid4())
 
-            _, msg_id_bytes = result
-            msg_id = msg_id_bytes.decode("utf-8")
-
-            # Now atomically process the message
-            pipe = self.client.pipeline()
-            pipe.zadd(keys.invisible, {msg_id: expiry_score})
-            pipe.hset(keys.meta, f"{msg_id}:handle", receipt_suffix)
-            pipe.hget(keys.data, msg_id)
-            pipe.hincrby(keys.meta, f"{msg_id}:count", 1)
-            pipe.hget(keys.meta, f"{msg_id}:enqueued")
-            results = pipe.execute()
-
-            data = results[2]
-            delivery_count = results[3]
-            enqueued_raw = results[4]
-        else:
-            # Use Lua script for atomic non-blocking receive
-            lua_keys = [keys.pending, keys.invisible, keys.data, keys.meta]
+            # Atomic Lua script: RPOP + ZADD + metadata in one operation
             result = self._scripts["receive"](
                 keys=lua_keys, args=[expiry_score, receipt_suffix]
             )
 
-            if result is None:
+            if result is not None:
+                msg_id = (
+                    result[0].decode("utf-8")
+                    if isinstance(result[0], bytes)
+                    else str(result[0])
+                )
+                data = result[1]
+                delivery_count = int(result[2])
+                enqueued_raw = result[3]
+                break
+
+            # No message available
+            remaining = deadline - time.time()
+            if remaining <= 0:
                 return None
 
-            msg_id = (
-                result[0].decode("utf-8")
-                if isinstance(result[0], bytes)
-                else str(result[0])
-            )
-            data = result[1]
-            delivery_count = int(result[2])
-            enqueued_raw = result[3]
+            # Poll again after interval (but don't overshoot deadline)
+            time.sleep(min(poll_interval, remaining))
 
         if data is None:
             # Message data was deleted (shouldn't happen, but handle gracefully)
