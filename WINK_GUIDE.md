@@ -335,49 +335,56 @@ ______________________________________________________________________
 1. [Orchestration with MainLoop](#7-orchestration-with-mainloop)
    1. [The minimal MainLoop](#71-the-minimal-mainloop)
    1. [Deadlines and budgets](#72-deadlines-and-budgets)
-1. [Progressive disclosure](#8-progressive-disclosure)
-   1. [SectionVisibility: FULL vs SUMMARY](#81-sectionvisibility-full-vs-summary)
-   1. [open_sections and read_section](#82-open_sections-and-read_section)
-   1. [Visibility overrides in session state](#83-visibility-overrides-in-session-state)
-1. [Prompt overrides and optimization](#9-prompt-overrides-and-optimization)
-   1. [Hash-based safety: override only what you intended](#91-hash-based-safety-override-only-what-you-intended)
-   1. [LocalPromptOverridesStore](#92-localpromptoverridesstore)
-   1. [Override file format](#93-override-file-format)
-   1. [A practical override workflow](#94-a-practical-override-workflow)
-1. [Workspace tools](#10-workspace-tools)
-   1. [PlanningToolsSection](#101-planningtoolssection)
-   1. [VfsToolsSection](#102-vfstoolssection)
-   1. [WorkspaceDigestSection](#103-workspacedigestsection)
-   1. [AstevalSection](#104-astevalsection)
-   1. [PodmanSandboxSection](#105-podmansandboxsection)
-   1. [Wiring a workspace into a prompt](#106-wiring-a-workspace-into-a-prompt)
-1. [Debugging and observability](#11-debugging-and-observability)
-   1. [Structured logging](#111-structured-logging)
-   1. [Session events](#112-session-events)
-   1. [Dumping snapshots to JSONL](#113-dumping-snapshots-to-jsonl)
-   1. [The debug UI](#114-the-debug-ui)
-1. [Testing and reliability](#12-testing-and-reliability)
-1. [Approach to code quality](#13-approach-to-code-quality)
-   1. [Strict type checking](#131-strict-type-checking)
-   1. [Design-by-contract](#132-design-by-contract)
-   1. [Coverage and mutation testing](#133-coverage-and-mutation-testing)
-   1. [Security scanning](#134-security-scanning)
-   1. [Quality gates in practice](#135-quality-gates-in-practice)
-1. [Recipes](#14-recipes)
-   1. [A code-review agent](#141-a-code-review-agent)
-   1. [A repo Q&A agent](#142-a-repo-qa-agent)
-   1. [A "safe patch" agent](#143-a-safe-patch-agent)
-   1. [A research agent with progressive disclosure](#144-a-research-agent-with-progressive-disclosure)
-1. [Troubleshooting](#15-troubleshooting)
-1. [API reference](#16-api-reference)
-   1. [Top-level exports](#161-top-level-exports)
-   1. [weakincentives.prompt](#162-weakincentivesprompt)
-   1. [weakincentives.runtime](#163-weakincentivesruntime)
-   1. [weakincentives.adapters](#164-weakincentivesadapters)
-   1. [weakincentives.contrib.tools](#165-weakincentivescontribtools)
-   1. [weakincentives.optimizers](#166-weakincentivesoptimizers)
-   1. [weakincentives.serde](#167-weakincentivesserde)
-   1. [CLI](#168-cli)
+1. [Evaluation with EvalLoop](#8-evaluation-with-evalloop)
+   1. [The composition philosophy](#81-the-composition-philosophy)
+   1. [Core types](#82-core-types)
+   1. [LLM-as-judge](#83-llm-as-judge)
+   1. [Running evaluations](#84-running-evaluations)
+   1. [Production deployment pattern](#85-production-deployment-pattern)
+1. [Progressive disclosure](#10-progressive-disclosure)
+   1. [SectionVisibility: FULL vs SUMMARY](#101-sectionvisibility-full-vs-summary)
+   1. [open_sections and read_section](#102-open_sections-and-read_section)
+   1. [Visibility overrides in session state](#103-visibility-overrides-in-session-state)
+1. [Prompt overrides and optimization](#11-prompt-overrides-and-optimization)
+   1. [Hash-based safety: override only what you intended](#111-hash-based-safety-override-only-what-you-intended)
+   1. [LocalPromptOverridesStore](#112-localpromptoverridesstore)
+   1. [Override file format](#113-override-file-format)
+   1. [A practical override workflow](#114-a-practical-override-workflow)
+1. [Workspace tools](#12-workspace-tools)
+   1. [PlanningToolsSection](#121-planningtoolssection)
+   1. [VfsToolsSection](#122-vfstoolssection)
+   1. [WorkspaceDigestSection](#123-workspacedigestsection)
+   1. [AstevalSection](#124-astevalsection)
+   1. [PodmanSandboxSection](#125-podmansandboxsection)
+   1. [Wiring a workspace into a prompt](#126-wiring-a-workspace-into-a-prompt)
+1. [Debugging and observability](#13-debugging-and-observability)
+   1. [Structured logging](#131-structured-logging)
+   1. [Session events](#132-session-events)
+   1. [Dumping snapshots to JSONL](#133-dumping-snapshots-to-jsonl)
+   1. [The debug UI](#134-the-debug-ui)
+1. [Testing and reliability](#14-testing-and-reliability)
+1. [Approach to code quality](#15-approach-to-code-quality)
+   1. [Strict type checking](#151-strict-type-checking)
+   1. [Design-by-contract](#152-design-by-contract)
+   1. [Coverage and mutation testing](#153-coverage-and-mutation-testing)
+   1. [Security scanning](#154-security-scanning)
+   1. [Quality gates in practice](#155-quality-gates-in-practice)
+1. [Recipes](#16-recipes)
+   1. [A code-review agent](#161-a-code-review-agent)
+   1. [A repo Q&A agent](#162-a-repo-qa-agent)
+   1. [A "safe patch" agent](#163-a-safe-patch-agent)
+   1. [A research agent with progressive disclosure](#164-a-research-agent-with-progressive-disclosure)
+1. [Troubleshooting](#17-troubleshooting)
+1. [API reference](#18-api-reference)
+   1. [Top-level exports](#181-top-level-exports)
+   1. [weakincentives.prompt](#182-weakincentivesprompt)
+   1. [weakincentives.runtime](#183-weakincentivesruntime)
+   1. [weakincentives.adapters](#184-weakincentivesadapters)
+   1. [weakincentives.contrib.tools](#185-weakincentivescontribtools)
+   1. [weakincentives.optimizers](#186-weakincentivesoptimizers)
+   1. [weakincentives.serde](#187-weakincentivesserde)
+   1. [weakincentives.evals](#188-weakincentivesevals)
+   1. [CLI](#189-cli)
 
 ______________________________________________________________________
 
@@ -1722,7 +1729,226 @@ enforced at the adapter level, so they work consistently across providers.
 
 ______________________________________________________________________
 
-## 8. Progressive disclosure
+## 8. Evaluation with EvalLoop
+
+_Canonical spec: [specs/EVALS.md](specs/EVALS.md)_
+
+Evaluation is built on the same composition pattern as everything else in WINK:
+**EvalLoop wraps MainLoop**. Rather than a separate evaluation framework, evals
+are just another way to drive your existing MainLoop with datasets and scoring.
+
+This means a worker in production can run both your regular agent logic
+(`MainLoop`) and your evaluation suite (`EvalLoop`) side by side—same prompt
+templates, same tools, same adapters. Canary deployments become natural: run
+evals against your production configuration before rolling out changes.
+
+### 8.1 The composition philosophy
+
+```
+┌─────────────┐     ┌──────────┐     ┌───────────┐     ┌────────────┐
+│   Dataset   │────▶│ EvalLoop │────▶│ MainLoop  │────▶│  Adapter   │
+│  (samples)  │     │.execute()│     │ .execute()│     │            │
+└─────────────┘     └────┬─────┘     └───────────┘     └────────────┘
+                         │
+                         ▼
+                   ┌───────────┐     ┌────────────┐
+                   │ Evaluator │────▶│ EvalReport │
+                   │ (scoring) │     │ (metrics)  │
+                   └───────────┘     └────────────┘
+```
+
+`EvalLoop` orchestrates evaluation: for each sample, it executes through the
+provided `MainLoop`, scores the output with an evaluator function, and
+aggregates results into a report. You already have a `MainLoop`—evals just add
+datasets and scoring.
+
+### 8.2 Core types
+
+**Sample and Dataset:**
+
+```python
+from weakincentives.evals import Dataset, Sample
+
+# A sample pairs input with expected output
+sample = Sample(
+    id="math-1",
+    input="What is 2 + 2?",
+    expected="4",
+)
+
+# Datasets are immutable collections of samples
+dataset = Dataset(samples=(sample,))
+
+# Or load from JSONL
+dataset = Dataset.load(Path("qa.jsonl"), str, str)
+```
+
+**Score and Evaluator:**
+
+Evaluators are pure functions—no side effects, no state:
+
+```python
+from weakincentives.evals import Score, Evaluator
+
+def my_evaluator(output: str, expected: str) -> Score:
+    passed = expected.lower() in output.lower()
+    return Score(
+        value=1.0 if passed else 0.0,
+        passed=passed,
+        reason="Found expected answer" if passed else "Missing expected answer",
+    )
+```
+
+**Built-in evaluators:**
+
+```python
+from weakincentives.evals import exact_match, contains, all_of, any_of
+
+# Strict equality
+score = exact_match("hello", "hello")  # passed=True
+
+# Substring presence
+score = contains("The answer is 42.", "42")  # passed=True
+
+# Combine evaluators
+evaluator = all_of(contains, my_custom_check)  # All must pass
+evaluator = any_of(exact_match, fuzzy_match)   # At least one must pass
+```
+
+### 8.3 LLM-as-judge
+
+For subjective criteria, use an LLM to score outputs. The judge selects from a
+fixed set of rating labels that map to values:
+
+```python
+from weakincentives.evals import llm_judge, all_of
+from weakincentives.adapters.openai import OpenAIAdapter
+
+# Use a smaller model for judging
+judge_adapter = OpenAIAdapter(model="gpt-4o-mini")
+
+evaluator = all_of(
+    contains,  # Must contain expected answer
+    llm_judge(judge_adapter, "Response is helpful and well-formatted"),
+    llm_judge(judge_adapter, "No hallucinated information"),
+)
+```
+
+The `llm_judge` factory creates an evaluator that prompts the model to rate
+outputs as "excellent", "good", "fair", "poor", or "wrong"—each mapping to a
+numeric value.
+
+### 8.4 Running evaluations
+
+**EvalLoop wraps your MainLoop:**
+
+```python
+from weakincentives.evals import EvalLoop, EvalRequest, EvalResult
+from weakincentives.runtime import InMemoryMailbox
+
+# Your existing MainLoop
+main_loop = MyLoop(adapter=adapter, bus=bus, config=config)
+
+# Create mailboxes for evaluation requests and results
+requests = InMemoryMailbox[EvalRequest[str, str]](name="eval-requests")
+results = InMemoryMailbox[EvalResult](name="eval-results")
+
+# Create EvalLoop wrapping your MainLoop
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=exact_match,
+    requests=requests,
+    results=results,
+)
+```
+
+**Submit samples and collect results:**
+
+```python
+from weakincentives.evals import submit_dataset, collect_results
+
+# Submit all samples to the requests mailbox
+submit_dataset(dataset, requests)
+
+# Run the evaluation worker
+eval_loop.run(max_iterations=1)
+
+# Collect results into a report
+report = collect_results(results, expected_count=len(dataset))
+
+# Inspect the report
+print(f"Pass rate: {report.pass_rate:.1%}")
+print(f"Mean score: {report.mean_score:.2f}")
+print(f"Mean latency: {report.mean_latency_ms:.0f}ms")
+
+# Review failures
+for result in report.failed_samples():
+    print(f"Failed: {result.sample_id} - {result.score.reason}")
+```
+
+### 8.5 Production deployment pattern
+
+In production, run both `MainLoop` and `EvalLoop` workers from the same process
+or container. This ensures your evaluation suite runs against the exact same
+configuration as your production agent:
+
+```python
+from threading import Thread
+from weakincentives.runtime import RedisMailbox
+
+# Production mailboxes (Redis-backed for durability)
+prod_requests = RedisMailbox(name="agent-requests", client=redis_client)
+prod_results = RedisMailbox(name="agent-results", client=redis_client)
+
+eval_requests = RedisMailbox(name="eval-requests", client=redis_client)
+eval_results = RedisMailbox(name="eval-results", client=redis_client)
+
+# Same MainLoop used for both production and eval
+main_loop = MyAgentLoop(adapter=adapter, bus=bus, config=config)
+
+# Production worker
+def run_production():
+    while True:
+        for msg in prod_requests.receive():
+            response, session = main_loop.execute(msg.body)
+            prod_results.send(response)
+            msg.acknowledge()
+
+# Eval worker (wraps the same MainLoop)
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=my_evaluator,
+    requests=eval_requests,
+    results=eval_results,
+)
+
+# Run both in parallel
+Thread(target=run_production, daemon=True).start()
+eval_loop.run()  # Blocks, processing eval requests
+```
+
+**Canary deployment:**
+
+Before rolling out prompt or configuration changes, submit your eval dataset to
+the new worker and verify the pass rate meets your threshold:
+
+```python
+# Submit eval dataset to canary worker
+submit_dataset(regression_dataset, canary_eval_requests)
+
+# Collect and check results
+report = collect_results(canary_eval_results, expected_count=len(regression_dataset))
+
+if report.pass_rate < 0.95:
+    raise RollbackError(f"Canary failed: {report.pass_rate:.1%} pass rate")
+```
+
+This is the control plane for safe model upgrades: verify behavior
+programmatically before promoting changes.
+
+______________________________________________________________________
+
+## 10. Progressive disclosure
 
 _Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md) (Progressive Disclosure
 section)_
@@ -1736,7 +1962,7 @@ solution:
 This keeps initial prompts lean while giving the model access to details when
 needed.
 
-### 8.1 SectionVisibility: FULL vs SUMMARY
+### 10.1 SectionVisibility: FULL vs SUMMARY
 
 A section can have:
 
@@ -1759,7 +1985,7 @@ section = MarkdownSection(
 )
 ```
 
-### 8.2 open_sections and read_section
+### 10.2 open_sections and read_section
 
 When summarized sections exist, WINK injects builtin tools:
 
@@ -1774,7 +2000,7 @@ and evaluation continues with the full content visible.
 The section remains summarized in subsequent turns. Use this for reference
 material that the model only needs temporarily.
 
-### 8.3 Visibility overrides in session state
+### 10.3 Visibility overrides in session state
 
 Visibility overrides live in the `VisibilityOverrides` session slice and are
 applied at render time.
@@ -1793,7 +2019,7 @@ MainLoop applies the override and re-renders the prompt.
 
 ______________________________________________________________________
 
-## 9. Prompt overrides and optimization
+## 11. Prompt overrides and optimization
 
 _Canonical spec: [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)_
 
@@ -1806,7 +2032,7 @@ Overrides are how WINK supports fast iteration without code edits:
 This separation matters. Your templates are code: tested, reviewed, versioned.
 Overrides are configuration: easy to tweak without a deploy.
 
-### 9.1 Hash-based safety: override only what you intended
+### 11.1 Hash-based safety: override only what you intended
 
 Overrides are validated against a `PromptDescriptor`:
 
@@ -1817,7 +2043,7 @@ If hashes don't match, WINK refuses to apply the override. This prevents a
 common failure mode: you edit a section in code, but an old override still
 applies, and you're running something different than you tested.
 
-### 9.2 LocalPromptOverridesStore
+### 11.2 LocalPromptOverridesStore
 
 The default store is `LocalPromptOverridesStore`, which writes JSON files under:
 
@@ -1835,7 +2061,7 @@ store = LocalPromptOverridesStore()
 prompt = Prompt(template, overrides_store=store, overrides_tag="stable")
 ```
 
-### 9.3 Override file format
+### 11.3 Override file format
 
 The override JSON format is intentionally simple (and human editable):
 
@@ -1869,7 +2095,7 @@ The override JSON format is intentionally simple (and human editable):
   descriptions.
 - Hashes prevent applying old overrides to changed prompts.
 
-### 9.4 A practical override workflow
+### 11.4 A practical override workflow
 
 A workflow that works well in teams:
 
@@ -1886,7 +2112,7 @@ text.
 
 ______________________________________________________________________
 
-## 10. Workspace tools
+## 12. Workspace tools
 
 _Canonical spec: [specs/WORKSPACE.md](specs/WORKSPACE.md)_
 
@@ -1894,7 +2120,7 @@ WINK includes several tool suites aimed at background agents that need to
 inspect and manipulate a repository safely. They live in
 `weakincentives.contrib.tools`.
 
-### 10.1 PlanningToolsSection
+### 12.1 PlanningToolsSection
 
 **Tools:**
 
@@ -1909,7 +2135,7 @@ ID, title, details, and status.
 Use it when you want the model to externalize its plan without inventing its own
 format. Many models plan better when they have explicit tools for planning.
 
-### 10.2 VfsToolsSection
+### 12.2 VfsToolsSection
 
 A copy-on-write virtual filesystem with tools:
 
@@ -1938,7 +2164,7 @@ vfs = VfsToolsSection(
 )
 ```
 
-### 10.3 WorkspaceDigestSection
+### 12.3 WorkspaceDigestSection
 
 Renders a cached repo digest stored in session state. The digest is a structured
 summary of the repository: file tree, key files, detected patterns.
@@ -1946,7 +2172,7 @@ summary of the repository: file tree, key files, detected patterns.
 It works well with progressive disclosure: default to `SUMMARY`, expand on
 demand. The model gets an overview without the full file contents.
 
-### 10.4 AstevalSection
+### 12.4 AstevalSection
 
 Exposes `evaluate_python` (safe-ish expression evaluation) with captured
 stdout/stderr.
@@ -1957,7 +2183,7 @@ without granting shell access.
 
 **Install:** `pip install "weakincentives[asteval]"`
 
-### 10.5 PodmanSandboxSection
+### 12.5 PodmanSandboxSection
 
 Runs shell commands and Python evaluation inside a Podman container.
 
@@ -1967,7 +2193,7 @@ host.
 
 **Install:** `pip install "weakincentives[podman]"`
 
-### 10.6 Wiring a workspace into a prompt
+### 12.6 Wiring a workspace into a prompt
 
 A practical pattern (also used by `code_reviewer_example.py` in this repo):
 
@@ -2021,9 +2247,9 @@ session. Each run gets its own session with its own tool sections.
 
 ______________________________________________________________________
 
-## 11. Debugging and observability
+## 13. Debugging and observability
 
-### 11.1 Structured logging
+### 13.1 Structured logging
 
 ```python
 from weakincentives.runtime import configure_logging, get_logger
@@ -2036,7 +2262,7 @@ logger.info("hello", event="demo.hello", context={"foo": "bar"})
 Logs include structured `event` and `context` fields for downstream routing and
 analysis. JSON mode makes logs machine-parseable.
 
-### 11.2 Session events
+### 13.2 Session events
 
 Sessions subscribe to the event bus and capture telemetry events like:
 
@@ -2049,7 +2275,7 @@ Sessions subscribe to the event bus and capture telemetry events like:
 You can use these for your own tracing pipeline. Subscribe to the bus and route
 events wherever you need them.
 
-### 11.3 Dumping snapshots to JSONL
+### 13.3 Dumping snapshots to JSONL
 
 Use `weakincentives.debug.dump_session(...)` to persist a session tree:
 
@@ -2062,7 +2288,7 @@ path = dump_session(session, target="snapshots/")  # writes <session_id>.jsonl
 Each line is one serialized session snapshot (root → leaves). The JSONL format
 is stable and human-readable.
 
-### 11.4 The debug UI
+### 13.4 The debug UI
 
 **Install:** `pip install "weakincentives[wink]"`
 
@@ -2078,7 +2304,7 @@ state evolved.
 
 ______________________________________________________________________
 
-## 12. Testing and reliability
+## 14. Testing and reliability
 
 WINK is designed so that most of your "agent logic" is testable without a model.
 
@@ -2109,7 +2335,7 @@ expected. When prompts are deterministic, you can test them like regular code.
 
 ______________________________________________________________________
 
-## 13. Approach to code quality
+## 15. Approach to code quality
 
 WINK applies strict quality gates that go beyond typical Python projects. These
 gates exist because agent code has unusual failure modes: type mismatches
@@ -2123,7 +2349,7 @@ design the codebase to make correct code natural. Strict types catch errors at
 construction time. Contracts document and enforce invariants. Coverage and
 mutation testing ensure tests actually verify behavior.
 
-### 13.1 Strict type checking
+### 15.1 Strict type checking
 
 WINK enforces pyright strict mode. Type annotations are the source of truth:
 
@@ -2149,7 +2375,7 @@ def handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
 - Avoid `Any` except where truly necessary
 - Run `make typecheck` (or your IDE's type checker) frequently
 
-### 13.2 Design-by-contract
+### 15.2 Design-by-contract
 
 Public APIs use decorators from `weakincentives.dbc`:
 
@@ -2190,7 +2416,7 @@ def render_template(template: str, params: dict) -> str:
 
 Read `specs/DBC.md` before modifying DbC-decorated modules.
 
-### 13.3 Coverage and mutation testing
+### 15.3 Coverage and mutation testing
 
 WINK requires 100% line coverage for `src/weakincentives/`. But coverage alone
 is insufficient—a test can execute a line without verifying its behavior.
@@ -2217,7 +2443,7 @@ make test           # Coverage-gated unit tests
 make mutation-test  # Mutation testing (slower, run before PRs)
 ```
 
-### 13.4 Security scanning
+### 15.4 Security scanning
 
 Agent code often handles untrusted input (user requests, model outputs) and
 performs privileged operations (file access, command execution). Security
@@ -2244,7 +2470,7 @@ make pip-audit   # Vulnerability scan
 - Use VFS or sandboxes for file operations when possible
 - Avoid pickle, eval, or exec on untrusted data
 
-### 13.5 Quality gates in practice
+### 15.5 Quality gates in practice
 
 All gates are combined in `make check`:
 
@@ -2275,12 +2501,12 @@ testable. If a line can't be tested, it probably shouldn't exist.
 
 ______________________________________________________________________
 
-## 14. Recipes
+## 16. Recipes
 
 These are intentionally opinionated. They reflect the "weak incentives" style:
 reduce surprise, keep state explicit, and make side effects auditable.
 
-### 14.1 A code-review agent
+### 16.1 A code-review agent
 
 See `code_reviewer_example.py` in this repo for a full, runnable example that
 demonstrates:
@@ -2294,7 +2520,7 @@ demonstrates:
 This is the canonical "put it all together" example. Read it after you
 understand the individual pieces.
 
-### 14.2 A repo Q&A agent
+### 16.2 A repo Q&A agent
 
 **Goal**: answer questions about a codebase quickly.
 
@@ -2307,7 +2533,7 @@ understand the individual pieces.
 The model sees a summary, asks questions, digs into details as needed. Token
 usage stays low for simple questions.
 
-### 14.3 A "safe patch" agent
+### 16.3 A "safe patch" agent
 
 **Goal**: generate a patch but avoid uncontrolled writes.
 
@@ -2320,7 +2546,7 @@ usage stays low for simple questions.
 The model can experiment freely in the VFS. Only the final diff matters. Humans
 review the diff before applying it to the real repo.
 
-### 14.4 A research agent with progressive disclosure
+### 16.4 A research agent with progressive disclosure
 
 **Goal**: answer deep questions without stuffing a giant blob into the prompt.
 
@@ -2336,7 +2562,7 @@ sources it used.
 
 ______________________________________________________________________
 
-## 15. Troubleshooting
+## 17. Troubleshooting
 
 Common issues you'll hit when getting started:
 
@@ -2432,12 +2658,12 @@ wink debug snapshots/session.jsonl
 
 ______________________________________________________________________
 
-## 16. API reference
+## 18. API reference
 
 This is a curated reference of the APIs you'll touch most often. For complete
 details, read module docstrings and the specs.
 
-### 16.1 Top-level exports
+### 18.1 Top-level exports
 
 Import from `weakincentives` when you want the "90% API":
 
@@ -2466,7 +2692,7 @@ Import from `weakincentives` when you want the "90% API":
 
 - `WinkError`, `ToolValidationError`, snapshot/restore errors
 
-### 16.2 weakincentives.prompt
+### 18.2 weakincentives.prompt
 
 ```python
 PromptTemplate[OutputT](ns, key, name=None, sections=..., allow_extra_keys=False)
@@ -2486,7 +2712,7 @@ ResourceRegistry.merge(base, override)
 
 - `VisibilityExpansionRequired`
 
-### 16.3 weakincentives.runtime
+### 18.3 weakincentives.runtime
 
 ```python
 Session(bus, tags=None, parent=None)
@@ -2513,7 +2739,7 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 - Telemetry events (`PromptRendered`, `ToolInvoked`, `PromptExecuted`,
   `TokenUsage`)
 
-### 16.4 weakincentives.adapters
+### 18.4 weakincentives.adapters
 
 ```python
 ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=..., resources=...)
@@ -2535,7 +2761,7 @@ PromptEvaluationError
 
 - `ThrottlePolicy`, `new_throttle_policy`, `ThrottleError`
 
-### 16.5 weakincentives.contrib.tools
+### 18.5 weakincentives.contrib.tools
 
 **Planning:**
 
@@ -2552,7 +2778,7 @@ PromptEvaluationError
 - `AstevalSection(session, accepts_overrides=False)`
 - `PodmanSandboxSection(session, config=PodmanSandboxConfig(...))` (extra)
 
-### 16.6 weakincentives.optimizers
+### 18.6 weakincentives.optimizers
 
 - `PromptOptimizer` protocol and `BasePromptOptimizer`
 - `OptimizationContext`, `OptimizationResult`
@@ -2561,7 +2787,7 @@ PromptEvaluationError
 
 - `WorkspaceDigestOptimizer`
 
-### 16.7 weakincentives.serde
+### 18.7 weakincentives.serde
 
 Dataclass serialization utilities (no Pydantic required):
 
@@ -2588,7 +2814,42 @@ copy = clone(my_dataclass)
 - `tuple`, `frozenset`, and other immutable collections are handled
 - `schema()` produces OpenAI-compatible JSON schemas for structured output
 
-### 16.8 CLI
+### 18.8 weakincentives.evals
+
+**Core types:**
+
+```python
+Sample[InputT, ExpectedT](id, input, expected)
+Dataset[InputT, ExpectedT](samples)
+Dataset.load(path, input_type, expected_type)
+
+Score(value, passed, reason="")
+EvalResult(sample_id, score, latency_ms, error=None)
+EvalReport(results)
+    .pass_rate / .mean_score / .mean_latency_ms / .failed_samples()
+```
+
+**Evaluators:**
+
+```python
+exact_match(output, expected) -> Score
+contains(output, expected) -> Score
+all_of(*evaluators) -> Evaluator
+any_of(*evaluators) -> Evaluator
+llm_judge(adapter, criterion) -> Evaluator
+```
+
+**Loop and helpers:**
+
+```python
+EvalLoop(loop, evaluator, requests, results)
+    .run(max_iterations=None)
+
+submit_dataset(dataset, requests)
+collect_results(results, expected_count, timeout_seconds=300)
+```
+
+### 18.9 CLI
 
 Installed via the `wink` extra:
 
@@ -2627,6 +2888,7 @@ ______________________________________________________________________
 - **Tools**: [specs/TOOLS.md](specs/TOOLS.md)
 - **Sessions**: [specs/SESSIONS.md](specs/SESSIONS.md)
 - **MainLoop**: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)
+- **Evals**: [specs/EVALS.md](specs/EVALS.md)
 - **Workspace**: [specs/WORKSPACE.md](specs/WORKSPACE.md)
 - **Overrides & optimization**:
   [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)
