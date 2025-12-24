@@ -1202,6 +1202,36 @@ registry = ResourceRegistry.build({
 })
 ```
 
+**Injecting resources at evaluation time:**
+
+You can pass custom resources directly to `adapter.evaluate()` or
+`MainLoop.execute()`. This makes tools cleaner, more testable, and portable:
+
+```python
+from weakincentives.prompt.tool import ResourceRegistry
+from myapp.http import HTTPClient
+
+# Build resource registry with your dependencies
+http_client = HTTPClient(base_url="https://api.example.com")
+resources = ResourceRegistry.build({HTTPClient: http_client})
+
+# Pass to adapter - merged with workspace resources (e.g., filesystem)
+response = adapter.evaluate(prompt, session=session, resources=resources)
+
+# Or at the MainLoop level
+config = MainLoopConfig(resources=resources)
+loop = MyLoop(adapter=adapter, bus=bus, config=config)
+response, session = loop.execute(request)
+```
+
+**Key behaviors:**
+
+- `ResourceRegistry.merge()` combines registries with the second taking
+  precedence on conflicts
+- User-provided resources override workspace defaults (e.g., custom filesystem)
+- Tool handlers access resources via `context.resources.get(ResourceType)`
+- All adapters (OpenAI, LiteLLM, Claude Agent SDK) support resource injection
+
 For workspace agents, the most common resource is a `Filesystem` implementation.
 Many contributed tool suites install one automatically (VFS, Podman).
 
@@ -1535,6 +1565,7 @@ response = adapter.evaluate(
     deadline=...,        # optional
     budget=...,          # optional
     budget_tracker=...,  # optional
+    resources=...,       # optional ResourceRegistry
 )
 ```
 
@@ -1547,6 +1578,11 @@ It returns `PromptResponse[OutputT]`:
 The adapter handles all the provider-specific details: API formatting, tool
 schema translation, response parsing. Your code just calls `evaluate()` and gets
 back typed results.
+
+The optional `resources` parameter lets you inject custom resources (HTTP
+clients, databases, external services) that tool handlers can access via
+`context.resources.get(ResourceType)`. Injected resources are merged with any
+workspace-provided resources, with user-provided resources taking precedence.
 
 ### 6.2 OpenAIAdapter
 
@@ -1631,7 +1667,7 @@ You implement:
 Then call `loop.execute(request)`.
 
 ```python
-from weakincentives.runtime import MainLoop, Session
+from weakincentives.runtime import MainLoop, MainLoopConfig, Session
 from weakincentives.prompt import Prompt
 
 class MyLoop(MainLoop[RequestType, OutputType]):
@@ -1645,6 +1681,24 @@ class MyLoop(MainLoop[RequestType, OutputType]):
 `MainLoop` also catches `VisibilityExpansionRequired` and retries automatically.
 When the model calls `open_sections`, MainLoop applies the visibility overrides
 and re-evaluates the prompt. You don't have to handle this yourself.
+
+**Configuring MainLoop with resources:**
+
+You can inject custom resources at the loop level via `MainLoopConfig`:
+
+```python
+from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.runtime import MainLoopConfig
+
+resources = ResourceRegistry.build({HTTPClient: http_client})
+config = MainLoopConfig(resources=resources)
+loop = MyLoop(adapter=adapter, bus=bus, config=config)
+response, session = loop.execute(request)
+```
+
+Resources configured this way are available to all tool handlers during
+execution. You can also pass resources directly to `loop.execute(request,
+resources=...)` for per-request overrides.
 
 ### 7.2 Deadlines and budgets
 
@@ -2396,15 +2450,15 @@ Import from `weakincentives` when you want the "90% API":
 
 - `PromptTemplate`, `Prompt`, `RenderedPrompt`
 - `Section`, `MarkdownSection`
-- `Tool`, `ToolContext`, `ToolResult`
+- `Tool`, `ToolContext`, `ToolResult`, `ResourceRegistry`
 - `SectionVisibility`
 - `parse_structured_output`, `OutputParseError`
 
 **Runtime primitives:**
 
 - `Session`, `InProcessEventBus`
-- `MainLoop` and loop events (`MainLoopRequest`, `MainLoopCompleted`,
-  `MainLoopFailed`)
+- `MainLoop`, `MainLoopConfig` and loop events (`MainLoopRequest`,
+  `MainLoopCompleted`, `MainLoopFailed`)
 - Reducer helpers (`append_all`, `replace_latest`, `upsert_by`, ...)
 - Logging helpers (`configure_logging`, `get_logger`)
 
@@ -2424,6 +2478,8 @@ Prompt(template, overrides_store=None, overrides_tag="latest")
 MarkdownSection(title, key, template, summary=None, visibility=..., tools=...)
 Tool(name, description, handler, examples=...)
 ToolResult(message, value, success=True, exclude_value_from_context=False)
+ResourceRegistry.build({Type: instance, ...})
+ResourceRegistry.merge(base, override)
 ```
 
 **Progressive disclosure:**
@@ -2441,6 +2497,10 @@ session.dispatch(event)
 VisibilityOverrides, SetVisibilityOverride, ClearVisibilityOverride
 session.snapshot(include_all=False)
 session.restore(snapshot, preserve_logs=True)
+
+# MainLoop configuration
+MainLoopConfig(deadline=..., budget=..., resources=...)
+MainLoop.execute(request, deadline=..., budget=..., resources=...)
 ```
 
 **Reducers:**
@@ -2456,7 +2516,7 @@ session.restore(snapshot, preserve_logs=True)
 ### 16.4 weakincentives.adapters
 
 ```python
-ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=...)
+ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=..., resources=...)
 PromptResponse(prompt_name, text, output)
 PromptEvaluationError
 ```
@@ -2465,6 +2525,11 @@ PromptEvaluationError
 
 - `OpenAIClientConfig`, `OpenAIModelConfig`
 - `LiteLLMClientConfig`, `LiteLLMModelConfig`
+
+**Resources:**
+
+- `ResourceRegistry.build({Type: instance, ...})` - build registry from dict
+- `ResourceRegistry.merge(base, override)` - combine registries (override wins)
 
 **Throttling:**
 
