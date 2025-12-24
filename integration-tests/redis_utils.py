@@ -39,22 +39,11 @@ import subprocess
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from redis import Redis
     from redis.cluster import RedisCluster
-
-
-@dataclass(frozen=True, slots=True)
-class RedisContainer:
-    """Information about a running Redis container."""
-
-    container_id: str
-    host: str
-    port: int
-    container_runtime: str  # "docker" or "podman"
 
 
 def _find_container_runtime() -> str | None:
@@ -322,7 +311,6 @@ REDIS_CLUSTER_TESTS_ENABLED = os.environ.get("REDIS_CLUSTER_TESTS", "0") == "1"
 
 __all__ = [
     "REDIS_CLUSTER_TESTS_ENABLED",
-    "RedisContainer",
     "is_redis_available",
     "redis_cluster",
     "redis_standalone",

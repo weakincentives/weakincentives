@@ -37,130 +37,100 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-from ...runtime.mailbox import (
+from weakincentives.runtime.mailbox import (
     MailboxConnectionError,
     MailboxFullError,
     Message,
     ReceiptHandleExpiredError,
     SerializationError,
 )
-from ...serde import dump, parse
+from weakincentives.serde import dump, parse
+
+# =============================================================================
+# Lua Scripts for Atomic Operations
+# =============================================================================
+# These scripts ensure atomicity of multi-step operations in Redis.
+# Each script operates on keys with a common hash tag {queue:name} to
+# ensure cluster compatibility.
+
+_LUA_RECEIVE = """
+local msg_id = redis.call('RPOP', KEYS[1])
+if not msg_id then return nil end
+redis.call('ZADD', KEYS[2], ARGV[1], msg_id)
+local data = redis.call('HGET', KEYS[3], msg_id)
+local count = redis.call('HINCRBY', KEYS[4], msg_id .. ':count', 1)
+local enqueued = redis.call('HGET', KEYS[4], msg_id .. ':enqueued')
+return {msg_id, data, count, enqueued}
+"""
+
+_LUA_ACKNOWLEDGE = """
+local removed = redis.call('ZREM', KEYS[1], ARGV[1])
+if removed == 0 then return 0 end
+redis.call('HDEL', KEYS[2], ARGV[1])
+redis.call('HDEL', KEYS[3], ARGV[1] .. ':count')
+redis.call('HDEL', KEYS[3], ARGV[1] .. ':enqueued')
+return 1
+"""
+
+_LUA_NACK = """
+local removed = redis.call('ZREM', KEYS[1], ARGV[1])
+if removed == 0 then return 0 end
+if tonumber(ARGV[2]) <= 0 then
+    redis.call('LPUSH', KEYS[2], ARGV[1])
+else
+    redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+end
+return 1
+"""
+
+_LUA_EXTEND = """
+redis.call('ZADD', KEYS[1], 'XX', ARGV[2], ARGV[1])
+local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
+return score and 1 or 0
+"""
+
+_LUA_REAP = """
+local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, 100)
+local count = 0
+for i, msg_id in ipairs(expired) do
+    redis.call('ZREM', KEYS[1], msg_id)
+    redis.call('LPUSH', KEYS[2], msg_id)
+    count = count + 1
+end
+return count
+"""
+
+_LUA_PURGE = """
+local pending_count = redis.call('LLEN', KEYS[1])
+local invisible_count = redis.call('ZCARD', KEYS[2])
+redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+return pending_count + invisible_count
+"""
 
 if TYPE_CHECKING:
     from redis import Redis
     from redis.cluster import RedisCluster
 
 
-# Lua script for atomic receive operation
-# Keys: pending, invisible, data, meta
-# Args: visibility_timeout_score, current_time_ms
-_LUA_RECEIVE = """
-local msg_id = redis.call('RPOP', KEYS[1])
-if not msg_id then
-    return nil
-end
+@dataclass(frozen=True, slots=True)
+class _QueueKeys:
+    """Redis keys for a named queue with hash tags for cluster compatibility."""
 
--- Add to invisible set with expiry score
-redis.call('ZADD', KEYS[2], ARGV[1], msg_id)
+    pending: str
+    invisible: str
+    data: str
+    meta: str
 
--- Get message data
-local data = redis.call('HGET', KEYS[3], msg_id)
-
--- Increment and get delivery count
-local count = redis.call('HINCRBY', KEYS[4], msg_id .. ':count', 1)
-
--- Get enqueued_at timestamp
-local enqueued = redis.call('HGET', KEYS[4], msg_id .. ':enqueued')
-
-return {msg_id, data, count, enqueued}
-"""
-
-# Lua script for atomic acknowledge operation
-# Keys: invisible, data, meta
-# Args: msg_id
-_LUA_ACKNOWLEDGE = """
-local removed = redis.call('ZREM', KEYS[1], ARGV[1])
-if removed == 0 then
-    return 0
-end
-
--- Clean up message data and metadata
-redis.call('HDEL', KEYS[2], ARGV[1])
-redis.call('HDEL', KEYS[3], ARGV[1] .. ':count')
-redis.call('HDEL', KEYS[3], ARGV[1] .. ':enqueued')
-
-return 1
-"""
-
-# Lua script for atomic nack operation
-# Keys: invisible, pending
-# Args: msg_id, new_visibility_score (0 means immediate)
-_LUA_NACK = """
-local removed = redis.call('ZREM', KEYS[1], ARGV[1])
-if removed == 0 then
-    return 0
-end
-
-if tonumber(ARGV[2]) <= 0 then
-    -- Immediate visibility: push to pending
-    redis.call('LPUSH', KEYS[2], ARGV[1])
-else
-    -- Delayed visibility: re-add to invisible with new score
-    redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
-end
-
-return 1
-"""
-
-# Lua script for extend visibility operation
-# Keys: invisible
-# Args: msg_id, new_visibility_score
-_LUA_EXTEND = """
--- Use XX to only update if exists
-local result = redis.call('ZADD', KEYS[1], 'XX', ARGV[2], ARGV[1])
--- Check if the member exists
-local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
-if score then
-    return 1
-end
-return 0
-"""
-
-# Lua script for reaping expired messages
-# Keys: invisible, pending
-# Args: current_time
-_LUA_REAP = """
-local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, 100)
-local count = 0
-
-for i, msg_id in ipairs(expired) do
-    redis.call('ZREM', KEYS[1], msg_id)
-    redis.call('LPUSH', KEYS[2], msg_id)
-    count = count + 1
-end
-
-return count
-"""
-
-# Lua script for purge operation
-# Keys: pending, invisible, data, meta
-# Returns: approximate count of deleted messages
-_LUA_PURGE = """
-local pending_count = redis.call('LLEN', KEYS[1])
-local invisible_count = redis.call('ZCARD', KEYS[2])
-
-redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
-
-return pending_count + invisible_count
-"""
-
-
-def _key(name: str, suffix: str) -> str:
-    """Generate a Redis key with hash tag for cluster compatibility.
-
-    The {queue:name} pattern ensures all keys for a queue hash to the same slot.
-    """
-    return f"{{queue:{name}}}:{suffix}"
+    @classmethod
+    def for_queue(cls, name: str) -> _QueueKeys:
+        """Create keys for the given queue name."""
+        prefix = f"{{queue:{name}}}"
+        return cls(
+            pending=f"{prefix}:pending",
+            invisible=f"{prefix}:invisible",
+            data=f"{prefix}:data",
+            meta=f"{prefix}:meta",
+        )
 
 
 @dataclass(slots=True)
@@ -214,6 +184,7 @@ class RedisMailbox[T]:
     reaper_interval: float = 1.0
     """Interval in seconds between visibility reaper runs."""
 
+    _keys: _QueueKeys = field(init=False, repr=False)
     _scripts: dict[str, Any] = field(init=False, default_factory=dict, repr=False)
     _reaper_thread: threading.Thread | None = field(
         default=None, repr=False, init=False
@@ -225,7 +196,8 @@ class RedisMailbox[T]:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def __post_init__(self) -> None:
-        """Register Lua scripts and start reaper thread."""
+        """Initialize keys, register Lua scripts, and start reaper thread."""
+        object.__setattr__(self, "_keys", _QueueKeys.for_queue(self.name))
         self._register_scripts()
         self._start_reaper()
 
@@ -260,10 +232,7 @@ class RedisMailbox[T]:
             Number of messages requeued.
         """
         now = time.time()
-        keys = [
-            _key(self.name, "invisible"),
-            _key(self.name, "pending"),
-        ]
+        keys = [self._keys.invisible, self._keys.pending]
         result = self._scripts["reap"](keys=keys, args=[now])
         return int(result) if result else 0
 
@@ -324,18 +293,18 @@ class RedisMailbox[T]:
             pipe = self.client.pipeline()
 
             # Store message data
-            pipe.hset(_key(self.name, "data"), msg_id, serialized)
+            pipe.hset(self._keys.data, msg_id, serialized)
 
             # Store enqueued timestamp in meta
-            pipe.hset(_key(self.name, "meta"), f"{msg_id}:enqueued", enqueued_at)
+            pipe.hset(self._keys.meta, f"{msg_id}:enqueued", enqueued_at)
 
             if delay_seconds > 0:
                 # Delayed message: add to invisible with future expiry
                 expiry_score = time.time() + delay_seconds
-                pipe.zadd(_key(self.name, "invisible"), {msg_id: expiry_score})
+                pipe.zadd(self._keys.invisible, {msg_id: expiry_score})
             else:
                 # Immediate visibility: add to pending queue
-                pipe.lpush(_key(self.name, "pending"), msg_id)
+                pipe.lpush(self._keys.pending, msg_id)
 
             pipe.execute()
             return msg_id
@@ -410,18 +379,13 @@ class RedisMailbox[T]:
         Returns:
             A Message if one was received, None otherwise.
         """
-        pending_key = _key(self.name, "pending")
-        invisible_key = _key(self.name, "invisible")
-        data_key = _key(self.name, "data")
-        meta_key = _key(self.name, "meta")
-
-        # Calculate visibility expiry score
+        keys = self._keys
         expiry_score = time.time() + visibility_timeout
 
         # Use blocking pop if waiting, otherwise use Lua script
         if wait_seconds > 0:
             # BRPOP for efficient long polling
-            result = self.client.brpop(pending_key, timeout=int(wait_seconds) or 1)
+            result = self.client.brpop(keys.pending, timeout=int(wait_seconds) or 1)
             if result is None:
                 return None
 
@@ -430,10 +394,10 @@ class RedisMailbox[T]:
 
             # Now atomically process the message
             pipe = self.client.pipeline()
-            pipe.zadd(invisible_key, {msg_id: expiry_score})
-            pipe.hget(data_key, msg_id)
-            pipe.hincrby(meta_key, f"{msg_id}:count", 1)
-            pipe.hget(meta_key, f"{msg_id}:enqueued")
+            pipe.zadd(keys.invisible, {msg_id: expiry_score})
+            pipe.hget(keys.data, msg_id)
+            pipe.hincrby(keys.meta, f"{msg_id}:count", 1)
+            pipe.hget(keys.meta, f"{msg_id}:enqueued")
             results = pipe.execute()
 
             data = results[1]
@@ -441,8 +405,8 @@ class RedisMailbox[T]:
             enqueued_raw = results[3]
         else:
             # Use Lua script for atomic non-blocking receive
-            keys = [pending_key, invisible_key, data_key, meta_key]
-            result = self._scripts["receive"](keys=keys, args=[expiry_score, 0])
+            lua_keys = [keys.pending, keys.invisible, keys.data, keys.meta]
+            result = self._scripts["receive"](keys=lua_keys, args=[expiry_score, 0])
 
             if result is None:
                 return None
@@ -491,11 +455,7 @@ class RedisMailbox[T]:
 
     def _acknowledge(self, msg_id: str) -> None:
         """Delete message from queue."""
-        keys = [
-            _key(self.name, "invisible"),
-            _key(self.name, "data"),
-            _key(self.name, "meta"),
-        ]
+        keys = [self._keys.invisible, self._keys.data, self._keys.meta]
         result = self._scripts["acknowledge"](keys=keys, args=[msg_id])
         if result == 0:
             raise ReceiptHandleExpiredError(
@@ -504,15 +464,8 @@ class RedisMailbox[T]:
 
     def _nack(self, msg_id: str, visibility_timeout: int) -> None:
         """Return message to queue."""
-        if visibility_timeout > 0:
-            new_score = time.time() + visibility_timeout
-        else:
-            new_score = 0
-
-        keys = [
-            _key(self.name, "invisible"),
-            _key(self.name, "pending"),
-        ]
+        new_score = time.time() + visibility_timeout if visibility_timeout > 0 else 0
+        keys = [self._keys.invisible, self._keys.pending]
         result = self._scripts["nack"](keys=keys, args=[msg_id, new_score])
         if result == 0:
             raise ReceiptHandleExpiredError(
@@ -522,8 +475,9 @@ class RedisMailbox[T]:
     def _extend(self, msg_id: str, timeout: int) -> None:
         """Extend visibility timeout."""
         new_score = time.time() + timeout
-        keys = [_key(self.name, "invisible")]
-        result = self._scripts["extend"](keys=keys, args=[msg_id, new_score])
+        result = self._scripts["extend"](
+            keys=[self._keys.invisible], args=[msg_id, new_score]
+        )
         if result == 0:
             raise ReceiptHandleExpiredError(
                 f"Message '{msg_id}' not found or already acknowledged"
@@ -539,10 +493,10 @@ class RedisMailbox[T]:
             Unlike SQS, Redis has no purge cooldown.
         """
         keys = [
-            _key(self.name, "pending"),
-            _key(self.name, "invisible"),
-            _key(self.name, "data"),
-            _key(self.name, "meta"),
+            self._keys.pending,
+            self._keys.invisible,
+            self._keys.data,
+            self._keys.meta,
         ]
         try:
             result = self._scripts["purge"](keys=keys, args=[])
@@ -557,8 +511,8 @@ class RedisMailbox[T]:
         Includes both visible (pending) and invisible (in-flight) messages.
         """
         try:
-            pending = self.client.llen(_key(self.name, "pending"))
-            invisible = self.client.zcard(_key(self.name, "invisible"))
+            pending = self.client.llen(self._keys.pending)
+            invisible = self.client.zcard(self._keys.invisible)
             return pending + invisible
         except Exception as e:
             raise MailboxConnectionError(f"Failed to get queue count: {e}") from e
