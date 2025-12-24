@@ -43,6 +43,16 @@ from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append_all
 from .slice_accessor import SliceAccessor
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
+from .slices import (
+    Append,
+    Clear,
+    Extend,
+    Replace,
+    Slice,
+    SliceFactoryConfig,
+    SliceOp,
+    default_slice_config,
+)
 from .snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -180,6 +190,7 @@ class Session(SessionProtocol):
         session_id: UUID | None = None,
         created_at: datetime | None = None,
         tags: Mapping[object, object] | None = None,
+        slice_config: SliceFactoryConfig | None = None,
     ) -> None:
         super().__init__()
         resolved_session_id = session_id if session_id is not None else uuid4()
@@ -200,8 +211,11 @@ class Session(SessionProtocol):
         else:
             self._bus = bus
 
+        self._slice_config = (
+            slice_config if slice_config is not None else default_slice_config()
+        )
         self._reducers: dict[SessionSliceType, list[_ReducerRegistration]] = {}
-        self._state: dict[SessionSliceType, SessionSlice] = {}
+        self._slices: dict[SessionSliceType, Slice[Any]] = {}
         self._slice_policies: dict[SessionSliceType, SlicePolicy] = {
             _PROMPT_RENDERED_TYPE: SlicePolicy.LOG,
             _PROMPT_EXECUTED_TYPE: SlicePolicy.LOG,
@@ -243,6 +257,16 @@ class Session(SessionProtocol):
                     slice_type=registration.slice_type,
                 )
 
+    def _get_or_create_slice[T: SupportsDataclass](
+        self, slice_type: type[T]
+    ) -> Slice[T]:
+        """Get existing slice or create one using the appropriate factory."""
+        if slice_type not in self._slices:
+            policy = self._slice_policies.get(slice_type, SlicePolicy.STATE)
+            factory = self._slice_config.factory_for_policy(policy)
+            self._slices[slice_type] = factory.create(slice_type)
+        return cast(Slice[T], self._slices[slice_type])
+
     def _snapshot_reducers_and_state(
         self,
     ) -> tuple[
@@ -256,7 +280,11 @@ class Session(SessionProtocol):
                 (data_type, tuple(registrations))
                 for data_type, registrations in self._reducers.items()
             ]
-            state_snapshot = dict(self._state)
+            # Convert slices to tuples for snapshot
+            state_snapshot = {
+                slice_type: slice_instance.snapshot()
+                for slice_type, slice_instance in self._slices.items()
+            }
             policy_snapshot = dict(self._slice_policies)
         return reducer_snapshot, state_snapshot, policy_snapshot
 
@@ -283,7 +311,9 @@ class Session(SessionProtocol):
     ) -> None:
         """Apply state snapshot to cloned session."""
         with clone.locked():
-            clone._state = state_snapshot
+            for slice_type, items in state_snapshot.items():
+                slice_instance = clone._get_or_create_slice(slice_type)
+                slice_instance.replace(items)
 
     @staticmethod
     def _apply_policies_to_clone(
@@ -302,6 +332,7 @@ class Session(SessionProtocol):
         session_id: UUID | None = None,
         created_at: datetime | None = None,
         tags: Mapping[object, object] | None = None,
+        slice_config: SliceFactoryConfig | None = None,
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
         reducer_snapshot, state_snapshot, policy_snapshot = (
@@ -313,6 +344,9 @@ class Session(SessionProtocol):
             session_id=self._resolve_clone_id(session_id),
             created_at=self._resolve_clone_created(created_at),
             tags=self._resolve_clone_tags(tags),
+            slice_config=slice_config
+            if slice_config is not None
+            else self._slice_config,
         )
         self._copy_reducers_to_clone(clone, reducer_snapshot)
         self._apply_state_to_clone(clone, state_snapshot)
@@ -326,8 +360,8 @@ class Session(SessionProtocol):
         Internal method used by SliceAccessor. Use ``session[SliceType].all()``
         for public access.
         """
-
-        return cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
+        slice_instance = self._get_or_create_slice(slice_type)
+        return slice_instance.all()
 
     @override
     def __getitem__[S: SupportsDataclass](
@@ -444,11 +478,13 @@ class Session(SessionProtocol):
             session.reset()  # All slices are now empty
 
         """
-        slice_types: set[SessionSliceType] = set(self._state)
+        slice_types: set[SessionSliceType] = set(self._slices)
         for registrations in self._reducers.values():
             for registration in registrations:
                 slice_types.add(registration.slice_type)
-        self._state = dict.fromkeys(slice_types, EMPTY_SLICE)
+        for slice_type in slice_types:
+            slice_instance = self._get_or_create_slice(slice_type)
+            slice_instance.clear()
 
     @override
     def restore(
@@ -484,7 +520,6 @@ class Session(SessionProtocol):
             raise SnapshotRestoreError(msg)
 
         with self.locked():
-            new_state: dict[SessionSliceType, SessionSlice] = dict(self._state)
             for slice_type in registered_slices:
                 policy = snapshot.policies.get(
                     slice_type,
@@ -492,8 +527,9 @@ class Session(SessionProtocol):
                 )
                 if preserve_logs and policy is SlicePolicy.LOG:
                     continue
-                new_state[slice_type] = snapshot.slices.get(slice_type, EMPTY_SLICE)
-            self._state = new_state
+                items = snapshot.slices.get(slice_type, EMPTY_SLICE)
+                slice_instance = self._get_or_create_slice(slice_type)
+                slice_instance.replace(items)
 
     # ──────────────────────────────────────────────────────────────────────
     # Private Mutation Methods (used by SliceAccessor)
@@ -504,7 +540,8 @@ class Session(SessionProtocol):
         self, slice_type: type[S], values: Iterable[S]
     ) -> None:
         """Initialize or replace the stored tuple for the provided type."""
-        self._state[slice_type] = tuple(values)
+        slice_instance = self._get_or_create_slice(slice_type)
+        slice_instance.replace(tuple(values))
 
     @_locked_method
     def _mutation_clear_slice[S: SupportsDataclass](
@@ -513,14 +550,8 @@ class Session(SessionProtocol):
         predicate: Callable[[S], bool] | None = None,
     ) -> None:
         """Remove items from the slice, optionally filtering by predicate."""
-        existing = cast(tuple[S, ...], self._state.get(slice_type, EMPTY_SLICE))
-        if not existing:
-            return
-        if predicate is None:
-            self._state[slice_type] = EMPTY_SLICE
-            return
-        filtered = tuple(value for value in existing if not predicate(value))
-        self._state[slice_type] = filtered
+        slice_instance = self._get_or_create_slice(slice_type)
+        slice_instance.clear(predicate)
 
     @_locked_method
     def _mutation_register_reducer[S: SupportsDataclass](
@@ -541,7 +572,8 @@ class Session(SessionProtocol):
         )
         bucket = self._reducers.setdefault(data_type, [])
         bucket.append(registration)
-        _ = self._state.setdefault(target_slice_type, EMPTY_SLICE)
+        # Ensure slice exists
+        _ = self._get_or_create_slice(target_slice_type)
         if policy is not None:
             self._slice_policies[target_slice_type] = policy
         else:
@@ -604,7 +636,11 @@ class Session(SessionProtocol):
         del tag
 
         with self.locked():
-            state_snapshot: dict[SessionSliceType, SessionSlice] = dict(self._state)
+            # Convert slices to tuples for snapshot
+            state_snapshot: dict[SessionSliceType, SessionSlice] = {
+                slice_type: slice_instance.snapshot()
+                for slice_type, slice_instance in self._slices.items()
+            }
             parent_id = self._parent.session_id if self._parent is not None else None
             children_ids = tuple(child.session_id for child in self._children)
             registered = set(state_snapshot)
@@ -645,7 +681,7 @@ class Session(SessionProtocol):
 
     def _registered_slice_types(self) -> set[SessionSliceType]:
         with self.locked():
-            types: set[SessionSliceType] = set(self._state)
+            types: set[SessionSliceType] = set(self._slices)
             for registrations in self._reducers.values():
                 for registration in registrations:
                     types.add(registration.slice_type)
@@ -746,31 +782,44 @@ class Session(SessionProtocol):
 
         for registration in registrations:
             slice_type = registration.slice_type
-            while True:
+            with self.locked():
+                slice_instance = self._get_or_create_slice(slice_type)
+                view = slice_instance.view()
+            try:
+                op = registration.reducer(view, event, context=context)
+                # Apply the slice operation
                 with self.locked():
-                    previous = self._state.get(slice_type, EMPTY_SLICE)
-                try:
-                    result = registration.reducer(previous, event, context=context)
-                except Exception:  # log and continue
-                    reducer_name = getattr(
-                        registration.reducer, "__qualname__", repr(registration.reducer)
-                    )
-                    logger.exception(
-                        "Reducer application failed.",
-                        event="session_reducer_failed",
-                        context={
-                            "reducer": reducer_name,
-                            "data_type": data_type.__qualname__,
-                            "slice_type": slice_type.__qualname__,
-                        },
-                    )
-                    break
-                normalized = tuple(result)
-                with self.locked():
-                    current = self._state.get(slice_type, EMPTY_SLICE)
-                    if current is previous or current == normalized:
-                        self._state[slice_type] = normalized
-                        break
+                    self._apply_slice_op(op, slice_instance)
+            except Exception:  # log and continue
+                reducer_name = getattr(
+                    registration.reducer, "__qualname__", repr(registration.reducer)
+                )
+                logger.exception(
+                    "Reducer application failed.",
+                    event="session_reducer_failed",
+                    context={
+                        "reducer": reducer_name,
+                        "data_type": data_type.__qualname__,
+                        "slice_type": slice_type.__qualname__,
+                    },
+                )
+                continue
+
+    @staticmethod
+    def _apply_slice_op[S: SupportsDataclass](
+        op: SliceOp[S],
+        slice_instance: Slice[S],
+    ) -> None:
+        """Apply slice operation using optimal method."""
+        match op:
+            case Append(item=item):
+                slice_instance.append(item)
+            case Extend(items=items):
+                slice_instance.extend(items)
+            case Replace(items=items):
+                slice_instance.replace(items)
+            case Clear(predicate=pred):
+                slice_instance.clear(pred)
 
     def _attach_to_dispatcher(self, bus: TelemetryDispatcher) -> None:
         with self.locked():

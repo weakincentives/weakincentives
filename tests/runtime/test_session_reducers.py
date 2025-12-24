@@ -15,7 +15,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from weakincentives.runtime.events import Dispatcher
-from weakincentives.runtime.session import Session
+from weakincentives.runtime.session import (
+    Append,
+    MemorySlice,
+    Replace,
+    Session,
+)
 from weakincentives.runtime.session._types import ReducerContextProtocol
 from weakincentives.runtime.session.reducers import (
     append_all,
@@ -40,14 +45,16 @@ def test_replace_latest_by_replaces_matching_entry() -> None:
     reducer = replace_latest_by(lambda item: item.key)
     session = Session()
     context = _Context(session=session, dispatcher=session.dispatcher)
-    initial = (_Sample("a", "first"), _Sample("b", "second"))
+    initial = MemorySlice((_Sample("a", "first"), _Sample("b", "second")))
 
-    updated = reducer(
-        initial,
+    op = reducer(
+        initial.view(),
         _Sample("a", "updated"),
         context=context,
     )
 
+    assert isinstance(op, Replace)
+    updated = op.items
     assert len(updated) == 2
     assert updated[-1].key == "a"
     assert updated[-1].data == "updated"
@@ -58,25 +65,25 @@ def test_append_all_always_appends() -> None:
     """append_all appends unconditionally (ledger semantics)."""
     session = Session()
     context = _Context(session=session, dispatcher=session.dispatcher)
-    initial = (_Sample("a", "first"),)
+    initial = MemorySlice((_Sample("a", "first"),))
 
-    # Append same value - should still append
-    updated = append_all(initial, _Sample("a", "first"), context=context)
+    # Append same value - should still append (returns Append operation)
+    op = append_all(initial.view(), _Sample("a", "first"), context=context)
 
-    assert len(updated) == 2
-    assert updated[0] == _Sample("a", "first")
-    assert updated[1] == _Sample("a", "first")
+    assert isinstance(op, Append)
+    assert op.item == _Sample("a", "first")
 
 
 def test_append_all_appends_to_empty_slice() -> None:
     """append_all works on empty slices."""
     session = Session()
     context = _Context(session=session, dispatcher=session.dispatcher)
+    initial = MemorySlice[_Sample]()
 
-    updated = append_all((), _Sample("a", "first"), context=context)
+    op = append_all(initial.view(), _Sample("a", "first"), context=context)
 
-    assert len(updated) == 1
-    assert updated[0] == _Sample("a", "first")
+    assert isinstance(op, Append)
+    assert op.item == _Sample("a", "first")
 
 
 def test_upsert_by_replaces_first_duplicate_and_removes_others() -> None:
@@ -85,22 +92,26 @@ def test_upsert_by_replaces_first_duplicate_and_removes_others() -> None:
     session = Session()
     context = _Context(session=session, dispatcher=session.dispatcher)
     # Slice with duplicate keys - this covers the branch at line 61->64
-    initial = (
-        _Sample("a", "first"),
-        _Sample("a", "duplicate"),  # duplicate key
-        _Sample("b", "other"),
+    initial = MemorySlice(
+        (
+            _Sample("a", "first"),
+            _Sample("a", "duplicate"),  # duplicate key
+            _Sample("b", "other"),
+        )
     )
 
-    updated = reducer(
-        initial,
+    op = reducer(
+        initial.view(),
         _Sample("a", "updated"),
         context=context,
     )
 
+    assert isinstance(op, Replace)
+    updated = op.items
     # Should have 2 items: the updated "a" and "b"
     assert len(updated) == 2
-    assert updated[0] == _Sample("a", "updated")
-    assert updated[1] == _Sample("b", "other")
+    assert updated[0] == _Sample("b", "other")
+    assert updated[1] == _Sample("a", "updated")
 
 
 def test_upsert_by_appends_when_key_not_found() -> None:
@@ -108,14 +119,16 @@ def test_upsert_by_appends_when_key_not_found() -> None:
     reducer = upsert_by(lambda item: item.key)
     session = Session()
     context = _Context(session=session, dispatcher=session.dispatcher)
-    initial = (_Sample("a", "first"),)
+    initial = MemorySlice((_Sample("a", "first"),))
 
-    updated = reducer(
-        initial,
+    op = reducer(
+        initial.view(),
         _Sample("b", "new"),
         context=context,
     )
 
+    assert isinstance(op, Replace)
+    updated = op.items
     assert len(updated) == 2
     assert updated[0] == _Sample("a", "first")
     assert updated[1] == _Sample("b", "new")

@@ -19,6 +19,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol
 
 from ...types.dataclass import SupportsDataclass
+from .slices import SliceOp, SliceView
 
 if TYPE_CHECKING:
     from .protocols import SessionViewProtocol
@@ -34,15 +35,19 @@ class ReducerContextProtocol(Protocol):
 
 
 class TypedReducer[S: SupportsDataclass](Protocol):
-    """Protocol for reducer callables maintained by :class:`Session`."""
+    """Protocol for reducer callables maintained by :class:`Session`.
+
+    Reducers receive a lazy SliceView and return a SliceOp describing
+    the mutation to apply.
+    """
 
     def __call__(
         self,
-        slice_values: tuple[S, ...],
+        view: SliceView[S],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[S, ...]: ...
+    ) -> SliceOp[S]: ...
 
 
 __all__ = [

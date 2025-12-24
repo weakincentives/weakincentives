@@ -19,10 +19,14 @@ This module provides a decorator-based approach for defining reducers
 co-located as methods on state slice dataclasses. This eliminates
 the need for separate reducer functions and manual registration.
 
+Declarative reducers return SliceOp, maintaining consistency with the
+functional reducer API:
+
 Example::
 
     from dataclasses import dataclass, replace
     from weakincentives.runtime.session import reducer
+    from weakincentives.runtime.session.slices import Replace
 
     @dataclass(frozen=True)
     class AgentPlan:
@@ -30,12 +34,14 @@ Example::
         current_step: int = 0
 
         @reducer(on=AddStep)
-        def add_step(self, event: AddStep) -> "AgentPlan":
-            return replace(self, steps=(*self.steps, event.step))
+        def add_step(self, event: AddStep) -> Replace["AgentPlan"]:
+            new_plan = replace(self, steps=(*self.steps, event.step))
+            return Replace((new_plan,))
 
         @reducer(on=CompleteStep)
-        def complete(self, event: CompleteStep) -> "AgentPlan":
-            return replace(self, current_step=self.current_step + 1)
+        def complete(self, event: CompleteStep) -> Replace["AgentPlan"]:
+            new_plan = replace(self, current_step=self.current_step + 1)
+            return Replace((new_plan,))
 
     # Register once:
     session.install(AgentPlan)
@@ -54,6 +60,7 @@ from typing import TYPE_CHECKING, Any, cast
 from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
 from ._types import ReducerContextProtocol, ReducerEvent, TypedReducer
+from .slices import Replace, SliceOp, SliceView
 
 if TYPE_CHECKING:
     from .session import Session
@@ -76,7 +83,7 @@ def reducer[E: SupportsDataclass](
     """Decorator to mark a method as a reducer for a specific event type.
 
     The decorated method receives ``self`` (the current slice value) and the
-    event, returning a new instance of the slice type. Each event type may
+    event, returning a SliceOp describing the mutation. Each event type may
     only have one reducer method per slice class.
 
     Args:
@@ -86,17 +93,18 @@ def reducer[E: SupportsDataclass](
         A decorator that marks the method with reducer metadata.
 
     Note:
-        The method signature must be ``(self, event: E) -> Self`` where:
+        The method signature must be ``(self, event: E) -> SliceOp[Self]`` where:
 
         - ``self`` is the current state (used to compute the new state)
         - ``event`` is the dispatched event of type ``E``
-        - Return type must be the same as the slice class (validated at runtime)
+        - Return type must be a SliceOp containing the new state
 
     Example::
 
         @reducer(on=AddStep)
-        def add_step(self, event: AddStep) -> "AgentPlan":
-            return replace(self, steps=(*self.steps, event.step))
+        def add_step(self, event: AddStep) -> Replace["AgentPlan"]:
+            new_plan = replace(self, steps=(*self.steps, event.step))
+            return Replace((new_plan,))
 
     """
 
@@ -147,9 +155,9 @@ def _create_reducer_for_method[S: SupportsDataclass, E: SupportsDataclass](
     """Create a reducer function that wraps a method on the slice class.
 
     The generated reducer:
-    1. Gets the latest slice value (or creates a default via initial_factory)
+    1. Gets the latest slice value from view (or creates a default via initial_factory)
     2. Calls the method with the event
-    3. Returns the result as a singleton tuple
+    3. Returns the SliceOp from the method directly
 
     Args:
         slice_type: The state slice class.
@@ -162,36 +170,28 @@ def _create_reducer_for_method[S: SupportsDataclass, E: SupportsDataclass](
 
     @pure
     def method_reducer(
-        slice_values: tuple[S, ...],
+        view: SliceView[S],
         event: ReducerEvent,
         *,
         context: ReducerContextProtocol,
-    ) -> tuple[S, ...]:
+    ) -> SliceOp[S]:
         del context  # Unused, method receives only self and event
 
         # Get the current state or create initial if factory provided
-        if slice_values:
-            current = slice_values[-1]
-        elif initial_factory is not None:
-            current = initial_factory()
-        else:
-            # No current state and no factory - cannot invoke method
-            return slice_values
+        current = view.latest()
+        if current is None:
+            if initial_factory is not None:
+                current = initial_factory()
+            else:
+                # No current state and no factory - return empty replace
+                return Replace(())
 
         # Get the method from the instance and call with event
         method = getattr(current, method_name)
         result = method(cast(E, event))
 
-        # Validate return type
-        if not isinstance(result, slice_type):
-            msg = (
-                f"{slice_type.__name__}.{method_name} must return "
-                f"{slice_type.__name__}, got {type(result).__name__}"
-            )
-            raise TypeError(msg)
-
-        # Return as singleton tuple (replace_latest semantics)
-        return (result,)
+        # The method should return a SliceOp directly
+        return cast(SliceOp[S], result)
 
     # Set qualname for better error messages
     method_reducer.__qualname__ = f"{slice_type.__name__}.{method_name}"
@@ -230,8 +230,9 @@ def install_state_slice[T: SupportsDataclass](
             steps: tuple[str, ...]
 
             @reducer(on=AddStep)
-            def add_step(self, event: AddStep) -> AgentPlan:
-                return replace(self, steps=(*self.steps, event.step))
+            def add_step(self, event: AddStep) -> Replace[AgentPlan]:
+                new_plan = replace(self, steps=(*self.steps, event.step))
+                return Replace((new_plan,))
 
         session.install(AgentPlan)
         # Or with initial factory:

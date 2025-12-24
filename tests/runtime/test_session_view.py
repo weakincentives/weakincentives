@@ -345,24 +345,27 @@ class TestReducerContextReceivesSessionView:
         self, session_factory: SessionFactory
     ) -> None:
         from weakincentives.runtime.session import (
+            Append,
             ReducerContextProtocol,
             ReducerEvent,
+            SliceView,
         )
 
         session, _ = session_factory()
         session[Step].seed(Step(description="existing step"))
 
         def cross_slice_reducer(
-            slice_values: tuple[Plan, ...],
+            view: SliceView[Plan],
             event: ReducerEvent,
             *,
             context: ReducerContextProtocol,
-        ) -> tuple[Plan, ...]:
+        ) -> Append[Plan]:
+            del view  # Unused in this test
             # Read from another slice via the view
             steps = context.session[Step].all()
             if steps:
-                return (*slice_values, Plan(name=f"saw {len(steps)} steps"))
-            return slice_values
+                return Append(Plan(name=f"saw {len(steps)} steps"))
+            return Append(Plan(name="no steps"))
 
         session[Plan].register(Plan, cross_slice_reducer)
         session.dispatch(Plan(name="trigger"))

@@ -281,6 +281,7 @@ def test_session_reducer_optimistic_concurrency_retry() -> None:
     import threading
     import time
 
+    from weakincentives.runtime.session import Append, SliceView
     from weakincentives.runtime.session.reducer_context import ReducerContext
 
     @dataclass(slots=True, frozen=True)
@@ -295,14 +296,18 @@ def test_session_reducer_optimistic_concurrency_retry() -> None:
     call_count_lock = threading.Lock()
 
     def slow_append_reducer(
-        state: tuple[CounterEvent, ...], event: CounterEvent, *, context: ReducerContext
-    ) -> tuple[CounterEvent, ...]:
+        view: SliceView[CounterEvent],
+        event: CounterEvent,
+        *,
+        context: ReducerContext,
+    ) -> Append[CounterEvent]:
         nonlocal call_count
+        del view, context  # unused
         with call_count_lock:
             call_count += 1
         # Small delay to increase chance of concurrent modification
         time.sleep(0.001)
-        return (*state, event)
+        return Append(event)
 
     # Register the slow reducer
     session[CounterEvent].register(CounterEvent, slow_append_reducer)
