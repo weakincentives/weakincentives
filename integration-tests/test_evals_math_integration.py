@@ -47,7 +47,7 @@ pytestmark = [
         "OPENAI_API_KEY" not in os.environ,
         reason="OPENAI_API_KEY not set; skipping OpenAI integration tests.",
     ),
-    pytest.mark.timeout(120),  # Math evals may take time
+    pytest.mark.timeout(300),  # Math evals may take time (10 samples x ~30s each)
 ]
 
 _MODEL_ENV_VAR = "OPENAI_TEST_MODEL"
