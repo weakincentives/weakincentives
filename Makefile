@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests integration-tests-ci redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -74,6 +74,10 @@ integration-tests:
 		echo "OPENAI_API_KEY is not set; export it to run integration tests." >&2; \
 		exit 1; \
 	fi
+	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
+
+# Run integration tests in CI (skips gracefully when credentials are missing)
+integration-tests-ci:
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
 
 # Run all Redis integration tests (standalone + cluster)
