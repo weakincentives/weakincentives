@@ -231,7 +231,7 @@ class Plan:
 ### Tools
 
 | Tool | Purpose |
-|------|---------|
+| ---------------------- | --------------------------- |
 | `planning_setup_plan` | Create or replace the plan |
 | `planning_add_step` | Append steps to active plan |
 | `planning_update_step` | Modify step title or status |

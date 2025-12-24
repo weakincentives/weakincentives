@@ -138,7 +138,7 @@ Always finish with `make test` to verify coverage.
 Consult these specs before modifying related code:
 
 | Spec | When to Read |
-|------|--------------|
+| ------------------------------ | --------------------------------------------------------------------- |
 | `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
@@ -166,7 +166,7 @@ Full spec index in `AGENTS.md`.
 User-facing how-to material lives in `guides/`:
 
 | Guide | Description |
-|-------|-------------|
+| ----------------------------- | --------------------------------------------------- |
 | `guides/code-review-agent.md` | End-to-end walkthrough of the code reviewer example |
 
 Guides cover quickstarts, patterns, recipes, and best practices. Design specs
@@ -207,6 +207,7 @@ prompt = Prompt[OutputType](
 
 ```python
 from weakincentives.runtime import Session, InProcessDispatcher
+from weakincentives.runtime.session import InitializeSlice, ClearSlice
 from weakincentives.contrib.tools import Plan, AddStep
 
 bus = InProcessDispatcher()
@@ -217,13 +218,17 @@ session[Plan].latest()                            # Most recent value
 session[Plan].all()                               # All values in slice
 session[Plan].where(lambda p: p.active)           # Filter by predicate
 
-# Dispatch events (through reducers)
-session.dispatch(AddStep(...))                    # Dispatch to all reducers
+# All mutations go through dispatch (unified, auditable)
+session.dispatch(AddStep(...))                    # Dispatch to reducers
 
-# Direct mutations via indexing (bypass reducers)
-session[Plan].seed(initial_plan)                  # Initialize slice
+# Convenience methods (dispatch events internally)
+session[Plan].seed(initial_plan)                  # → InitializeSlice
+session[Plan].clear()                             # → ClearSlice
 session[Plan].register(AddStep, reducer)          # Register reducer
-session[Plan].clear()                             # Clear slice
+
+# Direct system event dispatch (equivalent to methods above)
+session.dispatch(InitializeSlice(Plan, (initial_plan,)))
+session.dispatch(ClearSlice(Plan))
 
 # Global mutations
 session.reset()                                   # Clear all slices

@@ -55,7 +55,7 @@ enforce an `{event, context}` schema. The table below captures the current
 surface area and should be kept in sync with code changes.
 
 | Module | Logger Variable | Level | Event Name | Context Fields |
-| --- | --- | --- | --- | --- |
+| --------------------------------- | --------------- | ----------- | ----------------------------------------- | ------------------------------------------------------------------------------- |
 | `runtime/events/__init__.py` | `logger` | `exception` | `event_delivery_failed` | `event_type`, `handler` |
 | `runtime/session/session.py` | `logger` | `exception` | `session_reducer_failed` | `reducer`, `data_type`, `slice_type` |
 | `runtime/session/session.py` | `logger` | `exception` | `session_observer_failed` | `observer`, `slice_type` |

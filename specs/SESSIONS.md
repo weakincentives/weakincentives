@@ -22,8 +22,12 @@ event emission and subscription, deadline enforcement, and budget tracking.
 flowchart TB
     subgraph Session["Session State Management"]
         Event["Event"] --> Dispatch["dispatch()"]
-        Dispatch --> Reducer["Reducer"]
-        Reducer --> NewSlice["New Slice<br/>(immutable tuple)"]
+        Dispatch --> SystemCheck{"System<br/>Event?"}
+        SystemCheck -->|Yes| DirectMutation["Direct Mutation"]
+        SystemCheck -->|No| Reducer["Reducer"]
+        DirectMutation --> NewSlice["New Slice<br/>(immutable tuple)"]
+        Reducer --> NewSlice
+        NewSlice --> Observers["Notify Observers"]
     end
 
     subgraph Query["Query API"]
@@ -32,10 +36,10 @@ flowchart TB
         Where["[Slice].where()"]
     end
 
-    subgraph Mutate["Mutation API"]
-        Seed["seed()"]
-        Append["append()"]
-        Clear["clear()"]
+    subgraph Mutate["Mutation API (all via dispatch)"]
+        Seed["seed() → InitializeSlice"]
+        Append["append() → event dispatch"]
+        Clear["clear() → ClearSlice"]
         Register["register()"]
     end
 
@@ -119,6 +123,49 @@ all_results = session[SearchResult].all()
 filtered = session[Issue].where(lambda i: i.severity == "high")
 ```
 
+### Observer API
+
+Observers enable reactive programming by notifying callbacks when slices
+change:
+
+```python
+def on_plan_change(old: tuple[Plan, ...], new: tuple[Plan, ...]) -> None:
+    print(f"Plan changed: {len(old)} -> {len(new)} items")
+
+subscription = session.observe(Plan, on_plan_change)
+
+# Later, to stop observing:
+subscription.unsubscribe()
+```
+
+**SliceObserver signature:**
+
+```python
+type SliceObserver[T] = Callable[[tuple[T, ...], tuple[T, ...]], None]
+```
+
+The observer receives `(old_values, new_values)` after each state update where
+the slice actually changed.
+
+**Subscription handle:**
+
+```python
+@dataclass
+class Subscription:
+    subscription_id: UUID
+
+    def unsubscribe(self) -> bool:
+        """Remove the observer. Returns True if successfully unsubscribed."""
+```
+
+**Observer behavior:**
+
+- Observers are called synchronously after reducer execution
+- Multiple observers for the same slice are called in registration order
+- Observer exceptions are logged and isolated (do not affect other observers)
+- Observers are only called when state actually changes (not on no-op updates)
+- Observers are not copied during `session.clone()`
+
 ### Dispatch API
 
 Session provides broadcast dispatch via `session.dispatch()`:
@@ -126,33 +173,69 @@ Session provides broadcast dispatch via `session.dispatch()`:
 ```python
 # Broadcast dispatch - runs ALL reducers registered for the event type
 session.dispatch(SetupPlan(objective="Build feature"))
+
+# System mutation events (handled specially, before normal reducers)
+session.dispatch(InitializeSlice(Plan, (initial_plan,)))
+session.dispatch(ClearSlice(Plan))
+session.dispatch(ClearSlice(Plan, predicate=lambda p: not p.active))
 ```
 
-Events are routed by type to all matching reducers across all slices.
+Events are routed by type to all matching reducers across all slices. System
+mutation events (`InitializeSlice`, `ClearSlice`) are handled specially before
+normal reducer dispatch to ensure consistent behavior.
 
-### Mutation API
+### Unified Mutation Surface
 
-Slice accessors provide direct mutation methods:
+All mutations go through `dispatch()` for auditability and consistency. Slice
+accessor methods are convenience wrappers that dispatch the appropriate events:
 
 ```python
-# Slice-specific mutations
-session[Plan].seed(initial_plan)           # Initialize/replace slice
-session[Plan].clear()                       # Remove all items
-session[Plan].clear(lambda p: not p.active) # Predicate-based removal
-session[Plan].append(new_plan)              # Append via default reducer
+# Slice-specific mutations (all dispatch events internally)
+session[Plan].seed(initial_plan)           # Dispatches InitializeSlice
+session[Plan].clear()                       # Dispatches ClearSlice
+session[Plan].clear(lambda p: not p.active) # Dispatches ClearSlice with predicate
+session[Plan].append(new_plan)              # Dispatches to reducers
 session[Plan].register(SetupPlan, reducer)  # Register reducer
+
+# Direct dispatch of system events (equivalent to accessor methods)
+session.dispatch(InitializeSlice(Plan, (initial_plan,)))
+session.dispatch(ClearSlice(Plan))
 
 # Session-wide mutations
 session.reset()               # Clear all slices
 session.restore(snapshot)     # Restore from snapshot
 ```
 
+### System Mutation Events
+
+**InitializeSlice** - Replace all values in a slice:
+
+```python
+@FrozenDataclass()
+class InitializeSlice(Generic[T]):
+    slice_type: type[T]
+    values: tuple[T, ...]
+```
+
+**ClearSlice** - Remove items from a slice:
+
+```python
+@FrozenDataclass()
+class ClearSlice(Generic[T]):
+    slice_type: type[T]
+    predicate: Callable[[T], bool] | None = None
+```
+
+These events are handled by the session before normal reducer dispatch,
+ensuring they always succeed regardless of registered reducers. Observers are
+still notified when state changes.
+
 **SliceAccessor mutation methods:**
 
 - `seed(values)` - Initialize or replace the slice with provided value(s).
-  Bypasses reducers. Useful for initial state setup or restoration.
+  Dispatches `InitializeSlice` event for auditability.
 - `clear(predicate=None)` - Remove items from the slice. With a predicate,
-  only matching items are removed. Bypasses reducers.
+  only matching items are removed. Dispatches `ClearSlice` event.
 - `append(value)` - Shorthand for dispatching when event type equals slice
   type. Uses the default `append` reducer.
 - `register(data_type, reducer)` - Register a reducer for events of the given

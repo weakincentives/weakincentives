@@ -151,7 +151,7 @@ wink docs [--reference] [--guide] [--specs]
 ### Arguments
 
 | Argument | Type | Description |
-|----------|------|-------------|
+| ------------- | ---- | ------------------------------------------ |
 | `--reference` | flag | Print the API reference (`llms.md`) |
 | `--guide` | flag | Print the usage guide (`WINK_GUIDE.md`) |
 | `--specs` | flag | Print all specification files concatenated |
@@ -182,7 +182,7 @@ wink docs [--reference] [--guide] [--specs]
 ### Exit Codes
 
 | Code | Meaning |
-|------|---------|
+| ---- | ----------------------------------------------- |
 | 0 | Success |
 | 1 | No flags provided or invalid usage |
 | 2 | Documentation files not found (packaging error) |

@@ -654,7 +654,7 @@ class HostFilesystem:
 Backends enforce their own limits. Recommended defaults:
 
 | Limit | Value | Notes |
-|-------|-------|-------|
+| ------------------ | ------------ | ------------------------- |
 | Max file size | 48,000 chars | Per write operation |
 | Max path depth | 16 segments | Prevents deep nesting |
 | Max segment length | 80 chars | Per path component |
@@ -668,7 +668,7 @@ Backends enforce their own limits. Recommended defaults:
 All backends map internal errors to standard Python exceptions:
 
 | Backend Error | Python Exception |
-|---------------|------------------|
+| ------------------- | -------------------- |
 | File not found | `FileNotFoundError` |
 | Path is directory | `IsADirectoryError` |
 | Path is file | `NotADirectoryError` |

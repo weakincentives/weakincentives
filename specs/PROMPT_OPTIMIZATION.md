@@ -148,7 +148,7 @@ File format:
     "search": {
       "expected_contract_hash": "...",
       "description": "Search the index.",
-      "param_descriptions": {"query": "Keywords"}
+      "param_descriptions": { "query": "Keywords" }
     }
   }
 }

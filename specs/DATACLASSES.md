@@ -102,7 +102,7 @@ resolution and propagates constraint metadata.
 Merge keys from `Annotated[..., {...}]` and `field(metadata=...)`:
 
 | Key | Description |
-|-----|-------------|
+| -------------------------------------- | ------------------------------------ |
 | `ge`, `gt`, `le`, `lt` | Numeric bounds |
 | `minimum`, `maximum` | Alias for `ge`, `le` bounds |
 | `exclusiveMinimum`, `exclusiveMaximum` | Alias for `gt`, `lt` bounds |
@@ -115,7 +115,7 @@ Merge keys from `Annotated[..., {...}]` and `field(metadata=...)`:
 | `not_in` | Membership exclusion validation |
 | `validate` | Single custom validation callable |
 | `validators` | Iterable of validation callables |
-| `convert`, `transform` | Final value transformation (aliases)
+| `convert`, `transform` | Final value transformation (aliases) |
 
 ### Validation Hooks
 
