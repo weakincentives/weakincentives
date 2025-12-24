@@ -727,6 +727,7 @@ class Session(SessionProtocol):
         event: ReducerEvent,
     ) -> None:
         from .reducer_context import build_reducer_context
+        from .session_view import SessionView
 
         with self.locked():
             registrations = list(self._reducers.get(data_type, ()))
@@ -740,7 +741,8 @@ class Session(SessionProtocol):
                     )
                 ]
 
-        context = build_reducer_context(session=self)
+        view = SessionView(self)
+        context = build_reducer_context(session=view)
 
         for registration in registrations:
             slice_type = registration.slice_type

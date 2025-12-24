@@ -25,7 +25,7 @@ from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import Snapshot
 
 if TYPE_CHECKING:
-    from .slice_accessor import SliceAccessor
+    from .slice_accessor import ReadOnlySliceAccessor, SliceAccessor
 
 type SnapshotProtocol = Snapshot
 
@@ -103,4 +103,54 @@ class SessionProtocol(Protocol):
     def tags(self) -> Mapping[str, str]: ...
 
 
-__all__ = ["SessionProtocol", "SnapshotProtocol"]
+class SessionViewProtocol(Protocol):
+    """Read-only protocol for session access.
+
+    SessionView provides read-only access to session state, suitable for
+    contexts where mutation is not allowed (e.g., reducers). Access slices
+    via indexing::
+
+        # Query operations (read-only)
+        view[Plan].latest()
+        view[Plan].all()
+        view[Plan].where(lambda p: p.active)
+
+    Unlike full SessionProtocol, SessionView does not expose:
+    - ``install()`` for registering state slices
+    - ``reset()`` for clearing state
+    - ``restore()`` for loading snapshots
+    - Mutation methods on slice accessors (``seed``, ``clear``, ``register``)
+
+    Dispatch is still available for broadcasting events to reducers.
+    """
+
+    def snapshot(
+        self,
+        *,
+        tag: str | None = None,
+        policies: frozenset[SlicePolicy] = DEFAULT_SNAPSHOT_POLICIES,
+        include_all: bool = False,
+    ) -> SnapshotProtocol: ...
+
+    @property
+    def dispatcher(self) -> TelemetryDispatcher: ...
+
+    def __getitem__[T: SupportsDataclass](
+        self, slice_type: type[T]
+    ) -> ReadOnlySliceAccessor[T]: ...
+
+    def dispatch(self, event: SupportsDataclass) -> DispatchResult:
+        """Dispatch an event to all reducers registered for its type."""
+        ...
+
+    @property
+    def parent(self) -> Self | None: ...
+
+    @property
+    def children(self) -> tuple[Self, ...]: ...
+
+    @property
+    def tags(self) -> Mapping[str, str]: ...
+
+
+__all__ = ["SessionProtocol", "SessionViewProtocol", "SnapshotProtocol"]

@@ -17,7 +17,7 @@ from ._types import (
     ReducerEvent,
     TypedReducer,
 )
-from .protocols import SessionProtocol, SnapshotProtocol
+from .protocols import SessionProtocol, SessionViewProtocol, SnapshotProtocol
 from .reducer_context import ReducerContext, build_reducer_context
 from .reducers import (
     append_all,
@@ -26,7 +26,8 @@ from .reducers import (
     upsert_by,
 )
 from .session import DataEvent, Session, iter_sessions_bottom_up
-from .slice_accessor import SliceAccessor
+from .session_view import SessionView, as_view
+from .slice_accessor import ReadOnlySliceAccessor, SliceAccessor
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import (
     Snapshot,
@@ -52,12 +53,15 @@ __all__ = [
     "ClearAllVisibilityOverrides",
     "ClearVisibilityOverride",
     "DataEvent",
+    "ReadOnlySliceAccessor",
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
     "ReducerMeta",
     "Session",
     "SessionProtocol",
+    "SessionView",
+    "SessionViewProtocol",
     "SetVisibilityOverride",
     "SliceAccessor",
     "SlicePolicy",
@@ -68,6 +72,7 @@ __all__ = [
     "TypedReducer",
     "VisibilityOverrides",
     "append_all",
+    "as_view",
     "build_reducer_context",
     "get_session_visibility_override",
     "install_state_slice",

@@ -28,6 +28,14 @@ if TYPE_CHECKING:
     from ._types import TypedReducer
 
 
+class _ReadOnlySliceAccessorProvider(Protocol):
+    """Protocol for objects that support read-only slice access."""
+
+    def _select_all[S: SupportsDataclass](
+        self, slice_type: type[S]
+    ) -> tuple[S, ...]: ...
+
+
 class _SliceAccessorProvider(Protocol):
     """Protocol for objects that support slice access."""
 
@@ -209,4 +217,60 @@ class SliceAccessor[T: SupportsDataclass]:
         )
 
 
-__all__ = ["SliceAccessor"]
+class ReadOnlySliceAccessor[T: SupportsDataclass]:
+    """Read-only accessor for querying a specific slice.
+
+    Accessed via ``session_view[SliceType]``, providing only query operations:
+
+    - **Query operations**: Retrieve state from the slice
+
+    Unlike :class:`SliceAccessor`, this class does not expose mutation methods
+    (``seed``, ``clear``, ``append``, ``register``). Use this in contexts where
+    read-only access is required, such as reducers.
+
+    Usage::
+
+        # Query operations
+        view[Plan].all()
+        view[Plan].latest()
+        view[Plan].where(lambda p: p.active)
+
+    """
+
+    __slots__ = ("_provider", "_slice_type")
+
+    def __init__(
+        self, provider: _ReadOnlySliceAccessorProvider, slice_type: type[T]
+    ) -> None:
+        super().__init__()
+        self._provider = provider
+        self._slice_type = slice_type
+
+    # ──────────────────────────────────────────────────────────────────────
+    # Query Operations
+    # ──────────────────────────────────────────────────────────────────────
+
+    @pure
+    def all(self) -> tuple[T, ...]:
+        """Return the entire slice for the provided type."""
+        return self._provider._select_all(self._slice_type)
+
+    @pure
+    def latest(self) -> T | None:
+        """Return the most recent item in the slice, if any."""
+        values = self._provider._select_all(self._slice_type)
+        if not values:
+            return None
+        return values[-1]
+
+    @pure
+    def where(self, predicate: Callable[[T], bool]) -> tuple[T, ...]:
+        """Return items that satisfy the predicate."""
+        return tuple(
+            value
+            for value in self._provider._select_all(self._slice_type)
+            if predicate(value)
+        )
+
+
+__all__ = ["ReadOnlySliceAccessor", "SliceAccessor"]
