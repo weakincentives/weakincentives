@@ -22,7 +22,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ..runtime.mailbox import Mailbox, Message
+from ..runtime.mailbox import Mailbox, Message, ReceiptHandleExpiredError
 from ._types import EvalRequest, EvalResult, Score
 
 if TYPE_CHECKING:
@@ -94,11 +94,40 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             ):
                 try:
                     result = self._evaluate_sample(msg.body)
-                    _ = self._results.send(result)
-                    msg.acknowledge()
                 except Exception as e:
-                    self._handle_failure(msg, e)
+                    result = EvalResult(
+                        sample_id=msg.body.sample.id,
+                        score=Score(value=0.0, passed=False, reason=str(e)),
+                        latency_ms=0,
+                        error=str(e),
+                    )
+                self._send_and_ack(msg, result)
             iterations += 1
+
+    def _send_and_ack(
+        self,
+        msg: Message[EvalRequest[InputT, ExpectedT]],
+        result: EvalResult,
+    ) -> None:
+        """Send result and acknowledge message, handling failures gracefully.
+
+        Mirrors MainLoop._send_and_ack: on send failure, nack for retry instead
+        of fabricating an error result that would lose successful evaluations.
+        """
+        try:
+            _ = self._results.send(result)
+            msg.acknowledge()
+        except ReceiptHandleExpiredError:
+            # Handle expired during processing - message already requeued.
+            pass
+        except Exception:
+            # Response send failed - nack so message is retried
+            try:
+                backoff = min(60 * msg.delivery_count, 900)
+                msg.nack(visibility_timeout=backoff)
+            except ReceiptHandleExpiredError:
+                # Handle expired - message already requeued
+                pass
 
     def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
         """Execute and score a single sample."""
@@ -123,27 +152,6 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             score=score,
             latency_ms=latency_ms,
         )
-
-    def _handle_failure(
-        self,
-        msg: Message[EvalRequest[InputT, ExpectedT]],
-        error: Exception,
-    ) -> None:
-        """Handle evaluation failure with backoff retry."""
-        latency_ms = 0  # Unknown on failure
-        try:
-            _ = self._results.send(
-                EvalResult(
-                    sample_id=msg.body.sample.id,
-                    score=Score(value=0.0, passed=False, reason=str(error)),
-                    latency_ms=latency_ms,
-                    error=str(error),
-                )
-            )
-            msg.acknowledge()  # Error result sent - don't retry
-        except Exception:
-            # Result send failed - nack for retry with backoff
-            msg.nack(visibility_timeout=min(60 * msg.delivery_count, 900))
 
 
 __all__ = [

@@ -35,6 +35,7 @@ from weakincentives.evals import (
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.tool import ResourceRegistry
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
+from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
 from weakincentives.runtime.session import SessionProtocol
 
 # =============================================================================
@@ -541,20 +542,56 @@ class _FailingMailbox(InMemoryMailbox[EvalResult]):
     def __init__(self, *, fail_on_send: bool = False) -> None:
         super().__init__(name="failing-results")
         self._fail_on_send = fail_on_send
+        self.send_attempts = 0
 
     def send(self, message: EvalResult) -> str:
+        self.send_attempts += 1
         if self._fail_on_send:
             msg = "Simulated send failure"
             raise RuntimeError(msg)
         return super().send(message)
 
 
-def test_eval_loop_handle_failure_nack() -> None:
-    """EvalLoop nacks message when result send fails."""
+def test_eval_loop_nacks_on_send_failure() -> None:
+    """EvalLoop nacks message when result send fails (not acknowledges)."""
     requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
         name="eval-requests"
     )
     # Create a mailbox that fails on send
+    failing_results = _FailingMailbox(fail_on_send=True)
+
+    try:
+        # Create a successful loop - the key point is that evaluation succeeds
+        # but send fails, so we should nack (not fabricate an error result)
+        main_loop = _create_test_loop(result="correct")
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            results=failing_results,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample))
+
+        # Run - evaluation succeeds, but send fails, should nack
+        eval_loop.run(max_iterations=1)
+
+        # The message should have been nacked (not acknowledged), so it should
+        # still be in the queue after visibility timeout expires
+        assert requests.approximate_count() == 1
+        # Verify send was attempted
+        assert failing_results.send_attempts == 1
+    finally:
+        requests.close()
+        failing_results.close()
+
+
+def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
+    """EvalLoop nacks message when send fails even after evaluation error."""
+    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+        name="eval-requests"
+    )
     failing_results = _FailingMailbox(fail_on_send=True)
 
     try:
@@ -570,15 +607,120 @@ def test_eval_loop_handle_failure_nack() -> None:
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample))
 
-        # Run - this should trigger _handle_failure, which will try to send to
-        # results mailbox and fail, causing a nack
+        # Run - evaluation fails, send also fails, should nack
         eval_loop.run(max_iterations=1)
 
-        # The message should have been nacked (not acknowledged), so it should
-        # still be in the queue after visibility timeout expires
-        # Since we can't easily verify nack was called, we check the request
-        # mailbox still has the message after clearing visibility
+        # The message should have been nacked (not acknowledged)
         assert requests.approximate_count() == 1
+        assert failing_results.send_attempts == 1
+    finally:
+        requests.close()
+        failing_results.close()
+
+
+class _ExpiredHandleMailbox(InMemoryMailbox[EvalResult]):
+    """Mailbox that raises ReceiptHandleExpiredError on send."""
+
+    def send(self, message: EvalResult) -> str:
+        raise ReceiptHandleExpiredError("Handle expired")
+
+
+def test_eval_loop_handles_expired_receipt_on_send() -> None:
+    """EvalLoop handles ReceiptHandleExpiredError on send gracefully."""
+    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+        name="eval-requests"
+    )
+    expired_results = _ExpiredHandleMailbox(name="expired-results")
+
+    try:
+        main_loop = _create_test_loop(result="correct")
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            results=expired_results,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample))
+
+        # Run - should handle ReceiptHandleExpiredError gracefully (pass, not raise)
+        eval_loop.run(max_iterations=1)
+
+        # Message was processed (expired handle means message already requeued)
+        # The mailbox should be empty since we don't ack or nack on expired handle
+        assert requests.approximate_count() == 1
+    finally:
+        requests.close()
+        expired_results.close()
+
+
+class _NackExpiresRequestMailbox(InMemoryMailbox[EvalRequest[str, str]]):
+    """Request mailbox where nack raises ReceiptHandleExpiredError."""
+
+    def receive(
+        self,
+        *,
+        max_messages: int = 10,
+        visibility_timeout: int = 30,
+        wait_time_seconds: int = 0,
+    ) -> list[object]:
+        msgs = super().receive(
+            max_messages=max_messages,
+            visibility_timeout=visibility_timeout,
+            wait_time_seconds=wait_time_seconds,
+        )
+        # Wrap each message's nack method to raise ReceiptHandleExpiredError
+        wrapped = []
+        for msg in msgs:
+            wrapped.append(_NackExpiresMessage(msg))
+        return wrapped
+
+
+class _NackExpiresMessage:
+    """Message wrapper that raises ReceiptHandleExpiredError on nack."""
+
+    def __init__(self, inner: object) -> None:
+        self._inner = inner
+
+    @property
+    def body(self) -> object:
+        return self._inner.body  # type: ignore[attr-defined]
+
+    @property
+    def delivery_count(self) -> int:
+        return self._inner.delivery_count  # type: ignore[attr-defined,no-any-return]
+
+    def acknowledge(self) -> None:
+        self._inner.acknowledge()  # type: ignore[attr-defined]
+
+    def nack(self, *, visibility_timeout: int = 0) -> None:
+        raise ReceiptHandleExpiredError("Handle expired on nack")
+
+
+def test_eval_loop_handles_expired_receipt_on_nack() -> None:
+    """EvalLoop handles ReceiptHandleExpiredError on nack gracefully."""
+    requests: _NackExpiresRequestMailbox = _NackExpiresRequestMailbox(
+        name="eval-requests"
+    )
+    failing_results = _FailingMailbox(fail_on_send=True)
+
+    try:
+        main_loop = _create_test_loop(result="correct")
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,  # type: ignore[arg-type]
+            results=failing_results,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample))
+
+        # Run - send fails, nack raises ReceiptHandleExpiredError, should handle gracefully
+        eval_loop.run(max_iterations=1)
+
+        # Should not raise, just pass
     finally:
         requests.close()
         failing_results.close()
