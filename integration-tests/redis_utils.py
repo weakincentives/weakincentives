@@ -198,23 +198,21 @@ def _build_cluster_command(
     runtime: str,
     base_port: int,
     node_count: int,
-    replicas: int,
     image: str,
 ) -> list[str]:
     """Build the docker/podman command for starting a Redis Cluster."""
+    # Map ports 1:1 (same internal and external) so cluster node discovery works.
+    # The INITIAL_PORT env var configures the internal cluster ports to match.
     port_mappings = []
     for i in range(node_count):
-        port_mappings.extend(["-p", f"{base_port + i}:{7000 + i}"])
+        port = base_port + i
+        port_mappings.extend(["-p", f"{port}:{port}"])
 
     env_vars = [
         "-e",
         "IP=0.0.0.0",
         "-e",
-        "INITIAL_PORT=7000",
-        "-e",
-        f"MASTERS={node_count // (replicas + 1)}",
-        "-e",
-        f"SLAVES_PER_MASTER={replicas}",
+        f"INITIAL_PORT={base_port}",
     ]
 
     return [runtime, "run", "-d", "--rm", *port_mappings, *env_vars, image]
@@ -224,19 +222,17 @@ def _build_cluster_command(
 def redis_cluster(
     base_port: int | None = None,
     node_count: int = 6,
-    replicas: int = 2,
-    image: str = "grokzen/redis-cluster:7.0.10",
+    image: str = "neohq/redis-cluster:latest",
 ) -> Iterator[RedisCluster[bytes]]:
     """Context manager that starts a Redis Cluster.
 
     This uses a pre-built Redis Cluster image that handles cluster setup.
-    The cluster runs with 2 shards (masters) and 2 replicas per shard by default
-    (6 nodes total). This configuration provides good fault tolerance for testing.
+    The cluster runs with 3 masters and 1 replica per master by default
+    (6 nodes total). The neohq/redis-cluster image supports ARM64/Apple Silicon.
 
     Args:
         base_port: Base port for cluster nodes. If None, finds a free range.
-        node_count: Number of cluster nodes (default 6 = 2 masters x 3).
-        replicas: Number of replicas per master (default 2).
+        node_count: Number of cluster nodes (default 6 = 3 masters + 3 replicas).
         image: Docker image to use for Redis Cluster.
 
     Yields:
@@ -254,7 +250,7 @@ def redis_cluster(
     if base_port is None:
         base_port = _find_free_port_range(node_count)
 
-    cmd = _build_cluster_command(runtime, base_port, node_count, replicas, image)
+    cmd = _build_cluster_command(runtime, base_port, node_count, image)
     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
     container_id = result.stdout.strip()
 
@@ -264,9 +260,9 @@ def redis_cluster(
                 f"Redis Cluster failed to start on ports {base_port}-{base_port + node_count - 1}"
             )
 
-        startup_nodes = [{"host": "localhost", "port": base_port}]
         client: RedisCluster[bytes] = RedisCluster(
-            startup_nodes=startup_nodes,
+            host="localhost",
+            port=base_port,
             decode_responses=False,
         )
         try:
@@ -306,7 +302,7 @@ def skip_if_no_redis() -> str:
 
 
 # Environment variable to control cluster tests (they're slower)
-REDIS_CLUSTER_TESTS_ENABLED = os.environ.get("REDIS_CLUSTER_TESTS", "0") == "1"
+REDIS_CLUSTER_TESTS_ENABLED = os.environ.get("REDIS_CLUSTER_TESTS", "1") == "1"
 
 
 __all__ = [

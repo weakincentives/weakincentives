@@ -55,6 +55,7 @@ class _Event:
 # Skip all tests in this module if Redis is not available
 pytestmark = [
     pytest.mark.integration,
+    pytest.mark.redis,
     pytest.mark.skipif(not is_redis_available(), reason=skip_if_no_redis()),
     pytest.mark.timeout(60),
 ]
@@ -65,6 +66,7 @@ pytestmark = [
 # =============================================================================
 
 
+@pytest.mark.redis_standalone
 class TestRedisMailboxStandalone:
     """Tests for RedisMailbox with standalone Redis."""
 
@@ -547,15 +549,16 @@ class TestRedisMailboxStandalone:
 # =============================================================================
 
 
+@pytest.mark.redis_cluster
 @pytest.mark.skipif(
     not REDIS_CLUSTER_TESTS_ENABLED,
-    reason="Redis Cluster tests disabled (set REDIS_CLUSTER_TESTS=1 to enable)",
+    reason="Redis Cluster tests disabled (set REDIS_CLUSTER_TESTS=0 to disable)",
 )
 class TestRedisMailboxCluster:
     """Tests for RedisMailbox with Redis Cluster.
 
-    These tests are disabled by default because cluster setup is slower.
-    Enable with REDIS_CLUSTER_TESTS=1 environment variable.
+    These tests are enabled by default. Cluster setup takes ~60s per test.
+    Disable with REDIS_CLUSTER_TESTS=0 environment variable.
     """
 
     def test_send_and_receive_cluster(self) -> None:

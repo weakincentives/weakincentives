@@ -196,6 +196,9 @@ markers = [
     "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
     "threadstress: repeat tests under randomized thread-pool conditions.",
     "podman: marks tests that exercise the Podman tool against a live daemon.",
+    "redis: marks all Redis integration tests (standalone and cluster).",
+    "redis_standalone: marks tests using standalone Redis.",
+    "redis_cluster: marks tests using Redis Cluster.",
 ]
 norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 reruns = 2
