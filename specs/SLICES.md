@@ -1089,27 +1089,13 @@ except (json.JSONDecodeError, TypeError, ValueError) as e:
     slice.clear()
 ```
 
-## Migration Path
+## Future Backends
 
-### Phase 1: Add Protocol (Non-Breaking)
+Potential implementations beyond the core MemorySlice and JsonlSlice:
 
-1. Define `Slice` protocol and implementations
-2. Add `SliceFactoryConfig` to Session constructor (optional, defaults to memory)
-3. Internal refactor to use slice protocol
-4. All existing code continues to work unchanged
-
-### Phase 2: Deprecate Direct State Access
-
-1. Mark `session._state` as private implementation detail
-2. Document slice configuration options
-3. Add recipes for common persistence patterns
-
-### Phase 3: Advanced Backends (Future)
-
-Potential future implementations:
-- `SqliteSlice` - Indexed queries, better for large slices
-- `RedisSlice` - Distributed session state
-- `S3Slice` - Cloud persistence for long-running agents
+- **SqliteSlice** - Indexed queries, better for large slices with complex access patterns
+- **RedisSlice** - Distributed session state for multi-process agents
+- **S3Slice** - Cloud persistence for long-running agents with durable storage
 
 ## Limitations
 
