@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -98,6 +98,14 @@ demo-claude-agent:
 
 # Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, pip-audit, markdown, validate-integration-tests, test)
 check: format-check lint typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-integration-tests test
+
+# Synchronize documentation files into package
+sync-docs:
+	@mkdir -p src/weakincentives/docs/specs
+	@cp llms.md src/weakincentives/docs/
+	@cp WINK_GUIDE.md src/weakincentives/docs/
+	@cp specs/*.md src/weakincentives/docs/specs/
+	@touch src/weakincentives/docs/__init__.py
 
 # Run all checks and fixes
 all: format lint-fix bandit deptry pip-audit typecheck test
