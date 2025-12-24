@@ -53,6 +53,7 @@ For native tool execution with hooks::
 from __future__ import annotations
 
 import json
+import threading
 import types
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -369,6 +370,12 @@ class ExecutionState:
     snapshot()/restore() calls. For native Claude Agent SDK tools, the
     begin_tool_execution()/end_tool_execution() methods provide hook integration.
 
+    Thread Safety:
+        ExecutionState uses an RLock to guard all accesses/mutations of
+        _pending_tools and snapshot/restore flows in hook methods. This ensures
+        that concurrent calls from multiple threads do not lose snapshots or
+        corrupt pending tool execution state.
+
     Attributes:
         session: Session state container with typed slices.
         resources: Registry of runtime resources (filesystem, etc.).
@@ -405,6 +412,7 @@ class ExecutionState:
     _pending_tools: dict[str, PendingToolExecution] = field(
         default_factory=lambda: {}, repr=False
     )
+    _lock: threading.RLock = field(default_factory=threading.RLock, repr=False)
 
     def snapshot(self, *, tag: str | None = None) -> CompositeSnapshot:
         """Capture consistent snapshot of session and all snapshotable resources.
@@ -522,17 +530,22 @@ class ExecutionState:
         Called by pre_tool_use_hook before a native Claude Agent SDK tool runs.
         Stores the snapshot internally for potential rollback in end_tool_execution.
 
+        Thread Safety:
+            This method acquires the internal lock to atomically capture
+            the snapshot and register the pending execution.
+
         Args:
             tool_use_id: Unique identifier for this tool invocation.
             tool_name: Name of the tool being executed.
         """
-        snapshot = self.snapshot(tag=f"pre:{tool_name}:{tool_use_id}")
-        self._pending_tools[tool_use_id] = PendingToolExecution(
-            tool_use_id=tool_use_id,
-            tool_name=tool_name,
-            snapshot=snapshot,
-            started_at=datetime.now(UTC),
-        )
+        with self._lock:
+            snapshot = self.snapshot(tag=f"pre:{tool_name}:{tool_use_id}")
+            self._pending_tools[tool_use_id] = PendingToolExecution(
+                tool_use_id=tool_use_id,
+                tool_name=tool_name,
+                snapshot=snapshot,
+                started_at=datetime.now(UTC),
+            )
 
     def end_tool_execution(
         self,
@@ -546,6 +559,10 @@ class ExecutionState:
         If success is False, automatically restores state from the pre-execution
         snapshot.
 
+        Thread Safety:
+            This method acquires the internal lock to atomically pop the
+            pending execution and optionally restore state.
+
         Args:
             tool_use_id: Unique identifier for this tool invocation.
             success: Whether the tool execution succeeded.
@@ -553,15 +570,16 @@ class ExecutionState:
         Returns:
             True if state was restored (i.e., tool failed), False otherwise.
         """
-        pending = self._pending_tools.pop(tool_use_id, None)
-        if pending is None:
+        with self._lock:
+            pending = self._pending_tools.pop(tool_use_id, None)
+            if pending is None:
+                return False
+
+            if not success:
+                self.restore(pending.snapshot)
+                return True
+
             return False
-
-        if not success:
-            self.restore(pending.snapshot)
-            return True
-
-        return False
 
     def abort_tool_execution(self, tool_use_id: str) -> bool:
         """Abort tool execution and restore state.
@@ -569,26 +587,36 @@ class ExecutionState:
         Used for timeouts, interrupts, or other abnormal termination.
         Always restores state from the pre-execution snapshot.
 
+        Thread Safety:
+            This method acquires the internal lock to atomically pop the
+            pending execution and restore state.
+
         Args:
             tool_use_id: Unique identifier for this tool invocation.
 
         Returns:
             True if a pending execution was found and restored, False otherwise.
         """
-        pending = self._pending_tools.pop(tool_use_id, None)
-        if pending is None:
-            return False
+        with self._lock:
+            pending = self._pending_tools.pop(tool_use_id, None)
+            if pending is None:
+                return False
 
-        self.restore(pending.snapshot)
-        return True
+            self.restore(pending.snapshot)
+            return True
 
     @property
     def pending_tool_executions(self) -> Mapping[str, PendingToolExecution]:
         """Read-only view of pending tool executions.
 
         Useful for debugging and monitoring in-flight tool calls.
+
+        Thread Safety:
+            Returns a snapshot copy wrapped in MappingProxyType under the lock
+            to ensure a consistent view.
         """
-        return types.MappingProxyType(self._pending_tools)
+        with self._lock:
+            return types.MappingProxyType(dict(self._pending_tools))
 
 
 __all__ = [
