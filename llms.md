@@ -672,9 +672,9 @@ except ThrottleError as exc:
 - **Reducers**: Use `TypedReducer` with `ReducerContext` to manage typed state
   slices through event-driven mutations.
 - **Events**: `PromptExecuted` and `ToolInvoked` events capture every model
-  exchange. `Dispatcher`/`InProcessDispatcher` publish events to reducers and
-  custom observers. `HandlerFailure` and `DispatchResult` offer backpressure
-  and error reporting controls.
+  exchange. `Dispatcher`/`InProcessDispatcher` publish events to reducers.
+  `HandlerFailure` and `DispatchResult` offer backpressure and error reporting
+  controls.
 - **MainLoop**: Abstract orchestrator for agent workflows with automatic
   visibility expansion handling and budget tracking.
 - **Logging**: `configure_logging()` wires a structured logger; `get_logger`

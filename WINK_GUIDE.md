@@ -1704,8 +1704,7 @@ response, session = loop.execute(request)
 ```
 
 Resources configured this way are available to all tool handlers during
-execution. You can also pass resources directly to `loop.execute(request,
-resources=...)` for per-request overrides.
+execution. You can also pass resources directly to `loop.execute(request, resources=...)` for per-request overrides.
 
 ### 7.2 Deadlines and budgets
 

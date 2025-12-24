@@ -21,7 +21,6 @@ from typing import TYPE_CHECKING, Protocol, Self
 
 from ...types.dataclass import SupportsDataclass
 from ..events._types import DispatchResult, TelemetryDispatcher
-from ._observer_types import SliceObserver, Subscription
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import Snapshot
 
@@ -68,12 +67,6 @@ class SessionProtocol(Protocol):
 
     @property
     def dispatcher(self) -> TelemetryDispatcher: ...
-
-    def observe[T: SupportsDataclass](
-        self,
-        slice_type: type[T],
-        observer: SliceObserver[T],
-    ) -> Subscription: ...
 
     def __getitem__[T: SupportsDataclass](
         self, slice_type: type[T]

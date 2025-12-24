@@ -4,6 +4,31 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Removed: Session Slice Observers
+
+The slice observer API (`session.observe()`, `SliceObserver`, `Subscription`)
+has been removed. This reactive notification system added complexity without
+providing value—real applications simply query session state when needed using
+`session[Type].latest()` rather than subscribing to changes.
+
+**Removed:**
+
+- `session.observe(SliceType, callback)` method
+- `SliceObserver` type alias
+- `Subscription` class and `unsubscribe()` method
+- Observer notification after reducer execution
+
+**Migration:** Replace observer callbacks with direct state queries:
+
+```python
+# Before (removed)
+def on_change(old, new): ...
+subscription = session.observe(Plan, on_change)
+
+# After
+plan = session[Plan].latest()  # Query when needed
+```
+
 ### Mailbox Message Queue Abstraction
 
 A new `Mailbox` protocol provides SQS-compatible semantics for durable,
@@ -463,26 +488,6 @@ Key capabilities:
   `IsolationConfig` + `EphemeralHome`.
 - **Network policy (tools only)**: Restrict tool egress with
   `NetworkPolicy.no_network()` / `NetworkPolicy.with_domains(...)`.
-
-### Session State Observers
-
-Sessions now support reactive observation of state changes, eliminating the
-need for polling:
-
-```python
-from weakincentives.contrib.tools import Plan
-from weakincentives.runtime import Session
-
-session = Session()
-
-def on_plan_change(old: tuple[Plan, ...], new: tuple[Plan, ...]) -> None:
-    print(f"Plan changed: {len(old)} -> {len(new)} snapshots")
-
-subscription = session.observe(Plan, on_plan_change)
-subscription.unsubscribe()
-```
-
-Observers are notified immediately after any mutation to their watched slice.
 
 ### Session-Managed Visibility Overrides
 
