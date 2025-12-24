@@ -27,7 +27,6 @@ flowchart TB
         SystemCheck -->|No| Reducer["Reducer"]
         DirectMutation --> NewSlice["New Slice<br/>(immutable tuple)"]
         Reducer --> NewSlice
-        NewSlice --> Observers["Notify Observers"]
     end
 
     subgraph Query["Query API"]
@@ -122,49 +121,6 @@ latest_plan = session[Plan].latest()
 all_results = session[SearchResult].all()
 filtered = session[Issue].where(lambda i: i.severity == "high")
 ```
-
-### Observer API
-
-Observers enable reactive programming by notifying callbacks when slices
-change:
-
-```python
-def on_plan_change(old: tuple[Plan, ...], new: tuple[Plan, ...]) -> None:
-    print(f"Plan changed: {len(old)} -> {len(new)} items")
-
-subscription = session.observe(Plan, on_plan_change)
-
-# Later, to stop observing:
-subscription.unsubscribe()
-```
-
-**SliceObserver signature:**
-
-```python
-type SliceObserver[T] = Callable[[tuple[T, ...], tuple[T, ...]], None]
-```
-
-The observer receives `(old_values, new_values)` after each state update where
-the slice actually changed.
-
-**Subscription handle:**
-
-```python
-@dataclass
-class Subscription:
-    subscription_id: UUID
-
-    def unsubscribe(self) -> bool:
-        """Remove the observer. Returns True if successfully unsubscribed."""
-```
-
-**Observer behavior:**
-
-- Observers are called synchronously after reducer execution
-- Multiple observers for the same slice are called in registration order
-- Observer exceptions are logged and isolated (do not affect other observers)
-- Observers are only called when state actually changes (not on no-op updates)
-- Observers are not copied during `session.clone()`
 
 ### Dispatch API
 
