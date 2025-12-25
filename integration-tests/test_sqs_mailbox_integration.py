@@ -12,28 +12,125 @@
 
 """Integration tests for SQS mailbox using LocalStack.
 
-These tests require LocalStack to be running on localhost:4566.
-Run with: docker run -d -p 4566:4566 localstack/localstack
+These tests require a container runtime (Docker or Podman) to spin up LocalStack.
+Tests are skipped if prerequisites are not met.
 
 To run these tests:
-    pytest tests/contrib/mailbox/test_sqs_mailbox.py -v -m sqs
+    pytest integration-tests/test_sqs_mailbox_integration.py -v
 """
 
 from __future__ import annotations
 
+import contextlib
 import threading
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import pytest
+from sqs_utils import (
+    LOCALSTACK_ENDPOINT,
+    is_localstack_available,
+    is_localstack_running,
+    localstack_sqs,
+    skip_if_no_localstack,
+)
+
+from weakincentives.contrib.mailbox import SQSMailbox
+from weakincentives.runtime.mailbox import ReceiptHandleExpiredError, SerializationError
 
 if TYPE_CHECKING:
     from mypy_boto3_sqs import SQSClient
 
-    from weakincentives.contrib.mailbox import SQSMailbox
 
-pytestmark = pytest.mark.sqs
+@dataclass(slots=True, frozen=True)
+class _Event:
+    """Sample event type for testing."""
+
+    name: str
+    count: int = 0
+
+
+# Skip all tests in this module if LocalStack is not available
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.sqs,
+    pytest.mark.skipif(not is_localstack_available(), reason=skip_if_no_localstack()),
+    pytest.mark.timeout(120),
+]
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def sqs_resources() -> tuple[SQSClient, str] | pytest.MarkDecorator:  # type: ignore[return]
+    """Provide SQS client and queue URL.
+
+    Uses an already-running LocalStack instance if available,
+    otherwise starts one in a container.
+    """
+    import boto3
+
+    # Check if LocalStack is already running
+    if is_localstack_running():
+        client: SQSClient = boto3.client(
+            "sqs",
+            endpoint_url=LOCALSTACK_ENDPOINT,
+            region_name="us-east-1",
+            aws_access_key_id="test",
+            aws_secret_access_key="test",
+        )
+        queue_name = f"test-queue-{uuid4().hex[:8]}"
+        response = client.create_queue(QueueName=queue_name)
+        queue_url = response["QueueUrl"]
+
+        yield client, queue_url
+
+        with contextlib.suppress(Exception):
+            client.delete_queue(QueueUrl=queue_url)
+    else:
+        # Start LocalStack in a container
+        with localstack_sqs() as (client, queue_url):
+            yield client, queue_url
+
+
+@pytest.fixture
+def sqs_client(
+    sqs_resources: tuple[SQSClient, str],
+) -> SQSClient:
+    """Extract SQS client from resources."""
+    return sqs_resources[0]
+
+
+@pytest.fixture
+def sqs_queue_url(
+    sqs_resources: tuple[SQSClient, str],
+) -> str:
+    """Extract queue URL from resources."""
+    return sqs_resources[1]
+
+
+@pytest.fixture
+def sqs_mailbox(
+    sqs_client: SQSClient,
+    sqs_queue_url: str,
+) -> SQSMailbox[Any]:
+    """Fresh SQSMailbox for each test."""
+    mb: SQSMailbox[Any] = SQSMailbox(
+        queue_url=sqs_queue_url,
+        client=sqs_client,
+    )
+    yield mb
+    mb.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests - Basic Send/Receive
+# ---------------------------------------------------------------------------
 
 
 class TestSQSMailboxBasic:
@@ -65,21 +162,14 @@ class TestSQSMailboxBasic:
         self, sqs_client: SQSClient, sqs_queue_url: str
     ) -> None:
         """Send and receive a dataclass message with type hint."""
-        from weakincentives.contrib.mailbox import SQSMailbox
-
-        @dataclass
-        class TestEvent:
-            name: str
-            count: int
-
-        mb: SQSMailbox[TestEvent] = SQSMailbox(
+        mb: SQSMailbox[_Event] = SQSMailbox(
             queue_url=sqs_queue_url,
             client=sqs_client,
-            body_type=TestEvent,
+            body_type=_Event,
         )
 
         try:
-            event = TestEvent(name="test", count=123)
+            event = _Event(name="test", count=123)
             mb.send(event)
 
             messages = mb.receive(visibility_timeout=30)
@@ -117,6 +207,11 @@ class TestSQSMailboxBasic:
 
         for msg in messages:
             msg.acknowledge()
+
+
+# ---------------------------------------------------------------------------
+# Tests - Visibility Timeout
+# ---------------------------------------------------------------------------
 
 
 class TestSQSMailboxVisibility:
@@ -216,6 +311,11 @@ class TestSQSMailboxVisibility:
         msgs3[0].acknowledge()
 
 
+# ---------------------------------------------------------------------------
+# Tests - Delayed Messages
+# ---------------------------------------------------------------------------
+
+
 class TestSQSMailboxDelay:
     """Delayed message tests."""
 
@@ -243,6 +343,11 @@ class TestSQSMailboxDelay:
         assert len(msgs) == 1
         assert msgs[0].body == "delayed"
         msgs[0].acknowledge()
+
+
+# ---------------------------------------------------------------------------
+# Tests - Delivery Count
+# ---------------------------------------------------------------------------
 
 
 class TestSQSMailboxDeliveryCount:
@@ -282,6 +387,11 @@ class TestSQSMailboxDeliveryCount:
         msgs3[0].acknowledge()
 
 
+# ---------------------------------------------------------------------------
+# Tests - Purge and Count
+# ---------------------------------------------------------------------------
+
+
 class TestSQSMailboxPurgeAndCount:
     """Purge and count tests."""
 
@@ -317,6 +427,11 @@ class TestSQSMailboxPurgeAndCount:
         assert len(msgs) == 0
 
 
+# ---------------------------------------------------------------------------
+# Tests - Error Handling
+# ---------------------------------------------------------------------------
+
+
 class TestSQSMailboxErrors:
     """Error handling tests."""
 
@@ -324,8 +439,6 @@ class TestSQSMailboxErrors:
         self, sqs_mailbox: SQSMailbox[Any]
     ) -> None:
         """Acknowledge after visibility timeout raises error."""
-        from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
-
         sqs_mailbox.send("test")
 
         msgs = sqs_mailbox.receive(visibility_timeout=1)
@@ -345,8 +458,6 @@ class TestSQSMailboxErrors:
 
     def test_nack_after_acknowledge_raises(self, sqs_mailbox: SQSMailbox[Any]) -> None:
         """Nack after acknowledge raises error."""
-        from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
-
         sqs_mailbox.send("test")
 
         msgs = sqs_mailbox.receive(visibility_timeout=30)
@@ -361,8 +472,6 @@ class TestSQSMailboxErrors:
         self, sqs_mailbox: SQSMailbox[Any]
     ) -> None:
         """Extend after acknowledge raises error."""
-        from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
-
         sqs_mailbox.send("test")
 
         msgs = sqs_mailbox.receive(visibility_timeout=30)
@@ -377,9 +486,6 @@ class TestSQSMailboxErrors:
         self, sqs_client: SQSClient, sqs_queue_url: str
     ) -> None:
         """Serialization error for non-serializable body."""
-        from weakincentives.contrib.mailbox import SQSMailbox
-        from weakincentives.runtime.mailbox import SerializationError
-
         mb: SQSMailbox[Any] = SQSMailbox(
             queue_url=sqs_queue_url,
             client=sqs_client,
@@ -390,6 +496,11 @@ class TestSQSMailboxErrors:
             mb.send(lambda x: x)  # type: ignore[arg-type]
 
         mb.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests - Concurrency
+# ---------------------------------------------------------------------------
 
 
 class TestSQSMailboxConcurrency:
@@ -428,6 +539,11 @@ class TestSQSMailboxConcurrency:
 
         # No duplicates
         assert len(received) == len(set(received)), "Duplicate messages received"
+
+
+# ---------------------------------------------------------------------------
+# Tests - Long Polling
+# ---------------------------------------------------------------------------
 
 
 class TestSQSMailboxLongPoll:
@@ -470,6 +586,11 @@ class TestSQSMailboxLongPoll:
         assert elapsed >= 0.5  # Should have waited at least some time
 
 
+# ---------------------------------------------------------------------------
+# Tests - Close Behavior
+# ---------------------------------------------------------------------------
+
+
 class TestSQSMailboxClose:
     """Close behavior tests."""
 
@@ -488,6 +609,11 @@ class TestSQSMailboxClose:
         assert sqs_mailbox.closed is False
         sqs_mailbox.close()
         assert sqs_mailbox.closed is True
+
+
+# ---------------------------------------------------------------------------
+# Tests - Ordering
+# ---------------------------------------------------------------------------
 
 
 class TestSQSMailboxOrdering:
@@ -515,6 +641,11 @@ class TestSQSMailboxOrdering:
         # Should have received all messages (order may vary for standard queues)
         assert len(received) == 5
         assert set(received) == {f"msg-{i}" for i in range(5)}
+
+
+# ---------------------------------------------------------------------------
+# Tests - Message Attributes
+# ---------------------------------------------------------------------------
 
 
 class TestSQSMailboxMessageAttributes:
