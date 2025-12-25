@@ -380,7 +380,10 @@ def test_adapter_parity():
 
 ## Limitations
 
-- **Synchronous only**: Transactions assume single-threaded execution.
+- **Synchronous transactions**: Transaction operations (snapshot/restore) are
+  synchronous. However, pending tool tracking (`begin_tool_execution`,
+  `end_tool_execution`, `abort_tool_execution`) is thread-safe for concurrent
+  hook invocations.
 - **No partial restore**: Cannot restore specific slices independently.
 - **Git dependency**: Disk-backed filesystem snapshots require git.
 - **No network rollback**: External API calls cannot be undone.
