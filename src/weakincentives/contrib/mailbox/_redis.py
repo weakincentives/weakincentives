@@ -52,11 +52,49 @@ from weakincentives.serde import dump, parse
 # These scripts ensure atomicity of multi-step operations in Redis.
 # Each script operates on keys with a common hash tag {queue:name} to
 # ensure cluster compatibility.
+#
+# All scripts use Redis server TIME for visibility calculations to eliminate
+# client clock skew as a correctness factor.
+
+# Helper: compute server time as float seconds
+_LUA_NOW = """
+local t = redis.call('TIME')
+local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
+"""
+
+_LUA_SEND = """
+-- KEYS: [pending, invisible, data, meta]
+-- ARGV: [msg_id, payload, enqueued_at, delay_seconds, max_size]
+local max_size = tonumber(ARGV[5])
+if max_size and max_size > 0 then
+    local pending_n = redis.call('LLEN', KEYS[1])
+    local invisible_n = redis.call('ZCARD', KEYS[2])
+    if (pending_n + invisible_n) >= max_size then
+        return 0
+    end
+end
+redis.call('HSET', KEYS[3], ARGV[1], ARGV[2])
+redis.call('HSET', KEYS[4], ARGV[1] .. ':enqueued', ARGV[3])
+local delay = tonumber(ARGV[4])
+if delay and delay > 0 then
+    local t = redis.call('TIME')
+    local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
+    redis.call('ZADD', KEYS[2], now + delay, ARGV[1])
+else
+    redis.call('LPUSH', KEYS[1], ARGV[1])
+end
+return 1
+"""
 
 _LUA_RECEIVE = """
+-- KEYS: [pending, invisible, data, meta]
+-- ARGV: [visibility_timeout_seconds, receipt_suffix]
 local msg_id = redis.call('RPOP', KEYS[1])
 if not msg_id then return nil end
-redis.call('ZADD', KEYS[2], ARGV[1], msg_id)
+local t = redis.call('TIME')
+local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
+local expiry = now + tonumber(ARGV[1])
+redis.call('ZADD', KEYS[2], expiry, msg_id)
 redis.call('HSET', KEYS[4], msg_id .. ':handle', ARGV[2])
 local data = redis.call('HGET', KEYS[3], msg_id)
 local count = redis.call('HINCRBY', KEYS[4], msg_id .. ':count', 1)
@@ -65,6 +103,8 @@ return {msg_id, data, count, enqueued}
 """
 
 _LUA_ACKNOWLEDGE = """
+-- KEYS: [invisible, data, meta]
+-- ARGV: [msg_id, receipt_suffix]
 local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
 if expected ~= ARGV[2] then return 0 end
 local removed = redis.call('ZREM', KEYS[1], ARGV[1])
@@ -77,29 +117,43 @@ return 1
 """
 
 _LUA_NACK = """
+-- KEYS: [invisible, pending, meta]
+-- ARGV: [msg_id, receipt_suffix, visibility_timeout_seconds]
 local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
 if expected ~= ARGV[2] then return 0 end
 local removed = redis.call('ZREM', KEYS[1], ARGV[1])
 if removed == 0 then return 0 end
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':handle')
-if tonumber(ARGV[3]) <= 0 then
+local timeout = tonumber(ARGV[3])
+if timeout <= 0 then
     redis.call('LPUSH', KEYS[2], ARGV[1])
 else
-    redis.call('ZADD', KEYS[1], ARGV[3], ARGV[1])
+    local t = redis.call('TIME')
+    local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
+    redis.call('ZADD', KEYS[1], now + timeout, ARGV[1])
 end
 return 1
 """
 
 _LUA_EXTEND = """
+-- KEYS: [invisible, meta]
+-- ARGV: [msg_id, receipt_suffix, timeout_seconds]
 local expected = redis.call('HGET', KEYS[2], ARGV[1] .. ':handle')
 if expected ~= ARGV[2] then return 0 end
-redis.call('ZADD', KEYS[1], 'XX', ARGV[3], ARGV[1])
+local t = redis.call('TIME')
+local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
+local expiry = now + tonumber(ARGV[3])
+redis.call('ZADD', KEYS[1], 'XX', expiry, ARGV[1])
 local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
 return score and 1 or 0
 """
 
 _LUA_REAP = """
-local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', ARGV[1], 'LIMIT', 0, 100)
+-- KEYS: [invisible, pending, meta]
+-- ARGV: [] (computes now from server time)
+local t = redis.call('TIME')
+local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
+local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 100)
 local count = 0
 for i, msg_id in ipairs(expired) do
     redis.call('ZREM', KEYS[1], msg_id)
@@ -214,6 +268,7 @@ class RedisMailbox[T]:
 
     def _register_scripts(self) -> None:
         """Register Lua scripts with Redis."""
+        self._scripts["send"] = self.client.register_script(_LUA_SEND)
         self._scripts["receive"] = self.client.register_script(_LUA_RECEIVE)
         self._scripts["acknowledge"] = self.client.register_script(_LUA_ACKNOWLEDGE)
         self._scripts["nack"] = self.client.register_script(_LUA_NACK)
@@ -239,15 +294,15 @@ class RedisMailbox[T]:
     def _reap_expired(self) -> int:
         """Move expired messages from invisible back to pending.
 
-        Also clears receipt handles so stale handles cannot acknowledge
-        messages after they're redelivered.
+        Uses Redis server TIME for consistency across consumers. Also clears
+        receipt handles so stale handles cannot acknowledge messages after
+        they're redelivered.
 
         Returns:
             Number of messages requeued.
         """
-        now = time.time()
         keys = [self._keys.invisible, self._keys.pending, self._keys.meta]
-        result = self._scripts["reap"](keys=keys, args=[now])
+        result = self._scripts["reap"](keys=keys, args=[])
         return int(result) if result else 0
 
     def _serialize(self, body: T) -> str:
@@ -279,6 +334,10 @@ class RedisMailbox[T]:
     def send(self, body: T, *, delay_seconds: int = 0) -> str:
         """Enqueue a message, optionally delaying visibility.
 
+        This operation is atomic via Lua script, ensuring no partial state
+        on failure. Uses Redis server TIME for delayed message expiry to
+        eliminate client clock skew issues.
+
         Args:
             body: Message payload (must be serializable via serde).
             delay_seconds: Seconds before message becomes visible (0-900).
@@ -287,7 +346,7 @@ class RedisMailbox[T]:
             Message ID (unique within this queue).
 
         Raises:
-            MailboxFullError: Queue capacity exceeded.
+            MailboxFullError: Queue capacity exceeded (checked atomically).
             SerializationError: Body cannot be serialized.
             MailboxConnectionError: Cannot connect to Redis.
         """
@@ -296,31 +355,26 @@ class RedisMailbox[T]:
         enqueued_at = datetime.now(UTC).isoformat()
 
         try:
-            # Check capacity if max_size is set
-            if self.max_size is not None:
-                current = self.approximate_count()
-                if current >= self.max_size:
-                    raise MailboxFullError(
-                        f"Queue '{self.name}' at capacity ({self.max_size})"
-                    )
+            keys = [
+                self._keys.pending,
+                self._keys.invisible,
+                self._keys.data,
+                self._keys.meta,
+            ]
+            args = [
+                msg_id,
+                serialized,
+                enqueued_at,
+                delay_seconds,
+                self.max_size or 0,
+            ]
+            result = self._scripts["send"](keys=keys, args=args)
 
-            pipe = self.client.pipeline()
+            if result == 0:
+                raise MailboxFullError(
+                    f"Queue '{self.name}' at capacity ({self.max_size})"
+                )
 
-            # Store message data
-            pipe.hset(self._keys.data, msg_id, serialized)
-
-            # Store enqueued timestamp in meta
-            pipe.hset(self._keys.meta, f"{msg_id}:enqueued", enqueued_at)
-
-            if delay_seconds > 0:
-                # Delayed message: add to invisible with future expiry
-                expiry_score = time.time() + delay_seconds
-                pipe.zadd(self._keys.invisible, {msg_id: expiry_score})
-            else:
-                # Immediate visibility: add to pending queue
-                pipe.lpush(self._keys.pending, msg_id)
-
-            pipe.execute()
             return msg_id
 
         except (MailboxFullError, SerializationError):
@@ -381,8 +435,10 @@ class RedisMailbox[T]:
         """Attempt to receive a single message.
 
         Uses an atomic Lua script to pop from pending and move to invisible
-        in a single operation. For long-polling, polls with 300ms intervals
-        to avoid the atomicity gap that would exist with BRPOP + pipeline.
+        in a single operation. Uses Redis server TIME for expiry calculation
+        to eliminate client clock skew. For long-polling, polls with 300ms
+        intervals to avoid the atomicity gap that would exist with BRPOP +
+        pipeline.
 
         Args:
             visibility_timeout: Seconds message remains invisible.
@@ -398,12 +454,12 @@ class RedisMailbox[T]:
         deadline = time.time() + wait_seconds
 
         while True:
-            expiry_score = time.time() + visibility_timeout
             receipt_suffix = str(uuid4())
 
             # Atomic Lua script: RPOP + ZADD + metadata in one operation
+            # Script computes expiry using Redis server TIME + visibility_timeout
             result = self._scripts["receive"](
-                keys=lua_keys, args=[expiry_score, receipt_suffix]
+                keys=lua_keys, args=[visibility_timeout, receipt_suffix]
             )
 
             if result is not None:
@@ -484,6 +540,8 @@ class RedisMailbox[T]:
     def _nack(self, msg_id: str, receipt_suffix: str, visibility_timeout: int) -> None:
         """Return message to queue.
 
+        Uses Redis server TIME for expiry calculation to eliminate clock skew.
+
         Args:
             msg_id: The message ID.
             receipt_suffix: The receipt handle suffix for validation.
@@ -493,10 +551,10 @@ class RedisMailbox[T]:
             ReceiptHandleExpiredError: If the receipt handle doesn't match
                 the current delivery.
         """
-        new_score = time.time() + visibility_timeout if visibility_timeout > 0 else 0
         keys = [self._keys.invisible, self._keys.pending, self._keys.meta]
+        # Script computes expiry using Redis server TIME + visibility_timeout
         result = self._scripts["nack"](
-            keys=keys, args=[msg_id, receipt_suffix, new_score]
+            keys=keys, args=[msg_id, receipt_suffix, visibility_timeout]
         )
         if result == 0:
             raise ReceiptHandleExpiredError(
@@ -505,6 +563,8 @@ class RedisMailbox[T]:
 
     def _extend(self, msg_id: str, receipt_suffix: str, timeout: int) -> None:
         """Extend visibility timeout.
+
+        Uses Redis server TIME for expiry calculation to eliminate clock skew.
 
         Args:
             msg_id: The message ID.
@@ -515,10 +575,10 @@ class RedisMailbox[T]:
             ReceiptHandleExpiredError: If the receipt handle doesn't match
                 the current delivery.
         """
-        new_score = time.time() + timeout
+        # Script computes expiry using Redis server TIME + timeout
         result = self._scripts["extend"](
             keys=[self._keys.invisible, self._keys.meta],
-            args=[msg_id, receipt_suffix, new_score],
+            args=[msg_id, receipt_suffix, timeout],
         )
         if result == 0:
             raise ReceiptHandleExpiredError(
