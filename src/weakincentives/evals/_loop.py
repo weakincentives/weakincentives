@@ -18,10 +18,13 @@ provided MainLoop, scores the output, and aggregates results into a report.
 
 from __future__ import annotations
 
+import contextlib
+import threading
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Self
 
+from ..runtime.lifecycle import wait_until
 from ..runtime.mailbox import Mailbox, Message, ReceiptHandleExpiredError
 from ._types import EvalRequest, EvalResult, Score
 
@@ -40,6 +43,12 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     - requests mailbox: receives EvalRequest messages
     - results mailbox: sends EvalResult messages
 
+    Lifecycle:
+        - Use ``run()`` to start processing messages
+        - Call ``shutdown()`` to request graceful stop
+        - In-flight samples complete before exit
+        - Supports context manager protocol for automatic cleanup
+
     Example:
         >>> eval_loop = EvalLoop(
         ...     loop=main_loop,
@@ -54,6 +63,9 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     _evaluator: Callable[[OutputT, ExpectedT], Score]
     _requests: Mailbox[EvalRequest[InputT, ExpectedT]]
     _results: Mailbox[EvalResult]
+    _shutdown_event: threading.Event
+    _running: bool
+    _lock: threading.Lock
 
     def __init__(
         self,
@@ -76,8 +88,17 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         self._evaluator = evaluator
         self._requests = requests
         self._results = results
+        self._shutdown_event = threading.Event()
+        self._running = False
+        self._lock = threading.Lock()
 
-    def run(self, *, max_iterations: int | None = None) -> None:
+    def run(
+        self,
+        *,
+        max_iterations: int | None = None,
+        visibility_timeout: int = 300,
+        wait_time_seconds: int = 20,
+    ) -> None:
         """Process evaluation requests from mailbox.
 
         Polls the requests mailbox, evaluates each sample through
@@ -85,32 +106,93 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
         The loop exits when:
         - max_iterations is reached
+        - shutdown() is called
         - The requests mailbox is closed
+
+        In-flight samples complete before exit. Unprocessed messages from
+        the current batch are nacked for redelivery.
 
         Args:
             max_iterations: Stop after N iterations (None = run forever).
+            visibility_timeout: Seconds messages remain invisible during
+                processing. Must exceed maximum expected execution time.
+            wait_time_seconds: Long poll duration (0-20 seconds).
         """
-        iterations = 0
-        while max_iterations is None or iterations < max_iterations:
-            # Exit if mailbox closed
-            if self._requests.closed:
-                break
+        with self._lock:
+            self._running = True
+            self._shutdown_event.clear()
 
-            for msg in self._requests.receive(
-                visibility_timeout=300,  # 5 min - must exceed max execution time
-                wait_time_seconds=20,  # Long poll for efficiency
-            ):
-                try:
-                    result = self._evaluate_sample(msg.body)
-                except Exception as e:
-                    result = EvalResult(
-                        sample_id=msg.body.sample.id,
-                        score=Score(value=0.0, passed=False, reason=str(e)),
-                        latency_ms=0,
-                        error=str(e),
-                    )
-                self._send_and_ack(msg, result)
-            iterations += 1
+        iterations = 0
+        try:
+            while max_iterations is None or iterations < max_iterations:
+                # Check shutdown before blocking on receive
+                if self._shutdown_event.is_set():
+                    break
+
+                # Exit if mailbox closed
+                if self._requests.closed:
+                    break
+
+                for msg in self._requests.receive(
+                    visibility_timeout=visibility_timeout,
+                    wait_time_seconds=wait_time_seconds,
+                ):
+                    # Check shutdown between messages
+                    if self._shutdown_event.is_set():
+                        # Nack unprocessed message for redelivery
+                        with contextlib.suppress(ReceiptHandleExpiredError):
+                            msg.nack(visibility_timeout=0)
+                        break
+
+                    try:
+                        result = self._evaluate_sample(msg.body)
+                    except Exception as e:
+                        result = EvalResult(
+                            sample_id=msg.body.sample.id,
+                            score=Score(value=0.0, passed=False, reason=str(e)),
+                            latency_ms=0,
+                            error=str(e),
+                        )
+                    self._send_and_ack(msg, result)
+                iterations += 1
+        finally:
+            with self._lock:
+                self._running = False
+
+    def shutdown(self, *, timeout: float = 30.0) -> bool:
+        """Request graceful shutdown and wait for completion.
+
+        Sets the shutdown flag. If the loop is running, waits up to timeout
+        seconds for it to stop.
+
+        Args:
+            timeout: Maximum seconds to wait for the loop to stop.
+
+        Returns:
+            True if loop stopped cleanly, False if timeout expired.
+        """
+        self._shutdown_event.set()
+        return wait_until(lambda: not self.running, timeout=timeout)
+
+    @property
+    def running(self) -> bool:
+        """True if the loop is currently processing messages."""
+        with self._lock:
+            return self._running
+
+    def __enter__(self) -> Self:
+        """Context manager entry. Returns self for use in with statement."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Context manager exit. Triggers shutdown and waits for completion."""
+        _ = (exc_type, exc_val, exc_tb)
+        _ = self.shutdown()
 
     def _send_and_ack(
         self,

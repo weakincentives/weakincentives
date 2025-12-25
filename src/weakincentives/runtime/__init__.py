@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from . import events, mailbox, main_loop, session
+from . import events, lifecycle, mailbox, main_loop, session
 from .events import (
     ControlDispatcher,
     Dispatcher,
@@ -31,6 +31,12 @@ from .execution_state import (
     CompositeSnapshot,
     ExecutionState,
     SnapshotMetadata,
+)
+from .lifecycle import (
+    LoopGroup,
+    Runnable,
+    ShutdownCoordinator,
+    wait_until,
 )
 from .logging import StructuredLogger, configure_logging, get_logger
 from .mailbox import (
@@ -88,6 +94,7 @@ __all__ = [
     "HandlerFailure",
     "InMemoryMailbox",
     "InProcessDispatcher",
+    "LoopGroup",
     "Mailbox",
     "MailboxConnectionError",
     "MailboxError",
@@ -104,9 +111,11 @@ __all__ = [
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
+    "Runnable",
     "SerializationError",
     "Session",
     "SessionProtocol",
+    "ShutdownCoordinator",
     "SlicePolicy",
     "Snapshot",
     "SnapshotMetadata",
@@ -125,12 +134,14 @@ __all__ = [
     "events",
     "get_logger",
     "iter_sessions_bottom_up",
+    "lifecycle",
     "mailbox",
     "main_loop",
     "replace_latest",
     "replace_latest_by",
     "session",
     "upsert_by",
+    "wait_until",
 ]
 
 

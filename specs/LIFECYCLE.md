@@ -598,12 +598,14 @@ messages are not prematurely redelivered during graceful shutdown.
 Default signals: `SIGTERM`, `SIGINT`
 
 `SIGTERM` is sent by:
+
 - Kubernetes pod termination
 - Docker stop
 - systemd service stop
 - Manual `kill <pid>`
 
 `SIGINT` is sent by:
+
 - Ctrl+C in terminal
 - IDE stop button
 
