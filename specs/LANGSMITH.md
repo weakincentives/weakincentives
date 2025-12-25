@@ -2,22 +2,45 @@
 
 ## Purpose
 
-Enable full observability of WINK background agents through LangSmith. This
-specification covers telemetry/tracing integration and prompt management via
-LangSmith Hub.
+Enable full observability of WINK agents through LangSmith. This specification
+covers telemetry/tracing integration, prompt management via LangSmith Hub, and
+evaluation dataset synchronization.
 
 ## Guiding Principles
 
-- **Non-invasive instrumentation**: Telemetry hooks into existing event bus
-  infrastructure without requiring changes to business logic.
+- **Non-invasive instrumentation**: Telemetry hooks into the existing
+  `Dispatcher` infrastructure without requiring changes to business logic.
 - **Decoupled from critical path**: Network calls to LangSmith run
   asynchronously to avoid blocking prompt evaluation.
-- **Bidirectional prompt management**: Override system supports both push
+- **Bidirectional prompt management**: Override store supports both push
   (publish to Hub) and pull (fetch from Hub) workflows.
 - **Graceful degradation**: LangSmith unavailability does not break agent
   execution.
 - **Composable with LangSmith SDK**: Works alongside `@traceable` decorator
   and native LangSmith integrations (e.g., `configure_claude_agent_sdk()`).
+
+## Architecture Overview
+
+```mermaid
+flowchart TB
+    subgraph WINK["WINK Runtime"]
+        Dispatcher["Dispatcher"]
+        Session["Session"]
+        Adapter["Provider Adapter"]
+        OverrideStore["Override Store"]
+        EvalLoop["EvalLoop"]
+    end
+
+    subgraph LangSmith["LangSmith Platform"]
+        Tracing["Tracing"]
+        Hub["Prompt Hub"]
+        Datasets["Datasets"]
+    end
+
+    Dispatcher -->|PromptRendered<br/>ToolInvoked<br/>PromptExecuted| Tracing
+    OverrideStore <-->|resolve/upsert| Hub
+    EvalLoop <-->|sync| Datasets
+```
 
 ## Auto-Instrumentation
 
@@ -37,13 +60,13 @@ response = adapter.evaluate(prompt, session=session)
 ### How It Works
 
 `configure_wink()` patches the `InProcessDispatcher` class to automatically
-attach telemetry handlers to every new bus instance:
+attach telemetry handlers to every new dispatcher instance:
 
 ```mermaid
 flowchart LR
     Configure["configure_wink()"] --> Patch["Patch InProcessDispatcher.__init__"]
-    Patch --> NewBus["New Dispatcher Created"]
-    NewBus --> Attach["Auto-attach LangSmithTelemetryHandler"]
+    Patch --> NewDispatcher["New Dispatcher Created"]
+    NewDispatcher --> Attach["Auto-attach LangSmithTelemetryHandler"]
     Attach --> Events["Events flow to LangSmith"]
 ```
 
@@ -133,37 +156,19 @@ process_user_request (run_type="chain")
   └─ postprocess (if @traceable)
 ```
 
-```mermaid
-flowchart TB
-    subgraph WINK["WINK Runtime"]
-        Dispatcher["Event Bus"]
-        Session["Session"]
-        Adapter["Provider Adapter"]
-        OverrideStore["Override Store"]
-    end
-
-    subgraph LangSmith["LangSmith Platform"]
-        Tracing["Tracing"]
-        Hub["Prompt Hub"]
-    end
-
-    Dispatcher -->|PromptRendered<br/>ToolInvoked<br/>PromptExecuted| Tracing
-    OverrideStore <-->|resolve/upsert| Hub
-```
-
 ## Integration Surface
 
-### Event Bus Telemetry (Primary Hook)
+### Event Dispatcher Telemetry (Primary Hook)
 
-The event bus provides the primary integration point for tracing. Subscribers
-receive lifecycle events without modifying adapter or prompt code.
+The `Dispatcher` provides the primary integration point for tracing.
+Subscribers receive lifecycle events without modifying adapter or prompt code.
 
 **Available Events:**
 
 | Event | When Fired | Key Fields |
-| ---------------- | ---------------------------------- | ------------------------------------------------------------------------------------ |
+| ---------------- | ---------------------------------- | ------------------------------------------------------------------------------------------ |
 | `PromptRendered` | After render, before provider call | `prompt_ns`, `prompt_key`, `prompt_name`, `adapter`, `rendered_prompt`, `descriptor` |
-| `ToolInvoked` | After each tool handler | `name`, `params`, `result`, `usage`, `call_id` |
+| `ToolInvoked` | After each tool handler | `name`, `params`, `result`, `usage`, `call_id`, `rendered_output` |
 | `PromptExecuted` | After final parse | `result`, `usage`, `prompt_name` |
 
 **Mapping to LangSmith Runs:**
@@ -195,6 +200,30 @@ class PromptOverridesStore(Protocol):
         descriptor: PromptDescriptor,
         override: PromptOverride,
     ) -> PromptOverride: ...
+
+    def delete(
+        self,
+        *,
+        ns: str,
+        prompt_key: str,
+        tag: str,
+    ) -> None: ...
+
+    def set_section_override(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+        path: tuple[str, ...],
+        body: str,
+    ) -> PromptOverride: ...
+
+    def seed(
+        self,
+        prompt: PromptLike,
+        *,
+        tag: str = "latest",
+    ) -> PromptOverride: ...
 ```
 
 **Hub Mapping:**
@@ -206,29 +235,27 @@ class PromptOverridesStore(Protocol):
 | `SectionOverride.body` | Prompt template content |
 | `ToolOverride.description` | Tool description in template |
 
-## Architecture
-
-### Telemetry Layer
+## Telemetry Layer
 
 ```mermaid
 sequenceDiagram
     participant A as Adapter
-    participant B as Dispatcher
+    participant D as Dispatcher
     participant T as TelemetryHandler
     participant Q as AsyncQueue
     participant L as LangSmith Client
 
-    A->>B: publish(PromptRendered)
-    B->>T: handle(event)
+    A->>D: dispatch(PromptRendered)
+    D->>T: handle(event)
     T->>Q: enqueue(run_create)
     Q-->>L: batch upload (async)
 
-    A->>B: publish(ToolInvoked)
-    B->>T: handle(event)
+    A->>D: dispatch(ToolInvoked)
+    D->>T: handle(event)
     T->>Q: enqueue(run_create)
 
-    A->>B: publish(PromptExecuted)
-    B->>T: handle(event)
+    A->>D: dispatch(PromptExecuted)
+    D->>T: handle(event)
     T->>Q: enqueue(run_update)
     Q-->>L: batch upload (async)
 ```
@@ -242,7 +269,7 @@ sequenceDiagram
 1. **Graceful failure**: Queue overflow or upload failures are logged but do
    not raise to callers.
 
-### Prompt Hub Layer
+## Prompt Hub Layer
 
 ```mermaid
 flowchart LR
@@ -284,7 +311,7 @@ When using the Claude Agent SDK adapter, traces can be captured at two levels:
 
 ```mermaid
 flowchart TB
-    subgraph WINK["WINK Event Bus"]
+    subgraph WINK["WINK Dispatcher"]
         PR["PromptRendered"]
         TI["ToolInvoked (from hooks)"]
         PE["PromptExecuted"]
@@ -332,43 +359,6 @@ class LangSmithTelemetryHandler:
             return
         self._create_tool_run(event)
 ```
-
-### MCP Tool Bridge Tracing
-
-Custom WINK tools bridged via MCP are traced through WINK's event bus:
-
-```python
-# Custom tool with handler
-@dataclass(frozen=True)
-class SearchParams:
-    query: str
-
-def search_handler(params: SearchParams, *, context: ToolContext) -> ToolResult[str]:
-    # Handler execution
-    results = do_search(params.query)
-    return ToolResult(message="Found results", value=results, success=True)
-
-# Tool definition
-search_tool = Tool(
-    name="search",
-    description="Search the knowledge base",
-    params=SearchParams,
-    handler=search_handler,
-)
-
-# When invoked via MCP bridge, ToolInvoked event is published
-# and appears in LangSmith as a tool run
-```
-
-### Native Tool Tracing
-
-Claude Code's native tools (Read, Write, Bash, etc.) are traced via:
-
-1. **LangSmith's `configure_claude_agent_sdk()`**: Captures at SDK level
-1. **WINK's `PostToolUse` hook**: Publishes `ToolInvoked` events
-
-To avoid duplication, configure one or the other, or use the deduplication
-logic above.
 
 ### Recommended Configuration
 
@@ -461,23 +451,6 @@ run = self._client.create_run(
 This enables querying all runs for a session in LangSmith:
 `metadata.wink_session_id = "uuid-here"`
 
-### Isolation and Tracing
-
-When using `IsolationConfig`, traces still flow normally since the telemetry
-handler runs in the parent process, not the isolated SDK subprocess:
-
-```python
-adapter = ClaudeAgentSDKAdapter(
-    model="claude-sonnet-4-5-20250929",
-    client_config=ClaudeAgentSDKClientConfig(
-        isolation=IsolationConfig(
-            network_policy=NetworkPolicy.no_network(),
-            # Tracing still works - events published via hooks
-        ),
-    ),
-)
-```
-
 ## Configuration
 
 ### LangSmithConfig
@@ -495,6 +468,7 @@ class LangSmithConfig:
     # Telemetry settings
     tracing_enabled: bool = True
     trace_sample_rate: float = 1.0  # 0.0-1.0, for high-volume scenarios
+    trace_native_tools: bool = True  # Trace WINK tool invocations
     async_upload: bool = True
     upload_batch_size: int = 100
     upload_interval_seconds: float = 1.0
@@ -532,10 +506,10 @@ class LangSmithTelemetryHandler:
         client: Client | None = None,  # For testing
     ) -> None: ...
 
-    def attach(self, bus: Dispatcher) -> None:
+    def attach(self, dispatcher: Dispatcher) -> None:
         """Subscribe to all telemetry events."""
 
-    def detach(self, bus: Dispatcher) -> None:
+    def detach(self, dispatcher: Dispatcher) -> None:
         """Unsubscribe from all telemetry events."""
 
     def flush(self, *, timeout: float | None = None) -> None:
@@ -562,46 +536,12 @@ class TraceContext:
 _active_contexts: ContextVar[dict[UUID, TraceContext]] = ContextVar("langsmith_contexts")
 ```
 
-### RunTree Integration
-
-For advanced scenarios requiring manual control, the telemetry handler exposes
-the underlying `RunTree` for direct manipulation:
-
-```python
-from langsmith.run_trees import RunTree
-from weakincentives.contrib.langsmith import get_current_run_tree
-
-# Within a traced context
-run_tree = get_current_run_tree()
-if run_tree:
-    # Add custom child run
-    with run_tree.create_child(
-        name="custom_step",
-        run_type="chain",
-        inputs={"key": "value"},
-    ) as child:
-        result = do_custom_step()
-        child.end(outputs={"result": result})
-
-    # Add metadata to current run
-    run_tree.add_metadata({"custom_key": "custom_value"})
-
-    # Add tags
-    run_tree.add_tags(["tag1", "tag2"])
-```
-
-**Use Cases:**
-
-- Adding custom spans for non-WINK operations within tool handlers
-- Attaching domain-specific metadata for filtering in LangSmith UI
-- Creating structured traces for complex multi-step tool implementations
-
 ### LangSmithPromptOverridesStore
 
 Override store backed by LangSmith Hub.
 
 ```python
-class LangSmithPromptOverridesStore(PromptOverridesStore):
+class LangSmithPromptOverridesStore:
     """Fetch and persist prompt overrides via LangSmith Hub."""
 
     def __init__(
@@ -645,21 +585,51 @@ class LangSmithPromptOverridesStore(PromptOverridesStore):
         """Push current prompt to Hub, returning commit hash."""
 ```
 
-**Hub ↔ Override Mapping:**
+## Evaluation Integration
+
+LangSmith integration extends to WINK's evaluation framework, enabling dataset
+synchronization and experiment tracking.
+
+### Dataset Synchronization
 
 ```python
-def _hub_prompt_to_override(
-    hub_prompt: HubPrompt,
-    descriptor: PromptDescriptor,
-) -> PromptOverride:
-    """Convert LangSmith Hub prompt to WINK override format."""
+from weakincentives.contrib.langsmith import LangSmithDatasetStore
+from weakincentives.evals import Dataset
 
-def _override_to_hub_prompt(
-    override: PromptOverride,
-    descriptor: PromptDescriptor,
-) -> HubPrompt:
-    """Convert WINK override to LangSmith Hub prompt format."""
+store = LangSmithDatasetStore(config)
+
+# Pull dataset from LangSmith
+dataset: Dataset[str, str] = store.pull("my-qa-dataset", str, str)
+
+# Push local dataset to LangSmith
+store.push(dataset, name="my-qa-dataset")
 ```
+
+### Experiment Tracking
+
+EvalLoop results are automatically traced as LangSmith experiments when
+`configure_wink()` is enabled:
+
+```python
+from weakincentives.contrib.langsmith import configure_wink
+from weakincentives.evals import EvalLoop, Dataset, exact_match
+
+configure_wink(project="my-evals")
+
+# Each sample execution creates a trace linked to the experiment
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=exact_match,
+    requests=requests,
+    results=results,
+)
+eval_loop.run()
+```
+
+Results appear in LangSmith under the configured project with:
+- Individual sample traces
+- Aggregate metrics (pass rate, mean score, latency)
+- Side-by-side comparison with previous runs
 
 ## Usage Examples
 
@@ -681,13 +651,13 @@ config = LangSmithConfig(
 )
 
 # Setup
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(bus=dispatcher)
 adapter = OpenAIAdapter(model="gpt-4o")
 
 # Attach telemetry
 telemetry = LangSmithTelemetryHandler(config)
-telemetry.attach(bus)
+telemetry.attach(dispatcher)
 
 try:
     # Evaluate - traces automatically sent to LangSmith
@@ -695,7 +665,7 @@ try:
 finally:
     # Ensure all traces are uploaded
     telemetry.flush()
-    telemetry.detach(bus)
+    telemetry.detach(dispatcher)
 ```
 
 ### Prompt Hub Integration
@@ -733,6 +703,7 @@ from weakincentives.contrib.langsmith import (
     LangSmithPromptOverridesStore,
 )
 from weakincentives import MainLoop
+from weakincentives.runtime.events import InProcessDispatcher
 
 config = LangSmithConfig(
     project="production-agent",
@@ -746,13 +717,14 @@ telemetry = LangSmithTelemetryHandler(config)
 # Hub-backed override store
 store = LangSmithPromptOverridesStore(config)
 
+
 class ObservableAgentLoop(MainLoop[UserRequest, AgentOutput]):
     def __init__(self, adapter: ProviderAdapter[AgentOutput]) -> None:
-        bus = InProcessDispatcher()
-        super().__init__(adapter=adapter, bus=bus)
+        dispatcher = InProcessDispatcher()
+        super().__init__(adapter=adapter, bus=dispatcher)
 
         # Attach telemetry
-        telemetry.attach(bus)
+        telemetry.attach(dispatcher)
 
         # Configure prompts with Hub overrides
         self._prompt = Prompt(
@@ -761,9 +733,14 @@ class ObservableAgentLoop(MainLoop[UserRequest, AgentOutput]):
             overrides_tag="production",
         )
 
+    def initialize(self, request: UserRequest) -> tuple[Prompt[AgentOutput], Session]:
+        prompt = self._prompt.bind(request)
+        session = Session(bus=self._bus)
+        return prompt, session
+
     def shutdown(self) -> None:
         telemetry.flush(timeout=5.0)
-        telemetry.detach(self._bus)
+        telemetry.detach(self._dispatcher)
 ```
 
 ## Trace Correlation
@@ -773,13 +750,15 @@ class ObservableAgentLoop(MainLoop[UserRequest, AgentOutput]):
 Use `session_id` to correlate traces across multiple evaluations:
 
 ```python
-session = Session(bus=bus, session_id=uuid4())  # Explicit ID
+from uuid import uuid4
+
+session = Session(bus=dispatcher, session_id=uuid4())  # Explicit ID
 
 # All evaluations in this session share the session_id in LangSmith
 response1 = adapter.evaluate(prompt1, session=session)
 response2 = adapter.evaluate(prompt2, session=session)
 
-# Query in LangSmith: session_id="..."
+# Query in LangSmith: metadata.wink_session_id="..."
 ```
 
 ### Custom Metadata
@@ -788,7 +767,7 @@ Add custom tags and metadata via session tags:
 
 ```python
 session = Session(
-    bus=bus,
+    bus=dispatcher,
     tags={
         "user_id": user.id,
         "request_source": "api",
@@ -860,6 +839,7 @@ class LangSmithTraceStarted:
     project: str
     created_at: datetime
 
+
 @FrozenDataclass()
 class LangSmithTraceCompleted:
     trace_id: UUID
@@ -867,6 +847,7 @@ class LangSmithTraceCompleted:
     total_tokens: int
     trace_url: str | None
     created_at: datetime
+
 
 @FrozenDataclass()
 class LangSmithUploadFailed:
@@ -876,7 +857,7 @@ class LangSmithUploadFailed:
     created_at: datetime
 ```
 
-These events are published to the session event bus for custom handling.
+These events are dispatched to the session's dispatcher for custom handling.
 
 ## Performance Considerations
 
@@ -932,6 +913,7 @@ def langsmith_config():
         async_upload=False,  # Sync for deterministic tests
     )
 
+
 @pytest.fixture
 def mock_hub():
     return MockLangSmithHub()
@@ -948,17 +930,3 @@ def mock_hub():
 - **Claude Agent SDK deduplication**: When using both
   `configure_claude_agent_sdk()` and `configure_wink()`, careful configuration
   is needed to avoid duplicate traces.
-- **Isolated subprocess tracing**: When using `IsolationConfig`, LangSmith's
-  native Claude SDK integration cannot trace the isolated subprocess directly;
-  use WINK's hook-based tracing instead.
-
-## Future Considerations
-
-- **Streaming telemetry**: Support for token-level streaming events when WINK
-  adds streaming support.
-- **Evaluation integration**: Dataset-driven testing and automated prompt
-  optimization via LangSmith experiments.
-- **Multi-project support**: Route different prompt namespaces to different
-  LangSmith projects.
-- **Cost tracking**: Aggregate token costs per prompt/tool in LangSmith
-  dashboards.
