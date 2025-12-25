@@ -378,6 +378,96 @@ class TestVisibilityTimeout:
         msg.acknowledge()
 
 
+class TestEventualRequeue:
+    """
+    Liveness tests for INV-6: EventualRequeue.
+
+    Note: The TLA+ EventualRequeue temporal property cannot be checked by TLC
+    because it quantifies over state variable domains. These property-based
+    tests verify the liveness property through the actual implementation.
+    """
+
+    def test_expired_message_eventually_requeued(
+        self, mailbox: RedisMailbox[Any]
+    ) -> None:
+        """Expired messages eventually return to pending (liveness)."""
+        mailbox.send("test")
+
+        # Receive with very short timeout
+        msgs = mailbox.receive(visibility_timeout=1)
+        assert len(msgs) == 1
+        msg_id = msgs[0].id
+
+        # Wait for expiry + reaper interval + buffer
+        max_wait = 3.0  # seconds
+        start = time.time()
+        requeued = False
+
+        while time.time() - start < max_wait:
+            # Try to receive the requeued message
+            msgs2 = mailbox.receive(visibility_timeout=30, wait_time_seconds=0)
+            if msgs2 and msgs2[0].id == msg_id:
+                requeued = True
+                msgs2[0].acknowledge()
+                break
+            time.sleep(0.1)
+
+        assert requeued, f"Message not requeued within {max_wait}s (liveness violation)"
+
+    @pytest.mark.skipif(not HAS_HYPOTHESIS, reason="hypothesis not installed")
+    @given(st.integers(min_value=1, max_value=5))  # type: ignore[misc]
+    @settings(
+        max_examples=5,
+        deadline=None,
+        suppress_health_check=[HealthCheck.function_scoped_fixture],
+    )  # type: ignore[misc]
+    def test_multiple_messages_eventually_requeued(
+        self, redis_client: Redis[bytes], n: int
+    ) -> None:
+        """All expired messages eventually return to pending."""
+        from weakincentives.contrib.mailbox import RedisMailbox
+
+        mailbox: RedisMailbox[Any] = RedisMailbox(
+            name=f"test-{uuid4().hex[:8]}",
+            client=redis_client,
+            reaper_interval=0.1,  # Fast reaper for testing
+        )
+
+        try:
+            # Send n messages
+            sent_ids = [mailbox.send(f"msg-{i}") for i in range(n)]
+
+            # Receive all with short timeout
+            received = []
+            for _ in range(n):
+                msgs = mailbox.receive(visibility_timeout=1, wait_time_seconds=1)
+                if msgs:
+                    received.append(msgs[0].id)
+
+            assert len(received) == n
+
+            # Wait for all to expire and requeue
+            time.sleep(1.5)
+
+            # All should be requeued and receivable again
+            requeued = []
+            for _ in range(n * 2):  # Extra iterations for safety
+                msgs = mailbox.receive(visibility_timeout=30, wait_time_seconds=0)
+                if msgs:
+                    requeued.append(msgs[0].id)
+                    msgs[0].acknowledge()
+                if len(requeued) == n:
+                    break
+                time.sleep(0.1)
+
+            assert set(requeued) == set(sent_ids), (
+                f"Not all messages requeued: expected {set(sent_ids)}, got {set(requeued)}"
+            )
+        finally:
+            mailbox.close()
+            mailbox.purge()
+
+
 class TestFIFOOrdering:
     """Tests for INV-7: FIFO Ordering."""
 

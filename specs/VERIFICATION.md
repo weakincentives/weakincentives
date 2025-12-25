@@ -522,20 +522,57 @@ PROPERTIES
 ### Running TLC
 
 ```bash
-# Install TLA+ tools
+# Install TLA+ tools (or use make setup-tlaplus)
 brew install tlaplus  # macOS
 # or download from https://github.com/tlaplus/tlaplus/releases
 
-# Run model checker
-cd specs/tla
-tlc RedisMailboxMC.tla -config RedisMailboxMC.cfg -workers auto
+# Run model checker (simulation mode - fast, for CI)
+make tlaplus-check
+
+# Run exhaustive model checker (slow, for thorough verification)
+make tlaplus-check-exhaustive
 
 # Expected output (no errors):
 # Model checking completed. No error has been found.
-# Fingerprint collision probability: calculated ...
 ```
 
+### TLC Limitations and Workarounds
+
+**State Space Constraint**: The TLA+ specification uses `StateConstraint` to bound
+`now <= 5`, preventing infinite state exploration from the unbounded `Tick` action.
+This is sufficient for safety property verification but limits liveness checking.
+
+**Liveness Property Limitation**: The `EventualRequeue` temporal property:
+
+```tla
+EventualRequeue ==
+    \A msgId \in DOMAIN invisible:
+        invisible[msgId].expiresAt < now ~>
+            InPending(msgId)
+```
+
+Cannot be checked by TLC because it quantifies over the domain of the `invisible`
+state variable. TLC reports: "TLC cannot handle temporal formulas that quantify
+over state variable domains."
+
+**Workaround**: Liveness properties are verified through Hypothesis property-based
+tests in `tests/contrib/mailbox/test_redis_mailbox_invariants.py`:
+
+- `TestEventualRequeue.test_expired_message_eventually_requeued` - Single message
+- `TestEventualRequeue.test_multiple_messages_eventually_requeued` - Multiple messages
+
+These tests verify the actual implementation behavior with real timing, complementing
+the TLA+ safety verification.
+
 ## Property-Based Testing with Hypothesis
+
+**Important**: Hypothesis is required for complete verification coverage. While tests
+gracefully skip when Hypothesis is not installed, this significantly reduces test
+coverage. For verification purposes, ensure Hypothesis is installed:
+
+```bash
+uv sync --all-extras  # Installs hypothesis as dev dependency
+```
 
 ### Dependencies
 
