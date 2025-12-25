@@ -2,7 +2,7 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.17.0 - 2025-12-25
 
 ### Breaking: Reducer Signature Changes
 
