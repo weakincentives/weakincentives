@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check tlaplus-check-exhaustive property-tests stress-tests verify-mailbox setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -91,6 +91,85 @@ redis-cluster-tests:
 # Validate integration tests (typecheck without running)
 validate-integration-tests:
 	@uv run --all-extras python build/validate_integration_tests.py -q
+
+# =============================================================================
+# Setup
+# =============================================================================
+
+# Download TLA+ tools (requires Java)
+setup-tlaplus:
+	@echo "Setting up TLA+ tools..."
+	@mkdir -p tools
+	@if [ ! -f tools/tla2tools.jar ]; then \
+		echo "Downloading TLA+ tools..."; \
+		curl -sL -o tools/tla2tools.jar \
+			https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar; \
+	else \
+		echo "TLA+ tools already installed"; \
+	fi
+
+# Start Redis server for testing (if not running)
+setup-redis:
+	@echo "Setting up Redis..."
+	@if redis-cli ping >/dev/null 2>&1; then \
+		echo "Redis already running"; \
+	elif command -v redis-server >/dev/null 2>&1; then \
+		echo "Starting Redis server..."; \
+		redis-server --daemonize yes; \
+		sleep 1; \
+		redis-cli ping; \
+	else \
+		echo "Redis not installed. Install with: apt install redis-server"; \
+		exit 1; \
+	fi
+
+# Setup all verification dependencies
+setup: setup-tlaplus setup-redis
+	@echo "Syncing Python dependencies..."
+	@uv sync --all-extras
+	@echo "Setup complete!"
+
+# =============================================================================
+# Formal Verification
+# =============================================================================
+
+# Run TLC model checker in simulation mode (fast, for CI - ~2 seconds)
+# Checks 1000+ random traces of depth 50, verifying invariants at each state
+tlaplus-check:
+	@echo "Running TLC model checker (simulation mode)..."
+	@if [ ! -f tools/tla2tools.jar ]; then \
+		echo "TLC not installed. Run: make setup-tlaplus"; \
+		exit 1; \
+	fi
+	@cd specs/tla && java -XX:+UseParallelGC -jar ../../tools/tla2tools.jar \
+		-simulate num=1000 -depth 50 \
+		-config RedisMailboxMC-ci.cfg RedisMailbox.tla -workers auto
+
+# Run exhaustive TLC model checking (slow, for thorough verification)
+# Note: May take 10+ minutes depending on configuration
+tlaplus-check-exhaustive:
+	@echo "Running TLC model checker (exhaustive mode)..."
+	@if [ ! -f tools/tla2tools.jar ]; then \
+		echo "TLC not installed. Run: make setup-tlaplus"; \
+		exit 1; \
+	fi
+	@cd specs/tla && java -XX:+UseParallelGC -jar ../../tools/tla2tools.jar \
+		-config RedisMailboxMC.cfg RedisMailbox.tla -workers auto
+
+# Run Hypothesis property-based tests
+property-tests:
+	@uv run --all-extras pytest tests/contrib/mailbox/test_redis_mailbox_properties.py \
+		tests/contrib/mailbox/test_redis_mailbox_invariants.py \
+		--no-cov -v --hypothesis-show-statistics
+
+# Run concurrent stress tests
+stress-tests:
+	@uv run --all-extras pytest tests/contrib/mailbox/test_redis_mailbox_stress.py \
+		--no-cov -v -m slow --timeout=120
+
+# Run all mailbox verification
+verify-mailbox: tlaplus-check property-tests
+	@echo "All mailbox verification checks passed"
 
 # Launch the interactive code reviewer demo
 demo:
