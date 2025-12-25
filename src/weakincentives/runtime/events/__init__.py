@@ -17,11 +17,12 @@ from __future__ import annotations
 from dataclasses import field
 from datetime import datetime
 from threading import RLock
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 from ...dataclasses import FrozenDataclass
+from ...protocols.dispatcher import DispatchResultProtocol
 from ..logging import StructuredLogger, get_logger
 from ._types import (
     ControlDispatcher,
@@ -77,7 +78,7 @@ class InProcessDispatcher:
             else:
                 return True
 
-    def dispatch(self, event: object) -> DispatchResult:
+    def dispatch(self, event: object) -> DispatchResultProtocol:
         with self._lock:
             handlers = tuple(self._handlers.get(type(event), ()))
         invoked: list[EventHandler] = []
@@ -97,11 +98,12 @@ class InProcessDispatcher:
                 )
                 failures.append(HandlerFailure(handler=handler, error=error))
 
-        return DispatchResult(
+        result = DispatchResult(
             event=event,
             handlers_invoked=tuple(invoked),
             errors=tuple(failures),
         )
+        return cast(DispatchResultProtocol, result)
 
 
 @FrozenDataclass()

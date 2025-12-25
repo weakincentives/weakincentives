@@ -30,7 +30,8 @@ from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.tool import ResourceRegistry, Tool, ToolContext, ToolHandler, ToolResult
-from ..runtime.events import HandlerFailure, ToolInvoked
+from ..protocols.dispatcher import HandlerFailureProtocol
+from ..runtime.events import ToolInvoked
 from ..runtime.execution_state import CompositeSnapshot, ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..serde import parse
@@ -108,7 +109,7 @@ class ToolExecutionContext:
     execution_state: ExecutionState
     prompt_name: str
     parse_arguments: ToolArgumentsParser
-    format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str]
+    format_dispatch_failures: Callable[[Sequence[HandlerFailureProtocol]], str]
     deadline: Deadline | None
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
@@ -601,7 +602,7 @@ class ToolExecutor:
     execution_state: ExecutionState
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
     serialize_tool_message_fn: ToolMessageSerializer
-    format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str]
+    format_dispatch_failures: Callable[[Sequence[HandlerFailureProtocol]], str]
     parse_arguments: ToolArgumentsParser
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None

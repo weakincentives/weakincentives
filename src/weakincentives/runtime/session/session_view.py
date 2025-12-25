@@ -19,8 +19,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, override
 
+from ...protocols.dispatcher import DispatchResultProtocol
 from ...types.dataclass import SupportsDataclass
-from ..events._types import DispatchResult, TelemetryDispatcher
+from ..events._types import TelemetryDispatcher
 from .protocols import SessionProtocol, SessionViewProtocol, SnapshotProtocol
 from .slice_accessor import ReadOnlySliceAccessor
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
@@ -98,7 +99,7 @@ class SessionView(SessionViewProtocol):
     # ──────────────────────────────────────────────────────────────────────
 
     @override
-    def dispatch(self, event: SupportsDataclass) -> DispatchResult:
+    def dispatch(self, event: SupportsDataclass) -> DispatchResultProtocol:
         """Dispatch an event to all reducers registered for its type.
 
         Delegates to the underlying session's dispatch mechanism.
@@ -107,7 +108,7 @@ class SessionView(SessionViewProtocol):
             event: The event to dispatch.
 
         Returns:
-            DispatchResult containing dispatch outcome.
+            DispatchResultProtocol containing dispatch outcome.
 
         """
         return self._session.dispatch(event)

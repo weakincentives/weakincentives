@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from ..runtime.events import HandlerFailure
+from ..protocols.dispatcher import HandlerFailureProtocol
 from .deadline_utils import deadline_provider_payload, raise_tool_deadline_error
 from .provider_response import (
     call_provider_with_normalization,
@@ -50,10 +50,10 @@ from .tool_spec import (
 )
 
 
-def format_dispatch_failures(failures: Sequence[HandlerFailure]) -> str:
+def format_dispatch_failures(failures: Sequence[HandlerFailureProtocol]) -> str:
     """Summarize dispatch failures encountered while applying tool results."""
 
-    def _message_for(failure: HandlerFailure) -> str:
+    def _message_for(failure: HandlerFailureProtocol) -> str:
         message = str(failure.error).strip()
         return message or failure.error.__class__.__name__
 

@@ -32,7 +32,8 @@ from ..budget import BudgetExceededError, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt, RenderedPrompt
-from ..runtime.events import HandlerFailure, PromptExecuted, PromptRendered
+from ..protocols.dispatcher import HandlerFailureProtocol
+from ..runtime.events import PromptExecuted, PromptRendered
 from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import (
@@ -130,7 +131,7 @@ class InnerLoopConfig:
     call_provider: ProviderCall
     select_choice: ChoiceSelector
     serialize_tool_message_fn: ToolMessageSerializer
-    format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str] = (
+    format_dispatch_failures: Callable[[Sequence[HandlerFailureProtocol]], str] = (
         format_dispatch_failures
     )
     parse_arguments: ToolArgumentsParser = parse_tool_arguments

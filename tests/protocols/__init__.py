@@ -10,14 +10,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Slice policies for session snapshot and restore behavior.
-
-This module re-exports from weakincentives.protocols for backward compatibility.
-New code should import directly from weakincentives.protocols.slice_policy.
-"""
-
-from __future__ import annotations
-
-from ...protocols.slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
-
-__all__ = ["DEFAULT_SNAPSHOT_POLICIES", "SlicePolicy"]
+"""Tests for weakincentives.protocols package."""

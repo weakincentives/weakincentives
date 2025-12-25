@@ -19,8 +19,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, Self
 
+from ...protocols.dispatcher import DispatchResultProtocol
 from ...types.dataclass import SupportsDataclass
-from ..events._types import DispatchResult, TelemetryDispatcher
+from ..events._types import TelemetryDispatcher
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import Snapshot
 
@@ -79,7 +80,7 @@ class SessionProtocol(Protocol):
         initial: Callable[[], T] | None = None,
     ) -> None: ...
 
-    def dispatch(self, event: SupportsDataclass) -> DispatchResult:
+    def dispatch(self, event: SupportsDataclass) -> DispatchResultProtocol:
         """Dispatch an event to all reducers registered for its type."""
         ...
 
@@ -139,7 +140,7 @@ class SessionViewProtocol(Protocol):
         self, slice_type: type[T]
     ) -> ReadOnlySliceAccessor[T]: ...
 
-    def dispatch(self, event: SupportsDataclass) -> DispatchResult:
+    def dispatch(self, event: SupportsDataclass) -> DispatchResultProtocol:
         """Dispatch an event to all reducers registered for its type."""
         ...
 

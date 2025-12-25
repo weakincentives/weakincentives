@@ -10,56 +10,27 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Shared typing primitives for event integrations."""
+"""Shared typing primitives for event integrations.
+
+This module re-exports protocol types from weakincentives.protocols.dispatcher
+and provides concrete implementations used by the runtime.
+"""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Protocol, cast, override
+from typing import Any, cast, override
 from uuid import UUID, uuid4
 
 from ...adapters._names import AdapterName
 from ...dataclasses import FrozenDataclass
-
-EventHandler = Callable[[object], None]
-
-
-class Dispatcher(Protocol):
-    """Minimal synchronous event dispatcher with delivery tracking."""
-
-    def subscribe(self, event_type: type[object], handler: EventHandler) -> None:
-        """Register a handler for the given event type."""
-        ...
-
-    def unsubscribe(self, event_type: type[object], handler: EventHandler) -> bool:
-        """Remove a handler for the given event type.
-
-        Returns ``True`` if the handler was found and removed, ``False`` otherwise.
-        """
-        ...
-
-    def dispatch(self, event: object) -> DispatchResult:
-        """Dispatch an event to registered handlers and return the result."""
-        ...
-
-
-# Type aliases to clarify dispatcher usage patterns.
-#
-# ControlDispatcher: Used by MainLoop for request/response orchestration
-# (MainLoopRequest, MainLoopCompleted, MainLoopFailed events).
-#
-# TelemetryDispatcher: Used by adapters and sessions for observability
-# (PromptRendered, ToolInvoked, PromptExecuted events).
-#
-# Both aliases resolve to Dispatcher at runtime; the distinction is semantic.
-
-type ControlDispatcher = Dispatcher
-"""Dispatcher used for MainLoop request/response control flow."""
-
-type TelemetryDispatcher = Dispatcher
-"""Dispatcher used for session telemetry and adapter observability events."""
+from ...protocols.dispatcher import (
+    ControlDispatcher,
+    Dispatcher,
+    EventHandler,
+    TelemetryDispatcher,
+)
 
 
 @FrozenDataclass()

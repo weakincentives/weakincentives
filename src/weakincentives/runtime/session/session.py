@@ -27,9 +27,9 @@ from typing import Any, Concatenate, Final, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
+from ...protocols.dispatcher import DispatchResultProtocol
 from ...types.dataclass import SupportsDataclass
 from ..events import (
-    DispatchResult,
     PromptExecuted,
     PromptRendered,
     TelemetryDispatcher,
@@ -439,7 +439,7 @@ class Session(SessionProtocol):
     # ──────────────────────────────────────────────────────────────────────
 
     @override
-    def dispatch(self, event: SupportsDataclass) -> DispatchResult:
+    def dispatch(self, event: SupportsDataclass) -> DispatchResultProtocol:
         """Dispatch an event to all reducers registered for its type.
 
         This routes by event type and runs all registrations for that type,
@@ -451,7 +451,7 @@ class Session(SessionProtocol):
                 ``type(event)`` will be executed.
 
         Returns:
-            DispatchResult containing dispatch outcome and any handler errors.
+            DispatchResultProtocol containing dispatch outcome and any handler errors.
 
         Example::
 
