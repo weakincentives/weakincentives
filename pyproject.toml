@@ -199,6 +199,7 @@ markers = [
     "redis: marks all Redis integration tests (standalone and cluster).",
     "redis_standalone: marks tests using standalone Redis.",
     "redis_cluster: marks tests using Redis Cluster.",
+    "slow: marks tests that are slow and may be skipped in quick test runs.",
 ]
 norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
 reruns = 2
