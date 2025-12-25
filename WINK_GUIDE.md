@@ -34,224 +34,6 @@ This guide is written for engineers who want to:
 
 ______________________________________________________________________
 
-## Coming from LangGraph or LangChain?
-
-If you've built agents with LangGraph, LangChain, or similar frameworks, here's
-a quick orientation.
-
-**Different philosophy, different primitives.**
-
-LangGraph centers on **graphs**: nodes are functions, edges are transitions,
-state flows through the graph. You model agent behavior as explicit control
-flow. LangChain centers on **chains**: composable sequences of calls to LLMs,
-tools, and retrievers.
-
-WINK centers on **the prompt itself**. There's no graph. There's no chain. The
-prompt—a tree of typed sections—_is_ your agent. The model decides what to do
-next based on what's in the prompt. Tools, instructions, and state all live in
-that tree.
-
-**Concept mapping:**
-
-- **Graph / Chain** → `PromptTemplate` (tree of sections)
-- **Node / Tool** → `Tool` + handler function
-- **State / Memory** → `Session` (typed slices + reducers)
-- **Router / Conditional edge** → `enabled()` predicate on sections
-- **Checkpointing** → `session.snapshot()` / `session.restore()`
-- **LangSmith tracing** → Session events + debug UI
-
-**What's familiar:**
-
-- Tools are functions with typed params and results. You'll recognize this.
-- State management exists. Sessions use an event-driven pattern: state is
-  immutable, and changes flow through pure functions called "reducers."
-- Provider abstraction exists. Adapters swap between OpenAI, LiteLLM, Claude.
-
-**What's different:**
-
-- **No explicit routing.** You don't define edges. The model reads the prompt
-  and decides which tools to call. Sections can be conditionally enabled, but
-  there's no "if tool X returns Y, go to node Z."
-
-- **Prompt and tools are co-located.** In LangChain, you define tools in one
-  place and prompts in another. In WINK, the section that explains "use this
-  tool for searching" is the same section that registers the tool. They can't
-  drift apart.
-
-- **Deterministic by default.** Prompt rendering is pure. State transitions flow
-  through reducers. Side effects are confined to tool handlers. You can snapshot
-  the entire state at any point and restore it later.
-
-- **No async (yet).** Adapters are synchronous. This simplifies debugging at the
-  cost of throughput. Async may come later.
-
-**When to use WINK instead of LangGraph:**
-
-- You want the prompt to be the source of truth, not a graph definition.
-- You're building single-agent workflows where the model handles most routing.
-- You value determinism, testability, and auditability over flexibility.
-- You're tired of prompt text and tool definitions drifting apart.
-
-**When to stick with LangGraph:**
-
-- You need explicit multi-step workflows with complex branching logic.
-- You're building multi-agent systems with explicit handoffs.
-- You need async streaming throughout.
-
-You can also use both: WINK for prompt/tool/state management, LangGraph for
-higher-level orchestration.
-
-______________________________________________________________________
-
-## Coming from DSPy?
-
-If you've built LLM programs with DSPy, here's how WINK compares.
-
-**Different bets on where value lives.**
-
-DSPy centers on **automatic optimization**: you declare input/output signatures,
-compose modules, and let optimizers compile better prompts and few-shot
-examples. The framework treats prompts as implementation details that should be
-generated, not written.
-
-WINK centers on **explicit, inspectable prompts**: you write prompts as typed
-section trees, control exactly what the model sees, and iterate via
-version-controlled overrides. The framework treats prompts as first-class
-artifacts that should be readable, testable, and auditable.
-
-Both approaches have merit. DSPy shines when you have good metrics and want to
-automate prompt tuning. WINK shines when you need to understand exactly what's
-being sent to the model and why.
-
-**Concept mapping:**
-
-- **Signature** → Structured output dataclass + `PromptTemplate`
-- **Module** (`Predict`, `ChainOfThought`) → `Section` (instructions + tools)
-- **Program** (composed modules) → `PromptTemplate` (tree of sections)
-- **Optimizer / Teleprompter** → Prompt overrides + manual iteration
-- **Compilation** → No equivalent (prompts are explicit)
-- **`dspy.ReAct`** → `PlanningToolsSection` + tool sections
-- **Metric** → Evaluation framework (see `specs/EVALS.md`)
-- **Trace** → Session events + debug UI
-
-**What's familiar:**
-
-- **Typed inputs and outputs.** DSPy signatures declare input/output fields;
-  WINK uses frozen dataclasses for the same purpose. Both catch type mismatches
-  early.
-
-- **Composition.** DSPy composes modules into programs; WINK composes sections
-  into prompt templates. Both encourage modular, reusable components.
-
-- **Tool use.** DSPy modules like `ReAct` handle tool calling; WINK sections
-  register tools alongside their instructions.
-
-**What's different:**
-
-- **Prompts are visible.** In DSPy, prompts are generated artifacts—you don't
-  typically read or edit them directly. In WINK, `prompt.render()` returns the
-  exact markdown sent to the model. You can inspect, test, and version it.
-
-- **No automatic optimization.** DSPy's optimizers (BootstrapFewShot, MIPROv2,
-  etc.) generate prompts automatically. WINK uses hash-validated overrides for
-  manual iteration. You can build optimization workflows on top, but the
-  framework doesn't assume you want automated prompt generation.
-
-- **State is explicit.** DSPy traces execution but doesn't expose a structured
-  state model. WINK sessions are typed, reducer-managed state containers. Every
-  state change is an event you can query, snapshot, and restore.
-
-- **Tools and instructions are co-located.** In DSPy, tool definitions are
-  separate from module logic. In WINK, the section that explains "use this tool
-  for X" is the same section that registers the tool. They can't drift apart.
-
-- **Deterministic by default.** WINK prompt rendering is pure—same inputs
-  produce same outputs. You can write tests that assert on exact prompt text.
-  DSPy's compiled prompts depend on optimizer state and training data.
-
-**When to use WINK instead of DSPy:**
-
-- You need to inspect and understand exactly what prompts are being sent
-- You're building systems where auditability matters (compliance, debugging)
-- You want to iterate on prompts manually with version control
-- You value determinism and testability over automatic optimization
-- You're building tool-heavy agents where prompt/tool co-location helps
-
-**When to stick with DSPy:**
-
-- You have good metrics and want automated prompt optimization
-- You're doing research where prompt generation is part of the experiment
-- You want to bootstrap few-shot examples automatically
-- You prefer declaring intent (signatures) over writing prompts
-
-**Migration path:**
-
-If you're moving from DSPy to WINK:
-
-1. **Convert signatures to dataclasses.** A DSPy signature like
-   `"question -> answer"` becomes input and output dataclasses:
-
-   ```python
-   # DSPy
-   class QA(dspy.Signature):
-       question = dspy.InputField()
-       answer = dspy.OutputField()
-
-   # WINK
-   @dataclass(slots=True, frozen=True)
-   class QuestionParams:
-       question: str
-
-   @dataclass(slots=True, frozen=True)
-   class Answer:
-       answer: str
-   ```
-
-1. **Convert modules to sections.** A DSPy module becomes a WINK section that
-   renders instructions and optionally registers tools:
-
-   ```python
-   # DSPy
-   qa = dspy.ChainOfThought(QA)
-
-   # WINK
-   qa_section = MarkdownSection(
-       title="Question Answering",
-       key="qa",
-       template="Think step by step, then answer the question.\n\nQuestion: ${question}",
-   )
-   ```
-
-1. **Convert programs to templates.** Composed DSPy modules become a
-   `PromptTemplate` with nested sections:
-
-   ```python
-   template = PromptTemplate[Answer](
-       ns="qa",
-       key="chain-of-thought",
-       sections=(qa_section,),
-   )
-   ```
-
-1. **Replace optimizers with overrides.** Instead of compiled prompts, use
-   WINK's override system to iterate on prompt text:
-
-   ```python
-   prompt = Prompt(template, overrides_store=store, overrides_tag="v2")
-   ```
-
-1. **Add tools explicitly.** DSPy's `ReAct` handles tool use implicitly; WINK
-   requires explicit tool registration on sections. This is more verbose but
-   makes tool availability obvious from the prompt structure.
-
-The key mindset shift: DSPy optimizes prompts for you; WINK gives you tools to
-write and iterate on prompts yourself. If you've been frustrated by not knowing
-what DSPy is actually sending to the model, WINK's explicit approach may feel
-liberating. If you've relied heavily on DSPy's optimizers, you'll need to build
-or adopt optimization workflows separately.
-
-______________________________________________________________________
-
 ## Technical Strategy
 
 WINK is built around a specific bet about where durable value lives in agent
@@ -291,8 +73,6 @@ ______________________________________________________________________
 
 ## Table of Contents
 
-0. [Coming from LangGraph or LangChain?](#coming-from-langgraph-or-langchain)
-1. [Coming from DSPy?](#coming-from-dspy)
 1. [Technical Strategy](#technical-strategy)
 1. [Philosophy](#1-philosophy)
    1. [What "weak incentives" means](#11-what-weak-incentives-means)
@@ -385,6 +165,8 @@ ______________________________________________________________________
    1. [weakincentives.serde](#187-weakincentivesserde)
    1. [weakincentives.evals](#188-weakincentivesevals)
    1. [CLI](#189-cli)
+1. [Appendix A: Coming from LangGraph or LangChain?](#appendix-a-coming-from-langgraph-or-langchain)
+1. [Appendix B: Coming from DSPy?](#appendix-b-coming-from-dspy)
 
 ______________________________________________________________________
 
@@ -2921,3 +2703,221 @@ ______________________________________________________________________
 - **Code review example**:
   [guides/code-review-agent.md](guides/code-review-agent.md)
 - **Contributor guide**: [AGENTS.md](AGENTS.md)
+
+______________________________________________________________________
+
+## Appendix A: Coming from LangGraph or LangChain?
+
+If you've built agents with LangGraph, LangChain, or similar frameworks, here's
+a quick orientation.
+
+**Different philosophy, different primitives.**
+
+LangGraph centers on **graphs**: nodes are functions, edges are transitions,
+state flows through the graph. You model agent behavior as explicit control
+flow. LangChain centers on **chains**: composable sequences of calls to LLMs,
+tools, and retrievers.
+
+WINK centers on **the prompt itself**. There's no graph. There's no chain. The
+prompt—a tree of typed sections—_is_ your agent. The model decides what to do
+next based on what's in the prompt. Tools, instructions, and state all live in
+that tree.
+
+**Concept mapping:**
+
+- **Graph / Chain** → `PromptTemplate` (tree of sections)
+- **Node / Tool** → `Tool` + handler function
+- **State / Memory** → `Session` (typed slices + reducers)
+- **Router / Conditional edge** → `enabled()` predicate on sections
+- **Checkpointing** → `session.snapshot()` / `session.restore()`
+- **LangSmith tracing** → Session events + debug UI
+
+**What's familiar:**
+
+- Tools are functions with typed params and results. You'll recognize this.
+- State management exists. Sessions use an event-driven pattern: state is
+  immutable, and changes flow through pure functions called "reducers."
+- Provider abstraction exists. Adapters swap between OpenAI, LiteLLM, Claude.
+
+**What's different:**
+
+- **No explicit routing.** You don't define edges. The model reads the prompt
+  and decides which tools to call. Sections can be conditionally enabled, but
+  there's no "if tool X returns Y, go to node Z."
+
+- **Prompt and tools are co-located.** In LangChain, you define tools in one
+  place and prompts in another. In WINK, the section that explains "use this
+  tool for searching" is the same section that registers the tool. They can't
+  drift apart.
+
+- **Deterministic by default.** Prompt rendering is pure. State transitions flow
+  through reducers. Side effects are confined to tool handlers. You can snapshot
+  the entire state at any point and restore it later.
+
+- **No async (yet).** Adapters are synchronous. This simplifies debugging at the
+  cost of throughput. Async may come later.
+
+**When to use WINK instead of LangGraph:**
+
+- You want the prompt to be the source of truth, not a graph definition.
+- You're building single-agent workflows where the model handles most routing.
+- You value determinism, testability, and auditability over flexibility.
+- You're tired of prompt text and tool definitions drifting apart.
+
+**When to stick with LangGraph:**
+
+- You need explicit multi-step workflows with complex branching logic.
+- You're building multi-agent systems with explicit handoffs.
+- You need async streaming throughout.
+
+You can also use both: WINK for prompt/tool/state management, LangGraph for
+higher-level orchestration.
+
+______________________________________________________________________
+
+## Appendix B: Coming from DSPy?
+
+If you've built LLM programs with DSPy, here's how WINK compares.
+
+**Different bets on where value lives.**
+
+DSPy centers on **automatic optimization**: you declare input/output signatures,
+compose modules, and let optimizers compile better prompts and few-shot
+examples. The framework treats prompts as implementation details that should be
+generated, not written.
+
+WINK centers on **explicit, inspectable prompts**: you write prompts as typed
+section trees, control exactly what the model sees, and iterate via
+version-controlled overrides. The framework treats prompts as first-class
+artifacts that should be readable, testable, and auditable.
+
+Both approaches have merit. DSPy shines when you have good metrics and want to
+automate prompt tuning. WINK shines when you need to understand exactly what's
+being sent to the model and why.
+
+**Concept mapping:**
+
+- **Signature** → Structured output dataclass + `PromptTemplate`
+- **Module** (`Predict`, `ChainOfThought`) → `Section` (instructions + tools)
+- **Program** (composed modules) → `PromptTemplate` (tree of sections)
+- **Optimizer / Teleprompter** → Prompt overrides + manual iteration
+- **Compilation** → No equivalent (prompts are explicit)
+- **`dspy.ReAct`** → `PlanningToolsSection` + tool sections
+- **Metric** → Evaluation framework (see `specs/EVALS.md`)
+- **Trace** → Session events + debug UI
+
+**What's familiar:**
+
+- **Typed inputs and outputs.** DSPy signatures declare input/output fields;
+  WINK uses frozen dataclasses for the same purpose. Both catch type mismatches
+  early.
+
+- **Composition.** DSPy composes modules into programs; WINK composes sections
+  into prompt templates. Both encourage modular, reusable components.
+
+- **Tool use.** DSPy modules like `ReAct` handle tool calling; WINK sections
+  register tools alongside their instructions.
+
+**What's different:**
+
+- **Prompts are visible.** In DSPy, prompts are generated artifacts—you don't
+  typically read or edit them directly. In WINK, `prompt.render()` returns the
+  exact markdown sent to the model. You can inspect, test, and version it.
+
+- **No automatic optimization.** DSPy's optimizers (BootstrapFewShot, MIPROv2,
+  etc.) generate prompts automatically. WINK uses hash-validated overrides for
+  manual iteration. You can build optimization workflows on top, but the
+  framework doesn't assume you want automated prompt generation.
+
+- **State is explicit.** DSPy traces execution but doesn't expose a structured
+  state model. WINK sessions are typed, reducer-managed state containers. Every
+  state change is an event you can query, snapshot, and restore.
+
+- **Tools and instructions are co-located.** In DSPy, tool definitions are
+  separate from module logic. In WINK, the section that explains "use this tool
+  for X" is the same section that registers the tool. They can't drift apart.
+
+- **Deterministic by default.** WINK prompt rendering is pure—same inputs
+  produce same outputs. You can write tests that assert on exact prompt text.
+  DSPy's compiled prompts depend on optimizer state and training data.
+
+**When to use WINK instead of DSPy:**
+
+- You need to inspect and understand exactly what prompts are being sent
+- You're building systems where auditability matters (compliance, debugging)
+- You want to iterate on prompts manually with version control
+- You value determinism and testability over automatic optimization
+- You're building tool-heavy agents where prompt/tool co-location helps
+
+**When to stick with DSPy:**
+
+- You have good metrics and want automated prompt optimization
+- You're doing research where prompt generation is part of the experiment
+- You want to bootstrap few-shot examples automatically
+- You prefer declaring intent (signatures) over writing prompts
+
+**Migration path:**
+
+If you're moving from DSPy to WINK:
+
+1. **Convert signatures to dataclasses.** A DSPy signature like
+   `"question -> answer"` becomes input and output dataclasses:
+
+   ```python
+   # DSPy
+   class QA(dspy.Signature):
+       question = dspy.InputField()
+       answer = dspy.OutputField()
+
+   # WINK
+   @dataclass(slots=True, frozen=True)
+   class QuestionParams:
+       question: str
+
+   @dataclass(slots=True, frozen=True)
+   class Answer:
+       answer: str
+   ```
+
+1. **Convert modules to sections.** A DSPy module becomes a WINK section that
+   renders instructions and optionally registers tools:
+
+   ```python
+   # DSPy
+   qa = dspy.ChainOfThought(QA)
+
+   # WINK
+   qa_section = MarkdownSection(
+       title="Question Answering",
+       key="qa",
+       template="Think step by step, then answer the question.\n\nQuestion: ${question}",
+   )
+   ```
+
+1. **Convert programs to templates.** Composed DSPy modules become a
+   `PromptTemplate` with nested sections:
+
+   ```python
+   template = PromptTemplate[Answer](
+       ns="qa",
+       key="chain-of-thought",
+       sections=(qa_section,),
+   )
+   ```
+
+1. **Replace optimizers with overrides.** Instead of compiled prompts, use
+   WINK's override system to iterate on prompt text:
+
+   ```python
+   prompt = Prompt(template, overrides_store=store, overrides_tag="v2")
+   ```
+
+1. **Add tools explicitly.** DSPy's `ReAct` handles tool use implicitly; WINK
+   requires explicit tool registration on sections. This is more verbose but
+   makes tool availability obvious from the prompt structure.
+
+The key mindset shift: DSPy optimizes prompts for you; WINK gives you tools to
+write and iterate on prompts yourself. If you've been frustrated by not knowing
+what DSPy is actually sending to the model, WINK's explicit approach may feel
+liberating. If you've relied heavily on DSPy's optimizers, you'll need to build
+or adopt optimization workflows separately.
