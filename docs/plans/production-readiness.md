@@ -11,14 +11,14 @@ agent** that:
 
 ## Priority Framework
 
-| Priority | Criteria                                                  |
+| Priority | Criteria |
 | -------- | --------------------------------------------------------- |
-| **P0**   | Blocks production deployment; no workarounds              |
-| **P1**   | Critical for operations; manual workarounds possible      |
-| **P2**   | Important for scale/reliability; can defer initially      |
-| **P3**   | Nice to have; can build incrementally                     |
+| **P0** | Blocks production deployment; no workarounds |
+| **P1** | Critical for operations; manual workarounds possible |
+| **P2** | Important for scale/reliability; can defer initially |
+| **P3** | Nice to have; can build incrementally |
 
----
+______________________________________________________________________
 
 ## P0: Production Blockers
 
@@ -63,16 +63,16 @@ class MainLoop[UserRequestT, OutputT](ABC):
 **Implementation Steps**:
 
 1. Add `_shutdown_event: threading.Event` to MainLoop
-2. Register signal handlers in `run()` that set the event
-3. Check event in main loop before each `receive()` call
-4. Add `_current_message` tracking for visibility extension
-5. Implement `shutdown()` method with configurable drain timeout
-6. Add context manager support for clean resource management
-7. Update `_handle_message` to support cancellation check
+1. Register signal handlers in `run()` that set the event
+1. Check event in main loop before each `receive()` call
+1. Add `_current_message` tracking for visibility extension
+1. Implement `shutdown()` method with configurable drain timeout
+1. Add context manager support for clean resource management
+1. Update `_handle_message` to support cancellation check
 
 **Spec Updates**: `specs/MAIN_LOOP.md` - Add "Lifecycle Management" section
 
----
+______________________________________________________________________
 
 ### 2. Session & Filesystem Archival to S3
 
@@ -143,16 +143,16 @@ class AnalystLoop(MainLoop[AnalysisBrief, AnalysisResult]):
 **Implementation Steps**:
 
 1. Create `src/weakincentives/contrib/archival/` module
-2. Implement `ArchivalConfig` dataclass with validation
-3. Implement `S3Archiver` with boto3 (optional dependency)
-4. Add filesystem serialization (tar.gz of VFS contents)
-5. Add compression support (gzip default, zstd optional)
-6. Implement `restore()` for debugging workflows
-7. Add async variant `archive_async()` for non-blocking uploads
+1. Implement `ArchivalConfig` dataclass with validation
+1. Implement `S3Archiver` with boto3 (optional dependency)
+1. Add filesystem serialization (tar.gz of VFS contents)
+1. Add compression support (gzip default, zstd optional)
+1. Implement `restore()` for debugging workflows
+1. Add async variant `archive_async()` for non-blocking uploads
 
 **New Spec**: `specs/ARCHIVAL.md`
 
----
+______________________________________________________________________
 
 ### 3. User Identity Context
 
@@ -220,15 +220,15 @@ def run_analysis(params: AnalysisParams, *, context: ToolContext) -> ToolResult:
 **Implementation Steps**:
 
 1. Create `UserIdentity` dataclass in `src/weakincentives/runtime/identity.py`
-2. Add `user` field to `MainLoopRequest`
-3. Propagate identity through Session (as tag or dedicated field)
-4. Expose via `ToolContext.user` property
-5. Add to archival metadata automatically
-6. Update OpenAI adapter to pass `user.user_id` as `user` parameter
+1. Add `user` field to `MainLoopRequest`
+1. Propagate identity through Session (as tag or dedicated field)
+1. Expose via `ToolContext.user` property
+1. Add to archival metadata automatically
+1. Update OpenAI adapter to pass `user.user_id` as `user` parameter
 
 **Spec Updates**: `specs/MAIN_LOOP.md`, `specs/TOOLS.md`
 
----
+______________________________________________________________________
 
 ## P1: Critical for Operations
 
@@ -258,23 +258,23 @@ response = adapter.evaluate(prompt, session=session)
 **Key Components**:
 
 1. `LangSmithTelemetryHandler` - Event bus subscriber, async upload queue
-2. `LangSmithPromptOverridesStore` - Hub-backed prompt management
-3. `configure_wink()` - One-call instrumentation function
-4. Trace context propagation via `contextvars`
+1. `LangSmithPromptOverridesStore` - Hub-backed prompt management
+1. `configure_wink()` - One-call instrumentation function
+1. Trace context propagation via `contextvars`
 
 **Implementation Steps**:
 
 1. Review `specs/LANGSMITH.md` thoroughly
-2. Implement `LangSmithTelemetryHandler` with batched async uploads
-3. Implement `LangSmithPromptOverridesStore` for Hub integration
-4. Implement `configure_wink()` auto-instrumentation
-5. Add deduplication for Claude Agent SDK native integration
-6. Add graceful degradation (don't block on LangSmith failures)
-7. Integration tests with mock LangSmith client
+1. Implement `LangSmithTelemetryHandler` with batched async uploads
+1. Implement `LangSmithPromptOverridesStore` for Hub integration
+1. Implement `configure_wink()` auto-instrumentation
+1. Add deduplication for Claude Agent SDK native integration
+1. Add graceful degradation (don't block on LangSmith failures)
+1. Integration tests with mock LangSmith client
 
 **Spec**: Already complete at `specs/LANGSMITH.md`
 
----
+______________________________________________________________________
 
 ### 5. SQS Mailbox Implementation
 
@@ -298,16 +298,16 @@ requests = SQSMailbox[MainLoopRequest[AnalysisBrief]](
 **Implementation Steps**:
 
 1. Create `src/weakincentives/contrib/mailbox/sqs.py`
-2. Implement SQS send/receive/ack/nack with boto3
-3. Handle MessageAttributes for serde type hints
-4. Implement long polling with SQS wait semantics
-5. Add dead-letter queue configuration
-6. Add message deduplication support (FIFO queues)
-7. Tests with moto mock SQS
+1. Implement SQS send/receive/ack/nack with boto3
+1. Handle MessageAttributes for serde type hints
+1. Implement long polling with SQS wait semantics
+1. Add dead-letter queue configuration
+1. Add message deduplication support (FIFO queues)
+1. Tests with moto mock SQS
 
 **Spec**: Already covered in `specs/MAILBOX.md`
 
----
+______________________________________________________________________
 
 ## P2: Scale & Reliability
 
@@ -333,16 +333,16 @@ response = adapter.evaluate(prompt, session=session)
 **Implementation Steps**:
 
 1. Create `src/weakincentives/adapters/bedrock.py`
-2. Implement Bedrock Converse API integration
-3. Map structured output to Bedrock tool use patterns
-4. Handle Bedrock-specific throttling (ThrottlingException)
-5. Add cost tracking based on Bedrock pricing
-6. Support cross-region inference profiles
-7. Tests with moto mock Bedrock
+1. Implement Bedrock Converse API integration
+1. Map structured output to Bedrock tool use patterns
+1. Handle Bedrock-specific throttling (ThrottlingException)
+1. Add cost tracking based on Bedrock pricing
+1. Support cross-region inference profiles
+1. Tests with moto mock Bedrock
 
 **Spec Updates**: `specs/ADAPTERS.md`, `specs/CLAUDE_AGENT_SDK.md`
 
----
+______________________________________________________________________
 
 ### 7. Metrics & Health Checks
 
@@ -371,16 +371,16 @@ loop = AnalystLoop(..., metrics=metrics)
 **Implementation Steps**:
 
 1. Create `src/weakincentives/contrib/metrics/` module
-2. Define `MetricsCollector` protocol
-3. Implement `PrometheusMetrics` with prometheus-client
-4. Implement `CloudWatchMetrics` with boto3
-5. Instrument MainLoop with request/error/latency metrics
-6. Add token usage tracking from adapter responses
-7. Add health check endpoint (`/health`, `/ready`)
+1. Define `MetricsCollector` protocol
+1. Implement `PrometheusMetrics` with prometheus-client
+1. Implement `CloudWatchMetrics` with boto3
+1. Instrument MainLoop with request/error/latency metrics
+1. Add token usage tracking from adapter responses
+1. Add health check endpoint (`/health`, `/ready`)
 
 **New Spec**: `specs/METRICS.md`
 
----
+______________________________________________________________________
 
 ### 8. Configurable Retry & Dead-Letter Handling
 
@@ -418,15 +418,15 @@ class MainLoop:
 **Implementation Steps**:
 
 1. Create `RetryPolicy` dataclass with configurable parameters
-2. Add `dead_letter` mailbox parameter to MainLoop
-3. Classify errors as retryable vs. permanent
-4. Route permanent failures to dead-letter queue
-5. Include failure context (exception, stack trace, attempt count)
-6. Add retry metrics
+1. Add `dead_letter` mailbox parameter to MainLoop
+1. Classify errors as retryable vs. permanent
+1. Route permanent failures to dead-letter queue
+1. Include failure context (exception, stack trace, attempt count)
+1. Add retry metrics
 
 **Spec Updates**: `specs/MAIN_LOOP.md`
 
----
+______________________________________________________________________
 
 ## P3: Nice to Have
 
@@ -449,12 +449,12 @@ config = WinkConfig.from_file("config.toml")
 **Implementation Steps**:
 
 1. Define configuration schema as dataclass
-2. Environment variable loading with prefixes
-3. TOML/YAML file support
-4. Validation on load
-5. Secrets manager integration (AWS Secrets Manager)
+1. Environment variable loading with prefixes
+1. TOML/YAML file support
+1. Validation on load
+1. Secrets manager integration (AWS Secrets Manager)
 
----
+______________________________________________________________________
 
 ### 10. EvalLoop Co-location
 
@@ -478,49 +478,49 @@ group.run()
 
 This builds on top of the graceful shutdown work from P0.
 
----
+______________________________________________________________________
 
 ## Implementation Roadmap
 
 ### Phase 1: Production Minimum (P0)
 
-| Item                          | Estimate | Dependencies |
+| Item | Estimate | Dependencies |
 | ----------------------------- | -------- | ------------ |
-| Graceful Shutdown             | ~300 LOC | None         |
-| Session Archival to S3        | ~500 LOC | boto3        |
-| User Identity Context         | ~200 LOC | None         |
+| Graceful Shutdown | ~300 LOC | None |
+| Session Archival to S3 | ~500 LOC | boto3 |
+| User Identity Context | ~200 LOC | None |
 
 **Total**: ~1,000 LOC
 
 ### Phase 2: Observability (P1)
 
-| Item                          | Estimate | Dependencies     |
+| Item | Estimate | Dependencies |
 | ----------------------------- | -------- | ---------------- |
-| LangSmith Integration         | ~800 LOC | langsmith SDK    |
-| SQS Mailbox                   | ~400 LOC | boto3            |
+| LangSmith Integration | ~800 LOC | langsmith SDK |
+| SQS Mailbox | ~400 LOC | boto3 |
 
 **Total**: ~1,200 LOC
 
 ### Phase 3: AWS Native (P2)
 
-| Item                          | Estimate | Dependencies     |
+| Item | Estimate | Dependencies |
 | ----------------------------- | -------- | ---------------- |
-| Bedrock Adapter               | ~350 LOC | boto3            |
-| Metrics & Health Checks       | ~300 LOC | prometheus-client|
-| Retry & Dead-Letter           | ~250 LOC | None             |
+| Bedrock Adapter | ~350 LOC | boto3 |
+| Metrics & Health Checks | ~300 LOC | prometheus-client|
+| Retry & Dead-Letter | ~250 LOC | None |
 
 **Total**: ~900 LOC
 
 ### Phase 4: Polish (P3)
 
-| Item                          | Estimate | Dependencies |
+| Item | Estimate | Dependencies |
 | ----------------------------- | -------- | ------------ |
-| Configuration Management      | ~200 LOC | tomli        |
-| EvalLoop Co-location          | ~150 LOC | Phase 1      |
+| Configuration Management | ~200 LOC | tomli |
+| EvalLoop Co-location | ~150 LOC | Phase 1 |
 
 **Total**: ~350 LOC
 
----
+______________________________________________________________________
 
 ## Dependencies to Add
 
@@ -543,44 +543,44 @@ aws = [
 ]
 ```
 
----
+______________________________________________________________________
 
 ## Testing Strategy
 
 Each feature requires:
 
 1. **Unit tests** with mocks (moto for AWS services, responses for HTTP)
-2. **Integration tests** with real services (optional, CI-gated)
-3. **Property tests** for serialization round-trips
+1. **Integration tests** with real services (optional, CI-gated)
+1. **Property tests** for serialization round-trips
 
 **Coverage gate**: Maintain 100% coverage requirement
 
 **Mutation testing**: Add archival and metrics modules to mutation testing scope
 
----
+______________________________________________________________________
 
 ## Open Questions
 
 1. **Archival format**: Should we support Parquet for analytics use cases?
-2. **Multi-region**: Is cross-region session recovery needed?
-3. **Tenant isolation**: Hard isolation (separate queues) or soft (tags)?
-4. **Bedrock streaming**: Support streaming responses for long analyses?
+1. **Multi-region**: Is cross-region session recovery needed?
+1. **Tenant isolation**: Hard isolation (separate queues) or soft (tags)?
+1. **Bedrock streaming**: Support streaming responses for long analyses?
 
----
+______________________________________________________________________
 
 ## Appendix: Current State Summary
 
-| Component            | Status | Notes                                    |
+| Component | Status | Notes |
 | -------------------- | ------ | ---------------------------------------- |
-| MainLoop             | 80%    | Works, needs shutdown                    |
-| Session Snapshots    | 100%   | `Snapshot.to_json()` / `from_json()`     |
-| External Storage     | 0%     | No S3/DB backends                        |
-| User Identity        | 10%    | Basic `user` field in OpenAI adapter     |
-| LangSmith            | 0%     | Spec complete, no implementation         |
-| Redis Mailbox        | 100%   | Production-ready with Lua scripts        |
-| SQS Mailbox          | 0%     | Spec'd, not implemented                  |
-| OpenAI Adapter       | 100%   | Full structured output support           |
-| LiteLLM Adapter      | 100%   | 100+ providers                           |
-| Claude Agent SDK     | 100%   | MCP tool bridging                        |
-| Bedrock Adapter      | 0%     | Not started                              |
-| Metrics              | 0%     | Logging only                             |
+| MainLoop | 80% | Works, needs shutdown |
+| Session Snapshots | 100% | `Snapshot.to_json()` / `from_json()` |
+| External Storage | 0% | No S3/DB backends |
+| User Identity | 10% | Basic `user` field in OpenAI adapter |
+| LangSmith | 0% | Spec complete, no implementation |
+| Redis Mailbox | 100% | Production-ready with Lua scripts |
+| SQS Mailbox | 0% | Spec'd, not implemented |
+| OpenAI Adapter | 100% | Full structured output support |
+| LiteLLM Adapter | 100% | 100+ providers |
+| Claude Agent SDK | 100% | MCP tool bridging |
+| Bedrock Adapter | 0% | Not started |
+| Metrics | 0% | Logging only |
