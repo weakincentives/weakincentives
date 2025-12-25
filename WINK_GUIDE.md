@@ -1453,8 +1453,20 @@ state changes predictable: given the same inputs, you always get the same
 output. It also makes debugging easier—you can log every event and trace the
 exact sequence that led to any state.
 
-In WINK, reducers have this signature:
-`(slice_values, event) -> new_slice_values`.
+In WINK, reducers receive a `SliceView[S]` (read-only access to current values)
+and return a `SliceOp[S]` (describing the mutation to apply):
+
+```python
+def my_reducer(state: SliceView[Plan], event: AddStep) -> Append[Plan]:
+    return Append(Plan(steps=(event.step,)))
+```
+
+**SliceOp variants:**
+
+- `Append[T]`: Add a single value to the slice
+- `Extend[T]`: Add multiple values to the slice
+- `Replace[T]`: Replace all values in the slice
+- `Clear`: Remove all values from the slice
 
 WINK ships helper reducers:
 
@@ -1481,11 +1493,12 @@ assert session[Plan].all() == (Plan(steps=("step 2",)),)
 
 ### 5.4 Declarative reducers with @reducer
 
-For complex slices, attach reducers as methods using `@reducer`:
+For complex slices, attach reducers as methods using `@reducer`. Methods must
+return `Replace[T]` wrapping the new value:
 
 ```python
 from dataclasses import dataclass, replace
-from weakincentives.runtime.session.state_slice import reducer
+from weakincentives.runtime.session import reducer, Replace
 
 @dataclass(slots=True, frozen=True)
 class AddStep:
@@ -1496,8 +1509,8 @@ class AgentPlan:
     steps: tuple[str, ...]
 
     @reducer(on=AddStep)
-    def add_step(self, event: AddStep) -> "AgentPlan":
-        return replace(self, steps=(*self.steps, event.step))
+    def add_step(self, event: AddStep) -> Replace["AgentPlan"]:
+        return Replace(replace(self, steps=(*self.steps, event.step)))
 
 session.install(AgentPlan, initial=lambda: AgentPlan(steps=()))
 session.dispatch(AddStep(step="read README"))
@@ -2008,7 +2021,7 @@ applied at render time.
 from weakincentives.prompt import SectionVisibility
 from weakincentives.runtime.session import SetVisibilityOverride, VisibilityOverrides
 
-session[VisibilityOverrides].apply(
+session.dispatch(
     SetVisibilityOverride(path=("reference",), visibility=SectionVisibility.FULL)
 )
 ```
@@ -2715,8 +2728,13 @@ ResourceRegistry.merge(base, override)
 
 ```python
 Session(bus, tags=None, parent=None)
+SessionView(session)                    # Read-only wrapper for reducer contexts
 session[Type].all() / latest() / where()
-session.dispatch(event)
+session.dispatch(event)                 # All mutations go through dispatch
+
+# Convenience methods (dispatch events internally)
+session[Type].seed(value)               # → InitializeSlice
+session[Type].clear()                   # → ClearSlice
 
 # Visibility overrides (in runtime.session)
 VisibilityOverrides, SetVisibilityOverride, ClearVisibilityOverride
@@ -2728,9 +2746,18 @@ MainLoopConfig(deadline=..., budget=..., resources=...)
 MainLoop.execute(request, deadline=..., budget=..., resources=...)
 ```
 
+**Slice storage (in runtime.session):**
+
+- `SliceView[T]`: Read-only protocol for reducer input
+- `Slice[T]`: Mutable protocol for storage operations
+- `SliceOp`: Algebraic type (`Append | Extend | Replace | Clear`)
+- `InitializeSlice[T]`, `ClearSlice[T]`: System events for slice mutations
+- `MemorySlice` / `JsonlSlice`: In-memory and JSONL backends
+
 **Reducers:**
 
 - `append_all`, `replace_latest`, `replace_latest_by`, `upsert_by`
+- Reducers receive `SliceView[S]` and return `SliceOp[S]`
 
 **Event bus:**
 

@@ -258,6 +258,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `ReducerEvent`: Type alias for reducer events (dataclasses).
     - `Session`: Immutable event ledger with Redux-like reducers.
     - `SessionProtocol`: Protocol for sessions.
+    - `SessionView`: Read-only wrapper for Session (used in reducer contexts).
     - `Snapshot`: Session snapshot.
     - `SnapshotProtocol`: Protocol for session snapshots.
     - `SnapshotRestoreError`: Raised when snapshot restoration fails.
@@ -270,6 +271,19 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `replace_latest`: Replace the latest value in a session.
     - `replace_latest_by`: Replace the latest value in a session by key.
     - `upsert_by`: Upsert a value in a session by key.
+  - Slice storage:
+    - `SliceView[T]`: Read-only protocol for accessing slice values.
+    - `Slice[T]`: Mutable protocol for slice storage operations.
+    - `SliceFactory`: Protocol for creating slices by type.
+    - `SliceOp`: Algebraic type for slice mutations (`Append | Extend | Replace | Clear`).
+    - `Append[T]`: Append a single value to a slice.
+    - `Extend[T]`: Extend a slice with multiple values.
+    - `Replace[T]`: Replace all values in a slice.
+    - `Clear`: Clear all values from a slice.
+    - `InitializeSlice[T]`: System event for initializing a slice.
+    - `ClearSlice[T]`: System event for clearing a slice.
+    - `MemorySlice` / `MemorySliceView`: In-memory tuple-backed storage.
+    - `JsonlSlice` / `JsonlSliceView`: JSONL file-backed persistent storage.
 - `weakincentives.optimizers`: Prompt optimization algorithms and utilities.
   - Protocol and base classes:
     - `PromptOptimizer`: Protocol for prompt optimization algorithms.
@@ -635,7 +649,7 @@ Progressive disclosure is managed via session state:
 from weakincentives.prompt import SectionVisibility
 from weakincentives.runtime.session import SetVisibilityOverride, VisibilityOverrides
 
-session[VisibilityOverrides].apply(
+session.dispatch(
     SetVisibilityOverride(path=("details",), visibility=SectionVisibility.FULL)
 )
 ```
@@ -726,12 +740,15 @@ exists = session[MyType].exists()
 
 ### Dispatch API
 
-```python
-# Broadcast dispatch - runs ALL reducers for the event type
-session.apply(AddStep(step="x"))
+All session mutations flow through a single `dispatch()` method:
 
-# Targeted dispatch - runs only reducers for the specified slice
-session[Plan].apply(AddStep(step="x"))
+```python
+# Dispatch event - routes to registered reducers
+session.dispatch(AddStep(step="x"))
+
+# Convenience methods dispatch events internally
+session[Plan].seed(initial_plan)    # → dispatches InitializeSlice
+session[Plan].clear()               # → dispatches ClearSlice
 ```
 
 ### Mutation API
