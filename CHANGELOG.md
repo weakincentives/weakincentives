@@ -2,85 +2,9 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.17.0 - 2025-12-25
 
-### Unified Dispatch API
-
-All session mutations now flow through a single `session.dispatch(event)` method,
-providing a consistent, auditable mutation interface. Convenience methods on slice
-accessors dispatch events internally rather than mutating state directly.
-
-```python
-from weakincentives.runtime import Session, InProcessDispatcher
-from weakincentives.runtime.session import InitializeSlice, ClearSlice
-
-bus = InProcessDispatcher()
-session = Session(bus=bus)
-
-# All mutations go through dispatch
-session.dispatch(AddStep(step="Research"))
-
-# Convenience methods dispatch events internally
-session[Plan].seed(initial_plan)    # → dispatches InitializeSlice
-session[Plan].clear()               # → dispatches ClearSlice
-
-# Direct system event dispatch (equivalent to methods above)
-session.dispatch(InitializeSlice(Plan, (initial_plan,)))
-session.dispatch(ClearSlice(Plan))
-```
-
-**New system events:**
-
-- `InitializeSlice[T]`: Replace all values in a slice
-- `ClearSlice[T]`: Remove all values from a slice
-
-### SessionView for Read-Only Access
-
-`SessionView` provides a read-only wrapper around `Session` for safe, immutable
-access to session state. Reducer contexts now receive `SessionView` to prevent
-accidental mutations during reducer execution.
-
-```python
-from weakincentives.runtime.session import SessionView
-
-# SessionView exposes query operations only
-view = SessionView(session)
-latest = view[Plan].latest()       # ✓ Query allowed
-all_plans = view[Plan].all()       # ✓ Query allowed
-view[Plan].seed(plan)              # ✗ AttributeError - no mutation methods
-```
-
-**SessionView exposes:**
-
-- Query operations: `all()`, `latest()`, `where()` via `ReadOnlySliceAccessor`
-- Event dispatch: `dispatch()` for broadcasting events
-- Snapshot: `snapshot()` for capturing state
-- Properties: `dispatcher`, `parent`, `children`, `tags`
-
-**SessionView omits:**
-
-- Session methods: `reset()`, `restore()`, `install()`
-- Slice accessor methods: `seed()`, `clear()`, `append()`, `register()`
-
-### Slice Storage Backends
-
-Protocol-based slice storage backends enable swapping between in-memory tuples
-and persistent JSONL files without changing Session semantics.
-
-**New protocols and types:**
-
-- `SliceView[T]`: Lazy read-only protocol for reducer input
-- `Slice[T]`: Mutable protocol for storage operations
-- `SliceFactory`: Creates slices by type
-- `SliceOp` (algebraic type): `Append[T] | Extend[T] | Replace[T] | Clear`
-
-**Implementations:**
-
-- `MemorySlice` / `MemorySliceView`: In-memory tuple-backed storage (default)
-- `JsonlSlice` / `JsonlSliceView`: JSONL file-backed persistence with locking
-- `SliceFactoryConfig`: Policy-based factory selection (`STATE` vs `LOG`)
-
-**Breaking changes to reducer signature:**
+### Breaking: Reducer Signature Changes
 
 Reducers now receive `SliceView[S]` instead of `tuple[S, ...]` and return
 `SliceOp[S]` instead of `tuple[S, ...]`:
@@ -110,21 +34,7 @@ class AgentPlan:
         return Replace(replace(self, steps=(*self.steps, event.step)))
 ```
 
-### Formal Verification for Redis Mailbox
-
-The Redis mailbox algorithms are now formally verified using TLA+ model checking
-and Hypothesis stateful property-based testing.
-
-**Verification coverage:**
-
-- TLA+ specification for mailbox state machine (model checking)
-- Hypothesis stateful tests for implementation verification
-- Key invariants: message state exclusivity, receipt handle freshness,
-  no message loss, delivery count monotonicity, visibility timeout
-
-See `specs/VERIFICATION.md` for the complete verification framework.
-
-### Removed: Session Slice Observers
+### Breaking: Session Slice Observers Removed
 
 The slice observer API (`session.observe()`, `SliceObserver`, `Subscription`)
 has been removed. This reactive notification system added complexity without
@@ -223,8 +133,8 @@ print(f"Accuracy: {report.accuracy:.2%}")
 
 ### First-Class Resource Injection
 
-You can now pass custom resources into `adapter.evaluate()` and
-`MainLoop.execute()`, making tools cleaner, more testable, and portable.
+Pass custom resources into `adapter.evaluate()` and `MainLoop.execute()`,
+making tools cleaner, more testable, and portable.
 
 ```python
 from weakincentives.prompt.tool import ResourceRegistry
@@ -253,24 +163,108 @@ response, session = loop.execute(request)
   `resources` parameter
 - All adapters (OpenAI, LiteLLM, Claude Agent SDK) support resource injection
 
+### Unified Dispatch API
+
+All session mutations now flow through a single `session.dispatch(event)` method,
+providing a consistent, auditable mutation interface. Convenience methods on slice
+accessors dispatch events internally rather than mutating state directly.
+
+```python
+from weakincentives.runtime import Session, InProcessDispatcher
+from weakincentives.runtime.session import InitializeSlice, ClearSlice
+
+bus = InProcessDispatcher()
+session = Session(bus=bus)
+
+# All mutations go through dispatch
+session.dispatch(AddStep(step="Research"))
+
+# Convenience methods dispatch events internally
+session[Plan].seed(initial_plan)    # → dispatches InitializeSlice
+session[Plan].clear()               # → dispatches ClearSlice
+
+# Direct system event dispatch (equivalent to methods above)
+session.dispatch(InitializeSlice(Plan, (initial_plan,)))
+session.dispatch(ClearSlice(Plan))
+```
+
+**New system events:**
+
+- `InitializeSlice[T]`: Replace all values in a slice
+- `ClearSlice[T]`: Remove all values from a slice
+
+### Slice Storage Backends
+
+Protocol-based slice storage backends enable swapping between in-memory tuples
+and persistent JSONL files without changing Session semantics.
+
+**New protocols and types:**
+
+- `SliceView[T]`: Lazy read-only protocol for reducer input
+- `Slice[T]`: Mutable protocol for storage operations
+- `SliceFactory`: Creates slices by type
+- `SliceOp` (algebraic type): `Append[T] | Extend[T] | Replace[T] | Clear`
+
+**Implementations:**
+
+- `MemorySlice` / `MemorySliceView`: In-memory tuple-backed storage (default)
+- `JsonlSlice` / `JsonlSliceView`: JSONL file-backed persistence with locking
+- `SliceFactoryConfig`: Policy-based factory selection (`STATE` vs `LOG`)
+
+### SessionView for Read-Only Access
+
+`SessionView` provides a read-only wrapper around `Session` for safe, immutable
+access to session state. Reducer contexts now receive `SessionView` to prevent
+accidental mutations during reducer execution.
+
+```python
+from weakincentives.runtime.session import SessionView
+
+# SessionView exposes query operations only
+view = SessionView(session)
+latest = view[Plan].latest()       # ✓ Query allowed
+all_plans = view[Plan].all()       # ✓ Query allowed
+view[Plan].seed(plan)              # ✗ AttributeError - no mutation methods
+```
+
+**SessionView exposes:**
+
+- Query operations: `all()`, `latest()`, `where()` via `ReadOnlySliceAccessor`
+- Event dispatch: `dispatch()` for broadcasting events
+- Snapshot: `snapshot()` for capturing state
+- Properties: `dispatcher`, `parent`, `children`, `tags`
+
+**SessionView omits:**
+
+- Session methods: `reset()`, `restore()`, `install()`
+- Slice accessor methods: `seed()`, `clear()`, `append()`, `register()`
+
+### Formal Verification for Redis Mailbox
+
+The Redis mailbox algorithms are now formally verified using TLA+ model checking
+and Hypothesis stateful property-based testing. Key invariants verified:
+message state exclusivity, receipt handle freshness, no message loss, delivery
+count monotonicity, and visibility timeout. See `specs/VERIFICATION.md` for
+the complete verification framework.
+
 ### Added
 
-- **Thread-safe ExecutionState.** `ExecutionState` now uses an `RLock` to guard
-  all accesses to pending tool executions and snapshot/restore flows. Concurrent
-  tool executions from multiple threads are now safe.
+- **`MainLoop.execute()` direct execution.** MainLoop now supports direct
+  execution without mailbox routing, making it easier to run single evaluations
+  or integrate with external orchestrators.
 
 - **`wink docs` CLI command.** Exposes bundled documentation: `--reference`
   prints llms.md (API reference), `--guide` prints WINK_GUIDE.md, and `--specs`
   prints all spec files concatenated. Uses `importlib.resources` for reliable
   access when the package is installed outside the repository.
 
-- **`MainLoop.execute()` direct execution.** MainLoop now supports direct
-  execution without mailbox routing, making it easier to run single evaluations
-  or integrate with external orchestrators.
-
 - **DSPy migration guide.** WINK_GUIDE.md now includes a comprehensive migration
   guide for users coming from DSPy, covering philosophy differences, concept
   mapping, and step-by-step migration paths with code examples.
+
+- **Thread-safe ExecutionState.** `ExecutionState` now uses an `RLock` to guard
+  all accesses to pending tool executions and snapshot/restore flows. Concurrent
+  tool executions from multiple threads are now safe.
 
 - **Generic filesystem validation suite.** A reusable test suite validates
   filesystem implementations against the protocol contract.
