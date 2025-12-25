@@ -15,6 +15,7 @@
 This package contains mailbox implementations that require optional dependencies.
 
 - ``RedisMailbox``: Redis-backed mailbox (requires ``redis`` package)
+- ``SQSMailbox``: AWS SQS-backed mailbox (requires ``boto3`` package)
 
 Example::
 
@@ -26,10 +27,22 @@ Example::
         name="events",
         client=client,
     )
+
+Example (SQS)::
+
+    import boto3
+    from weakincentives.contrib.mailbox import SQSMailbox
+
+    sqs = boto3.client("sqs")
+    mailbox: SQSMailbox[MyEvent] = SQSMailbox(
+        queue_url="https://sqs.us-east-1.amazonaws.com/123456789/my-queue",
+        client=sqs,
+    )
 """
 
 from __future__ import annotations
 
 from ._redis import RedisMailbox
+from ._sqs import SQSMailbox
 
-__all__ = ["RedisMailbox"]
+__all__ = ["RedisMailbox", "SQSMailbox"]

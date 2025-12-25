@@ -54,6 +54,10 @@ podman = [
 redis = [
     "redis>=5.0.0",
 ]
+sqs = [
+    "boto3>=1.35.0",
+    "boto3-stubs[sqs]>=1.35.0",
+]
 claude-agent-sdk = [
     "claude-agent-sdk>=0.1.15",
 ]
@@ -166,6 +170,7 @@ combine-as-imports = true
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR6301", "ANN401", "TRY300"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]
 "src/weakincentives/contrib/mailbox/_redis.py" = ["PLR0914", "PLR6301", "C901", "TRY300", "TRY301", "SIM108"]
+"src/weakincentives/contrib/mailbox/_sqs.py" = ["PLR6301", "TRY300", "TRY301"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 8
@@ -199,6 +204,7 @@ markers = [
     "redis: marks all Redis integration tests (standalone and cluster).",
     "redis_standalone: marks tests using standalone Redis.",
     "redis_cluster: marks tests using Redis Cluster.",
+    "sqs: marks tests that exercise SQS mailbox against LocalStack or real SQS.",
     "slow: marks tests that are slow and may be skipped in quick test runs.",
 ]
 norecursedirs = ["test-repositories", ".uv-cache", ".venv", ".hypothesis"]
@@ -256,6 +262,8 @@ source = ["src/weakincentives"]
 omit = [
     # Redis mailbox requires integration tests with a real Redis server
     "src/weakincentives/contrib/mailbox/_redis.py",
+    # SQS mailbox requires integration tests with LocalStack or real SQS
+    "src/weakincentives/contrib/mailbox/_sqs.py",
 ]
 
 [tool.coverage.report]
@@ -272,7 +280,7 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "podman", "pyyaml", "redis"]
+DEP002 = ["asteval", "boto3", "boto3-stubs", "claude-agent-sdk", "litellm", "mcp", "openai", "podman", "pyyaml", "redis"]
 
 [tool.pyright]
 typeCheckingMode = "strict"
