@@ -42,12 +42,13 @@ jobs:
           wget -q https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
           sudo mv tla2tools.jar /usr/local/lib/
 
-      - name: Run TLC
+      - name: Run TLC (simulation mode)
         run: |
           cd specs/tla
-          java -jar /usr/local/lib/tla2tools.jar \
-            -config RedisMailboxMC.cfg \
-            RedisMailboxMC.tla \
+          java -XX:+UseParallelGC -jar /usr/local/lib/tla2tools.jar \
+            -simulate num=1000 -depth 50 \
+            -config RedisMailboxMC-ci.cfg \
+            RedisMailbox.tla \
             -workers auto
 
   property-tests:

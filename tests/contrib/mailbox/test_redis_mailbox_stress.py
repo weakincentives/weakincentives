@@ -120,14 +120,14 @@ class TestConcurrentStress:
 
             # All messages accounted for
             assert len(sent) == total_messages
-            assert (
-                len(set(acked)) + remaining == total_messages
-            ), f"Message loss: sent={total_messages}, acked={len(set(acked))}, remaining={remaining}"
+            assert len(set(acked)) + remaining == total_messages, (
+                f"Message loss: sent={total_messages}, acked={len(set(acked))}, remaining={remaining}"
+            )
 
             # No duplicate acks (set size equals list size)
-            assert len(acked) == len(
-                set(acked)
-            ), f"Duplicate acks: {len(acked)} total, {len(set(acked))} unique"
+            assert len(acked) == len(set(acked)), (
+                f"Duplicate acks: {len(acked)} total, {len(set(acked))} unique"
+            )
 
         finally:
             stop_consumers.set()
@@ -168,9 +168,9 @@ class TestConcurrentStress:
 
             # All messages should be back in pending
             count = mailbox.approximate_count()
-            assert (
-                count == num_messages
-            ), f"Expected {num_messages} messages, got {count}"
+            assert count == num_messages, (
+                f"Expected {num_messages} messages, got {count}"
+            )
 
             # Old handles should be rejected
             for msg_id, old_handle in received_handles[:5]:

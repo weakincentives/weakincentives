@@ -46,11 +46,9 @@ pytestmark = pytest.mark.redis_standalone
 class TestReceiptHandleFreshness:
     """Tests for INV-2: Receipt Handle Freshness."""
 
-    def test_redelivery_generates_new_handle(
-        self, mailbox: RedisMailbox[Any]
-    ) -> None:
+    def test_redelivery_generates_new_handle(self, mailbox: RedisMailbox[Any]) -> None:
         """Each delivery of the same message gets a unique handle."""
-        mailbox.send('test')
+        mailbox.send("test")
 
         # First receive
         msgs1 = mailbox.receive(visibility_timeout=1)
@@ -72,7 +70,7 @@ class TestReceiptHandleFreshness:
         """Stale handles from previous delivery are rejected."""
         from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
 
-        mailbox.send('test')
+        mailbox.send("test")
 
         # First consumer receives
         msgs1 = mailbox.receive(visibility_timeout=1)
@@ -96,7 +94,11 @@ class TestReceiptHandleFreshness:
 
     @pytest.mark.skipif(not HAS_HYPOTHESIS, reason="hypothesis not installed")
     @given(st.integers(min_value=2, max_value=5))  # type: ignore[misc]
-    @settings(max_examples=10, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])  # type: ignore[misc]
+    @settings(
+        max_examples=10,
+        deadline=None,
+        suppress_health_check=[HealthCheck.function_scoped_fixture],
+    )  # type: ignore[misc]
     def test_handle_unique_across_n_deliveries(
         self, redis_client: Redis[bytes], n: int
     ) -> None:
@@ -110,7 +112,7 @@ class TestReceiptHandleFreshness:
         )
 
         try:
-            mailbox.send('test')
+            mailbox.send("test")
             handles = []
 
             for _ in range(n):
@@ -120,9 +122,9 @@ class TestReceiptHandleFreshness:
                 time.sleep(0.2)  # Allow reaper to run
 
             # All handles should be unique
-            assert len(handles) == len(
-                set(handles)
-            ), f"Duplicate handles found: {handles}"
+            assert len(handles) == len(set(handles)), (
+                f"Duplicate handles found: {handles}"
+            )
         finally:
             mailbox.close()
             mailbox.purge()
@@ -135,7 +137,7 @@ class TestMessageStateExclusivity:
         self, mailbox: RedisMailbox[Any], redis_client: Redis[bytes]
     ) -> None:
         """Receive atomically moves message from pending to invisible."""
-        mailbox.send('test')
+        mailbox.send("test")
 
         # Receive
         msgs = mailbox.receive(visibility_timeout=30)
@@ -148,9 +150,7 @@ class TestMessageStateExclusivity:
         assert msg_id.encode() not in in_pending
         assert in_invisible is not None
 
-    def test_concurrent_receive_no_duplicates(
-        self, mailbox: RedisMailbox[Any]
-    ) -> None:
+    def test_concurrent_receive_no_duplicates(self, mailbox: RedisMailbox[Any]) -> None:
         """Parallel receives never return the same message twice."""
         # Send 100 messages
         for i in range(100):
@@ -190,7 +190,7 @@ class TestMessageStateExclusivity:
         3. Consumer calls receive
         """
         # Send and receive with short timeout
-        mailbox.send('test')
+        mailbox.send("test")
         msgs = mailbox.receive(visibility_timeout=1)
         msg_id = msgs[0].id
 
@@ -201,13 +201,11 @@ class TestMessageStateExclusivity:
         in_pending = msg_id.encode() in redis_client.lrange(
             mailbox._keys.pending, 0, -1
         )
-        in_invisible = (
-            redis_client.zscore(mailbox._keys.invisible, msg_id) is not None
-        )
+        in_invisible = redis_client.zscore(mailbox._keys.invisible, msg_id) is not None
 
-        assert (
-            in_pending != in_invisible
-        ), f"Message in invalid state: pending={in_pending}, invisible={in_invisible}"
+        assert in_pending != in_invisible, (
+            f"Message in invalid state: pending={in_pending}, invisible={in_invisible}"
+        )
 
 
 class TestNoMessageLoss:
@@ -217,7 +215,11 @@ class TestNoMessageLoss:
     @given(  # type: ignore[misc]
         st.lists(st.text(min_size=1, max_size=50), min_size=1, max_size=20)
     )
-    @settings(max_examples=20, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])  # type: ignore[misc]
+    @settings(
+        max_examples=20,
+        deadline=None,
+        suppress_health_check=[HealthCheck.function_scoped_fixture],
+    )  # type: ignore[misc]
     def test_all_messages_accounted_for(
         self, redis_client: Redis[bytes], bodies: list[str]
     ) -> None:
@@ -245,9 +247,9 @@ class TestNoMessageLoss:
 
             # Verify: acked + remaining = total
             remaining = mailbox.approximate_count()
-            assert (
-                len(acked) + remaining == len(bodies)
-            ), f"Message loss: sent={len(bodies)}, acked={len(acked)}, remaining={remaining}"
+            assert len(acked) + remaining == len(bodies), (
+                f"Message loss: sent={len(bodies)}, acked={len(acked)}, remaining={remaining}"
+            )
         finally:
             mailbox.close()
             mailbox.purge()
@@ -278,7 +280,7 @@ class TestDeliveryCountMonotonicity:
 
     def test_delivery_count_increments(self, mailbox: RedisMailbox[Any]) -> None:
         """Each delivery increments the count."""
-        mailbox.send('test')
+        mailbox.send("test")
 
         counts = []
         for _ in range(3):
@@ -295,7 +297,7 @@ class TestDeliveryCountMonotonicity:
         self, mailbox: RedisMailbox[Any]
     ) -> None:
         """Delivery count persists across timeout and requeue."""
-        mailbox.send('test')
+        mailbox.send("test")
 
         # First delivery
         msgs1 = mailbox.receive(visibility_timeout=1)
@@ -306,24 +308,20 @@ class TestDeliveryCountMonotonicity:
 
         # Second delivery - count should be 2, not reset to 1
         msgs2 = mailbox.receive(visibility_timeout=1)
-        assert (
-            msgs2[0].delivery_count == 2
-        ), "Delivery count was reset after requeue!"
+        assert msgs2[0].delivery_count == 2, "Delivery count was reset after requeue!"
 
         # Let it timeout again
         time.sleep(1.5)
 
         # Third delivery
         msgs3 = mailbox.receive(visibility_timeout=30)
-        assert (
-            msgs3[0].delivery_count == 3
-        ), "Delivery count was reset after second requeue!"
+        assert msgs3[0].delivery_count == 3, (
+            "Delivery count was reset after second requeue!"
+        )
 
-    def test_delivery_count_survives_nack(
-        self, mailbox: RedisMailbox[Any]
-    ) -> None:
+    def test_delivery_count_survives_nack(self, mailbox: RedisMailbox[Any]) -> None:
         """Delivery count persists across nack and requeue."""
-        mailbox.send('test')
+        mailbox.send("test")
 
         # First delivery
         msgs1 = mailbox.receive(visibility_timeout=30)
@@ -338,11 +336,9 @@ class TestDeliveryCountMonotonicity:
 class TestVisibilityTimeout:
     """Tests for INV-6: Visibility Timeout Correctness."""
 
-    def test_message_requeued_after_timeout(
-        self, mailbox: RedisMailbox[Any]
-    ) -> None:
+    def test_message_requeued_after_timeout(self, mailbox: RedisMailbox[Any]) -> None:
         """Expired messages return to pending."""
-        mailbox.send('test')
+        mailbox.send("test")
 
         # Receive with short timeout
         msgs = mailbox.receive(visibility_timeout=1)
@@ -362,7 +358,7 @@ class TestVisibilityTimeout:
 
     def test_extend_prevents_requeue(self, mailbox: RedisMailbox[Any]) -> None:
         """Extended visibility prevents timeout requeue."""
-        mailbox.send('test')
+        mailbox.send("test")
 
         msgs = mailbox.receive(visibility_timeout=1)
         msg = msgs[0]
@@ -385,9 +381,7 @@ class TestVisibilityTimeout:
 class TestFIFOOrdering:
     """Tests for INV-7: FIFO Ordering."""
 
-    def test_messages_received_in_send_order(
-        self, mailbox: RedisMailbox[Any]
-    ) -> None:
+    def test_messages_received_in_send_order(self, mailbox: RedisMailbox[Any]) -> None:
         """Messages are delivered in FIFO order."""
         # Send in order
         ids = []

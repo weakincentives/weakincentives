@@ -149,9 +149,7 @@ class MailboxModel:
                 requeued.append(msg_id)
         return requeued
 
-    def extend(
-        self, msg_id: str, handle: str, new_timeout: int, now: float
-    ) -> bool:
+    def extend(self, msg_id: str, handle: str, new_timeout: int, now: float) -> bool:
         """Model an extend. Returns True if successful."""
         if msg_id not in self.invisible:
             return False
@@ -273,13 +271,13 @@ if HAS_HYPOTHESIS:
 
             try:
                 self.mailbox._acknowledge(msg_id, suffix)
-                assert self.model.acknowledge(
-                    msg_id, handle
-                ), "Model predicted failure but implementation succeeded"
+                assert self.model.acknowledge(msg_id, handle), (
+                    "Model predicted failure but implementation succeeded"
+                )
             except ReceiptHandleExpiredError:
-                assert not self.model.is_handle_valid(
-                    msg_id, handle
-                ), "Model predicted success but implementation failed"
+                assert not self.model.is_handle_valid(msg_id, handle), (
+                    "Model predicted success but implementation failed"
+                )
 
         @rule(
             receipt=received,
@@ -300,13 +298,11 @@ if HAS_HYPOTHESIS:
             try:
                 self.mailbox._nack(msg_id, suffix, new_timeout)
                 expected = self.model.nack(msg_id, handle, new_timeout, time.time())
-                assert (
-                    expected
-                ), "Model predicted failure but implementation succeeded"
+                assert expected, "Model predicted failure but implementation succeeded"
             except ReceiptHandleExpiredError:
-                assert not self.model.is_handle_valid(
-                    msg_id, handle
-                ), "Model predicted success but implementation failed"
+                assert not self.model.is_handle_valid(msg_id, handle), (
+                    "Model predicted success but implementation failed"
+                )
 
         @rule(
             receipt=received,
@@ -326,16 +322,12 @@ if HAS_HYPOTHESIS:
 
             try:
                 self.mailbox._extend(msg_id, suffix, new_timeout)
-                expected = self.model.extend(
-                    msg_id, handle, new_timeout, time.time()
-                )
-                assert (
-                    expected
-                ), "Model predicted failure but implementation succeeded"
+                expected = self.model.extend(msg_id, handle, new_timeout, time.time())
+                assert expected, "Model predicted failure but implementation succeeded"
             except ReceiptHandleExpiredError:
-                assert not self.model.is_handle_valid(
-                    msg_id, handle
-                ), "Model predicted success but implementation failed"
+                assert not self.model.is_handle_valid(msg_id, handle), (
+                    "Model predicted success but implementation failed"
+                )
 
         @rule()
         def advance_time(self) -> None:
@@ -356,9 +348,9 @@ if HAS_HYPOTHESIS:
             expected = self.model.total_count()
             actual = self.mailbox.approximate_count()
             # Allow for timing differences in invisible set
-            assert (
-                abs(expected - actual) <= 1
-            ), f"Count mismatch: model={expected}, redis={actual}"
+            assert abs(expected - actual) <= 1, (
+                f"Count mismatch: model={expected}, redis={actual}"
+            )
 
         @invariant()
         def no_messages_lost(self) -> None:
@@ -376,9 +368,9 @@ if HAS_HYPOTHESIS:
                 has_data = self.client.hexists(self.mailbox._keys.data, msg_id)
 
                 assert has_data, f"Message {msg_id} data lost"
-                assert (
-                    in_pending or in_invisible
-                ), f"Message {msg_id} not in pending or invisible"
+                assert in_pending or in_invisible, (
+                    f"Message {msg_id} not in pending or invisible"
+                )
 
         @invariant()
         def message_state_exclusive(self) -> None:
@@ -395,12 +387,12 @@ if HAS_HYPOTHESIS:
         def deleted_messages_gone(self) -> None:
             """Deleted messages have no remaining state."""
             for msg_id in self.model.deleted:
-                assert not self._msg_in_pending(
-                    msg_id
-                ), f"Deleted message {msg_id} in pending"
-                assert not self._msg_in_invisible(
-                    msg_id
-                ), f"Deleted message {msg_id} in invisible"
+                assert not self._msg_in_pending(msg_id), (
+                    f"Deleted message {msg_id} in pending"
+                )
+                assert not self._msg_in_invisible(msg_id), (
+                    f"Deleted message {msg_id} in invisible"
+                )
 
         @invariant()
         def delivery_count_monotonic(self) -> None:
@@ -408,9 +400,9 @@ if HAS_HYPOTHESIS:
             for msg_id, history in self.model.delivery_history.items():
                 counts = [count for count, _ in history]
                 for i in range(1, len(counts)):
-                    assert (
-                        counts[i] > counts[i - 1]
-                    ), f"Non-monotonic delivery count for {msg_id}: {counts}"
+                    assert counts[i] > counts[i - 1], (
+                        f"Non-monotonic delivery count for {msg_id}: {counts}"
+                    )
 
         # =====================================================================
         # Helper methods
