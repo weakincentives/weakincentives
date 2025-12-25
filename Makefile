@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check property-tests stress-tests verify-mailbox setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check tlaplus-check-exhaustive property-tests stress-tests verify-mailbox setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -133,18 +133,28 @@ setup: setup-tlaplus setup-redis
 # Formal Verification
 # =============================================================================
 
-# Run TLC model checker on Redis mailbox spec
+# Run TLC model checker in simulation mode (fast, for CI - ~2 seconds)
+# Checks 1000+ random traces of depth 50, verifying invariants at each state
 tlaplus-check:
-	@echo "Running TLC model checker..."
-	@if command -v tlc >/dev/null 2>&1; then \
-		cd specs/tla && tlc RedisMailboxMC.tla -config RedisMailboxMC.cfg -workers auto; \
-	elif [ -f tools/tla2tools.jar ]; then \
-		cd specs/tla && java -jar ../../tools/tla2tools.jar \
-			-config RedisMailboxMC.cfg RedisMailboxMC.tla -workers auto; \
-	else \
+	@echo "Running TLC model checker (simulation mode)..."
+	@if [ ! -f tools/tla2tools.jar ]; then \
 		echo "TLC not installed. Run: make setup-tlaplus"; \
 		exit 1; \
 	fi
+	@cd specs/tla && java -XX:+UseParallelGC -jar ../../tools/tla2tools.jar \
+		-simulate num=1000 -depth 50 \
+		-config RedisMailboxMC-ci.cfg RedisMailbox.tla -workers auto
+
+# Run exhaustive TLC model checking (slow, for thorough verification)
+# Note: May take 10+ minutes depending on configuration
+tlaplus-check-exhaustive:
+	@echo "Running TLC model checker (exhaustive mode)..."
+	@if [ ! -f tools/tla2tools.jar ]; then \
+		echo "TLC not installed. Run: make setup-tlaplus"; \
+		exit 1; \
+	fi
+	@cd specs/tla && java -XX:+UseParallelGC -jar ../../tools/tla2tools.jar \
+		-config RedisMailboxMC.cfg RedisMailbox.tla -workers auto
 
 # Run Hypothesis property-based tests
 property-tests:

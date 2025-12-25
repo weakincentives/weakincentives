@@ -350,7 +350,21 @@ EventualRequeue ==
         invisible[msgId].expiresAt < now ~>
             InPending(msgId)
 
-(* Full Specification with fairness *)
+(* Safety-only specification (faster model checking) *)
+SafetySpec == Init /\ [][Next]_vars
+
+(* Full Specification with fairness (slower, checks liveness) *)
 Spec == Init /\ [][Next]_vars /\ Fairness
+
+-----------------------------------------------------------------------------
+(* State Constraints for Model Checking *)
+
+(* Bound time to prevent infinite state exploration *)
+StateConstraint ==
+    now <= 5
+
+(* Tighter constraint for CI config - now can only be 0, 1, or 2 *)
+TightStateConstraint ==
+    now <= 2
 
 =============================================================================
