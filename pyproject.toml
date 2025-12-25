@@ -272,7 +272,7 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "pyyaml", "redis"]
+DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "podman", "pyyaml", "redis"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

@@ -38,8 +38,8 @@ brew install tlaplus
 ### Manual Installation
 
 1. Download from <https://github.com/tlaplus/tlaplus/releases>
-2. Extract `tla2tools.jar` to a known location
-3. Create an alias:
+1. Extract `tla2tools.jar` to a known location
+1. Create an alias:
 
 ```bash
 alias tlc='java -jar /path/to/tla2tools.jar'
@@ -131,8 +131,8 @@ and that the property is correctly specified.
 If checking takes too long:
 
 1. Reduce constant values in `RedisMailboxMC.cfg`
-2. Enable simulation mode
-3. Add symmetry sets if applicable
+1. Enable simulation mode
+1. Add symmetry sets if applicable
 
 ## References
 

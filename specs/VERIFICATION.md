@@ -14,7 +14,7 @@ The verification framework provides two complementary layers:
    be exhaustively checked by the TLC model checker for safety and liveness
    properties.
 
-2. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
+1. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
    actual Python implementation against the same invariants.
 
 Together, these layers provide high confidence that:
@@ -1676,18 +1676,18 @@ jobs:
 Update `specs/tla/RedisMailbox.tla` when:
 
 1. Adding new operations to RedisMailbox
-2. Changing Lua script logic
-3. Modifying state transitions
-4. Adding new invariants
+1. Changing Lua script logic
+1. Modifying state transitions
+1. Adding new invariants
 
 ### When to Update Property Tests
 
 Update property tests when:
 
 1. Adding new public methods
-2. Changing visibility timeout behavior
-3. Modifying receipt handle generation
-4. Adding new error conditions
+1. Changing visibility timeout behavior
+1. Modifying receipt handle generation
+1. Adding new error conditions
 
 ### Verification Checklist
 
@@ -1710,13 +1710,13 @@ environment. If any assumption is violated, the invariants may not hold.
    command can interleave during script execution. This is the foundation
    for all multi-key atomic operations.
 
-2. **FIFO List Ordering**: Redis LIST operations (LPUSH/RPOP) maintain FIFO
+1. **FIFO List Ordering**: Redis LIST operations (LPUSH/RPOP) maintain FIFO
    order. Messages pushed first are popped first.
 
-3. **Sorted Set Score Ordering**: ZRANGEBYSCORE returns members in score order.
+1. **Sorted Set Score Ordering**: ZRANGEBYSCORE returns members in score order.
    The reaper correctly finds expired messages by querying `score <= now`.
 
-4. **Single-Threaded Execution**: Redis is single-threaded for command
+1. **Single-Threaded Execution**: Redis is single-threaded for command
    execution. This prevents race conditions between concurrent commands.
 
 ### Cluster Mode Assumptions
@@ -1724,10 +1724,10 @@ environment. If any assumption is violated, the invariants may not hold.
 5. **Hash Tag Co-location**: All keys for a queue use the same hash tag
    (`{queue:name}`), ensuring they reside on the same shard.
 
-6. **No Cross-Shard Transactions**: Operations are atomic only within a single
+1. **No Cross-Shard Transactions**: Operations are atomic only within a single
    queue. Cross-queue operations are not atomic.
 
-7. **Eventual Replication**: During failover, recently written data may be lost
+1. **Eventual Replication**: During failover, recently written data may be lost
    if not yet replicated. Configure `min-replicas-to-write` for durability.
 
 ### Timing Assumptions
@@ -1735,19 +1735,19 @@ environment. If any assumption is violated, the invariants may not hold.
 8. **Reaper Fairness**: The background reaper thread runs at least once every
    `reaper_interval` seconds. Under normal operation, this is 1 second.
 
-9. **Clock Monotonicity**: `time.time()` returns monotonically increasing
+1. **Clock Monotonicity**: `time.time()` returns monotonically increasing
    values. Clock skew or NTP adjustments could affect visibility timeouts.
 
-10. **Visibility Timeout > Processing Time**: The visibility timeout should
-    exceed the maximum expected processing time, or consumers should call
-    `extend_visibility()` periodically.
+1. **Visibility Timeout > Processing Time**: The visibility timeout should
+   exceed the maximum expected processing time, or consumers should call
+   `extend_visibility()` periodically.
 
 ### Consumer Assumptions
 
 11. **Handle Secrecy**: Receipt handles are not shared between consumers. A
     consumer uses only handles from its own receive calls.
 
-12. **Single Acknowledgment**: A consumer attempts to acknowledge each message
+01. **Single Acknowledgment**: A consumer attempts to acknowledge each message
     at most once. The implementation is idempotent, but redundant acks waste
     resources.
 
@@ -1758,13 +1758,13 @@ The TLA+ model makes these simplifications:
 1. **Finite State Space**: The model uses small constants (MaxMessages=3,
    NumConsumers=2) for exhaustive checking. Larger models require simulation.
 
-2. **Abstract Time**: Time advances in discrete ticks, not continuous. This
+1. **Abstract Time**: Time advances in discrete ticks, not continuous. This
    may miss timing-dependent edge cases.
 
-3. **No Network Partitions**: The model assumes reliable Redis connectivity.
+1. **No Network Partitions**: The model assumes reliable Redis connectivity.
    Network failures are not modeled.
 
-4. **No Message Body**: Message bodies are abstracted to simple identifiers.
+1. **No Message Body**: Message bodies are abstracted to simple identifiers.
    Serialization errors are not modeled.
 
 ## References
