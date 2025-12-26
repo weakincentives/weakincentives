@@ -132,6 +132,29 @@ class TestBinding:
         with pytest.raises(AttributeError):
             binding.scope = Scope.PROTOTYPE  # type: ignore[misc]
 
+    def test_binding_instance_creates_eager_singleton(self) -> None:
+        """Binding.instance() creates an eager SINGLETON binding."""
+        config = ConcreteConfig(value=99)
+        binding = Binding.instance(Config, config)
+
+        assert binding.protocol is Config
+        assert binding.scope == Scope.SINGLETON
+        assert binding.eager is True
+
+    def test_binding_instance_resolved_on_start(self) -> None:
+        """Instances from Binding.instance() are available immediately after start()."""
+        config = ConcreteConfig(value=42)
+        registry = ResourceRegistry.of(Binding.instance(Config, config))
+
+        ctx = registry.create_context()
+        # Before start, nothing in cache
+        assert Config not in ctx.singleton_cache
+
+        ctx.start()
+        # After start, instance is in cache
+        assert Config in ctx.singleton_cache
+        assert ctx.singleton_cache[Config] is config
+
 
 # === ResourceRegistry Tests ===
 
@@ -265,6 +288,20 @@ class TestResourceRegistry:
         config = registry.get(Config)
         assert config is not None
         assert config.value == 42
+
+    def test_get_returns_default_when_unbound(self) -> None:
+        """registry.get() returns default when protocol is not bound."""
+        registry = ResourceRegistry.of()
+        default_config = ConcreteConfig(value=999)
+
+        result = registry.get(Config, default=default_config)
+        assert result is default_config
+
+    def test_get_returns_none_when_unbound_no_default(self) -> None:
+        """registry.get() returns None when protocol is not bound and no default."""
+        registry = ResourceRegistry.of()
+        result = registry.get(Config)
+        assert result is None
 
     def test_get_all_with_predicate(self) -> None:
         """get_all() returns instances matching a predicate."""
@@ -679,6 +716,95 @@ class TestScopeBehavior:
             t = r.get(Tracer)
             assert t.id == 1
 
+    def test_nested_tool_scopes(self) -> None:
+        """Test nested tool scopes maintain proper isolation."""
+        counter = itertools.count()
+        close_order: list[int] = []
+
+        @dataclass
+        class NestedTracer:
+            id: int
+            closed: bool = False
+
+            def close(self) -> None:
+                self.closed = True
+                close_order.append(self.id)
+
+        registry = ResourceRegistry.of(
+            Binding(
+                NestedTracer,
+                lambda r: NestedTracer(id=next(counter)),
+                scope=Scope.TOOL_CALL,
+            )
+        )
+        ctx = registry.create_context()
+
+        with ctx.tool_scope() as outer:
+            t_outer = outer.get(NestedTracer)
+            assert t_outer.id == 0
+
+            # Nested scope
+            with ctx.tool_scope() as inner:
+                t_inner = inner.get(NestedTracer)
+                assert t_inner.id == 1
+                assert t_inner is not t_outer
+
+            # Inner tracer closed on exit
+            assert t_inner.closed is True
+            assert t_outer.closed is False
+
+            # Outer scope still works
+            t_outer_again = outer.get(NestedTracer)
+            assert t_outer_again is t_outer
+
+        # Outer tracer closed on exit
+        assert t_outer.closed is True
+        # Inner closed first, then outer
+        assert close_order == [1, 0]
+
+    def test_nested_tool_scopes_with_singleton(self) -> None:
+        """Test nested tool scopes share singleton resources."""
+        singleton_count = 0
+        tool_count = itertools.count()
+
+        @dataclass
+        class SharedConfig:
+            id: int
+
+        @dataclass
+        class ScopedTracer:
+            config: SharedConfig
+            id: int
+
+        def make_config(r: ResourceResolver) -> SharedConfig:
+            nonlocal singleton_count
+            singleton_count += 1
+            return SharedConfig(id=singleton_count)
+
+        registry = ResourceRegistry.of(
+            Binding(SharedConfig, make_config),
+            Binding(
+                ScopedTracer,
+                lambda r: ScopedTracer(config=r.get(SharedConfig), id=next(tool_count)),
+                scope=Scope.TOOL_CALL,
+            ),
+        )
+        ctx = registry.create_context()
+
+        with ctx.tool_scope() as outer:
+            t_outer = outer.get(ScopedTracer)
+
+            with ctx.tool_scope() as inner:
+                t_inner = inner.get(ScopedTracer)
+
+                # Both refer to same singleton
+                assert t_outer.config is t_inner.config
+                # But different tool-scoped instances
+                assert t_outer.id != t_inner.id
+
+        # Singleton created only once
+        assert singleton_count == 1
+
 
 # === Error Message Tests ===
 
@@ -728,6 +854,116 @@ class TestIntegration:
         ctx = registry.create_context()
         service = ctx.get(Service)
         assert service.http.config.value == 100
+
+    def test_deeply_nested_dependency_chain(self) -> None:
+        """Test resolving a 5-level dependency chain: A → B → C → D → E."""
+
+        @dataclass
+        class LevelE:
+            value: int
+
+        @dataclass
+        class LevelD:
+            e: LevelE
+
+        @dataclass
+        class LevelC:
+            d: LevelD
+
+        @dataclass
+        class LevelB:
+            c: LevelC
+
+        @dataclass
+        class LevelA:
+            b: LevelB
+
+        registry = ResourceRegistry.of(
+            Binding(LevelE, lambda r: LevelE(value=42)),
+            Binding(LevelD, lambda r: LevelD(e=r.get(LevelE))),
+            Binding(LevelC, lambda r: LevelC(d=r.get(LevelD))),
+            Binding(LevelB, lambda r: LevelB(c=r.get(LevelC))),
+            Binding(LevelA, lambda r: LevelA(b=r.get(LevelB))),
+        )
+        ctx = registry.create_context()
+        a = ctx.get(LevelA)
+        assert a.b.c.d.e.value == 42
+
+    def test_deep_circular_dependency(self) -> None:
+        """Test circular dependency detection in deep chain: A → B → C → A."""
+
+        @dataclass
+        class DeepA:
+            b: object
+
+        @dataclass
+        class DeepB:
+            c: object
+
+        @dataclass
+        class DeepC:
+            a: object  # Cycle back to A
+
+        registry = ResourceRegistry.of(
+            Binding(DeepA, lambda r: DeepA(b=r.get(DeepB))),
+            Binding(DeepB, lambda r: DeepB(c=r.get(DeepC))),
+            Binding(DeepC, lambda r: DeepC(a=r.get(DeepA))),
+        )
+        ctx = registry.create_context()
+        with pytest.raises(CircularDependencyError) as exc:
+            ctx.get(DeepA)
+        # Cycle should include all three types
+        assert DeepA in exc.value.cycle
+        assert DeepB in exc.value.cycle
+        assert DeepC in exc.value.cycle
+
+    def test_deep_chain_with_mixed_scopes(self) -> None:
+        """Test deep chain with SINGLETON depending on TOOL_CALL (and vice versa)."""
+        counter = itertools.count()
+
+        @dataclass
+        class DeepConfig:
+            id: int
+
+        @dataclass
+        class DeepClient:
+            config: DeepConfig
+            id: int
+
+        @dataclass
+        class DeepService:
+            client: DeepClient
+            id: int
+
+        registry = ResourceRegistry.of(
+            # SINGLETON at the root
+            Binding(DeepConfig, lambda r: DeepConfig(id=next(counter))),
+            # TOOL_CALL depends on SINGLETON
+            Binding(
+                DeepClient,
+                lambda r: DeepClient(config=r.get(DeepConfig), id=next(counter)),
+                scope=Scope.TOOL_CALL,
+            ),
+            # Another TOOL_CALL depends on first TOOL_CALL
+            Binding(
+                DeepService,
+                lambda r: DeepService(client=r.get(DeepClient), id=next(counter)),
+                scope=Scope.TOOL_CALL,
+            ),
+        )
+        ctx = registry.create_context()
+
+        # First tool scope
+        with ctx.tool_scope() as r1:
+            s1 = r1.get(DeepService)
+            config_id = s1.client.config.id
+
+        # Second tool scope - same config, fresh client and service
+        with ctx.tool_scope() as r2:
+            s2 = r2.get(DeepService)
+            assert s2.client.config.id == config_id  # Same singleton
+            assert s2.client.id != s1.client.id  # Fresh tool-call resource
+            assert s2.id != s1.id  # Fresh tool-call resource
 
     def test_mixed_scopes(self) -> None:
         counter = itertools.count()
