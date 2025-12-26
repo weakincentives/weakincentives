@@ -30,7 +30,7 @@ from .scope import Scope
 if TYPE_CHECKING:
     from .registry import ResourceRegistry
 
-log = logging.getLogger(__name__)
+log: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass(slots=True)
@@ -75,9 +75,7 @@ class ScopedResourceContext:
     )
     """Cache for TOOL_CALL-scoped resources (cleared per scope)."""
 
-    _resolving: set[type[object]] = field(
-        default_factory=lambda: set[type[object]]()
-    )
+    _resolving: set[type[object]] = field(default_factory=lambda: set[type[object]]())
     """Tracks in-flight resolutions for cycle detection."""
 
     _instantiation_order: list[tuple[Scope, type[object]]] = field(
@@ -163,13 +161,11 @@ class ScopedResourceContext:
 
     def _cache_for_scope(self, scope: Scope) -> dict[type[object], object] | None:
         """Return appropriate cache for scope, or None for PROTOTYPE."""
-        match scope:
-            case Scope.SINGLETON:
-                return self.singleton_cache
-            case Scope.TOOL_CALL:
-                return self._tool_call_cache
-            case Scope.PROTOTYPE:
-                return None
+        if scope == Scope.SINGLETON:
+            return self.singleton_cache
+        if scope == Scope.TOOL_CALL:
+            return self._tool_call_cache
+        return None  # PROTOTYPE or unknown scope
 
     def start(self) -> None:
         """Initialize context and instantiate eager singletons.
@@ -183,12 +179,16 @@ class ScopedResourceContext:
         """Dispose all instantiated resources implementing Closeable.
 
         Resources are closed in reverse instantiation order.
+        Only SINGLETON and TOOL_CALL scoped resources are tracked and closed;
+        PROTOTYPE resources are not cached and thus not tracked.
         """
-        # Close in reverse order
         for scope, protocol in reversed(self._instantiation_order):
-            cache = self._cache_for_scope(scope)
-            if cache is None:
-                continue
+            # Only SINGLETON and TOOL_CALL are ever in _instantiation_order
+            cache = (
+                self.singleton_cache
+                if scope == Scope.SINGLETON
+                else self._tool_call_cache
+            )
             instance = cache.get(protocol)
             if instance is not None and isinstance(instance, Closeable):
                 try:

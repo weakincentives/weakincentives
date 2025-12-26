@@ -23,17 +23,13 @@ import pytest
 from weakincentives.resources import (
     Binding,
     CircularDependencyError,
-    Closeable,
     DuplicateBindingError,
-    PostConstruct,
     ProviderError,
     ResourceRegistry,
     ResourceResolver,
     Scope,
-    ScopedResourceContext,
     UnboundResourceError,
 )
-
 
 # === Test Fixtures ===
 
@@ -176,7 +172,9 @@ class TestResourceRegistry:
 
     def test_merge(self) -> None:
         base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig(value=1)))
-        override = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig(value=2)))
+        override = ResourceRegistry.of(
+            Binding(Config, lambda r: ConcreteConfig(value=2))
+        )
         merged = base.merge(override)
 
         ctx = merged.create_context()
@@ -385,6 +383,96 @@ class TestLifecycle:
         ctx.start()
         assert constructed == ["config"]
 
+    def test_post_construct_failure_with_close_failure(self) -> None:
+        """Test that close() failure during post_construct cleanup is logged."""
+
+        @dataclass
+        class FailingClose:
+            def post_construct(self) -> None:
+                raise RuntimeError("post_construct failed")
+
+            def close(self) -> None:
+                raise RuntimeError("close also failed")
+
+        registry = ResourceRegistry.of(Binding(FailingClose, lambda r: FailingClose()))
+        ctx = registry.create_context()
+        with pytest.raises(ProviderError) as exc:
+            ctx.get(FailingClose)
+        assert "post_construct failed" in str(exc.value.cause)
+
+    def test_close_skips_non_closeable_resources(self) -> None:
+        """Test that close() skips resources that don't implement Closeable."""
+
+        @dataclass
+        class NonCloseableResource:
+            pass
+
+        @dataclass
+        class CloseableResource:
+            closed: bool = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        registry = ResourceRegistry.of(
+            Binding(NonCloseableResource, lambda r: NonCloseableResource()),
+            Binding(CloseableResource, lambda r: CloseableResource()),
+        )
+        ctx = registry.create_context()
+        _ = ctx.get(NonCloseableResource)
+        closeable = ctx.get(CloseableResource)
+
+        ctx.close()  # Should not raise
+        assert closeable.closed is True
+
+    def test_close_with_failing_resource(self) -> None:
+        """Test that close continues after a resource fails to close."""
+
+        @dataclass
+        class FailingCloseResource:
+            def close(self) -> None:
+                raise RuntimeError("close failed")
+
+        @dataclass
+        class GoodResource:
+            closed: bool = False
+
+            def close(self) -> None:
+                self.closed = True
+
+        registry = ResourceRegistry.of(
+            Binding(GoodResource, lambda r: GoodResource()),
+            Binding(FailingCloseResource, lambda r: FailingCloseResource()),
+        )
+        ctx = registry.create_context()
+        good = ctx.get(GoodResource)
+        _ = ctx.get(FailingCloseResource)
+
+        # close() should not raise, but log the error
+        ctx.close()
+        assert good.closed is True
+
+    def test_tool_scope_close_with_failing_resource(self) -> None:
+        """Test that tool_scope cleanup continues after a resource fails to close."""
+
+        @dataclass
+        class FailingCloseTracer:
+            def close(self) -> None:
+                raise RuntimeError("close failed")
+
+        registry = ResourceRegistry.of(
+            Binding(
+                FailingCloseTracer,
+                lambda r: FailingCloseTracer(),
+                scope=Scope.TOOL_CALL,
+            )
+        )
+        ctx = registry.create_context()
+
+        # Should not raise despite close() failure
+        with ctx.tool_scope() as r:
+            _ = r.get(FailingCloseTracer)
+
 
 # === Scope Behavior Tests ===
 
@@ -398,7 +486,9 @@ class TestScopeBehavior:
             n: int
 
         registry = ResourceRegistry.of(
-            Binding(Numbered, lambda r: Numbered(n=next(counter)), scope=Scope.PROTOTYPE)
+            Binding(
+                Numbered, lambda r: Numbered(n=next(counter)), scope=Scope.PROTOTYPE
+            )
         )
         ctx = registry.create_context()
         n1 = ctx.get(Numbered)
@@ -416,7 +506,9 @@ class TestScopeBehavior:
             call_count += 1
             return ConcreteConfig()
 
-        registry = ResourceRegistry.of(Binding(Config, make_config, scope=Scope.SINGLETON))
+        registry = ResourceRegistry.of(
+            Binding(Config, make_config, scope=Scope.SINGLETON)
+        )
         ctx = registry.create_context()
 
         with ctx.tool_scope() as r1:
@@ -453,7 +545,9 @@ class TestScopeBehavior:
 
     def test_tool_call_closed_on_scope_exit(self) -> None:
         registry = ResourceRegistry.of(
-            Binding(CloseableResource, lambda r: CloseableResource(), scope=Scope.TOOL_CALL)
+            Binding(
+                CloseableResource, lambda r: CloseableResource(), scope=Scope.TOOL_CALL
+            )
         )
         ctx = registry.create_context()
 
@@ -543,7 +637,9 @@ class TestIntegration:
 
         registry = ResourceRegistry.of(
             Binding(Config, lambda r: ConcreteConfig()),  # SINGLETON
-            Binding(RequestId, lambda r: RequestId(id=next(counter)), scope=Scope.TOOL_CALL),
+            Binding(
+                RequestId, lambda r: RequestId(id=next(counter)), scope=Scope.TOOL_CALL
+            ),
         )
         ctx = registry.create_context()
 
