@@ -73,5 +73,41 @@ class Binding[T]:
     eager: bool = False
     """If True, instantiate during context startup (SINGLETON only)."""
 
+    preconstructed: T | None = None
+    """Pre-constructed instance, set by Binding.instance(). None for provider bindings."""
+
+    @staticmethod
+    def instance[U](protocol: type[U], value: U) -> Binding[U]:
+        """Create a binding for a pre-constructed instance.
+
+        This is the canonical way to register existing objects. The instance
+        is stored directly and returned on resolution, with SINGLETON scope.
+
+        Example::
+
+            from weakincentives.resources import Binding, ResourceRegistry
+
+            # Pre-constructed instance
+            config = Config.from_env()
+            filesystem = InMemoryFilesystem()
+
+            # Register using Binding.instance()
+            registry = ResourceRegistry.of(
+                Binding.instance(Config, config),
+                Binding.instance(Filesystem, filesystem),
+                Binding(Service, lambda r: Service(r.get(Config))),
+            )
+
+        Args:
+            protocol: The protocol type this binding satisfies.
+            value: The pre-constructed instance to return.
+
+        Returns:
+            A SINGLETON-scoped binding that returns the instance.
+        """
+        return Binding(
+            protocol, lambda _: value, scope=Scope.SINGLETON, preconstructed=value
+        )
+
 
 __all__ = ["Binding", "Provider"]

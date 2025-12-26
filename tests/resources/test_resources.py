@@ -256,6 +256,33 @@ class TestResourceRegistry:
         assert len(eager) == 1
         assert eager[0].protocol is Config
 
+    def test_get_with_provider_binding(self) -> None:
+        """registry.get() resolves provider bindings via context."""
+        registry = ResourceRegistry.of(
+            Binding(Config, lambda r: ConcreteConfig(value=42))
+        )
+        # get() should resolve the provider and return the constructed instance
+        config = registry.get(Config)
+        assert config is not None
+        assert config.value == 42
+
+    def test_snapshotable_resources_excludes_provider_bindings(self) -> None:
+        """snapshotable_resources() only includes instance bindings."""
+        # Provider binding is not introspected
+        registry = ResourceRegistry.of(
+            Binding(Config, lambda r: ConcreteConfig()),
+        )
+        snapshotable = registry.snapshotable_resources()
+        assert len(snapshotable) == 0
+
+    def test_snapshotable_resources_excludes_non_snapshotable(self) -> None:
+        """snapshotable_resources() only includes Snapshotable instances."""
+        # ConcreteConfig doesn't implement Snapshotable
+        config = ConcreteConfig()
+        registry = ResourceRegistry.build({Config: config})
+        snapshotable = registry.snapshotable_resources()
+        assert len(snapshotable) == 0
+
 
 # === ScopedResourceContext Tests ===
 
