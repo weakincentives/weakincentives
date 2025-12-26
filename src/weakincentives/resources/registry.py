@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
@@ -23,7 +23,6 @@ from .binding import Binding
 from .errors import DuplicateBindingError
 
 if TYPE_CHECKING:
-    from ..runtime.snapshotable import Snapshotable
     from .context import ScopedResourceContext
 
 
@@ -148,9 +147,8 @@ class ResourceRegistry:
     def get[T](self, protocol: type[T], default: T | None = None) -> T | None:
         """Return the resource for the given protocol, or default if absent.
 
-        For pre-constructed instances (via ``Binding.instance()``), returns
-        the instance directly. For provider-based bindings, resolves via
-        a temporary context.
+        Creates a temporary context, starts it, and resolves the protocol.
+        For instance bindings (eager), the instance is resolved during start().
 
         Args:
             protocol: The protocol type to look up.
@@ -159,32 +157,39 @@ class ResourceRegistry:
         Returns:
             The resource instance if found, otherwise default.
         """
-        binding = self._bindings.get(protocol)
-        if binding is None:
+        if protocol not in self._bindings:
             return default
-        # For instance bindings, return directly
-        if binding.preconstructed is not None:
-            return cast(T, binding.preconstructed)
-        # For provider bindings, resolve via context
         ctx = self.create_context()
+        ctx.start()
         return ctx.get(protocol)
 
-    def snapshotable_resources(self) -> Mapping[type[object], Snapshotable]:
-        """Return all pre-constructed instances that implement Snapshotable.
+    def get_all[T](self, predicate: Callable[[object], bool]) -> Mapping[type[T], T]:
+        """Return all resolved instances matching a predicate.
 
-        Only bindings created via ``Binding.instance()`` are checked.
-        Provider-based bindings are not introspected.
+        Creates a context, starts it (resolving all eager bindings),
+        and returns instances from the singleton cache that match.
+
+        This is the generic way to introspect resources. For example,
+        to find all Snapshotable resources::
+
+            from weakincentives.runtime.snapshotable import Snapshotable
+
+            snapshotable = registry.get_all(
+                lambda x: isinstance(x, Snapshotable)
+            )
+
+        Args:
+            predicate: Function that returns True for matching instances.
 
         Returns:
-            Mapping from resource type to snapshotable resource instance.
+            Mapping from protocol type to matching instance.
         """
-        from ..runtime.snapshotable import Snapshotable
-
-        result: dict[type[object], Snapshotable] = {}
-        for protocol, binding in self._bindings.items():
-            instance = binding.preconstructed
-            if instance is not None and isinstance(instance, Snapshotable):
-                result[protocol] = instance
+        ctx = self.create_context()
+        ctx.start()
+        result: dict[type[T], T] = {}
+        for protocol, instance in ctx.singleton_cache.items():
+            if predicate(instance):
+                result[cast(type[T], protocol)] = cast(T, instance)
         return result
 
     # === Composition ===

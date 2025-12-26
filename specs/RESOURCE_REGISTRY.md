@@ -111,6 +111,15 @@ class Binding[T]:
 
     eager: bool = False
     """If True, instantiate during context startup (SINGLETON only)."""
+
+    @staticmethod
+    def instance[U](protocol: type[U], value: U) -> Binding[U]:
+        """Create a binding for a pre-constructed instance.
+
+        Returns an eager SINGLETON binding that returns the given instance.
+        This is the canonical way to register existing objects.
+        """
+        ...
 ```
 
 Provider signature:
@@ -166,6 +175,15 @@ class ResourceRegistry:
         """
         ...
 
+    @staticmethod
+    def build(mapping: Mapping[type[object], object]) -> ResourceRegistry:
+        """Convenience method to create a registry from pre-constructed instances.
+
+        Equivalent to calling of() with Binding.instance() for each entry.
+        None values are filtered out.
+        """
+        ...
+
     def __contains__(self, protocol: type[object]) -> bool:
         """Check if protocol has a binding."""
         ...
@@ -180,6 +198,26 @@ class ResourceRegistry:
 
     def binding_for[T](self, protocol: type[T]) -> Binding[T] | None:
         """Return the binding for a protocol, or None if unbound."""
+        ...
+
+    def get[T](self, protocol: type[T], default: T | None = None) -> T | None:
+        """Return the resource for the given protocol, or default if absent.
+
+        Creates a temporary context, starts it, and resolves the protocol.
+        """
+        ...
+
+    def get_all[T](self, predicate: Callable[[object], bool]) -> Mapping[type[T], T]:
+        """Return all resolved instances matching a predicate.
+
+        Creates a context, starts it (resolving all eager bindings),
+        and returns instances from the singleton cache that match.
+
+        Example:
+            snapshotable = registry.get_all(
+                lambda x: isinstance(x, Snapshotable)
+            )
+        """
         ...
 
     def merge(self, other: ResourceRegistry) -> ResourceRegistry:
@@ -315,7 +353,7 @@ class ProviderError(ResourceError):
 ```python
 from weakincentives.resources import Binding, ResourceRegistry, Scope
 
-# Define bindings
+# Define bindings with providers
 registry = ResourceRegistry.of(
     Binding(Config, lambda r: Config.from_env()),
     Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
@@ -329,6 +367,43 @@ try:
     http = ctx.get(HTTPClient)  # Lazily constructs Config, then HTTPClient
 finally:
     ctx.close()
+```
+
+### Pre-Constructed Instances
+
+```python
+# Use Binding.instance() for pre-constructed resources
+fs = InMemoryFilesystem()
+tracker = BudgetTracker(budget=Budget(max_tokens=1000))
+
+registry = ResourceRegistry.of(
+    Binding.instance(Filesystem, fs),
+    Binding.instance(BudgetTracker, tracker),
+    Binding(Service, lambda r: Service(r.get(Filesystem))),
+)
+
+# Or use the convenience build() method
+registry = ResourceRegistry.build({
+    Filesystem: fs,
+    BudgetTracker: tracker,
+})
+```
+
+### Introspecting Resources
+
+```python
+from weakincentives.runtime.snapshotable import Snapshotable
+
+# Find all resources matching a predicate
+registry = ResourceRegistry.build({
+    Filesystem: InMemoryFilesystem(),  # Implements Snapshotable
+    BudgetTracker: tracker,            # Does not implement Snapshotable
+})
+
+# get_all() scans resolved singletons
+snapshotable = registry.get_all(lambda x: isinstance(x, Snapshotable))
+assert Filesystem in snapshotable
+assert BudgetTracker not in snapshotable
 ```
 
 ### Tool-Call Scoped Resources

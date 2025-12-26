@@ -269,7 +269,7 @@ class TestSnapshotableProtocol:
         fs = InMemoryFilesystem()
         resources = ResourceRegistry.build({Filesystem: fs})
 
-        snapshotable = resources.snapshotable_resources()
+        snapshotable = resources.get_all(lambda x: isinstance(x, Snapshotable))
 
         assert Filesystem in snapshotable
         assert snapshotable[Filesystem] is fs

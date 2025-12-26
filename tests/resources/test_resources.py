@@ -266,22 +266,36 @@ class TestResourceRegistry:
         assert config is not None
         assert config.value == 42
 
-    def test_snapshotable_resources_excludes_provider_bindings(self) -> None:
-        """snapshotable_resources() only includes instance bindings."""
-        # Provider binding is not introspected
+    def test_get_all_with_predicate(self) -> None:
+        """get_all() returns instances matching a predicate."""
+        config = ConcreteConfig(value=10)
+        registry = ResourceRegistry.build({Config: config})
+        # Match instances where value > 5
+        result = registry.get_all(
+            lambda x: isinstance(x, ConcreteConfig) and x.value > 5
+        )
+        assert Config in result
+        assert result[Config] is config
+
+    def test_get_all_excludes_non_matching(self) -> None:
+        """get_all() excludes instances that don't match."""
+        config = ConcreteConfig(value=3)
+        registry = ResourceRegistry.build({Config: config})
+        # Match instances where value > 5 (config.value is 3)
+        result = registry.get_all(
+            lambda x: isinstance(x, ConcreteConfig) and x.value > 5
+        )
+        assert len(result) == 0
+
+    def test_get_all_only_includes_eager_bindings(self) -> None:
+        """get_all() only includes eager (instance) bindings, not lazy providers."""
+        # Lazy provider binding - not resolved until accessed
         registry = ResourceRegistry.of(
             Binding(Config, lambda r: ConcreteConfig()),
         )
-        snapshotable = registry.snapshotable_resources()
-        assert len(snapshotable) == 0
-
-    def test_snapshotable_resources_excludes_non_snapshotable(self) -> None:
-        """snapshotable_resources() only includes Snapshotable instances."""
-        # ConcreteConfig doesn't implement Snapshotable
-        config = ConcreteConfig()
-        registry = ResourceRegistry.build({Config: config})
-        snapshotable = registry.snapshotable_resources()
-        assert len(snapshotable) == 0
+        result = registry.get_all(lambda x: isinstance(x, ConcreteConfig))
+        # Lazy bindings aren't in singleton cache after start()
+        assert len(result) == 0
 
 
 # === ScopedResourceContext Tests ===

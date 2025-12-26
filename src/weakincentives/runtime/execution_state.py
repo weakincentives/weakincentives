@@ -516,7 +516,10 @@ class ExecutionState:
 
     def _snapshotable_resources(self) -> Mapping[type[object], Snapshotable]:
         """Return all resources that implement Snapshotable."""
-        return self.resources.snapshotable_resources()
+        return cast(
+            Mapping[type[object], Snapshotable],
+            self.resources.get_all(lambda x: isinstance(x, Snapshotable)),
+        )
 
     # --- Hook-based Tool Transaction Methods ---
 
