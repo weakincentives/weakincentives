@@ -44,6 +44,33 @@ class Mailbox(Protocol[T]):
         """
         ...
 
+    def send_with_reply_to(
+        self,
+        body: T,
+        *,
+        reply_to: str,
+        delay_seconds: int = 0,
+    ) -> str:
+        """Enqueue a message with reply destination.
+
+        The reply_to identifier is stored in the message and available via
+        Message.reply_to. Workers use Message.reply_mailbox() to resolve
+        the identifier to a concrete Mailbox for sending responses.
+
+        Args:
+            body: Message payload (must be serializable).
+            reply_to: Identifier for response mailbox (queue name, URL, etc.).
+            delay_seconds: Seconds before message becomes visible (0-900).
+
+        Returns:
+            Message ID (unique within this queue).
+
+        Raises:
+            MailboxFullError: Queue capacity exceeded (backend-specific).
+            SerializationError: Body cannot be serialized.
+        """
+        ...
+
     def receive(
         self,
         *,
@@ -118,6 +145,11 @@ class Message(Generic[T]):
     attributes: Mapping[str, str]
     """Backend-specific message attributes (e.g., SQS MessageAttributes)."""
 
+    reply_to: str | None
+    """Optional identifier for the reply destination. Used by reply_mailbox()
+    to resolve the appropriate mailbox for sending responses. The format is
+    backend-specific (e.g., queue name, URL, or routing key)."""
+
     def acknowledge(self) -> None:
         """Delete the message from the queue.
 
@@ -157,6 +189,45 @@ class Message(Generic[T]):
             ReceiptHandleExpiredError: Handle no longer valid.
         """
         ...
+
+    def reply_mailbox[R](self) -> Mailbox[R]:
+        """Return the mailbox for sending replies to this message.
+
+        Resolves the ``reply_to`` identifier to a concrete Mailbox instance
+        using the resolver bound at receive time. The returned mailbox is
+        typed for the expected response type.
+
+        This enables request-response patterns where the requester specifies
+        where replies should be sent, and workers derive the response
+        destination from each incoming message.
+
+        Returns:
+            Mailbox instance for sending responses.
+
+        Raises:
+            ReplyMailboxUnavailableError: No reply_to specified or resolver
+                cannot resolve the identifier.
+
+        Example:
+            >>> msg = requests.receive()[0]
+            >>> result = process(msg.body)
+            >>> msg.reply_mailbox().send(result)  # Send to reply destination
+            >>> msg.acknowledge()
+        """
+        ...
+```
+
+### ReplyMailboxUnavailableError
+
+```python
+class ReplyMailboxUnavailableError(MailboxError):
+    """Cannot resolve reply mailbox for message.
+
+    Raised when:
+    - Message has no reply_to identifier
+    - Resolver cannot create mailbox for the given identifier
+    - Reply destination no longer exists
+    """
 ```
 
 ## Message Lifecycle
@@ -241,15 +312,175 @@ redelivery, the old handle becomes invalid.
 minute. Redis provides exact counts. Use for monitoring, not precise control
 flow.
 
+## Reply Mailbox Pattern
+
+The reply mailbox pattern enables request-response workflows where workers derive
+the response destination from each incoming message. Instead of configuring a
+fixed response mailbox, workers use `Message.reply_mailbox()` to dynamically
+resolve where to send results.
+
+### MailboxResolver
+
+A resolver maps reply-to identifiers to concrete mailbox instances:
+
+```python
+class MailboxResolver[T](Protocol):
+    """Resolves reply-to identifiers to Mailbox instances."""
+
+    def resolve(self, reply_to: str) -> Mailbox[T]:
+        """Create or retrieve a mailbox for the given identifier.
+
+        Args:
+            reply_to: Backend-specific identifier (queue name, URL, etc.)
+
+        Returns:
+            Mailbox instance for sending messages.
+
+        Raises:
+            ReplyMailboxUnavailableError: Cannot resolve identifier.
+        """
+        ...
+```
+
+Implementations vary by backend:
+
+| Backend | reply_to Format | Resolution |
+| ----------- | ------------------------------ | ----------------------------------------- |
+| InMemory | Queue name | Lookup in registry dict |
+| Redis | Queue name | Create RedisMailbox with same client |
+| SQS | Queue URL | Create SQSMailbox with URL |
+
+### Configuring Reply Resolution
+
+The resolver is bound when creating the request mailbox:
+
+```python
+# InMemory: registry-based resolution
+registry: dict[str, InMemoryMailbox] = {}
+requests = InMemoryMailbox(name="requests", reply_resolver=registry.get)
+
+# Redis: same client, different queue name
+def redis_resolver(reply_to: str) -> RedisMailbox:
+    return RedisMailbox(name=reply_to, client=redis_client)
+
+requests = RedisMailbox(
+    name="requests",
+    client=redis_client,
+    reply_resolver=redis_resolver,
+)
+
+# SQS: queue URL resolution
+def sqs_resolver(reply_to: str) -> SQSMailbox:
+    return SQSMailbox(queue_url=reply_to, client=sqs_client)
+
+requests = SQSMailbox(
+    queue_url="https://sqs.../requests",
+    client=sqs_client,
+    reply_resolver=sqs_resolver,
+)
+```
+
+### Sending with Reply-To
+
+Use `send_with_reply_to` to include a reply destination:
+
+```python
+def send_with_reply_to(
+    self,
+    body: T,
+    *,
+    reply_to: str,
+    delay_seconds: int = 0,
+) -> str:
+    """Enqueue a message with reply destination.
+
+    The reply_to identifier is stored in the message and used by
+    Message.reply_mailbox() to resolve the response mailbox.
+
+    Args:
+        body: Message payload.
+        reply_to: Identifier for response mailbox.
+        delay_seconds: Seconds before message becomes visible.
+
+    Returns:
+        Message ID.
+    """
+    ...
+```
+
+Example:
+
+```python
+# Client specifies where to receive responses
+response_queue = InMemoryMailbox[MainLoopResult](name="client-123-responses")
+registry["client-123-responses"] = response_queue
+
+requests.send_with_reply_to(
+    MainLoopRequest(request=my_request),
+    reply_to="client-123-responses",
+)
+
+# Poll dedicated response queue (no filtering needed)
+for msg in response_queue.receive(wait_time_seconds=20):
+    result = msg.body
+    msg.acknowledge()
+```
+
+### Worker Pattern
+
+Workers use `reply_mailbox()` to derive the response destination:
+
+```python
+for msg in requests.receive(...):
+    try:
+        result = process(msg.body)
+        msg.reply_mailbox().send(result)  # Send to message's reply destination
+        msg.acknowledge()
+    except ReplyMailboxUnavailableError:
+        # No reply destination - log and acknowledge
+        log.warning("No reply_to for message", msg_id=msg.id)
+        msg.acknowledge()
+    except Exception as e:
+        handle_failure(msg, e)
+```
+
+### Benefits
+
+**Eval run collection.** All samples in an eval run specify the same reply-to
+destination. Results collect into a single mailbox regardless of which worker
+processes each sample:
+
+```
+               ┌────────────────────────────────────┐
+               │     Requests Mailbox               │
+               │  (reply_to: "eval-run-42-results") │
+               └─────────────────┬──────────────────┘
+          ┌──────────────────────┼──────────────────────┐
+          ▼                      ▼                      ▼
+    ┌───────────┐          ┌───────────┐          ┌───────────┐
+    │  Worker 1 │          │  Worker 2 │          │  Worker 3 │
+    └─────┬─────┘          └─────┬─────┘          └─────┬─────┘
+          │ reply_mailbox()      │                      │
+          └──────────────────────┼──────────────────────┘
+                                 ▼
+               ┌─────────────────────────────────────┐
+               │ Results Mailbox: "eval-run-42-results" │
+               └─────────────────────────────────────┘
+```
+
+**Per-client isolation.** Each client creates its own response queue. No
+filtering or contention with other clients.
+
+**Dynamic routing.** Response destination determined per-message, not
+per-worker. Different requests can route to different destinations.
+
 ## MainLoop Integration
 
-`MainLoop` currently uses `ControlDispatcher` for request/response events
-(see `src/weakincentives/runtime/main_loop.py:147`). For distributed deployments,
-Mailbox provides durable message delivery with acknowledgment semantics.
+MainLoop uses a single requests mailbox and derives response destinations from
+incoming messages via `reply_mailbox()`. This simplifies worker configuration
+and enables flexible response routing.
 
-### Pattern: Two Mailboxes
-
-Use separate mailboxes for requests and responses:
+### MainLoop Constructor
 
 ```python
 class MainLoop(ABC, Generic[UserRequestT, OutputT]):
@@ -258,19 +489,13 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         *,
         adapter: ProviderAdapter[OutputT],
         requests: Mailbox[MainLoopRequest[UserRequestT]],
-        responses: Mailbox[MainLoopResult[OutputT]],
     ) -> None: ...
 ```
 
-Request and response are correlated by `request_id`. This pattern supports:
-
-- Multiple workers processing requests concurrently
-- Client recovery after disconnect (poll response queue)
-- Dead-letter handling for failed requests
+Only the requests mailbox is required. Response routing is determined by each
+message's `reply_to` field.
 
 ### Request/Response Events
-
-The existing `MainLoopRequest` dataclass (`src/weakincentives/runtime/main_loop.py:50-68`):
 
 ```python
 @FrozenDataclass()
@@ -282,8 +507,6 @@ class MainLoopRequest[UserRequestT]:
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
-
-The unified result type for all MainLoop responses:
 
 ```python
 @dataclass(frozen=True, slots=True)
@@ -305,10 +528,6 @@ class MainLoopResult(Generic[OutputT]):
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
 
-**Migration:** `MainLoopCompleted` and `MainLoopFailed`
-(`src/weakincentives/runtime/main_loop.py:70-87`) should be deleted. Use
-`MainLoopResult` for all response handling.
-
 ### Worker Loop Pattern
 
 ```python
@@ -321,11 +540,16 @@ def run(self, *, max_iterations: int | None = None) -> None:
         ):
             try:
                 response, session = self._execute(msg.body)
-                self._responses.send(MainLoopResult(
+                result = MainLoopResult(
                     request_id=msg.body.request_id,
                     output=response.output,
                     session_id=session.session_id,
-                ))
+                )
+                msg.reply_mailbox().send(result)  # Derive from message
+                msg.acknowledge()
+            except ReplyMailboxUnavailableError:
+                # No reply destination configured - log and drop
+                log.warning("No reply_to", request_id=msg.body.request_id)
                 msg.acknowledge()
             except Exception as e:
                 self._handle_failure(msg, e)
@@ -338,11 +562,15 @@ def run(self, *, max_iterations: int | None = None) -> None:
 def _handle_failure(self, msg: Message[MainLoopRequest], error: Exception) -> None:
     try:
         # Attempt to send error response
-        self._responses.send(MainLoopResult(
+        msg.reply_mailbox().send(MainLoopResult(
             request_id=msg.body.request_id,
             error=str(error),
         ))
         msg.acknowledge()  # Error response sent - don't retry
+    except ReplyMailboxUnavailableError:
+        # No reply destination - acknowledge to prevent infinite retry
+        log.error("Cannot send error response", request_id=msg.body.request_id)
+        msg.acknowledge()
     except Exception:
         # Response send failed - nack for retry with backoff
         msg.nack(visibility_timeout=min(60 * msg.delivery_count, 900))
@@ -371,40 +599,65 @@ def _handle_failure(self, msg: Message[MainLoopRequest], error: Exception) -> No
 ### Client Usage
 
 ```python
-# Send request and wait for response
-request_id = uuid4()
-requests.send(MainLoopRequest(
-    request=my_request,
-    request_id=request_id,
-))
+# Create dedicated response mailbox
+response_queue = InMemoryMailbox[MainLoopResult](name="my-responses")
+registry["my-responses"] = response_queue  # Register for resolution
 
-# Poll for response
+# Send request with reply destination
+request_id = uuid4()
+requests.send_with_reply_to(
+    MainLoopRequest(request=my_request, request_id=request_id),
+    reply_to="my-responses",
+)
+
+# Poll dedicated queue (no filtering needed)
 deadline = time.time() + timeout_seconds
 while time.time() < deadline:
-    for msg in responses.receive(wait_time_seconds=5):
+    for msg in response_queue.receive(wait_time_seconds=5):
         if msg.body.request_id == request_id:
             msg.acknowledge()
             if msg.body.error:
                 raise RemoteError(msg.body.error)
             return msg.body.output
-        # Not our message - return to queue for other clients
-        msg.nack(visibility_timeout=0)
+        msg.acknowledge()  # Unexpected message - still ours
 raise TimeoutError(f"No response within {timeout_seconds}s")
 ```
 
-### Response Queue Strategies
+### Eval Run Pattern
 
-**Shared queue with filtering:**
+For evaluation runs, all samples specify the same reply destination. This
+collects results into a single mailbox regardless of worker distribution:
 
-All clients poll a single response queue and filter by `request_id`. Simple but
-causes contention under high concurrency. Unmatched messages are nacked
-immediately with `visibility_timeout=0`.
+```python
+# Create eval-run-specific response mailbox
+run_id = uuid4()
+results_queue = InMemoryMailbox[MainLoopResult](name=f"eval-{run_id}")
+registry[f"eval-{run_id}"] = results_queue
 
-**Per-client response queues:**
+# Submit all samples with same reply destination
+for sample in dataset:
+    requests.send_with_reply_to(
+        MainLoopRequest(request=sample.input),
+        reply_to=f"eval-{run_id}",
+    )
 
-Each client creates a dedicated response queue (e.g., `responses:{client_id}`).
-Workers include `reply_to` in requests. No filtering needed. Better for
-high-throughput but requires queue lifecycle management.
+# Collect all results from dedicated queue
+collected = []
+while len(collected) < len(dataset):
+    for msg in results_queue.receive(wait_time_seconds=20):
+        collected.append(msg.body)
+        msg.acknowledge()
+
+# Build report from collected results
+report = EvalReport(results=tuple(collected))
+```
+
+This pattern enables:
+
+- **Centralized collection**: All results arrive at one destination
+- **Worker independence**: Workers don't need eval-specific configuration
+- **Run isolation**: Different eval runs use different response queues
+- **Simple aggregation**: No filtering by request_id needed
 
 ## Implementations
 
@@ -714,6 +967,15 @@ class MailboxConnectionError(MailboxError):
 
     Redis: Connection refused, timeout, authentication failure
     SQS: AWS credentials invalid, network unreachable
+    """
+
+class ReplyMailboxUnavailableError(MailboxError):
+    """Cannot resolve reply mailbox for message.
+
+    Raised by Message.reply_mailbox() when:
+    - Message has no reply_to identifier (reply_to is None)
+    - Resolver cannot create mailbox for the given identifier
+    - Reply destination no longer exists or is inaccessible
     """
 ```
 
