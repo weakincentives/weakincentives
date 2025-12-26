@@ -15,11 +15,19 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 from ..deadlines import Deadline
-from ._overrides_protocols import PromptOverridesStore
-from ._types import SupportsDataclass
+from ..types.dataclass import SupportsDataclass
+from .overrides import PromptOverridesStore
+
+
+@runtime_checkable
+class ToolRenderableResult(SupportsDataclass, Protocol):
+    """Protocol implemented by tool result payloads providing render()."""
+
+    def render(self) -> str: ...
+
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import Budget, BudgetTracker
@@ -137,4 +145,5 @@ __all__ = [
     "PromptTemplateProtocol",
     "ProviderAdapterProtocol",
     "RenderedPromptProtocol",
+    "ToolRenderableResult",
 ]

@@ -16,7 +16,7 @@ import inspect
 from collections.abc import Callable
 from typing import TYPE_CHECKING, cast
 
-from ._types import SupportsDataclass
+from ..types.dataclass import SupportsDataclass
 
 if TYPE_CHECKING:
     from ..runtime.session.protocols import SessionProtocol

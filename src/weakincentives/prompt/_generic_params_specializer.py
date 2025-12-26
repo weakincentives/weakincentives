@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import ClassVar, Self, cast
 
-from ._types import SupportsDataclass
+from ..types.dataclass import SupportsDataclass
 
 
 class GenericParamsSpecializer[ParamsT: SupportsDataclass]:

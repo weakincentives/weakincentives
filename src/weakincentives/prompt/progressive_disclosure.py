@@ -34,7 +34,7 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Mapping, Set
 
     from ..runtime.session.protocols import SessionProtocol
-    from ._types import SupportsDataclass
+    from ..types.dataclass import SupportsDataclass
     from .registry import RegistrySnapshot, SectionNode
 
 
