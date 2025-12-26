@@ -114,7 +114,7 @@ class _TestLoop(MainLoop[str, _Output]):
             ],
         )
 
-    def initialize(self, request: str) -> tuple[Prompt[_Output], Session]:
+    def prepare(self, request: str) -> tuple[Prompt[_Output], Session]:
         prompt = Prompt(self._template).bind(_Params(content=request))
         session = Session(tags={"loop": "test"})
         return prompt, session
@@ -486,7 +486,7 @@ class _NoneOutputLoop(MainLoop[str, _Output]):
             ],
         )
 
-    def initialize(self, request: str) -> tuple[Prompt[_Output], Session]:
+    def prepare(self, request: str) -> tuple[Prompt[_Output], Session]:
         prompt = Prompt(self._template).bind(_Params(content=request))
         session = Session(tags={"loop": "test"})
         return prompt, session

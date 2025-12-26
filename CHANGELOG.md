@@ -273,7 +273,7 @@ the complete verification framework.
 
 - **MainLoop initialization refactored.** The two abstract methods
   `create_session()` and `create_prompt(request)` have been replaced with a
-  single `initialize(request)` method returning `(prompt, session)`. A new
+  single `prepare(request)` method returning `(prompt, session)`. A new
   optional `finalize(prompt, session)` hook is called after successful
   evaluation for cleanup or post-processing.
 

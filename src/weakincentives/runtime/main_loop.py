@@ -29,7 +29,7 @@ Example::
             super().__init__(adapter=adapter, requests=requests, responses=responses)
             self._template = PromptTemplate[ReviewResult](...)
 
-        def initialize(
+        def prepare(
             self, request: ReviewRequest
         ) -> tuple[Prompt[ReviewResult], Session]:
             prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
@@ -134,7 +134,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
     Execution flow:
         1. Receive message from requests mailbox
-        2. Initialize prompt and session via ``initialize(request)``
+        2. Initialize prompt and session via ``prepare(request)``
         3. Evaluate with adapter
         4. On ``VisibilityExpansionRequired``: accumulate overrides, retry step 3
         5. Call ``finalize(prompt, session)`` for post-processing
@@ -175,8 +175,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
         self._config = config if config is not None else MainLoopConfig()
 
     @abstractmethod
-    def initialize(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]:
-        """Initialize prompt and session for the given request.
+    def prepare(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]:
+        """Prepare prompt and session for the given request.
 
         Subclasses must implement this method to construct the prompt
         and session appropriate for their domain.
@@ -239,7 +239,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         Handles core execution logic including visibility expansion retries.
         """
-        prompt, session = self.initialize(request_event.request)
+        prompt, session = self.prepare(request_event.request)
 
         effective_budget = (
             request_event.budget

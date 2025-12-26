@@ -234,10 +234,10 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         except PromptOverridesError as exc:  # pragma: no cover
             raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
 
-    def initialize(
+    def prepare(
         self, request: ReviewTurnParams
     ) -> tuple[Prompt[ReviewResponse], Session]:
-        """Initialize prompt and session for the given request.
+        """Prepare prompt and session for the given request.
 
         Runs workspace optimization on first request if needed, then creates
         the review prompt and returns the persistent session.
