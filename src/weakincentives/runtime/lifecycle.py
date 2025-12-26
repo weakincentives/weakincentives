@@ -253,7 +253,6 @@ class LoopGroup:
         self.shutdown_timeout = shutdown_timeout
         self._executor: ThreadPoolExecutor | None = None
         self._futures: list[Future[None]] = []
-        self._shutdown_event = threading.Event()
 
     def run(
         self,
@@ -308,14 +307,7 @@ class LoopGroup:
             True if all loops stopped cleanly, False if any timeout expired.
         """
         effective_timeout = timeout if timeout is not None else self.shutdown_timeout
-        self._shutdown_event.set()
-
-        results: list[bool] = []
-        for loop in self.loops:
-            result = loop.shutdown(timeout=effective_timeout)
-            results.append(result)
-
-        return all(results)
+        return all(loop.shutdown(timeout=effective_timeout) for loop in self.loops)
 
     def _trigger_shutdown(self) -> bool:
         """Internal callback for ShutdownCoordinator."""

@@ -194,7 +194,6 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, Future
 from typing import Sequence
 
-@dataclass
 class LoopGroup:
     """Coordinates lifecycle of multiple loops.
 
@@ -211,14 +210,16 @@ class LoopGroup:
         # Shutdown triggered on context exit
     """
 
-    loops: Sequence[Runnable]
-    shutdown_timeout: float = 30.0
-
-    _executor: ThreadPoolExecutor | None = field(default=None, init=False, repr=False)
-    _futures: list[Future[None]] = field(default_factory=list, init=False, repr=False)
-    _shutdown_event: threading.Event = field(
-        default_factory=threading.Event, init=False, repr=False
-    )
+    def __init__(
+        self,
+        loops: Sequence[Runnable],
+        *,
+        shutdown_timeout: float = 30.0,
+    ) -> None:
+        self.loops = loops
+        self.shutdown_timeout = shutdown_timeout
+        self._executor: ThreadPoolExecutor | None = None
+        self._futures: list[Future[None]] = []
 
     def run(
         self,
@@ -266,24 +267,17 @@ class LoopGroup:
         """Shutdown all loops gracefully.
 
         Args:
-            timeout: Maximum seconds to wait. Defaults to shutdown_timeout.
+            timeout: Maximum seconds to wait per loop. Defaults to shutdown_timeout.
 
         Returns:
-            True if all loops stopped cleanly, False if timeout expired.
+            True if all loops stopped cleanly, False if any timeout expired.
         """
         effective_timeout = timeout if timeout is not None else self.shutdown_timeout
-        self._shutdown_event.set()
+        return all(loop.shutdown(timeout=effective_timeout) for loop in self.loops)
 
-        results = []
-        for loop in self.loops:
-            result = loop.shutdown(timeout=effective_timeout)
-            results.append(result)
-
-        return all(results)
-
-    def _trigger_shutdown(self) -> None:
+    def _trigger_shutdown(self) -> bool:
         """Internal callback for ShutdownCoordinator."""
-        _ = self.shutdown()
+        return self.shutdown()
 
     def __enter__(self) -> Self:
         return self
@@ -303,7 +297,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
     # New lifecycle attributes
     _shutdown_event: threading.Event
     _running: bool
-    _current_message: Message[MainLoopRequest[UserRequestT]] | None
     _lock: threading.Lock
 ```
 
@@ -324,16 +317,16 @@ def run(
     - shutdown() is called
     - The requests mailbox is closed
 
-    In-flight messages complete before exit. Visibility timeout is
-    extended if needed during shutdown drain.
+    In-flight messages complete before exit. Unprocessed messages
+    from the current batch are nacked for redelivery.
     """
     with self._lock:
         self._running = True
+        self._shutdown_event.clear()
 
     iterations = 0
     try:
         while max_iterations is None or iterations < max_iterations:
-            # Check shutdown before blocking on receive
             if self._shutdown_event.is_set():
                 break
 
@@ -346,23 +339,12 @@ def run(
             )
 
             for msg in messages:
-                # Check shutdown between messages
                 if self._shutdown_event.is_set():
-                    # Nack unprocessed message for redelivery
-                    try:
+                    with contextlib.suppress(ReceiptHandleExpiredError):
                         msg.nack(visibility_timeout=0)
-                    except ReceiptHandleExpiredError:
-                        pass
                     break
 
-                with self._lock:
-                    self._current_message = msg
-
-                try:
-                    self._handle_message(msg)
-                finally:
-                    with self._lock:
-                        self._current_message = None
+                self._handle_message(msg)
 
             iterations += 1
     finally:
@@ -376,25 +358,17 @@ def run(
 def shutdown(self, *, timeout: float = 30.0) -> bool:
     """Request graceful shutdown and wait for completion.
 
-    Sets the shutdown flag. If an in-flight message is being processed,
-    waits up to timeout seconds for it to complete.
+    Sets the shutdown flag. If the loop is running, waits up to
+    timeout seconds for it to stop.
 
     Args:
-        timeout: Maximum seconds to wait for in-flight work.
+        timeout: Maximum seconds to wait for the loop to stop.
 
     Returns:
         True if loop stopped cleanly, False if timeout expired.
     """
     self._shutdown_event.set()
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        with self._lock:
-            if not self._running:
-                return True
-        time.sleep(0.1)
-
-    return False
+    return wait_until(lambda: not self.running, timeout=timeout)
 
 @property
 def running(self) -> bool:
@@ -424,7 +398,7 @@ def __exit__(
 
 EvalLoop receives identical changes to MainLoop:
 
-- `_shutdown_event`, `_running`, `_current_message`, `_lock` attributes
+- `_shutdown_event`, `_running`, `_lock` attributes
 - Updated `run()` with shutdown checks
 - New `shutdown()` method
 - Context manager support
@@ -576,7 +550,7 @@ take too long are naturally handled by the mailbox's redelivery semantics.
 ### MainLoop/EvalLoop
 
 - `_shutdown_event` is a `threading.Event`
-- `_running` and `_current_message` protected by `_lock`
+- `_running` protected by `_lock`
 - `shutdown()` can be called from any thread
 
 ## Configuration
