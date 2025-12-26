@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from abc import ABC
 from collections.abc import Callable, Iterable
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
@@ -58,7 +59,43 @@ class _SliceAccessorProvider(Protocol):
     ) -> None: ...
 
 
-class SliceAccessor[T: SupportsDataclass]:
+class _BaseSliceAccessor[T: SupportsDataclass, P: _ReadOnlySliceAccessorProvider](ABC):
+    """Base class providing common query operations for slice accessors.
+
+    Subclasses must define ``_provider`` and ``_slice_type`` slots.
+    """
+
+    __slots__ = ()
+
+    _provider: P
+    _slice_type: type[T]
+
+    @pure
+    def all(self) -> tuple[T, ...]:
+        """Return the entire slice for the provided type."""
+        return self._provider._select_all(self._slice_type)
+
+    @pure
+    def latest(self) -> T | None:
+        """Return the most recent item in the slice, if any."""
+        values = self._provider._select_all(self._slice_type)
+        if not values:
+            return None
+        return values[-1]
+
+    @pure
+    def where(self, predicate: Callable[[T], bool]) -> tuple[T, ...]:
+        """Return items that satisfy the predicate."""
+        return tuple(
+            value
+            for value in self._provider._select_all(self._slice_type)
+            if predicate(value)
+        )
+
+
+class SliceAccessor[T: SupportsDataclass](
+    _BaseSliceAccessor[T, _SliceAccessorProvider]
+):
     """Fluent interface for querying and mutating a specific slice.
 
     Accessed via ``session[SliceType]``, providing:
@@ -93,32 +130,6 @@ class SliceAccessor[T: SupportsDataclass]:
         super().__init__()
         self._provider = provider
         self._slice_type = slice_type
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Query Operations
-    # ──────────────────────────────────────────────────────────────────────
-
-    @pure
-    def all(self) -> tuple[T, ...]:
-        """Return the entire slice for the provided type."""
-        return self._provider._select_all(self._slice_type)
-
-    @pure
-    def latest(self) -> T | None:
-        """Return the most recent item in the slice, if any."""
-        values = self._provider._select_all(self._slice_type)
-        if not values:
-            return None
-        return values[-1]
-
-    @pure
-    def where(self, predicate: Callable[[T], bool]) -> tuple[T, ...]:
-        """Return items that satisfy the predicate."""
-        return tuple(
-            value
-            for value in self._provider._select_all(self._slice_type)
-            if predicate(value)
-        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Mutation Operations (all via dispatch)
@@ -213,7 +224,9 @@ class SliceAccessor[T: SupportsDataclass]:
         )
 
 
-class ReadOnlySliceAccessor[T: SupportsDataclass]:
+class ReadOnlySliceAccessor[T: SupportsDataclass](
+    _BaseSliceAccessor[T, _ReadOnlySliceAccessorProvider]
+):
     """Read-only accessor for querying a specific slice.
 
     Accessed via ``session_view[SliceType]``, providing only query operations:
@@ -241,32 +254,6 @@ class ReadOnlySliceAccessor[T: SupportsDataclass]:
         super().__init__()
         self._provider = provider
         self._slice_type = slice_type
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Query Operations
-    # ──────────────────────────────────────────────────────────────────────
-
-    @pure
-    def all(self) -> tuple[T, ...]:
-        """Return the entire slice for the provided type."""
-        return self._provider._select_all(self._slice_type)
-
-    @pure
-    def latest(self) -> T | None:
-        """Return the most recent item in the slice, if any."""
-        values = self._provider._select_all(self._slice_type)
-        if not values:
-            return None
-        return values[-1]
-
-    @pure
-    def where(self, predicate: Callable[[T], bool]) -> tuple[T, ...]:
-        """Return items that satisfy the predicate."""
-        return tuple(
-            value
-            for value in self._provider._select_all(self._slice_type)
-            if predicate(value)
-        )
 
 
 __all__ = ["ReadOnlySliceAccessor", "SliceAccessor"]

@@ -26,10 +26,9 @@ from typing import (
 )
 
 from ..dataclasses import FrozenDataclass
-from ._overrides_protocols import PromptOverridesStore
-from ._types import SupportsDataclass
+from ..types.dataclass import SupportsDataclass
 from .errors import PromptValidationError, SectionPath
-from .overrides import PromptDescriptor
+from .overrides import PromptDescriptor, PromptOverridesStore
 from .registry import PromptRegistry, SectionNode
 from .rendering import PromptRenderer, RenderedPrompt
 from .section import Section

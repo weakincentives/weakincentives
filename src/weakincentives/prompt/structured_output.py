@@ -21,8 +21,8 @@ from ..dataclasses import FrozenDataclass
 from ..errors import WinkError
 from ..serde.parse import parse as parse_dataclass
 from ..types import JSONValue, ParseableDataclassT
+from ..types.dataclass import SupportsDataclass
 from ._structured_output_config import StructuredOutputConfig
-from ._types import SupportsDataclass
 from .protocols import RenderedPromptProtocol
 
 __all__ = [

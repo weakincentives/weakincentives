@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-from ._types import ToolRenderableResult
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -48,6 +47,7 @@ from .protocols import (
     PromptTemplateProtocol,
     ProviderAdapterProtocol,
     RenderedPromptProtocol,
+    ToolRenderableResult,
 )
 from .rendering import RenderedPrompt
 from .section import Section, SectionVisibility
