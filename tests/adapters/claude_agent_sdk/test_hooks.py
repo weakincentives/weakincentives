@@ -1111,7 +1111,7 @@ class TestPreToolUseHookTransactional:
         """Pre-tool hook takes snapshot when execution_state is present."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         fs = InMemoryFilesystem()
@@ -1137,7 +1137,7 @@ class TestPreToolUseHookTransactional:
         """Pre-tool hook skips snapshot for MCP WINK tools."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         fs = InMemoryFilesystem()
@@ -1164,7 +1164,7 @@ class TestPostToolUseHookTransactional:
         """Post-tool hook restores state when tool fails."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         fs = InMemoryFilesystem()
@@ -1207,7 +1207,7 @@ class TestPostToolUseHookTransactional:
         """Post-tool hook doesn't restore state on success."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         fs = InMemoryFilesystem()

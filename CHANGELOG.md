@@ -137,7 +137,7 @@ Pass custom resources into `adapter.evaluate()` and `MainLoop.execute()`,
 making tools cleaner, more testable, and portable.
 
 ```python
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from myapp.http import HTTPClient
 
 # Build resource registry with your dependencies

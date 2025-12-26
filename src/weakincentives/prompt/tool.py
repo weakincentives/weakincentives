@@ -830,7 +830,6 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
 
 __all__ = [
-    "ResourceRegistry",
     "Tool",
     "ToolContext",
     "ToolExample",

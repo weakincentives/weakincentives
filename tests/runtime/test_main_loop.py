@@ -32,7 +32,7 @@ from weakincentives.prompt import (
     SectionVisibility,
     VisibilityExpansionRequired,
 )
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.mailbox import FakeMailbox, InMemoryMailbox
 from weakincentives.runtime.main_loop import (
     MainLoop,

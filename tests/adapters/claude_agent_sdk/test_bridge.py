@@ -722,7 +722,7 @@ class TestVisibilityExpansionRequiredPropagation:
         """Test that filesystem is accessed via execution_state resources."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         captured_filesystem: list[object] = []
@@ -776,7 +776,7 @@ class TestCreateBridgedToolsWithFilesystem:
         """Test that create_bridged_tools passes filesystem via execution_state."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         captured_filesystem: list[object] = []
 
@@ -925,7 +925,7 @@ class TestBridgedToolTransactionalExecution:
         """Test that state is restored when tool returns success=False."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         test_fs = InMemoryFilesystem()
@@ -980,7 +980,7 @@ class TestBridgedToolTransactionalExecution:
         """Test that state is restored when tool raises exception."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         test_fs = InMemoryFilesystem()
@@ -1031,7 +1031,7 @@ class TestBridgedToolTransactionalExecution:
         """Test that state is restored when validation fails."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         test_fs = InMemoryFilesystem()
@@ -1071,7 +1071,7 @@ class TestBridgedToolTransactionalExecution:
         """Test that state is restored when VisibilityExpansionRequired is raised."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         test_fs = InMemoryFilesystem()
@@ -1179,7 +1179,7 @@ class TestCreateBridgedToolsWithExecutionState:
         """Test that create_bridged_tools passes execution_state to BridgedTool."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
         from weakincentives.runtime.execution_state import ExecutionState
 
         test_fs = InMemoryFilesystem()

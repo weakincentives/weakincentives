@@ -997,7 +997,7 @@ You can pass custom resources directly to `adapter.evaluate()` or
 `MainLoop.execute()`. This makes tools cleaner, more testable, and portable:
 
 ```python
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from myapp.http import HTTPClient
 
 # Build resource registry with your dependencies
@@ -1489,7 +1489,7 @@ and re-evaluates the prompt. You don't have to handle this yourself.
 You can inject custom resources at the loop level via `MainLoopConfig`:
 
 ```python
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime import MainLoopConfig
 
 resources = ResourceRegistry.build({HTTPClient: http_client})
