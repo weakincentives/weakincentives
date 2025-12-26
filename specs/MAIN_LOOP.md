@@ -28,7 +28,7 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
     ) -> None: ...
 
     @abstractmethod
-    def initialize(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]: ...
+    def prepare(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]: ...
 
     def finalize(self, prompt: Prompt[OutputT], session: Session) -> None: ...
 
@@ -86,7 +86,7 @@ flowchart LR
 ```
 
 1. Receive `MainLoopRequest` via bus or direct `execute()` call
-1. Initialize prompt and session via `initialize(request)`
+1. Initialize prompt and session via `prepare(request)`
 1. Evaluate with adapter
 1. On `VisibilityExpansionRequired`: write overrides into session state, retry
    step 3
@@ -97,7 +97,7 @@ flowchart LR
 
 ```python
 def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Session]:
-    prompt, session = self.initialize(request)
+    prompt, session = self.prepare(request)
     budget_tracker = BudgetTracker(budget=self._effective_budget) if self._effective_budget else None
 
     while True:
@@ -159,7 +159,7 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
             sections=[...],
         )
 
-    def initialize(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
+    def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
         session = Session(bus=self._bus, tags={"loop": "code-review"})
         return prompt, session
@@ -172,7 +172,7 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 ### With Reducers
 
 ```python
-def initialize(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
+def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
     prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
     session = Session(bus=self._bus)
     session[Plan].register(SetupPlan, plan_reducer)
@@ -182,7 +182,7 @@ def initialize(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Sess
 ### With Progressive Disclosure
 
 ```python
-def initialize(self, request: Request) -> tuple[Prompt[Output], Session]:
+def prepare(self, request: Request) -> tuple[Prompt[Output], Session]:
     prompt = Prompt(PromptTemplate[Output](
         ns="agent",
         key="task",
@@ -212,7 +212,7 @@ def initialize(self, request: Request) -> tuple[Prompt[Output], Session]:
 The code reviewer agent uses `MainLoop` with these specifics:
 
 **Session reuse:** A single session is created at loop construction and reused
-across all `initialize()` calls. State accumulates across turns.
+across all `prepare()` calls. State accumulates across turns.
 
 **Auto-optimization:** The explicit `optimize` command is removed. Before each
 evaluation, the loop checks for `WorkspaceDigest` in session state. If absent,

@@ -134,7 +134,7 @@ For example, if the problem is "What is 2 + 2?", you would:
         )
 
     @override
-    def initialize(self, request: MathProblem) -> tuple[Prompt[MathAnswer], Session]:
+    def prepare(self, request: MathProblem) -> tuple[Prompt[MathAnswer], Session]:
         prompt = Prompt(self._template).bind(
             _InstructionParams(question=request.question)
         )
