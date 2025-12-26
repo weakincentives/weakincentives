@@ -2,11 +2,10 @@
 
 ## Purpose
 
-This specification extends `ResourceRegistry` with provider-based lazy
-construction and scope-aware lifecycle management. These additions enable
-complex agent architectures where resources have dependencies on each other
-and require different lifetimes (session-scoped singletons vs. per-tool-call
-instances).
+This specification defines `weakincentives.resources`, a module providing
+dependency injection with scope-aware lifecycle management. It enables complex
+agent architectures where resources have dependencies on each other and require
+different lifetimes (session-scoped singletons vs. per-tool-call instances).
 
 ## Guiding Principles
 
@@ -15,16 +14,14 @@ instances).
 - **Dependency resolution**: Resources can depend on other resources; the
   registry resolves the graph automatically.
 - **Cycle detection**: Circular dependencies fail fast with clear errors.
-- **Backward compatible**: Existing `ResourceRegistry.build()` usage continues
-  to work unchanged.
-- **Immutable core**: The registry configuration is immutable; only scope
-  caches are mutable.
+- **Immutable configuration**: The registry is immutable; only scope caches are
+  mutable.
+- **Clean API**: Simple, focused interfaces without legacy cruft.
 
 ```mermaid
 flowchart TB
     subgraph Configuration["Registry Configuration (Immutable)"]
         Bindings["Bindings<br/>(protocol → provider + scope)"]
-        Instances["Direct Instances<br/>(protocol → object)"]
     end
 
     subgraph Resolution["Resolution (per request)"]
@@ -49,6 +46,19 @@ flowchart TB
     end
 
     Configuration --> Resolution
+```
+
+## Module Structure
+
+```
+weakincentives/resources/
+├── __init__.py      # Public API exports
+├── scope.py         # Scope enum
+├── binding.py       # Binding dataclass, Provider type alias
+├── protocols.py     # ResourceResolver, Closeable, PostConstruct
+├── errors.py        # Error hierarchy
+├── registry.py      # ResourceRegistry (immutable config)
+└── context.py       # ScopedResourceContext (mutable resolution)
 ```
 
 ## Scopes
@@ -77,17 +87,17 @@ class Scope(Enum):
 | `TOOL_CALL` | Needs fresh state per tool, or tracks tool-specific context | Request tracers, tool-scoped transactions |
 | `PROTOTYPE` | Cheap to create, each caller needs independent instance | Builders, temporary buffers |
 
-## Core Schemas
+## Core Types
 
 ### Binding
 
 `Binding[T]` describes how to obtain an instance of protocol `T`:
 
 ```python
-Provider: TypeAlias = Callable[[ResourceResolver], T]
+Provider = Callable[[ResourceResolver], T]
 
 @dataclass(slots=True, frozen=True)
-class Binding(Generic[T]):
+class Binding[T]:
     """Describes how to construct a resource and its lifetime."""
 
     protocol: type[T]
@@ -100,14 +110,14 @@ class Binding(Generic[T]):
     """Lifetime of constructed instances."""
 
     eager: bool = False
-    """If True, instantiate during registry startup (SINGLETON only)."""
+    """If True, instantiate during context startup (SINGLETON only)."""
 ```
 
 Provider signature:
 
 ```python
 def my_provider(resolver: ResourceResolver) -> MyService:
-    # Can request other dependencies from resolver
+    # Request dependencies from resolver
     config = resolver.get(Config)
     http = resolver.get(HTTPClient)
     return MyService(config=config, http=http)
@@ -118,6 +128,7 @@ def my_provider(resolver: ResourceResolver) -> MyService:
 Passed to providers for dependency resolution:
 
 ```python
+@runtime_checkable
 class ResourceResolver(Protocol):
     """Protocol for resolving dependencies during construction."""
 
@@ -135,76 +146,56 @@ class ResourceResolver(Protocol):
         ...
 ```
 
-### ResourceRegistry (Extended)
+### ResourceRegistry
+
+Immutable configuration of resource bindings:
 
 ```python
 @dataclass(slots=True, frozen=True)
 class ResourceRegistry:
-    """Typed container for runtime resources with lazy construction."""
+    """Immutable configuration of resource bindings."""
 
-    _instances: Mapping[type[object], object] = field(
-        default_factory=lambda: MappingProxyType({}),
-    )
-    _bindings: Mapping[type[object], Binding[object]] = field(
-        default_factory=lambda: MappingProxyType({}),
-    )
-
-    # === Query API ===
-
-    def get[T](self, protocol: type[T], default: T | None = None) -> T | None:
-        """Return resource for protocol, or default if unbound.
-
-        For lazy bindings, this returns None. Use a scoped context
-        for lazy resolution.
-        """
-        ...
-
-    def __contains__(self, protocol: type[object]) -> bool:
-        """Check if protocol has an instance or binding."""
-        return protocol in self._instances or protocol in self._bindings
-
-    def has_binding(self, protocol: type[object]) -> bool:
-        """Check if protocol has a lazy binding (vs direct instance)."""
-        return protocol in self._bindings
-
-    # === Construction API ===
+    _bindings: Mapping[type[object], Binding[object]]
 
     @staticmethod
-    def build(
-        instances: Mapping[type[object], object] | None = None,
-        bindings: Sequence[Binding[object]] | None = None,
-    ) -> ResourceRegistry:
-        """Construct a registry from instances and/or bindings.
-
-        Args:
-            instances: Direct type-to-instance mapping (eager).
-            bindings: Lazy provider bindings.
+    def of(*bindings: Binding[object]) -> ResourceRegistry:
+        """Construct a registry from bindings.
 
         Raises:
             DuplicateBindingError: Same protocol bound twice.
         """
         ...
 
+    def __contains__(self, protocol: type[object]) -> bool:
+        """Check if protocol has a binding."""
+        ...
+
+    def __len__(self) -> int:
+        """Return number of bindings."""
+        ...
+
+    def __iter__(self) -> Iterator[type[object]]:
+        """Iterate over bound protocol types."""
+        ...
+
+    def binding_for[T](self, protocol: type[T]) -> Binding[T] | None:
+        """Return the binding for a protocol, or None if unbound."""
+        ...
+
     def merge(self, other: ResourceRegistry) -> ResourceRegistry:
         """Merge registries; other takes precedence on conflicts."""
         ...
 
-    # === Scope Context Factory ===
+    def eager_bindings(self) -> Sequence[Binding[object]]:
+        """Return all bindings marked as eager."""
+        ...
 
-    def scoped_context(
+    def create_context(
         self,
         *,
-        singleton_cache: MutableMapping[type[object], object] | None = None,
+        singleton_cache: dict[type[object], object] | None = None,
     ) -> ScopedResourceContext:
-        """Create a scoped resolution context.
-
-        Args:
-            singleton_cache: Shared cache for SINGLETON scope. If None,
-                creates a new cache (typical for session start).
-
-        Returns:
-            Context that supports lazy resolution with scope awareness.
-        """
+        """Create a scoped resolution context."""
         ...
 ```
 
@@ -220,31 +211,16 @@ class ScopedResourceContext:
     registry: ResourceRegistry
     """Immutable registry configuration."""
 
-    _singleton_cache: MutableMapping[type[object], object]
-    """Shared cache for SINGLETON-scoped resources."""
-
-    _tool_call_cache: MutableMapping[type[object], object] = field(
-        default_factory=dict,
-    )
-    """Per-tool-call cache, cleared on exit."""
-
-    _resolving: set[type[object]] = field(default_factory=set)
-    """Tracks in-flight resolutions for cycle detection."""
-
-    # === Resolution API ===
+    singleton_cache: dict[type[object], object]
+    """Cache for SINGLETON-scoped resources."""
 
     def get[T](self, protocol: type[T]) -> T:
         """Resolve and return resource for protocol.
 
-        Resolution order:
-        1. Direct instances in registry
-        2. Tool-call cache (if TOOL_CALL scope)
-        3. Singleton cache (if SINGLETON scope)
-        4. Invoke provider and cache per scope
-
         Raises:
             UnboundResourceError: No binding exists.
             CircularDependencyError: Dependency cycle detected.
+            ProviderError: Provider raised an exception.
         """
         ...
 
@@ -252,49 +228,22 @@ class ScopedResourceContext:
         """Resolve if bound, return None otherwise."""
         ...
 
-    # === Lifecycle API ===
-
-    def enter_tool_call(self) -> ToolCallScope:
-        """Enter a tool-call scope. Returns context manager."""
-        ...
-
-    def instantiate_eager(self) -> None:
-        """Instantiate all eager SINGLETON bindings.
-
-        Call during session startup to fail fast on configuration errors.
-        """
+    def start(self) -> None:
+        """Initialize context and instantiate eager singletons."""
         ...
 
     def close(self) -> None:
-        """Dispose all instantiated resources that implement Closeable."""
-        ...
-```
-
-### ToolCallScope
-
-Context manager for tool-call scoped resources:
-
-```python
-@dataclass(slots=True)
-class ToolCallScope:
-    """Context manager for tool-call scoped resource lifetime."""
-
-    _context: ScopedResourceContext
-    _previous_cache: MutableMapping[type[object], object]
-
-    def __enter__(self) -> ResourceResolver:
-        """Enter tool-call scope, returning resolver."""
+        """Dispose all instantiated resources implementing Closeable."""
         ...
 
-    def __exit__(self, *exc: object) -> None:
-        """Exit scope, disposing tool-call resources."""
-        for resource in self._context._tool_call_cache.values():
-            if isinstance(resource, Closeable):
-                try:
-                    resource.close()
-                except Exception:
-                    log.warning("Error closing resource", exc_info=True)
-        self._context._tool_call_cache = self._previous_cache
+    @contextmanager
+    def tool_scope(self) -> Iterator[ResourceResolver]:
+        """Enter a tool-call scope.
+
+        Resources with TOOL_CALL scope are fresh within this context
+        and disposed on exit.
+        """
+        ...
 ```
 
 ## Lifecycle Protocols
@@ -304,6 +253,7 @@ class ToolCallScope:
 Resources that need cleanup implement `Closeable`:
 
 ```python
+@runtime_checkable
 class Closeable(Protocol):
     """Protocol for resources requiring cleanup."""
 
@@ -317,319 +267,126 @@ class Closeable(Protocol):
 Resources needing initialization after construction:
 
 ```python
+@runtime_checkable
 class PostConstruct(Protocol):
     """Protocol for post-construction initialization."""
 
     def post_construct(self) -> None:
-        """Called after all dependencies are injected.
+        """Called after construction, before caching.
 
-        Use for initialization that requires other resources.
-        Failures here prevent the resource from being cached.
+        Failures here prevent the resource from being cached
+        and are wrapped in ProviderError.
         """
         ...
 ```
 
-## Resolution Algorithm
-
-```python
-def resolve[T](self, protocol: type[T]) -> T:
-    # 1. Check direct instances (always win)
-    if protocol in self.registry._instances:
-        return cast(T, self.registry._instances[protocol])
-
-    # 2. Check scope caches
-    binding = self.registry._bindings.get(protocol)
-    if binding is None:
-        raise UnboundResourceError(f"No binding for {protocol.__name__}")
-
-    cache = self._cache_for_scope(binding.scope)
-    if cache is not None and protocol in cache:
-        return cast(T, cache[protocol])
-
-    # 3. Cycle detection
-    if protocol in self._resolving:
-        cycle = " -> ".join(t.__name__ for t in self._resolving)
-        raise CircularDependencyError(f"Cycle: {cycle} -> {protocol.__name__}")
-
-    # 4. Invoke provider
-    self._resolving.add(protocol)
-    try:
-        instance = binding.provider(self)
-    finally:
-        self._resolving.discard(protocol)
-
-    # 5. Post-construct hook
-    if isinstance(instance, PostConstruct):
-        instance.post_construct()
-
-    # 6. Cache per scope
-    if cache is not None:
-        cache[protocol] = instance
-
-    return cast(T, instance)
-
-def _cache_for_scope(
-    self, scope: Scope
-) -> MutableMapping[type[object], object] | None:
-    match scope:
-        case Scope.SINGLETON:
-            return self._singleton_cache
-        case Scope.TOOL_CALL:
-            return self._tool_call_cache
-        case Scope.PROTOTYPE:
-            return None
-```
-
-## Integration with ExecutionState
-
-`ExecutionState` manages the scoped context lifecycle:
-
-```python
-@dataclass(slots=True)
-class ExecutionState:
-    session: SessionProtocol
-    resources: ResourceRegistry
-    _scoped_context: ScopedResourceContext | None = field(
-        default=None, init=False
-    )
-
-    def start(self) -> None:
-        """Initialize execution state. Call before first tool."""
-        self._scoped_context = self.resources.scoped_context()
-        self._scoped_context.instantiate_eager()
-
-    def stop(self) -> None:
-        """Cleanup execution state. Call after last tool."""
-        if self._scoped_context is not None:
-            self._scoped_context.close()
-            self._scoped_context = None
-
-    @contextmanager
-    def tool_scope(self) -> Iterator[ResourceResolver]:
-        """Enter tool-call scope for resource resolution."""
-        if self._scoped_context is None:
-            raise ExecutionStateError("ExecutionState not started")
-        with self._scoped_context.enter_tool_call() as resolver:
-            yield resolver
-
-    # Existing snapshot/restore unchanged...
-```
-
-Tool execution integrates scopes:
-
-```python
-def execute_tool(
-    tool: Tool[P, R],
-    params: P,
-    *,
-    execution_state: ExecutionState,
-) -> ToolResult[R]:
-    snapshot = execution_state.snapshot()
-
-    with execution_state.tool_scope() as resolver:
-        context = ToolContext(
-            # ... existing fields ...
-            resolver=resolver,  # New: scoped resolver
-        )
-        try:
-            result = tool.handler(params, context=context)
-            if not result.success:
-                execution_state.restore(snapshot)
-            return result
-        except Exception as e:
-            execution_state.restore(snapshot)
-            return ToolResult(message=str(e), value=None, success=False)
-    # Tool-call scoped resources automatically disposed here
-```
-
-## ToolContext Extension
-
-`ToolContext` gains access to scoped resolution:
-
-```python
-@dataclass(slots=True, frozen=True)
-class ToolContext:
-    # ... existing fields ...
-
-    resolver: ResourceResolver | None = None
-    """Scoped resolver for lazy resource access."""
-
-    def require[T](self, protocol: type[T]) -> T:
-        """Get required resource, raising if unavailable.
-
-        Prefer this over resources.get() for required dependencies.
-        """
-        if self.resolver is not None:
-            return self.resolver.get(protocol)
-        instance = self.resources.get(protocol)
-        if instance is None:
-            raise UnboundResourceError(f"Required resource not bound: {protocol}")
-        return instance
-```
-
-## Error Handling
+## Error Hierarchy
 
 ```python
 class ResourceError(WinkError, RuntimeError):
     """Base class for resource resolution errors."""
 
 
-class UnboundResourceError(ResourceError):
+class UnboundResourceError(ResourceError, LookupError):
     """No binding exists for the requested protocol."""
-
     protocol: type[object]
 
 
 class CircularDependencyError(ResourceError):
     """Circular dependency detected during resolution."""
-
     cycle: tuple[type[object], ...]
 
 
-class DuplicateBindingError(ResourceError):
+class DuplicateBindingError(ResourceError, ValueError):
     """Same protocol bound multiple times."""
-
     protocol: type[object]
 
 
 class ProviderError(ResourceError):
     """Provider raised an exception during construction."""
-
     protocol: type[object]
-    cause: Exception
+    cause: BaseException
 ```
 
 ## Usage Examples
 
-### Basic Provider Binding
+### Basic Usage
 
 ```python
-from weakincentives.prompt.tool import Binding, Scope, ResourceRegistry
+from weakincentives.resources import Binding, ResourceRegistry, Scope
 
 # Define bindings
-config_binding = Binding(
-    protocol=Config,
-    provider=lambda r: Config.from_env(),
-    scope=Scope.SINGLETON,
+registry = ResourceRegistry.of(
+    Binding(Config, lambda r: Config.from_env()),
+    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
 )
 
-http_binding = Binding(
-    protocol=HTTPClient,
-    provider=lambda r: HTTPClient(
-        base_url=r.get(Config).api_url,
-        timeout=r.get(Config).timeout,
-    ),
-    scope=Scope.SINGLETON,
-)
+# Create resolution context
+ctx = registry.create_context()
+ctx.start()
 
-# Build registry
-registry = ResourceRegistry.build(
-    bindings=[config_binding, http_binding],
-)
-
-# Use in execution
-with registry.scoped_context() as ctx:
+try:
     http = ctx.get(HTTPClient)  # Lazily constructs Config, then HTTPClient
+finally:
+    ctx.close()
 ```
 
 ### Tool-Call Scoped Resources
 
 ```python
-# Request-scoped tracer
-tracer_binding = Binding(
-    protocol=RequestTracer,
-    provider=lambda r: RequestTracer(
-        client=r.get(HTTPClient),
-        request_id=uuid4(),  # Fresh ID per tool call
+registry = ResourceRegistry.of(
+    Binding(Config, lambda r: Config.from_env()),
+    Binding(
+        RequestTracer,
+        lambda r: RequestTracer(request_id=uuid4()),
+        scope=Scope.TOOL_CALL,
     ),
-    scope=Scope.TOOL_CALL,
 )
 
-# In tool handler
-def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Output]:
-    tracer = context.require(RequestTracer)  # Fresh per invocation
-    tracer.record("starting", params)
-    # ...
-```
+ctx = registry.create_context()
+ctx.start()
 
-### Mixing Direct Instances and Bindings
+# Each tool scope gets fresh TOOL_CALL resources
+with ctx.tool_scope() as resolver:
+    tracer1 = resolver.get(RequestTracer)
 
-```python
-# Some resources constructed externally
-external_db = PostgresPool(connection_string)
+with ctx.tool_scope() as resolver:
+    tracer2 = resolver.get(RequestTracer)
 
-registry = ResourceRegistry.build(
-    instances={
-        Database: external_db,  # Direct instance
-    },
-    bindings=[
-        Binding(UserService, lambda r: UserService(r.get(Database))),
-    ],
-)
+assert tracer1 is not tracer2  # Fresh instances
+
+ctx.close()
 ```
 
 ### Eager Initialization
 
 ```python
 # Validate configuration at startup
-config_binding = Binding(
-    protocol=Config,
-    provider=lambda r: Config.from_env(),  # May raise on invalid config
-    scope=Scope.SINGLETON,
-    eager=True,  # Instantiate during start()
+registry = ResourceRegistry.of(
+    Binding(
+        Config,
+        lambda r: Config.from_env(),  # May raise on invalid config
+        eager=True,  # Instantiate during start()
+    ),
 )
 
-# Fails fast if config invalid
-execution_state.start()  # Raises here, not on first tool call
+ctx = registry.create_context()
+ctx.start()  # Raises here if config invalid, not on first use
 ```
 
-## Snapshotable Integration
-
-Scoped contexts integrate with existing snapshot/restore:
+### Registry Composition
 
 ```python
-def snapshotable_resources(self) -> Mapping[type[object], Snapshotable]:
-    """Return all instantiated snapshotable resources."""
-    result: dict[type[object], Snapshotable] = {}
-
-    # Direct instances
-    for protocol, instance in self.registry._instances.items():
-        if isinstance(instance, Snapshotable):
-            result[protocol] = instance
-
-    # Cached singletons (only if instantiated)
-    for protocol, instance in self._singleton_cache.items():
-        if isinstance(instance, Snapshotable):
-            result[protocol] = instance
-
-    return result
-```
-
-Tool-call scoped resources are not snapshotted—they're disposed on scope exit,
-which happens before any restore would occur.
-
-## Backward Compatibility
-
-Existing code using `ResourceRegistry.build({...})` continues to work:
-
-```python
-# Old style (still works)
-registry = ResourceRegistry.build({
-    Filesystem: InMemoryFilesystem(),
-    BudgetTracker: tracker,
-})
-
-# Equivalent to
-registry = ResourceRegistry.build(
-    instances={
-        Filesystem: InMemoryFilesystem(),
-        BudgetTracker: tracker,
-    },
+base = ResourceRegistry.of(
+    Binding(Config, lambda r: Config(env="prod")),
 )
-```
 
-The `get()` method on `ResourceRegistry` returns direct instances only.
-Lazy resolution requires a `ScopedResourceContext`.
+test_override = ResourceRegistry.of(
+    Binding(Config, lambda r: Config(env="test")),
+)
+
+merged = base.merge(test_override)  # test_override wins
+```
 
 ## Acceptance Criteria
 
@@ -643,15 +400,12 @@ def test_lazy_construction():
         constructed.append("service")
         return Service()
 
-    registry = ResourceRegistry.build(
-        bindings=[Binding(Service, make_service)],
-    )
+    registry = ResourceRegistry.of(Binding(Service, make_service))
 
-    # Not constructed yet
     assert constructed == []
 
-    with registry.scoped_context() as ctx:
-        _ = ctx.get(Service)
+    ctx = registry.create_context()
+    _ = ctx.get(Service)
 
     assert constructed == ["service"]
 ```
@@ -660,125 +414,107 @@ def test_lazy_construction():
 
 ```python
 def test_dependency_resolution():
-    registry = ResourceRegistry.build(
-        bindings=[
-            Binding(Config, lambda r: Config(value=42)),
-            Binding(Service, lambda r: Service(config=r.get(Config))),
-        ],
+    registry = ResourceRegistry.of(
+        Binding(Config, lambda r: Config(value=42)),
+        Binding(Service, lambda r: Service(config=r.get(Config))),
     )
 
-    with registry.scoped_context() as ctx:
-        service = ctx.get(Service)
-        assert service.config.value == 42
+    ctx = registry.create_context()
+    service = ctx.get(Service)
+    assert service.config.value == 42
 ```
 
 ### Cycle Detection
 
 ```python
 def test_circular_dependency_detected():
-    registry = ResourceRegistry.build(
-        bindings=[
-            Binding(A, lambda r: A(b=r.get(B))),
-            Binding(B, lambda r: B(a=r.get(A))),
-        ],
+    registry = ResourceRegistry.of(
+        Binding(A, lambda r: A(b=r.get(B))),
+        Binding(B, lambda r: B(a=r.get(A))),
     )
 
-    with registry.scoped_context() as ctx:
-        with pytest.raises(CircularDependencyError) as exc:
-            ctx.get(A)
-        assert "A -> B -> A" in str(exc.value)
+    ctx = registry.create_context()
+    with pytest.raises(CircularDependencyError) as exc:
+        ctx.get(A)
+    assert A in exc.value.cycle
+    assert B in exc.value.cycle
 ```
 
-### Scope Isolation
+### Singleton Caching
 
 ```python
-def test_tool_call_scope_isolation():
+def test_singleton_cached():
     call_count = 0
 
-    def make_tracer(r: ResourceResolver) -> Tracer:
+    def make_service(r: ResourceResolver) -> Service:
         nonlocal call_count
         call_count += 1
-        return Tracer(id=call_count)
+        return Service()
 
-    registry = ResourceRegistry.build(
-        bindings=[Binding(Tracer, make_tracer, scope=Scope.TOOL_CALL)],
-    )
+    registry = ResourceRegistry.of(Binding(Service, make_service))
+    ctx = registry.create_context()
 
-    ctx = registry.scoped_context()
+    s1 = ctx.get(Service)
+    s2 = ctx.get(Service)
 
-    with ctx.enter_tool_call() as r1:
-        t1 = r1.get(Tracer)
-        assert t1.id == 1
-
-    with ctx.enter_tool_call() as r2:
-        t2 = r2.get(Tracer)
-        assert t2.id == 2  # Fresh instance
-
-    assert call_count == 2
-```
-
-### Singleton Sharing
-
-```python
-def test_singleton_shared_across_tool_calls():
-    call_count = 0
-
-    def make_pool(r: ResourceResolver) -> Pool:
-        nonlocal call_count
-        call_count += 1
-        return Pool()
-
-    registry = ResourceRegistry.build(
-        bindings=[Binding(Pool, make_pool, scope=Scope.SINGLETON)],
-    )
-
-    ctx = registry.scoped_context()
-
-    with ctx.enter_tool_call() as r1:
-        p1 = r1.get(Pool)
-
-    with ctx.enter_tool_call() as r2:
-        p2 = r2.get(Pool)
-
-    assert p1 is p2  # Same instance
+    assert s1 is s2
     assert call_count == 1
+```
+
+### Tool-Call Scope Isolation
+
+```python
+def test_tool_call_fresh_per_scope():
+    counter = itertools.count()
+
+    registry = ResourceRegistry.of(
+        Binding(Tracer, lambda r: Tracer(id=next(counter)), scope=Scope.TOOL_CALL)
+    )
+
+    ctx = registry.create_context()
+
+    with ctx.tool_scope() as r1:
+        t1 = r1.get(Tracer)
+
+    with ctx.tool_scope() as r2:
+        t2 = r2.get(Tracer)
+
+    assert t1.id == 0
+    assert t2.id == 1
 ```
 
 ### Resource Cleanup
 
 ```python
-def test_closeable_resources_closed():
-    closed = []
-
-    class ClosingResource(Closeable):
-        def __init__(self, id: int):
-            self.id = id
-
-        def close(self) -> None:
-            closed.append(self.id)
-
-    counter = itertools.count(1)
-    registry = ResourceRegistry.build(
-        bindings=[
-            Binding(
-                ClosingResource,
-                lambda r: ClosingResource(next(counter)),
-                scope=Scope.TOOL_CALL,
-            ),
-        ],
+def test_closeable_disposed():
+    registry = ResourceRegistry.of(
+        Binding(CloseableResource, lambda r: CloseableResource())
     )
 
-    ctx = registry.scoped_context()
+    ctx = registry.create_context()
+    resource = ctx.get(CloseableResource)
+    assert resource.closed is False
 
-    with ctx.enter_tool_call() as r:
-        _ = r.get(ClosingResource)
+    ctx.close()
+    assert resource.closed is True
+```
 
-    assert closed == [1]  # Closed on scope exit
+### Reverse Order Cleanup
 
-    with ctx.enter_tool_call() as r:
-        _ = r.get(ClosingResource)
+```python
+def test_close_reverse_order():
+    closed_order = []
 
-    assert closed == [1, 2]
+    registry = ResourceRegistry.of(
+        Binding(ResourceA, lambda r: ResourceA(on_close=lambda: closed_order.append("A"))),
+        Binding(ResourceB, lambda r: ResourceB(a=r.get(ResourceA), on_close=lambda: closed_order.append("B"))),
+    )
+
+    ctx = registry.create_context()
+    _ = ctx.get(ResourceB)  # Constructs A, then B
+    ctx.close()
+
+    assert closed_order == ["B", "A"]  # Reverse instantiation order
 ```
 
 ## Limitations
@@ -788,12 +524,12 @@ def test_closeable_resources_closed():
 - **No conditional bindings**: Cannot bind different implementations based on
   runtime conditions (use explicit registry construction instead).
 - **No interception**: No AOP-style interceptors on resource access.
-- **No named bindings**: Use wrapper types or `Qualified[T]` pattern if needed
-  (not built-in).
+- **No named bindings**: Use wrapper types if you need multiple implementations
+  of the same protocol.
 
 ## Future Considerations
 
-The following are explicitly out of scope for this phase but may be added:
+The following are explicitly out of scope but may be added later:
 
 - **Modules**: Grouping related bindings for composition.
 - **Qualifiers**: Built-in support for distinguishing multiple implementations.
