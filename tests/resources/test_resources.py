@@ -198,6 +198,55 @@ class TestResourceRegistry:
         protocols = set(registry)
         assert protocols == {Config, HTTPClient}
 
+    def test_build_creates_registry_with_instances(self) -> None:
+        config = ConcreteConfig(value=42)
+        registry = ResourceRegistry.build({Config: config})
+        assert Config in registry
+        assert len(registry) == 1
+        assert registry.get(Config) is config
+
+    def test_build_filters_none_values(self) -> None:
+        config = ConcreteConfig(value=42)
+        registry = ResourceRegistry.build({Config: config, HTTPClient: None})
+        assert Config in registry
+        assert HTTPClient not in registry
+        assert len(registry) == 1
+
+    def test_iter_with_instances_only(self) -> None:
+        """Test iteration when registry has only instances (no bindings)."""
+        config = ConcreteConfig()
+        client = ConcreteHTTPClient(config=config)
+        registry = ResourceRegistry.build({Config: config, HTTPClient: client})
+        protocols = set(registry)
+        assert protocols == {Config, HTTPClient}
+
+    def test_iter_with_bindings_and_instances(self) -> None:
+        """Test iteration yields both bindings and non-overlapping instances."""
+        config = ConcreteConfig()
+        # Create registry with a binding for Service and instance for Config
+        base = ResourceRegistry.of(
+            Binding(Service, lambda r: ConcreteService(r.get(HTTPClient)))
+        )
+        instances = ResourceRegistry.build({Config: config})
+        merged = base.merge(instances)
+        protocols = set(merged)
+        # Should yield both Service (from binding) and Config (from instances)
+        assert protocols == {Service, Config}
+
+    def test_iter_skips_duplicate_protocols(self) -> None:
+        """Test iteration doesn't yield the same protocol twice."""
+        config = ConcreteConfig()
+        # Create registry with a binding for Config and also an instance for Config
+        bindings = ResourceRegistry.of(
+            Binding(Config, lambda r: ConcreteConfig(value=1))
+        )
+        instances = ResourceRegistry.build({Config: config})
+        merged = bindings.merge(instances)
+        # Iterate and check Config only appears once
+        protocols = list(merged)
+        assert protocols.count(Config) == 1
+        assert len(protocols) == 1
+
     def test_eager_bindings(self) -> None:
         registry = ResourceRegistry.of(
             Binding(Config, lambda r: ConcreteConfig(), eager=True),
@@ -241,6 +290,17 @@ class TestScopedResourceContext:
         c2 = ctx.get(Config)
         assert c1 is c2
         assert call_count == 1
+
+    def test_get_returns_preconstructed_instance(self) -> None:
+        """Context.get() returns pre-constructed instances from registry."""
+        config = ConcreteConfig(value=99)
+        registry = ResourceRegistry.build({Config: config})
+        ctx = registry.create_context()
+
+        # Should return the pre-constructed instance directly
+        result = ctx.get(Config)
+        assert result is config
+        assert result.value == 99
 
     def test_get_resolves_dependencies(self) -> None:
         registry = ResourceRegistry.of(

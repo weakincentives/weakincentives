@@ -87,15 +87,21 @@ class ScopedResourceContext:
         """Resolve and return resource for protocol.
 
         Resolution order:
-        1. Tool-call cache (if in tool scope and TOOL_CALL binding)
-        2. Singleton cache (if SINGLETON binding)
-        3. Invoke provider and cache per scope
+        1. Pre-constructed instances (from registry._instances)
+        2. Tool-call cache (if TOOL_CALL binding)
+        3. Singleton cache (if SINGLETON binding)
+        4. Invoke provider and cache per scope
 
         Raises:
-            UnboundResourceError: No binding exists.
+            UnboundResourceError: No binding or instance exists.
             CircularDependencyError: Dependency cycle detected.
             ProviderError: Provider raised an exception.
         """
+        # Check pre-constructed instances first
+        instance = self.registry.get(protocol)
+        if instance is not None:
+            return instance
+
         binding = self.registry.binding_for(protocol)
         if binding is None:
             raise UnboundResourceError(protocol)
@@ -113,16 +119,16 @@ class ScopedResourceContext:
         # Invoke provider
         self._resolving.add(protocol)
         try:
-            instance = self._construct(binding)
+            constructed = self._construct(binding)
         finally:
             self._resolving.discard(protocol)
 
         # Cache per scope
         if cache is not None:
-            cache[protocol] = instance
+            cache[protocol] = constructed
             self._instantiation_order.append((binding.scope, protocol))
 
-        return instance
+        return constructed
 
     def get_optional[T](self, protocol: type[T]) -> T | None:
         """Resolve if bound, return None otherwise."""

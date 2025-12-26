@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from ..budget import BudgetTracker
 from ..filesystem import Filesystem
-from ..prompt.tool import ResourceRegistry
+from ..resources import ResourceRegistry
 
 
 def build_resources(

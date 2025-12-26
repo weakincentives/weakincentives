@@ -24,7 +24,7 @@ from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..filesystem import Filesystem
 from ..prompt.prompt import Prompt
-from ..prompt.tool import ResourceRegistry
+from ..resources import ResourceRegistry
 from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ._names import LITELLM_ADAPTER_NAME

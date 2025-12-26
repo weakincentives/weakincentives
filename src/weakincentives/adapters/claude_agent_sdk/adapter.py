@@ -24,7 +24,7 @@ from ...deadlines import Deadline
 from ...filesystem import Filesystem
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
-from ...prompt.tool import ResourceRegistry
+from ...resources import ResourceRegistry
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.execution_state import ExecutionState

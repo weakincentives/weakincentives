@@ -64,7 +64,7 @@ from uuid import UUID, uuid4
 
 from ..dataclasses import FrozenDataclass
 from ..errors import RestoreFailedError
-from ..prompt.tool import ResourceRegistry
+from ..resources import ResourceRegistry
 from ..serde import dump, parse
 from ..serde._utils import TYPE_REF_KEY, resolve_type_identifier, type_identifier
 from ..types import JSONValue
