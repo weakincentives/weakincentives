@@ -53,7 +53,7 @@ from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
-from ..prompt.tool import ResourceRegistry
+from ..resources import ResourceRegistry
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
 from .session import Session
 from .session.visibility_overrides import SetVisibilityOverride

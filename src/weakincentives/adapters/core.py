@@ -22,7 +22,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import WinkError
 from ..prompt import Prompt
-from ..prompt.tool import ResourceRegistry
+from ..resources import ResourceRegistry
 from ..runtime.session.protocols import SessionProtocol
 
 

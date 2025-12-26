@@ -15,9 +15,8 @@ from __future__ import annotations
 import inspect
 import re
 import types
-from collections.abc import Callable, Mapping, Sequence as SequenceABC
+from collections.abc import Callable, Sequence as SequenceABC
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -34,7 +33,7 @@ from typing import (
 
 from ..budget import BudgetTracker
 from ..deadlines import Deadline
-from ..runtime.snapshotable import Snapshotable
+from ..resources import ResourceRegistry
 from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
@@ -80,91 +79,6 @@ ParamsT_contra = TypeVar(
     "ParamsT_contra", bound=SupportsDataclassOrNone, contravariant=True
 )
 ResultT_co = TypeVar("ResultT_co", bound=SupportsToolResult)
-
-
-@dataclass(slots=True, frozen=True)
-class ResourceRegistry:
-    """Typed container for runtime resources available to tool handlers.
-
-    ResourceRegistry provides type-safe access to runtime services like
-    filesystem backends, HTTP clients, or tracers without requiring
-    dedicated fields on ToolContext.
-
-    Resources are stored by their type and retrieved via the ``get`` method:
-
-    .. code-block:: python
-
-        fs = context.resources.get(Filesystem)
-        if fs is not None:
-            content = fs.read("path/to/file")
-
-    This design allows extensibility without bloating the core dataclass.
-    Common resources like ``Filesystem`` have sugar properties on
-    ``ToolContext`` for convenience.
-    """
-
-    _entries: Mapping[type[object], object] = field(
-        default_factory=lambda: MappingProxyType({}),
-    )
-
-    def get[T](self, resource_type: type[T], default: T | None = None) -> T | None:
-        """Return the resource of the given type, or ``default`` if absent."""
-        value = self._entries.get(resource_type)
-        if value is None:
-            return default
-        return cast(T, value)
-
-    def __contains__(self, resource_type: type[object]) -> bool:
-        """Check if a resource of the given type is registered."""
-        return resource_type in self._entries
-
-    def snapshotable_resources(self) -> Mapping[type[object], Snapshotable]:
-        """Return all resources that implement Snapshotable.
-
-        Returns:
-            Mapping from resource type to snapshotable resource instance.
-            Only resources that implement the Snapshotable protocol are included.
-        """
-        return {k: v for k, v in self._entries.items() if isinstance(v, Snapshotable)}
-
-    def merge(self, other: ResourceRegistry) -> ResourceRegistry:
-        """Merge two registries, with ``other`` taking precedence on conflicts.
-
-        This enables layered resource injection where caller-provided resources
-        override workspace defaults:
-
-        .. code-block:: python
-
-            workspace = ResourceRegistry.build({Filesystem: InMemoryFilesystem()})
-            user = ResourceRegistry.build({HTTPClient: MyClient(), Filesystem: custom_fs})
-            merged = workspace.merge(user)  # user's Filesystem wins
-
-        Returns:
-            A new registry containing all resources from both registries.
-            When both registries contain the same type, ``other``'s value is used.
-        """
-        merged = dict(self._entries)
-        merged.update(other._entries)
-        return ResourceRegistry(_entries=MappingProxyType(merged))
-
-    @staticmethod
-    def build(mapping: Mapping[type[object], object]) -> ResourceRegistry:
-        """Construct a registry from a type-to-instance mapping.
-
-        Use protocol types as keys to enable protocol-based lookup:
-
-        .. code-block:: python
-
-            registry = ResourceRegistry.build({
-                Filesystem: InMemoryFilesystem(),
-                HTTPClient: MyHTTPClient(),
-            })
-
-            # Now protocol-based lookup works:
-            fs = registry.get(Filesystem)  # Returns the InMemoryFilesystem
-        """
-        filtered = {k: v for k, v in mapping.items() if v is not None}
-        return ResourceRegistry(_entries=MappingProxyType(filtered))
 
 
 @dataclass(slots=True, frozen=True)
@@ -916,7 +830,6 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
 
 __all__ = [
-    "ResourceRegistry",
     "Tool",
     "ToolContext",
     "ToolExample",

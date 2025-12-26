@@ -33,7 +33,7 @@ from weakincentives.evals import (
     submit_dataset,
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
 from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
 from weakincentives.runtime.session import SessionProtocol

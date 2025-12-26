@@ -22,7 +22,7 @@ import pytest
 
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.filesystem import Filesystem
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.execution_state import (
     CompositeSnapshot,
     ExecutionState,
@@ -269,7 +269,7 @@ class TestSnapshotableProtocol:
         fs = InMemoryFilesystem()
         resources = ResourceRegistry.build({Filesystem: fs})
 
-        snapshotable = resources.snapshotable_resources()
+        snapshotable = resources.get_all(lambda x: isinstance(x, Snapshotable))
 
         assert Filesystem in snapshotable
         assert snapshotable[Filesystem] is fs
@@ -889,7 +889,7 @@ class TestToolTransactionMethods:
         """begin_tool_execution takes a snapshot and stores pending execution."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -910,7 +910,7 @@ class TestToolTransactionMethods:
         """end_tool_execution with success=True doesn't restore state."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -935,7 +935,7 @@ class TestToolTransactionMethods:
         """end_tool_execution with success=False restores state."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -969,7 +969,7 @@ class TestToolTransactionMethods:
         """abort_tool_execution always restores state."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1032,7 +1032,7 @@ class TestToolTransactionContextManager:
         """tool_transaction restores state when an exception is raised."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1052,7 +1052,7 @@ class TestToolTransactionContextManager:
         """tool_transaction preserves state changes on successful exit."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1070,7 +1070,7 @@ class TestToolTransactionContextManager:
         """tool_transaction allows manual restore for result.success=False."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1172,7 +1172,7 @@ class TestExecutionStateConcurrency:
 
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1214,7 +1214,7 @@ class TestExecutionStateConcurrency:
 
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1272,7 +1272,7 @@ class TestExecutionStateConcurrency:
 
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1324,7 +1324,7 @@ class TestExecutionStateConcurrency:
 
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1384,7 +1384,7 @@ class TestExecutionStateConcurrency:
 
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1446,7 +1446,7 @@ class TestExecutionStateConcurrency:
 
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         fs = InMemoryFilesystem()
@@ -1489,7 +1489,7 @@ class TestExecutionStateConcurrency:
 
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.prompt.tool import ResourceRegistry
+        from weakincentives.resources import ResourceRegistry
 
         session = Session()
         session[SamplePlan].seed([SamplePlan(objective="initial")])

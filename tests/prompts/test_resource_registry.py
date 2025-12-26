@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 
 
 @dataclass

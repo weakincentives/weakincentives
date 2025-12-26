@@ -29,7 +29,8 @@ from ..filesystem import Filesystem
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
-from ..prompt.tool import ResourceRegistry, Tool, ToolContext, ToolHandler, ToolResult
+from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from ..resources import ResourceRegistry
 from ..runtime.events import HandlerFailure, ToolInvoked
 from ..runtime.execution_state import CompositeSnapshot, ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger

@@ -353,7 +353,7 @@ handlers through `ToolContext.resources`. This enables dependency injection
 for testing and decouples tools from specific implementations.
 
 ```python
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from myapp.http import HTTPClient
 
 # Create resources registry with custom dependencies

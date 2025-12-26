@@ -64,7 +64,7 @@ from uuid import UUID, uuid4
 
 from ..dataclasses import FrozenDataclass
 from ..errors import RestoreFailedError
-from ..prompt.tool import ResourceRegistry
+from ..resources import ResourceRegistry
 from ..serde import dump, parse
 from ..serde._utils import TYPE_REF_KEY, resolve_type_identifier, type_identifier
 from ..types import JSONValue
@@ -516,7 +516,10 @@ class ExecutionState:
 
     def _snapshotable_resources(self) -> Mapping[type[object], Snapshotable]:
         """Return all resources that implement Snapshotable."""
-        return self.resources.snapshotable_resources()
+        return cast(
+            Mapping[type[object], Snapshotable],
+            self.resources.get_all(lambda x: isinstance(x, Snapshotable)),
+        )
 
     # --- Hook-based Tool Transaction Methods ---
 

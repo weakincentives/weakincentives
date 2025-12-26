@@ -57,8 +57,9 @@ from weakincentives.errors import SnapshotRestoreError
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
-from weakincentives.prompt.tool import ResourceRegistry, Tool
+from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.events import (
     Dispatcher,
     DispatchResult,

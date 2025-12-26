@@ -30,7 +30,7 @@ from weakincentives.evals import (
     llm_judge,
 )
 from weakincentives.prompt import Prompt
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.session import SessionProtocol
 
 # =============================================================================

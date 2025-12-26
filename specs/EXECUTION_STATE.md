@@ -54,7 +54,11 @@ class ExecutionState:
         """Capture consistent snapshot of session and all snapshotable resources."""
         resource_snapshots: dict[type[object], object] = {}
 
-        for resource_type, resource in self.resources.snapshotable_resources().items():
+        # Use get_all() with a predicate to find Snapshotable resources
+        snapshotable = self.resources.get_all(
+            lambda x: isinstance(x, Snapshotable)
+        )
+        for resource_type, resource in snapshotable.items():
             resource_snapshots[resource_type] = resource.snapshot(tag=tag)
 
         return CompositeSnapshot(
@@ -84,25 +88,22 @@ class ExecutionState:
 
 ### ResourceRegistry
 
+See `specs/RESOURCE_REGISTRY.md` for full documentation. Key methods for ExecutionState:
+
 ```python
-@dataclass(slots=True, frozen=True)
 class ResourceRegistry:
-    """Typed container for runtime resources."""
+    def get[T](self, protocol: type[T], default: T | None = None) -> T | None:
+        """Return resource for protocol, or default if absent."""
+        ...
 
-    _entries: Mapping[type[object], object]
-
-    def get[T](self, resource_type: type[T]) -> T | None: ...
-    def get[T](self, resource_type: type[T], default: T) -> T: ...
-
-    def snapshotable_resources(self) -> Mapping[type[object], Snapshotable[object]]:
-        """Return all resources that implement Snapshotable."""
-        return {
-            k: v for k, v in self._entries.items()
-            if isinstance(v, Snapshotable)
-        }
+    def get_all[T](self, predicate: Callable[[object], bool]) -> Mapping[type[T], T]:
+        """Return all resolved instances matching a predicate."""
+        ...
 
     @staticmethod
-    def build(entries: Mapping[type[object], object]) -> ResourceRegistry: ...
+    def build(mapping: Mapping[type[object], object]) -> ResourceRegistry:
+        """Create registry from pre-constructed instances."""
+        ...
 ```
 
 ## Snapshotable Protocol
