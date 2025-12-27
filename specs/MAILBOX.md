@@ -235,6 +235,7 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         *,
         adapter: ProviderAdapter[OutputT],
         requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
+        resources: ResourceRegistry | None = None,
     ) -> None: ...
 ```
 
@@ -246,7 +247,6 @@ class MainLoopRequest[UserRequestT]:
     request: UserRequestT
     budget: Budget | None = None
     deadline: Deadline | None = None
-    resources: ResourceRegistry | None = None
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
