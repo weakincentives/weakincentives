@@ -70,6 +70,7 @@ class MessageState:
     delivery_count: int = 0
     current_handle: str | None = None
     expires_at: float | None = None
+    reply_to: str | None = None
 
 
 @dataclass
@@ -82,11 +83,17 @@ class MailboxModel:
     deleted: set[str] = field(default_factory=set)
     delivery_history: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
 
-    def send(self, msg_id: str, body: Any) -> None:  # noqa: ANN401
+    def send(self, msg_id: str, body: Any, reply_to: str | None = None) -> None:  # noqa: ANN401
         """Model a send operation."""
-        state = MessageState(id=msg_id, body=body)
+        state = MessageState(id=msg_id, body=body, reply_to=reply_to)
         self.data[msg_id] = state
         self.pending.append(msg_id)
+
+    def get_reply_to(self, msg_id: str) -> str | None:
+        """Get the reply_to for a message."""
+        if msg_id in self.data:
+            return self.data[msg_id].reply_to
+        return None
 
     def receive(self, msg_id: str, handle: str, expires_at: float) -> None:
         """Model a receive operation."""
@@ -236,6 +243,17 @@ if HAS_HYPOTHESIS:
             """Send a message and track it."""
             msg_id = self.mailbox.send(body)
             self.model.send(msg_id, body)
+            return msg_id
+
+        @rule(
+            target=sent_ids,
+            body=st.text(min_size=1, max_size=100),
+            reply_to=st.sampled_from(["reply-queue-1", "reply-queue-2"]),
+        )
+        def send_message_with_reply_to(self, body: str, reply_to: str) -> str:
+            """Send a message with reply_to and track it."""
+            msg_id = self.mailbox.send(body, reply_to=reply_to)
+            self.model.send(msg_id, body, reply_to=reply_to)
             return msg_id
 
         @rule(
@@ -403,6 +421,28 @@ if HAS_HYPOTHESIS:
                     assert counts[i] > counts[i - 1], (
                         f"Non-monotonic delivery count for {msg_id}: {counts}"
                     )
+
+        @invariant()
+        def reply_to_preserved(self) -> None:
+            """Reply_to is preserved across redeliveries until acknowledged."""
+            for msg_id, state in self.model.data.items():
+                if msg_id in self.model.deleted:
+                    continue
+
+                # Verify reply_to matches what's in Redis
+                has_data = self.client.hexists(self.mailbox._keys.data, msg_id)
+                if has_data and state.reply_to is not None:
+                    # The reply_to should be stored with the message
+                    raw = self.client.hget(self.mailbox._keys.data, msg_id)
+                    if raw:
+                        import json
+
+                        parsed = json.loads(raw)
+                        redis_reply_to = parsed.get("reply_to")
+                        assert redis_reply_to == state.reply_to, (
+                            f"reply_to mismatch for {msg_id}: "
+                            f"model={state.reply_to}, redis={redis_reply_to}"
+                        )
 
         # =====================================================================
         # Helper methods

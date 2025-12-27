@@ -26,6 +26,9 @@ CONSTANTS
 \* Special value for null/none (0 is outside the message ID range 1..MaxMessages)
 NULL == 0
 
+\* Special value for no reply-to destination
+NO_REPLY == "none"
+
 VARIABLES
     pending,            \* Sequence of message IDs in pending list
     invisible,          \* Function: msg_id -> {expiresAt, handle}
@@ -65,7 +68,7 @@ TypeOK ==
     /\ deliveryHistory \in [DOMAIN deliveryHistory ->
             Seq([count: Nat, handle: Nat])]
     /\ DOMAIN deliveryHistory \subseteq 1..MaxMessages
-    /\ replyTo \in [DOMAIN replyTo -> {"r1", "r2", NULL}]
+    /\ replyTo \in [DOMAIN replyTo -> {"r1", "r2", NO_REPLY}]
     /\ DOMAIN replyTo \subseteq 1..MaxMessages
 
 -----------------------------------------------------------------------------
@@ -83,7 +86,7 @@ Init ==
     /\ consumerState = [c \in 1..NumConsumers |-> [holding |-> NULL, handle |-> 0]]
     /\ deliveryCounts = [m \in {} |-> 0]
     /\ deliveryHistory = [m \in {} |-> <<>>]
-    /\ replyTo = [m \in {} |-> NULL]
+    /\ replyTo = [m \in {} |-> NO_REPLY]
 
 -----------------------------------------------------------------------------
 (* Helper Operators *)
@@ -258,7 +261,7 @@ Tick ==
 (* Next State Relation *)
 
 Next ==
-    \/ \E body \in {"a", "b", "c"}, r \in {"r1", "r2", NULL}: Send(body, r)
+    \/ \E body \in {"a", "b", "c"}, r \in {"r1", "r2", NO_REPLY}: Send(body, r)
     \/ \E c \in 1..NumConsumers: Receive(c)
     \/ \E c \in 1..NumConsumers: Acknowledge(c)
     \/ \E c \in 1..NumConsumers: AcknowledgeFail(c)
