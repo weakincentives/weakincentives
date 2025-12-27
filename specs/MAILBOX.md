@@ -33,7 +33,7 @@ class Mailbox(Protocol[T, R]):
         R: Reply type (what reply_mailbox() sends). Use None if no replies.
     """
 
-    def send(self, body: T, *, reply_to: str | None = None, delay_seconds: int = 0) -> str:
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
         """Enqueue a message, optionally specifying reply destination.
 
         Args:
@@ -41,7 +41,6 @@ class Mailbox(Protocol[T, R]):
             reply_to: Optional identifier for response mailbox. Workers use
                 Message.reply_mailbox() to resolve this to a concrete Mailbox.
                 Should only be set when R is not None.
-            delay_seconds: Seconds before message becomes visible (0-900).
 
         Returns:
             Message ID (unique within this queue).
@@ -276,10 +275,6 @@ consumer.
 
 Long polling reduces empty responses and API calls. Use 20 seconds (SQS maximum)
 for efficient polling loops.
-
-**Delay.** `delay_seconds` on send defers message visibility. The message is
-queued immediately but remains invisible until the delay expires. Use for
-scheduled tasks or rate limiting.
 
 **Receipt handle.** Each delivery generates a unique receipt handle. Operations
 (acknowledge, nack, extend) require the current handle. After timeout or
