@@ -148,6 +148,7 @@ Consult these specs before modifying related code:
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, MainLoop integration |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
+| `specs/METRICS.md` | Meter abstraction, token counters, latency histograms, tool metrics |
 | `specs/PROMPTS.md` | Prompt system, composition, structured output |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
