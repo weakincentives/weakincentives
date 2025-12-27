@@ -344,6 +344,38 @@ def test_tool_wrap_requires_docstring() -> None:
         Tool.wrap(docless)
 
 
+def test_tool_wrap_rejects_handler_with_wrong_parameter_count() -> None:
+    def single_param(params: ExampleParams) -> ToolResult[ExampleResult]:
+        """Handler with only one parameter."""
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    with pytest.raises(PromptValidationError, match="one positional argument"):
+        Tool.wrap(single_param)
+
+
+def test_tool_wrap_handles_type_hint_resolution_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(
+        params: ExampleParams,
+        *,
+        context: ToolContext,
+    ) -> ToolResult[ExampleResult]:
+        """Handler with type hint resolution issues."""
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    # Force get_type_hints to fail so _resolve_annotations returns empty dict
+    monkeypatch.setattr(
+        tool_module,
+        "get_type_hints",
+        lambda *a, **k: (_ for _ in ()).throw(TypeError()),
+    )
+
+    # When hints fail, params type comes from signature which may be a string
+    with pytest.raises(PromptValidationError, match="ToolResult"):
+        Tool.wrap(handler)
+
+
 def test_tool_wrap_enforces_handler_constraints() -> None:
     def invalid_handler(
         params: ExampleParams, context: ToolContext
@@ -473,22 +505,3 @@ def test_tool_wrap_handles_empty_toolresult_args(
         match=r"Tool handler return annotation must be ToolResult\[ResultT\].",
     ):
         Tool.wrap(handler)
-
-
-def test_tool_validate_return_annotation_non_toolresult() -> None:
-    """Test validation fails when return is not ToolResult."""
-
-    def handler(
-        params: ExampleParams, *, context: ToolContext
-    ) -> ExampleResult:  # Wrong - not ToolResult
-        """Handler with wrong return type."""
-        return ExampleResult(value=params.query)
-
-    with pytest.raises(PromptValidationError) as exc:
-        Tool[ExampleParams, ExampleResult](
-            name="bad_return",
-            description="Bad return type",
-            handler=handler,  # type: ignore[arg-type]
-        )
-
-    assert "return annotation must be ToolResult[ResultT]" in str(exc.value)
