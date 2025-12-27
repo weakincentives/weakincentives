@@ -262,9 +262,9 @@ class MainLoopResult[OutputT]:
 ### Error Handling Guidelines
 
 1. **Set visibility_timeout > max execution time.** 5 minutes for 4-minute tasks.
-2. **Send response before acknowledging.** Crash-safe ordering.
-3. **Use delivery_count for backoff.** `min(60 * delivery_count, 900)` = 1-15 min.
-4. **Dead-letter after N retries.** `delivery_count > 5` → log and acknowledge.
+1. **Send response before acknowledging.** Crash-safe ordering.
+1. **Use delivery_count for backoff.** `min(60 * delivery_count, 900)` = 1-15 min.
+1. **Dead-letter after N retries.** `delivery_count > 5` → log and acknowledge.
 
 ## Implementations
 
@@ -277,7 +277,7 @@ class MainLoopResult[OutputT]:
 ### Backend Differences
 
 | Aspect | SQS Standard | SQS FIFO | Redis | InMemory |
-| ----------------- | ------------ | -------- | ----- | -------- |
+| -------------- | ------------ | ---------- | ------ | -------- |
 | Ordering | Best-effort | Strict | FIFO | FIFO |
 | Long poll max | 20 sec | 20 sec | ∞ | ∞ |
 | Visibility max | 12 hours | 12 hours | ∞ | ∞ |

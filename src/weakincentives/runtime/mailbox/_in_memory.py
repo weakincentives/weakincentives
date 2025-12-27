@@ -17,16 +17,22 @@ from __future__ import annotations
 import threading
 import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ._types import (
+    Mailbox,
     MailboxFullError,
     Message,
     ReceiptHandleExpiredError,
+    ReplyMailboxUnavailableError,
 )
+
+if TYPE_CHECKING:
+    pass
 
 
 @dataclass
@@ -39,10 +45,11 @@ class _InFlightMessage[T]:
     delivery_count: int
     receipt_handle: str
     expires_at: float  # time.monotonic() value
+    reply_to: str | None = None
 
 
 @dataclass(slots=True)
-class InMemoryMailbox[T]:
+class InMemoryMailbox[T, R]:
     """Thread-safe in-memory mailbox implementation.
 
     Messages are stored in memory and lost on process restart.
@@ -56,12 +63,20 @@ class InMemoryMailbox[T]:
 
     Example::
 
-        mailbox: Mailbox[MyEvent] = InMemoryMailbox(name="events")
-        mailbox.send(MyEvent(data="hello"))
-        messages = mailbox.receive(max_messages=1)
-        if messages:
-            process(messages[0].body)
-            messages[0].acknowledge()
+        registry: dict[str, Mailbox] = {}
+        responses: Mailbox[MyResult, None] = InMemoryMailbox(name="responses")
+        registry["responses"] = responses
+
+        requests: Mailbox[MyRequest, MyResult] = InMemoryMailbox(
+            name="requests",
+            reply_resolver=registry.get,
+        )
+        requests.send(MyRequest(data="hello"), reply_to="responses")
+
+        for msg in requests.receive(max_messages=1):
+            result = process(msg.body)
+            msg.reply_mailbox().send(result)
+            msg.acknowledge()
     """
 
     name: str = "default"
@@ -69,6 +84,9 @@ class InMemoryMailbox[T]:
 
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited."""
+
+    reply_resolver: Callable[[str], Mailbox[R, None] | None] | None = None
+    """Function to resolve reply_to identifiers to Mailbox instances."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _condition: threading.Condition = field(init=False, repr=False)
@@ -118,12 +136,13 @@ class InMemoryMailbox[T]:
                 self._pending.append(msg)
                 self._condition.notify_all()
 
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
-        """Enqueue a message, optionally delaying visibility.
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
+        """Enqueue a message.
 
         Args:
             body: Message payload.
-            delay_seconds: Seconds before message becomes visible (0-900).
+            reply_to: Identifier for response mailbox. Workers resolve this
+                via Message.reply_mailbox().
 
         Returns:
             Message ID (unique within this queue).
@@ -147,16 +166,11 @@ class InMemoryMailbox[T]:
                 delivery_count=0,
                 receipt_handle="",
                 expires_at=0.0,
+                reply_to=reply_to,
             )
 
-            if delay_seconds > 0:
-                # Put in invisible with delay as expiry
-                in_flight.receipt_handle = f"delay-{uuid4()}"
-                in_flight.expires_at = time.monotonic() + delay_seconds
-                self._invisible[in_flight.receipt_handle] = in_flight
-            else:
-                self._pending.append(in_flight)
-                self._condition.notify_all()
+            self._pending.append(in_flight)
+            self._condition.notify_all()
 
         return msg_id
 
@@ -166,7 +180,7 @@ class InMemoryMailbox[T]:
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Receive messages from the queue.
 
         Args:
@@ -180,7 +194,7 @@ class InMemoryMailbox[T]:
         max_messages = min(max(1, max_messages), 10)
         deadline = time.monotonic() + wait_time_seconds
 
-        messages: list[Message[T]] = []
+        messages: list[Message[T, R]] = []
 
         with self._lock:
             while len(messages) < max_messages:
@@ -211,10 +225,13 @@ class InMemoryMailbox[T]:
                         receipt_handle=receipt_handle,
                         delivery_count=in_flight.delivery_count,
                         enqueued_at=in_flight.enqueued_at,
-                        attributes={},
+                        reply_to=in_flight.reply_to,
                         _acknowledge_fn=lambda h=receipt_handle: self._acknowledge(h),
                         _nack_fn=lambda t, h=receipt_handle: self._nack(h, t),
                         _extend_fn=lambda t, h=receipt_handle: self._extend(h, t),
+                        _reply_mailbox_fn=lambda rt=in_flight.reply_to: (
+                            self._resolve_reply_mailbox(rt)
+                        ),
                     )
                     messages.append(message)
                 else:
@@ -230,6 +247,32 @@ class InMemoryMailbox[T]:
                     _ = self._condition.wait(timeout=remaining)
 
         return messages
+
+    def _resolve_reply_mailbox(self, reply_to: str | None) -> Mailbox[R, None]:
+        """Resolve reply_to identifier to a Mailbox.
+
+        Args:
+            reply_to: The reply_to identifier from the message.
+
+        Returns:
+            The resolved Mailbox.
+
+        Raises:
+            ReplyMailboxUnavailableError: If resolution fails.
+        """
+        if reply_to is None:
+            raise ReplyMailboxUnavailableError("No reply_to specified")
+
+        if self.reply_resolver is None:
+            raise ReplyMailboxUnavailableError("No reply resolver configured")
+
+        mailbox = self.reply_resolver(reply_to)
+        if mailbox is None:
+            raise ReplyMailboxUnavailableError(
+                f"Reply resolver returned None for '{reply_to}'"
+            )
+
+        return mailbox
 
     def _acknowledge(self, receipt_handle: str) -> None:
         """Delete message from queue."""

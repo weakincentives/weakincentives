@@ -101,8 +101,8 @@ class MathSolverLoop(MainLoop[MathProblem, MathAnswer]):
         self,
         *,
         adapter: OpenAIAdapter[MathAnswer],
-        requests: InMemoryMailbox[object],
-        responses: InMemoryMailbox[object],
+        requests: InMemoryMailbox[object, None],
+        responses: InMemoryMailbox[object, None],
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, responses=responses)  # type: ignore[arg-type]
 
@@ -264,12 +264,16 @@ def adapter(openai_model: str) -> OpenAIAdapter[MathAnswer]:
 
 def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
     """Test a single math problem evaluation."""
-    requests: InMemoryMailbox[EvalRequest[MathProblem, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[MathProblem, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
-    dummy_requests: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-requests")
-    dummy_responses: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-responses")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    dummy_requests: InMemoryMailbox[object, None] = InMemoryMailbox(
+        name="dummy-requests"
+    )
+    dummy_responses: InMemoryMailbox[object, None] = InMemoryMailbox(
+        name="dummy-responses"
+    )
 
     try:
         main_loop = MathSolverLoop(
@@ -312,12 +316,16 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
 
 def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
     """Test the full math dataset evaluation."""
-    requests: InMemoryMailbox[EvalRequest[MathProblem, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[MathProblem, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
-    dummy_requests: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-requests")
-    dummy_responses: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-responses")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    dummy_requests: InMemoryMailbox[object, None] = InMemoryMailbox(
+        name="dummy-requests"
+    )
+    dummy_responses: InMemoryMailbox[object, None] = InMemoryMailbox(
+        name="dummy-responses"
+    )
 
     try:
         main_loop = MathSolverLoop(

@@ -98,8 +98,8 @@ class _TestLoop(MainLoop[str, _Output]):
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[object],
-        responses: InMemoryMailbox[object],
+        requests: InMemoryMailbox[object, None],
+        responses: InMemoryMailbox[object, None],
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, responses=responses)  # type: ignore[arg-type]
         self._template = PromptTemplate[_Output](
@@ -128,8 +128,8 @@ def _create_test_loop(
     """Create a test MainLoop with mock adapter."""
     adapter = _MockAdapter(result=result, error=error)
     # EvalLoop doesn't use MainLoop's mailboxes, but MainLoop requires them
-    requests: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-requests")
-    responses: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-responses")
+    requests: InMemoryMailbox[object, None] = InMemoryMailbox(name="dummy-requests")
+    responses: InMemoryMailbox[object, None] = InMemoryMailbox(name="dummy-responses")
     return _TestLoop(adapter=adapter, requests=requests, responses=responses)
 
 
@@ -145,10 +145,10 @@ def _output_to_str(output: _Output, expected: str) -> Score:
 
 def test_eval_loop_processes_sample() -> None:
     """EvalLoop processes a sample and produces result."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         main_loop = _create_test_loop(result="correct")
@@ -183,10 +183,10 @@ def test_eval_loop_processes_sample() -> None:
 
 def test_eval_loop_handles_failure() -> None:
     """EvalLoop handles evaluation failure gracefully."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         main_loop = _create_test_loop(error=RuntimeError("test error"))
@@ -216,10 +216,10 @@ def test_eval_loop_handles_failure() -> None:
 
 def test_eval_loop_respects_max_iterations() -> None:
     """EvalLoop respects max_iterations limit."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         main_loop = _create_test_loop()
@@ -247,10 +247,10 @@ def test_eval_loop_respects_max_iterations() -> None:
 
 def test_eval_loop_failing_score() -> None:
     """EvalLoop correctly reports failing evaluations."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         main_loop = _create_test_loop(result="wrong")
@@ -285,7 +285,7 @@ def test_eval_loop_failing_score() -> None:
 
 def test_submit_dataset() -> None:
     """submit_dataset sends all samples to mailbox."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
 
@@ -314,7 +314,7 @@ def test_submit_dataset() -> None:
 
 def test_submit_dataset_empty() -> None:
     """submit_dataset handles empty dataset."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
 
@@ -333,7 +333,7 @@ def test_submit_dataset_empty() -> None:
 
 def test_collect_results() -> None:
     """collect_results gathers results into report."""
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         # Send some results
@@ -356,7 +356,7 @@ def test_collect_results() -> None:
 
 def test_collect_results_timeout() -> None:
     """collect_results respects timeout."""
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         # Send only 1 result but expect 2
@@ -379,7 +379,7 @@ def test_collect_results_timeout() -> None:
 
 def test_collect_results_empty() -> None:
     """collect_results handles empty results."""
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         report = collect_results(results, expected_count=0, timeout_seconds=0.1)
@@ -396,10 +396,10 @@ def test_collect_results_empty() -> None:
 
 def test_end_to_end_evaluation() -> None:
     """Full evaluation flow from dataset to report."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         # Create dataset
@@ -470,8 +470,8 @@ class _NoneOutputLoop(MainLoop[str, _Output]):
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[object],
-        responses: InMemoryMailbox[object],
+        requests: InMemoryMailbox[object, None],
+        responses: InMemoryMailbox[object, None],
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, responses=responses)  # type: ignore[arg-type]
         self._template = PromptTemplate[_Output](
@@ -494,15 +494,17 @@ class _NoneOutputLoop(MainLoop[str, _Output]):
 
 def test_eval_loop_none_output() -> None:
     """EvalLoop handles None output from adapter."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         adapter = _NoneOutputAdapter()
-        dummy_requests: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-requests")
-        dummy_responses: InMemoryMailbox[object] = InMemoryMailbox(
+        dummy_requests: InMemoryMailbox[object, None] = InMemoryMailbox(
+            name="dummy-requests"
+        )
+        dummy_responses: InMemoryMailbox[object, None] = InMemoryMailbox(
             name="dummy-responses"
         )
         main_loop = _NoneOutputLoop(
@@ -536,7 +538,7 @@ def test_eval_loop_none_output() -> None:
         dummy_responses.close()
 
 
-class _FailingMailbox(InMemoryMailbox[EvalResult]):
+class _FailingMailbox(InMemoryMailbox[EvalResult, None]):
     """Mailbox that fails on send for testing."""
 
     def __init__(self, *, fail_on_send: bool = False) -> None:
@@ -554,7 +556,7 @@ class _FailingMailbox(InMemoryMailbox[EvalResult]):
 
 def test_eval_loop_nacks_on_send_failure() -> None:
     """EvalLoop nacks message when result send fails (not acknowledges)."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
     # Create a mailbox that fails on send
@@ -589,7 +591,7 @@ def test_eval_loop_nacks_on_send_failure() -> None:
 
 def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
     """EvalLoop nacks message when send fails even after evaluation error."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
     failing_results = _FailingMailbox(fail_on_send=True)
@@ -618,7 +620,7 @@ def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
         failing_results.close()
 
 
-class _ExpiredHandleMailbox(InMemoryMailbox[EvalResult]):
+class _ExpiredHandleMailbox(InMemoryMailbox[EvalResult, None]):
     """Mailbox that raises ReceiptHandleExpiredError on send."""
 
     def send(self, message: EvalResult) -> str:
@@ -627,7 +629,7 @@ class _ExpiredHandleMailbox(InMemoryMailbox[EvalResult]):
 
 def test_eval_loop_handles_expired_receipt_on_send() -> None:
     """EvalLoop handles ReceiptHandleExpiredError on send gracefully."""
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
     expired_results = _ExpiredHandleMailbox(name="expired-results")
@@ -655,7 +657,7 @@ def test_eval_loop_handles_expired_receipt_on_send() -> None:
         expired_results.close()
 
 
-class _NackExpiresRequestMailbox(InMemoryMailbox[EvalRequest[str, str]]):
+class _NackExpiresRequestMailbox(InMemoryMailbox[EvalRequest[str, str], None]):
     """Request mailbox where nack raises ReceiptHandleExpiredError."""
 
     def receive(
@@ -727,10 +729,10 @@ def test_eval_loop_exits_when_mailbox_closed() -> None:
     """EvalLoop exits cleanly when requests mailbox is closed."""
     import threading
 
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
+    requests: InMemoryMailbox[EvalRequest[str, str], None] = InMemoryMailbox(
         name="eval-requests"
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
     try:
         main_loop = _create_test_loop(result="correct")

@@ -37,10 +37,11 @@ VARIABLES
     nextHandle,         \* Counter for generating handle suffixes
     consumerState,      \* Function: consumer_id -> {holding, handle}
     deliveryCounts,     \* Function: msg_id -> count (persists across requeue)
-    deliveryHistory     \* Function: msg_id -> Sequence of (count, handle) for INV-4
+    deliveryHistory,    \* Function: msg_id -> Sequence of (count, handle) for INV-4
+    replyTo             \* Function: msg_id -> reply_to identifier (or NULL)
 
 vars == <<pending, invisible, data, handles, deleted, now, nextMsgId,
-          nextHandle, consumerState, deliveryCounts, deliveryHistory>>
+          nextHandle, consumerState, deliveryCounts, deliveryHistory, replyTo>>
 
 -----------------------------------------------------------------------------
 (* Type Invariant *)
@@ -64,6 +65,8 @@ TypeOK ==
     /\ deliveryHistory \in [DOMAIN deliveryHistory ->
             Seq([count: Nat, handle: Nat])]
     /\ DOMAIN deliveryHistory \subseteq 1..MaxMessages
+    /\ replyTo \in [DOMAIN replyTo -> {"r1", "r2", NULL}]
+    /\ DOMAIN replyTo \subseteq 1..MaxMessages
 
 -----------------------------------------------------------------------------
 (* Initial State *)
@@ -80,6 +83,7 @@ Init ==
     /\ consumerState = [c \in 1..NumConsumers |-> [holding |-> NULL, handle |-> 0]]
     /\ deliveryCounts = [m \in {} |-> 0]
     /\ deliveryHistory = [m \in {} |-> <<>>]
+    /\ replyTo = [m \in {} |-> NULL]
 
 -----------------------------------------------------------------------------
 (* Helper Operators *)
@@ -99,32 +103,17 @@ UpdateFunc(f, k, v) ==
 -----------------------------------------------------------------------------
 (* Actions *)
 
-(* Send: Add a new message to the pending queue (immediate visibility) *)
-Send(body) ==
+(* Send: Add a new message to the pending queue with optional reply_to *)
+Send(body, replyDest) ==
     /\ nextMsgId <= MaxMessages
     /\ LET msgId == nextMsgId
        IN /\ pending' = Append(pending, msgId)
           /\ data' = UpdateFunc(data, msgId, body)
           /\ deliveryCounts' = UpdateFunc(deliveryCounts, msgId, 0)
           /\ deliveryHistory' = UpdateFunc(deliveryHistory, msgId, <<>>)
+          /\ replyTo' = UpdateFunc(replyTo, msgId, replyDest)
           /\ nextMsgId' = nextMsgId + 1
     /\ UNCHANGED <<invisible, handles, deleted, now, nextHandle, consumerState>>
-
-(* SendDelayed: Add a new message with delayed visibility.
- * Message goes directly to invisible set with future expiry.
- * This matches Python's send(delay_seconds > 0) behavior.
- *)
-SendDelayed(body, delay) ==
-    /\ nextMsgId <= MaxMessages
-    /\ delay > 0
-    /\ LET msgId == nextMsgId
-           expiry == now + delay
-       IN /\ invisible' = UpdateFunc(invisible, msgId, [expiresAt |-> expiry, handle |-> 0])
-          /\ data' = UpdateFunc(data, msgId, body)
-          /\ deliveryCounts' = UpdateFunc(deliveryCounts, msgId, 0)
-          /\ deliveryHistory' = UpdateFunc(deliveryHistory, msgId, <<>>)
-          /\ nextMsgId' = nextMsgId + 1
-    /\ UNCHANGED <<pending, handles, deleted, now, nextHandle, consumerState>>
 
 (* Receive: Atomically move message from pending to invisible *)
 Receive(consumer) ==
@@ -144,7 +133,7 @@ Receive(consumer) ==
           /\ nextHandle' = nextHandle + 1
           /\ consumerState' = [consumerState EXCEPT
                 ![consumer] = [holding |-> msgId, handle |-> newHandle]]
-    /\ UNCHANGED <<data, deleted, now, nextMsgId>>
+    /\ UNCHANGED <<data, deleted, now, nextMsgId, replyTo>>
 
 (* Acknowledge: Successfully complete message processing *)
 Acknowledge(consumer) ==
@@ -158,6 +147,7 @@ Acknowledge(consumer) ==
           /\ data' = RemoveKey(data, msgId)
           /\ handles' = RemoveKey(handles, msgId)
           /\ deliveryCounts' = RemoveKey(deliveryCounts, msgId)
+          /\ replyTo' = RemoveKey(replyTo, msgId)
           /\ deleted' = deleted \cup {msgId}
           /\ consumerState' = [consumerState EXCEPT
                 ![consumer] = [holding |-> NULL, handle |-> 0]]
@@ -174,7 +164,7 @@ AcknowledgeFail(consumer) ==
     /\ consumerState' = [consumerState EXCEPT
             ![consumer] = [holding |-> NULL, handle |-> 0]]
     /\ UNCHANGED <<pending, invisible, data, handles, deleted, now,
-                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory>>
+                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory, replyTo>>
 
 (* Nack: Return message to queue with optional delay *)
 Nack(consumer, newTimeout) ==
@@ -198,7 +188,7 @@ Nack(consumer, newTimeout) ==
           /\ consumerState' = [consumerState EXCEPT
                 ![consumer] = [holding |-> NULL, handle |-> 0]]
     /\ UNCHANGED <<data, deleted, now, nextMsgId, nextHandle,
-                   deliveryCounts, deliveryHistory>>
+                   deliveryCounts, deliveryHistory, replyTo>>
 
 (* NackFail: Nack fails if handle is stale *)
 NackFail(consumer) ==
@@ -211,7 +201,7 @@ NackFail(consumer) ==
     /\ consumerState' = [consumerState EXCEPT
             ![consumer] = [holding |-> NULL, handle |-> 0]]
     /\ UNCHANGED <<pending, invisible, data, handles, deleted, now,
-                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory>>
+                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory, replyTo>>
 
 (* Extend: Extend visibility timeout for a message *)
 Extend(consumer, newTimeout) ==
@@ -226,7 +216,7 @@ Extend(consumer, newTimeout) ==
                 ![msgId].expiresAt = now + newTimeout]
     \* Handle and consumer state remain valid
     /\ UNCHANGED <<pending, data, handles, deleted, now, nextMsgId,
-                   nextHandle, consumerState, deliveryCounts, deliveryHistory>>
+                   nextHandle, consumerState, deliveryCounts, deliveryHistory, replyTo>>
 
 (* ExtendFail: Extend fails if handle is stale or message not in invisible *)
 ExtendFail(consumer) ==
@@ -239,7 +229,7 @@ ExtendFail(consumer) ==
     /\ consumerState' = [consumerState EXCEPT
             ![consumer] = [holding |-> NULL, handle |-> 0]]
     /\ UNCHANGED <<pending, invisible, data, handles, deleted, now,
-                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory>>
+                   nextMsgId, nextHandle, deliveryCounts, deliveryHistory, replyTo>>
 
 (* ReapOne: Move one expired message back to pending *)
 ReapOne ==
@@ -254,22 +244,21 @@ ReapOne ==
             IF consumerState[c].holding = msgId
             THEN [holding |-> NULL, handle |-> 0]
             ELSE consumerState[c]]
-    \* deliveryCounts persists - this is critical for INV-4
+    \* deliveryCounts and replyTo persist - this is critical for INV-4
     /\ UNCHANGED <<data, deleted, now, nextMsgId, nextHandle,
-                   deliveryCounts, deliveryHistory>>
+                   deliveryCounts, deliveryHistory, replyTo>>
 
 (* Tick: Advance abstract time *)
 Tick ==
     /\ now' = now + 1
     /\ UNCHANGED <<pending, invisible, data, handles, deleted, nextMsgId,
-                   nextHandle, consumerState, deliveryCounts, deliveryHistory>>
+                   nextHandle, consumerState, deliveryCounts, deliveryHistory, replyTo>>
 
 -----------------------------------------------------------------------------
 (* Next State Relation *)
 
 Next ==
-    \/ \E body \in {"a", "b", "c"}: Send(body)
-    \/ \E body \in {"a", "b", "c"}, d \in 1..VisibilityTimeout: SendDelayed(body, d)
+    \/ \E body \in {"a", "b", "c"}, r \in {"r1", "r2", NULL}: Send(body, r)
     \/ \E c \in 1..NumConsumers: Receive(c)
     \/ \E c \in 1..NumConsumers: Acknowledge(c)
     \/ \E c \in 1..NumConsumers: AcknowledgeFail(c)
@@ -341,6 +330,13 @@ HandleUniqueness ==
         IN \A i, j \in 1..Len(history):
             i /= j => history[i].handle /= history[j].handle
 
+(* INV-8: ReplyTo Preservation
+ * Reply-to persists across redeliveries until acknowledged
+ *)
+ReplyToPreservation ==
+    \A msgId \in DOMAIN data:
+        msgId \in DOMAIN replyTo
+
 (* Combined Type Invariant for model checking *)
 Invariant ==
     /\ MessageStateExclusive
@@ -349,6 +345,7 @@ Invariant ==
     /\ DeliveryCountPersistence
     /\ NoMessageLoss
     /\ HandleUniqueness
+    /\ ReplyToPreservation
 
 -----------------------------------------------------------------------------
 (* Liveness Properties *)

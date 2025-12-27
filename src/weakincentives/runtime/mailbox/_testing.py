@@ -14,20 +14,22 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import uuid4
 
 from ._types import (
+    Mailbox,
     MailboxError,
     Message,
     ReceiptHandleExpiredError,
+    ReplyMailboxUnavailableError,
 )
 
 
 @dataclass(slots=True)
-class NullMailbox[T]:
+class NullMailbox[T, R]:
     """Mailbox that drops all messages on send and returns empty on receive.
 
     Useful for tests where you need a Mailbox interface but don't care
@@ -35,7 +37,7 @@ class NullMailbox[T]:
 
     Example::
 
-        mailbox: Mailbox[Event] = NullMailbox()
+        mailbox: Mailbox[Event, None] = NullMailbox()
         mailbox.send(Event(...))  # Silently dropped
         assert mailbox.receive() == []
         assert mailbox.approximate_count() == 0
@@ -49,9 +51,9 @@ class NullMailbox[T]:
         """Return True if mailbox has been closed."""
         return self._closed
 
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
         """Accept and discard the message."""
-        _ = (self, body, delay_seconds)
+        _ = (self, body, reply_to)
         return str(uuid4())
 
     def receive(
@@ -60,7 +62,7 @@ class NullMailbox[T]:
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Return empty sequence."""
         _ = (self, max_messages, visibility_timeout, wait_time_seconds)
         return []
@@ -81,7 +83,7 @@ class NullMailbox[T]:
 
 
 @dataclass(slots=True)
-class CollectingMailbox[T]:
+class CollectingMailbox[T, R]:
     """Mailbox that stores all sent messages for inspection.
 
     Useful for asserting what was sent without processing semantics.
@@ -89,7 +91,7 @@ class CollectingMailbox[T]:
 
     Example::
 
-        mailbox: CollectingMailbox[Event] = CollectingMailbox()
+        mailbox: CollectingMailbox[Event, None] = CollectingMailbox()
         mailbox.send(Event(type="a"))
         mailbox.send(Event(type="b"))
 
@@ -101,11 +103,15 @@ class CollectingMailbox[T]:
     sent: list[T] = field(init=False)
     """List of all sent message bodies in send order."""
 
+    reply_tos: list[str | None] = field(init=False)
+    """List of reply_to values corresponding to sent messages."""
+
     _message_ids: list[str] = field(init=False, repr=False)
     _closed: bool = field(default=False, repr=False, init=False)
 
     def __post_init__(self) -> None:
         self.sent = []
+        self.reply_tos = []
         self._message_ids = []
 
     @property
@@ -113,11 +119,11 @@ class CollectingMailbox[T]:
         """Return True if mailbox has been closed."""
         return self._closed
 
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
         """Store the message body for later inspection."""
-        _ = delay_seconds
         msg_id = str(uuid4())
         self.sent.append(body)
+        self.reply_tos.append(reply_to)
         self._message_ids.append(msg_id)
         return msg_id
 
@@ -127,7 +133,7 @@ class CollectingMailbox[T]:
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Return empty sequence (collecting only, no consumption)."""
         _ = (self, max_messages, visibility_timeout, wait_time_seconds)
         return []
@@ -136,6 +142,7 @@ class CollectingMailbox[T]:
         """Clear all collected messages."""
         count = len(self.sent)
         self.sent.clear()
+        self.reply_tos.clear()
         self._message_ids.clear()
         return count
 
@@ -149,7 +156,7 @@ class CollectingMailbox[T]:
 
 
 @dataclass
-class FakeMailbox[T]:
+class FakeMailbox[T, R]:
     """Full in-memory implementation with controllable behavior for testing edge cases.
 
     Extends InMemoryMailbox semantics with methods to simulate failures
@@ -157,7 +164,7 @@ class FakeMailbox[T]:
 
     Example::
 
-        mailbox: FakeMailbox[Event] = FakeMailbox()
+        mailbox: FakeMailbox[Event, None] = FakeMailbox()
 
         # Simulate receipt handle expiry
         msg = mailbox.receive()[0]
@@ -173,11 +180,18 @@ class FakeMailbox[T]:
 
     name: str = "fake"
 
-    _pending: list[tuple[str, T, datetime, int]] = field(init=False, repr=False)
-    """List of (id, body, enqueued_at, delivery_count) tuples."""
+    reply_resolver: Callable[[str], Mailbox[R, None] | None] | None = None
+    """Function to resolve reply_to identifiers to Mailbox instances."""
 
-    _invisible: dict[str, tuple[str, T, datetime, int]] = field(init=False, repr=False)
-    """Map of receipt_handle -> (id, body, enqueued_at, delivery_count)."""
+    _pending: list[tuple[str, T, datetime, int, str | None]] = field(
+        init=False, repr=False
+    )
+    """List of (id, body, enqueued_at, delivery_count, reply_to) tuples."""
+
+    _invisible: dict[str, tuple[str, T, datetime, int, str | None]] = field(
+        init=False, repr=False
+    )
+    """Map of receipt_handle -> (id, body, enqueued_at, delivery_count, reply_to)."""
 
     _expired_handles: set[str] = field(init=False, repr=False)
     """Handles that have been manually expired."""
@@ -198,14 +212,13 @@ class FakeMailbox[T]:
         """Return True if mailbox has been closed."""
         return self._closed
 
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
         """Enqueue a message."""
-        _ = delay_seconds
         if self._connection_error is not None:
             raise self._connection_error
 
         msg_id = str(uuid4())
-        self._pending.append((msg_id, body, datetime.now(UTC), 0))
+        self._pending.append((msg_id, body, datetime.now(UTC), 0, reply_to))
         return msg_id
 
     def receive(
@@ -214,17 +227,17 @@ class FakeMailbox[T]:
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Receive messages from the queue."""
         _ = (visibility_timeout, wait_time_seconds)
         if self._connection_error is not None:
             raise self._connection_error
 
-        messages: list[Message[T]] = []
+        messages: list[Message[T, R]] = []
         count = min(max_messages, len(self._pending))
 
         for _ in range(count):
-            msg_id, body, enqueued_at, delivery_count = self._pending.pop(0)
+            msg_id, body, enqueued_at, delivery_count, reply_to = self._pending.pop(0)
             receipt_handle = str(uuid4())
             delivery_count += 1
 
@@ -233,6 +246,7 @@ class FakeMailbox[T]:
                 body,
                 enqueued_at,
                 delivery_count,
+                reply_to,
             )
 
             message = Message(
@@ -241,14 +255,31 @@ class FakeMailbox[T]:
                 receipt_handle=receipt_handle,
                 delivery_count=delivery_count,
                 enqueued_at=enqueued_at,
-                attributes={},
+                reply_to=reply_to,
                 _acknowledge_fn=lambda h=receipt_handle: self._acknowledge(h),
                 _nack_fn=lambda t, h=receipt_handle: self._nack(h, t),
                 _extend_fn=lambda t, h=receipt_handle: self._extend(h, t),
+                _reply_mailbox_fn=lambda rt=reply_to: self._resolve_reply_mailbox(rt),
             )
             messages.append(message)
 
         return messages
+
+    def _resolve_reply_mailbox(self, reply_to: str | None) -> Mailbox[R, None]:
+        """Resolve reply_to identifier to a Mailbox."""
+        if reply_to is None:
+            raise ReplyMailboxUnavailableError("No reply_to specified")
+
+        if self.reply_resolver is None:
+            raise ReplyMailboxUnavailableError("No reply resolver configured")
+
+        mailbox = self.reply_resolver(reply_to)
+        if mailbox is None:
+            raise ReplyMailboxUnavailableError(
+                f"Reply resolver returned None for '{reply_to}'"
+            )
+
+        return mailbox
 
     def _acknowledge(self, receipt_handle: str) -> None:
         """Delete message from queue."""
@@ -266,8 +297,10 @@ class FakeMailbox[T]:
         if receipt_handle not in self._invisible:
             raise ReceiptHandleExpiredError(f"Handle '{receipt_handle}' not found")
 
-        msg_id, body, enqueued_at, delivery_count = self._invisible.pop(receipt_handle)
-        self._pending.append((msg_id, body, enqueued_at, delivery_count))
+        msg_id, body, enqueued_at, delivery_count, reply_to = self._invisible.pop(
+            receipt_handle
+        )
+        self._pending.append((msg_id, body, enqueued_at, delivery_count, reply_to))
 
     def _extend(self, receipt_handle: str, timeout: int) -> None:
         """Extend visibility timeout (no-op for fake, just validates handle)."""
@@ -317,7 +350,12 @@ class FakeMailbox[T]:
         self._connection_error = None
 
     def inject_message(
-        self, body: T, *, msg_id: str | None = None, delivery_count: int = 0
+        self,
+        body: T,
+        *,
+        msg_id: str | None = None,
+        delivery_count: int = 0,
+        reply_to: str | None = None,
     ) -> str:
         """Inject a message directly into the pending queue.
 
@@ -327,12 +365,15 @@ class FakeMailbox[T]:
             body: Message body.
             msg_id: Optional specific message ID.
             delivery_count: Initial delivery count.
+            reply_to: Reply-to identifier.
 
         Returns:
             The message ID.
         """
         msg_id = msg_id or str(uuid4())
-        self._pending.append((msg_id, body, datetime.now(UTC), delivery_count))
+        self._pending.append(
+            (msg_id, body, datetime.now(UTC), delivery_count, reply_to)
+        )
         return msg_id
 
     def close(self) -> None:

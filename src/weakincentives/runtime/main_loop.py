@@ -148,16 +148,16 @@ class MainLoop[UserRequestT, OutputT](ABC):
     """
 
     _adapter: ProviderAdapter[OutputT]
-    _requests: Mailbox[MainLoopRequest[UserRequestT]]
-    _responses: Mailbox[MainLoopResult[OutputT]]
+    _requests: Mailbox[MainLoopRequest[UserRequestT], None]
+    _responses: Mailbox[MainLoopResult[OutputT], None]
     _config: MainLoopConfig
 
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        requests: Mailbox[MainLoopRequest[UserRequestT]],
-        responses: Mailbox[MainLoopResult[OutputT]],
+        requests: Mailbox[MainLoopRequest[UserRequestT], None],
+        responses: Mailbox[MainLoopResult[OutputT], None],
         config: MainLoopConfig | None = None,
     ) -> None:
         """Initialize the MainLoop.
@@ -281,7 +281,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 self.finalize(prompt, session)
                 return response, session
 
-    def _handle_message(self, msg: Message[MainLoopRequest[UserRequestT]]) -> None:
+    def _handle_message(
+        self, msg: Message[MainLoopRequest[UserRequestT], None]
+    ) -> None:
         """Process a single message from the requests mailbox."""
         request_event = msg.body
 
@@ -306,7 +308,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
     def _send_and_ack(
         self,
-        msg: Message[MainLoopRequest[UserRequestT]],
+        msg: Message[MainLoopRequest[UserRequestT], None],
         result: MainLoopResult[OutputT],
     ) -> None:
         """Send result and acknowledge message, handling expired handles gracefully."""

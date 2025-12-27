@@ -52,16 +52,16 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
     _loop: MainLoop[InputT, OutputT]
     _evaluator: Callable[[OutputT, ExpectedT], Score]
-    _requests: Mailbox[EvalRequest[InputT, ExpectedT]]
-    _results: Mailbox[EvalResult]
+    _requests: Mailbox[EvalRequest[InputT, ExpectedT], None]
+    _results: Mailbox[EvalResult, None]
 
     def __init__(
         self,
         *,
         loop: MainLoop[InputT, OutputT],
         evaluator: Callable[[OutputT, ExpectedT], Score],
-        requests: Mailbox[EvalRequest[InputT, ExpectedT]],
-        results: Mailbox[EvalResult],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT], None],
+        results: Mailbox[EvalResult, None],
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -114,7 +114,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
     def _send_and_ack(
         self,
-        msg: Message[EvalRequest[InputT, ExpectedT]],
+        msg: Message[EvalRequest[InputT, ExpectedT], None],
         result: EvalResult,
     ) -> None:
         """Send result and acknowledge message, handling failures gracefully.

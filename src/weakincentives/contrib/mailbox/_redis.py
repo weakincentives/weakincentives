@@ -31,17 +31,19 @@ import contextlib
 import json
 import threading
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from weakincentives.runtime.mailbox import (
+    Mailbox,
     MailboxConnectionError,
     MailboxFullError,
     Message,
     ReceiptHandleExpiredError,
+    ReplyMailboxUnavailableError,
     SerializationError,
 )
 from weakincentives.serde import dump, parse
@@ -56,33 +58,22 @@ from weakincentives.serde import dump, parse
 # All scripts use Redis server TIME for visibility calculations to eliminate
 # client clock skew as a correctness factor.
 
-# Helper: compute server time as float seconds
-_LUA_NOW = """
-local t = redis.call('TIME')
-local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-"""
-
 _LUA_SEND = """
--- KEYS: [pending, invisible, data, meta]
--- ARGV: [msg_id, payload, enqueued_at, delay_seconds, max_size]
+-- KEYS: [pending, data, meta]
+-- ARGV: [msg_id, payload, enqueued_at, reply_to, max_size]
 local max_size = tonumber(ARGV[5])
 if max_size and max_size > 0 then
     local pending_n = redis.call('LLEN', KEYS[1])
-    local invisible_n = redis.call('ZCARD', KEYS[2])
-    if (pending_n + invisible_n) >= max_size then
+    if pending_n >= max_size then
         return 0
     end
 end
-redis.call('HSET', KEYS[3], ARGV[1], ARGV[2])
-redis.call('HSET', KEYS[4], ARGV[1] .. ':enqueued', ARGV[3])
-local delay = tonumber(ARGV[4])
-if delay and delay > 0 then
-    local t = redis.call('TIME')
-    local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
-    redis.call('ZADD', KEYS[2], now + delay, ARGV[1])
-else
-    redis.call('LPUSH', KEYS[1], ARGV[1])
+redis.call('HSET', KEYS[2], ARGV[1], ARGV[2])
+redis.call('HSET', KEYS[3], ARGV[1] .. ':enqueued', ARGV[3])
+if ARGV[4] and ARGV[4] ~= '' then
+    redis.call('HSET', KEYS[3], ARGV[1] .. ':reply_to', ARGV[4])
 end
+redis.call('LPUSH', KEYS[1], ARGV[1])
 return 1
 """
 
@@ -99,7 +90,8 @@ redis.call('HSET', KEYS[4], msg_id .. ':handle', ARGV[2])
 local data = redis.call('HGET', KEYS[3], msg_id)
 local count = redis.call('HINCRBY', KEYS[4], msg_id .. ':count', 1)
 local enqueued = redis.call('HGET', KEYS[4], msg_id .. ':enqueued')
-return {msg_id, data, count, enqueued}
+local reply_to = redis.call('HGET', KEYS[4], msg_id .. ':reply_to')
+return {msg_id, data, count, enqueued, reply_to}
 """
 
 _LUA_ACKNOWLEDGE = """
@@ -113,6 +105,7 @@ redis.call('HDEL', KEYS[2], ARGV[1])
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':count')
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':enqueued')
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':handle')
+redis.call('HDEL', KEYS[3], ARGV[1] .. ':reply_to')
 return 1
 """
 
@@ -198,7 +191,7 @@ class _QueueKeys:
 
 
 @dataclass(slots=True)
-class RedisMailbox[T]:
+class RedisMailbox[T, R]:
     """Redis-backed mailbox with SQS-compatible visibility timeout semantics.
 
     Supports both standalone Redis and Redis Cluster deployments. Uses Lua scripts
@@ -212,7 +205,8 @@ class RedisMailbox[T]:
         {queue:name}:data       # HASH - message ID → serialized message body
         {queue:name}:meta       # HASH - message ID:count → delivery count,
                                 #        message ID:enqueued → enqueued timestamp,
-                                #        message ID:handle → current receipt handle suffix
+                                #        message ID:handle → current receipt handle suffix,
+                                #        message ID:reply_to → reply mailbox identifier
 
     Example::
 
@@ -220,18 +214,29 @@ class RedisMailbox[T]:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         client = Redis(host="localhost", port=6379)
-        mailbox: RedisMailbox[MyEvent] = RedisMailbox(
-            name="events",
+
+        # Setup with reply pattern
+        registry: dict[str, RedisMailbox] = {}
+        responses: RedisMailbox[MyResult, None] = RedisMailbox(
+            name="responses",
             client=client,
+        )
+        registry["responses"] = responses
+
+        requests: RedisMailbox[MyRequest, MyResult] = RedisMailbox(
+            name="requests",
+            client=client,
+            reply_resolver=registry.get,
         )
 
         try:
-            mailbox.send(MyEvent(data="hello"))
-            for msg in mailbox.receive(visibility_timeout=60):
-                process(msg.body)
+            requests.send(MyRequest(data="hello"), reply_to="responses")
+            for msg in requests.receive(visibility_timeout=60):
+                result = process(msg.body)
+                msg.reply_mailbox().send(result)
                 msg.acknowledge()
         finally:
-            mailbox.close()
+            requests.close()
     """
 
     name: str
@@ -245,6 +250,9 @@ class RedisMailbox[T]:
 
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited (subject to Redis maxmemory)."""
+
+    reply_resolver: Callable[[str], Mailbox[R, None] | None] | None = None
+    """Function to resolve reply_to identifiers to Mailbox instances."""
 
     reaper_interval: float = 1.0
     """Interval in seconds between visibility reaper runs."""
@@ -331,16 +339,16 @@ class RedisMailbox[T]:
         except Exception as e:
             raise SerializationError(f"Failed to deserialize message body: {e}") from e
 
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
-        """Enqueue a message, optionally delaying visibility.
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
+        """Enqueue a message.
 
         This operation is atomic via Lua script, ensuring no partial state
-        on failure. Uses Redis server TIME for delayed message expiry to
-        eliminate client clock skew issues.
+        on failure.
 
         Args:
             body: Message payload (must be serializable via serde).
-            delay_seconds: Seconds before message becomes visible (0-900).
+            reply_to: Identifier for response mailbox. Workers resolve this
+                via Message.reply_mailbox().
 
         Returns:
             Message ID (unique within this queue).
@@ -357,7 +365,6 @@ class RedisMailbox[T]:
         try:
             keys = [
                 self._keys.pending,
-                self._keys.invisible,
                 self._keys.data,
                 self._keys.meta,
             ]
@@ -365,7 +372,7 @@ class RedisMailbox[T]:
                 msg_id,
                 serialized,
                 enqueued_at,
-                delay_seconds,
+                reply_to or "",
                 self.max_size or 0,
             ]
             result = self._scripts["send"](keys=keys, args=args)
@@ -388,7 +395,7 @@ class RedisMailbox[T]:
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Receive messages from the queue.
 
         Args:
@@ -407,7 +414,7 @@ class RedisMailbox[T]:
             return []
 
         max_messages = min(max(1, max_messages), 10)
-        messages: list[Message[T]] = []
+        messages: list[Message[T, R]] = []
         deadline = time.time() + wait_time_seconds
 
         try:
@@ -431,7 +438,7 @@ class RedisMailbox[T]:
 
     def _receive_one(
         self, visibility_timeout: int, wait_seconds: float
-    ) -> Message[T] | None:
+    ) -> Message[T, R] | None:
         """Attempt to receive a single message.
 
         Uses an atomic Lua script to pop from pending and move to invisible
@@ -463,6 +470,8 @@ class RedisMailbox[T]:
             )
 
             if result is not None:
+                # Result format: [msg_id, data, count, enqueued, reply_to (optional)]
+                result_reply_to_idx = 4
                 msg_id = (
                     result[0].decode("utf-8")
                     if isinstance(result[0], bytes)
@@ -471,6 +480,11 @@ class RedisMailbox[T]:
                 data = result[1]
                 delivery_count = int(result[2])
                 enqueued_raw = result[3]
+                reply_to_raw = (
+                    result[result_reply_to_idx]
+                    if len(result) > result_reply_to_idx
+                    else None
+                )
                 break
 
             # No message available
@@ -496,6 +510,17 @@ class RedisMailbox[T]:
         else:
             enqueued_at = datetime.now(UTC)
 
+        # Parse reply_to
+        reply_to: str | None = None
+        if reply_to_raw:
+            reply_to = (
+                reply_to_raw.decode("utf-8")
+                if isinstance(reply_to_raw, bytes)
+                else str(reply_to_raw)
+            )
+            if reply_to == "":
+                reply_to = None
+
         # Compose receipt handle from msg_id and suffix
         receipt_handle = f"{msg_id}:{receipt_suffix}"
 
@@ -509,7 +534,7 @@ class RedisMailbox[T]:
             receipt_handle=receipt_handle,
             delivery_count=delivery_count,
             enqueued_at=enqueued_at,
-            attributes={},
+            reply_to=reply_to,
             _acknowledge_fn=lambda mid=msg_id, suf=receipt_suffix: self._acknowledge(
                 mid, suf
             ),
@@ -517,7 +542,34 @@ class RedisMailbox[T]:
             _extend_fn=lambda t, mid=msg_id, suf=receipt_suffix: self._extend(
                 mid, suf, t
             ),
+            _reply_mailbox_fn=lambda rt=reply_to: self._resolve_reply_mailbox(rt),
         )
+
+    def _resolve_reply_mailbox(self, reply_to: str | None) -> Mailbox[R, None]:
+        """Resolve reply_to identifier to a Mailbox.
+
+        Args:
+            reply_to: The reply_to identifier from the message.
+
+        Returns:
+            The resolved Mailbox.
+
+        Raises:
+            ReplyMailboxUnavailableError: If resolution fails.
+        """
+        if reply_to is None:
+            raise ReplyMailboxUnavailableError("No reply_to specified")
+
+        if self.reply_resolver is None:
+            raise ReplyMailboxUnavailableError("No reply resolver configured")
+
+        mailbox = self.reply_resolver(reply_to)
+        if mailbox is None:
+            raise ReplyMailboxUnavailableError(
+                f"Reply resolver returned None for '{reply_to}'"
+            )
+
+        return mailbox
 
     def _acknowledge(self, msg_id: str, receipt_suffix: str) -> None:
         """Delete message from queue.
