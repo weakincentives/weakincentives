@@ -77,6 +77,7 @@ from weakincentives.runtime import (
     MainLoopRequest,
     MainLoopResult,
     Session,
+    ShutdownCoordinator,
 )
 from weakincentives.types import SupportsDataclass
 
@@ -394,11 +395,14 @@ class CodeReviewApp:
         )
         print("Type a review prompt to begin. (Type 'exit' to quit.)")
 
+        # Install signal handlers for graceful shutdown
+        coordinator = ShutdownCoordinator.install()
+        coordinator.register(self._loop.shutdown)
+
         # Start background worker thread
         self._worker_thread = threading.Thread(
             target=self._run_worker,
             name="code-review-worker",
-            daemon=True,
         )
         self._worker_thread.start()
         _LOGGER.info("Started background worker thread")
@@ -439,7 +443,13 @@ class CodeReviewApp:
 
     def _cleanup(self) -> None:
         """Clean up resources."""
-        # Close mailboxes first - this signals worker to exit
+        # Gracefully shutdown the loop - completes in-flight work
+        if self._loop.shutdown(timeout=5.0):
+            _LOGGER.info("Worker loop stopped cleanly")
+        else:
+            _LOGGER.warning("Worker loop did not stop within timeout")
+
+        # Close mailboxes
         self._requests.close()
         self._responses.close()
 
