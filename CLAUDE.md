@@ -152,6 +152,7 @@ Consult these specs before modifying related code:
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
+| `specs/SPAN_CONTEXT.md` | Trace context propagation, parent/child spans, baggage, contextvars |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
 | `specs/VERIFICATION.md` | Redis mailbox formal verification, TLA+, property tests |
