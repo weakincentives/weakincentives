@@ -200,15 +200,16 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         self,
         *,
         adapter: ProviderAdapter[ReviewResponse],
-        requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]],
-        responses: InMemoryMailbox[MainLoopResult[ReviewResponse]],
+        requests: InMemoryMailbox[
+            MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+        ],
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
         use_podman: bool = False,
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
     ) -> None:
-        super().__init__(adapter=adapter, requests=requests, responses=responses)
+        super().__init__(adapter=adapter, requests=requests)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = resolve_override_tag(
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV

@@ -15,12 +15,15 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from ...errors import WinkError
+
+if TYPE_CHECKING:
+    pass
 
 
 class MailboxError(WinkError):
@@ -63,13 +66,27 @@ class MailboxConnectionError(MailboxError):
     """
 
 
+class ReplyMailboxUnavailableError(MailboxError):
+    """Cannot resolve reply_to to a Mailbox.
+
+    Raised when Message.reply_mailbox() is called but:
+    - No reply_to was specified when sending
+    - The resolver function returned None
+    - The resolver function raised an exception
+    """
+
+
 @dataclass(frozen=True, slots=True)
-class Message[T]:
+class Message[T, R]:
     """A received message with delivery metadata and lifecycle methods.
 
     Messages are immutable snapshots of delivery state. The lifecycle methods
-    (acknowledge, nack, extend_visibility) operate on the message via the
-    bound callback references stored at receive time.
+    (acknowledge, nack, extend_visibility, reply_mailbox) operate on the message
+    via the bound callback references stored at receive time.
+
+    Type parameters:
+        T: Message body type.
+        R: Reply type (None if no replies expected).
     """
 
     id: str
@@ -89,8 +106,8 @@ class Message[T]:
     enqueued_at: datetime
     """Timestamp when message was originally sent (UTC)."""
 
-    attributes: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
-    """Backend-specific message attributes (e.g., SQS MessageAttributes)."""
+    reply_to: str | None = None
+    """Identifier for response mailbox. Workers resolve this via reply_mailbox()."""
 
     _acknowledge_fn: Callable[[], None] = field(
         default=lambda: None, repr=False, compare=False
@@ -106,6 +123,15 @@ class Message[T]:
         default=lambda _: None, repr=False, compare=False
     )
     """Internal callback for extend_visibility operation."""
+
+    _reply_mailbox_fn: Callable[[], Mailbox[R, None]] = field(
+        default=lambda: (_ for _ in ()).throw(
+            ReplyMailboxUnavailableError("No reply resolver configured")
+        ),
+        repr=False,
+        compare=False,
+    )
+    """Internal callback for reply_mailbox operation."""
 
     def acknowledge(self) -> None:
         """Delete the message from the queue.
@@ -147,14 +173,29 @@ class Message[T]:
         """
         self._extend_fn(timeout)
 
+    def reply_mailbox(self) -> Mailbox[R, None]:
+        """Resolve reply_to to a Mailbox for sending responses.
+
+        Returns:
+            A Mailbox for sending reply messages.
+
+        Raises:
+            ReplyMailboxUnavailableError: No reply_to specified or resolver failed.
+        """
+        return self._reply_mailbox_fn()
+
 
 @runtime_checkable
-class Mailbox[T](Protocol):
+class Mailbox[T, R](Protocol):
     """Point-to-point message queue with visibility timeout semantics.
 
     Mailbox provides SQS-compatible semantics for durable, at-least-once
     message delivery. Messages are invisible to other consumers after receive
     until acknowledged, nacked, or visibility times out.
+
+    Type parameters:
+        T: Message body type.
+        R: Reply type (None if no replies expected).
     """
 
     @property
@@ -164,12 +205,13 @@ class Mailbox[T](Protocol):
         ...
 
     @abstractmethod
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
-        """Enqueue a message, optionally delaying visibility.
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
+        """Enqueue a message.
 
         Args:
             body: Message payload (must be serializable).
-            delay_seconds: Seconds before message becomes visible (0-900).
+            reply_to: Identifier for response mailbox. Workers resolve this
+                via Message.reply_mailbox().
 
         Returns:
             Message ID (unique within this queue).
@@ -187,7 +229,7 @@ class Mailbox[T](Protocol):
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Receive messages from the queue.
 
         Received messages become invisible to other consumers for
@@ -247,5 +289,6 @@ __all__ = [
     "MailboxFullError",
     "Message",
     "ReceiptHandleExpiredError",
+    "ReplyMailboxUnavailableError",
     "SerializationError",
 ]

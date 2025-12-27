@@ -101,10 +101,9 @@ class MathSolverLoop(MainLoop[MathProblem, MathAnswer]):
         self,
         *,
         adapter: OpenAIAdapter[MathAnswer],
-        requests: InMemoryMailbox[object],
-        responses: InMemoryMailbox[object],
+        requests: InMemoryMailbox[object, object],
     ) -> None:
-        super().__init__(adapter=adapter, requests=requests, responses=responses)  # type: ignore[arg-type]
+        super().__init__(adapter=adapter, requests=requests)  # type: ignore[arg-type]
 
         # Create persistent session for the loop
         self._session = Session(tags={"loop": "math-solver"})
@@ -264,25 +263,27 @@ def adapter(openai_model: str) -> OpenAIAdapter[MathAnswer]:
 
 def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
     """Test a single math problem evaluation."""
-    requests: InMemoryMailbox[EvalRequest[MathProblem, str]] = InMemoryMailbox(
-        name="eval-requests"
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[MathProblem, str], EvalResult] = (
+        InMemoryMailbox(
+            name="eval-requests",
+            reply_resolver=lambda name: results if name == "results" else None,
+        )
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
-    dummy_requests: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-requests")
-    dummy_responses: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-responses")
+    dummy_requests: InMemoryMailbox[object, object] = InMemoryMailbox(
+        name="dummy-requests"
+    )
 
     try:
         main_loop = MathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
-            responses=dummy_responses,
         )
 
         eval_loop: EvalLoop[MathProblem, MathAnswer, str] = EvalLoop(
             loop=main_loop,
             evaluator=_math_evaluator,
             requests=requests,
-            results=results,
         )
 
         # Single sample: 2 + 2 = 4
@@ -291,7 +292,7 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
             input=MathProblem(question="What is 2 + 2?"),
             expected="4",
         )
-        _ = requests.send(EvalRequest(sample=sample))
+        _ = requests.send(EvalRequest(sample=sample), reply_to="results")
 
         eval_loop.run(max_iterations=1)
 
@@ -307,35 +308,36 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
         requests.close()
         results.close()
         dummy_requests.close()
-        dummy_responses.close()
 
 
 def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
     """Test the full math dataset evaluation."""
-    requests: InMemoryMailbox[EvalRequest[MathProblem, str]] = InMemoryMailbox(
-        name="eval-requests"
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[MathProblem, str], EvalResult] = (
+        InMemoryMailbox(
+            name="eval-requests",
+            reply_resolver=lambda name: results if name == "results" else None,
+        )
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
-    dummy_requests: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-requests")
-    dummy_responses: InMemoryMailbox[object] = InMemoryMailbox(name="dummy-responses")
+    dummy_requests: InMemoryMailbox[object, object] = InMemoryMailbox(
+        name="dummy-requests"
+    )
 
     try:
         main_loop = MathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
-            responses=dummy_responses,
         )
 
         eval_loop: EvalLoop[MathProblem, MathAnswer, str] = EvalLoop(
             loop=main_loop,
             evaluator=_math_evaluator,
             requests=requests,
-            results=results,
         )
 
-        # Create and submit the full dataset
+        # Create and submit the full dataset with reply_to
         dataset = _create_math_dataset()
-        submit_dataset(dataset, requests)
+        submit_dataset(dataset, requests, reply_to="results")
 
         # Run evaluations (10 samples, give some headroom for iterations)
         eval_loop.run(max_iterations=15)
@@ -370,4 +372,3 @@ def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
         requests.close()
         results.close()
         dummy_requests.close()
-        dummy_responses.close()

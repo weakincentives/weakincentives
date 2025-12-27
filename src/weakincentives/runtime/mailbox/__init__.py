@@ -33,15 +33,27 @@ Example::
 
     from weakincentives.runtime.mailbox import InMemoryMailbox, Message
 
-    mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="tasks")
+    # Setup with reply pattern
+    registry: dict[str, InMemoryMailbox] = {}
+    responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
+    registry["responses"] = responses
 
-    # Send a message
-    msg_id = mailbox.send("process this")
+    requests: InMemoryMailbox[str, str] = InMemoryMailbox(
+        name="requests",
+        reply_resolver=registry.get,
+    )
 
-    # Receive and process
-    for msg in mailbox.receive(visibility_timeout=60):
+    # Send a request with reply_to
+    requests.send("process this", reply_to="responses")
+
+    # Receive and process with reply
+    for msg in requests.receive(visibility_timeout=60):
         try:
-            do_work(msg.body)
+            result = do_work(msg.body)
+            msg.reply_mailbox().send(result)
+            msg.acknowledge()
+        except ReplyMailboxUnavailableError:
+            # No reply_to specified, just process
             msg.acknowledge()
         except Exception:
             msg.nack(visibility_timeout=30)  # Retry after 30s
@@ -60,6 +72,7 @@ from ._types import (
     MailboxFullError,
     Message,
     ReceiptHandleExpiredError,
+    ReplyMailboxUnavailableError,
     SerializationError,
 )
 
@@ -74,9 +87,6 @@ __all__ = [
     "Message",
     "NullMailbox",
     "ReceiptHandleExpiredError",
+    "ReplyMailboxUnavailableError",
     "SerializationError",
 ]
-
-
-def __dir__() -> list[str]:
-    return sorted({*globals().keys(), *__all__})  # pragma: no cover - convenience shim

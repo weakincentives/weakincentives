@@ -22,10 +22,22 @@ Example::
     from weakincentives.contrib.mailbox import RedisMailbox
 
     client = Redis(host="localhost", port=6379)
-    mailbox: RedisMailbox[MyEvent] = RedisMailbox(
-        name="events",
+
+    # Setup with reply pattern
+    registry: dict[str, RedisMailbox] = {}
+    responses: RedisMailbox[MyResult, None] = RedisMailbox(
+        name="responses",
         client=client,
     )
+    registry["responses"] = responses
+
+    requests: RedisMailbox[MyRequest, MyResult] = RedisMailbox(
+        name="requests",
+        client=client,
+        reply_resolver=registry.get,
+    )
+
+    requests.send(MyRequest(data="hello"), reply_to="responses")
 """
 
 from __future__ import annotations

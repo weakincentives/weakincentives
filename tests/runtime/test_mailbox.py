@@ -31,6 +31,7 @@ from weakincentives.runtime.mailbox import (
     Message,
     NullMailbox,
     ReceiptHandleExpiredError,
+    ReplyMailboxUnavailableError,
 )
 
 
@@ -41,6 +42,13 @@ class _Event:
     data: str
 
 
+@dataclass(slots=True, frozen=True)
+class _Result:
+    """Sample result type for testing."""
+
+    status: str
+
+
 # =============================================================================
 # Message Tests
 # =============================================================================
@@ -48,7 +56,7 @@ class _Event:
 
 def test_message_is_frozen() -> None:
     """Message instances are immutable."""
-    msg: Message[str] = Message(
+    msg: Message[str, None] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
@@ -65,7 +73,7 @@ def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
     nack_called = []
     extend_called = []
 
-    msg: Message[str] = Message(
+    msg: Message[str, None] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
@@ -86,6 +94,34 @@ def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
     assert extend_called == [60]
 
 
+def test_message_reply_mailbox_raises_without_resolver() -> None:
+    """reply_mailbox() raises ReplyMailboxUnavailableError without resolver."""
+    msg: Message[str, str] = Message(
+        id="msg-1",
+        body="hello",
+        receipt_handle="handle-1",
+        delivery_count=1,
+        enqueued_at=time.time(),  # type: ignore[arg-type]
+        reply_to="responses",
+    )
+
+    with pytest.raises(ReplyMailboxUnavailableError, match="No reply resolver"):
+        msg.reply_mailbox()
+
+
+def test_message_reply_to_field() -> None:
+    """Message has reply_to field."""
+    msg: Message[str, None] = Message(
+        id="msg-1",
+        body="hello",
+        receipt_handle="handle-1",
+        delivery_count=1,
+        enqueued_at=time.time(),  # type: ignore[arg-type]
+        reply_to="my-response-queue",
+    )
+    assert msg.reply_to == "my-response-queue"
+
+
 # =============================================================================
 # InMemoryMailbox Tests
 # =============================================================================
@@ -96,7 +132,7 @@ class TestInMemoryMailbox:
 
     def test_send_returns_message_id(self) -> None:
         """send() returns a unique message ID."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             msg_id = mailbox.send("hello")
             assert isinstance(msg_id, str)
@@ -106,7 +142,7 @@ class TestInMemoryMailbox:
 
     def test_send_and_receive_basic(self) -> None:
         """Basic send and receive workflow."""
-        mailbox: InMemoryMailbox[_Event] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[_Event, None] = InMemoryMailbox(name="test")
         try:
             event = _Event(data="test-data")
             mailbox.send(event)
@@ -118,9 +154,19 @@ class TestInMemoryMailbox:
         finally:
             mailbox.close()
 
+    def test_send_with_reply_to(self) -> None:
+        """send() accepts reply_to parameter."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            mailbox.send("hello", reply_to="response-queue")
+            messages = mailbox.receive(max_messages=1)
+            assert messages[0].reply_to == "response-queue"
+        finally:
+            mailbox.close()
+
     def test_receive_empty_queue(self) -> None:
         """receive() returns empty list when queue is empty."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             messages = mailbox.receive(max_messages=1)
             assert messages == []
@@ -129,7 +175,7 @@ class TestInMemoryMailbox:
 
     def test_receive_max_messages(self) -> None:
         """receive() respects max_messages limit."""
-        mailbox: InMemoryMailbox[int] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
         try:
             for i in range(5):
                 mailbox.send(i)
@@ -142,7 +188,7 @@ class TestInMemoryMailbox:
 
     def test_receive_fifo_order(self) -> None:
         """Messages are received in FIFO order."""
-        mailbox: InMemoryMailbox[int] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
         try:
             for i in range(3):
                 mailbox.send(i)
@@ -154,7 +200,7 @@ class TestInMemoryMailbox:
 
     def test_acknowledge_removes_message(self) -> None:
         """acknowledge() removes message from queue."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -167,7 +213,7 @@ class TestInMemoryMailbox:
 
     def test_acknowledge_expired_handle_raises(self) -> None:
         """acknowledge() raises ReceiptHandleExpiredError for invalid handle."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -180,7 +226,7 @@ class TestInMemoryMailbox:
 
     def test_nack_returns_message_to_queue(self) -> None:
         """nack() returns message to queue for redelivery."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -196,7 +242,7 @@ class TestInMemoryMailbox:
 
     def test_nack_expired_handle_raises(self) -> None:
         """nack() raises ReceiptHandleExpiredError for invalid handle."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -209,7 +255,7 @@ class TestInMemoryMailbox:
 
     def test_extend_visibility_expired_handle_raises(self) -> None:
         """extend_visibility() raises ReceiptHandleExpiredError for invalid handle."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -222,7 +268,7 @@ class TestInMemoryMailbox:
 
     def test_visibility_timeout_requeues_message(self) -> None:
         """Message is requeued after visibility timeout expires."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1, visibility_timeout=1)
@@ -241,7 +287,7 @@ class TestInMemoryMailbox:
 
     def test_purge_removes_all_messages(self) -> None:
         """purge() removes all messages from queue."""
-        mailbox: InMemoryMailbox[int] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
         try:
             for i in range(5):
                 mailbox.send(i)
@@ -254,7 +300,7 @@ class TestInMemoryMailbox:
 
     def test_approximate_count(self) -> None:
         """approximate_count() returns correct message count."""
-        mailbox: InMemoryMailbox[int] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
         try:
             assert mailbox.approximate_count() == 0
 
@@ -269,7 +315,7 @@ class TestInMemoryMailbox:
 
     def test_max_size_enforced(self) -> None:
         """MailboxFullError raised when max_size exceeded."""
-        mailbox: InMemoryMailbox[int] = InMemoryMailbox(name="test", max_size=2)
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test", max_size=2)
         try:
             mailbox.send(1)
             mailbox.send(2)
@@ -279,28 +325,9 @@ class TestInMemoryMailbox:
         finally:
             mailbox.close()
 
-    def test_delay_seconds(self) -> None:
-        """delay_seconds delays message visibility."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
-        try:
-            mailbox.send("delayed", delay_seconds=1)
-
-            # Message should not be visible immediately
-            messages = mailbox.receive(max_messages=1)
-            assert len(messages) == 0
-
-            # Wait for delay to expire
-            time.sleep(1.2)
-
-            messages = mailbox.receive(max_messages=1)
-            assert len(messages) == 1
-            assert messages[0].body == "delayed"
-        finally:
-            mailbox.close()
-
     def test_long_poll_wait_time(self) -> None:
         """wait_time_seconds blocks until message arrives."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
 
             def sender() -> None:
@@ -324,7 +351,7 @@ class TestInMemoryMailbox:
 
     def test_long_poll_timeout(self) -> None:
         """wait_time_seconds returns empty on timeout."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             start = time.monotonic()
             messages = mailbox.receive(max_messages=1, wait_time_seconds=0.2)
@@ -337,7 +364,7 @@ class TestInMemoryMailbox:
 
     def test_thread_safety(self) -> None:
         """Mailbox is thread-safe for concurrent access."""
-        mailbox: InMemoryMailbox[int] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
         try:
             num_messages = 100
             num_threads = 4
@@ -386,13 +413,125 @@ class TestInMemoryMailbox:
 
     def test_message_enqueued_at(self) -> None:
         """Message enqueued_at is set correctly."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
             assert messages[0].enqueued_at.tzinfo == UTC
         finally:
             mailbox.close()
+
+
+# =============================================================================
+# Reply Pattern Tests
+# =============================================================================
+
+
+class TestReplyPattern:
+    """Tests for the reply pattern."""
+
+    def test_reply_mailbox_resolution(self) -> None:
+        """reply_mailbox() resolves to configured mailbox."""
+        registry: dict[str, InMemoryMailbox[_Result, None]] = {}
+        responses: InMemoryMailbox[_Result, None] = InMemoryMailbox(name="responses")
+        registry["responses"] = responses
+
+        requests: InMemoryMailbox[_Event, _Result] = InMemoryMailbox(
+            name="requests",
+            reply_resolver=registry.get,
+        )
+        try:
+            requests.send(_Event(data="test"), reply_to="responses")
+            messages = requests.receive(max_messages=1)
+            assert len(messages) == 1
+
+            reply_mb = messages[0].reply_mailbox()
+            assert reply_mb is responses
+
+            messages[0].acknowledge()
+        finally:
+            requests.close()
+            responses.close()
+
+    def test_reply_mailbox_send_response(self) -> None:
+        """Worker can send response via reply_mailbox()."""
+        registry: dict[str, InMemoryMailbox[_Result, None]] = {}
+        responses: InMemoryMailbox[_Result, None] = InMemoryMailbox(name="responses")
+        registry["responses"] = responses
+
+        requests: InMemoryMailbox[_Event, _Result] = InMemoryMailbox(
+            name="requests",
+            reply_resolver=registry.get,
+        )
+        try:
+            # Client sends request
+            requests.send(_Event(data="test"), reply_to="responses")
+
+            # Worker processes and responds
+            messages = requests.receive(max_messages=1)
+            messages[0].reply_mailbox().send(_Result(status="ok"))
+            messages[0].acknowledge()
+
+            # Client receives response
+            response_msgs = responses.receive(max_messages=1)
+            assert len(response_msgs) == 1
+            assert response_msgs[0].body.status == "ok"
+            response_msgs[0].acknowledge()
+        finally:
+            requests.close()
+            responses.close()
+
+    def test_reply_mailbox_no_reply_to_raises(self) -> None:
+        """reply_mailbox() raises when no reply_to specified."""
+        registry: dict[str, InMemoryMailbox[_Result, None]] = {}
+
+        requests: InMemoryMailbox[_Event, _Result] = InMemoryMailbox(
+            name="requests",
+            reply_resolver=registry.get,
+        )
+        try:
+            requests.send(_Event(data="test"))  # No reply_to
+            messages = requests.receive(max_messages=1)
+
+            with pytest.raises(ReplyMailboxUnavailableError, match="No reply_to"):
+                messages[0].reply_mailbox()
+
+            messages[0].acknowledge()
+        finally:
+            requests.close()
+
+    def test_reply_mailbox_no_resolver_raises(self) -> None:
+        """reply_mailbox() raises when no resolver configured."""
+        requests: InMemoryMailbox[_Event, _Result] = InMemoryMailbox(name="requests")
+        try:
+            requests.send(_Event(data="test"), reply_to="responses")
+            messages = requests.receive(max_messages=1)
+
+            with pytest.raises(ReplyMailboxUnavailableError, match="No reply resolver"):
+                messages[0].reply_mailbox()
+
+            messages[0].acknowledge()
+        finally:
+            requests.close()
+
+    def test_reply_mailbox_resolver_returns_none_raises(self) -> None:
+        """reply_mailbox() raises when resolver returns None."""
+        registry: dict[str, InMemoryMailbox[_Result, None]] = {}
+
+        requests: InMemoryMailbox[_Event, _Result] = InMemoryMailbox(
+            name="requests",
+            reply_resolver=registry.get,
+        )
+        try:
+            requests.send(_Event(data="test"), reply_to="unknown")
+            messages = requests.receive(max_messages=1)
+
+            with pytest.raises(ReplyMailboxUnavailableError, match="returned None"):
+                messages[0].reply_mailbox()
+
+            messages[0].acknowledge()
+        finally:
+            requests.close()
 
 
 # =============================================================================
@@ -405,27 +544,33 @@ class TestNullMailbox:
 
     def test_send_returns_id(self) -> None:
         """send() returns a message ID even though message is dropped."""
-        mailbox: NullMailbox[str] = NullMailbox()
+        mailbox: NullMailbox[str, None] = NullMailbox()
         msg_id = mailbox.send("hello")
         assert isinstance(msg_id, str)
         assert len(msg_id) > 0
 
+    def test_send_with_reply_to(self) -> None:
+        """send() accepts reply_to parameter."""
+        mailbox: NullMailbox[str, None] = NullMailbox()
+        msg_id = mailbox.send("hello", reply_to="responses")
+        assert isinstance(msg_id, str)
+
     def test_receive_always_empty(self) -> None:
         """receive() always returns empty list."""
-        mailbox: NullMailbox[str] = NullMailbox()
+        mailbox: NullMailbox[str, None] = NullMailbox()
         mailbox.send("hello")
         mailbox.send("world")
         assert mailbox.receive(max_messages=10) == []
 
     def test_purge_returns_zero(self) -> None:
         """purge() returns zero (nothing to purge)."""
-        mailbox: NullMailbox[str] = NullMailbox()
+        mailbox: NullMailbox[str, None] = NullMailbox()
         mailbox.send("hello")
         assert mailbox.purge() == 0
 
     def test_approximate_count_zero(self) -> None:
         """approximate_count() always returns zero."""
-        mailbox: NullMailbox[str] = NullMailbox()
+        mailbox: NullMailbox[str, None] = NullMailbox()
         mailbox.send("hello")
         assert mailbox.approximate_count() == 0
 
@@ -440,7 +585,7 @@ class TestCollectingMailbox:
 
     def test_send_collects_messages(self) -> None:
         """send() stores messages in sent list."""
-        mailbox: CollectingMailbox[_Event] = CollectingMailbox()
+        mailbox: CollectingMailbox[_Event, None] = CollectingMailbox()
         event1 = _Event(data="first")
         event2 = _Event(data="second")
         mailbox.send(event1)
@@ -450,25 +595,35 @@ class TestCollectingMailbox:
         assert mailbox.sent[0] == event1
         assert mailbox.sent[1] == event2
 
+    def test_send_collects_reply_tos(self) -> None:
+        """send() stores reply_to values."""
+        mailbox: CollectingMailbox[str, None] = CollectingMailbox()
+        mailbox.send("msg1", reply_to="queue1")
+        mailbox.send("msg2", reply_to="queue2")
+        mailbox.send("msg3")  # No reply_to
+
+        assert mailbox.reply_tos == ["queue1", "queue2", None]
+
     def test_receive_always_empty(self) -> None:
         """receive() returns empty (collecting only)."""
-        mailbox: CollectingMailbox[str] = CollectingMailbox()
+        mailbox: CollectingMailbox[str, None] = CollectingMailbox()
         mailbox.send("hello")
         assert mailbox.receive(max_messages=10) == []
 
     def test_purge_clears_collected(self) -> None:
         """purge() clears all collected messages."""
-        mailbox: CollectingMailbox[str] = CollectingMailbox()
-        mailbox.send("hello")
-        mailbox.send("world")
+        mailbox: CollectingMailbox[str, None] = CollectingMailbox()
+        mailbox.send("hello", reply_to="q1")
+        mailbox.send("world", reply_to="q2")
 
         count = mailbox.purge()
         assert count == 2
         assert mailbox.sent == []
+        assert mailbox.reply_tos == []
 
     def test_approximate_count(self) -> None:
         """approximate_count() returns number of collected messages."""
-        mailbox: CollectingMailbox[str] = CollectingMailbox()
+        mailbox: CollectingMailbox[str, None] = CollectingMailbox()
         assert mailbox.approximate_count() == 0
         mailbox.send("hello")
         assert mailbox.approximate_count() == 1
@@ -479,12 +634,12 @@ class TestCollectingMailbox:
 # =============================================================================
 
 
-class TestFakeMailbox:
+class TestFakeMailbox:  # noqa: PLR0904
     """Tests for FakeMailbox implementation."""
 
     def test_basic_send_receive(self) -> None:
         """Basic send and receive workflow."""
-        mailbox: FakeMailbox[_Event] = FakeMailbox()
+        mailbox: FakeMailbox[_Event, None] = FakeMailbox()
         event = _Event(data="test")
         mailbox.send(event)
 
@@ -493,9 +648,16 @@ class TestFakeMailbox:
         assert messages[0].body == event
         assert messages[0].delivery_count == 1
 
+    def test_send_with_reply_to(self) -> None:
+        """send() stores reply_to."""
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox.send("hello", reply_to="response-queue")
+        messages = mailbox.receive(max_messages=1)
+        assert messages[0].reply_to == "response-queue"
+
     def test_acknowledge(self) -> None:
         """acknowledge() removes message."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].acknowledge()
@@ -504,7 +666,7 @@ class TestFakeMailbox:
 
     def test_nack_requeues(self) -> None:
         """nack() returns message to queue."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].nack(visibility_timeout=0)
@@ -515,7 +677,7 @@ class TestFakeMailbox:
 
     def test_expire_handle(self) -> None:
         """expire_handle() causes ReceiptHandleExpiredError on acknowledge."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
@@ -526,7 +688,7 @@ class TestFakeMailbox:
 
     def test_expire_handle_affects_nack(self) -> None:
         """expire_handle() causes ReceiptHandleExpiredError on nack."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
@@ -537,7 +699,7 @@ class TestFakeMailbox:
 
     def test_expire_handle_affects_extend(self) -> None:
         """expire_handle() causes ReceiptHandleExpiredError on extend_visibility."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
@@ -548,7 +710,7 @@ class TestFakeMailbox:
 
     def test_set_connection_error_affects_send(self) -> None:
         """set_connection_error() causes error on send."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         error = MailboxConnectionError("Redis down")
         mailbox.set_connection_error(error)
 
@@ -557,7 +719,7 @@ class TestFakeMailbox:
 
     def test_set_connection_error_affects_receive(self) -> None:
         """set_connection_error() causes error on receive."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         mailbox.set_connection_error(MailboxConnectionError("Redis down"))
 
@@ -566,7 +728,7 @@ class TestFakeMailbox:
 
     def test_set_connection_error_affects_purge(self) -> None:
         """set_connection_error() causes error on purge."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.set_connection_error(MailboxConnectionError("Redis down"))
 
         with pytest.raises(MailboxConnectionError):
@@ -574,7 +736,7 @@ class TestFakeMailbox:
 
     def test_set_connection_error_affects_count(self) -> None:
         """set_connection_error() causes error on approximate_count."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.set_connection_error(MailboxConnectionError("Redis down"))
 
         with pytest.raises(MailboxConnectionError):
@@ -582,7 +744,7 @@ class TestFakeMailbox:
 
     def test_clear_connection_error(self) -> None:
         """clear_connection_error() removes pending error."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.set_connection_error(MailboxConnectionError("Redis down"))
         mailbox.clear_connection_error()
 
@@ -592,7 +754,7 @@ class TestFakeMailbox:
 
     def test_inject_message(self) -> None:
         """inject_message() adds message directly to queue."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         msg_id = mailbox.inject_message("injected", delivery_count=3)
 
         messages = mailbox.receive(max_messages=1)
@@ -603,15 +765,23 @@ class TestFakeMailbox:
 
     def test_inject_message_with_custom_id(self) -> None:
         """inject_message() respects custom message ID."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.inject_message("test", msg_id="custom-id")
 
         messages = mailbox.receive(max_messages=1)
         assert messages[0].id == "custom-id"
 
+    def test_inject_message_with_reply_to(self) -> None:
+        """inject_message() accepts reply_to."""
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox.inject_message("test", reply_to="response-queue")
+
+        messages = mailbox.receive(max_messages=1)
+        assert messages[0].reply_to == "response-queue"
+
     def test_acknowledge_unknown_handle_raises(self) -> None:
         """acknowledge() raises for unknown (not expired) handle."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].acknowledge()  # First acknowledge succeeds
@@ -622,7 +792,7 @@ class TestFakeMailbox:
 
     def test_nack_unknown_handle_raises(self) -> None:
         """nack() raises for unknown (not expired) handle."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].acknowledge()  # Remove from invisible
@@ -632,7 +802,7 @@ class TestFakeMailbox:
 
     def test_extend_unknown_handle_raises(self) -> None:
         """extend_visibility() raises for unknown (not expired) handle."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].acknowledge()  # Remove from invisible
@@ -642,7 +812,7 @@ class TestFakeMailbox:
 
     def test_extend_visibility_success(self) -> None:
         """extend_visibility() succeeds for valid handle."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
@@ -656,13 +826,65 @@ class TestFakeMailbox:
 
     def test_purge_without_connection_error(self) -> None:
         """purge() works normally without connection error."""
-        mailbox: FakeMailbox[str] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
         mailbox.send("hello")
         mailbox.send("world")
 
         count = mailbox.purge()
         assert count == 2
         assert mailbox.approximate_count() == 0
+
+    def test_reply_mailbox_with_resolver(self) -> None:
+        """reply_mailbox() resolves via configured resolver."""
+        registry: dict[str, FakeMailbox[_Result, None]] = {}
+        responses: FakeMailbox[_Result, None] = FakeMailbox(name="responses")
+        registry["responses"] = responses
+
+        requests: FakeMailbox[_Event, _Result] = FakeMailbox(
+            name="requests",
+            reply_resolver=registry.get,
+        )
+
+        requests.send(_Event(data="test"), reply_to="responses")
+        messages = requests.receive(max_messages=1)
+
+        reply_mb = messages[0].reply_mailbox()
+        assert reply_mb is responses
+
+    def test_reply_mailbox_no_reply_to_raises(self) -> None:
+        """reply_mailbox() raises when no reply_to specified."""
+        requests: FakeMailbox[_Event, _Result] = FakeMailbox(name="requests")
+
+        requests.send(_Event(data="test"))  # No reply_to
+        messages = requests.receive(max_messages=1)
+
+        with pytest.raises(ReplyMailboxUnavailableError, match="No reply_to specified"):
+            messages[0].reply_mailbox()
+
+    def test_reply_mailbox_no_resolver_raises(self) -> None:
+        """reply_mailbox() raises when no resolver configured."""
+        requests: FakeMailbox[_Event, _Result] = FakeMailbox(name="requests")
+
+        requests.send(_Event(data="test"), reply_to="responses")
+        messages = requests.receive(max_messages=1)
+
+        with pytest.raises(ReplyMailboxUnavailableError, match="No reply resolver"):
+            messages[0].reply_mailbox()
+
+    def test_reply_mailbox_resolver_returns_none_raises(self) -> None:
+        """reply_mailbox() raises when resolver returns None."""
+        registry: dict[str, FakeMailbox[_Result, None]] = {}
+
+        requests: FakeMailbox[_Event, _Result] = FakeMailbox(
+            name="requests",
+            reply_resolver=registry.get,
+        )
+
+        requests.send(_Event(data="test"), reply_to="unknown")
+        messages = requests.receive(max_messages=1)
+
+        with pytest.raises(ReplyMailboxUnavailableError, match="returned None"):
+            messages[0].reply_mailbox()
 
 
 # =============================================================================
@@ -675,7 +897,7 @@ class TestInMemoryMailboxCoverage:
 
     def test_extend_visibility_success(self) -> None:
         """extend_visibility() extends timeout for valid handle."""
-        mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1, visibility_timeout=1)
@@ -705,7 +927,7 @@ class TestInMemoryMailboxCoverage:
 
 def test_in_memory_mailbox_is_mailbox() -> None:
     """InMemoryMailbox implements Mailbox protocol."""
-    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
     try:
         assert isinstance(mailbox, Mailbox)
     finally:
@@ -714,19 +936,19 @@ def test_in_memory_mailbox_is_mailbox() -> None:
 
 def test_null_mailbox_is_mailbox() -> None:
     """NullMailbox implements Mailbox protocol."""
-    mailbox: NullMailbox[str] = NullMailbox()
+    mailbox: NullMailbox[str, None] = NullMailbox()
     assert isinstance(mailbox, Mailbox)
 
 
 def test_collecting_mailbox_is_mailbox() -> None:
     """CollectingMailbox implements Mailbox protocol."""
-    mailbox: CollectingMailbox[str] = CollectingMailbox()
+    mailbox: CollectingMailbox[str, None] = CollectingMailbox()
     assert isinstance(mailbox, Mailbox)
 
 
 def test_fake_mailbox_is_mailbox() -> None:
     """FakeMailbox implements Mailbox protocol."""
-    mailbox: FakeMailbox[str] = FakeMailbox()
+    mailbox: FakeMailbox[str, None] = FakeMailbox()
     assert isinstance(mailbox, Mailbox)
 
 
@@ -737,7 +959,7 @@ def test_fake_mailbox_is_mailbox() -> None:
 
 def test_in_memory_mailbox_closed_initially_false() -> None:
     """InMemoryMailbox.closed is False initially."""
-    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
     try:
         assert mailbox.closed is False
     finally:
@@ -746,14 +968,14 @@ def test_in_memory_mailbox_closed_initially_false() -> None:
 
 def test_in_memory_mailbox_closed_after_close() -> None:
     """InMemoryMailbox.closed is True after close()."""
-    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
     mailbox.close()
     assert mailbox.closed is True
 
 
 def test_in_memory_mailbox_receive_returns_empty_when_closed() -> None:
     """InMemoryMailbox.receive() returns empty when closed."""
-    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
     mailbox.send("test")
     mailbox.close()
 
@@ -764,7 +986,7 @@ def test_in_memory_mailbox_receive_returns_empty_when_closed() -> None:
 
 def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
     """InMemoryMailbox.close() wakes receivers blocked on wait."""
-    mailbox: InMemoryMailbox[str] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
     received: list[bool] = []
 
     def receiver() -> None:
@@ -789,38 +1011,38 @@ def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
 
 def test_null_mailbox_closed_initially_false() -> None:
     """NullMailbox.closed is False initially."""
-    mailbox: NullMailbox[str] = NullMailbox()
+    mailbox: NullMailbox[str, None] = NullMailbox()
     assert mailbox.closed is False
 
 
 def test_null_mailbox_closed_after_close() -> None:
     """NullMailbox.closed is True after close()."""
-    mailbox: NullMailbox[str] = NullMailbox()
+    mailbox: NullMailbox[str, None] = NullMailbox()
     mailbox.close()
     assert mailbox.closed is True
 
 
 def test_collecting_mailbox_closed_initially_false() -> None:
     """CollectingMailbox.closed is False initially."""
-    mailbox: CollectingMailbox[str] = CollectingMailbox()
+    mailbox: CollectingMailbox[str, None] = CollectingMailbox()
     assert mailbox.closed is False
 
 
 def test_collecting_mailbox_closed_after_close() -> None:
     """CollectingMailbox.closed is True after close()."""
-    mailbox: CollectingMailbox[str] = CollectingMailbox()
+    mailbox: CollectingMailbox[str, None] = CollectingMailbox()
     mailbox.close()
     assert mailbox.closed is True
 
 
 def test_fake_mailbox_closed_initially_false() -> None:
     """FakeMailbox.closed is False initially."""
-    mailbox: FakeMailbox[str] = FakeMailbox()
+    mailbox: FakeMailbox[str, None] = FakeMailbox()
     assert mailbox.closed is False
 
 
 def test_fake_mailbox_closed_after_close() -> None:
     """FakeMailbox.closed is True after close()."""
-    mailbox: FakeMailbox[str] = FakeMailbox()
+    mailbox: FakeMailbox[str, None] = FakeMailbox()
     mailbox.close()
     assert mailbox.closed is True
