@@ -51,19 +51,16 @@ _TYPING_UNION = _TypingUnion
 
 get_args = typing_get_args
 
+_NOT_HANDLED = object()
+
 
 def _bool_from_str(value: str) -> bool:
     lowered = value.strip().lower()
-    truthy = {"true", "1", "yes", "on"}
-    falsy = {"false", "0", "no", "off"}
-    if lowered in truthy:
+    if lowered in {"true", "1", "yes", "on"}:
         return True
-    if lowered in falsy:
+    if lowered in {"false", "0", "no", "off"}:
         return False
     raise TypeError(f"Cannot interpret '{value}' as boolean")
-
-
-_NOT_HANDLED = object()
 
 
 def _decimal_from_any(value: object) -> object:
@@ -106,15 +103,17 @@ _PRIMITIVE_COERCERS: dict[type[object], Callable[[object], object]] = cast(
 )
 
 
+def _type_name(base_type: object) -> str:
+    return getattr(base_type, "__name__", type(base_type).__name__)
+
+
 def _is_union_type(origin: object) -> bool:
-    """Check if origin is a union type (either types.UnionType or typing.Union)."""
     return origin is _UNION_TYPE or origin is _TYPING_UNION
 
 
 def _is_empty_string_coercible_to_none(
     value: object, base_type: object, config: _ParseConfig
 ) -> bool:
-    """Check if empty string can be coerced to None in an optional union."""
     return (
         config.coerce
         and isinstance(value, str)
@@ -124,7 +123,6 @@ def _is_empty_string_coercible_to_none(
 
 
 def _raise_union_error(last_error: Exception, path: str) -> None:
-    """Raise an appropriately prefixed error from union coercion."""
     message = str(last_error)
     if message.startswith(f"{path}:") or message.startswith(f"{path}."):
         raise last_error
@@ -162,22 +160,6 @@ def _coerce_union(
     raise TypeError(f"{path}: no matching type in Union")
 
 
-def _try_coerce_literal(
-    value: object, literal: object
-) -> tuple[object | None, Exception | None]:
-    """Attempt to coerce value to match a literal. Returns (coerced, error)."""
-    literal_type = type(literal)
-    try:
-        if isinstance(literal, bool) and isinstance(value, str):
-            coerced = _bool_from_str(value)
-        else:
-            coerced = literal_type(value)
-    except (TypeError, ValueError) as error:
-        return None, error
-    else:
-        return coerced, None
-
-
 def _coerce_literal(
     value: object,
     base_type: object,
@@ -189,22 +171,26 @@ def _coerce_literal(
     if origin is not Literal:
         return _NOT_HANDLED
     literals = get_args(base_type)
-    last_literal_error: Exception | None = None
+    last_error: Exception | None = None
     for literal in literals:
         if value == literal:
             return _apply_constraints(literal, merged_meta, path)
         if not config.coerce:
             continue  # pragma: no cover - coerce=False rarely used with Literal
-        coerced_literal, error = _try_coerce_literal(value, literal)
-        if error is not None:
-            last_literal_error = error
+        literal_type = type(literal)
+        try:
+            coerced = (
+                _bool_from_str(value)
+                if isinstance(literal, bool) and isinstance(value, str)
+                else literal_type(value)
+            )
+        except (TypeError, ValueError) as error:
+            last_error = error
             continue
-        if coerced_literal == literal:
+        if coerced == literal:
             return _apply_constraints(literal, merged_meta, path)
-    if last_literal_error is not None:
-        raise type(last_literal_error)(
-            f"{path}: {last_literal_error}"
-        ) from last_literal_error
+    if last_error is not None:
+        raise type(last_error)(f"{path}: {last_error}") from last_error
     raise ValueError(f"{path}: expected one of {list(literals)}")
 
 
@@ -233,13 +219,13 @@ def _coerce_primitive(
     if isinstance(value, literal_type):
         return _apply_constraints(value, merged_meta, path)
     if not config.coerce:
-        type_name = getattr(base_type, "__name__", type(base_type).__name__)
-        raise TypeError(f"{path}: expected {type_name}")
+        raise TypeError(f"{path}: expected {_type_name(base_type)}")
     try:
         coerced_value = coercer(value)
     except Exception as error:
-        type_name = getattr(base_type, "__name__", type(base_type).__name__)
-        raise TypeError(f"{path}: unable to coerce {value!r} to {type_name}") from error
+        raise TypeError(
+            f"{path}: unable to coerce {value!r} to {_type_name(base_type)}"
+        ) from error
     return _apply_constraints(coerced_value, merged_meta, path)
 
 
@@ -256,8 +242,9 @@ def _coerce_dataclass(
     if isinstance(value, dataclass_type):
         return _apply_constraints(value, merged_meta, path)
     if not isinstance(value, Mapping):
-        type_name = getattr(dataclass_type, "__name__", type(dataclass_type).__name__)
-        raise TypeError(f"{path}: expected mapping for dataclass {type_name}")
+        raise TypeError(
+            f"{path}: expected mapping for dataclass {_type_name(dataclass_type)}"
+        )
     try:
         parsed = parse(
             dataclass_type,
@@ -272,10 +259,11 @@ def _coerce_dataclass(
         message = str(error)
         if ":" in message:
             prefix, suffix = message.split(":", 1)
-            if " " not in prefix:
-                message = f"{path}.{prefix}:{suffix}"
-            else:
-                message = f"{path}: {message}"
+            message = (
+                f"{path}.{prefix}:{suffix}"
+                if " " not in prefix
+                else f"{path}: {message}"
+            )
         else:
             message = f"{path}: {message}"
         raise type(error)(message) from error
@@ -364,12 +352,12 @@ def _coerce_sequence(
     args = get_args(base_type)
     coerced_items = _coerce_sequence_items(items, args, origin, path, config)
     if origin is set:
-        value_out: object = set(coerced_items)
+        result: object = set(coerced_items)
     elif origin is tuple:
-        value_out = tuple(coerced_items)
+        result = tuple(coerced_items)
     else:
-        value_out = list(coerced_items)
-    return _apply_constraints(value_out, merged_meta, path)
+        result = list(coerced_items)
+    return _apply_constraints(result, merged_meta, path)
 
 
 def _coerce_mapping(
@@ -408,24 +396,19 @@ def _coerce_enum(
     if not (isinstance(base_type, type) and issubclass(base_type, Enum)):
         return _NOT_HANDLED
     if isinstance(value, base_type):
-        enum_value = value
-    elif config.coerce:
+        return _apply_constraints(value, merged_meta, path)
+    if not config.coerce:
+        raise TypeError(f"{path}: expected {_type_name(base_type)}")
+    try:
         if isinstance(value, str):
             try:
                 enum_value = base_type[value]
             except KeyError:
-                try:
-                    enum_value = base_type(value)
-                except (TypeError, ValueError) as error:
-                    raise ValueError(f"{path}: invalid enum value {value!r}") from error
-        else:
-            try:
                 enum_value = base_type(value)
-            except (TypeError, ValueError) as error:
-                raise ValueError(f"{path}: invalid enum value {value!r}") from error
-    else:
-        type_name = getattr(base_type, "__name__", type(base_type).__name__)
-        raise TypeError(f"{path}: expected {type_name}")
+        else:
+            enum_value = base_type(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{path}: invalid enum value {value!r}") from error
     return _apply_constraints(enum_value, merged_meta, path)
 
 
@@ -451,6 +434,29 @@ def _coerce_bool(
     raise TypeError(f"{path}: expected bool")
 
 
+def _coerce_none_wrapper(
+    value: object,
+    base_type: object,
+    merged_meta: Mapping[str, object],
+    path: str,
+    config: _ParseConfig,
+) -> object:
+    return _coerce_none(value, base_type, path)
+
+
+_COERCERS: tuple[Callable[..., object], ...] = (
+    _coerce_union,
+    _coerce_none_wrapper,
+    _coerce_literal,
+    _coerce_dataclass,
+    _coerce_sequence,
+    _coerce_mapping,
+    _coerce_enum,
+    _coerce_bool,
+    _coerce_primitive,
+)
+
+
 def _coerce_to_type(
     value: object,
     typ: object,
@@ -463,19 +469,8 @@ def _coerce_to_type(
     if base_type is object or base_type is _AnyType:
         return _apply_constraints(value, merged_meta, path)
 
-    coercers = (
-        lambda: _coerce_union(value, base_type, merged_meta, path, config),
-        lambda: _coerce_none(value, base_type, path),
-        lambda: _coerce_literal(value, base_type, merged_meta, path, config),
-        lambda: _coerce_dataclass(value, base_type, merged_meta, path, config),
-        lambda: _coerce_sequence(value, base_type, merged_meta, path, config),
-        lambda: _coerce_mapping(value, base_type, merged_meta, path, config),
-        lambda: _coerce_enum(value, base_type, merged_meta, path, config),
-        lambda: _coerce_bool(value, base_type, merged_meta, path, config),
-        lambda: _coerce_primitive(value, base_type, merged_meta, path, config),
-    )
-    for coercer in coercers:
-        result = coercer()
+    for coercer in _COERCERS:
+        result = coercer(value, base_type, merged_meta, path, config)
         if result is not _NOT_HANDLED:
             return result
 
@@ -489,7 +484,6 @@ def _coerce_to_type(
 def _find_key_exact(
     data: Mapping[str, object], candidates: list[str | None]
 ) -> str | None:
-    """Find exact match for any candidate key."""
     for candidate in candidates:
         if candidate is not None and candidate in data:
             return candidate
@@ -497,7 +491,6 @@ def _find_key_exact(
 
 
 def _build_lowered_key_map(data: Mapping[str, object]) -> dict[str, str]:
-    """Build a case-insensitive key lookup map."""
     lowered_map: dict[str, str] = {}
     for key in data:
         if isinstance(key, str):
@@ -523,30 +516,32 @@ def _find_key(
 
 
 def _resolve_field_alias(
-    field: dataclasses.Field[object],
+    field_obj: dataclasses.Field[object],
     aliases: Mapping[str, str] | None,
     alias_generator: Callable[[str], str] | None,
     field_meta: dict[str, object],
 ) -> str | None:
-    if aliases and field.name in aliases:
-        return aliases[field.name]
+    if aliases and field_obj.name in aliases:
+        return aliases[field_obj.name]
     alias_value = field_meta.get("alias")
     if alias_value is not None:
         return cast(str, alias_value)
     if alias_generator is not None:
-        return alias_generator(field.name)
+        return alias_generator(field_obj.name)
     return None
 
 
 def _coerce_field_value(
-    field: dataclasses.Field[object],
+    field_obj: dataclasses.Field[object],
     raw_value: object,
     field_meta: Mapping[str, object],
     field_type: object,
     config: _ParseConfig,
 ) -> object:
     try:
-        return _coerce_to_type(raw_value, field_type, field_meta, field.name, config)
+        return _coerce_to_type(
+            raw_value, field_type, field_meta, field_obj.name, config
+        )
     except (TypeError, ValueError) as error:
         raise type(error)(str(error)) from error
 
@@ -563,22 +558,26 @@ def _collect_field_kwargs(
     kwargs: dict[str, object] = {}
     used_keys: set[str] = set()
 
-    for field in dataclasses.fields(cls):
-        if not field.init:
+    for field_obj in dataclasses.fields(cls):
+        if not field_obj.init:
             continue
-        field_meta = dict(field.metadata)
-        field_alias = _resolve_field_alias(field, aliases, alias_generator, field_meta)
+        field_meta = dict(field_obj.metadata)
+        field_alias = _resolve_field_alias(
+            field_obj, aliases, alias_generator, field_meta
+        )
 
-        key = _find_key(mapping_data, field.name, field_alias, config.case_insensitive)
+        key = _find_key(
+            mapping_data, field_obj.name, field_alias, config.case_insensitive
+        )
         if key is None:
-            if field.default is MISSING and field.default_factory is MISSING:
-                raise ValueError(f"Missing required field: '{field.name}'")
+            if field_obj.default is MISSING and field_obj.default_factory is MISSING:
+                raise ValueError(f"Missing required field: '{field_obj.name}'")
             continue
         used_keys.add(key)
         raw_value = mapping_data[key]
-        field_type = type_hints.get(field.name, field.type)
-        kwargs[field.name] = _coerce_field_value(
-            field, raw_value, field_meta, field_type, config
+        field_type = type_hints.get(field_obj.name, field_obj.type)
+        kwargs[field_obj.name] = _coerce_field_value(
+            field_obj, raw_value, field_meta, field_type, config
         )
 
     return kwargs, used_keys
@@ -615,7 +614,6 @@ def _run_validation_hooks(instance: object) -> None:
 def _resolve_type_from_payload(
     mapping_data: Mapping[str, object], type_key: str
 ) -> tuple[type[object], Mapping[str, object]]:
-    """Resolve dataclass type from payload type_key reference."""
     type_identifier = mapping_data[type_key]
     if not isinstance(type_identifier, str):
         raise TypeError(f"{type_key} must be a string type reference")
