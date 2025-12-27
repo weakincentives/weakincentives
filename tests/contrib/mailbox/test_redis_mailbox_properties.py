@@ -430,19 +430,20 @@ if HAS_HYPOTHESIS:
                     continue
 
                 # Verify reply_to matches what's in Redis
+                # reply_to is stored in the meta hash, not the data hash
                 has_data = self.client.hexists(self.mailbox._keys.data, msg_id)
                 if has_data and state.reply_to is not None:
-                    # The reply_to should be stored with the message
-                    raw = self.client.hget(self.mailbox._keys.data, msg_id)
-                    if raw:
-                        import json
-
-                        parsed = json.loads(raw)
-                        redis_reply_to = parsed.get("reply_to")
-                        assert redis_reply_to == state.reply_to, (
-                            f"reply_to mismatch for {msg_id}: "
-                            f"model={state.reply_to}, redis={redis_reply_to}"
-                        )
+                    # The reply_to is stored in meta hash at key "msg_id:reply_to"
+                    redis_reply_to_raw = self.client.hget(
+                        self.mailbox._keys.meta, f"{msg_id}:reply_to"
+                    )
+                    redis_reply_to = (
+                        redis_reply_to_raw.decode() if redis_reply_to_raw else None
+                    )
+                    assert redis_reply_to == state.reply_to, (
+                        f"reply_to mismatch for {msg_id}: "
+                        f"model={state.reply_to}, redis={redis_reply_to}"
+                    )
 
         # =====================================================================
         # Helper methods
