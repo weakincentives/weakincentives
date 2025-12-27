@@ -37,7 +37,28 @@ def _param_description_mapping_factory() -> dict[str, str]:
     return {}
 
 
+# ---------------------------------------------------------------------------
+# Structural protocols for prompt/section types
+# ---------------------------------------------------------------------------
+# These protocols break import cycles between the overrides module and the
+# core prompt module. They define the minimal interface needed for override
+# operations without importing the full Prompt, PromptTemplate, Section, or
+# SectionNode classes.
+#
+# Implementations:
+# - ToolContractProtocol: matched by Tool
+# - SectionLike: matched by Section
+# - SectionNodeLike: matched by SectionNode
+# - PromptLike: matched by both Prompt and PromptTemplate
+# ---------------------------------------------------------------------------
+
+
 class ToolContractProtocol(Protocol):
+    """Minimal tool interface for contract hashing.
+
+    Matched by: Tool
+    """
+
     name: str
     description: str
     params_type: type[SupportsDataclass] | type[None]
@@ -47,6 +68,11 @@ class ToolContractProtocol(Protocol):
 
 
 class SectionLike(Protocol):
+    """Minimal section interface for override operations.
+
+    Matched by: Section (and subclasses like MarkdownSection)
+    """
+
     def original_body_template(self) -> str | None: ...
 
     def tools(self) -> tuple[ToolContractProtocol, ...]: ...
@@ -55,12 +81,22 @@ class SectionLike(Protocol):
 
 
 class SectionNodeLike(Protocol):
+    """Minimal section node interface for prompt traversal.
+
+    Matched by: SectionNode
+    """
+
     path: tuple[str, ...]
     number: str
     section: SectionLike
 
 
 class PromptLike(Protocol):
+    """Minimal prompt interface for override store operations.
+
+    Matched by: Prompt, PromptTemplate
+    """
+
     ns: str
     key: str
 
