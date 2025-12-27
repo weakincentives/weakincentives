@@ -264,17 +264,19 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
     """Auto-optimization runs when first request is processed."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
+    responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
         name="responses"
+    )
+    requests: InMemoryMailbox[
+        MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+    ] = InMemoryMailbox(
+        name="requests",
+        reply_resolver=lambda name: responses if name == "responses" else None,
     )
     try:
         loop = CodeReviewLoop(
             adapter=cast(ProviderAdapter[ReviewResponse], adapter),
             requests=requests,
-            responses=responses,
             overrides_store=overrides_store,
         )
 
@@ -307,17 +309,19 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
-    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
+    responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
         name="responses"
+    )
+    requests: InMemoryMailbox[
+        MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+    ] = InMemoryMailbox(
+        name="requests",
+        reply_resolver=lambda name: responses if name == "responses" else None,
     )
     try:
         loop = CodeReviewLoop(
             adapter=adapter,
             requests=requests,
-            responses=responses,
             overrides_store=overrides_store,
         )
 

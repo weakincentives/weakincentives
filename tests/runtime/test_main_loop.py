@@ -133,15 +133,11 @@ class _TestLoop(MainLoop[_Request, _Output]):
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[MainLoopRequest[_Request]]
-        | FakeMailbox[MainLoopRequest[_Request]],
-        responses: InMemoryMailbox[MainLoopResult[_Output]]
-        | FakeMailbox[MainLoopResult[_Output]],
+        requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
+        | FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
         config: MainLoopConfig | None = None,
     ) -> None:
-        super().__init__(
-            adapter=adapter, requests=requests, responses=responses, config=config
-        )
+        super().__init__(adapter=adapter, requests=requests, config=config)
         self._template = PromptTemplate[_Output](
             ns="test",
             key="test-prompt",
@@ -166,6 +162,23 @@ class _TestLoop(MainLoop[_Request, _Output]):
         del prompt
         self.finalize_called = True
         _ = session
+
+
+def _create_mailboxes() -> tuple[
+    InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
+    InMemoryMailbox[MainLoopResult[_Output], None],
+]:
+    """Create requests and responses mailboxes with reply pattern setup."""
+    responses: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+        name="responses"
+    )
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(
+            name="requests",
+            reply_resolver=lambda name: responses if name == "responses" else None,
+        )
+    )
+    return requests, responses
 
 
 # =============================================================================
@@ -275,19 +288,14 @@ def test_result_is_frozen() -> None:
 
 def test_loop_processes_request() -> None:
     """MainLoop processes request from mailbox."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
-        # Send request
+        # Send request with reply_to
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         # Run single iteration
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -307,18 +315,13 @@ def test_loop_processes_request() -> None:
 
 def test_loop_sends_error_on_failure() -> None:
     """MainLoop sends error result on adapter failure."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         adapter = _MockAdapter(error=RuntimeError("adapter failure"))
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -336,18 +339,13 @@ def test_loop_sends_error_on_failure() -> None:
 
 def test_loop_acknowledges_request() -> None:
     """MainLoop acknowledges processed request."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -360,18 +358,13 @@ def test_loop_acknowledges_request() -> None:
 
 def test_loop_calls_finalize() -> None:
     """MainLoop calls finalize after successful processing."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -383,18 +376,16 @@ def test_loop_calls_finalize() -> None:
 
 def test_loop_respects_max_iterations() -> None:
     """MainLoop respects max_iterations limit."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         for i in range(5):
-            requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
+            requests.send(
+                MainLoopRequest(request=_Request(message=f"msg-{i}")),
+                reply_to="responses",
+            )
 
         # Only run 2 iterations
         loop.run(max_iterations=2, wait_time_seconds=0)
@@ -409,21 +400,16 @@ def test_loop_respects_max_iterations() -> None:
 
 def test_loop_handles_visibility_expansion() -> None:
     """MainLoop handles visibility expansion correctly."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
             {("section1",): SectionVisibility.FULL},
         ]
         adapter = _MockAdapter(visibility_requests=visibility_requests)
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -440,22 +426,15 @@ def test_loop_handles_visibility_expansion() -> None:
 
 def test_loop_uses_config_budget() -> None:
     """MainLoop uses budget from config."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         budget = Budget(max_total_tokens=1000)
         config = MainLoopConfig(budget=budget)
         adapter = _MockAdapter()
-        loop = _TestLoop(
-            adapter=adapter, requests=requests, responses=responses, config=config
-        )
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -468,26 +447,19 @@ def test_loop_uses_config_budget() -> None:
 
 def test_loop_request_overrides_config() -> None:
     """MainLoop uses request budget/deadline over config."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         config_budget = Budget(max_total_tokens=1000)
         config = MainLoopConfig(budget=config_budget)
         adapter = _MockAdapter()
-        loop = _TestLoop(
-            adapter=adapter, requests=requests, responses=responses, config=config
-        )
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         override_budget = Budget(max_total_tokens=2000)
         request = MainLoopRequest(
             request=_Request(message="hello"),
             budget=override_budget,
         )
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -500,20 +472,25 @@ def test_loop_request_overrides_config() -> None:
 
 def test_loop_nacks_on_response_send_failure() -> None:
     """MainLoop nacks request when response send fails."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
+    from weakincentives.runtime.mailbox import MailboxConnectionError
+
+    responses: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(
+        name="responses"
     )
-    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(
+            name="requests",
+            reply_resolver=lambda name: responses if name == "responses" else None,
+        )
+    )
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         # Make response send fail
-        from weakincentives.runtime.mailbox import MailboxConnectionError
-
         responses.set_connection_error(MailboxConnectionError("connection lost"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -528,21 +505,26 @@ def test_loop_nacks_on_response_send_failure() -> None:
 
 def test_loop_nacks_on_error_response_send_failure() -> None:
     """MainLoop nacks request when error response send fails."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
+    from weakincentives.runtime.mailbox import MailboxConnectionError
+
+    responses: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(
+        name="responses"
     )
-    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(
+            name="requests",
+            reply_resolver=lambda name: responses if name == "responses" else None,
+        )
+    )
     try:
         # Adapter that fails
         adapter = _MockAdapter(error=RuntimeError("adapter failure"))
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         # Make error response send fail too
-        from weakincentives.runtime.mailbox import MailboxConnectionError
-
         responses.set_connection_error(MailboxConnectionError("connection lost"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -560,15 +542,11 @@ class _TestLoopNoFinalizeOverride(MainLoop[_Request, _Output]):
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[MainLoopRequest[_Request]]
-        | FakeMailbox[MainLoopRequest[_Request]],
-        responses: InMemoryMailbox[MainLoopResult[_Output]]
-        | FakeMailbox[MainLoopResult[_Output]],
+        requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
+        | FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
         config: MainLoopConfig | None = None,
     ) -> None:
-        super().__init__(
-            adapter=adapter, requests=requests, responses=responses, config=config
-        )
+        super().__init__(adapter=adapter, requests=requests, config=config)
         self._template = PromptTemplate[_Output](
             ns="test",
             key="test-prompt",
@@ -589,20 +567,13 @@ class _TestLoopNoFinalizeOverride(MainLoop[_Request, _Output]):
 
 def test_loop_default_finalize() -> None:
     """MainLoop default finalize does nothing."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         adapter = _MockAdapter()
-        loop = _TestLoopNoFinalizeOverride(
-            adapter=adapter, requests=requests, responses=responses
-        )
+        loop = _TestLoopNoFinalizeOverride(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         # Run should succeed even without finalize override
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -649,23 +620,16 @@ def test_request_accepts_resources() -> None:
 
 def test_loop_passes_resources_from_config() -> None:
     """MainLoop passes config resources to adapter."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         resource = _CustomResource(name="config-resource")
         resources = ResourceRegistry.build({_CustomResource: resource})
         config = MainLoopConfig(resources=resources)
         adapter = _MockAdapter()
-        loop = _TestLoop(
-            adapter=adapter, requests=requests, responses=responses, config=config
-        )
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -677,20 +641,13 @@ def test_loop_passes_resources_from_config() -> None:
 
 def test_loop_request_resources_overrides_config() -> None:
     """MainLoop request resources override config resources."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         config_resource = _CustomResource(name="config-resource")
         config_resources = ResourceRegistry.build({_CustomResource: config_resource})
         config = MainLoopConfig(resources=config_resources)
         adapter = _MockAdapter()
-        loop = _TestLoop(
-            adapter=adapter, requests=requests, responses=responses, config=config
-        )
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         override_resource = _CustomResource(name="override-resource")
         override_resources = ResourceRegistry.build(
@@ -700,7 +657,7 @@ def test_loop_request_resources_overrides_config() -> None:
             request=_Request(message="hello"),
             resources=override_resources,
         )
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -712,12 +669,7 @@ def test_loop_request_resources_overrides_config() -> None:
 
 def test_same_resources_used_across_visibility_retries() -> None:
     """Same resources are passed across visibility expansion retries."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         resource = _CustomResource(name="persistent-resource")
         resources = ResourceRegistry.build({_CustomResource: resource})
@@ -726,13 +678,13 @@ def test_same_resources_used_across_visibility_retries() -> None:
             {("section2",): SectionVisibility.FULL},
         ]
         adapter = _MockAdapter(visibility_requests=visibility_requests)
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(
             request=_Request(message="hello"),
             resources=resources,
         )
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -748,18 +700,13 @@ def test_same_resources_used_across_visibility_retries() -> None:
 
 def test_no_resources_when_not_set() -> None:
     """No resources are passed when not configured."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -776,22 +723,17 @@ def test_no_resources_when_not_set() -> None:
 
 def test_visibility_overrides_accumulate_in_session() -> None:
     """MainLoop accumulates visibility overrides in session state."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
             {("section1",): SectionVisibility.FULL},
             {("section2",): SectionVisibility.FULL},
         ]
         adapter = _MockAdapter(visibility_requests=visibility_requests)
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -808,12 +750,7 @@ def test_visibility_overrides_accumulate_in_session() -> None:
 
 def test_same_budget_tracker_used_across_visibility_retries() -> None:
     """Same BudgetTracker is used across visibility expansion retries."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         budget = Budget(max_total_tokens=1000)
         config = MainLoopConfig(budget=budget)
@@ -822,12 +759,10 @@ def test_same_budget_tracker_used_across_visibility_retries() -> None:
             {("section2",): SectionVisibility.FULL},
         ]
         adapter = _MockAdapter(visibility_requests=visibility_requests)
-        loop = _TestLoop(
-            adapter=adapter, requests=requests, responses=responses, config=config
-        )
+        loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -846,18 +781,13 @@ def test_same_budget_tracker_used_across_visibility_retries() -> None:
 
 def test_no_budget_tracker_when_no_budget() -> None:
     """No BudgetTracker is created when no budget is set."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request)
+        requests.send(request, reply_to="responses")
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -874,14 +804,21 @@ def test_no_budget_tracker_when_no_budget() -> None:
 
 def test_loop_handles_expired_receipt_handle_on_ack() -> None:
     """MainLoop continues when receipt handle expires during processing."""
-    requests: FakeMailbox[MainLoopRequest[_Request]] = FakeMailbox(name="requests")
-    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+    responses: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(
+        name="responses"
+    )
+    requests: FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        FakeMailbox(
+            name="requests",
+            reply_resolver=lambda name: responses if name == "responses" else None,
+        )
+    )
 
     adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+    loop = _TestLoop(adapter=adapter, requests=requests)
 
     request = MainLoopRequest(request=_Request(message="hello"))
-    requests.send(request)
+    requests.send(request, reply_to="responses")
 
     # Receive the message to get the handle, then expire it
     msgs = requests.receive(max_messages=1)
@@ -909,14 +846,21 @@ def test_loop_handles_expired_receipt_handle_on_nack() -> None:
     """MainLoop continues when receipt handle expires during nack after send failure."""
     from weakincentives.runtime.mailbox import MailboxConnectionError
 
-    requests: FakeMailbox[MainLoopRequest[_Request]] = FakeMailbox(name="requests")
-    responses: FakeMailbox[MainLoopResult[_Output]] = FakeMailbox(name="responses")
+    responses: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(
+        name="responses"
+    )
+    requests: FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        FakeMailbox(
+            name="requests",
+            reply_resolver=lambda name: responses if name == "responses" else None,
+        )
+    )
 
     adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+    loop = _TestLoop(adapter=adapter, requests=requests)
 
     request = MainLoopRequest(request=_Request(message="hello"))
-    requests.send(request)
+    requests.send(request, reply_to="responses")
 
     # Receive the message to get the handle
     msgs = requests.receive(max_messages=1)
@@ -945,14 +889,9 @@ def test_loop_exits_when_mailbox_closed() -> None:
     """MainLoop.run() exits when requests mailbox is closed."""
     import threading
 
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
+    requests, responses = _create_mailboxes()
     adapter = _MockAdapter()
-    loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+    loop = _TestLoop(adapter=adapter, requests=requests)
 
     exited = []
 

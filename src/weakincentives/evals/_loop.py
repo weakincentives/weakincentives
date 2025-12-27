@@ -20,9 +20,14 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from ..runtime.mailbox import Mailbox, Message, ReceiptHandleExpiredError
+from ..runtime.mailbox import (
+    Mailbox,
+    Message,
+    ReceiptHandleExpiredError,
+    ReplyMailboxUnavailableError,
+)
 from ._types import EvalRequest, EvalResult, Score
 
 if TYPE_CHECKING:
@@ -33,35 +38,40 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     """Mailbox-driven evaluation loop.
 
     Receives EvalRequest messages, executes through MainLoop, scores
-    with evaluator, and sends EvalResult to results mailbox. Designed
+    with evaluator, and sends EvalResult via the reply pattern. Designed
     to run alongside MainLoop workers in distributed deployments.
 
-    The two-mailbox pattern matches MainLoop for distributed deployments:
+    Uses the reply pattern for sending results:
     - requests mailbox: receives EvalRequest messages
-    - results mailbox: sends EvalResult messages
+    - results: sent via msg.reply_mailbox()
 
     Example:
+        >>> # Setup with reply pattern
+        >>> results: Mailbox[EvalResult, None] = InMemoryMailbox(name="results")
+        >>> requests: Mailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        ...     name="requests",
+        ...     reply_resolver=lambda name: results if name == "results" else None,
+        ... )
         >>> eval_loop = EvalLoop(
         ...     loop=main_loop,
         ...     evaluator=exact_match,
-        ...     requests=requests_mailbox,
-        ...     results=results_mailbox,
+        ...     requests=requests,
         ... )
+        >>> # Submit request with reply_to
+        >>> requests.send(EvalRequest(sample=sample), reply_to="results")
         >>> eval_loop.run(max_iterations=1)
     """
 
     _loop: MainLoop[InputT, OutputT]
     _evaluator: Callable[[OutputT, ExpectedT], Score]
-    _requests: Mailbox[EvalRequest[InputT, ExpectedT], None]
-    _results: Mailbox[EvalResult, None]
+    _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
 
     def __init__(
         self,
         *,
         loop: MainLoop[InputT, OutputT],
         evaluator: Callable[[OutputT, ExpectedT], Score],
-        requests: Mailbox[EvalRequest[InputT, ExpectedT], None],
-        results: Mailbox[EvalResult, None],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -69,13 +79,12 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             loop: MainLoop instance for executing samples.
             evaluator: Scoring function (output, expected) -> Score.
             requests: Mailbox to receive EvalRequest messages from.
-            results: Mailbox to send EvalResult messages to.
+                Must be configured with a reply_resolver if callers set reply_to.
         """
         super().__init__()
         self._loop = loop
         self._evaluator = evaluator
         self._requests = requests
-        self._results = results
 
     def run(self, *, max_iterations: int | None = None) -> None:
         """Process evaluation requests from mailbox.
@@ -112,18 +121,22 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 self._send_and_ack(msg, result)
             iterations += 1
 
+    @staticmethod
     def _send_and_ack(
-        self,
-        msg: Message[EvalRequest[InputT, ExpectedT], None],
+        msg: Message[EvalRequest[Any, Any], EvalResult],
         result: EvalResult,
     ) -> None:
-        """Send result and acknowledge message, handling failures gracefully.
+        """Send result via reply_mailbox and acknowledge, handling failures gracefully.
 
         Mirrors MainLoop._send_and_ack: on send failure, nack for retry instead
         of fabricating an error result that would lose successful evaluations.
         """
         try:
-            _ = self._results.send(result)
+            _ = msg.reply_mailbox().send(result)
+            msg.acknowledge()
+        except ReplyMailboxUnavailableError:
+            # No reply_to specified - just acknowledge without sending result.
+            # This is valid for fire-and-forget evaluations.
             msg.acknowledge()
         except ReceiptHandleExpiredError:
             # Handle expired during processing - message already requeued.

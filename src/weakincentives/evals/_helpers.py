@@ -26,24 +26,26 @@ ExpectedT = TypeVar("ExpectedT")
 
 def submit_dataset(
     dataset: Dataset[InputT, ExpectedT],
-    requests: Mailbox[EvalRequest[InputT, ExpectedT], None],
+    requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
+    *,
+    reply_to: str,
 ) -> None:
     """Submit all samples in a dataset for evaluation.
 
-    Sends each sample to the requests mailbox as an EvalRequest.
-    This function is synchronous and blocks until all samples
-    are enqueued.
+    Sends each sample to the requests mailbox as an EvalRequest with
+    the specified reply_to destination for results.
 
     Args:
         dataset: The dataset containing samples to evaluate.
         requests: Mailbox to send EvalRequest messages to.
+        reply_to: The reply destination identifier for results.
 
     Example:
         >>> dataset = Dataset.load(Path("qa.jsonl"), str, str)
-        >>> submit_dataset(dataset, requests_mailbox)
+        >>> submit_dataset(dataset, requests_mailbox, reply_to="results")
     """
     for sample in dataset:
-        _ = requests.send(EvalRequest(sample=sample))
+        _ = requests.send(EvalRequest(sample=sample), reply_to=reply_to)
 
 
 def collect_results(
