@@ -25,8 +25,13 @@ and explicit acknowledgment.
 ### Mailbox
 
 ```python
-class Mailbox(Protocol[T]):
-    """Point-to-point message queue with visibility timeout semantics."""
+class Mailbox(Protocol[T, R]):
+    """Point-to-point message queue with visibility timeout semantics.
+
+    Type parameters:
+        T: Message body type (what this mailbox receives).
+        R: Reply type (what reply_mailbox() sends). Use None if no replies.
+    """
 
     def send(self, body: T, *, reply_to: str | None = None, delay_seconds: int = 0) -> str:
         """Enqueue a message, optionally specifying reply destination.
@@ -35,6 +40,7 @@ class Mailbox(Protocol[T]):
             body: Message payload (must be serializable).
             reply_to: Optional identifier for response mailbox. Workers use
                 Message.reply_mailbox() to resolve this to a concrete Mailbox.
+                Should only be set when R is not None.
             delay_seconds: Seconds before message becomes visible (0-900).
 
         Returns:
@@ -52,7 +58,7 @@ class Mailbox(Protocol[T]):
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Receive messages from the queue.
 
         Received messages become invisible to other consumers for
@@ -97,8 +103,13 @@ class Mailbox(Protocol[T]):
 
 ```python
 @dataclass(frozen=True, slots=True)
-class Message(Generic[T]):
-    """A received message with delivery metadata and lifecycle methods."""
+class Message(Generic[T, R]):
+    """A received message with delivery metadata and lifecycle methods.
+
+    Type parameters:
+        T: Message body type.
+        R: Reply type. Use None if no replies expected.
+    """
 
     id: str
     """Unique message identifier within the queue."""
@@ -165,16 +176,14 @@ class Message(Generic[T]):
         """
         ...
 
-    def reply_mailbox[R](self) -> Mailbox[R]:
+    def reply_mailbox(self) -> Mailbox[R, None]:
         """Return the mailbox for sending replies to this message.
 
         Resolves the ``reply_to`` identifier to a concrete Mailbox instance
         using the resolver bound at receive time. The returned mailbox is
-        typed for the expected response type.
+        typed for R (the reply type of the originating mailbox).
 
-        This enables request-response patterns where the requester specifies
-        where replies should be sent, and workers derive the response
-        destination from each incoming message.
+        The reply mailbox has R=None since reply chains don't nest.
 
         Returns:
             Mailbox instance for sending responses.
@@ -327,28 +336,34 @@ Implementations vary by backend:
 
 ### Configuring Reply Resolution
 
-The resolver is bound when creating the request mailbox:
+The resolver is bound when creating the request mailbox. **Important:** Resolvers
+should cache mailbox instances to avoid resource leaks (connections, threads).
 
 ```python
-# InMemory: registry-based resolution
-registry: dict[str, InMemoryMailbox] = {}
-requests = InMemoryMailbox(name="requests", reply_resolver=registry.get)
+# InMemory: registry-based resolution (inherently cached)
+registry: dict[str, InMemoryMailbox[MainLoopResult, None]] = {}
+requests: Mailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
+    name="requests",
+    reply_resolver=registry.get,
+)
 
-# Redis: same client, different queue name
-def redis_resolver(reply_to: str) -> RedisMailbox:
+# Redis: cached resolver using same client
+@cache  # functools.cache or similar
+def redis_resolver(reply_to: str) -> RedisMailbox[MainLoopResult, None]:
     return RedisMailbox(name=reply_to, client=redis_client)
 
-requests = RedisMailbox(
+requests: Mailbox[MainLoopRequest, MainLoopResult] = RedisMailbox(
     name="requests",
     client=redis_client,
     reply_resolver=redis_resolver,
 )
 
-# SQS: queue URL resolution
-def sqs_resolver(reply_to: str) -> SQSMailbox:
+# SQS: cached resolver
+@cache
+def sqs_resolver(reply_to: str) -> SQSMailbox[MainLoopResult, None]:
     return SQSMailbox(queue_url=reply_to, client=sqs_client)
 
-requests = SQSMailbox(
+requests: Mailbox[MainLoopRequest, MainLoopResult] = SQSMailbox(
     queue_url="https://sqs.../requests",
     client=sqs_client,
     reply_resolver=sqs_resolver,
@@ -360,16 +375,19 @@ requests = SQSMailbox(
 Pass `reply_to` to `send()` to specify the response destination:
 
 ```python
-# Client specifies where to receive responses
-response_queue = InMemoryMailbox[MainLoopResult](name="client-123-responses")
+# Client creates dedicated response queue
+response_queue: Mailbox[MainLoopResult, None] = InMemoryMailbox(
+    name="client-123-responses",
+)
 registry["client-123-responses"] = response_queue
 
+# Send request with reply destination
 requests.send(
     MainLoopRequest(request=my_request),
     reply_to="client-123-responses",
 )
 
-# Poll dedicated response queue (no filtering needed)
+# Poll dedicated response queue
 for msg in response_queue.receive(wait_time_seconds=20):
     result = msg.body
     msg.acknowledge()
@@ -548,27 +566,26 @@ def _handle_failure(self, msg: Message[MainLoopRequest], error: Exception) -> No
 ### Client Usage
 
 ```python
-# Create dedicated response mailbox
-response_queue = InMemoryMailbox[MainLoopResult](name="my-responses")
+# Create dedicated response mailbox (one per client or request batch)
+response_queue: Mailbox[MainLoopResult, None] = InMemoryMailbox(
+    name="my-responses",
+)
 registry["my-responses"] = response_queue  # Register for resolution
 
 # Send request with reply destination
-request_id = uuid4()
 requests.send(
-    MainLoopRequest(request=my_request, request_id=request_id),
+    MainLoopRequest(request=my_request),
     reply_to="my-responses",
 )
 
-# Poll dedicated queue (no filtering needed)
+# Poll dedicated queue - all messages are ours, no filtering needed
 deadline = time.time() + timeout_seconds
 while time.time() < deadline:
     for msg in response_queue.receive(wait_time_seconds=5):
-        if msg.body.request_id == request_id:
-            msg.acknowledge()
-            if msg.body.error:
-                raise RemoteError(msg.body.error)
-            return msg.body.output
-        msg.acknowledge()  # Unexpected message - still ours
+        msg.acknowledge()
+        if msg.body.error:
+            raise RemoteError(msg.body.error)
+        return msg.body.output
 raise TimeoutError(f"No response within {timeout_seconds}s")
 ```
 
@@ -580,7 +597,9 @@ collects results into a single mailbox regardless of worker distribution:
 ```python
 # Create eval-run-specific response mailbox
 run_id = uuid4()
-results_queue = InMemoryMailbox[MainLoopResult](name=f"eval-{run_id}")
+results_queue: Mailbox[MainLoopResult, None] = InMemoryMailbox(
+    name=f"eval-{run_id}",
+)
 registry[f"eval-{run_id}"] = results_queue
 
 # Submit all samples with same reply destination
@@ -633,7 +652,7 @@ Thread-safe implementation using Python primitives:
 - Exact message counts
 
 ```python
-mailbox: Mailbox[MyEvent] = InMemoryMailbox(name="events")
+mailbox: Mailbox[MyEvent, None] = InMemoryMailbox(name="events")
 ```
 
 ### RedisMailbox
@@ -936,7 +955,7 @@ Drops all messages on send. Returns empty on receive. For tests where you need
 a Mailbox interface but don't care about message delivery.
 
 ```python
-mailbox: Mailbox[Event] = NullMailbox()
+mailbox: Mailbox[Event, None] = NullMailbox()
 mailbox.send(Event(...))  # Silently dropped
 assert mailbox.receive() == []
 assert mailbox.approximate_count() == 0
@@ -947,7 +966,7 @@ assert mailbox.approximate_count() == 0
 Stores all sent messages for inspection. Useful for asserting what was sent.
 
 ```python
-mailbox: CollectingMailbox[Event] = CollectingMailbox()
+mailbox: CollectingMailbox[Event, None] = CollectingMailbox()
 mailbox.send(Event(type="a"))
 mailbox.send(Event(type="b"))
 
@@ -960,7 +979,7 @@ assert mailbox.sent[0].type == "a"
 Full in-memory implementation with controllable behavior for testing edge cases.
 
 ```python
-mailbox: FakeMailbox[Event] = FakeMailbox()
+mailbox: FakeMailbox[Event, None] = FakeMailbox()
 
 # Simulate receipt handle expiry
 msg = mailbox.receive()[0]
@@ -978,21 +997,32 @@ with pytest.raises(MailboxConnectionError):
 
 ```python
 def test_mainloop_processes_request():
-    requests = InMemoryMailbox[MainLoopRequest[MyRequest]]("requests")
-    responses = InMemoryMailbox[MainLoopResult[MyOutput]]("responses")
-    loop = MyLoop(adapter=adapter, requests=requests, responses=responses)
+    # Response queue and resolver registry
+    registry: dict[str, Mailbox] = {}
+    responses: Mailbox[MainLoopResult[MyOutput], None] = InMemoryMailbox(
+        name="responses",
+    )
+    registry["responses"] = responses
 
-    # Send request
-    request_id = uuid4()
-    requests.send(MainLoopRequest(request=MyRequest(...), request_id=request_id))
+    # Request queue with resolver
+    requests: Mailbox[MainLoopRequest[MyRequest], MainLoopResult[MyOutput]] = (
+        InMemoryMailbox(name="requests", reply_resolver=registry.get)
+    )
+
+    loop = MyLoop(adapter=adapter, requests=requests)
+
+    # Send request with reply destination
+    requests.send(
+        MainLoopRequest(request=MyRequest(...)),
+        reply_to="responses",
+    )
 
     # Run single iteration
     loop.run(max_iterations=1)
 
-    # Assert response
+    # Assert response arrived at reply destination
     msgs = responses.receive()
     assert len(msgs) == 1
-    assert msgs[0].body.request_id == request_id
     assert msgs[0].body.error is None
     msgs[0].acknowledge()
 ```
