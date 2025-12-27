@@ -28,38 +28,13 @@ and explicit acknowledgment.
 class Mailbox(Protocol[T]):
     """Point-to-point message queue with visibility timeout semantics."""
 
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
-        """Enqueue a message, optionally delaying visibility.
+    def send(self, body: T, *, reply_to: str | None = None, delay_seconds: int = 0) -> str:
+        """Enqueue a message, optionally specifying reply destination.
 
         Args:
             body: Message payload (must be serializable).
-            delay_seconds: Seconds before message becomes visible (0-900).
-
-        Returns:
-            Message ID (unique within this queue).
-
-        Raises:
-            MailboxFullError: Queue capacity exceeded (backend-specific).
-            SerializationError: Body cannot be serialized.
-        """
-        ...
-
-    def send_with_reply_to(
-        self,
-        body: T,
-        *,
-        reply_to: str,
-        delay_seconds: int = 0,
-    ) -> str:
-        """Enqueue a message with reply destination.
-
-        The reply_to identifier is stored in the message and available via
-        Message.reply_to. Workers use Message.reply_mailbox() to resolve
-        the identifier to a concrete Mailbox for sending responses.
-
-        Args:
-            body: Message payload (must be serializable).
-            reply_to: Identifier for response mailbox (queue name, URL, etc.).
+            reply_to: Optional identifier for response mailbox. Workers use
+                Message.reply_mailbox() to resolve this to a concrete Mailbox.
             delay_seconds: Seconds before message becomes visible (0-900).
 
         Returns:
@@ -382,40 +357,14 @@ requests = SQSMailbox(
 
 ### Sending with Reply-To
 
-Use `send_with_reply_to` to include a reply destination:
-
-```python
-def send_with_reply_to(
-    self,
-    body: T,
-    *,
-    reply_to: str,
-    delay_seconds: int = 0,
-) -> str:
-    """Enqueue a message with reply destination.
-
-    The reply_to identifier is stored in the message and used by
-    Message.reply_mailbox() to resolve the response mailbox.
-
-    Args:
-        body: Message payload.
-        reply_to: Identifier for response mailbox.
-        delay_seconds: Seconds before message becomes visible.
-
-    Returns:
-        Message ID.
-    """
-    ...
-```
-
-Example:
+Pass `reply_to` to `send()` to specify the response destination:
 
 ```python
 # Client specifies where to receive responses
 response_queue = InMemoryMailbox[MainLoopResult](name="client-123-responses")
 registry["client-123-responses"] = response_queue
 
-requests.send_with_reply_to(
+requests.send(
     MainLoopRequest(request=my_request),
     reply_to="client-123-responses",
 )
@@ -605,7 +554,7 @@ registry["my-responses"] = response_queue  # Register for resolution
 
 # Send request with reply destination
 request_id = uuid4()
-requests.send_with_reply_to(
+requests.send(
     MainLoopRequest(request=my_request, request_id=request_id),
     reply_to="my-responses",
 )
@@ -636,7 +585,7 @@ registry[f"eval-{run_id}"] = results_queue
 
 # Submit all samples with same reply destination
 for sample in dataset:
-    requests.send_with_reply_to(
+    requests.send(
         MainLoopRequest(request=sample.input),
         reply_to=f"eval-{run_id}",
     )
