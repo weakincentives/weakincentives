@@ -285,6 +285,29 @@ def _handle_tool_deadline_error(
     )
 
 
+def _handle_handler_signature_error(
+    *,
+    log: StructuredLogger,
+    tool_name: str,
+    error: TypeError,
+) -> ToolResult[SupportsToolResult]:
+    """Handle TypeError from handler signature mismatch.
+
+    Pyright strict mode catches signature mismatches at development time.
+    This handler provides clear runtime error messages if mismatches slip through.
+    """
+    log.error(
+        "Handler signature mismatch.",
+        event="tool_handler_signature_mismatch",
+        context={"error": str(error)},
+    )
+    return ToolResult(
+        message=f"Tool '{tool_name}' handler signature mismatch: {error}",
+        value=None,
+        success=False,
+    )
+
+
 def _handle_unexpected_tool_error(
     *,
     log: StructuredLogger,
@@ -382,10 +405,17 @@ def _handle_tool_exception(  # noqa: PLR0913
             tool_name=tool_name,
             deadline=context.deadline,
         ) from error
-    # Unexpected exception - manually restore since we're catching and returning
+    # Restore snapshot for all other exceptions since we're catching and returning
     _restore_snapshot_if_needed(
         context.execution_state, snapshot, log, reason="exception"
     )
+    # TypeError indicates handler signature mismatch (pyright should catch these)
+    if isinstance(error, TypeError):
+        return _handle_handler_signature_error(
+            log=log,
+            tool_name=tool_name,
+            error=error,
+        )
     return _handle_unexpected_tool_error(
         log=log,
         tool_name=tool_name,
