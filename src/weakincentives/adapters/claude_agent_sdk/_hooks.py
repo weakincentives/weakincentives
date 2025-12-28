@@ -141,6 +141,7 @@ class HookContext:
         self._tool_count = 0
         self._last_usage: TokenUsage | None = None
         self._last_response_text: str | None = None
+        self._last_structured_output: object | None = None
 
     @property
     def session(self) -> SessionProtocol:
@@ -486,99 +487,100 @@ def create_post_tool_use_hook(
                     },
                 )
 
-        # Handle StructuredOutput tool - check completion handler before stopping
-        if stop_on_structured_output and data.tool_name == "StructuredOutput":
-            # Try to parse structured output and check completion handler
-            should_continue = _check_completion_and_budget(
-                hook_context,
-                data.tool_input,
-            )
+        # Handle StructuredOutput tool
+        if data.tool_name == "StructuredOutput":
+            # Always store the parsed output for Stop hook
+            _store_structured_output(hook_context, data.tool_input)
 
-            if should_continue:
-                logger.info(
-                    "claude_agent_sdk.hook.structured_output_continue",
-                    event="hook.structured_output_continue",
-                    context={
-                        "tool_name": data.tool_name,
-                        "reason": "completion_handler_incomplete",
-                    },
+            # Only check completion if stop_on_structured_output is enabled
+            if stop_on_structured_output:
+                should_continue = _check_completion_and_budget(hook_context)
+
+                if should_continue:
+                    logger.info(
+                        "claude_agent_sdk.hook.structured_output_continue",
+                        event="hook.structured_output_continue",
+                        context={
+                            "tool_name": data.tool_name,
+                            "reason": "completion_handler_incomplete",
+                        },
+                    )
+                    return {}  # Continue execution
+
+                logger.debug(
+                    "claude_agent_sdk.hook.structured_output_stop",
+                    event="hook.structured_output_stop",
+                    context={"tool_name": data.tool_name},
                 )
-                return {}  # Continue execution
-
-            logger.debug(
-                "claude_agent_sdk.hook.structured_output_stop",
-                event="hook.structured_output_stop",
-                context={"tool_name": data.tool_name},
-            )
-            return {"continue": False}
+                return {"continue": False}
 
         return {}
 
     return post_tool_use_hook
 
 
-def _parse_structured_output_for_completion(
+def _store_structured_output(
     hook_context: HookContext,
     tool_input: dict[str, Any],
-) -> object | None:
-    """Parse structured output for completion check.
+) -> None:
+    """Store structured output for later use by Stop hook.
 
-    Returns the parsed output or None if parsing fails or is not applicable.
+    Parses and stores the output if possible.
+
+    Args:
+        hook_context: Context to store the parsed output.
+        tool_input: The StructuredOutput tool input containing the output.
     """
     # Need rendered prompt to know output type
     if hook_context.rendered_prompt is None:
-        return None
+        return
 
     output_type = hook_context.rendered_prompt.output_type
     if output_type is None or output_type is type(None):
-        return None
+        return
 
     # Try to parse the structured output from tool input
     raw_output = tool_input.get("json_output") or tool_input.get("output")
     if raw_output is None:
-        return None
+        return
 
     try:
-        return parse(output_type, raw_output, extra="ignore")
+        parsed = parse(output_type, raw_output, extra="ignore")
+        hook_context._last_structured_output = parsed
     except (TypeError, ValueError):
         logger.debug(
             "claude_agent_sdk.hook.completion_parse_failed",
             event="hook.completion_parse_failed",
             context={"output_type": output_type.__name__},
         )
-        return None
 
 
-def _check_completion_and_budget(
-    hook_context: HookContext,
-    tool_input: dict[str, Any],
-) -> bool:
+def _check_completion_and_budget(hook_context: HookContext) -> bool:
     """Check if execution should continue based on completion handler.
 
     Returns True if:
     - Prompt has a completion handler, AND
-    - Structured output can be parsed, AND
+    - Stored structured output exists, AND
     - Completion handler returns incomplete, AND
     - Budget/deadline allows continuation
 
+    Assumes _store_structured_output was already called.
+
     Args:
-        hook_context: Context with prompt, budget, and session state.
-        tool_input: The StructuredOutput tool input containing the output.
+        hook_context: Context with prompt, budget, and stored output.
 
     Returns:
         True if execution should continue, False to stop.
     """
-    # Need prompt with completion handler
+    # Need stored output and prompt with completion handler
+    if hook_context._last_structured_output is None:
+        return False
+
     if hook_context.prompt is None or hook_context.prompt.completion_handler is None:
         return False
 
-    # Try to parse output
-    parsed_output = _parse_structured_output_for_completion(hook_context, tool_input)
-    if parsed_output is None:
-        return False
-
     # Check completion handler
-    result = hook_context.check_completion(parsed_output)
+    result = hook_context.check_completion(hook_context._last_structured_output)
 
     if result.complete:
         logger.debug(
@@ -664,12 +666,13 @@ def create_user_prompt_submit_hook(
 def create_stop_hook(
     hook_context: HookContext,
 ) -> AsyncHookCallback:
-    """Create a Stop hook for execution finalization.
+    """Create a Stop hook for execution finalization and completion checking.
 
-    Records the stop reason for later use in result construction.
+    Records the stop reason and checks the completion handler. If the task
+    is incomplete and there is remaining budget, signals to continue execution.
 
     Args:
-        hook_context: Context to record stop reason.
+        hook_context: Context to record stop reason and check completion.
 
     Returns:
         An async hook callback function matching SDK signature.
@@ -696,9 +699,72 @@ def create_stop_hook(
             context={"stop_reason": stop_reason},
         )
 
+        # Check completion handler if we have a stored structured output
+        should_continue = _check_stop_completion(hook_context)
+        if should_continue:
+            logger.info(
+                "claude_agent_sdk.hook.stop_continue",
+                event="hook.stop_continue",
+                context={
+                    "stop_reason": stop_reason,
+                    "reason": "completion_handler_incomplete",
+                },
+            )
+            return {"continue": True}
+
         return {}
 
     return stop_hook
+
+
+def _check_stop_completion(hook_context: HookContext) -> bool:
+    """Check if execution should continue based on stored structured output.
+
+    Returns True if:
+    - We have a stored structured output from a previous StructuredOutput call, AND
+    - Prompt has a completion handler, AND
+    - Completion handler returns incomplete, AND
+    - Budget/deadline allows continuation
+
+    Args:
+        hook_context: Context with prompt, budget, and stored output.
+
+    Returns:
+        True if execution should continue, False to stop.
+    """
+    # Need stored output and prompt with completion handler
+    if hook_context._last_structured_output is None:
+        return False
+
+    if hook_context.prompt is None or hook_context.prompt.completion_handler is None:
+        return False
+
+    # Check completion handler
+    result = hook_context.check_completion(hook_context._last_structured_output)
+
+    if result.complete:
+        logger.debug(
+            "claude_agent_sdk.hook.stop_completion_complete",
+            event="hook.stop_completion_complete",
+            context={"reason": result.reason},
+        )
+        return False
+
+    # Task not complete - check if we have budget to continue
+    if not hook_context.has_remaining_budget():
+        logger.info(
+            "claude_agent_sdk.hook.stop_completion_no_budget",
+            event="hook.stop_completion_no_budget",
+            context={"reason": result.reason},
+        )
+        return False
+
+    logger.info(
+        "claude_agent_sdk.hook.stop_completion_incomplete",
+        event="hook.stop_completion_incomplete",
+        context={"reason": result.reason},
+    )
+    return True
 
 
 def create_subagent_start_hook(
