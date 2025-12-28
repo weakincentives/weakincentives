@@ -77,6 +77,7 @@ from weakincentives.runtime import (
     MainLoopRequest,
     MainLoopResult,
     Session,
+    ShutdownCoordinator,
 )
 from weakincentives.types import SupportsDataclass
 
@@ -315,6 +316,7 @@ class CodeReviewApp:
     _pending_requests: dict[UUID, str]  # request_id -> user prompt for display
     _use_claude_agent: bool
     _workspace_section: ClaudeAgentWorkspaceSection | None
+    _shutdown_requested: bool
 
     def __init__(  # noqa: PLR0913
         self,
@@ -330,6 +332,7 @@ class CodeReviewApp:
         self._workspace_section = workspace_section
         self._worker_thread = None
         self._pending_requests = {}
+        self._shutdown_requested = False
         # Create mailboxes for the loop
         self._requests = InMemoryMailbox(name="code-review-requests")
         self._responses = InMemoryMailbox(name="code-review-responses")
@@ -383,6 +386,11 @@ class CodeReviewApp:
                 )
         return None
 
+    def _request_shutdown(self) -> None:
+        """Signal handler callback to request shutdown."""
+        self._shutdown_requested = True
+        self._loop.shutdown(timeout=0)  # Non-blocking, just set the flag
+
     def run(self) -> None:
         """Start the interactive review session with background worker."""
         print(
@@ -394,21 +402,27 @@ class CodeReviewApp:
         )
         print("Type a review prompt to begin. (Type 'exit' to quit.)")
 
+        # Install signal handlers for graceful shutdown
+        coordinator = ShutdownCoordinator.install()
+        coordinator.register(self._request_shutdown)
+
         # Start background worker thread
         self._worker_thread = threading.Thread(
             target=self._run_worker,
             name="code-review-worker",
-            daemon=True,
         )
         self._worker_thread.start()
         _LOGGER.info("Started background worker thread")
 
         try:
-            while True:
+            while not self._shutdown_requested:
                 try:
                     user_prompt = input("Review prompt: ").strip()
-                except EOFError:  # pragma: no cover - interactive convenience
+                except (EOFError, KeyboardInterrupt):
                     print()
+                    break
+
+                if self._shutdown_requested:
                     break
 
                 if not user_prompt or user_prompt.lower() in {"exit", "quit"}:
@@ -426,10 +440,11 @@ class CodeReviewApp:
 
                 # Wait for response
                 result = self._wait_for_response(request_event.request_id)
-                del self._pending_requests[request_event.request_id]
-                if result is None:
-                    print("Worker stopped unexpectedly.")
+                if result is None or self._shutdown_requested:
+                    if not self._shutdown_requested:
+                        print("Worker stopped unexpectedly.")
                     break
+                del self._pending_requests[request_event.request_id]
                 self._render_result(result)
         finally:
             self._cleanup()
@@ -439,7 +454,13 @@ class CodeReviewApp:
 
     def _cleanup(self) -> None:
         """Clean up resources."""
-        # Close mailboxes first - this signals worker to exit
+        # Gracefully shutdown the loop - completes in-flight work
+        if self._loop.shutdown(timeout=5.0):
+            _LOGGER.info("Worker loop stopped cleanly")
+        else:
+            _LOGGER.warning("Worker loop did not stop within timeout")
+
+        # Close mailboxes
         self._requests.close()
         self._responses.close()
 
