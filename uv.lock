@@ -2614,6 +2614,9 @@ asteval = [
 claude-agent-sdk = [
     { name = "claude-agent-sdk" },
 ]
+demos = [
+    { name = "textual" },
+]
 litellm = [
     { name = "litellm" },
 ]
@@ -2661,9 +2664,10 @@ requires-dist = [
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.8.0" },
     { name = "podman", marker = "extra == 'podman'", specifier = ">=5.6.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.0" },
+    { name = "textual", marker = "extra == 'demos'", specifier = ">=3.0.0" },
     { name = "uvicorn", marker = "extra == 'wink'", specifier = ">=0.30.0" },
 ]
-provides-extras = ["asteval", "claude-agent-sdk", "litellm", "openai", "podman", "redis", "wink"]
+provides-extras = ["asteval", "claude-agent-sdk", "demos", "litellm", "openai", "podman", "redis", "wink"]
 
 [package.metadata.requires-dev]
 dev = [

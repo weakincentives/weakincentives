@@ -62,6 +62,9 @@ wink = [
     "markdown-it-py[linkify]>=4.0.0",
     "uvicorn>=0.30.0",
 ]
+demos = [
+    "textual>=3.0.0",
+]
 
 [project.scripts]
 wink = "weakincentives.cli.wink:main"
@@ -145,6 +148,8 @@ combine-as-imports = true
 "integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
 # Examples may use higher complexity for illustration purposes.
 "examples/**" = ["C901"]
+# Code reviewer example uses Textual widgets with compose methods and nested contexts.
+"code_reviewer_example.py" = ["C901", "PLR2004", "PLR6301", "SIM117"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
@@ -272,7 +277,7 @@ exclude_lines = [
 [tool.deptry]
 
 [tool.deptry.per_rule_ignores]
-DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "podman", "pyyaml", "redis"]
+DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "podman", "pyyaml", "redis", "textual"]
 
 [tool.pyright]
 typeCheckingMode = "strict"

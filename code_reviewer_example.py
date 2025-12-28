@@ -10,11 +10,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Interactive walkthrough showcasing a minimalist code review agent."""
+"""Textual-based code review agent with MainLoop and EvalLoop modes.
+
+This demo showcases:
+- Interactive code review via MainLoop with a rich TUI
+- Evaluation mode via EvalLoop on datasets derived from past snapshots
+- Snapshot-to-dataset conversion for regression testing
+
+Run with:
+    uv run python code_reviewer_example.py              # Interactive mode
+    uv run python code_reviewer_example.py --eval       # Evaluation mode
+    uv run python code_reviewer_example.py --convert    # Convert snapshots to dataset
+"""
 
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import textwrap
@@ -22,8 +34,29 @@ import threading
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import cast
+from typing import ClassVar, cast
 from uuid import UUID
+
+from textual import on, work
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
+from textual.message import Message
+from textual.reactive import reactive
+from textual.widgets import (
+    Button,
+    Footer,
+    Header,
+    Input,
+    Label,
+    ListItem,
+    ListView,
+    Markdown,
+    ProgressBar,
+    Static,
+    TabbedContent,
+    TabPane,
+)
 
 from examples import (
     build_logged_session,
@@ -32,15 +65,6 @@ from examples import (
     resolve_override_tag,
 )
 from weakincentives.adapters import ProviderAdapter
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    ClaudeAgentWorkspaceSection,
-    HostMount as ClaudeHostMount,
-    IsolationConfig,
-    NetworkPolicy,
-    SandboxConfig,
-)
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
 from weakincentives.contrib.tools import (
@@ -48,8 +72,6 @@ from weakincentives.contrib.tools import (
     HostMount,
     PlanningStrategy,
     PlanningToolsSection,
-    PodmanSandboxConfig,
-    PodmanSandboxSection,
     VfsPath,
     VfsToolsSection,
     WorkspaceDigest,
@@ -57,6 +79,16 @@ from weakincentives.contrib.tools import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session as dump_session_tree
+from weakincentives.evals import (
+    Dataset,
+    EvalLoop,
+    EvalReport,
+    EvalRequest,
+    EvalResult,
+    Sample,
+    Score,
+    submit_dataset,
+)
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
@@ -77,14 +109,15 @@ from weakincentives.runtime import (
     MainLoopRequest,
     MainLoopResult,
     Session,
-    ShutdownCoordinator,
 )
+from weakincentives.runtime.session.snapshots import Snapshot
 from weakincentives.types import SupportsDataclass
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
 SNAPSHOT_DIR = PROJECT_ROOT / "snapshots"
+DATASET_DIR = PROJECT_ROOT / "datasets"
 PROMPT_OVERRIDES_TAG_ENV = "CODE_REVIEW_PROMPT_TAG"
 SUNFISH_MOUNT_INCLUDE_GLOBS: tuple[str, ...] = (
     "*.md",
@@ -107,24 +140,20 @@ SUNFISH_MOUNT_EXCLUDE_GLOBS: tuple[str, ...] = (
 )
 SUNFISH_MOUNT_MAX_BYTES = 600_000
 DEFAULT_DEADLINE_MINUTES = 5
+MIN_KEYWORD_LENGTH = 3
 _LOGGER = logging.getLogger(__name__)
-
-# Domains allowed for code review reference documentation
-CODE_REVIEW_ALLOWED_DOMAINS: tuple[str, ...] = (
-    "api.anthropic.com",  # Required for API access
-    "peps.python.org",  # PEP documentation
-    "docs.python.org",  # Python standard library docs
-    "typing.readthedocs.io",  # typing module documentation
-    "mypy.readthedocs.io",  # mypy type checker docs
-)
 
 
 def _default_deadline() -> Deadline:
     """Create a fresh default deadline for each request."""
-
     return Deadline(
         expires_at=datetime.now(UTC) + timedelta(minutes=DEFAULT_DEADLINE_MINUTES)
     )
+
+
+# -----------------------------------------------------------------------------
+# Data Types
+# -----------------------------------------------------------------------------
 
 
 @dataclass(slots=True, frozen=True)
@@ -168,36 +197,82 @@ class ReferenceParams:
     )
 
 
+# -----------------------------------------------------------------------------
+# Expected Response for Evaluation
+# -----------------------------------------------------------------------------
+
+
+@dataclass(slots=True, frozen=True)
+class ExpectedReviewResponse:
+    """Expected output for evaluation - allows partial matching."""
+
+    keywords: tuple[str, ...] = ()
+    min_issues: int = 0
+    min_next_steps: int = 0
+
+
+# -----------------------------------------------------------------------------
+# Evaluator for Code Review Responses
+# -----------------------------------------------------------------------------
+
+
+def review_response_evaluator(
+    output: ReviewResponse, expected: ExpectedReviewResponse
+) -> Score:
+    """Evaluate a review response against expected criteria."""
+    issues_found = len(output.issues) >= expected.min_issues
+    steps_found = len(output.next_steps) >= expected.min_next_steps
+
+    all_text = (
+        output.summary.lower()
+        + " ".join(output.issues).lower()
+        + " ".join(output.next_steps).lower()
+    )
+    keywords_found = all(kw.lower() in all_text for kw in expected.keywords)
+
+    passed = issues_found and steps_found and keywords_found
+    score = (
+        (1.0 if issues_found else 0.0)
+        + (1.0 if steps_found else 0.0)
+        + (1.0 if keywords_found else 0.0)
+    ) / 3.0
+
+    reasons: list[str] = []
+    if not issues_found:
+        reasons.append(f"expected >= {expected.min_issues} issues")
+    if not steps_found:
+        reasons.append(f"expected >= {expected.min_next_steps} next steps")
+    if not keywords_found:
+        missing = [kw for kw in expected.keywords if kw.lower() not in all_text]
+        reasons.append(f"missing keywords: {missing}")
+
+    return Score(
+        value=score,
+        passed=passed,
+        reason="; ".join(reasons) if reasons else "all criteria met",
+    )
+
+
+# -----------------------------------------------------------------------------
+# MainLoop Implementation
+# -----------------------------------------------------------------------------
+
+
 class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     """MainLoop implementation for code review with auto-optimization.
 
     This loop runs as a background worker processing requests from a mailbox.
     It maintains a persistent session across all requests and automatically
     runs workspace digest optimization on first use.
-
-    Example::
-
-        requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox()
-        responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox()
-        loop = CodeReviewLoop(
-            adapter=adapter,
-            requests=requests,
-            responses=responses,
-        )
-        # Run in background thread
-        thread = threading.Thread(target=lambda: loop.run(max_iterations=None))
-        thread.start()
     """
 
     _persistent_session: Session
     _template: PromptTemplate[ReviewResponse]
     _overrides_store: LocalPromptOverridesStore
     _override_tag: str
-    _use_podman: bool
-    _use_claude_agent: bool
     _optimization_done: bool
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         *,
         adapter: ProviderAdapter[ReviewResponse],
@@ -205,27 +280,15 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         responses: InMemoryMailbox[MainLoopResult[ReviewResponse]],
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
-        use_podman: bool = False,
-        use_claude_agent: bool = False,
-        workspace_section: ClaudeAgentWorkspaceSection | None = None,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests, responses=responses)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = resolve_override_tag(
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
         )
-        self._use_podman = use_podman
-        self._use_claude_agent = use_claude_agent
         self._optimization_done = False
-        # Create persistent session at construction time
         self._persistent_session = build_logged_session(tags={"app": "code-reviewer"})
-        self._template = build_task_prompt(
-            session=self._persistent_session,
-            use_podman=use_podman,
-            use_claude_agent=use_claude_agent,
-            workspace_section=workspace_section,
-        )
-        # Seed overrides for all modes
+        self._template = build_task_prompt(session=self._persistent_session)
         self._seed_overrides()
 
     def _seed_overrides(self) -> None:
@@ -238,12 +301,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     def prepare(
         self, request: ReviewTurnParams
     ) -> tuple[Prompt[ReviewResponse], Session]:
-        """Prepare prompt and session for the given request.
-
-        Runs workspace optimization on first request if needed, then creates
-        the review prompt and returns the persistent session.
-        """
-        # Run optimization once on first request
+        """Prepare prompt and session for the given request."""
         if not self._optimization_done:
             needs_optimization = (
                 self._persistent_session[WorkspaceDigest].latest() is None
@@ -295,365 +353,174 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         """Expose override tag for display."""
         return self._override_tag
 
-    @property
-    def use_podman(self) -> bool:
-        """Expose workspace mode for display."""
-        return self._use_podman
+
+# -----------------------------------------------------------------------------
+# Snapshot to Dataset Conversion
+# -----------------------------------------------------------------------------
 
 
-class CodeReviewApp:
-    """Owns the REPL loop and user interaction.
-
-    Runs the MainLoop in a background thread while the main thread handles
-    user input. Requests are sent via the request mailbox and results are
-    received from the response mailbox.
-    """
-
-    _requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]]
-    _responses: InMemoryMailbox[MainLoopResult[ReviewResponse]]
-    _loop: CodeReviewLoop
-    _worker_thread: threading.Thread | None
-    _pending_requests: dict[UUID, str]  # request_id -> user prompt for display
-    _use_claude_agent: bool
-    _workspace_section: ClaudeAgentWorkspaceSection | None
-    _shutdown_requested: bool
-
-    def __init__(  # noqa: PLR0913
-        self,
-        adapter: ProviderAdapter[ReviewResponse],
-        *,
-        overrides_store: LocalPromptOverridesStore | None = None,
-        override_tag: str | None = None,
-        use_podman: bool = False,
-        use_claude_agent: bool = False,
-        workspace_section: ClaudeAgentWorkspaceSection | None = None,
-    ) -> None:
-        self._use_claude_agent = use_claude_agent
-        self._workspace_section = workspace_section
-        self._worker_thread = None
-        self._pending_requests = {}
-        self._shutdown_requested = False
-        # Create mailboxes for the loop
-        self._requests = InMemoryMailbox(name="code-review-requests")
-        self._responses = InMemoryMailbox(name="code-review-responses")
-        self._loop = CodeReviewLoop(
-            adapter=adapter,
-            requests=self._requests,
-            responses=self._responses,
-            overrides_store=overrides_store,
-            override_tag=override_tag,
-            use_podman=use_podman,
-            use_claude_agent=use_claude_agent,
-            workspace_section=workspace_section,
-        )
-
-    def _run_worker(self) -> None:
-        """Background worker that processes requests from the mailbox."""
-        # Run indefinitely until mailbox is closed
-        self._loop.run(max_iterations=None, wait_time_seconds=5)
-        _LOGGER.debug("Worker thread exiting")
-
-    def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:
-        """Render the result to console."""
-        print("\n--- Agent Response ---")
-        if result.success and result.output is not None:
-            answer = _render_response(result.output)
-            print(answer)
-        else:
-            print(f"Error: {result.error}")
-        print("\n--- Plan Snapshot ---")
-        print(render_plan_snapshot(self._loop.session))
-        print("-" * 23 + "\n")
-
-    def _wait_for_response(
-        self, request_id: UUID
-    ) -> MainLoopResult[ReviewResponse] | None:
-        """Poll the response mailbox until we get a response for our request.
-
-        Returns None if mailbox is closed before response received.
-        """
-        while not self._responses.closed:
-            msgs = self._responses.receive(max_messages=1, wait_time_seconds=1)
-            if msgs:
-                msg = msgs[0]
-                result = msg.body
-                msg.acknowledge()
-                if result.request_id == request_id:
-                    return result
-                # Not our response - this shouldn't happen in single-user mode
-                _LOGGER.warning(
-                    "Received response for unknown request: %s", result.request_id
-                )
-        return None
-
-    def _request_shutdown(self) -> None:
-        """Signal handler callback to request shutdown."""
-        self._shutdown_requested = True
-        self._loop.shutdown(timeout=0)  # Non-blocking, just set the flag
-
-    def run(self) -> None:
-        """Start the interactive review session with background worker."""
-        print(
-            _build_intro(
-                self._loop.override_tag,
-                use_podman=self._loop.use_podman,
-                use_claude_agent=self._use_claude_agent,
-            )
-        )
-        print("Type a review prompt to begin. (Type 'exit' to quit.)")
-
-        # Install signal handlers for graceful shutdown
-        coordinator = ShutdownCoordinator.install()
-        coordinator.register(self._request_shutdown)
-
-        # Start background worker thread
-        self._worker_thread = threading.Thread(
-            target=self._run_worker,
-            name="code-review-worker",
-        )
-        self._worker_thread.start()
-        _LOGGER.info("Started background worker thread")
-
+def load_snapshots_from_directory(snapshot_dir: Path) -> list[Snapshot]:
+    """Load all snapshots from JSONL files in a directory."""
+    snapshots: list[Snapshot] = []
+    for jsonl_file in sorted(snapshot_dir.glob("*.jsonl")):
         try:
-            while not self._shutdown_requested:
-                try:
-                    user_prompt = input("Review prompt: ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    break
-
-                if self._shutdown_requested:
-                    break
-
-                if not user_prompt or user_prompt.lower() in {"exit", "quit"}:
-                    break
-
-                # Send request to mailbox
-                request = ReviewTurnParams(request=user_prompt)
-                request_event = MainLoopRequest(
-                    request=request,
-                    deadline=_default_deadline(),
-                )
-                self._pending_requests[request_event.request_id] = user_prompt
-                self._requests.send(request_event)
-                print("Processing request...")
-
-                # Wait for response
-                result = self._wait_for_response(request_event.request_id)
-                if result is None or self._shutdown_requested:
-                    if not self._shutdown_requested:
-                        print("Worker stopped unexpectedly.")
-                    break
-                del self._pending_requests[request_event.request_id]
-                self._render_result(result)
-        finally:
-            self._cleanup()
-
-        print("Goodbye.")
-        dump_session_tree(self._loop.session, SNAPSHOT_DIR)
-
-    def _cleanup(self) -> None:
-        """Clean up resources."""
-        # Gracefully shutdown the loop - completes in-flight work
-        if self._loop.shutdown(timeout=5.0):
-            _LOGGER.info("Worker loop stopped cleanly")
-        else:
-            _LOGGER.warning("Worker loop did not stop within timeout")
-
-        # Close mailboxes
-        self._requests.close()
-        self._responses.close()
-
-        # Wait for worker thread to exit
-        if self._worker_thread is not None:
-            self._worker_thread.join(timeout=2.0)
-
-        if self._workspace_section is not None:
-            self._workspace_section.cleanup()
-            _LOGGER.info("Cleaned up Claude Agent workspace.")
+            with jsonl_file.open() as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        snapshot = Snapshot.from_json(line)
+                        snapshots.append(snapshot)
+                    except Exception as e:
+                        _LOGGER.warning("Failed to parse snapshot: %s", e)
+        except Exception as e:
+            _LOGGER.warning("Failed to read %s: %s", jsonl_file, e)
+    return snapshots
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Interactive code review agent example."
-    )
-    parser.add_argument(
-        "--podman",
-        action="store_true",
-        help="Use Podman sandbox instead of VFS + Asteval (requires Podman connection).",
-    )
-    parser.add_argument(
-        "--claude-agent",
-        action="store_true",
-        help=(
-            "Use Claude Agent SDK adapter with native agentic capabilities. "
-            "Requires ANTHROPIC_API_KEY. Uses SDK's built-in tools."
-        ),
-    )
-    return parser.parse_args()
+def extract_review_requests_from_snapshots(
+    snapshots: list[Snapshot],
+) -> list[tuple[str, ReviewResponse | None]]:
+    """Extract review request/response pairs from snapshots.
 
-
-def main() -> None:
-    """Entry point used by the `weakincentives` CLI harness."""
-    args = parse_args()
-    configure_logging()
-
-    if args.claude_agent:
-        adapter, workspace_section = build_claude_agent_adapter()
-        app = CodeReviewApp(
-            adapter,
-            use_podman=False,
-            use_claude_agent=True,
-            workspace_section=workspace_section,
-        )
-    else:
-        adapter = build_adapter()
-        app = CodeReviewApp(adapter, use_podman=args.podman)
-
-    app.run()
-
-
-def build_adapter() -> ProviderAdapter[ReviewResponse]:
-    """Build the OpenAI adapter, checking for the required API key."""
-    if "OPENAI_API_KEY" not in os.environ:
-        raise SystemExit("Set OPENAI_API_KEY before running this example.")
-    model = os.getenv("OPENAI_MODEL", "gpt-5.1")
-    return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
-
-
-def build_claude_agent_adapter() -> tuple[
-    ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection
-]:
-    """Build the Claude Agent SDK adapter with workspace section and isolation.
-
-    Creates a workspace section with the test repository mounted, and configures
-    the adapter to use the SDK's native agentic capabilities with hermetic
-    isolation. The sandbox has network access to Python documentation sites
-    for code quality reference.
-
-    Returns:
-        Tuple of (adapter, workspace_section). The workspace section should be
-        cloned with the real session before use in prompts.
+    Returns a list of (request_text, response_or_none) tuples.
     """
-    if "ANTHROPIC_API_KEY" not in os.environ:
-        raise SystemExit("Set ANTHROPIC_API_KEY before running with --claude-agent.")
+    pairs: list[tuple[str, ReviewResponse | None]] = []
 
-    _ensure_test_repository_available()
+    for snapshot in snapshots:
+        # Look for ReviewTurnParams and ReviewResponse in the slices
+        request_text: str | None = None
+        response: ReviewResponse | None = None
 
-    # Create a temporary session for workspace materialization
-    temp_session = Session(tags={"purpose": "workspace-materialization"})
+        for slice_type, items in snapshot.slices.items():
+            type_name = slice_type.__name__
 
-    # Create workspace section with test repository mounted
-    sunfish_path = TEST_REPOSITORIES_ROOT / "sunfish"
-    workspace_section = ClaudeAgentWorkspaceSection(
-        session=temp_session,
-        mounts=(
-            ClaudeHostMount(
-                host_path=str(sunfish_path),
-                mount_path="sunfish",
-                include_glob=SUNFISH_MOUNT_INCLUDE_GLOBS,
-                exclude_glob=SUNFISH_MOUNT_EXCLUDE_GLOBS,
-                max_bytes=SUNFISH_MOUNT_MAX_BYTES,
-            ),
-        ),
-        allowed_host_roots=(str(TEST_REPOSITORIES_ROOT),),
-    )
+            if type_name == "ReviewTurnParams" and items:
+                item = items[-1]
+                if hasattr(item, "request"):
+                    request_text = str(item.request)  # type: ignore[attr-defined]
 
-    # Configure hermetic isolation with access to Python documentation
-    isolation = IsolationConfig(
-        network_policy=NetworkPolicy(
-            allowed_domains=CODE_REVIEW_ALLOWED_DOMAINS,
-        ),
-        sandbox=SandboxConfig(
-            enabled=True,
-            # Allow reading the workspace directory
-            readable_paths=(str(workspace_section.temp_dir),),
-            # Auto-approve bash commands in sandbox (safe with network restrictions)
-            bash_auto_allow=True,
-        ),
-    )
+            if type_name == "ReviewResponse" and items:
+                item = items[-1]
+                if (
+                    hasattr(item, "summary")
+                    and hasattr(item, "issues")
+                    and hasattr(item, "next_steps")
+                ):
+                    response = ReviewResponse(
+                        summary=str(item.summary),  # type: ignore[attr-defined]
+                        issues=list(item.issues),  # type: ignore[attr-defined]
+                        next_steps=list(item.next_steps),  # type: ignore[attr-defined]
+                    )
 
-    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
-    adapter = ClaudeAgentSDKAdapter(
-        model=model,
-        client_config=ClaudeAgentSDKClientConfig(
-            permission_mode="bypassPermissions",
-            cwd=str(workspace_section.temp_dir),
-            isolation=isolation,
-        ),
-    )
-    return cast(ProviderAdapter[ReviewResponse], adapter), workspace_section
+        if request_text:
+            pairs.append((request_text, response))
+
+    return pairs
+
+
+def create_dataset_from_snapshots(
+    snapshot_dir: Path,
+    output_path: Path,
+    *,
+    min_issues: int = 1,
+    min_next_steps: int = 1,
+) -> int:
+    """Convert snapshots to a JSONL dataset for evaluation.
+
+    Returns the number of samples written.
+    """
+    snapshots = load_snapshots_from_directory(snapshot_dir)
+    pairs = extract_review_requests_from_snapshots(snapshots)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    count = 0
+
+    with output_path.open("w") as f:
+        for idx, (request, response) in enumerate(pairs):
+            # Create expected response based on what we saw
+            if response:
+                keywords = tuple(
+                    word
+                    for word in response.summary.split()[:5]
+                    if len(word) > MIN_KEYWORD_LENGTH and word.isalpha()
+                )
+            else:
+                keywords = ()
+
+            sample = {
+                "id": f"snapshot-{idx}",
+                "input": {"request": request},
+                "expected": {
+                    "keywords": keywords,
+                    "min_issues": min(
+                        min_issues, len(response.issues) if response else 0
+                    ),
+                    "min_next_steps": min(
+                        min_next_steps, len(response.next_steps) if response else 0
+                    ),
+                },
+            }
+            f.write(json.dumps(sample) + "\n")
+            count += 1
+
+    return count
+
+
+def load_review_dataset(
+    path: Path,
+) -> Dataset[ReviewTurnParams, ExpectedReviewResponse]:
+    """Load a review dataset from JSONL."""
+    samples: list[Sample[ReviewTurnParams, ExpectedReviewResponse]] = []
+    with path.open() as f:
+        for line in f:
+            obj = json.loads(line)
+            input_obj = obj["input"]
+            expected_obj = obj["expected"]
+            samples.append(
+                Sample(
+                    id=obj["id"],
+                    input=ReviewTurnParams(request=input_obj["request"]),
+                    expected=ExpectedReviewResponse(
+                        keywords=tuple(expected_obj.get("keywords", [])),
+                        min_issues=expected_obj.get("min_issues", 0),
+                        min_next_steps=expected_obj.get("min_next_steps", 0),
+                    ),
+                )
+            )
+    return Dataset(samples=tuple(samples))
+
+
+# -----------------------------------------------------------------------------
+# Prompt Building
+# -----------------------------------------------------------------------------
 
 
 def build_task_prompt(
     *,
     session: Session,
-    use_podman: bool = False,
-    use_claude_agent: bool = False,
-    workspace_section: ClaudeAgentWorkspaceSection | None = None,
 ) -> PromptTemplate[ReviewResponse]:
-    """Builds the main prompt template for the code review agent.
-
-    This prompt demonstrates progressive disclosure: the Reference Documentation
-    section starts summarized and can be expanded on demand via `open_sections`.
-
-    All modes now support full features including workspace optimization.
-
-    Args:
-        session: Session for state management.
-        use_podman: If True, use Podman sandbox instead of VFS.
-        use_claude_agent: If True, use Claude Agent SDK mode.
-        workspace_section: Pre-created workspace section (for Claude Agent mode).
-            Will be cloned with the provided session.
-    """
+    """Builds the main prompt template for the code review agent."""
     _ensure_test_repository_available()
 
-    if use_claude_agent:
-        # Claude Agent SDK mode: full features with ClaudeAgentWorkspaceSection.
-        # Streaming mode enables hooks, MCP tool bridging, and workspace optimization.
-        # Clone the workspace section with the real session.
-        if workspace_section is None:
-            msg = "workspace_section is required when use_claude_agent=True"
-            raise ValueError(msg)
-        cloned_workspace = workspace_section.clone(session=session)
-        sections = (
-            _build_claude_agent_guidance_section(),
-            WorkspaceDigestSection(session=session),
-            _build_reference_section(),  # Progressive disclosure section
-            PlanningToolsSection(
-                session=session,
-                strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-                accepts_overrides=True,
-            ),
-            cloned_workspace,
-            MarkdownSection[ReviewTurnParams](
-                title="Review Request",
-                template="${request}",
-                key="review-request",
-            ),
-        )
-    else:
-        # Standard mode: full prompt with VFS or Podman workspace sections
-        workspace_sections = _build_workspace_section(
-            session=session, use_podman=use_podman
-        )
-        sections = (
-            _build_review_guidance_section(),
-            WorkspaceDigestSection(session=session),
-            _build_reference_section(),  # Progressive disclosure section
-            PlanningToolsSection(
-                session=session,
-                strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-                accepts_overrides=True,
-            ),
-            *workspace_sections,
-            MarkdownSection[ReviewTurnParams](
-                title="Review Request",
-                template="${request}",
-                key="review-request",
-            ),
-        )
+    workspace_sections = _build_workspace_section(session=session)
+    sections = (
+        _build_review_guidance_section(),
+        WorkspaceDigestSection(session=session),
+        _build_reference_section(),
+        PlanningToolsSection(
+            session=session,
+            strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+            accepts_overrides=True,
+        ),
+        *workspace_sections,
+        MarkdownSection[ReviewTurnParams](
+            title="Review Request",
+            template="${request}",
+            key="review-request",
+        ),
+    )
 
     return PromptTemplate[ReviewResponse](
         ns="examples/code-review",
@@ -684,49 +551,6 @@ def _build_review_guidance_section() -> MarkdownSection[ReviewGuidance]:
             - Planning tools help you capture multi-step investigations; keep the
               plan updated as you explore.
             - Filesystem tools list directories, read files, and stage edits.
-              When available, the `shell_execute` command runs short Podman
-              commands (no network access). Mounted files are read-only; use
-              writes to stage new snapshots.
-
-            Respond with JSON containing:
-            - summary: One paragraph describing your findings so far.
-            - issues: List concrete risks, questions, or follow-ups you found.
-            - next_steps: Actionable recommendations to progress the task.
-            """
-        ).strip(),
-        default_params=ReviewGuidance(),
-        key="code-review-brief",
-    )
-
-
-def _build_claude_agent_guidance_section() -> MarkdownSection[ReviewGuidance]:
-    """Build guidance section for Claude Agent SDK mode.
-
-    This version is tailored for the SDK's native agentic capabilities
-    and includes references to accessible Python documentation.
-    """
-    return MarkdownSection[ReviewGuidance](
-        title="Code Review Brief",
-        template=textwrap.dedent(
-            """
-            You are a code review assistant. The repository has been mounted
-            in your current working directory under `sunfish/`.
-
-            Use your native tools to explore the codebase:
-            - Read files to understand the code structure
-            - Use Bash to run commands like `find`, `grep`, or `git`
-            - Write files if you need to suggest changes
-
-            ## Code Quality References
-
-            You have network access to Python documentation for code quality guidance:
-            - **PEP 8** (https://peps.python.org/pep-0008/): Style guide for Python code
-            - **PEP 484** (https://peps.python.org/pep-0484/): Type hints
-            - **PEP 257** (https://peps.python.org/pep-0257/): Docstring conventions
-            - **PEP 20** (https://peps.python.org/pep-0020/): The Zen of Python
-            - **Python docs** (https://docs.python.org/): Standard library reference
-
-            When reviewing code, consider citing relevant PEPs for style or design issues.
 
             Respond with JSON containing:
             - summary: One paragraph describing your findings so far.
@@ -740,11 +564,7 @@ def _build_claude_agent_guidance_section() -> MarkdownSection[ReviewGuidance]:
 
 
 def _build_reference_section() -> MarkdownSection[ReferenceParams]:
-    """Build a reference documentation section with progressive disclosure.
-
-    This section starts summarized. The model can call `open_sections` to
-    expand it when detailed documentation is needed.
-    """
+    """Build a reference documentation section with progressive disclosure."""
     return MarkdownSection[ReferenceParams](
         title="Reference Documentation",
         template=textwrap.dedent(
@@ -791,39 +611,11 @@ def _sunfish_mounts() -> tuple[HostMount, ...]:
 def _build_workspace_section(
     *,
     session: Session,
-    use_podman: bool = False,
 ) -> tuple[MarkdownSection[SupportsDataclass], ...]:
-    """Build workspace sections based on the selected sandbox mode.
-
-    By default, returns VFS + Asteval sections. When ``use_podman`` is True,
-    attempts to use the Podman sandbox (falling back to VFS+Asteval if unavailable).
-    """
+    """Build VFS + Asteval workspace sections."""
     mounts = _sunfish_mounts()
     allowed_roots = (TEST_REPOSITORIES_ROOT,)
 
-    if use_podman:
-        connection = PodmanSandboxSection.resolve_connection()
-        if connection is None:
-            _LOGGER.warning(
-                "Podman requested but connection unavailable; "
-                "falling back to VFS + Asteval."
-            )
-        else:
-            return (
-                PodmanSandboxSection(
-                    session=session,
-                    config=PodmanSandboxConfig(
-                        mounts=mounts,
-                        allowed_host_roots=allowed_roots,
-                        base_url=connection.get("base_url"),
-                        identity=connection.get("identity"),
-                        connection_name=connection.get("connection_name"),
-                        accepts_overrides=True,
-                    ),
-                ),
-            )
-
-    # Default: VFS + Asteval
     return (
         VfsToolsSection(
             session=session,
@@ -835,48 +627,588 @@ def _build_workspace_section(
     )
 
 
-def _build_intro(
-    override_tag: str, *, use_podman: bool, use_claude_agent: bool = False
-) -> str:
-    if use_claude_agent:
-        return textwrap.dedent(
-            f"""
-            Launching example code reviewer agent with Claude Agent SDK.
-            - Adapter: Claude Agent SDK (native agentic capabilities)
-            - Isolation: Hermetic sandbox with ephemeral home directory
-            - Repository: test-repositories/sunfish mounted in workspace
-            - Tools: SDK's native Read, Write, Bash + custom MCP tools (planning, open_sections)
-            - Network: Access to peps.python.org, docs.python.org for code quality reference
-            - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-
-            Note: Custom MCP tools are bridged via streaming mode for full feature parity.
-            """
-        ).strip()
-
-    workspace_mode = "Podman sandbox" if use_podman else "VFS + Asteval"
-    return textwrap.dedent(
-        f"""
-        Launching example code reviewer agent.
-        - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
-        - Workspace: {workspace_mode} (use --podman flag to enable Podman sandbox).
-        - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-        - Auto-optimization: Workspace digest generated on first request.
-
-        Note: Full prompt text and tool calls will be logged to the console for observability.
-        """
-    ).strip()
+def build_adapter() -> ProviderAdapter[ReviewResponse]:
+    """Build the OpenAI adapter, checking for the required API key."""
+    if "OPENAI_API_KEY" not in os.environ:
+        raise SystemExit("Set OPENAI_API_KEY before running this example.")
+    model = os.getenv("OPENAI_MODEL", "gpt-4.1")
+    return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
 def _render_response(output: ReviewResponse) -> str:
-    """Render a ReviewResponse as formatted text."""
-    lines = [f"Summary: {output.summary}"]
+    """Render a ReviewResponse as formatted markdown."""
+    lines = [f"## Summary\n\n{output.summary}\n"]
     if output.issues:
-        lines.append("Issues:")
+        lines.append("## Issues\n")
         lines.extend(f"- {issue}" for issue in output.issues)
+        lines.append("")
     if output.next_steps:
-        lines.append("Next Steps:")
+        lines.append("## Next Steps\n")
         lines.extend(f"- {step}" for step in output.next_steps)
+        lines.append("")
     return "\n".join(lines)
+
+
+# -----------------------------------------------------------------------------
+# Textual TUI Components
+# -----------------------------------------------------------------------------
+
+
+class ReviewMessage(Message):
+    """Message sent when a review is completed."""
+
+    def __init__(self, result: MainLoopResult[ReviewResponse]) -> None:
+        super().__init__()
+        self.result = result
+
+
+class EvalProgressMessage(Message):
+    """Message for evaluation progress updates."""
+
+    def __init__(self, current: int, total: int, latest: EvalResult | None) -> None:
+        super().__init__()
+        self.current = current
+        self.total = total
+        self.latest = latest
+
+
+class EvalCompleteMessage(Message):
+    """Message sent when evaluation is complete."""
+
+    def __init__(self, report: EvalReport) -> None:
+        super().__init__()
+        self.report = report
+
+
+class ReviewPanel(Container):
+    """Panel showing the latest review response."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Review Response", classes="panel-title")
+        yield VerticalScroll(
+            Markdown("*Submit a review request to get started...*", id="response-md"),
+            id="response-scroll",
+        )
+
+
+class PlanPanel(Container):
+    """Panel showing the current plan state."""
+
+    def compose(self) -> ComposeResult:
+        yield Label("Plan Snapshot", classes="panel-title")
+        yield VerticalScroll(
+            Static("No plan yet", id="plan-content"),
+            id="plan-scroll",
+        )
+
+
+class StatusBar(Static):
+    """Status bar showing current state."""
+
+    status_text: reactive[str] = reactive("Ready")
+
+    def render(self) -> str:
+        return f"Status: {self.status_text}"
+
+
+class HistoryItem(ListItem):
+    """A review history item."""
+
+    def __init__(
+        self, request: str, response: ReviewResponse, **kwargs: object
+    ) -> None:
+        super().__init__(**kwargs)
+        self.request = request
+        self.response = response
+
+    def compose(self) -> ComposeResult:
+        preview = self.request[:50] + "..." if len(self.request) > 50 else self.request
+        yield Label(preview)
+
+
+class EvalResultItem(ListItem):
+    """An evaluation result item."""
+
+    def __init__(self, result: EvalResult, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.result = result
+
+    def compose(self) -> ComposeResult:
+        status = "[green]PASS[/]" if self.result.score.passed else "[red]FAIL[/]"
+        yield Label(f"{status} {self.result.sample_id}: {self.result.score.value:.2f}")
+
+
+# -----------------------------------------------------------------------------
+# Main Textual App
+# -----------------------------------------------------------------------------
+
+
+class CodeReviewApp(App[None]):
+    """Textual app for interactive code review with MainLoop and EvalLoop support."""
+
+    CSS = """
+    Screen {
+        layout: grid;
+        grid-size: 2 2;
+        grid-rows: 1fr 3;
+    }
+
+    .panel-title {
+        background: $primary;
+        color: $text;
+        padding: 0 1;
+        text-style: bold;
+    }
+
+    ReviewPanel {
+        column-span: 1;
+        row-span: 1;
+        border: solid $primary;
+    }
+
+    PlanPanel {
+        column-span: 1;
+        row-span: 1;
+        border: solid $secondary;
+    }
+
+    #input-container {
+        column-span: 2;
+        height: 3;
+        layout: horizontal;
+    }
+
+    #review-input {
+        width: 1fr;
+    }
+
+    #submit-btn {
+        width: auto;
+        min-width: 12;
+    }
+
+    StatusBar {
+        dock: bottom;
+        height: 1;
+        background: $surface;
+        padding: 0 1;
+    }
+
+    #response-scroll {
+        height: 100%;
+    }
+
+    #plan-scroll {
+        height: 100%;
+    }
+
+    #eval-tab {
+        height: 100%;
+    }
+
+    #eval-progress {
+        margin: 1;
+    }
+
+    #eval-results-list {
+        height: 1fr;
+        border: solid $secondary;
+    }
+
+    #eval-summary {
+        margin: 1;
+        height: auto;
+    }
+
+    .history-panel {
+        border: solid $secondary;
+        height: 100%;
+    }
+    """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("ctrl+q", "quit", "Quit"),
+        Binding("ctrl+e", "switch_mode", "Switch Mode"),
+        Binding("ctrl+r", "run_eval", "Run Eval"),
+    ]
+
+    def __init__(
+        self,
+        adapter: ProviderAdapter[ReviewResponse],
+        *,
+        eval_mode: bool = False,
+        dataset_path: Path | None = None,
+    ) -> None:
+        super().__init__()
+        self._adapter = adapter
+        self._eval_mode = eval_mode
+        self._dataset_path = dataset_path
+        self._history: list[tuple[str, ReviewResponse]] = []
+
+        # MainLoop setup
+        self._requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = (
+            InMemoryMailbox(name="code-review-requests")
+        )
+        self._responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = (
+            InMemoryMailbox(name="code-review-responses")
+        )
+        self._loop = CodeReviewLoop(
+            adapter=adapter,
+            requests=self._requests,
+            responses=self._responses,
+        )
+        self._worker_thread: threading.Thread | None = None
+        self._pending_request_id: UUID | None = None
+
+    def compose(self) -> ComposeResult:
+        yield Header(show_clock=True)
+
+        with TabbedContent():
+            with TabPane("Review", id="review-tab"):
+                with Container(id="review-container"):
+                    yield ReviewPanel()
+                    yield PlanPanel()
+                    with Horizontal(id="input-container"):
+                        yield Input(
+                            placeholder="Enter your review request...",
+                            id="review-input",
+                        )
+                        yield Button("Submit", id="submit-btn", variant="primary")
+
+            with TabPane("Evaluation", id="eval-tab"):
+                with Vertical():
+                    yield Label("Evaluation Progress", classes="panel-title")
+                    yield ProgressBar(id="eval-progress", total=100, show_eta=True)
+                    yield Label("Results:", classes="panel-title")
+                    yield ListView(id="eval-results-list")
+                    yield Static("", id="eval-summary")
+                    with Horizontal():
+                        yield Button(
+                            "Run Evaluation", id="run-eval-btn", variant="primary"
+                        )
+                        yield Button(
+                            "Load Dataset", id="load-dataset-btn", variant="default"
+                        )
+
+            with TabPane("History", id="history-tab"):
+                with Vertical(classes="history-panel"):
+                    yield Label("Review History", classes="panel-title")
+                    yield ListView(id="history-list")
+
+        yield StatusBar()
+        yield Footer()
+
+    def on_mount(self) -> None:
+        """Start the background worker when the app mounts."""
+        self._start_worker()
+        if self._eval_mode and self._dataset_path:
+            self.call_later(self._run_evaluation)
+
+    def _start_worker(self) -> None:
+        """Start the MainLoop worker thread."""
+        self._worker_thread = threading.Thread(
+            target=self._run_worker,
+            name="code-review-worker",
+            daemon=True,
+        )
+        self._worker_thread.start()
+        self.query_one(StatusBar).status_text = "Worker started"
+
+    def _run_worker(self) -> None:
+        """Background worker that processes requests from the mailbox."""
+        self._loop.run(max_iterations=None, wait_time_seconds=1)
+
+    @on(Button.Pressed, "#submit-btn")
+    def handle_submit(self) -> None:
+        """Handle the submit button press."""
+        input_widget = self.query_one("#review-input", Input)
+        request_text = input_widget.value.strip()
+        if not request_text:
+            return
+
+        input_widget.value = ""
+        self._submit_review(request_text)
+
+    @on(Input.Submitted, "#review-input")
+    def handle_input_submit(self, event: Input.Submitted) -> None:
+        """Handle Enter key in the input field."""
+        request_text = event.value.strip()
+        if not request_text:
+            return
+
+        event.input.value = ""
+        self._submit_review(request_text)
+
+    def _submit_review(self, request_text: str) -> None:
+        """Submit a review request to the MainLoop."""
+        self.query_one(StatusBar).status_text = "Processing..."
+        self.query_one("#submit-btn", Button).disabled = True
+
+        request = ReviewTurnParams(request=request_text)
+        request_event = MainLoopRequest(
+            request=request,
+            deadline=_default_deadline(),
+        )
+        self._pending_request_id = request_event.request_id
+        self._requests.send(request_event)
+
+        self._wait_for_response(request_event.request_id, request_text)
+
+    @work(thread=True)
+    def _wait_for_response(self, request_id: UUID, request_text: str) -> None:
+        """Wait for a response from the MainLoop in a background thread."""
+        while not self._responses.closed:
+            msgs = self._responses.receive(max_messages=1, wait_time_seconds=1)
+            if msgs:
+                msg = msgs[0]
+                result = msg.body
+                msg.acknowledge()
+                if result.request_id == request_id:
+                    self.post_message(ReviewMessage(result))
+                    if result.output:
+                        self._history.append((request_text, result.output))
+                    return
+
+    @on(ReviewMessage)
+    def handle_review_result(self, message: ReviewMessage) -> None:
+        """Handle a completed review."""
+        result = message.result
+        self.query_one("#submit-btn", Button).disabled = False
+
+        if result.success and result.output is not None:
+            response_md = _render_response(result.output)
+            self.query_one("#response-md", Markdown).update(response_md)
+            self.query_one(StatusBar).status_text = "Review complete"
+
+            # Update history
+            history_list = self.query_one("#history-list", ListView)
+            if self._history:
+                req, resp = self._history[-1]
+                history_list.append(HistoryItem(req, resp))
+        else:
+            self.query_one("#response-md", Markdown).update(
+                f"**Error:** {result.error}"
+            )
+            self.query_one(StatusBar).status_text = "Review failed"
+
+        # Update plan snapshot
+        plan_text = render_plan_snapshot(self._loop.session)
+        self.query_one("#plan-content", Static).update(plan_text or "No plan")
+
+    @on(Button.Pressed, "#run-eval-btn")
+    def handle_run_eval(self) -> None:
+        """Handle the run evaluation button press."""
+        self._run_evaluation()
+
+    @work(thread=True)
+    def _run_evaluation(self) -> None:
+        """Run evaluation on the dataset."""
+        dataset_path = self._dataset_path or (DATASET_DIR / "reviews.jsonl")
+
+        if not dataset_path.exists():
+            # Create a sample dataset if none exists
+            _LOGGER.info("Creating sample evaluation dataset...")
+            sample_data = [
+                {
+                    "id": "sample-1",
+                    "input": {"request": "Review the README.md file for clarity"},
+                    "expected": {"keywords": [], "min_issues": 0, "min_next_steps": 1},
+                },
+                {
+                    "id": "sample-2",
+                    "input": {"request": "Check the main Python files for code style"},
+                    "expected": {"keywords": [], "min_issues": 0, "min_next_steps": 1},
+                },
+            ]
+            dataset_path.parent.mkdir(parents=True, exist_ok=True)
+            with dataset_path.open("w") as f:
+                for item in sample_data:
+                    f.write(json.dumps(item) + "\n")
+
+        dataset = load_review_dataset(dataset_path)
+        total = len(dataset)
+
+        # Create mailboxes for EvalLoop
+        eval_requests: InMemoryMailbox[
+            EvalRequest[ReviewTurnParams, ExpectedReviewResponse]
+        ] = InMemoryMailbox(name="eval-requests")
+        eval_results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+
+        # Create a fresh MainLoop for evaluation
+        eval_loop_requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = (
+            InMemoryMailbox(name="eval-mainloop-requests")
+        )
+        eval_loop_responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = (
+            InMemoryMailbox(name="eval-mainloop-responses")
+        )
+        eval_main_loop = CodeReviewLoop(
+            adapter=self._adapter,
+            requests=eval_loop_requests,
+            responses=eval_loop_responses,
+        )
+
+        # Create EvalLoop
+        eval_loop = EvalLoop(
+            loop=eval_main_loop,
+            evaluator=review_response_evaluator,
+            requests=eval_requests,
+            results=eval_results,
+        )
+
+        # Submit dataset
+        submit_dataset(dataset, eval_requests)
+
+        # Run evaluation in a thread
+        def run_eval() -> None:
+            eval_loop.run(max_iterations=total)
+
+        eval_thread = threading.Thread(target=run_eval, daemon=True)
+        eval_thread.start()
+
+        # Collect results with progress updates
+        collected: list[EvalResult] = []
+        while len(collected) < total:
+            msgs = eval_results.receive(max_messages=1, wait_time_seconds=1)
+            for msg in msgs:
+                collected.append(msg.body)
+                msg.acknowledge()
+                self.post_message(
+                    EvalProgressMessage(len(collected), total, collected[-1])
+                )
+
+        eval_thread.join(timeout=5)
+        report = EvalReport(results=tuple(collected))
+        self.post_message(EvalCompleteMessage(report))
+
+    @on(EvalProgressMessage)
+    def handle_eval_progress(self, message: EvalProgressMessage) -> None:
+        """Update the evaluation progress bar."""
+        progress = self.query_one("#eval-progress", ProgressBar)
+        progress.total = message.total
+        progress.progress = message.current
+
+        self.query_one(
+            StatusBar
+        ).status_text = f"Evaluating {message.current}/{message.total}"
+
+        if message.latest:
+            results_list = self.query_one("#eval-results-list", ListView)
+            results_list.append(EvalResultItem(message.latest))
+
+    @on(EvalCompleteMessage)
+    def handle_eval_complete(self, message: EvalCompleteMessage) -> None:
+        """Handle evaluation completion."""
+        report = message.report
+        summary_text = (
+            f"**Evaluation Complete**\n\n"
+            f"- Total samples: {report.total}\n"
+            f"- Successful: {report.successful}\n"
+            f"- Pass rate: {report.pass_rate:.1%}\n"
+            f"- Mean score: {report.mean_score:.2f}\n"
+            f"- Mean latency: {report.mean_latency_ms:.0f}ms\n"
+        )
+        self.query_one("#eval-summary", Static).update(summary_text)
+        self.query_one(StatusBar).status_text = "Evaluation complete"
+
+    @on(ListView.Selected, "#history-list")
+    def handle_history_select(self, event: ListView.Selected) -> None:
+        """Handle history item selection."""
+        if isinstance(event.item, HistoryItem):
+            response_md = _render_response(event.item.response)
+            self.query_one("#response-md", Markdown).update(response_md)
+
+    def action_quit(self) -> None:
+        """Quit the application."""
+        self._cleanup()
+        self.exit()
+
+    def action_switch_mode(self) -> None:
+        """Switch between Review and Eval tabs."""
+        tabbed = self.query_one(TabbedContent)
+        if tabbed.active == "review-tab":
+            tabbed.active = "eval-tab"
+        else:
+            tabbed.active = "review-tab"
+
+    def action_run_eval(self) -> None:
+        """Trigger evaluation from keyboard shortcut."""
+        self._run_evaluation()
+
+    def _cleanup(self) -> None:
+        """Clean up resources."""
+        if self._loop.shutdown(timeout=2.0):
+            _LOGGER.info("Worker loop stopped cleanly")
+        else:
+            _LOGGER.warning("Worker loop did not stop within timeout")
+
+        self._requests.close()
+        self._responses.close()
+
+        # Dump session for debugging
+        dump_session_tree(self._loop.session, SNAPSHOT_DIR)
+
+
+# -----------------------------------------------------------------------------
+# CLI Entry Point
+# -----------------------------------------------------------------------------
+
+
+def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Textual-based code review agent with MainLoop and EvalLoop modes."
+    )
+    parser.add_argument(
+        "--eval",
+        action="store_true",
+        help="Start in evaluation mode instead of interactive mode.",
+    )
+    parser.add_argument(
+        "--dataset",
+        type=Path,
+        help="Path to evaluation dataset (JSONL format).",
+    )
+    parser.add_argument(
+        "--convert",
+        action="store_true",
+        help="Convert snapshots to a dataset and exit.",
+    )
+    parser.add_argument(
+        "--snapshot-dir",
+        type=Path,
+        default=SNAPSHOT_DIR,
+        help="Directory containing snapshot JSONL files.",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DATASET_DIR / "reviews.jsonl",
+        help="Output path for converted dataset.",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    """Entry point used by the `weakincentives` CLI harness."""
+    args = parse_args()
+    configure_logging()
+
+    if args.convert:
+        # Convert snapshots to dataset
+        count = create_dataset_from_snapshots(
+            args.snapshot_dir,
+            args.output,
+        )
+        print(f"Created dataset with {count} samples at {args.output}")
+        return
+
+    adapter = build_adapter()
+    app = CodeReviewApp(
+        adapter,
+        eval_mode=args.eval,
+        dataset_path=args.dataset,
+    )
+    app.run()
 
 
 if __name__ == "__main__":
