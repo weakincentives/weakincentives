@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -1339,3 +1340,528 @@ class TestIsToolErrorResponse:
         assert _is_tool_error_response({"content": [{"text": None}]}) is False
         # Text field is a list instead of string
         assert _is_tool_error_response({"content": [{"text": ["error"]}]}) is False
+
+
+class TestHookContextCompletion:
+    """Tests for HookContext completion handler integration."""
+
+    def test_check_completion_no_prompt(self, session: Session) -> None:
+        """Returns complete when no prompt is configured."""
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        result = context.check_completion({"any": "output"})
+        assert result.complete is True
+
+    def test_check_completion_no_handler(self, session: Session) -> None:
+        """Returns complete when prompt has no completion handler."""
+        from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+
+        @dataclass(frozen=True)
+        class Output:
+            value: str
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template)
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+        )
+
+        result = context.check_completion(Output(value="done"))
+        assert result.complete is True
+
+    def test_check_completion_with_handler(self, session: Session) -> None:
+        """Invokes completion handler and returns its result."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            valid: bool
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            if not output.valid:
+                return CompletionResult(complete=False, reason="Invalid output")
+            return CompletionResult(complete=True)
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+        )
+
+        # Test incomplete
+        result = context.check_completion(Output(valid=False))
+        assert result.complete is False
+        assert result.reason == "Invalid output"
+
+        # Test complete
+        result = context.check_completion(Output(valid=True))
+        assert result.complete is True
+
+    def test_has_remaining_budget_no_constraints(self, session: Session) -> None:
+        """Returns True when no deadline or budget."""
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        assert context.has_remaining_budget() is True
+
+    def test_has_remaining_budget_expired_deadline(
+        self, session: Session, frozen_utcnow: FrozenUtcNow
+    ) -> None:
+        """Returns False when deadline expired."""
+        anchor = datetime.now(UTC)
+        frozen_utcnow.set(anchor)
+        deadline = Deadline(anchor + timedelta(seconds=5))
+        frozen_utcnow.advance(timedelta(seconds=10))
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            deadline=deadline,
+        )
+        assert context.has_remaining_budget() is False
+
+    def test_has_remaining_budget_exhausted(self, session: Session) -> None:
+        """Returns False when budget exhausted."""
+        budget = Budget(max_total_tokens=100)
+        tracker = BudgetTracker(budget)
+        tracker.record_cumulative("test", TokenUsage(input_tokens=80, output_tokens=30))
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            budget_tracker=tracker,
+        )
+        assert context.has_remaining_budget() is False
+
+
+class TestCompletionHandlerIntegration:
+    """Tests for completion handler integration in post-tool hook."""
+
+    def test_continues_when_incomplete_with_budget(self, session: Session) -> None:
+        """Continues execution when completion handler returns incomplete and budget available."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            quality: int
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            if output.quality < 5:
+                return CompletionResult(complete=False, reason="Quality too low")
+            return CompletionResult(complete=True)
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)
+        rendered = prompt.render()
+
+        budget = Budget(max_total_tokens=10000)
+        tracker = BudgetTracker(budget)
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+            rendered_prompt=rendered,
+            budget_tracker=tracker,
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"json_output": {"quality": 2}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should return empty (continue) because incomplete and has budget
+        assert result == {}
+
+    def test_stops_when_complete(self, session: Session) -> None:
+        """Stops execution when completion handler returns complete."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            quality: int
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            if output.quality < 5:
+                return CompletionResult(complete=False, reason="Quality too low")
+            return CompletionResult(complete=True)
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)
+        rendered = prompt.render()
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+            rendered_prompt=rendered,
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"json_output": {"quality": 10}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop because complete
+        assert result == {"continue": False}
+
+    def test_stops_when_incomplete_no_budget(self, session: Session) -> None:
+        """Stops execution when incomplete but no budget remaining."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            quality: int
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            return CompletionResult(complete=False, reason="Never complete")
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)
+        rendered = prompt.render()
+
+        budget = Budget(max_total_tokens=100)
+        tracker = BudgetTracker(budget)
+        tracker.record_cumulative("test", TokenUsage(input_tokens=80, output_tokens=30))
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+            rendered_prompt=rendered,
+            budget_tracker=tracker,
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"json_output": {"quality": 2}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop because no budget even though incomplete
+        assert result == {"continue": False}
+
+    def test_stops_when_no_completion_handler(self, session: Session) -> None:
+        """Stops execution normally when no completion handler configured."""
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"json_output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop because no completion handler
+        assert result == {"continue": False}
+
+    def test_handles_output_key(self, session: Session) -> None:
+        """Handles 'output' key as well as 'json_output'."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            value: str
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            if output.value == "incomplete":
+                return CompletionResult(complete=False, reason="Still working")
+            return CompletionResult(complete=True)
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)
+        rendered = prompt.render()
+
+        budget = Budget(max_total_tokens=10000)
+        tracker = BudgetTracker(budget)
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+            rendered_prompt=rendered,
+            budget_tracker=tracker,
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"value": "incomplete"}},  # 'output' key
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should continue because incomplete and has budget
+        assert result == {}
+
+    def test_stops_when_no_rendered_prompt(self, session: Session) -> None:
+        """Stops execution when no rendered_prompt provided."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            value: str
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            return CompletionResult(complete=False, reason="Never complete")
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+            rendered_prompt=None,  # No rendered prompt
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"json_output": {"value": "test"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop because no rendered_prompt to get output type
+        assert result == {"continue": False}
+
+    def test_stops_when_output_type_is_none(self, session: Session) -> None:
+        """Stops execution when output type is None."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            value: str
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            return CompletionResult(complete=False, reason="Never complete")
+
+        template: PromptTemplate[None] = PromptTemplate(
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)  # type: ignore[arg-type]
+        rendered = prompt.render()
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,  # type: ignore[arg-type]
+            rendered_prompt=rendered,
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"json_output": {"value": "test"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop because output type is None
+        assert result == {"continue": False}
+
+    def test_stops_when_no_output_in_tool_input(self, session: Session) -> None:
+        """Stops execution when tool_input has no output data."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            value: str
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            return CompletionResult(complete=False, reason="Never complete")
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)
+        rendered = prompt.render()
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+            rendered_prompt=rendered,
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {},  # No json_output or output key
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop because no output in tool_input
+        assert result == {"continue": False}
+
+    def test_stops_when_output_parse_fails(self, session: Session) -> None:
+        """Stops execution when output parsing fails."""
+        from weakincentives.prompt import (
+            CompletionContext,
+            CompletionResult,
+            MarkdownSection,
+            Prompt,
+            PromptTemplate,
+        )
+
+        @dataclass(frozen=True)
+        class Output:
+            value: str
+            required_field: int  # Will fail if not provided
+
+        def handler(output: Output, *, context: CompletionContext) -> CompletionResult:
+            return CompletionResult(complete=False, reason="Never complete")
+
+        template = PromptTemplate[Output](
+            ns="test",
+            key="test",
+            sections=[MarkdownSection(title="Task", key="task", template="Do it")],
+        )
+        prompt = Prompt(template).with_completion_handler(handler)
+        rendered = prompt.render()
+
+        context = HookContext(
+            execution_state=ExecutionState(session=session),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            prompt=prompt,
+            rendered_prompt=rendered,
+        )
+
+        hook = create_post_tool_use_hook(context)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"json_output": {"value": "test"}},  # Missing required_field
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop because parsing fails
+        assert result == {"continue": False}

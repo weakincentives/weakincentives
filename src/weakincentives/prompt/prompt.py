@@ -28,6 +28,7 @@ from typing import (
 from ..dataclasses import FrozenDataclass
 from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
+from .completion import CompletionHandler, CompletionResult
 from .errors import PromptValidationError, SectionPath
 from .overrides import PromptDescriptor
 from .registry import PromptRegistry, SectionNode
@@ -38,6 +39,7 @@ from .structured_output import StructuredOutputConfig
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
     from ..runtime.session.protocols import SessionProtocol
+    from .completion import CompletionContext
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
 
@@ -253,6 +255,23 @@ class Prompt[OutputT]:
     Prompt is the only way to render a PromptTemplate. It holds the runtime
     configuration (overrides store, tag, params) and performs all rendering
     and override resolution.
+
+    Prompts can define a completion handler to determine whether a task is
+    complete. This is used by adapters (e.g., Claude Agent SDK) to decide
+    whether to continue execution when there is remaining budget.
+
+    Example::
+
+        def check_complete(
+            output: MyOutput,
+            *,
+            context: CompletionContext,
+        ) -> CompletionResult:
+            if not output.is_valid:
+                return CompletionResult(complete=False, reason="Invalid output")
+            return CompletionResult(complete=True)
+
+        prompt = Prompt(template).with_completion_handler(check_complete)
     """
 
     def __init__(
@@ -269,6 +288,7 @@ class Prompt[OutputT]:
         self.overrides_store = overrides_store
         self.overrides_tag = overrides_tag
         self._params: tuple[SupportsDataclass, ...] = ()
+        self._completion_handler: CompletionHandler[OutputT] | None = None
 
     @property
     def params(self) -> tuple[SupportsDataclass, ...]:
@@ -331,6 +351,69 @@ class Prompt[OutputT]:
 
         self._params = tuple(current)
         return self
+
+    @property
+    def completion_handler(self) -> CompletionHandler[OutputT] | None:
+        """Return the completion handler for this prompt, if any."""
+        return self._completion_handler
+
+    def with_completion_handler(
+        self,
+        handler: CompletionHandler[OutputT],
+    ) -> Prompt[OutputT]:
+        """Set the completion handler for this prompt; return self for chaining.
+
+        The completion handler is called after prompt evaluation to determine
+        if the task is complete. If the handler returns ``complete=False`` and
+        there is remaining budget (time/tokens), the adapter may continue
+        execution.
+
+        Args:
+            handler: A callable that takes the output and context, returning
+                a CompletionResult indicating whether the task is complete.
+
+        Returns:
+            Self for method chaining.
+
+        Example::
+
+            def check_complete(
+                output: ReviewResult,
+                *,
+                context: CompletionContext,
+            ) -> CompletionResult:
+                if len(output.findings) < 3:
+                    return CompletionResult(
+                        complete=False,
+                        reason="Need at least 3 findings",
+                    )
+                return CompletionResult(complete=True)
+
+            prompt = Prompt(template).with_completion_handler(check_complete)
+        """
+        self._completion_handler = handler
+        return self
+
+    def check_completion(
+        self,
+        output: OutputT,
+        *,
+        context: CompletionContext,
+    ) -> CompletionResult:
+        """Check if the task is complete using the registered handler.
+
+        If no completion handler is registered, returns complete=True.
+
+        Args:
+            output: The structured output from prompt evaluation.
+            context: Execution context with session, budget, and response info.
+
+        Returns:
+            CompletionResult indicating whether the task is complete.
+        """
+        if self._completion_handler is None:
+            return CompletionResult(complete=True)
+        return self._completion_handler(output, context=context)
 
     def render(
         self,
@@ -408,4 +491,11 @@ class Prompt[OutputT]:
         return None
 
 
-__all__ = ["Prompt", "PromptTemplate", "RenderedPrompt", "SectionNode"]
+__all__ = [
+    "CompletionHandler",
+    "CompletionResult",
+    "Prompt",
+    "PromptTemplate",
+    "RenderedPrompt",
+    "SectionNode",
+]

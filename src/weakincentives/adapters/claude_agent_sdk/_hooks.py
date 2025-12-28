@@ -19,15 +19,21 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
-from ...runtime.events._types import ToolInvoked
+from ...prompt.completion import CompletionContext, CompletionResult
+from ...runtime.events._types import TokenUsage, ToolInvoked
 from ...runtime.execution_state import ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
+from ...serde import parse
 from ._notifications import Notification
+
+if TYPE_CHECKING:
+    from ...prompt import Prompt
+    from ...prompt.rendering import RenderedPrompt
 
 __all__ = [
     "AsyncHookCallback",
@@ -113,7 +119,7 @@ class HookContext:
     Session is accessed via execution_state.session.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         execution_state: ExecutionState,
@@ -121,19 +127,76 @@ class HookContext:
         prompt_name: str,
         deadline: Deadline | None = None,
         budget_tracker: BudgetTracker | None = None,
+        prompt: Prompt[Any] | None = None,
+        rendered_prompt: RenderedPrompt[Any] | None = None,
     ) -> None:
         self.execution_state = execution_state
         self.adapter_name = adapter_name
         self.prompt_name = prompt_name
         self.deadline = deadline
         self.budget_tracker = budget_tracker
+        self.prompt = prompt
+        self.rendered_prompt = rendered_prompt
         self.stop_reason: str | None = None
         self._tool_count = 0
+        self._last_usage: TokenUsage | None = None
+        self._last_response_text: str | None = None
 
     @property
     def session(self) -> SessionProtocol:
         """Get session from execution state."""
         return self.execution_state.session
+
+    def check_completion(self, output: object) -> CompletionResult:
+        """Check if the task is complete using the prompt's completion handler.
+
+        If no prompt or completion handler is configured, returns complete=True.
+
+        Args:
+            output: The structured output from prompt evaluation.
+
+        Returns:
+            CompletionResult indicating whether the task is complete.
+        """
+        if self.prompt is None:
+            return CompletionResult(complete=True)
+
+        context = CompletionContext(
+            prompt=self.prompt,
+            rendered_prompt=self.rendered_prompt,
+            session=self.session,
+            stop_reason=self.stop_reason,
+            deadline=self.deadline,
+            budget_tracker=self.budget_tracker,
+            resources=self.execution_state.resources,
+            usage=self._last_usage,
+            response_text=self._last_response_text,
+        )
+        return self.prompt.check_completion(output, context=context)
+
+    def has_remaining_budget(self) -> bool:
+        """Check if there is remaining budget for continued execution.
+
+        Returns True if:
+        - No deadline or deadline has not expired, AND
+        - No budget tracker or budget limits not exceeded
+        """
+        # Check deadline
+        if self.deadline is not None and self.deadline.remaining().total_seconds() <= 0:
+            return False
+
+        # Check token budget
+        if self.budget_tracker is None:
+            return True
+
+        budget = self.budget_tracker.budget
+        consumed = self.budget_tracker.consumed
+        consumed_total = (consumed.input_tokens or 0) + (consumed.output_tokens or 0)
+
+        return not (
+            budget.max_total_tokens is not None
+            and consumed_total >= budget.max_total_tokens
+        )
 
 
 def _utcnow() -> datetime:
@@ -423,8 +486,25 @@ def create_post_tool_use_hook(
                     },
                 )
 
-        # Stop execution after StructuredOutput tool to end turn cleanly
+        # Handle StructuredOutput tool - check completion handler before stopping
         if stop_on_structured_output and data.tool_name == "StructuredOutput":
+            # Try to parse structured output and check completion handler
+            should_continue = _check_completion_and_budget(
+                hook_context,
+                data.tool_input,
+            )
+
+            if should_continue:
+                logger.info(
+                    "claude_agent_sdk.hook.structured_output_continue",
+                    event="hook.structured_output_continue",
+                    context={
+                        "tool_name": data.tool_name,
+                        "reason": "completion_handler_incomplete",
+                    },
+                )
+                return {}  # Continue execution
+
             logger.debug(
                 "claude_agent_sdk.hook.structured_output_stop",
                 event="hook.structured_output_stop",
@@ -435,6 +515,94 @@ def create_post_tool_use_hook(
         return {}
 
     return post_tool_use_hook
+
+
+def _parse_structured_output_for_completion(
+    hook_context: HookContext,
+    tool_input: dict[str, Any],
+) -> object | None:
+    """Parse structured output for completion check.
+
+    Returns the parsed output or None if parsing fails or is not applicable.
+    """
+    # Need rendered prompt to know output type
+    if hook_context.rendered_prompt is None:
+        return None
+
+    output_type = hook_context.rendered_prompt.output_type
+    if output_type is None or output_type is type(None):
+        return None
+
+    # Try to parse the structured output from tool input
+    raw_output = tool_input.get("json_output") or tool_input.get("output")
+    if raw_output is None:
+        return None
+
+    try:
+        return parse(output_type, raw_output, extra="ignore")
+    except (TypeError, ValueError):
+        logger.debug(
+            "claude_agent_sdk.hook.completion_parse_failed",
+            event="hook.completion_parse_failed",
+            context={"output_type": output_type.__name__},
+        )
+        return None
+
+
+def _check_completion_and_budget(
+    hook_context: HookContext,
+    tool_input: dict[str, Any],
+) -> bool:
+    """Check if execution should continue based on completion handler.
+
+    Returns True if:
+    - Prompt has a completion handler, AND
+    - Structured output can be parsed, AND
+    - Completion handler returns incomplete, AND
+    - Budget/deadline allows continuation
+
+    Args:
+        hook_context: Context with prompt, budget, and session state.
+        tool_input: The StructuredOutput tool input containing the output.
+
+    Returns:
+        True if execution should continue, False to stop.
+    """
+    # Need prompt with completion handler
+    if hook_context.prompt is None or hook_context.prompt.completion_handler is None:
+        return False
+
+    # Try to parse output
+    parsed_output = _parse_structured_output_for_completion(hook_context, tool_input)
+    if parsed_output is None:
+        return False
+
+    # Check completion handler
+    result = hook_context.check_completion(parsed_output)
+
+    if result.complete:
+        logger.debug(
+            "claude_agent_sdk.hook.completion_complete",
+            event="hook.completion_complete",
+            context={"reason": result.reason},
+        )
+        return False
+
+    # Task not complete - check if we have budget to continue
+    if not hook_context.has_remaining_budget():
+        logger.info(
+            "claude_agent_sdk.hook.completion_no_budget",
+            event="hook.completion_no_budget",
+            context={"reason": result.reason},
+        )
+        return False
+
+    logger.info(
+        "claude_agent_sdk.hook.completion_incomplete",
+        event="hook.completion_incomplete",
+        context={"reason": result.reason},
+    )
+    return True
 
 
 def _is_tool_error_response(response: Any) -> bool:  # noqa: ANN401

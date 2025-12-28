@@ -274,6 +274,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             prompt_name=prompt_name,
             deadline=deadline,
             budget_tracker=budget_tracker,
+            prompt=prompt,
+            rendered_prompt=rendered,
         )
 
         bridged_tools = create_bridged_tools(

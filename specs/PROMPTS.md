@@ -391,6 +391,116 @@ rendered = Prompt(template).bind(TaskParams(objective="Refactor auth module")).r
 result: TaskResult = parse_structured_output(response_text, rendered)
 ```
 
+## Completion Handlers
+
+Completion handlers allow prompts to define custom logic for determining whether
+a task has been completed. This is used by adapters (e.g., Claude Agent SDK) to
+decide whether to continue execution when there is remaining budget.
+
+### CompletionHandler Protocol
+
+```python
+class CompletionHandler(Protocol[OutputT]):
+    def __call__(
+        self,
+        output: OutputT,
+        *,
+        context: CompletionContext,
+    ) -> CompletionResult: ...
+```
+
+### CompletionResult
+
+```python
+@FrozenDataclass()
+class CompletionResult:
+    complete: bool          # Whether task is complete
+    reason: str | None = None  # Optional explanation for incomplete status
+```
+
+### CompletionContext
+
+```python
+@dataclass(slots=True, frozen=True)
+class CompletionContext:
+    prompt: PromptProtocol
+    rendered_prompt: RenderedPromptProtocol | None
+    session: SessionProtocol
+    stop_reason: str | None    # e.g., "end_turn", "tool_use"
+    deadline: Deadline | None
+    budget_tracker: BudgetTracker | None
+    resources: ResourceRegistry
+    usage: TokenUsage | None
+    response_text: str | None
+
+    def has_remaining_budget(self) -> bool:
+        """Check if deadline and token budget allow continuation."""
+```
+
+### Registering a Completion Handler
+
+```python
+from weakincentives.prompt import (
+    CompletionContext,
+    CompletionResult,
+    Prompt,
+    PromptTemplate,
+)
+
+@dataclass(frozen=True)
+class ReviewResult:
+    summary: str
+    findings: list[str]
+    has_security_section: bool
+
+def check_review_complete(
+    output: ReviewResult,
+    *,
+    context: CompletionContext,
+) -> CompletionResult:
+    if not output.has_security_section:
+        return CompletionResult(
+            complete=False,
+            reason="Missing security analysis section",
+        )
+    if len(output.findings) < 3:
+        return CompletionResult(
+            complete=False,
+            reason="Need at least 3 findings",
+        )
+    return CompletionResult(complete=True)
+
+template = PromptTemplate[ReviewResult](
+    ns="review",
+    key="code-review",
+    sections=[...],
+)
+
+prompt = Prompt(template).with_completion_handler(check_review_complete)
+```
+
+### Behavior with Claude Agent SDK
+
+When using the `ClaudeAgentSDKAdapter`, the completion handler integrates with
+the SDK's stop hook:
+
+1. After the model calls `StructuredOutput`, the hook parses the output
+1. If a completion handler is registered, it's invoked with the parsed output
+1. If the handler returns `complete=False` AND budget/deadline permit:
+   - Execution continues (model can make more tool calls)
+   - The handler's `reason` is logged for debugging
+1. If complete or no budget remains, execution stops normally
+
+This enables iterative refinement patterns where the model continues working
+until a quality threshold is met or budget is exhausted.
+
+### Best Practices
+
+- Keep handlers fast and deterministic
+- Use `context.has_remaining_budget()` to check budget in complex handlers
+- Log meaningful reasons for incomplete status to aid debugging
+- Consider session state for stateful completion logic
+
 ## Limitations
 
 - **Dataclass-only inputs**: Non-dataclass params are rejected

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from ._types import ToolRenderableResult
+from .completion import CompletionContext, CompletionHandler, CompletionResult
 from .errors import (
     PromptError,
     PromptRenderError,
@@ -61,6 +62,9 @@ from .tool import ResourceRegistry, Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
+    "CompletionContext",
+    "CompletionHandler",
+    "CompletionResult",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "OpenSectionsParams",

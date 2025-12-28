@@ -2,6 +2,38 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Added
+
+- **Completion Handlers**: Prompts can now define a completion handler to
+  determine if a task is complete. When using the Claude Agent SDK adapter,
+  if the handler returns `complete=False` and there is remaining budget
+  (time/tokens), execution continues automatically. This enables iterative
+  refinement patterns where the model works until a quality threshold is met.
+
+  ```python
+  from weakincentives.prompt import (
+      CompletionContext,
+      CompletionResult,
+      Prompt,
+  )
+
+  def check_complete(
+      output: ReviewResult,
+      *,
+      context: CompletionContext,
+  ) -> CompletionResult:
+      if len(output.findings) < 3:
+          return CompletionResult(
+              complete=False,
+              reason="Need at least 3 findings",
+          )
+      return CompletionResult(complete=True)
+
+  prompt = Prompt(template).with_completion_handler(check_complete)
+  ```
+
 ## v0.17.0 - 2025-12-25
 
 ### Breaking: Reducer Signature Changes
