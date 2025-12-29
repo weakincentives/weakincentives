@@ -2,6 +2,112 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Lifecycle Management for MainLoop and EvalLoop
+
+New primitives for coordinating graceful shutdown across multiple loop instances
+running in the same process.
+
+```python
+from weakincentives.runtime import LoopGroup, ShutdownCoordinator
+
+# Run multiple loops with coordinated shutdown
+group = LoopGroup(loops=[main_loop, eval_loop])
+group.run()  # Blocks until SIGTERM/SIGINT
+
+# Or manual coordination
+coordinator = ShutdownCoordinator.install()
+coordinator.register(loop.shutdown)
+loop.run()
+```
+
+**New types:**
+
+- `Runnable`: Protocol for loops that support graceful shutdown (`run()`,
+  `shutdown()`, `running` property)
+- `ShutdownCoordinator`: Singleton that installs SIGTERM/SIGINT handlers and
+  invokes registered callbacks on shutdown
+- `LoopGroup`: Runs each loop in a dedicated thread with coordinated shutdown
+- `wait_until`: Helper for polling predicates with timeout
+
+### Enhanced Resource Registry with Dependency Injection
+
+ResourceRegistry now supports provider-based lazy construction with scope-aware
+lifecycle management.
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry, Scope
+
+# Define how to construct resources with dependencies
+registry = ResourceRegistry.of(
+    Binding(Config, lambda r: Config.from_env()),
+    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+    Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+)
+
+# Create resolution context
+ctx = registry.create_context()
+ctx.start()
+
+try:
+    # Resolve resources (lazily constructed)
+    http = ctx.get(HTTPClient)
+
+    # Tool-call scoped resources are fresh per scope
+    with ctx.tool_scope() as resolver:
+        tracer = resolver.get(Tracer)
+finally:
+    ctx.close()
+```
+
+**New types:**
+
+- `Binding[T]`: Associates a protocol type with a provider function and scope
+- `Scope`: Enum controlling instance lifetime (`SINGLETON`, `TOOL_CALL`,
+  `PROTOTYPE`)
+- `ScopedResourceContext`: Resolution context with dependency graph walking and
+  cycle detection
+- `Provider[T]`: Type alias for factory functions that accept a resolver
+- `Closeable`: Protocol for resources with `close()` method (auto-cleanup)
+- `PostConstruct`: Protocol for resources with `post_construct()` initialization
+
+**New errors:**
+
+- `CircularDependencyError`: Raised when dependency graph contains cycles
+- `DuplicateBindingError`: Raised when binding for a type already exists
+- `ProviderError`: Raised when provider function fails
+- `UnboundResourceError`: Raised when resolving unbound type
+
+### Reply-to Routing in Mailbox Specification
+
+The mailbox specification now supports reply-to routing, enabling workers to
+derive response destinations from incoming messages rather than requiring a
+fixed response mailbox at construction.
+
+**Specification additions:**
+
+- `reply_to` field on `Message` for storing reply destination identifier
+- `reply_mailbox()` method on `Message` for resolving the reply `Mailbox`
+- `send(body, reply_to=...)` parameter for specifying reply destination
+- `MailboxResolver` protocol for backend-specific mailbox resolution
+- `ReplyMailboxUnavailableError` for resolution failures
+
+This enables patterns like eval run collection where all samples specify the
+same `reply_to` and results collect into one mailbox regardless of which worker
+processes each sample.
+
+### Changed
+
+- **MainLoop.initialize renamed to prepare.** The method name `prepare` better
+  describes its purpose: preparing the prompt and session for evaluation, rather
+  than initialization which suggests constructor-like behavior.
+
+### Internal
+
+- Reorganized WINK_GUIDE.md by moving comparison sections to appendixes.
+- Hide warnings for integration tests.
+
 ## v0.17.0 - 2025-12-25
 
 ### Breaking: Reducer Signature Changes
