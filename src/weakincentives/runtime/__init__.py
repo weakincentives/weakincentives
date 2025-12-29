@@ -33,6 +33,7 @@ from .execution_state import (
     SnapshotMetadata,
 )
 from .lifecycle import (
+    HealthServer,
     LoopGroup,
     Runnable,
     ShutdownCoordinator,
@@ -92,6 +93,7 @@ __all__ = [
     "ExecutionState",
     "FakeMailbox",
     "HandlerFailure",
+    "HealthServer",
     "InMemoryMailbox",
     "InProcessDispatcher",
     "LoopGroup",

@@ -1206,3 +1206,272 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
         results.close()
         main_requests.close()
         main_responses.close()
+
+
+# =============================================================================
+# HealthServer Tests
+# =============================================================================
+
+
+def test_health_server_liveness_endpoint() -> None:
+    """HealthServer returns 200 for /health/live."""
+    import json
+    import urllib.request
+
+    from weakincentives.runtime import HealthServer
+
+    server = HealthServer(host="127.0.0.1", port=0)  # OS-assigned port
+    server.start()
+
+    try:
+        _, port = server.address  # type: ignore[misc]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health/live") as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode())
+            assert data == {"status": "healthy"}
+    finally:
+        server.stop()
+
+
+def test_health_server_readiness_endpoint_healthy() -> None:
+    """HealthServer returns 200 for /health/ready when check passes."""
+    import json
+    import urllib.request
+
+    from weakincentives.runtime import HealthServer
+
+    server = HealthServer(host="127.0.0.1", port=0, readiness_check=lambda: True)
+    server.start()
+
+    try:
+        _, port = server.address  # type: ignore[misc]
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready") as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode())
+            assert data == {"status": "healthy"}
+    finally:
+        server.stop()
+
+
+def test_health_server_readiness_endpoint_unhealthy() -> None:
+    """HealthServer returns 503 for /health/ready when check fails."""
+    import urllib.error
+    import urllib.request
+
+    from weakincentives.runtime import HealthServer
+
+    server = HealthServer(host="127.0.0.1", port=0, readiness_check=lambda: False)
+    server.start()
+
+    try:
+        _, port = server.address  # type: ignore[misc]
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready")
+            msg = "Expected HTTPError with 503 status"
+            raise AssertionError(msg)
+        except urllib.error.HTTPError as e:
+            assert e.code == 503
+    finally:
+        server.stop()
+
+
+def test_health_server_404_for_unknown_path() -> None:
+    """HealthServer returns 404 for unknown paths."""
+    import urllib.error
+    import urllib.request
+
+    from weakincentives.runtime import HealthServer
+
+    server = HealthServer(host="127.0.0.1", port=0)
+    server.start()
+
+    try:
+        _, port = server.address  # type: ignore[misc]
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/unknown")
+            msg = "Expected HTTPError with 404 status"
+            raise AssertionError(msg)
+        except urllib.error.HTTPError as e:
+            assert e.code == 404
+    finally:
+        server.stop()
+
+
+def test_health_server_address_none_when_not_started() -> None:
+    """HealthServer.address is None before start."""
+    from weakincentives.runtime import HealthServer
+
+    server = HealthServer(port=0)
+    assert server.address is None
+
+
+def test_health_server_start_idempotent() -> None:
+    """HealthServer.start() is idempotent."""
+    from weakincentives.runtime import HealthServer
+
+    server = HealthServer(host="127.0.0.1", port=0)
+    server.start()
+
+    try:
+        addr1 = server.address
+        server.start()  # Should be no-op
+        addr2 = server.address
+        assert addr1 == addr2
+    finally:
+        server.stop()
+
+
+def test_health_server_stop_idempotent() -> None:
+    """HealthServer.stop() is idempotent."""
+    from weakincentives.runtime import HealthServer
+
+    server = HealthServer(host="127.0.0.1", port=0)
+    server.start()
+    server.stop()
+    server.stop()  # Should be no-op, no error
+    assert server.address is None
+
+
+def test_health_server_dynamic_readiness_check() -> None:
+    """HealthServer readiness check is evaluated dynamically."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    from weakincentives.runtime import HealthServer
+
+    state = {"ready": False}
+    server = HealthServer(
+        host="127.0.0.1", port=0, readiness_check=lambda: state["ready"]
+    )
+    server.start()
+
+    try:
+        _, port = server.address  # type: ignore[misc]
+
+        # Initially not ready
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready")
+            msg = "Expected HTTPError with 503 status"
+            raise AssertionError(msg)
+        except urllib.error.HTTPError as e:
+            assert e.code == 503
+
+        # Now ready
+        state["ready"] = True
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready") as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode())
+            assert data == {"status": "healthy"}
+    finally:
+        server.stop()
+
+
+# =============================================================================
+# LoopGroup Health Server Integration Tests
+# =============================================================================
+
+
+def test_loop_group_starts_health_server(reset_coordinator: None) -> None:
+    """LoopGroup starts health server when health_port is set."""
+    import json
+    import urllib.request
+
+    from weakincentives.runtime import LoopGroup
+
+    _ = reset_coordinator
+    loops = [_MockRunnable(run_delay=0.2)]
+    group = LoopGroup(loops=loops, health_port=0, health_host="127.0.0.1")
+
+    # Run in background thread
+    thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
+    thread.start()
+
+    try:
+        # Wait for server to start
+        time.sleep(0.05)
+
+        # Health server should be running
+        assert group._health_server is not None
+        _, port = group._health_server.address  # type: ignore[misc]
+
+        # Liveness should work
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health/live") as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode())
+            assert data == {"status": "healthy"}
+    finally:
+        group.shutdown(timeout=1.0)
+        thread.join(timeout=2.0)
+
+
+def test_loop_group_readiness_reflects_loop_state(reset_coordinator: None) -> None:
+    """LoopGroup readiness endpoint reflects loop running state."""
+    import json
+    import urllib.request
+
+    from weakincentives.runtime import LoopGroup
+
+    _ = reset_coordinator
+    loops = [_MockRunnable()]
+    group = LoopGroup(loops=loops, health_port=0, health_host="127.0.0.1")
+
+    thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
+    thread.start()
+
+    try:
+        # Wait for server and loops to start
+        time.sleep(0.1)
+
+        assert group._health_server is not None
+        _, port = group._health_server.address  # type: ignore[misc]
+
+        # Readiness should be healthy when loops are running
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready") as resp:
+            assert resp.status == 200
+            data = json.loads(resp.read().decode())
+            assert data == {"status": "healthy"}
+    finally:
+        group.shutdown(timeout=1.0)
+        thread.join(timeout=2.0)
+
+
+def test_loop_group_no_health_server_without_port(reset_coordinator: None) -> None:
+    """LoopGroup does not start health server when health_port is None."""
+    from weakincentives.runtime import LoopGroup
+
+    _ = reset_coordinator
+    loops = [_MockRunnable(run_delay=0.05)]
+    group = LoopGroup(loops=loops)  # No health_port
+
+    thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
+    thread.start()
+
+    try:
+        time.sleep(0.02)
+        assert group._health_server is None
+    finally:
+        group.shutdown(timeout=1.0)
+        thread.join(timeout=2.0)
+
+
+def test_loop_group_health_server_stops_on_shutdown(reset_coordinator: None) -> None:
+    """LoopGroup stops health server on shutdown."""
+    from weakincentives.runtime import LoopGroup
+
+    _ = reset_coordinator
+    loops = [_MockRunnable()]
+    group = LoopGroup(loops=loops, health_port=0, health_host="127.0.0.1")
+
+    thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
+    thread.start()
+
+    try:
+        time.sleep(0.05)
+        assert group._health_server is not None
+    finally:
+        group.shutdown(timeout=1.0)
+        thread.join(timeout=2.0)
+
+    # After shutdown, health server should be stopped
+    assert group._health_server is None
