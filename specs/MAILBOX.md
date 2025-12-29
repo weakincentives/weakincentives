@@ -37,7 +37,7 @@ class Mailbox(Protocol[T, R]):
         Args:
             body: Message payload (must be serializable).
             reply_to: Identifier for response mailbox. Workers resolve this
-                via Message.reply_mailbox().
+                via Message.reply().
 
         Returns:
             Message ID.

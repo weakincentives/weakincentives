@@ -306,7 +306,7 @@ class Mailbox[T](Protocol):
             body: Message payload.
             delay_seconds: Seconds before message becomes visible.
             reply_to: Identifier for response mailbox. Workers resolve
-                this via Message.reply_mailbox().
+                this via Message.reply().
 
         Returns:
             Message ID.
@@ -326,7 +326,7 @@ class InMemoryMailbox[T]:
     name: str = "default"
     max_size: int | None = None
     reply_resolver: MailboxResolver[object] | None = None
-    """Resolver for reply_mailbox() on received messages."""
+    """Resolver for Message.reply() on received messages."""
 
     # ... internal state ...
 
@@ -788,25 +788,25 @@ def test_reply_without_reply_to():
 
 ### Why Cache Factory-Created Mailboxes?
 
-Without caching, each `resolve()` call creates a new mailbox instance:
+Without caching, each `reply()` call would create a new mailbox instance:
 
 ```python
-# BAD: Creates new RedisMailbox each time
+# BAD: Without caching, each reply() creates new RedisMailbox
 for msg in requests.receive():
-    reply = msg.reply_mailbox()  # New connection, new threads
-    reply.send(result)
+    msg.reply(result)  # Internally resolves → new connection, new threads
+    msg.acknowledge()
     # Leaked mailbox with active connections!
 ```
 
 With caching:
 
 ```python
-# GOOD: Reuses cached mailbox
+# GOOD: Resolver caches factory-created mailboxes
 resolver = CompositeResolver(registry={}, factory=factory, cache={})
 
 for msg in requests.receive():
-    reply = msg.reply_mailbox()  # Returns cached instance
-    reply.send(result)
+    msg.reply(result)  # Internally resolves → returns cached instance
+    msg.acknowledge()
     # No leak - same mailbox reused
 ```
 
