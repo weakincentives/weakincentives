@@ -202,651 +202,184 @@ class MailboxResolutionError(MailboxError):
 
 ## Message Integration
 
-### Updated Message Type
-
-The `Message` type gains a `reply()` method that resolves the mailbox
-internally, and tracks finalization state to prevent replies after
-acknowledge/nack.
+`Message.reply()` resolves the mailbox internally and tracks finalization:
 
 ```python
-@dataclass(slots=True)  # Not frozen - tracks mutable finalization state
-class Message[T, R]:
-    """Received message with lifecycle methods and reply support.
+def reply(self, body: R) -> str:
+    if self._finalized:
+        raise MessageFinalizedError(...)
+    mailbox = self._resolver.resolve(self.reply_to)
+    return mailbox.send(body)
 
-    Messages track finalization state. Once acknowledged or nacked,
-    further reply() calls raise MessageFinalizedError.
-    """
-
-    id: str
-    body: T
-    receipt_handle: str
-    delivery_count: int
-    enqueued_at: datetime
-    attributes: Mapping[str, str]
-    reply_to: str | None = None
-    """Identifier for reply mailbox. Resolved via reply()."""
-
-    _acknowledge_fn: Callable[[], None] = field(repr=False, compare=False)
-    _nack_fn: Callable[[int], None] = field(repr=False, compare=False)
-    _extend_fn: Callable[[int], None] = field(repr=False, compare=False)
-    _reply_resolver: MailboxResolver[R] | None = field(
-        default=None, repr=False, compare=False
-    )
-    """Resolver bound at receive time."""
-
-    _finalized: bool = field(default=False, repr=False, compare=False)
-    """True after acknowledge() or nack() called."""
-
-    def reply(self, body: R) -> str:
-        """Send a reply to the message's reply_to destination.
-
-        Resolves the mailbox internally and sends the body.
-        Multiple replies are permitted before finalization.
-
-        Args:
-            body: Response payload to send.
-
-        Returns:
-            Message ID of the sent reply.
-
-        Raises:
-            ReplyNotAvailableError: No reply_to or resolver failed.
-            MessageFinalizedError: Already acknowledged or nacked.
-        """
-        if self._finalized:
-            raise MessageFinalizedError(
-                f"Message {self.id} already finalized"
-            )
-
-        mailbox = self._resolve_reply_mailbox()
-        return mailbox.send(body)
-
-    def _resolve_reply_mailbox(self) -> Mailbox[R]:
-        """Internal: resolve reply_to to a Mailbox."""
-        if self.reply_to is None:
-            raise ReplyNotAvailableError("No reply_to specified")
-
-        if self._reply_resolver is None:
-            raise ReplyNotAvailableError("No resolver configured")
-
-        try:
-            return self._reply_resolver.resolve(self.reply_to)
-        except MailboxResolutionError as e:
-            raise ReplyNotAvailableError(
-                f"Cannot resolve reply_to '{self.reply_to}': {e}"
-            ) from e
-
-    def acknowledge(self) -> None:
-        """Delete message and finalize."""
-        self._acknowledge_fn()
-        self._finalized = True
-
-    def nack(self, *, visibility_timeout: int = 0) -> None:
-        """Return to queue and finalize."""
-        self._nack_fn(visibility_timeout)
-        self._finalized = True
-
-    @property
-    def is_finalized(self) -> bool:
-        """True if acknowledged or nacked."""
-        return self._finalized
+def acknowledge(self) -> None:
+    self._acknowledge_fn()
+    self._finalized = True
 ```
 
-### Updated Mailbox Protocol
+Mailboxes bind their resolver to messages at receive time:
 
 ```python
-@runtime_checkable
-class Mailbox[T](Protocol):
-    """Point-to-point message queue with visibility timeout semantics."""
-
-    def send(self, body: T, *, delay_seconds: int = 0, reply_to: str | None = None) -> str:
-        """Enqueue a message with optional reply routing.
-
-        Args:
-            body: Message payload.
-            delay_seconds: Seconds before message becomes visible.
-            reply_to: Identifier for response mailbox. Workers resolve
-                this via Message.reply().
-
-        Returns:
-            Message ID.
-        """
-        ...
-
-    # ... other methods unchanged
-```
-
-### Updated InMemoryMailbox
-
-```python
-@dataclass(slots=True)
-class InMemoryMailbox[T]:
-    """Thread-safe in-memory mailbox implementation."""
-
-    name: str = "default"
-    max_size: int | None = None
-    reply_resolver: MailboxResolver[object] | None = None
-    """Resolver for Message.reply() on received messages."""
-
-    # ... internal state ...
-
-    def send(self, body: T, *, delay_seconds: int = 0, reply_to: str | None = None) -> str:
-        """Enqueue a message with optional reply routing."""
-        # Store reply_to in message metadata
-        ...
-
-    def receive(self, ...) -> Sequence[Message[T]]:
-        # Bind resolver to each message
-        message = Message(
-            id=in_flight.id,
-            body=in_flight.body,
-            reply_to=in_flight.reply_to,
-            _reply_resolver=self.reply_resolver,
-            # ... other fields ...
-        )
-        ...
+requests = InMemoryMailbox(reply_resolver=resolver)
+msg = requests.receive()[0]  # msg._resolver = resolver
+msg.reply(result)            # Uses bound resolver
 ```
 
 ## Backend Factories
 
-### InMemoryMailboxFactory
+Factories create mailboxes from identifiers. They don't cache—that's the
+resolver's job.
 
 ```python
-@dataclass(slots=True, frozen=True)
 class InMemoryMailboxFactory[T]:
-    """Factory for in-memory mailboxes.
-
-    Creates InMemoryMailbox instances keyed by identifier.
-    Useful for testing and single-process scenarios.
-    """
-
-    reply_resolver: MailboxResolver[object] | None = None
-    """Resolver to bind to created mailboxes."""
-
-    max_size: int | None = None
-    """Default max_size for created mailboxes."""
-
     def create(self, identifier: str) -> InMemoryMailbox[T]:
-        return InMemoryMailbox(
-            name=identifier,
-            max_size=self.max_size,
-            reply_resolver=self.reply_resolver,
-        )
-```
+        return InMemoryMailbox(name=identifier)
 
-### RedisMailboxFactory
-
-```python
-@dataclass(slots=True, frozen=True)
 class RedisMailboxFactory[T]:
-    """Factory for Redis-backed mailboxes.
-
-    Creates RedisMailbox instances using the provided client.
-    Queue names are prefixed to avoid collisions.
-    """
-
     client: RedisClient
-    """Redis client for backend operations."""
-
     prefix: str = "wink:queue:"
-    """Prefix for Redis keys."""
-
-    reply_resolver: MailboxResolver[object] | None = None
-    """Resolver to bind to created mailboxes."""
-
-    item_type: type[T] | None = None
-    """Type for deserialization. Required if T is not runtime-inspectable."""
 
     def create(self, identifier: str) -> RedisMailbox[T]:
-        return RedisMailbox(
-            name=identifier,
-            client=self.client,
-            key_prefix=self.prefix,
-            item_type=self.item_type,
-            reply_resolver=self.reply_resolver,
-        )
+        return RedisMailbox(name=identifier, client=self.client)
 ```
 
-### URIMailboxFactory
+URI-based factory for backend selection:
 
 ```python
-@dataclass(slots=True, frozen=True)
 class URIMailboxFactory[T]:
-    """Factory that parses URI schemes to select backend.
-
-    Supports:
-    - memory://name → InMemoryMailbox
-    - redis://host:port/name → RedisMailbox
-    - sqs://region/queue-name → SQSMailbox
-
-    Example::
-
-        factory = URIMailboxFactory(
-            redis_client=redis_client,
-            sqs_client=sqs_client,
-        )
-        mailbox = factory.create("redis://localhost/responses")
-    """
-
-    redis_client: RedisClient | None = None
-    sqs_client: SQSClient | None = None
-    reply_resolver: MailboxResolver[object] | None = None
+    """Parses memory://, redis://, sqs:// schemes."""
 
     def create(self, identifier: str) -> Mailbox[T]:
-        parsed = urlparse(identifier)
-
-        match parsed.scheme:
-            case "memory":
-                return InMemoryMailbox(
-                    name=parsed.netloc or parsed.path,
-                    reply_resolver=self.reply_resolver,
-                )
-            case "redis":
-                if self.redis_client is None:
-                    raise ValueError("Redis client not configured")
-                return RedisMailbox(
-                    name=parsed.path.lstrip("/"),
-                    client=self.redis_client,
-                    reply_resolver=self.reply_resolver,
-                )
-            case "sqs":
-                if self.sqs_client is None:
-                    raise ValueError("SQS client not configured")
-                return SQSMailbox(
-                    queue_url=f"https://sqs.{parsed.netloc}.amazonaws.com{parsed.path}",
-                    client=self.sqs_client,
-                    reply_resolver=self.reply_resolver,
-                )
-            case _:
-                raise ValueError(f"Unknown scheme: {parsed.scheme}")
+        match urlparse(identifier).scheme:
+            case "memory": return InMemoryMailbox(...)
+            case "redis":  return RedisMailbox(...)
+            case "sqs":    return SQSMailbox(...)
 ```
 
 ## Usage Patterns
 
-### Basic Reply Pattern
+### Basic Reply
 
 ```python
 # Setup
-registry: dict[str, Mailbox] = {}
-responses: Mailbox[Result] = InMemoryMailbox(name="responses")
-registry["responses"] = responses
-
-resolver = RegistryResolver(registry=registry)
-requests: Mailbox[Request] = InMemoryMailbox(
-    name="requests",
-    reply_resolver=resolver,
-)
+registry = {"responses": InMemoryMailbox()}
+requests = InMemoryMailbox(reply_resolver=RegistryResolver(registry))
 
 # Client
-requests.send(Request(data="..."), reply_to="responses")
+requests.send(Request(...), reply_to="responses")
 
 # Worker
 for msg in requests.receive():
-    result = process(msg.body)
-    msg.reply(result)
+    msg.reply(process(msg.body))
     msg.acknowledge()
 ```
 
-### Multiple Replies
+### Multiple Replies (Progress Streaming)
 
 ```python
-for msg in requests.receive(visibility_timeout=600):
-    # Stream progress updates
-    msg.reply(Progress(step=1, status="starting"))
-
-    for i, chunk in enumerate(process_chunks(msg.body)):
-        msg.reply(Progress(step=i+2, status="processing"))
-
-    # Final result
-    msg.reply(Complete(result=summarize()))
+for msg in requests.receive():
+    msg.reply(Progress(step=1))
+    msg.reply(Progress(step=2))
+    msg.reply(Complete(result=...))
     msg.acknowledge()
 ```
 
 ### Dynamic Reply Queues
 
 ```python
-# Setup with factory fallback
-registry: dict[str, Mailbox] = {}
-factory = RedisMailboxFactory(client=redis_client)
-resolver = CompositeResolver(registry=registry, factory=factory)
+# Factory creates mailboxes on demand
+resolver = CompositeResolver(registry={}, factory=RedisMailboxFactory(...))
+requests = RedisMailbox(reply_resolver=resolver)
 
-requests: Mailbox[Request] = RedisMailbox(
-    name="requests",
-    client=redis_client,
-    reply_resolver=resolver,
-)
+# Client uses unique reply queue
+requests.send(Request(...), reply_to=f"client-{uuid4()}")
 
-# Client creates dedicated response queue
-client_id = uuid4()
-response_queue = f"client-{client_id}"
-# No need to register - factory will create on demand
-
-requests.send(Request(...), reply_to=response_queue)
-
-# Worker resolves dynamically
+# Worker resolves dynamically - factory creates if not cached
 for msg in requests.receive():
-    result = process(msg.body)
-    msg.reply(result)  # Factory creates RedisMailbox internally
+    msg.reply(result)  # Resolves "client-xxx" → new RedisMailbox
     msg.acknowledge()
-```
-
-### Eval Run Collection
-
-```python
-# All samples route to same eval mailbox
-run_id = uuid4()
-eval_queue = f"eval-{run_id}"
-
-for sample in dataset:
-    requests.send(
-        MainLoopRequest(request=sample.input),
-        reply_to=eval_queue,
-    )
-
-# Collect results
-eval_mailbox = resolver.resolve(eval_queue)
-collected = []
-while len(collected) < len(dataset):
-    for msg in eval_mailbox.receive(wait_time_seconds=20):
-        collected.append(msg.body)
-        msg.acknowledge()
 ```
 
 ### Multi-Tenant Isolation
 
 ```python
-# Per-tenant resolver with isolated factories
-def create_tenant_resolver(tenant_id: str) -> MailboxResolver:
-    prefix = f"tenant-{tenant_id}:"
+def tenant_resolver(tenant_id: str) -> CompositeResolver:
     return CompositeResolver(
         registry={},
-        factory=RedisMailboxFactory(
-            client=redis_client,
-            prefix=prefix,
-        ),
+        factory=RedisMailboxFactory(prefix=f"tenant-{tenant_id}:"),
     )
-
-# Tenants cannot access each other's mailboxes
-tenant_a_resolver = create_tenant_resolver("a")
-tenant_b_resolver = create_tenant_resolver("b")
 ```
 
 ## MainLoop Integration
 
-MainLoop evolves to use a single requests mailbox with reply-based routing:
+MainLoop uses a single requests mailbox; response routing via `reply_to`:
 
 ```python
-class MainLoop(ABC, Generic[UserRequestT, OutputT]):
-    def __init__(
-        self,
-        *,
-        adapter: ProviderAdapter[OutputT],
-        requests: Mailbox[MainLoopRequest[UserRequestT]],
-        resources: ResourceRegistry | None = None,
-    ) -> None:
-        """Initialize MainLoop with request mailbox.
+class MainLoop:
+    def __init__(self, adapter, requests: Mailbox): ...
 
-        Response routing is determined by each message's reply_to field.
-        The requests mailbox must have a reply_resolver configured.
-        """
-        ...
-
-    def _handle_message(
-        self, msg: Message[MainLoopRequest[UserRequestT]]
-    ) -> None:
-        request_event = msg.body
-
-        try:
-            response, session = self._execute(request_event)
-            result = MainLoopResult[OutputT](
-                request_id=request_event.request_id,
-                output=response.output,
-                session_id=session.session_id,
-            )
-        except Exception as exc:
-            result = MainLoopResult[OutputT](
-                request_id=request_event.request_id,
-                error=str(exc),
-            )
-
-        # Route response via reply()
-        try:
-            msg.reply(result)
-        except ReplyNotAvailableError:
-            log.warning("No reply_to for request", request_id=request_event.request_id)
-
+    def _handle_message(self, msg):
+        result = self._execute(msg.body)
+        msg.reply(result)
         msg.acknowledge()
 ```
 
 ## ResourceRegistry Integration
 
-MailboxResolver can be registered as a resource for DI:
+MailboxResolver can be a DI-managed singleton:
 
 ```python
 registry = ResourceRegistry.of(
-    Binding(RedisClient, lambda r: create_redis_client()),
-    Binding(
-        MailboxResolver,
-        lambda r: CompositeResolver(
-            registry={},
-            factory=RedisMailboxFactory(client=r.get(RedisClient)),
-        ),
-    ),
+    Binding(MailboxResolver, lambda r: CompositeResolver(...)),
 )
 
-# Tools can request the resolver
-def my_tool(params: Params, *, context: ToolContext) -> ToolResult:
+# Tools access via context
+def my_tool(params, *, context):
     resolver = context.resources.get(MailboxResolver)
-    mailbox = resolver.resolve("notifications")
-    mailbox.send(Notification(...))
-    ...
+    resolver.resolve("notifications").send(Notification(...))
 ```
-
-This keeps MailboxResolver as a focused abstraction while allowing it to
-participate in the broader resource lifecycle.
 
 ## Testing
 
 ### FakeMailboxResolver
 
 ```python
-@dataclass(slots=True)
 class FakeMailboxResolver[T]:
-    """Test double for mailbox resolution.
-
-    Tracks resolution calls and allows configuration of behavior.
-    """
-
-    mailboxes: dict[str, Mailbox[T]] = field(default_factory=dict)
-    resolution_log: list[str] = field(default_factory=list)
-    fail_on: set[str] = field(default_factory=set)
-
-    def resolve(self, identifier: str) -> Mailbox[T]:
-        self.resolution_log.append(identifier)
-
-        if identifier in self.fail_on:
-            raise MailboxResolutionError(identifier)
-
-        if identifier not in self.mailboxes:
-            self.mailboxes[identifier] = CollectingMailbox()
-
-        return self.mailboxes[identifier]
-
-    def resolve_optional(self, identifier: str) -> Mailbox[T] | None:
-        try:
-            return self.resolve(identifier)
-        except MailboxResolutionError:
-            return None
+    mailboxes: dict[str, Mailbox[T]]  # Auto-creates CollectingMailbox
+    resolution_log: list[str]          # Tracks resolve() calls
+    fail_on: set[str]                  # Identifiers that raise
 ```
 
-### Testing Message Reply
+### Testing Reply
 
 ```python
-def test_reply_sends_and_resolves():
+def test_reply_resolves_and_sends():
     resolver = FakeMailboxResolver()
-    msg = Message(
-        id="1",
-        body="test",
-        receipt_handle="h1",
-        delivery_count=1,
-        enqueued_at=datetime.now(UTC),
-        reply_to="responses",
-        _reply_resolver=resolver,
-        _acknowledge_fn=lambda: None,
-        _nack_fn=lambda t: None,
-        _extend_fn=lambda t: None,
-    )
+    msg = make_message(reply_to="responses", resolver=resolver)
 
     msg.reply("hello")
+
     assert resolver.resolution_log == ["responses"]
     assert resolver.mailboxes["responses"].sent == ["hello"]
 
 
-def test_multiple_replies():
-    resolver = FakeMailboxResolver()
-    msg = Message(
-        id="1",
-        body="test",
-        receipt_handle="h1",
-        delivery_count=1,
-        enqueued_at=datetime.now(UTC),
-        reply_to="responses",
-        _reply_resolver=resolver,
-        _acknowledge_fn=lambda: None,
-        _nack_fn=lambda t: None,
-        _extend_fn=lambda t: None,
-    )
-
-    msg.reply(1)
-    msg.reply(2)
-    msg.reply(3)
-    assert resolver.mailboxes["responses"].sent == [1, 2, 3]
-
-
 def test_reply_after_ack_raises():
-    resolver = FakeMailboxResolver()
-    msg = Message(
-        id="1",
-        body="test",
-        receipt_handle="h1",
-        delivery_count=1,
-        enqueued_at=datetime.now(UTC),
-        reply_to="responses",
-        _reply_resolver=resolver,
-        _acknowledge_fn=lambda: None,
-        _nack_fn=lambda t: None,
-        _extend_fn=lambda t: None,
-    )
-
+    msg = make_message(reply_to="responses")
     msg.acknowledge()
-    assert msg.is_finalized
 
     with pytest.raises(MessageFinalizedError):
         msg.reply("too late")
-
-
-def test_reply_after_nack_raises():
-    resolver = FakeMailboxResolver()
-    msg = Message(
-        id="1",
-        body="test",
-        receipt_handle="h1",
-        delivery_count=1,
-        enqueued_at=datetime.now(UTC),
-        reply_to="responses",
-        _reply_resolver=resolver,
-        _acknowledge_fn=lambda: None,
-        _nack_fn=lambda t: None,
-        _extend_fn=lambda t: None,
-    )
-
-    msg.nack(visibility_timeout=60)
-    assert msg.is_finalized
-
-    with pytest.raises(MessageFinalizedError):
-        msg.reply("too late")
-
-
-def test_reply_without_reply_to():
-    msg = Message(
-        id="1",
-        body="test",
-        receipt_handle="h1",
-        delivery_count=1,
-        enqueued_at=datetime.now(UTC),
-        reply_to=None,
-        _acknowledge_fn=lambda: None,
-        _nack_fn=lambda t: None,
-        _extend_fn=lambda t: None,
-    )
-
-    with pytest.raises(ReplyNotAvailableError):
-        msg.reply("nowhere")
 ```
 
 ## Caching Considerations
 
-### Why Cache Factory-Created Mailboxes?
+Without caching, each `reply()` to a dynamic queue creates a new mailbox
+(new connections, threads, resources). `CompositeResolver` caches
+factory-created instances to prevent leaks.
 
-Without caching, each `reply()` call would create a new mailbox instance:
-
-```python
-# BAD: Without caching, each reply() creates new RedisMailbox
-for msg in requests.receive():
-    msg.reply(result)  # Internally resolves → new connection, new threads
-    msg.acknowledge()
-    # Leaked mailbox with active connections!
-```
-
-With caching:
-
-```python
-# GOOD: Resolver caches factory-created mailboxes
-resolver = CompositeResolver(registry={}, factory=factory, cache={})
-
-for msg in requests.receive():
-    msg.reply(result)  # Internally resolves → returns cached instance
-    msg.acknowledge()
-    # No leak - same mailbox reused
-```
-
-### Cache Eviction
-
-The default `CompositeResolver` does not evict. For long-running processes
-with many dynamic queues, consider:
-
-1. **LRU cache** with max size
-2. **TTL-based eviction** for stale entries
-3. **Explicit cleanup** via `resolver.evict(identifier)`
-
-```python
-@dataclass(slots=True)
-class LRUCompositeResolver[T]:
-    """Composite resolver with LRU cache eviction."""
-
-    registry: Mapping[str, Mailbox[T]]
-    factory: MailboxFactory[T]
-    max_cache_size: int = 1000
-    _cache: OrderedDict[str, Mailbox[T]] = field(default_factory=OrderedDict)
-
-    def resolve(self, identifier: str) -> Mailbox[T]:
-        if identifier in self.registry:
-            return self.registry[identifier]
-
-        if identifier in self._cache:
-            self._cache.move_to_end(identifier)
-            return self._cache[identifier]
-
-        mailbox = self.factory.create(identifier)
-
-        # Evict oldest if at capacity
-        while len(self._cache) >= self.max_cache_size:
-            _, evicted = self._cache.popitem(last=False)
-            evicted.close()
-
-        self._cache[identifier] = mailbox
-        return mailbox
-```
+For long-running processes with many dynamic queues:
+- **LRU cache** with max size
+- **TTL-based eviction** for stale entries
+- **Explicit cleanup** via `resolver.evict(identifier)`
 
 ## Limitations
 
