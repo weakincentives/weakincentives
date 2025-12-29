@@ -4,13 +4,13 @@
 
 `MailboxResolver` provides service discovery for mailbox instances, enabling
 dynamic reply routing via string identifiers. This abstraction sits between
-the `Message.reply_mailbox()` API and backend-specific mailbox construction.
+the `Message.reply()` API and backend-specific mailbox construction.
 
 ```python
-# Worker resolves reply destination from message metadata
+# Worker sends reply - resolution happens internally
 for msg in requests.receive(visibility_timeout=300):
     result = process(msg.body)
-    msg.reply_mailbox().send(result)  # Resolves reply_to → Mailbox
+    msg.reply(result)  # Resolves reply_to → Mailbox internally
     msg.acknowledge()
 ```
 
@@ -204,10 +204,18 @@ class MailboxResolutionError(MailboxError):
 
 ### Updated Message Type
 
+The `Message` type gains a `reply()` method that resolves the mailbox
+internally, and tracks finalization state to prevent replies after
+acknowledge/nack.
+
 ```python
-@dataclass(frozen=True, slots=True)
-class Message[T]:
-    """Received message with lifecycle methods and reply support."""
+@dataclass(slots=True)  # Not frozen - tracks mutable finalization state
+class Message[T, R]:
+    """Received message with lifecycle methods and reply support.
+
+    Messages track finalization state. Once acknowledged or nacked,
+    further reply() calls raise MessageFinalizedError.
+    """
 
     id: str
     body: T
@@ -216,35 +224,77 @@ class Message[T]:
     enqueued_at: datetime
     attributes: Mapping[str, str]
     reply_to: str | None = None
-    """Identifier for reply mailbox. Resolved via reply_mailbox()."""
+    """Identifier for reply mailbox. Resolved via reply()."""
 
     _acknowledge_fn: Callable[[], None] = field(repr=False, compare=False)
     _nack_fn: Callable[[int], None] = field(repr=False, compare=False)
     _extend_fn: Callable[[int], None] = field(repr=False, compare=False)
-    _reply_resolver: MailboxResolver[object] | None = field(
+    _reply_resolver: MailboxResolver[R] | None = field(
         default=None, repr=False, compare=False
     )
-    """Resolver bound at receive time for reply_mailbox()."""
+    """Resolver bound at receive time."""
 
-    def reply_mailbox[R](self) -> Mailbox[R]:
-        """Resolve reply_to to a Mailbox for sending responses.
+    _finalized: bool = field(default=False, repr=False, compare=False)
+    """True after acknowledge() or nack() called."""
+
+    def reply(self, body: R) -> str:
+        """Send a reply to the message's reply_to destination.
+
+        Resolves the mailbox internally and sends the body.
+        Multiple replies are permitted before finalization.
+
+        Args:
+            body: Response payload to send.
 
         Returns:
-            Mailbox instance for the reply_to identifier.
+            Message ID of the sent reply.
 
         Raises:
-            ReplyMailboxUnavailableError: No reply_to set or resolution failed.
+            ReplyNotAvailableError: No reply_to or resolver failed.
+            MessageFinalizedError: Already acknowledged or nacked.
+        """
+        if self._finalized:
+            raise MessageFinalizedError(
+                f"Message {self.id} already finalized"
+            )
+
+        mailbox = self.reply_mailbox()
+        return mailbox.send(body)
+
+    def acknowledge(self) -> None:
+        """Delete message and finalize."""
+        self._acknowledge_fn()
+        self._finalized = True
+
+    def nack(self, *, visibility_timeout: int = 0) -> None:
+        """Return to queue and finalize."""
+        self._nack_fn(visibility_timeout)
+        self._finalized = True
+
+    @property
+    def is_finalized(self) -> bool:
+        """True if acknowledged or nacked."""
+        return self._finalized
+
+    def reply_mailbox(self) -> Mailbox[R]:
+        """Resolve reply_to to a Mailbox.
+
+        Lower-level API for direct mailbox access. Does not check
+        finalization state.
+
+        Raises:
+            ReplyNotAvailableError: No reply_to or resolution failed.
         """
         if self.reply_to is None:
-            raise ReplyMailboxUnavailableError("No reply_to specified")
+            raise ReplyNotAvailableError("No reply_to specified")
 
         if self._reply_resolver is None:
-            raise ReplyMailboxUnavailableError("No resolver configured")
+            raise ReplyNotAvailableError("No resolver configured")
 
         try:
-            return cast(Mailbox[R], self._reply_resolver.resolve(self.reply_to))
+            return self._reply_resolver.resolve(self.reply_to)
         except MailboxResolutionError as e:
-            raise ReplyMailboxUnavailableError(
+            raise ReplyNotAvailableError(
                 f"Cannot resolve reply_to '{self.reply_to}': {e}"
             ) from e
 ```
@@ -440,7 +490,22 @@ requests.send(Request(data="..."), reply_to="responses")
 # Worker
 for msg in requests.receive():
     result = process(msg.body)
-    msg.reply_mailbox().send(result)
+    msg.reply(result)
+    msg.acknowledge()
+```
+
+### Multiple Replies
+
+```python
+for msg in requests.receive(visibility_timeout=600):
+    # Stream progress updates
+    msg.reply(Progress(step=1, status="starting"))
+
+    for i, chunk in enumerate(process_chunks(msg.body)):
+        msg.reply(Progress(step=i+2, status="processing"))
+
+    # Final result
+    msg.reply(Complete(result=summarize()))
     msg.acknowledge()
 ```
 
@@ -468,7 +533,7 @@ requests.send(Request(...), reply_to=response_queue)
 # Worker resolves dynamically
 for msg in requests.receive():
     result = process(msg.body)
-    msg.reply_mailbox().send(result)  # Factory creates RedisMailbox
+    msg.reply(result)  # Factory creates RedisMailbox internally
     msg.acknowledge()
 ```
 
@@ -551,10 +616,10 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
                 error=str(exc),
             )
 
-        # Route response via reply_mailbox
+        # Route response via reply()
         try:
-            msg.reply_mailbox().send(result)
-        except ReplyMailboxUnavailableError:
+            msg.reply(result)
+        except ReplyNotAvailableError:
             log.warning("No reply_to for request", request_id=request_event.request_id)
 
         msg.acknowledge()
@@ -624,7 +689,7 @@ class FakeMailboxResolver[T]:
 ### Testing Message Reply
 
 ```python
-def test_reply_mailbox_resolves():
+def test_reply_sends_and_resolves():
     resolver = FakeMailboxResolver()
     msg = Message(
         id="1",
@@ -634,14 +699,82 @@ def test_reply_mailbox_resolves():
         enqueued_at=datetime.now(UTC),
         reply_to="responses",
         _reply_resolver=resolver,
+        _acknowledge_fn=lambda: None,
+        _nack_fn=lambda t: None,
+        _extend_fn=lambda t: None,
     )
 
-    mailbox = msg.reply_mailbox()
-    assert mailbox is resolver.mailboxes["responses"]
+    msg.reply("hello")
     assert resolver.resolution_log == ["responses"]
+    assert resolver.mailboxes["responses"].sent == ["hello"]
 
 
-def test_reply_mailbox_without_reply_to():
+def test_multiple_replies():
+    resolver = FakeMailboxResolver()
+    msg = Message(
+        id="1",
+        body="test",
+        receipt_handle="h1",
+        delivery_count=1,
+        enqueued_at=datetime.now(UTC),
+        reply_to="responses",
+        _reply_resolver=resolver,
+        _acknowledge_fn=lambda: None,
+        _nack_fn=lambda t: None,
+        _extend_fn=lambda t: None,
+    )
+
+    msg.reply(1)
+    msg.reply(2)
+    msg.reply(3)
+    assert resolver.mailboxes["responses"].sent == [1, 2, 3]
+
+
+def test_reply_after_ack_raises():
+    resolver = FakeMailboxResolver()
+    msg = Message(
+        id="1",
+        body="test",
+        receipt_handle="h1",
+        delivery_count=1,
+        enqueued_at=datetime.now(UTC),
+        reply_to="responses",
+        _reply_resolver=resolver,
+        _acknowledge_fn=lambda: None,
+        _nack_fn=lambda t: None,
+        _extend_fn=lambda t: None,
+    )
+
+    msg.acknowledge()
+    assert msg.is_finalized
+
+    with pytest.raises(MessageFinalizedError):
+        msg.reply("too late")
+
+
+def test_reply_after_nack_raises():
+    resolver = FakeMailboxResolver()
+    msg = Message(
+        id="1",
+        body="test",
+        receipt_handle="h1",
+        delivery_count=1,
+        enqueued_at=datetime.now(UTC),
+        reply_to="responses",
+        _reply_resolver=resolver,
+        _acknowledge_fn=lambda: None,
+        _nack_fn=lambda t: None,
+        _extend_fn=lambda t: None,
+    )
+
+    msg.nack(visibility_timeout=60)
+    assert msg.is_finalized
+
+    with pytest.raises(MessageFinalizedError):
+        msg.reply("too late")
+
+
+def test_reply_without_reply_to():
     msg = Message(
         id="1",
         body="test",
@@ -649,10 +782,13 @@ def test_reply_mailbox_without_reply_to():
         delivery_count=1,
         enqueued_at=datetime.now(UTC),
         reply_to=None,
+        _acknowledge_fn=lambda: None,
+        _nack_fn=lambda t: None,
+        _extend_fn=lambda t: None,
     )
 
-    with pytest.raises(ReplyMailboxUnavailableError):
-        msg.reply_mailbox()
+    with pytest.raises(ReplyNotAvailableError):
+        msg.reply("nowhere")
 ```
 
 ## Caching Considerations
