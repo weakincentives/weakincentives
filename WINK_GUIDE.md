@@ -984,11 +984,11 @@ caught at construction time.
 tracers) without adding new fields to the core dataclass.
 
 ```python
-from weakincentives.prompt import ResourceRegistry
+from weakincentives.resources import Binding, ResourceRegistry
 
-registry = ResourceRegistry.build({
-    MyHttpClient: MyHttpClient(...),
-})
+registry = ResourceRegistry.of(
+    Binding.instance(MyHttpClient, MyHttpClient(...)),
+)
 ```
 
 **Injecting resources at evaluation time:**
@@ -997,12 +997,19 @@ You can pass custom resources directly to `adapter.evaluate()` or
 `MainLoop.execute()`. This makes tools cleaner, more testable, and portable:
 
 ```python
-from weakincentives.resources import ResourceRegistry
-from myapp.http import HTTPClient
+from weakincentives.resources import Binding, ResourceRegistry, Scope
+from myapp.http import HTTPClient, Config
 
-# Build resource registry with your dependencies
+# Simple case: pre-constructed instances
 http_client = HTTPClient(base_url="https://api.example.com")
-resources = ResourceRegistry.build({HTTPClient: http_client})
+resources = ResourceRegistry.of(Binding.instance(HTTPClient, http_client))
+
+# Advanced: lazy construction with dependencies and scopes
+resources = ResourceRegistry.of(
+    Binding(Config, lambda r: Config.from_env()),
+    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+    Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per tool
+)
 
 # Pass to adapter - merged with workspace resources (e.g., filesystem)
 response = adapter.evaluate(prompt, session=session, resources=resources)
@@ -1012,6 +1019,12 @@ config = MainLoopConfig(resources=resources)
 loop = MyLoop(adapter=adapter, bus=bus, config=config)
 response, session = loop.execute(request)
 ```
+
+**Scopes control instance lifetime:**
+
+- `Scope.SINGLETON`: One instance per session (default)
+- `Scope.TOOL_CALL`: Fresh instance per tool invocation
+- `Scope.PROTOTYPE`: Fresh instance on every access
 
 **Key behaviors:**
 
@@ -1463,8 +1476,7 @@ way.
 
 You implement:
 
-- `create_prompt(request) -> Prompt[OutputT]`
-- `create_session() -> Session`
+- `prepare(request) -> tuple[Prompt[OutputT], Session]`
 
 Then call `loop.execute(request)`.
 
@@ -1473,11 +1485,10 @@ from weakincentives.runtime import MainLoop, MainLoopConfig, Session
 from weakincentives.prompt import Prompt
 
 class MyLoop(MainLoop[RequestType, OutputType]):
-    def create_prompt(self, request: RequestType) -> Prompt[OutputType]:
-        return Prompt(self._template).bind(request)
-
-    def create_session(self) -> Session:
-        return Session(bus=self._bus)
+    def prepare(self, request: RequestType) -> tuple[Prompt[OutputType], Session]:
+        prompt = Prompt(self._template).bind(request)
+        session = Session(tags={"loop": "my-loop"})
+        return prompt, session
 ```
 
 `MainLoop` also catches `VisibilityExpansionRequired` and retries automatically.
@@ -1489,10 +1500,18 @@ and re-evaluates the prompt. You don't have to handle this yourself.
 You can inject custom resources at the loop level via `MainLoopConfig`:
 
 ```python
-from weakincentives.resources import ResourceRegistry
+from weakincentives.resources import Binding, ResourceRegistry, Scope
 from weakincentives.runtime import MainLoopConfig
 
-resources = ResourceRegistry.build({HTTPClient: http_client})
+# Simple case: pre-constructed instances
+resources = ResourceRegistry.of(Binding.instance(HTTPClient, http_client))
+
+# Or with lazy construction and scopes
+resources = ResourceRegistry.of(
+    Binding(Config, lambda r: Config.from_env()),
+    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+)
+
 config = MainLoopConfig(resources=resources)
 loop = MyLoop(adapter=adapter, bus=bus, config=config)
 response, session = loop.execute(request)
@@ -2498,8 +2517,6 @@ Prompt(template, overrides_store=None, overrides_tag="latest")
 MarkdownSection(title, key, template, summary=None, visibility=..., tools=...)
 Tool(name, description, handler, examples=...)
 ToolResult(message, value, success=True, exclude_value_from_context=False)
-ResourceRegistry.build({Type: instance, ...})
-ResourceRegistry.merge(base, override)
 ```
 
 **Progressive disclosure:**
@@ -2547,6 +2564,13 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 - Telemetry events (`PromptRendered`, `ToolInvoked`, `PromptExecuted`,
   `TokenUsage`)
 
+**Lifecycle management:**
+
+- `Runnable`: Protocol for loops with graceful shutdown (`run()`, `shutdown()`)
+- `ShutdownCoordinator.install()`: Singleton for SIGTERM/SIGINT handling
+- `LoopGroup(loops)`: Run multiple loops with coordinated shutdown
+- `wait_until(predicate, timeout=...)`: Poll predicate with timeout
+
 ### 18.4 weakincentives.adapters
 
 ```python
@@ -2560,10 +2584,15 @@ PromptEvaluationError
 - `OpenAIClientConfig`, `OpenAIModelConfig`
 - `LiteLLMClientConfig`, `LiteLLMModelConfig`
 
-**Resources:**
+**Resources (weakincentives.resources):**
 
-- `ResourceRegistry.build({Type: instance, ...})` - build registry from dict
+- `Binding[T](protocol, provider, scope=Scope.SINGLETON, eager=False)`
+- `Binding.instance(protocol, value)` - bind pre-constructed instance
+- `Scope` enum: `SINGLETON`, `TOOL_CALL`, `PROTOTYPE`
+- `ResourceRegistry.of(*bindings)` - build registry from bindings
 - `ResourceRegistry.merge(base, override)` - combine registries (override wins)
+- `ScopedResourceContext` - resolution context with lifecycle management
+- `Closeable`, `PostConstruct` - lifecycle protocols
 
 **Throttling:**
 

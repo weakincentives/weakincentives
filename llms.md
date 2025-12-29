@@ -251,6 +251,14 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
       (budget, deadline, resources).
     - `MainLoopCompleted`: Success event published via bus.
     - `MainLoopFailed`: Failure event published via bus.
+  - Lifecycle management:
+    - `Runnable`: Protocol for loops supporting graceful shutdown (`run()`,
+      `shutdown()`, `running`).
+    - `ShutdownCoordinator`: Singleton for SIGTERM/SIGINT handling and
+      coordinated callback invocation.
+    - `LoopGroup`: Runs multiple loops in dedicated threads with coordinated
+      shutdown.
+    - `wait_until`: Helper for polling predicates with timeout.
   - Session ledger:
     - `DataEvent`: Event carrying data.
     - `ReducerContext`: Context for reducers.
@@ -310,6 +318,17 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     `PodmanSandboxSection`.
   - `weakincentives.contrib.optimizers`: Concrete optimizers (currently
     `WorkspaceDigestOptimizer`).
+- `weakincentives.resources`: Resource injection with scoped lifecycles.
+  - `Binding[T]`: Associates protocol type with provider function and scope.
+  - `Scope`: Enum for instance lifetime (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
+  - `ScopedResourceContext`: Resolution context with dependency graph walking.
+  - `ResourceRegistry`: Container for bindings with `of()` and `create_context()`.
+  - `ResourceResolver`: Protocol for dependency resolution in providers.
+  - `Provider[T]`: Type alias for factory functions accepting a resolver.
+  - `Closeable`: Protocol for resources with `close()` method (auto-cleanup).
+  - `PostConstruct`: Protocol for resources with `post_construct()` hook.
+  - Errors: `CircularDependencyError`, `DuplicateBindingError`, `ProviderError`,
+    `UnboundResourceError`, `ResourceError`.
 - `weakincentives.serde`: Dataclass serialization helpers.
   - `clone`: Clone a dataclass.
   - `dump`: Dump a dataclass to JSON-compatible types.
@@ -990,19 +1009,26 @@ Pass custom runtime resources to adapters and MainLoop for cleaner, more
 testable tool handlers:
 
 ```python
-from weakincentives.prompt import ResourceRegistry
-from myapp.http import HTTPClient
+from weakincentives.resources import Binding, ResourceRegistry, Scope
+from myapp.http import HTTPClient, Config
 
-# Build a resource registry with your dependencies
+# Simple case: pre-constructed instances
 http_client = HTTPClient(base_url="https://api.example.com")
-resources = ResourceRegistry.build({HTTPClient: http_client})
+resources = ResourceRegistry.of(Binding.instance(HTTPClient, http_client))
+
+# Advanced: lazy construction with dependencies
+resources = ResourceRegistry.of(
+    Binding(Config, lambda r: Config.from_env()),
+    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+    Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per tool
+)
 
 # Pass to adapter - merged with workspace resources (e.g., filesystem)
 response = adapter.evaluate(prompt, session=session, resources=resources)
 
 # Or configure at MainLoop level for all requests
 config = MainLoopConfig(resources=resources)
-loop = MyLoop(adapter=adapter, requests=requests, responses=responses, config=config)
+loop = MyLoop(adapter=adapter, requests=requests, config=config)
 ```
 
 In tool handlers, access resources via the typed registry:
