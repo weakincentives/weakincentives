@@ -285,6 +285,29 @@ def _handle_tool_deadline_error(
     )
 
 
+def _handle_type_error(
+    *,
+    log: StructuredLogger,
+    tool_name: str,
+    error: TypeError,
+) -> ToolResult[SupportsToolResult]:
+    """Handle TypeError during tool execution.
+
+    TypeErrors may indicate handler signature mismatches (which pyright catches
+    at development time) or other type-related issues within the handler logic.
+    """
+    log.error(
+        "Tool raised TypeError.",
+        event="tool_type_error",
+        context={"error": str(error)},
+    )
+    return ToolResult(
+        message=f"Tool '{tool_name}' raised TypeError: {error}",
+        value=None,
+        success=False,
+    )
+
+
 def _handle_unexpected_tool_error(
     *,
     log: StructuredLogger,
@@ -382,10 +405,17 @@ def _handle_tool_exception(  # noqa: PLR0913
             tool_name=tool_name,
             deadline=context.deadline,
         ) from error
-    # Unexpected exception - manually restore since we're catching and returning
+    # Restore snapshot for all other exceptions since we're catching and returning
     _restore_snapshot_if_needed(
         context.execution_state, snapshot, log, reason="exception"
     )
+    # TypeError may indicate signature mismatch or other type issues
+    if isinstance(error, TypeError):
+        return _handle_type_error(
+            log=log,
+            tool_name=tool_name,
+            error=error,
+        )
     return _handle_unexpected_tool_error(
         log=log,
         tool_name=tool_name,

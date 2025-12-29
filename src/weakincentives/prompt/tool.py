@@ -45,16 +45,11 @@ from .tool_result import ToolResult
 
 _NAME_MIN_LENGTH: Final = 1
 _NAME_MAX_LENGTH: Final = 64
-_DESCRIPTION_MIN_LENGTH: Final = 1
 _DESCRIPTION_MAX_LENGTH: Final = 200
 _EXPECTED_TYPE_ARGUMENTS: Final = 2
 _HANDLER_PARAMETER_COUNT: Final = 2
 _VARIADIC_TUPLE_LENGTH: Final = 2
 _NONE_TYPE: Final = type(None)
-_POSITIONAL_PARAMETER_KINDS: Final = {
-    inspect.Parameter.POSITIONAL_ONLY,
-    inspect.Parameter.POSITIONAL_OR_KEYWORD,
-}
 
 _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
     rf"^[a-z0-9_-]{{{_NAME_MIN_LENGTH},{_NAME_MAX_LENGTH}}}$"
@@ -216,10 +211,9 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             result_type,
         )
 
-        self._validate_handler_if_present(
-            params_type,
-            raw_result_annotation,  # ty: ignore[invalid-argument-type]  # ty typevar bounds
-        )
+        # Handler validation removed: pyright strict mode catches signature mismatches
+        # at development time. Runtime TypeErrors are caught in _handle_tool_exception
+        # (tool_executor.py) and converted to ToolResult errors.
 
     def _resolve_type_arguments(
         self,
@@ -415,61 +409,6 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
 
         return tuple(normalized_examples)
 
-    def _validate_handler_if_present(
-        self,
-        params_type: ParamsType,
-        raw_result_annotation: object,
-    ) -> None:
-        handler = self.handler
-        if handler is None:
-            return
-        self._validate_handler(
-            handler,
-            params_type,
-            raw_result_annotation,
-        )
-
-    def _validate_handler(
-        self,
-        handler: object,
-        params_type: ParamsType,
-        result_annotation: object,
-    ) -> None:
-        if not callable(handler):
-            raise PromptValidationError(
-                "Tool handler must be callable.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-
-        callable_handler = cast(Callable[..., ToolResult[ResultT]], handler)
-        signature = inspect.signature(callable_handler)
-        parameters = list(signature.parameters.values())
-
-        parameter, context_parameter = self._validate_parameter_count(
-            parameters,
-            params_type,
-        )
-
-        self._validate_parameter_kind(parameter, params_type)
-        self._validate_context_parameter(context_parameter, params_type)
-
-        hints = self._resolve_annotations(callable_handler)
-        annotation = hints.get(parameter.name, parameter.annotation)
-        self._validate_parameter_annotation(annotation, params_type)
-
-        context_annotation = hints.get(
-            context_parameter.name, context_parameter.annotation
-        )
-        self._validate_context_annotation(context_annotation, params_type)
-
-        self._validate_return_annotation(
-            hints,
-            signature,
-            result_annotation,
-            params_type,
-        )
-
     @staticmethod
     def _validate_parameter_count(
         parameters: list[inspect.Parameter],
@@ -487,42 +426,6 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         return parameter, context_parameter
 
     @staticmethod
-    def _validate_parameter_kind(
-        parameter: inspect.Parameter,
-        params_type: ParamsType,
-    ) -> None:
-        if parameter.kind not in _POSITIONAL_PARAMETER_KINDS:
-            raise PromptValidationError(
-                "Tool handler parameter must be positional.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-
-    @staticmethod
-    def _validate_context_parameter(
-        context_parameter: inspect.Parameter,
-        params_type: ParamsType,
-    ) -> None:
-        if context_parameter.kind is not inspect.Parameter.KEYWORD_ONLY:
-            raise PromptValidationError(
-                "Tool handler must declare a keyword-only 'context' parameter.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-        if context_parameter.default is not inspect.Signature.empty:
-            raise PromptValidationError(
-                "Tool handler 'context' parameter must not define a default value.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-        if context_parameter.name != "context":
-            raise PromptValidationError(
-                "Tool handler must name the keyword-only context parameter 'context'.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-
-    @staticmethod
     def _resolve_annotations(
         callable_handler: Callable[..., ToolResult[ResultT]],
     ) -> dict[str, object]:
@@ -530,91 +433,6 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             return get_type_hints(callable_handler, include_extras=True)
         except Exception:
             return {}
-
-    @staticmethod
-    def _validate_parameter_annotation(
-        annotation: object,
-        params_type: ParamsType,
-    ) -> None:
-        if annotation is inspect.Parameter.empty:
-            raise PromptValidationError(
-                "Tool handler parameter must be annotated with ParamsT.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-        annotation_to_validate = annotation
-        if get_origin(annotation_to_validate) is Annotated:
-            annotation_to_validate = get_args(annotation_to_validate)[0]
-        literal_origin = get_origin(annotation_to_validate)
-        if literal_origin is Literal:
-            literal_args = get_args(annotation_to_validate)
-            annotation_to_validate = (
-                literal_args[0] if literal_args else annotation_to_validate
-            )
-        if params_type is _NONE_TYPE and annotation_to_validate in {
-            None,
-            _NONE_TYPE,
-        }:
-            return
-        if annotation_to_validate is not params_type:
-            raise PromptValidationError(
-                "Tool handler parameter annotation must match ParamsT.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-
-    @staticmethod
-    def _validate_context_annotation(
-        context_annotation: object,
-        params_type: ParamsType,
-    ) -> None:
-        if context_annotation is inspect.Parameter.empty:
-            raise PromptValidationError(
-                "Tool handler must annotate the 'context' parameter with ToolContext.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-        context_annotation_to_validate = context_annotation
-        if get_origin(context_annotation_to_validate) is Annotated:
-            context_annotation_to_validate = get_args(context_annotation_to_validate)[0]
-        if context_annotation_to_validate is not ToolContext:
-            raise PromptValidationError(
-                "Tool handler 'context' annotation must be ToolContext.",
-                dataclass_type=params_type,
-                placeholder="handler",
-            )
-
-    def _validate_return_annotation(
-        self,
-        hints: dict[str, object],
-        signature: inspect.Signature,
-        result_annotation: object,
-        params_type: ParamsType,
-    ) -> None:
-        return_annotation = hints.get("return", signature.return_annotation)
-        if return_annotation is inspect.Signature.empty:
-            raise PromptValidationError(
-                "Tool handler must annotate its return value with ToolResult[ResultT].",
-                dataclass_type=params_type,
-                placeholder="return",
-            )
-        return_annotation_to_validate = return_annotation
-        if get_origin(return_annotation_to_validate) is Annotated:
-            return_annotation_to_validate = get_args(return_annotation_to_validate)[0]
-
-        origin = get_origin(return_annotation_to_validate)
-        if origin is ToolResult:
-            result_args_raw = get_args(return_annotation_to_validate)
-            if result_args_raw and self._matches_result_annotation(
-                result_args_raw[0],
-                result_annotation,
-            ):
-                return
-        raise PromptValidationError(
-            "Tool handler return annotation must be ToolResult[ResultT].",
-            dataclass_type=params_type,
-            placeholder="return",
-        )
 
     @staticmethod
     def _normalize_result_annotation(
@@ -654,41 +472,6 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             )
 
         return cast(ResultType, element), "array"
-
-    @staticmethod
-    def _matches_result_annotation(candidate: object, expected: object) -> bool:
-        candidate = _coerce_none_type(candidate)
-        expected = _coerce_none_type(expected)
-        if candidate is expected:
-            return True
-
-        candidate_origin = get_origin(candidate)
-        expected_origin = get_origin(expected)
-
-        if candidate_origin is None or expected_origin is None:
-            return False
-
-        sequence_origins = {list, tuple, SequenceABC}
-        if candidate_origin in sequence_origins and expected_origin in sequence_origins:
-            candidate_args = get_args(candidate)
-            expected_args = get_args(expected)
-            candidate_element = (
-                candidate_args[0]
-                if candidate_origin is not tuple
-                else candidate_args[0]
-                if len(candidate_args) == _VARIADIC_TUPLE_LENGTH
-                else None
-            )
-            expected_element = (
-                expected_args[0]
-                if expected_origin is not tuple
-                else expected_args[0]
-                if len(expected_args) == _VARIADIC_TUPLE_LENGTH
-                else None
-            )
-            return candidate_element is expected_element
-
-        return False
 
     @classmethod
     def __class_getitem__(
