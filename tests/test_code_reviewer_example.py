@@ -25,12 +25,7 @@ import pytest
 from pytest import CaptureFixture
 
 import code_reviewer_example as reviewer_example
-from code_reviewer_example import (
-    CodeReviewLoop,
-    ReviewResponse,
-    ReviewTurnParams,
-    build_task_prompt,
-)
+from code_reviewer_example import ReviewLoop, ReviewRequest, ReviewResponse
 from examples.logging import attach_logging_subscribers
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
@@ -43,14 +38,13 @@ from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
-from weakincentives.runtime import (
-    InMemoryMailbox,
-    MainLoopRequest,
-    MainLoopResult,
-)
+from weakincentives.runtime import InMemoryMailbox, MainLoopRequest, MainLoopResult
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
+
+# Alias for testing - expose internal function
+build_task_prompt = reviewer_example._build_prompt
 
 
 @dataclass(slots=True, frozen=True)
@@ -176,7 +170,7 @@ def test_workspace_digest_section_empty_by_default() -> None:
     session = Session(bus=bus)
     template = build_task_prompt(session=session)
 
-    rendered = Prompt(template).bind(ReviewTurnParams(request="demo request")).render()
+    rendered = Prompt(template).bind(ReviewRequest(request="demo request")).render()
 
     assert "## 2. Workspace Digest (workspace-digest)" in rendered.text
     post_section = rendered.text.split("## 2. Workspace Digest (workspace-digest)", 1)[
@@ -212,7 +206,7 @@ def test_workspace_digest_override_applied_when_no_session_digest(
             overrides_store=overrides_store,
             overrides_tag="seed",
         )
-        .bind(ReviewTurnParams(request="demo request"))
+        .bind(ReviewRequest(request="demo request"))
         .render()
     )
     assert "Override digest" in rendered.text
@@ -251,7 +245,7 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
             overrides_store=overrides_store,
             overrides_tag="seed",
         )
-        .bind(ReviewTurnParams(request="demo request"))
+        .bind(ReviewRequest(request="demo request"))
         .render()
     )
     # With SUMMARY visibility, the session digest summary is shown (not the
@@ -262,28 +256,22 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
 
 def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
     """Auto-optimization runs when first request is processed."""
-    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
+    requests: InMemoryMailbox[MainLoopRequest[ReviewRequest]] = InMemoryMailbox(
         name="requests"
     )
     responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
         name="responses"
     )
     try:
-        loop = CodeReviewLoop(
+        loop = ReviewLoop(
             adapter=cast(ProviderAdapter[ReviewResponse], adapter),
             requests=requests,
             responses=responses,
-            overrides_store=overrides_store,
         )
-
-        assert loop.override_tag == "latest"
 
         # Send request via mailbox
-        request_event = MainLoopRequest(
-            request=ReviewTurnParams(request="test request")
-        )
+        request_event = MainLoopRequest(request=ReviewRequest(request="test request"))
         requests.send(request_event)
 
         # Process one iteration
@@ -305,20 +293,18 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
     """Each request gets a deadline from MainLoopRequest."""
     from datetime import timedelta
 
-    overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
-    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
+    requests: InMemoryMailbox[MainLoopRequest[ReviewRequest]] = InMemoryMailbox(
         name="requests"
     )
     responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
         name="responses"
     )
     try:
-        loop = CodeReviewLoop(
+        loop = ReviewLoop(
             adapter=adapter,
             requests=requests,
             responses=responses,
-            overrides_store=overrides_store,
         )
 
         set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
@@ -329,7 +315,7 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
 
         requests.send(
             MainLoopRequest(
-                request=ReviewTurnParams(request="first"),
+                request=ReviewRequest(request="first"),
                 deadline=first_deadline,
             )
         )
@@ -337,7 +323,7 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
 
         requests.send(
             MainLoopRequest(
-                request=ReviewTurnParams(request="second"),
+                request=ReviewRequest(request="second"),
                 deadline=second_deadline,
             )
         )
