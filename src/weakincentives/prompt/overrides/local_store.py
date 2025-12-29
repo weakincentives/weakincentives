@@ -69,9 +69,12 @@ class LocalPromptOverridesStore(PromptOverridesStore):
     @override
     def resolve(
         self,
-        descriptor: PromptDescriptor,
+        prompt: PromptLike,
+        *,
         tag: str = "latest",
+        seed_if_missing: bool = True,
     ) -> PromptOverride | None:
+        descriptor = descriptor_for_prompt(prompt)
         normalized_tag = self._filesystem.validate_identifier(tag, "tag")
         file_path = self._filesystem.override_file_path(
             ns=descriptor.ns,
@@ -80,6 +83,17 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         )
         with self._filesystem.locked_override_path(file_path):
             if not file_path.exists():
+                if seed_if_missing:
+                    _LOGGER.info(
+                        "Override missing; auto-seeding from prompt.",
+                        event="prompt_override_auto_seed",
+                        context={
+                            "ns": descriptor.ns,
+                            "prompt_key": descriptor.key,
+                            "tag": normalized_tag,
+                        },
+                    )
+                    return self.seed(prompt, tag=normalized_tag)
                 _LOGGER.debug(
                     "Override file not found.",
                     event="prompt_override_missing",
@@ -131,7 +145,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             )
             return None
 
-        override = PromptOverride(
+        result = PromptOverride(
             ns=descriptor.ns,
             prompt_key=descriptor.key,
             tag=tag,
@@ -149,7 +163,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "tool_count": len(filtered_tools),
             },
         )
-        return override
+        return result
 
     @override
     def upsert(
@@ -249,21 +263,23 @@ class LocalPromptOverridesStore(PromptOverridesStore):
     ) -> PromptOverride:
         descriptor = descriptor_for_prompt(prompt)
         normalized_tag = self._filesystem.validate_identifier(tag, "tag")
-        existing_override = self.resolve(descriptor=descriptor, tag=normalized_tag)
+        existing_override = self.resolve(
+            prompt, tag=normalized_tag, seed_if_missing=False
+        )
         sections = dict(existing_override.sections) if existing_override else {}
         tools = dict(existing_override.tool_overrides) if existing_override else {}
 
         expected_hash = _lookup_section_hash(descriptor, path)
         sections[path] = SectionOverride(expected_hash=expected_hash, body=body)
 
-        override = PromptOverride(
+        new_override = PromptOverride(
             ns=descriptor.ns,
             prompt_key=descriptor.key,
             tag=normalized_tag,
             sections=sections,
             tool_overrides=tools,
         )
-        return self.upsert(descriptor, override)
+        return self.upsert(descriptor, new_override)
 
     @override
     def seed(
@@ -282,7 +298,9 @@ class LocalPromptOverridesStore(PromptOverridesStore):
 
         with self._filesystem.locked_override_path(file_path):
             if file_path.exists():
-                existing = self.resolve(descriptor=descriptor, tag=normalized_tag)
+                existing = self.resolve(
+                    prompt, tag=normalized_tag, seed_if_missing=False
+                )
                 if existing is None:
                     raise PromptOverridesError(
                         "Override file exists but could not be resolved."

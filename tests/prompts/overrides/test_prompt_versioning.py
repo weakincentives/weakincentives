@@ -25,12 +25,14 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.overrides import (
     PromptDescriptor,
+    PromptLike,
     PromptOverride,
     PromptOverridesStore,
     SectionDescriptor,
     SectionOverride,
     ToolDescriptor,
     ToolOverride,
+    descriptor_for_prompt,
     filter_override_for_descriptor,
     hash_json,
     hash_text,
@@ -226,9 +228,12 @@ class _RecordingOverridesStore(PromptOverridesStore):
 
     def resolve(
         self,
-        descriptor: PromptDescriptor,
+        prompt: PromptLike,
+        *,
         tag: str = "latest",
+        seed_if_missing: bool = True,
     ) -> PromptOverride | None:
+        descriptor = descriptor_for_prompt(prompt)
         self.calls.append((descriptor, tag))
         if self.override is None:
             return None

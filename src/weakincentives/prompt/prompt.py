@@ -360,7 +360,7 @@ class Prompt[OutputT]:
         descriptor = self.descriptor
 
         if self.overrides_store is not None:
-            override = self.overrides_store.resolve(descriptor=descriptor, tag=tag)
+            override = self.overrides_store.resolve(cast("PromptLike", self), tag=tag)
 
             if override is not None:
                 overrides = {

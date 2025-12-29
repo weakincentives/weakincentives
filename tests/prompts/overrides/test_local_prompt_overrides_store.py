@@ -110,7 +110,7 @@ def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     section = descriptor.sections[0]
-    assert store.resolve(descriptor) is None
+    assert store.resolve(prompt, seed_if_missing=False) is None
     override = PromptOverride(
         ns=descriptor.ns,
         prompt_key=descriptor.key,
@@ -132,7 +132,7 @@ def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
     assert payload["version"] == 1
     assert payload["sections"]["greeting"]["body"] == "Cheer loudly for ${subject}."
 
-    resolved = store.resolve(descriptor)
+    resolved = store.resolve(prompt, seed_if_missing=False)
     assert resolved is not None
     assert resolved.sections[section.path].body == "Cheer loudly for ${subject}."
 
@@ -160,7 +160,7 @@ def test_seed_captures_prompt_content(tmp_path: Path) -> None:
     assert tool_override.description == "Search stored notes."
     assert tool_override.param_descriptions == {"query": "User provided keywords."}
 
-    resolved = store.resolve(descriptor, tag="stable")
+    resolved = store.resolve(prompt, tag="stable", seed_if_missing=False)
     assert resolved is not None
     assert resolved.sections[section.path].body == "Greet ${subject} warmly."
 
@@ -198,7 +198,7 @@ def test_resolve_invalid_json_raises_error(tmp_path: Path) -> None:
     override_path.write_text("{not-json}", encoding="utf-8")
 
     with pytest.raises(PromptOverridesError):
-        store.resolve(descriptor)
+        store.resolve(prompt, seed_if_missing=False)
 
 
 def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
@@ -229,7 +229,7 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
     }
     override_path.write_text(json.dumps(payload), encoding="utf-8")
 
-    assert store.resolve(descriptor) is None
+    assert store.resolve(prompt, seed_if_missing=False) is None
 
 
 def test_resolve_section_payload_validation_errors(tmp_path: Path) -> None:
@@ -298,7 +298,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
         },
     }
     override_path.write_text(json.dumps(payload), encoding="utf-8")
-    assert store.resolve(descriptor) is None
+    assert store.resolve(prompt, seed_if_missing=False) is None
 
     payload = dict(base_payload)
     payload["tools"] = {
@@ -310,7 +310,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
     }
     override_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(PromptOverridesError):
-        store.resolve(descriptor)
+        store.resolve(prompt, seed_if_missing=False)
 
     payload = dict(base_payload)
     payload["tools"] = {
@@ -321,7 +321,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
         }
     }
     override_path.write_text(json.dumps(payload), encoding="utf-8")
-    assert store.resolve(descriptor) is not None
+    assert store.resolve(prompt, seed_if_missing=False) is not None
 
     payload = dict(base_payload)
     payload["tools"] = {
@@ -333,7 +333,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
     }
     override_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(PromptOverridesError):
-        store.resolve(descriptor)
+        store.resolve(prompt, seed_if_missing=False)
 
     payload = dict(base_payload)
     payload["tools"] = {
@@ -345,7 +345,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
     }
     override_path.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(PromptOverridesError):
-        store.resolve(descriptor)
+        store.resolve(prompt, seed_if_missing=False)
 
     with pytest.raises(PromptOverridesError):
         load_tools(cast(JSONValue, []), descriptor)
@@ -616,7 +616,7 @@ def test_upsert_allows_none_tool_description(tmp_path: Path) -> None:
     persisted = store.upsert(descriptor, override)
     assert persisted.tool_overrides[tool.name].description is None
 
-    resolved = store.resolve(descriptor)
+    resolved = store.resolve(prompt, seed_if_missing=False)
     assert resolved is not None
     assert resolved.tool_overrides[tool.name].description is None
 
@@ -704,7 +704,6 @@ def test_root_detection_without_git_raises(
     nested.mkdir(parents=True)
 
     prompt = _build_prompt()
-    descriptor = PromptDescriptor.from_prompt(prompt)
 
     monkeypatch.setattr(OverrideFilesystem, "_git_toplevel", lambda _self: None)
     monkeypatch.chdir(nested)
@@ -712,7 +711,7 @@ def test_root_detection_without_git_raises(
     store = LocalPromptOverridesStore()
 
     with pytest.raises(PromptOverridesError):
-        store.resolve(descriptor)
+        store.resolve(prompt, seed_if_missing=False)
 
 
 def test_git_toplevel_empty_output_falls_back(
@@ -777,14 +776,14 @@ def test_resolve_header_validation_errors(tmp_path: Path) -> None:
     }
     override_path.write_text(json.dumps(bad_version), encoding="utf-8")
     with pytest.raises(PromptOverridesError):
-        store.resolve(descriptor)
+        store.resolve(prompt, seed_if_missing=False)
 
     bad_metadata = dict(bad_version)
     bad_metadata["version"] = 1
     bad_metadata["ns"] = "other"
     override_path.write_text(json.dumps(bad_metadata), encoding="utf-8")
     with pytest.raises(PromptOverridesError):
-        store.resolve(descriptor)
+        store.resolve(prompt, seed_if_missing=False)
 
 
 def test_seed_sections_missing_section_raises(tmp_path: Path) -> None:
@@ -904,3 +903,75 @@ def test_collect_param_descriptions_with_partial_metadata(tmp_path: Path) -> Non
 
     # Only the field with a non-empty description should be included
     assert overrides[tool.name].param_descriptions == {"with_desc": "Has a description"}
+
+
+def test_resolve_returns_existing_override(tmp_path: Path) -> None:
+    """When override exists, resolve returns it without re-seeding."""
+    prompt = _build_prompt_with_tool()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    existing = store.seed(prompt)
+
+    # Modify the override to verify we get the existing one back
+    modified_override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                expected_hash=section.content_hash,
+                body="Modified body.",
+            )
+        },
+        tool_overrides=existing.tool_overrides,
+    )
+    store.upsert(descriptor, modified_override)
+
+    result = store.resolve(prompt)
+
+    assert result is not None
+    assert result.sections[section.path].body == "Modified body."
+
+
+def test_resolve_auto_seeds_when_missing(tmp_path: Path) -> None:
+    """When override is missing, resolve auto-seeds from prompt by default."""
+    prompt = _build_prompt_with_tool()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    # Verify no override exists
+    assert store.resolve(prompt, seed_if_missing=False) is None
+
+    # resolve with default seed_if_missing=True should create it
+    result = store.resolve(prompt)
+
+    assert result is not None
+    section = descriptor.sections[0]
+    assert result.sections[section.path].body == "Greet ${subject} warmly."
+    tool = descriptor.tools[0]
+    assert result.tool_overrides[tool.name].description == "Search stored notes."
+
+    # Verify it persisted
+    resolved = store.resolve(prompt, seed_if_missing=False)
+    assert resolved is not None
+    assert resolved.sections == result.sections
+
+
+def test_resolve_auto_seed_respects_tag(tmp_path: Path) -> None:
+    """resolve auto-seeds using the specified tag."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    result = store.resolve(prompt, tag="stable")
+
+    assert result is not None
+    assert result.tag == "stable"
+    override_path = _override_path(tmp_path, descriptor, tag="stable")
+    assert override_path.exists()
+
+    # Default tag should not exist
+    default_path = _override_path(tmp_path, descriptor, tag="latest")
+    assert not default_path.exists()

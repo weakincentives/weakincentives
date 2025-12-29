@@ -160,8 +160,10 @@ File format:
 class PromptOverridesStore(Protocol):
     def resolve(
         self,
-        descriptor: PromptDescriptor,
+        prompt: PromptLike,
+        *,
         tag: str = "latest",
+        seed_if_missing: bool = True,
     ) -> PromptOverride | None: ...
 
     def upsert(
@@ -329,10 +331,24 @@ result = optimizer.optimize(prompt, session=session)
 print(f"Digest stored at section: {result.section_key}")
 ```
 
-### Seeding Overrides
+### Resolving Overrides
 
 ```python
-# Bootstrap override file from current prompt
+# Resolve override, auto-seeding if missing (default behavior)
+override = store.resolve(prompt, tag="latest")
+
+# Resolve without auto-seeding (returns None if missing)
+override = store.resolve(prompt, tag="latest", seed_if_missing=False)
+```
+
+The `resolve` method auto-seeds by default: if an override file exists it
+returns it; otherwise it creates one from the prompt's current content. Pass
+`seed_if_missing=False` to disable auto-seeding and return `None` when missing.
+
+### Manual Seeding
+
+```python
+# Explicitly bootstrap override file from current prompt
 override = store.seed(prompt, tag="v1")
 ```
 

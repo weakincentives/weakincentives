@@ -210,8 +210,10 @@ class PromptOverridesStore(Protocol):
 
     def resolve(
         self,
-        descriptor: PromptDescriptor,
+        prompt: PromptLike,
+        *,
         tag: str = "latest",
+        seed_if_missing: bool = True,
     ) -> PromptOverride | None: ...
 
     def upsert(
