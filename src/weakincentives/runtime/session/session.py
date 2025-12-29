@@ -388,9 +388,9 @@ class Session(SessionProtocol):
             # Reducer registration
             session[Plan].register(AddStep, add_step_reducer)
 
-        For broadcast dispatch (routes to all reducers for the event type)::
+        For dispatch (routes to all reducers for the event type)::
 
-            session.broadcast(AddStep(step="x"))
+            session.dispatch(AddStep(step="x"))
 
         """
         return SliceAccessor(self, slice_type)
