@@ -15,7 +15,15 @@
 from __future__ import annotations
 
 import sys
+import warnings
 from pathlib import Path
+
+warnings.filterwarnings(
+    "ignore",
+    message=r"Pydantic serializer warnings:",
+    category=UserWarning,
+    module=r"pydantic\.main",
+)
 
 # When pytest is invoked via the console script the CWD isn't automatically
 # added to sys.path, so ensure the repository root (and thus the tests helpers)

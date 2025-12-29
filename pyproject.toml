@@ -201,7 +201,7 @@ markers = [
     "redis_cluster: marks tests using Redis Cluster.",
     "slow: marks tests that are slow and may be skipped in quick test runs.",
 ]
-norecursedirs = ["test-repositories", ".uv-cache", ".venv"]
+norecursedirs = ["test-repositories", ".uv-cache", ".venv", ".hypothesis"]
 reruns = 2
 reruns_delay = 0.5
 
