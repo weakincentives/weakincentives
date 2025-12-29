@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from . import events, lifecycle, mailbox, main_loop, session
+from . import events, lifecycle, mailbox, main_loop, session, watchdog
 from .events import (
     ControlDispatcher,
     Dispatcher,
@@ -33,7 +33,6 @@ from .execution_state import (
     SnapshotMetadata,
 )
 from .lifecycle import (
-    HealthServer,
     LoopGroup,
     Runnable,
     ShutdownCoordinator,
@@ -81,6 +80,11 @@ from .session import (
     upsert_by,
 )
 from .snapshotable import Snapshotable
+from .watchdog import (
+    HealthServer,
+    Heartbeat,
+    Watchdog,
+)
 
 __all__ = [
     "DEFAULT_SNAPSHOT_POLICIES",
@@ -94,6 +98,7 @@ __all__ = [
     "FakeMailbox",
     "HandlerFailure",
     "HealthServer",
+    "Heartbeat",
     "InMemoryMailbox",
     "InProcessDispatcher",
     "LoopGroup",
@@ -130,6 +135,7 @@ __all__ = [
     "TokenUsage",
     "ToolInvoked",
     "TypedReducer",
+    "Watchdog",
     "append_all",
     "build_reducer_context",
     "configure_logging",
@@ -144,6 +150,7 @@ __all__ = [
     "session",
     "upsert_by",
     "wait_until",
+    "watchdog",
 ]
 
 

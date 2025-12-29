@@ -23,6 +23,14 @@ Example::
     group = LoopGroup(loops=[main_loop, eval_loop])
     group.run()  # Blocks until SIGTERM/SIGINT
 
+    # With health endpoints and watchdog
+    group = LoopGroup(
+        loops=[main_loop],
+        health_port=8080,
+        watchdog_threshold=720.0,
+    )
+    group.run()
+
     # Or manual coordination
     coordinator = ShutdownCoordinator.install()
     coordinator.register(loop.shutdown)
@@ -38,14 +46,14 @@ Health endpoints::
 from __future__ import annotations
 
 import contextlib
-import json
 import signal
 import threading
 import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import TYPE_CHECKING, Protocol, Self
+
+from .watchdog import HealthServer, Heartbeat, Watchdog
 
 if TYPE_CHECKING:
     from types import FrameType
@@ -99,6 +107,16 @@ class Runnable(Protocol):
         """True if the loop is currently processing messages."""
         ...
 
+    @property
+    def heartbeat(self) -> Heartbeat | None:
+        """Heartbeat tracker for watchdog monitoring.
+
+        Returns None if the loop does not support heartbeat monitoring.
+        Loops that support monitoring should return a Heartbeat instance
+        and call ``beat()`` at regular intervals during processing.
+        """
+        ...
+
     def __enter__(self) -> Self:
         """Context manager entry (no-op, returns self)."""
         ...
@@ -111,111 +129,6 @@ class Runnable(Protocol):
     ) -> None:
         """Context manager exit triggers shutdown."""
         ...
-
-
-class HealthServer:
-    """Minimal HTTP server for Kubernetes health probes.
-
-    Exposes two endpoints:
-    - GET /health/live: Liveness probe (200 if process is responsive)
-    - GET /health/ready: Readiness probe (200 if all loops running, 503 otherwise)
-
-    Example::
-
-        server = HealthServer(port=8080, readiness_check=lambda: all_loops_running)
-        server.start()
-        # ... run application ...
-        server.stop()
-    """
-
-    def __init__(
-        self,
-        *,
-        host: str = "0.0.0.0",  # nosec B104 - bind to all interfaces for k8s
-        port: int = 8080,
-        readiness_check: Callable[[], bool] | None = None,
-    ) -> None:
-        """Initialize the health server.
-
-        Args:
-            host: Host to bind to. Defaults to all interfaces.
-            port: Port to bind to. Use 0 for OS-assigned port.
-            readiness_check: Callable returning True if ready. Defaults to always True.
-        """
-        super().__init__()
-        self._host = host
-        self._port = port
-        self._readiness_check = readiness_check or (lambda: True)
-        self._server: HTTPServer | None = None
-        self._thread: threading.Thread | None = None
-
-    def start(self) -> None:
-        """Start health server in a daemon thread.
-
-        Safe to call multiple times; subsequent calls are no-ops if already running.
-        """
-        if self._server is not None:
-            return
-
-        readiness = self._readiness_check
-
-        class Handler(BaseHTTPRequestHandler):
-            def do_GET(self) -> None:
-                if self.path == "/health/live":
-                    self._send(200, {"status": "healthy"})
-                elif self.path == "/health/ready":
-                    ok = readiness()
-                    self._send(
-                        200 if ok else 503,
-                        {"status": "healthy" if ok else "unhealthy"},
-                    )
-                else:
-                    self.send_error(404)
-
-            def _send(self, code: int, body: dict[str, str]) -> None:
-                data = json.dumps(body).encode()
-                self.send_response(code)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                _ = self.wfile.write(data)
-
-            def log_message(  # pyright: ignore[reportImplicitOverride]
-                self,
-                format: str,  # noqa: A002
-                *args: object,
-            ) -> None:
-                # Suppress request logging
-                pass
-
-        self._server = HTTPServer((self._host, self._port), Handler)
-        self._thread = threading.Thread(
-            target=self._server.serve_forever,
-            daemon=True,
-        )
-        self._thread.start()
-
-    def stop(self) -> None:
-        """Stop the health server.
-
-        Safe to call multiple times; subsequent calls are no-ops if not running.
-        """
-        if self._server is not None:
-            self._server.shutdown()
-            self._server = None
-            self._thread = None
-
-    @property
-    def address(self) -> tuple[str, int] | None:
-        """Return (host, port) if running, None otherwise.
-
-        Useful when port=0 is passed to get the OS-assigned port.
-        """
-        if self._server is None:
-            return None
-        addr = self._server.server_address
-        # HTTPServer always uses AF_INET, so address is (host, port)
-        return (str(addr[0]), addr[1])
 
 
 class ShutdownCoordinator:
@@ -337,10 +250,24 @@ class LoopGroup:
     Runs each loop in a separate thread and handles coordinated shutdown.
     Integrates with ShutdownCoordinator for signal-driven termination.
 
+    Features:
+        - Health endpoints for Kubernetes liveness/readiness probes
+        - Watchdog monitoring to detect and terminate stuck workers
+        - Coordinated graceful shutdown via signals
+
     Example::
 
         group = LoopGroup(loops=[main_loop, eval_loop])
         group.run()  # Blocks until shutdown signal or all loops exit
+
+    Example with health and watchdog::
+
+        group = LoopGroup(
+            loops=[main_loop],
+            health_port=8080,
+            watchdog_threshold=720.0,
+        )
+        group.run()
 
     Example with context manager::
 
@@ -354,37 +281,46 @@ class LoopGroup:
         group.run()  # GET /health/live and /health/ready available
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         loops: Sequence[Runnable],
         *,
         shutdown_timeout: float = 30.0,
         health_port: int | None = None,
         health_host: str = "0.0.0.0",  # nosec B104 - bind to all interfaces for k8s
+        watchdog_threshold: float | None = 720.0,
+        watchdog_interval: float = 60.0,
     ) -> None:
         """Initialize the LoopGroup.
 
         Args:
             loops: Sequence of Runnable loops to coordinate.
             shutdown_timeout: Maximum seconds to wait for each loop during shutdown.
-            health_port: Port for health endpoint. If None, no health server is started.
+            health_port: Port for health endpoints. None disables health server.
             health_host: Host for health endpoint. Defaults to all interfaces.
+            watchdog_threshold: Seconds without heartbeat before process termination.
+                None disables watchdog. Default 720s (12 min) calibrated for
+                10-minute prompt evaluations.
+            watchdog_interval: Seconds between watchdog checks. Default 60s.
         """
         super().__init__()
         self.loops = loops
         self.shutdown_timeout = shutdown_timeout
         self._health_port = health_port
         self._health_host = health_host
-        self._health_server: HealthServer | None = None
+        self._watchdog_threshold = watchdog_threshold
+        self._watchdog_interval = watchdog_interval
         self._executor: ThreadPoolExecutor | None = None
         self._futures: list[Future[None]] = []
+        self._health_server: HealthServer | None = None
+        self._watchdog: Watchdog | None = None
 
-    def run(
+    def run(  # noqa: C901
         self,
         *,
         install_signals: bool = True,
-        visibility_timeout: int = 300,
-        wait_time_seconds: int = 20,
+        visibility_timeout: int = 1800,
+        wait_time_seconds: int = 30,
     ) -> None:
         """Run all loops until shutdown.
 
@@ -394,18 +330,39 @@ class LoopGroup:
         Args:
             install_signals: If True, install SIGTERM/SIGINT handlers.
             visibility_timeout: Passed to each loop's run() method.
+                Default 1800s (30 min) calibrated for 10-min evaluations.
             wait_time_seconds: Passed to each loop's run() method.
+                Default 30s for long poll.
         """
         if install_signals:
             coordinator = ShutdownCoordinator.install()
             coordinator.register(self._trigger_shutdown)
+
+        # Collect heartbeats from loops that support them
+        heartbeats: list[Heartbeat] = []
+        loop_names: list[str] = []
+        for i, loop in enumerate(self.loops):
+            hb = getattr(loop, "heartbeat", None)
+            if hb is not None:
+                heartbeats.append(hb)
+                loop_names.append(getattr(loop, "name", f"loop-{i}"))
+
+        # Start watchdog if configured and loops support heartbeats
+        if self._watchdog_threshold is not None and heartbeats:
+            self._watchdog = Watchdog(
+                heartbeats,
+                stall_threshold=self._watchdog_threshold,
+                check_interval=self._watchdog_interval,
+                loop_names=loop_names,
+            )
+            self._watchdog.start()
 
         # Start health server if configured
         if self._health_port is not None:
             self._health_server = HealthServer(
                 host=self._health_host,
                 port=self._health_port,
-                readiness_check=lambda: all(loop.running for loop in self.loops),
+                readiness_check=self._build_readiness_check(heartbeats),
             )
             self._health_server.start()
 
@@ -431,8 +388,33 @@ class LoopGroup:
             if self._health_server is not None:
                 self._health_server.stop()
                 self._health_server = None
+            if self._watchdog is not None:
+                self._watchdog.stop()
+                self._watchdog = None
             self._executor.shutdown(wait=True)
             self._futures.clear()
+
+    def _build_readiness_check(
+        self,
+        heartbeats: list[Heartbeat],
+    ) -> Callable[[], bool]:
+        """Build readiness check incorporating heartbeat freshness."""
+        threshold = self._watchdog_threshold
+
+        def check() -> bool:
+            # All loops must be running
+            if not all(loop.running for loop in self.loops):
+                return False
+
+            # If watchdog is configured, heartbeats must be fresh
+            if threshold is not None:
+                for hb in heartbeats:
+                    if hb.elapsed() > threshold:
+                        return False
+
+            return True
+
+        return check
 
     def shutdown(self, *, timeout: float | None = None) -> bool:
         """Shutdown all loops gracefully.
@@ -490,7 +472,6 @@ def wait_until(
 
 
 __all__ = [
-    "HealthServer",
     "LoopGroup",
     "Runnable",
     "ShutdownCoordinator",
