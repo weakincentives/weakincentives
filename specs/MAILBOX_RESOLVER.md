@@ -258,8 +258,23 @@ class Message[T, R]:
                 f"Message {self.id} already finalized"
             )
 
-        mailbox = self.reply_mailbox()
+        mailbox = self._resolve_reply_mailbox()
         return mailbox.send(body)
+
+    def _resolve_reply_mailbox(self) -> Mailbox[R]:
+        """Internal: resolve reply_to to a Mailbox."""
+        if self.reply_to is None:
+            raise ReplyNotAvailableError("No reply_to specified")
+
+        if self._reply_resolver is None:
+            raise ReplyNotAvailableError("No resolver configured")
+
+        try:
+            return self._reply_resolver.resolve(self.reply_to)
+        except MailboxResolutionError as e:
+            raise ReplyNotAvailableError(
+                f"Cannot resolve reply_to '{self.reply_to}': {e}"
+            ) from e
 
     def acknowledge(self) -> None:
         """Delete message and finalize."""
@@ -275,28 +290,6 @@ class Message[T, R]:
     def is_finalized(self) -> bool:
         """True if acknowledged or nacked."""
         return self._finalized
-
-    def reply_mailbox(self) -> Mailbox[R]:
-        """Resolve reply_to to a Mailbox.
-
-        Lower-level API for direct mailbox access. Does not check
-        finalization state.
-
-        Raises:
-            ReplyNotAvailableError: No reply_to or resolution failed.
-        """
-        if self.reply_to is None:
-            raise ReplyNotAvailableError("No reply_to specified")
-
-        if self._reply_resolver is None:
-            raise ReplyNotAvailableError("No resolver configured")
-
-        try:
-            return self._reply_resolver.resolve(self.reply_to)
-        except MailboxResolutionError as e:
-            raise ReplyNotAvailableError(
-                f"Cannot resolve reply_to '{self.reply_to}': {e}"
-            ) from e
 ```
 
 ### Updated Mailbox Protocol

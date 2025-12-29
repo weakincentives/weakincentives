@@ -160,18 +160,6 @@ class Message(Generic[T, R]):
         """Extend visibility for long-running processing."""
         ...
 
-    def reply_mailbox(self) -> Mailbox[R, None]:
-        """Resolve reply_to to a Mailbox for sending responses.
-
-        This is a lower-level API than reply(). Use when you need direct
-        access to the mailbox (e.g., for batch operations or inspecting
-        queue state). Does not check finalization state.
-
-        Raises:
-            ReplyNotAvailableError: No reply_to or resolver failed.
-        """
-        ...
-
     @property
     def is_finalized(self) -> bool:
         """Return True if the message has been acknowledged or nacked."""
@@ -304,24 +292,6 @@ msg.reply(Result(value=2))  # Raises MessageFinalizedError
 This prevents:
 - Sending replies to a deleted message (after ack)
 - Sending replies that race with redelivery (after nack)
-
-### Advanced: Direct Mailbox Access
-
-Use `reply_mailbox()` when you need direct access to the resolved mailbox:
-
-```python
-# Batch send multiple messages
-mailbox = msg.reply_mailbox()
-for item in batch:
-    mailbox.send(item)
-msg.acknowledge()
-
-# Inspect queue state
-mailbox = msg.reply_mailbox()
-count = mailbox.approximate_count()
-```
-
-Note: `reply_mailbox()` does not check finalization state. Use with care.
 
 ### Eval Run Collection
 
