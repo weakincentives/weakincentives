@@ -830,9 +830,543 @@ def test_any_of_requires_one():
     assert score.passed is True  # contains passes
 ```
 
+## State Assertions
+
+Beyond evaluating output correctness, agent evals often need to verify side
+effects: Did the agent update session state correctly? Did it create the right
+files? State assertions address this by inspecting Session and Filesystem after
+MainLoop execution.
+
+### Design Principles
+
+- **Assertions are functions** - Pure `(state) -> Score`, composable like evaluators
+- **Separate from output evaluation** - State assertions run independently
+- **Optional** - EvalLoop works without them; add when needed
+- **Combinable** - Use `all_of`/`any_of` patterns for multi-criteria checks
+
+### Architecture
+
+```
+┌──────────────┐     ┌───────────────┐     ┌────────────────┐
+│  MainLoop    │────▶│    Session    │────▶│ SessionAssertion│
+│  .execute()  │     │   (state)     │     │   (scoring)     │
+└──────────────┘     └───────────────┘     └────────────────┘
+       │
+       │             ┌───────────────┐     ┌────────────────────┐
+       └────────────▶│  Filesystem   │────▶│FilesystemAssertion │
+                     │   (files)     │     │    (scoring)       │
+                     └───────────────┘     └────────────────────┘
+```
+
+`MainLoop.execute()` returns `(response, session)`. The Session is now captured
+by EvalLoop and passed to session assertions. Filesystem is accessed via the
+ResourceRegistry passed to execute.
+
+### Type Aliases
+
+```python
+SessionAssertion = Callable[[Session], Score]
+"""Assertion against session state. Pure function: (session) -> Score."""
+
+FilesystemAssertion = Callable[[Filesystem], Score]
+"""Assertion against filesystem state. Pure function: (filesystem) -> Score."""
+```
+
+### Session Assertions
+
+#### session_has
+
+Assert a slice contains a specific number of items:
+
+```python
+def session_has[T: SupportsDataclass](
+    slice_type: type[T],
+    *,
+    count: int | None = None,
+    min_count: int | None = None,
+    max_count: int | None = None,
+) -> SessionAssertion:
+    """Assert slice has expected item count.
+
+    Args:
+        slice_type: The slice type to check.
+        count: Exact count required (mutually exclusive with min/max).
+        min_count: Minimum items required.
+        max_count: Maximum items allowed.
+
+    Returns:
+        SessionAssertion that scores based on count constraints.
+
+    Example:
+        >>> assertion = session_has(Plan, count=1)
+        >>> score = assertion(session)
+        >>> score.passed  # True if exactly 1 Plan in session
+    """
+```
+
+#### session_latest
+
+Assert the most recent item in a slice matches a predicate:
+
+```python
+def session_latest[T: SupportsDataclass](
+    slice_type: type[T],
+    predicate: Callable[[T], bool],
+    *,
+    reason: str = "",
+) -> SessionAssertion:
+    """Assert latest item in slice matches predicate.
+
+    Args:
+        slice_type: The slice type to check.
+        predicate: Function that returns True if item matches.
+        reason: Optional reason included in Score on failure.
+
+    Returns:
+        SessionAssertion that passes if latest item matches.
+
+    Example:
+        >>> assertion = session_latest(Plan, lambda p: p.status == "complete")
+        >>> score = assertion(session)
+    """
+```
+
+#### session_contains
+
+Assert at least one item in a slice matches a predicate:
+
+```python
+def session_contains[T: SupportsDataclass](
+    slice_type: type[T],
+    predicate: Callable[[T], bool],
+    *,
+    reason: str = "",
+) -> SessionAssertion:
+    """Assert at least one item in slice matches predicate.
+
+    Args:
+        slice_type: The slice type to check.
+        predicate: Function that returns True if item matches.
+        reason: Optional reason included in Score on failure.
+
+    Returns:
+        SessionAssertion that passes if any item matches.
+
+    Example:
+        >>> assertion = session_contains(ToolCall, lambda t: t.name == "search")
+        >>> score = assertion(session)
+    """
+```
+
+#### session_all
+
+Assert all items in a slice match a predicate:
+
+```python
+def session_all[T: SupportsDataclass](
+    slice_type: type[T],
+    predicate: Callable[[T], bool],
+    *,
+    reason: str = "",
+) -> SessionAssertion:
+    """Assert all items in slice match predicate.
+
+    Args:
+        slice_type: The slice type to check.
+        predicate: Function that returns True if item matches.
+        reason: Optional reason included in Score on failure.
+
+    Returns:
+        SessionAssertion that passes if all items match (or slice is empty).
+
+    Example:
+        >>> assertion = session_all(ToolCall, lambda t: t.success)
+        >>> score = assertion(session)
+    """
+```
+
+### Filesystem Assertions
+
+#### file_exists / file_missing
+
+Assert file existence:
+
+```python
+def file_exists(path: str) -> FilesystemAssertion:
+    """Assert file exists at path.
+
+    Example:
+        >>> assertion = file_exists("output/result.json")
+        >>> score = assertion(filesystem)
+    """
+
+
+def file_missing(path: str) -> FilesystemAssertion:
+    """Assert file does not exist at path.
+
+    Example:
+        >>> assertion = file_missing("temp/scratch.txt")
+        >>> score = assertion(filesystem)
+    """
+```
+
+#### file_contains
+
+Assert file contains a substring:
+
+```python
+def file_contains(path: str, substring: str) -> FilesystemAssertion:
+    """Assert file contains substring.
+
+    Args:
+        path: Path to the file.
+        substring: Text that must appear in file content.
+
+    Returns:
+        FilesystemAssertion that passes if substring is found.
+
+    Example:
+        >>> assertion = file_contains("output.txt", "SUCCESS")
+        >>> score = assertion(filesystem)
+    """
+```
+
+#### file_matches
+
+Assert file content matches a regex pattern:
+
+```python
+def file_matches(path: str, pattern: str) -> FilesystemAssertion:
+    """Assert file content matches regex pattern.
+
+    Args:
+        path: Path to the file.
+        pattern: Regular expression pattern.
+
+    Returns:
+        FilesystemAssertion that passes if pattern matches.
+
+    Example:
+        >>> assertion = file_matches("config.json", r'"version":\s*"\d+\.\d+"')
+        >>> score = assertion(filesystem)
+    """
+```
+
+#### file_equals
+
+Assert file has exact content:
+
+```python
+def file_equals(path: str, content: str) -> FilesystemAssertion:
+    """Assert file has exact content.
+
+    Args:
+        path: Path to the file.
+        content: Expected file content (exact match).
+
+    Returns:
+        FilesystemAssertion that passes if content matches exactly.
+
+    Example:
+        >>> assertion = file_equals("flag.txt", "DONE")
+        >>> score = assertion(filesystem)
+    """
+```
+
+#### dir_contains
+
+Assert directory contains files matching patterns:
+
+```python
+def dir_contains(path: str, *patterns: str) -> FilesystemAssertion:
+    """Assert directory contains files matching glob patterns.
+
+    Args:
+        path: Directory path.
+        *patterns: Glob patterns that must each match at least one file.
+
+    Returns:
+        FilesystemAssertion that passes if all patterns match.
+
+    Example:
+        >>> assertion = dir_contains("src", "*.py", "*.md")
+        >>> score = assertion(filesystem)
+    """
+```
+
+### Assertion Combinators
+
+Reuse the same combinator pattern as evaluators:
+
+```python
+def all_session_assertions(*assertions: SessionAssertion) -> SessionAssertion:
+    """All session assertions must pass. Score is the mean.
+
+    Example:
+        >>> combined = all_session_assertions(
+        ...     session_has(Plan, count=1),
+        ...     session_latest(Plan, lambda p: p.complete),
+        ... )
+    """
+
+
+def any_session_assertions(*assertions: SessionAssertion) -> SessionAssertion:
+    """At least one session assertion must pass. Score is the max."""
+
+
+def all_filesystem_assertions(*assertions: FilesystemAssertion) -> FilesystemAssertion:
+    """All filesystem assertions must pass. Score is the mean."""
+
+
+def any_filesystem_assertions(*assertions: FilesystemAssertion) -> FilesystemAssertion:
+    """At least one filesystem assertion must pass. Score is the max."""
+```
+
+### EvalLoop with State Assertions
+
+EvalLoop gains optional parameters for state assertions:
+
+```python
+class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
+    def __init__(
+        self,
+        *,
+        loop: MainLoop[InputT, OutputT],
+        evaluator: Evaluator[OutputT, ExpectedT],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT]],
+        results: Mailbox[EvalResult],
+        # State assertions (optional)
+        session_assertions: SessionAssertion | None = None,
+        filesystem: Filesystem | None = None,
+        filesystem_assertions: FilesystemAssertion | None = None,
+    ) -> None:
+        """Initialize EvalLoop with optional state assertions.
+
+        Args:
+            loop: MainLoop instance for executing samples.
+            evaluator: Output scoring function (output, expected) -> Score.
+            requests: Mailbox to receive EvalRequest messages from.
+            results: Mailbox to send EvalResult messages to.
+            session_assertions: Optional assertions against session state.
+            filesystem: Filesystem instance for filesystem assertions.
+            filesystem_assertions: Optional assertions against filesystem.
+        """
+```
+
+**Score Aggregation:**
+
+When state assertions are provided, the final score combines all components
+using `all_of` semantics:
+
+1. Output evaluator score
+2. Session assertions score (if provided)
+3. Filesystem assertions score (if provided)
+
+All must pass for the sample to pass. The combined score value is the mean
+of all component scores.
+
+```python
+def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
+    """Execute and score a single sample."""
+    sample = request.sample
+    start = time.monotonic()
+
+    # Execute and capture session
+    response, session = self._loop.execute(sample.input)
+    latency_ms = int((time.monotonic() - start) * 1000)
+
+    if response.output is None:
+        return EvalResult(
+            sample_id=sample.id,
+            score=Score(value=0.0, passed=False, reason="No output"),
+            latency_ms=latency_ms,
+            error="No output from MainLoop",
+        )
+
+    # Collect all scores
+    scores: list[Score] = []
+
+    # Output evaluation
+    scores.append(self._evaluator(response.output, sample.expected))
+
+    # Session assertions
+    if self._session_assertions is not None:
+        scores.append(self._session_assertions(session))
+
+    # Filesystem assertions
+    if self._filesystem_assertions is not None and self._filesystem is not None:
+        scores.append(self._filesystem_assertions(self._filesystem))
+
+    # Combine scores (all_of semantics)
+    passed = all(s.passed for s in scores)
+    value = sum(s.value for s in scores) / len(scores)
+    reasons = [s.reason for s in scores if s.reason]
+
+    return EvalResult(
+        sample_id=sample.id,
+        score=Score(value=value, passed=passed, reason="; ".join(reasons)),
+        latency_ms=latency_ms,
+    )
+```
+
+### Usage Examples
+
+#### Evaluating Agent Planning
+
+```python
+from weakincentives.evals import (
+    EvalLoop, exact_match,
+    session_has, session_latest, all_session_assertions,
+)
+
+# Verify agent creates exactly one plan and marks it complete
+session_checks = all_session_assertions(
+    session_has(Plan, count=1),
+    session_latest(Plan, lambda p: p.status == "complete"),
+)
+
+eval_loop = EvalLoop(
+    loop=planning_agent,
+    evaluator=exact_match,
+    requests=requests,
+    results=results,
+    session_assertions=session_checks,
+)
+```
+
+#### Evaluating File Operations
+
+```python
+from weakincentives.evals import (
+    EvalLoop, exact_match,
+    file_exists, file_contains, all_filesystem_assertions,
+)
+from weakincentives.contrib.tools import InMemoryFilesystem
+
+# Create filesystem for the agent
+fs = InMemoryFilesystem()
+
+# Verify agent creates expected files
+fs_checks = all_filesystem_assertions(
+    file_exists("output/result.json"),
+    file_contains("output/result.json", '"status": "success"'),
+)
+
+eval_loop = EvalLoop(
+    loop=file_agent,
+    evaluator=exact_match,
+    requests=requests,
+    results=results,
+    filesystem=fs,
+    filesystem_assertions=fs_checks,
+)
+```
+
+#### Combined Output and State Evaluation
+
+```python
+from weakincentives.evals import (
+    EvalLoop, all_of, contains, llm_judge,
+    session_has, session_contains,
+    file_exists, file_matches,
+    all_session_assertions, all_filesystem_assertions,
+)
+
+# Output must contain expected answer and be well-formatted
+output_eval = all_of(
+    contains,
+    llm_judge(judge_adapter, "Response is clear and actionable"),
+)
+
+# Session must have tool calls, including a successful search
+session_checks = all_session_assertions(
+    session_has(ToolCall, min_count=1),
+    session_contains(ToolCall, lambda t: t.name == "search" and t.success),
+)
+
+# Filesystem must have summary file with proper structure
+fs_checks = all_filesystem_assertions(
+    file_exists("summary.md"),
+    file_matches("summary.md", r"^# Summary\n"),
+)
+
+eval_loop = EvalLoop(
+    loop=research_agent,
+    evaluator=output_eval,
+    requests=requests,
+    results=results,
+    session_assertions=session_checks,
+    filesystem=fs,
+    filesystem_assertions=fs_checks,
+)
+```
+
+### Testing State Assertions
+
+State assertions are pure functions—test them directly:
+
+```python
+def test_session_has_exact_count():
+    session = Session()
+    session[Plan].seed(Plan(status="complete"))
+
+    assertion = session_has(Plan, count=1)
+    score = assertion(session)
+
+    assert score.passed is True
+    assert score.value == 1.0
+
+
+def test_session_has_fails_wrong_count():
+    session = Session()
+    # No plans seeded
+
+    assertion = session_has(Plan, count=1)
+    score = assertion(session)
+
+    assert score.passed is False
+    assert "expected 1" in score.reason
+
+
+def test_file_exists_passes():
+    fs = InMemoryFilesystem()
+    fs.write("output.txt", "hello")
+
+    assertion = file_exists("output.txt")
+    score = assertion(fs)
+
+    assert score.passed is True
+
+
+def test_file_contains_passes():
+    fs = InMemoryFilesystem()
+    fs.write("log.txt", "Operation completed successfully")
+
+    assertion = file_contains("log.txt", "successfully")
+    score = assertion(fs)
+
+    assert score.passed is True
+
+
+def test_combined_assertions():
+    session = Session()
+    session[Plan].seed(Plan(status="complete"))
+
+    combined = all_session_assertions(
+        session_has(Plan, count=1),
+        session_latest(Plan, lambda p: p.status == "complete"),
+    )
+    score = combined(session)
+
+    assert score.passed is True
+    assert score.value == 1.0  # Mean of two 1.0 scores
+```
+
 ## Limitations
 
 - **Sequential execution** - MainLoop is synchronous; samples run one at a time
 - **No caching** - Repeated samples re-execute; add caching at adapter level
 - **No checkpoints** - Cannot resume interrupted runs
 - **Single loop** - Each `EvalLoop.execute()` uses one MainLoop instance
+- **Filesystem per EvalLoop** - All samples share the same filesystem instance;
+  reset between samples if isolation is needed
