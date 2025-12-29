@@ -92,13 +92,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
     Example:
         >>> from weakincentives import Prompt, PromptTemplate, MarkdownSection
-        >>> from weakincentives.runtime import Session, InProcessEventBus
+        >>> from weakincentives.runtime import Session, InProcessDispatcher
         >>> from weakincentives.adapters.claude_agent_sdk import (
         ...     ClaudeAgentSDKAdapter,
         ...     ClaudeAgentSDKClientConfig,
         ... )
         >>>
-        >>> bus = InProcessEventBus()
+        >>> bus = InProcessDispatcher()
         >>> session = Session(bus=bus)
         >>>
         >>> adapter = ClaudeAgentSDKAdapter(

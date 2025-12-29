@@ -19,7 +19,7 @@ and the weakincentives Session.
 
 Example:
     >>> from weakincentives import Prompt, MarkdownSection
-    >>> from weakincentives.runtime import Session, InProcessEventBus
+    >>> from weakincentives.runtime import Session, InProcessDispatcher
     >>> from weakincentives.adapters.claude_agent_sdk import (
     ...     ClaudeAgentSDKAdapter,
     ...     ClaudeAgentSDKClientConfig,
@@ -27,7 +27,7 @@ Example:
     ...     HostMount,
     ... )
     >>>
-    >>> bus = InProcessEventBus()
+    >>> bus = InProcessDispatcher()
     >>> session = Session(bus=bus)
     >>>
     >>> # Create workspace section with host files

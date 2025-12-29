@@ -404,7 +404,7 @@ This example is intentionally small but complete:
 from dataclasses import dataclass
 
 from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
-from weakincentives.runtime import InProcessEventBus, Session
+from weakincentives.runtime import InProcessDispatcher, Session
 
 @dataclass(slots=True, frozen=True)
 class SummarizeRequest:
@@ -443,7 +443,7 @@ prompt = Prompt(template).bind(SummarizeRequest(
          "typed programs. Tools are explicit. State is inspectable."
 ))
 
-bus = InProcessEventBus()
+bus = InProcessDispatcher()
 session = Session(bus=bus)
 
 # To actually run this, you need an adapter and API key:
@@ -2495,7 +2495,7 @@ Import from `weakincentives` when you want the "90% API":
 
 **Runtime primitives:**
 
-- `Session`, `InProcessEventBus`
+- `Session`, `InProcessDispatcher`
 - `MainLoop`, `MainLoopConfig` and loop events (`MainLoopRequest`,
   `MainLoopCompleted`, `MainLoopFailed`)
 - Reducer helpers (`append_all`, `replace_latest`, `upsert_by`, ...)
@@ -2560,7 +2560,7 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 
 **Event bus:**
 
-- `InProcessEventBus`
+- `InProcessDispatcher`
 - Telemetry events (`PromptRendered`, `ToolInvoked`, `PromptExecuted`,
   `TokenUsage`)
 
