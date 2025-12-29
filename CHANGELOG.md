@@ -103,6 +103,12 @@ processes each sample.
   describes its purpose: preparing the prompt and session for evaluation, rather
   than initialization which suggests constructor-like behavior.
 
+- **Tool handler signature validation now uses fail-fast approach.** Pyright
+  strict mode catches signature mismatches at development time; runtime
+  TypeErrors are caught in `tool_executor.py` and converted to
+  `ToolResult(success=False)`. This removes ~200 lines of upfront validation
+  code while maintaining type safety through static analysis.
+
 ### Internal
 
 - Reorganized WINK_GUIDE.md by moving comparison sections to appendixes.

@@ -215,3 +215,24 @@ def test_tool_execution_converts_unexpected_exceptions() -> None:
         assert outcome.result.success is False
         assert outcome.result.message == "Tool 'search_notes' execution failed: boom"
         assert outcome.params == ToolParams(query="policies")
+
+
+def test_tool_execution_handles_type_error_as_possible_signature_mismatch() -> None:
+    """TypeError during execution is treated as possible signature mismatch.
+
+    While pyright catches most signature issues at development time,
+    TypeErrors can still occur at runtime and should be handled gracefully.
+    """
+
+    def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
+        del params, context
+        raise TypeError("handler() missing 1 required keyword-only argument: 'context'")
+
+    tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
+    context = _base_context(tool)
+    tool_call = _tool_call({"query": "policies"})
+
+    with tool_execution(context=context, tool_call=tool_call) as outcome:
+        assert outcome.result.success is False
+        assert "TypeError" in outcome.result.message
+        assert "search_notes" in outcome.result.message

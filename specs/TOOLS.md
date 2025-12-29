@@ -390,7 +390,26 @@ Exception handling is nuanced by exception type:
 - `VisibilityExpansionRequired` → Re-raise (not wrapped)
 - `PromptEvaluationError` → Re-raise (not wrapped)
 - `DeadlineExceededError` → Convert to `PromptEvaluationError`
+- `TypeError` → Wrap as `ToolResult(success=False)` with descriptive message
 - Other exceptions → Wrap as `ToolResult(success=False)`
+
+### Handler Signature Validation
+
+Tool handlers are validated using a **fail-fast** approach:
+
+- **Development time**: pyright strict mode catches signature mismatches
+- **Runtime**: TypeErrors during execution are caught and converted to
+  `ToolResult(success=False)` with an informative error message
+
+This approach eliminates redundant runtime validation while ensuring type safety
+through static analysis. The handler signature must match:
+
+```python
+def handler(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]: ...
+```
+
+If a handler with an incorrect signature is invoked at runtime, the resulting
+TypeError is logged and returned as a failed tool result.
 
 Tool failures forward error messages to the LLM via `role: "tool"` response.
 Original exceptions are logged for observability.

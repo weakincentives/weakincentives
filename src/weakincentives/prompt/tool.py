@@ -212,7 +212,8 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         )
 
         # Handler validation removed: pyright strict mode catches signature mismatches
-        # at development time. Runtime TypeErrors are caught at call site in tool_executor.py
+        # at development time. Runtime TypeErrors are caught in _handle_tool_exception
+        # (tool_executor.py) and converted to ToolResult errors.
 
     def _resolve_type_arguments(
         self,
