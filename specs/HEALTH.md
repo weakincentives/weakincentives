@@ -508,14 +508,14 @@ sequenceDiagram
     participant K8s as Kubernetes
     participant Health as HealthServer
     participant Group as LoopGroup
-    participant Loop as MainLoop
+    participant Worker as MainLoop
 
     K8s->>Health: GET /health/ready
     Health->>Group: readiness_check()
-    Group->>Loop: check running
-    Loop-->>Group: True
-    Group->>Loop: check heartbeat elapsed
-    Loop-->>Group: 5.2s
+    Group->>Worker: check running
+    Worker-->>Group: True
+    Group->>Worker: check heartbeat elapsed
+    Worker-->>Group: 5.2s
     Group-->>Health: True (all healthy)
     Health-->>K8s: 200 {"status": "healthy"}
 ```
