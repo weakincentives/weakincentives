@@ -77,6 +77,20 @@ class Mailbox(Protocol[T, R]):
     def approximate_count(self) -> int:
         """Approximate message count (eventually consistent)."""
         ...
+
+    def close(self) -> None:
+        """Close the mailbox and release resources.
+
+        After closing:
+        - receive() returns empty immediately
+        - send() behavior is implementation-defined
+        """
+        ...
+
+    @property
+    def closed(self) -> bool:
+        """Return True if the mailbox has been closed."""
+        ...
 ```
 
 ### Message
@@ -92,6 +106,7 @@ class Message(Generic[T, R]):
     delivery_count: int
     enqueued_at: datetime
     reply_to: str | None
+    attributes: Mapping[str, str]  # Backend-specific message attributes
 
     def reply(self, body: R) -> str:
         """Send reply to reply_to destination. Multiple replies allowed."""

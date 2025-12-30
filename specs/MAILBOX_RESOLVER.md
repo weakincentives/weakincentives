@@ -91,7 +91,7 @@ class CompositeResolver[R]:
 ### RegistryResolver
 
 ```python
-@dataclass(slots=True, frozen=True)
+@dataclass(slots=True)
 class RegistryResolver[R]:
     """Simple resolver backed by a static registry."""
 
