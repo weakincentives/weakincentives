@@ -18,11 +18,14 @@ It supports both standalone Redis and Redis Cluster deployments.
 See ``specs/MAILBOX.md`` for the complete specification.
 """
 
+# Pyright suppressions for redis library type stub limitations:
+# - Redis[bytes]/RedisCluster[bytes] type args not recognized by stubs
+# - register_script() and other methods have incomplete type annotations
+# - Script execution returns partially unknown types
+# These cannot be fixed without upstream redis-py type stub improvements.
 # pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
 # pyright: reportInvalidTypeArguments=false, reportAttributeAccessIssue=false
 # pyright: reportUnknownArgumentType=false, reportUnusedCallResult=false
-# pyright: reportArgumentType=false, reportUnnecessaryComparison=false
-# pyright: reportGeneralTypeIssues=false, reportUnknownLambdaType=false
 # pyright: reportOperatorIssue=false
 
 from __future__ import annotations
