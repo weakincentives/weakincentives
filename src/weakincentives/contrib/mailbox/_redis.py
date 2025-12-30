@@ -41,6 +41,7 @@ from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from weakincentives.runtime.mailbox import (
+    CompositeResolver,
     MailboxConnectionError,
     MailboxFullError,
     MailboxResolutionError,
@@ -52,7 +53,7 @@ from weakincentives.runtime.mailbox import (
 from weakincentives.serde import dump, parse
 
 if TYPE_CHECKING:
-    from weakincentives.runtime.mailbox import MailboxResolver
+    from weakincentives.runtime.mailbox import Mailbox, MailboxResolver
 
 # =============================================================================
 # Lua Scripts for Atomic Operations
@@ -204,6 +205,66 @@ class _QueueKeys:
         )
 
 
+class RedisMailboxFactory[R]:
+    """Factory that creates RedisMailbox instances using a shared Redis client.
+
+    Use with CompositeResolver for automatic reply routing. When a message's
+    reply_to identifier is resolved, this factory creates a new RedisMailbox
+    connected to the same Redis server.
+
+    Example::
+
+        factory = RedisMailboxFactory(client=redis_client)
+        resolver = CompositeResolver(registry={}, factory=factory)
+        requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
+
+        # Worker can now reply to any queue name
+        for msg in requests.receive():
+            msg.reply(result)  # Resolves reply_to → new RedisMailbox with same client
+            msg.acknowledge()
+    """
+
+    __slots__ = ("body_type", "client")
+
+    client: Redis[bytes] | RedisCluster[bytes]
+    """Redis client to use for all created mailboxes."""
+
+    body_type: type[R] | None
+    """Optional type hint for message body deserialization."""
+
+    def __init__(
+        self,
+        client: Redis[bytes] | RedisCluster[bytes],
+        *,
+        body_type: type[R] | None = None,
+    ) -> None:
+        """Initialize factory with shared Redis client.
+
+        Args:
+            client: Redis client to use for all created mailboxes.
+            body_type: Optional type hint for message body deserialization.
+        """
+        super().__init__()
+        self.client = client
+        self.body_type = body_type
+
+    def create(self, identifier: str) -> Mailbox[R, None]:
+        """Create a RedisMailbox for the given identifier.
+
+        Args:
+            identifier: Queue name for the new mailbox.
+
+        Returns:
+            A new RedisMailbox connected to the shared client.
+        """
+        return RedisMailbox(
+            name=identifier,
+            client=self.client,
+            body_type=self.body_type,
+            reply_resolver=None,  # Reply mailboxes don't need nested resolution
+        )
+
+
 @dataclass(slots=True)
 class RedisMailbox[T, R]:
     """Redis-backed mailbox with SQS-compatible visibility timeout semantics.
@@ -260,7 +321,9 @@ class RedisMailbox[T, R]:
     """Maximum queue capacity. None for unlimited (subject to Redis maxmemory)."""
 
     reply_resolver: MailboxResolver[R] | None = None
-    """Resolver for reply_to identifiers. Required for Message.reply() to work."""
+    """Resolver for reply_to identifiers. If None, a default resolver using
+    RedisMailboxFactory is created automatically, enabling reply_to to resolve
+    to any queue name on the same Redis server."""
 
     reaper_interval: float = 1.0
     """Interval in seconds between visibility reaper runs."""
@@ -281,6 +344,12 @@ class RedisMailbox[T, R]:
         object.__setattr__(self, "_keys", _QueueKeys.for_queue(self.name))
         self._register_scripts()
         self._start_reaper()
+        # Set up default resolver if none provided
+        if self.reply_resolver is None:
+            factory: RedisMailboxFactory[R] = RedisMailboxFactory(client=self.client)
+            object.__setattr__(
+                self, "reply_resolver", CompositeResolver(registry={}, factory=factory)
+            )
 
     def _register_scripts(self) -> None:
         """Register Lua scripts with Redis."""
@@ -675,4 +744,4 @@ class RedisMailbox[T, R]:
         return self._closed
 
 
-__all__ = ["RedisMailbox"]
+__all__ = ["RedisMailbox", "RedisMailboxFactory"]
