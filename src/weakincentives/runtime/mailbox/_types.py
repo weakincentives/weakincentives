@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -112,9 +112,6 @@ class Message[T, R]:
 
     reply_to: str | None = None
     """Identifier for response mailbox. Workers resolve this via reply()."""
-
-    attributes: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
-    """Backend-specific message attributes (e.g., SQS MessageAttributes)."""
 
     _acknowledge_fn: Callable[[], None] = field(
         default=lambda: None, repr=False, compare=False

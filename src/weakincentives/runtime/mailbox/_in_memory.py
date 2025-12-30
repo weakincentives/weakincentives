@@ -223,7 +223,6 @@ class InMemoryMailbox[T, R]:
                         delivery_count=in_flight.delivery_count,
                         enqueued_at=in_flight.enqueued_at,
                         reply_to=in_flight.reply_to,
-                        attributes={},
                         _acknowledge_fn=lambda h=receipt_handle: self._acknowledge(h),
                         _nack_fn=lambda t, h=receipt_handle: self._nack(h, t),
                         _extend_fn=lambda t, h=receipt_handle: self._extend(h, t),

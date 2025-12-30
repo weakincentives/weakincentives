@@ -534,7 +534,6 @@ class RedisMailbox[T, R]:
             delivery_count=delivery_count,
             enqueued_at=enqueued_at,
             reply_to=reply_to,
-            attributes={},
             _acknowledge_fn=lambda mid=msg_id, suf=receipt_suffix: self._acknowledge(
                 mid, suf
             ),

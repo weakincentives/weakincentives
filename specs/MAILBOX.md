@@ -106,7 +106,6 @@ class Message(Generic[T, R]):
     delivery_count: int
     enqueued_at: datetime
     reply_to: str | None
-    attributes: Mapping[str, str]  # Backend-specific message attributes
 
     def reply(self, body: R) -> str:
         """Send reply to reply_to destination. Multiple replies allowed."""
