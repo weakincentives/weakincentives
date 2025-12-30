@@ -29,7 +29,8 @@ import pytest
 @pytest.fixture(scope="module")
 def project_root() -> Path:
     """Return the project root directory."""
-    return Path(__file__).parent.parent.parent
+    # integration-tests/test_package_structure.py -> parent.parent = project root
+    return Path(__file__).parent.parent
 
 
 @pytest.fixture(scope="module")
