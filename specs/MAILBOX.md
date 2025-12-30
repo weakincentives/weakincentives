@@ -170,23 +170,17 @@ mailbox internally. Multiple replies are permitted before acknowledgment.
 
 ```python
 # Registry for resolving reply_to identifiers
-registry: dict[str, Mailbox] = {}
+registry: dict[str, Mailbox] = {"responses": InMemoryMailbox(name="responses")}
 
 # Request mailbox with resolver
 requests: Mailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
     name="requests",
-    reply_resolver=registry.get,
+    reply_resolver=RegistryResolver(registry),
 )
 ```
 
 **Important:** Resolvers should cache mailbox instances to avoid resource leaks.
 See `specs/MAILBOX_RESOLVER.md` for resolver patterns.
-
-```python
-@cache
-def redis_resolver(reply_to: str) -> RedisMailbox[MainLoopResult, None]:
-    return RedisMailbox(name=reply_to, client=redis_client)
-```
 
 ### Client
 
