@@ -1029,7 +1029,7 @@ When session assertions are provided, the final score combines both components
 using `all_of` semantics:
 
 1. Output evaluator score
-2. Session assertions score (if provided)
+1. Session assertions score (if provided)
 
 Both must pass for the sample to pass. The combined score value is the mean
 of both component scores.

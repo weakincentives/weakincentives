@@ -208,11 +208,13 @@ def test_session_latest_custom_reason() -> None:
 def test_session_contains_passes() -> None:
     """session_contains passes when any item matches predicate."""
     session = Session()
-    session[ToolCall].seed([
-        ToolCall(name="read", success=True),
-        ToolCall(name="search", success=True),
-        ToolCall(name="write", success=False),
-    ])
+    session[ToolCall].seed(
+        [
+            ToolCall(name="read", success=True),
+            ToolCall(name="search", success=True),
+            ToolCall(name="write", success=False),
+        ]
+    )
 
     assertion = session_contains(ToolCall, lambda t: t.name == "search")
     score = assertion(session)
@@ -224,10 +226,12 @@ def test_session_contains_passes() -> None:
 def test_session_contains_fails_no_match() -> None:
     """session_contains fails when no item matches predicate."""
     session = Session()
-    session[ToolCall].seed([
-        ToolCall(name="read", success=True),
-        ToolCall(name="write", success=False),
-    ])
+    session[ToolCall].seed(
+        [
+            ToolCall(name="read", success=True),
+            ToolCall(name="write", success=False),
+        ]
+    )
 
     assertion = session_contains(ToolCall, lambda t: t.name == "search")
     score = assertion(session)
@@ -265,10 +269,12 @@ def test_session_contains_custom_reason() -> None:
 def test_session_all_passes() -> None:
     """session_all passes when all items match predicate."""
     session = Session()
-    session[ToolCall].seed([
-        ToolCall(name="read", success=True),
-        ToolCall(name="write", success=True),
-    ])
+    session[ToolCall].seed(
+        [
+            ToolCall(name="read", success=True),
+            ToolCall(name="write", success=True),
+        ]
+    )
 
     assertion = session_all(ToolCall, lambda t: t.success)
     score = assertion(session)
@@ -280,10 +286,12 @@ def test_session_all_passes() -> None:
 def test_session_all_fails() -> None:
     """session_all fails when any item doesn't match predicate."""
     session = Session()
-    session[ToolCall].seed([
-        ToolCall(name="read", success=True),
-        ToolCall(name="write", success=False),
-    ])
+    session[ToolCall].seed(
+        [
+            ToolCall(name="read", success=True),
+            ToolCall(name="write", success=False),
+        ]
+    )
 
     assertion = session_all(ToolCall, lambda t: t.success)
     score = assertion(session)
