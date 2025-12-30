@@ -38,33 +38,18 @@ It does not participate in dependency graphs or lifecycle scoping.
 ### MailboxResolver
 
 ```python
-from typing import Protocol, runtime_checkable
-
 @runtime_checkable
-class MailboxResolver[T](Protocol):
+class MailboxResolver[R](Protocol):
     """Resolves string identifiers to Mailbox instances.
 
-    Implementations may use registries, factories, or both.
-    Caching is implementation-specific but recommended to prevent
-    resource leaks from repeated resolution of the same identifier.
+    Type parameter R matches the reply type from Mailbox[T, R].
     """
 
-    def resolve(self, identifier: str) -> Mailbox[T]:
-        """Resolve an identifier to a mailbox instance.
-
-        Args:
-            identifier: String identifier for the mailbox (e.g., queue name,
-                URI, or registered key).
-
-        Returns:
-            Mailbox instance for the identifier.
-
-        Raises:
-            MailboxResolutionError: Cannot resolve identifier.
-        """
+    def resolve(self, identifier: str) -> Mailbox[R, None]:
+        """Resolve an identifier to a mailbox instance."""
         ...
 
-    def resolve_optional(self, identifier: str) -> Mailbox[T] | None:
+    def resolve_optional(self, identifier: str) -> Mailbox[R, None] | None:
         """Resolve if possible, return None otherwise."""
         ...
 ```
@@ -72,28 +57,11 @@ class MailboxResolver[T](Protocol):
 ### MailboxFactory
 
 ```python
-from typing import Protocol
+class MailboxFactory[R](Protocol):
+    """Creates mailbox instances from string identifiers."""
 
-class MailboxFactory[T](Protocol):
-    """Creates mailbox instances from string identifiers.
-
-    Factories handle backend-specific construction. They do not cache;
-    caching is the resolver's responsibility.
-    """
-
-    def create(self, identifier: str) -> Mailbox[T]:
-        """Create a new mailbox for the given identifier.
-
-        Args:
-            identifier: Backend-specific identifier (queue name, URI, etc.).
-
-        Returns:
-            New mailbox instance.
-
-        Raises:
-            MailboxConnectionError: Cannot connect to backend.
-            ValueError: Invalid identifier format.
-        """
+    def create(self, identifier: str) -> Mailbox[R, None]:
+        """Create a new mailbox for the given identifier."""
         ...
 ```
 
@@ -101,88 +69,38 @@ class MailboxFactory[T](Protocol):
 
 ```python
 @dataclass(slots=True)
-class CompositeResolver[T]:
+class CompositeResolver[R]:
     """Combines a registry with a factory for dynamic resolution.
 
     Resolution order:
     1. Check registry for pre-registered mailbox
     2. Fall back to factory for dynamic creation
-    3. Cache factory-created instances (if caching enabled)
-
-    Example::
-
-        registry: dict[str, Mailbox[Event]] = {}
-        factory = RedisMailboxFactory(client=redis_client)
-        resolver = CompositeResolver(registry=registry, factory=factory)
-
-        # Pre-register known mailboxes
-        registry["responses"] = InMemoryMailbox(name="responses")
-
-        # Dynamic resolution via factory
-        mailbox = resolver.resolve("worker-123")  # Creates RedisMailbox
     """
 
-    registry: Mapping[str, Mailbox[T]]
-    """Pre-registered mailboxes looked up first."""
+    registry: Mapping[str, Mailbox[R, None]]
+    factory: MailboxFactory[R] | None = None
 
-    factory: MailboxFactory[T] | None = None
-    """Optional factory for dynamic creation. None disables fallback."""
-
-    cache: dict[str, Mailbox[T]] = field(default_factory=dict)
-    """Cache for factory-created instances. Prevents resource leaks."""
-
-    def resolve(self, identifier: str) -> Mailbox[T]:
-        # Check registry first
+    def resolve(self, identifier: str) -> Mailbox[R, None]:
         if identifier in self.registry:
             return self.registry[identifier]
-
-        # Check cache
-        if identifier in self.cache:
-            return self.cache[identifier]
-
-        # Fall back to factory
         if self.factory is None:
             raise MailboxResolutionError(identifier)
-
-        mailbox = self.factory.create(identifier)
-        self.cache[identifier] = mailbox
-        return mailbox
-
-    def resolve_optional(self, identifier: str) -> Mailbox[T] | None:
-        try:
-            return self.resolve(identifier)
-        except MailboxResolutionError:
-            return None
+        return self.factory.create(identifier)
 ```
 
 ### RegistryResolver
 
 ```python
 @dataclass(slots=True, frozen=True)
-class RegistryResolver[T]:
-    """Simple resolver backed by a static registry.
+class RegistryResolver[R]:
+    """Simple resolver backed by a static registry."""
 
-    Use when all mailboxes are known at configuration time.
-    No factory fallback, no dynamic creation.
+    registry: Mapping[str, Mailbox[R, None]]
 
-    Example::
-
-        registry = {
-            "requests": InMemoryMailbox(name="requests"),
-            "responses": InMemoryMailbox(name="responses"),
-        }
-        resolver = RegistryResolver(registry=registry)
-    """
-
-    registry: Mapping[str, Mailbox[T]]
-
-    def resolve(self, identifier: str) -> Mailbox[T]:
+    def resolve(self, identifier: str) -> Mailbox[R, None]:
         if identifier not in self.registry:
             raise MailboxResolutionError(identifier)
         return self.registry[identifier]
-
-    def resolve_optional(self, identifier: str) -> Mailbox[T] | None:
-        return self.registry.get(identifier)
 ```
 
 ### Errors
@@ -370,34 +288,20 @@ def test_reply_after_ack_raises():
         msg.reply("too late")
 ```
 
-## Caching Considerations
-
-Without caching, each `reply()` to a dynamic queue creates a new mailbox
-(new connections, threads, resources). `CompositeResolver` caches
-factory-created instances to prevent leaks.
-
-For long-running processes with many dynamic queues:
-- **LRU cache** with max size
-- **TTL-based eviction** for stale entries
-- **Explicit cleanup** via `resolver.evict(identifier)`
-
 ## Limitations
 
-- **No distributed cache**: Each process has its own cache. Shared state
-  requires external coordination (Redis, database).
-- **No health checks**: Cached mailboxes may have stale connections. Consider
-  periodic validation or connection pooling at the backend level.
-- **Single type parameter**: Resolver is typed for one message type. Use
-  separate resolvers or cast for heterogeneous mailboxes.
-- **Synchronous only**: Resolution is blocking. Async resolution not supported.
+- **No caching**: Factory creates new mailbox on each resolution. Callers
+  should cache or use registry for repeated access to same identifier.
+- **Single type parameter**: Resolver is typed for one reply type. Use
+  separate resolvers for heterogeneous mailboxes.
 
 ## Future Considerations
 
+- **Caching**: LRU or TTL-based caching to prevent resource leaks from
+  repeated factory creation of the same identifier.
 - **URI-based resolution**: Parse `redis://host/queue` or `sqs://region/name`
   for backend selection (sketched in URIMailboxFactory).
-- **Metrics**: Resolution latency, cache hit rate, factory call count.
-- **Health monitoring**: Periodic liveness checks on cached mailboxes.
-- **Distributed cache**: Redis-backed resolver cache for multi-process deployments.
+- **Metrics**: Resolution latency, factory call count.
 
 ## Related Specifications
 
