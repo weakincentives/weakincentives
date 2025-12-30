@@ -1158,12 +1158,12 @@ def test_composite_resolver_resolve_optional_uses_factory() -> None:
         created_mailbox.close()
 
 
-def test_composite_resolver_resolve_optional_catches_factory_error() -> None:
-    """CompositeResolver.resolve_optional() returns None when factory raises."""
+def test_composite_resolver_resolve_optional_catches_resolution_error() -> None:
+    """CompositeResolver.resolve_optional() returns None when factory raises MailboxResolutionError."""
 
     class _FailingFactory(MailboxFactory[str]):
         def create(self, identifier: str) -> Mailbox[str, None]:
-            raise RuntimeError("Factory failed")
+            raise MailboxResolutionError(identifier)
 
     resolver = CompositeResolver[str](registry={}, factory=_FailingFactory())
     assert resolver.resolve_optional("dynamic") is None

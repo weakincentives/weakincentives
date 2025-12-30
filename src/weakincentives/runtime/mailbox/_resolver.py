@@ -199,7 +199,7 @@ class CompositeResolver[R]:
             return None
         try:
             return self.factory.create(identifier)
-        except Exception:
+        except MailboxResolutionError:
             return None
 
 
