@@ -27,7 +27,12 @@ class DocsSyncHook(BuildHookInterface):
     PLUGIN_NAME = "docs-sync"
 
     def initialize(self, version: str, build_data: dict[str, Any]) -> None:
-        """Copy documentation files into the package directory."""
+        """Copy documentation files into the package directory.
+
+        The docs directory is in .gitignore since it's generated at build time.
+        We use force_include to ensure these files are included in the wheel
+        despite being gitignored.
+        """
         root = Path(self.root)
         docs_dir = root / "src" / "weakincentives" / "docs"
         specs_dir = docs_dir / "specs"
@@ -48,3 +53,16 @@ class DocsSyncHook(BuildHookInterface):
         init_file = docs_dir / "__init__.py"
         if not init_file.exists():
             init_file.touch()
+
+        # Force include docs files in wheel (bypasses .gitignore exclusion)
+        # The docs directory is gitignored because it's generated at build time
+        force_include: dict[str, str] = build_data.setdefault("force_include", {})
+        force_include[str(docs_dir / "__init__.py")] = "weakincentives/docs/__init__.py"
+        force_include[str(docs_dir / "llms.md")] = "weakincentives/docs/llms.md"
+        force_include[str(docs_dir / "WINK_GUIDE.md")] = (
+            "weakincentives/docs/WINK_GUIDE.md"
+        )
+
+        for spec_file in specs_dir.glob("*.md"):
+            target = f"weakincentives/docs/specs/{spec_file.name}"
+            force_include[str(spec_file)] = target
