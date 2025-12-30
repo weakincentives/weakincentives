@@ -33,14 +33,16 @@ def project_root() -> Path:
 
 
 @pytest.fixture(scope="module")
-def wheel_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
+def wheel_path(tmp_path_factory: pytest.TempPathFactory, project_root: Path) -> Path:
     """Build a wheel and return its path.
 
     This is module-scoped to avoid rebuilding for each test.
+    Uses project_root to ensure we build from the correct directory,
+    even when tests run from a different working directory (e.g., mutants/).
     """
     output_dir = tmp_path_factory.mktemp("dist")
 
-    # Build wheel using uv/pip
+    # Build wheel using uv/pip from the project root
     result = subprocess.run(
         [
             sys.executable,
@@ -50,7 +52,7 @@ def wheel_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "--no-deps",
             "--wheel-dir",
             str(output_dir),
-            ".",
+            str(project_root),
         ],
         capture_output=True,
         text=True,
