@@ -847,29 +847,20 @@ MainLoop execution.
 ### Architecture
 
 ```
-┌──────────────┐     ┌───────────────┐     ┌────────────────┐
+┌──────────────┐     ┌───────────────┐     ┌─────────────────┐
 │  MainLoop    │────▶│    Session    │────▶│ SessionAssertion│
 │  .execute()  │     │   (state)     │     │   (scoring)     │
-└──────────────┘     └───────────────┘     └────────────────┘
-       │
-       │             ┌───────────────┐     ┌────────────────────┐
-       └────────────▶│  Filesystem   │────▶│FilesystemAssertion │
-                     │   (files)     │     │    (scoring)       │
-                     └───────────────┘     └────────────────────┘
+└──────────────┘     └───────────────┘     └─────────────────┘
 ```
 
 `MainLoop.execute()` returns `(response, session)`. The Session is now captured
-by EvalLoop and passed to session assertions. Filesystem is accessed via the
-ResourceRegistry passed to execute.
+by EvalLoop and passed to session assertions.
 
-### Type Aliases
+### Type Alias
 
 ```python
 SessionAssertion = Callable[[Session], Score]
 """Assertion against session state. Pure function: (session) -> Score."""
-
-FilesystemAssertion = Callable[[Filesystem], Score]
-"""Assertion against filesystem state. Pure function: (filesystem) -> Score."""
 ```
 
 ### Session Assertions
@@ -985,115 +976,6 @@ def session_all[T: SupportsDataclass](
     """
 ```
 
-### Filesystem Assertions
-
-#### file_exists / file_missing
-
-Assert file existence:
-
-```python
-def file_exists(path: str) -> FilesystemAssertion:
-    """Assert file exists at path.
-
-    Example:
-        >>> assertion = file_exists("output/result.json")
-        >>> score = assertion(filesystem)
-    """
-
-
-def file_missing(path: str) -> FilesystemAssertion:
-    """Assert file does not exist at path.
-
-    Example:
-        >>> assertion = file_missing("temp/scratch.txt")
-        >>> score = assertion(filesystem)
-    """
-```
-
-#### file_contains
-
-Assert file contains a substring:
-
-```python
-def file_contains(path: str, substring: str) -> FilesystemAssertion:
-    """Assert file contains substring.
-
-    Args:
-        path: Path to the file.
-        substring: Text that must appear in file content.
-
-    Returns:
-        FilesystemAssertion that passes if substring is found.
-
-    Example:
-        >>> assertion = file_contains("output.txt", "SUCCESS")
-        >>> score = assertion(filesystem)
-    """
-```
-
-#### file_matches
-
-Assert file content matches a regex pattern:
-
-```python
-def file_matches(path: str, pattern: str) -> FilesystemAssertion:
-    """Assert file content matches regex pattern.
-
-    Args:
-        path: Path to the file.
-        pattern: Regular expression pattern.
-
-    Returns:
-        FilesystemAssertion that passes if pattern matches.
-
-    Example:
-        >>> assertion = file_matches("config.json", r'"version":\s*"\d+\.\d+"')
-        >>> score = assertion(filesystem)
-    """
-```
-
-#### file_equals
-
-Assert file has exact content:
-
-```python
-def file_equals(path: str, content: str) -> FilesystemAssertion:
-    """Assert file has exact content.
-
-    Args:
-        path: Path to the file.
-        content: Expected file content (exact match).
-
-    Returns:
-        FilesystemAssertion that passes if content matches exactly.
-
-    Example:
-        >>> assertion = file_equals("flag.txt", "DONE")
-        >>> score = assertion(filesystem)
-    """
-```
-
-#### dir_contains
-
-Assert directory contains files matching patterns:
-
-```python
-def dir_contains(path: str, *patterns: str) -> FilesystemAssertion:
-    """Assert directory contains files matching glob patterns.
-
-    Args:
-        path: Directory path.
-        *patterns: Glob patterns that must each match at least one file.
-
-    Returns:
-        FilesystemAssertion that passes if all patterns match.
-
-    Example:
-        >>> assertion = dir_contains("src", "*.py", "*.md")
-        >>> score = assertion(filesystem)
-    """
-```
-
 ### Assertion Combinators
 
 Reuse the same combinator pattern as evaluators:
@@ -1112,19 +994,11 @@ def all_session_assertions(*assertions: SessionAssertion) -> SessionAssertion:
 
 def any_session_assertions(*assertions: SessionAssertion) -> SessionAssertion:
     """At least one session assertion must pass. Score is the max."""
-
-
-def all_filesystem_assertions(*assertions: FilesystemAssertion) -> FilesystemAssertion:
-    """All filesystem assertions must pass. Score is the mean."""
-
-
-def any_filesystem_assertions(*assertions: FilesystemAssertion) -> FilesystemAssertion:
-    """At least one filesystem assertion must pass. Score is the max."""
 ```
 
-### EvalLoop with State Assertions
+### EvalLoop with Session Assertions
 
-EvalLoop gains optional parameters for state assertions:
+EvalLoop gains an optional parameter for session assertions:
 
 ```python
 class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
@@ -1135,12 +1009,10 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
         evaluator: Evaluator[OutputT, ExpectedT],
         requests: Mailbox[EvalRequest[InputT, ExpectedT]],
         results: Mailbox[EvalResult],
-        # State assertions (optional)
+        # Session assertions (optional)
         session_assertions: SessionAssertion | None = None,
-        filesystem: Filesystem | None = None,
-        filesystem_assertions: FilesystemAssertion | None = None,
     ) -> None:
-        """Initialize EvalLoop with optional state assertions.
+        """Initialize EvalLoop with optional session assertions.
 
         Args:
             loop: MainLoop instance for executing samples.
@@ -1148,22 +1020,19 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
             requests: Mailbox to receive EvalRequest messages from.
             results: Mailbox to send EvalResult messages to.
             session_assertions: Optional assertions against session state.
-            filesystem: Filesystem instance for filesystem assertions.
-            filesystem_assertions: Optional assertions against filesystem.
         """
 ```
 
 **Score Aggregation:**
 
-When state assertions are provided, the final score combines all components
+When session assertions are provided, the final score combines both components
 using `all_of` semantics:
 
 1. Output evaluator score
 2. Session assertions score (if provided)
-3. Filesystem assertions score (if provided)
 
-All must pass for the sample to pass. The combined score value is the mean
-of all component scores.
+Both must pass for the sample to pass. The combined score value is the mean
+of both component scores.
 
 ```python
 def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
@@ -1192,10 +1061,6 @@ def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResul
     # Session assertions
     if self._session_assertions is not None:
         scores.append(self._session_assertions(session))
-
-    # Filesystem assertions
-    if self._filesystem_assertions is not None and self._filesystem is not None:
-        scores.append(self._filesystem_assertions(self._filesystem))
 
     # Combine scores (all_of semantics)
     passed = all(s.passed for s in scores)
@@ -1234,42 +1099,13 @@ eval_loop = EvalLoop(
 )
 ```
 
-#### Evaluating File Operations
-
-```python
-from weakincentives.evals import (
-    EvalLoop, exact_match,
-    file_exists, file_contains, all_filesystem_assertions,
-)
-from weakincentives.contrib.tools import InMemoryFilesystem
-
-# Create filesystem for the agent
-fs = InMemoryFilesystem()
-
-# Verify agent creates expected files
-fs_checks = all_filesystem_assertions(
-    file_exists("output/result.json"),
-    file_contains("output/result.json", '"status": "success"'),
-)
-
-eval_loop = EvalLoop(
-    loop=file_agent,
-    evaluator=exact_match,
-    requests=requests,
-    results=results,
-    filesystem=fs,
-    filesystem_assertions=fs_checks,
-)
-```
-
-#### Combined Output and State Evaluation
+#### Combined Output and Session Evaluation
 
 ```python
 from weakincentives.evals import (
     EvalLoop, all_of, contains, llm_judge,
     session_has, session_contains,
-    file_exists, file_matches,
-    all_session_assertions, all_filesystem_assertions,
+    all_session_assertions,
 )
 
 # Output must contain expected answer and be well-formatted
@@ -1284,26 +1120,18 @@ session_checks = all_session_assertions(
     session_contains(ToolCall, lambda t: t.name == "search" and t.success),
 )
 
-# Filesystem must have summary file with proper structure
-fs_checks = all_filesystem_assertions(
-    file_exists("summary.md"),
-    file_matches("summary.md", r"^# Summary\n"),
-)
-
 eval_loop = EvalLoop(
     loop=research_agent,
     evaluator=output_eval,
     requests=requests,
     results=results,
     session_assertions=session_checks,
-    filesystem=fs,
-    filesystem_assertions=fs_checks,
 )
 ```
 
-### Testing State Assertions
+### Testing Session Assertions
 
-State assertions are pure functions—test them directly:
+Session assertions are pure functions—test them directly:
 
 ```python
 def test_session_has_exact_count():
@@ -1328,26 +1156,6 @@ def test_session_has_fails_wrong_count():
     assert "expected 1" in score.reason
 
 
-def test_file_exists_passes():
-    fs = InMemoryFilesystem()
-    fs.write("output.txt", "hello")
-
-    assertion = file_exists("output.txt")
-    score = assertion(fs)
-
-    assert score.passed is True
-
-
-def test_file_contains_passes():
-    fs = InMemoryFilesystem()
-    fs.write("log.txt", "Operation completed successfully")
-
-    assertion = file_contains("log.txt", "successfully")
-    score = assertion(fs)
-
-    assert score.passed is True
-
-
 def test_combined_assertions():
     session = Session()
     session[Plan].seed(Plan(status="complete"))
@@ -1368,5 +1176,3 @@ def test_combined_assertions():
 - **No caching** - Repeated samples re-execute; add caching at adapter level
 - **No checkpoints** - Cannot resume interrupted runs
 - **Single loop** - Each `EvalLoop.execute()` uses one MainLoop instance
-- **Filesystem per EvalLoop** - All samples share the same filesystem instance;
-  reset between samples if isolation is needed
