@@ -214,6 +214,7 @@ tests_dir = ["tests"]
 do_not_mutate = [
     "snapshots/*",
     "tests/snapshots/*",
+    "tests/packaging/*",
     "test-repositories/*",
     "integration-tests/*",
     "build/*",
