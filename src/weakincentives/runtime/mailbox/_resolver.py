@@ -95,7 +95,7 @@ class MailboxFactory[R](Protocol):
         ...
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class RegistryResolver[R]:
     """Simple resolver backed by a static registry.
 
@@ -140,7 +140,7 @@ class RegistryResolver[R]:
         return self.registry.get(identifier)
 
 
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class CompositeResolver[R]:
     """Combines a registry with a factory for dynamic resolution.
 

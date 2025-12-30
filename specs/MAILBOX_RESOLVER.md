@@ -68,7 +68,7 @@ class MailboxFactory[R](Protocol):
 ### CompositeResolver
 
 ```python
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class CompositeResolver[R]:
     """Combines a registry with a factory for dynamic resolution.
 
@@ -91,7 +91,7 @@ class CompositeResolver[R]:
 ### RegistryResolver
 
 ```python
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class RegistryResolver[R]:
     """Simple resolver backed by a static registry."""
 
