@@ -37,7 +37,7 @@ class Mailbox(Protocol[T, R]):
         Args:
             body: Message payload (must be serializable).
             reply_to: Identifier for response mailbox. Workers resolve this
-                via Message.reply_mailbox().
+                via Message.reply().
 
         Returns:
             Message ID.
@@ -82,35 +82,36 @@ class Mailbox(Protocol[T, R]):
 ### Message
 
 ```python
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class Message(Generic[T, R]):
     """Received message with lifecycle methods."""
 
     id: str
     body: T
     receipt_handle: str
-    delivery_count: int  # First delivery = 1
+    delivery_count: int
     enqueued_at: datetime
     reply_to: str | None
 
+    def reply(self, body: R) -> str:
+        """Send reply to reply_to destination. Multiple replies allowed."""
+        ...
+
     def acknowledge(self) -> None:
-        """Delete message from queue. Call after successful processing."""
+        """Delete message. Finalizes - no further replies allowed."""
         ...
 
     def nack(self, *, visibility_timeout: int = 0) -> None:
-        """Return message to queue. Use visibility_timeout for backoff."""
+        """Return to queue. Finalizes - no further replies allowed."""
         ...
 
     def extend_visibility(self, timeout: int) -> None:
         """Extend visibility for long-running processing."""
         ...
 
-    def reply_mailbox(self) -> Mailbox[R, None]:
-        """Resolve reply_to to a Mailbox for sending responses.
-
-        Raises:
-            ReplyMailboxUnavailableError: No reply_to or resolver failed.
-        """
+    @property
+    def is_finalized(self) -> bool:
+        """True if acknowledged or nacked."""
         ...
 ```
 
@@ -122,7 +123,8 @@ class ReceiptHandleExpiredError(MailboxError): ...  # Handle no longer valid
 class MailboxFullError(MailboxError): ...           # Queue capacity exceeded
 class SerializationError(MailboxError): ...         # Cannot serialize body
 class MailboxConnectionError(MailboxError): ...     # Backend unreachable
-class ReplyMailboxUnavailableError(MailboxError): ... # Cannot resolve reply_to
+class ReplyNotAvailableError(MailboxError): ...     # Cannot resolve reply_to
+class MessageFinalizedError(MailboxError): ...      # Message already ack/nack'd
 ```
 
 ## Message Lifecycle
@@ -147,8 +149,8 @@ require the current handle; after timeout, old handles become invalid.
 
 ## Reply Pattern
 
-Workers derive response destinations from messages via `reply_mailbox()`.
-No fixed response mailbox required.
+Workers send responses via `Message.reply()`, which resolves the destination
+mailbox internally. Multiple replies are permitted before acknowledgment.
 
 ### Setup
 
@@ -164,6 +166,7 @@ requests: Mailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
 ```
 
 **Important:** Resolvers should cache mailbox instances to avoid resource leaks.
+See `specs/MAILBOX_RESOLVER.md` for resolver patterns.
 
 ```python
 @cache
@@ -193,15 +196,51 @@ for msg in responses.receive(wait_time_seconds=20):
 for msg in requests.receive(visibility_timeout=300, wait_time_seconds=20):
     try:
         result = process(msg.body)
-        msg.reply_mailbox().send(result)
+        msg.reply(result)
         msg.acknowledge()
-    except ReplyMailboxUnavailableError:
+    except ReplyNotAvailableError:
         log.warning("No reply_to", msg_id=msg.id)
         msg.acknowledge()
     except Exception as e:
         # Backoff retry
         msg.nack(visibility_timeout=min(60 * msg.delivery_count, 900))
 ```
+
+### Multiple Replies
+
+Messages support multiple replies before finalization. This enables
+progress reporting, streaming results, or multi-part responses:
+
+```python
+for msg in requests.receive(visibility_timeout=600):
+    try:
+        # Stream progress updates
+        for i, chunk in enumerate(process_chunks(msg.body)):
+            msg.reply(Progress(step=i, data=chunk))
+
+        # Send final result
+        msg.reply(Complete(summary=summarize()))
+        msg.acknowledge()
+
+    except Exception as e:
+        msg.nack(visibility_timeout=60)
+```
+
+### Reply After Finalization
+
+Once a message is acknowledged or nacked, further replies raise
+`MessageFinalizedError`:
+
+```python
+msg = requests.receive()[0]
+msg.reply(Result(value=1))  # OK
+msg.acknowledge()
+msg.reply(Result(value=2))  # Raises MessageFinalizedError
+```
+
+This prevents:
+- Sending replies to a deleted message (after ack)
+- Sending replies that race with redelivery (after nack)
 
 ### Eval Run Collection
 
@@ -313,27 +352,35 @@ mailbox.expire_handle(msg.receipt_handle)  # Simulate expiry
 mailbox.set_connection_error(...)          # Simulate failure
 ```
 
-### Testing MainLoop
+### Testing Reply
 
 ```python
-def test_mainloop_processes_request():
-    registry: dict[str, Mailbox] = {}
-    responses: Mailbox[MainLoopResult, None] = InMemoryMailbox(name="responses")
-    registry["responses"] = responses
+def test_reply_sends_to_resolved_mailbox():
+    responses = CollectingMailbox()
+    requests = InMemoryMailbox(reply_resolver={"responses": responses}.get)
 
-    requests: Mailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
-        name="requests",
-        reply_resolver=registry.get,
-    )
+    requests.send("hello", reply_to="responses")
+    msg = requests.receive()[0]
+    msg.reply("world")
+    msg.acknowledge()
 
-    loop = MyLoop(adapter=adapter, requests=requests)
-    requests.send(MainLoopRequest(request=MyRequest(...)), reply_to="responses")
-    loop.run(max_iterations=1)
+    assert responses.sent == ["world"]
 
-    msgs = responses.receive()
-    assert len(msgs) == 1
-    assert msgs[0].body.error is None
-    msgs[0].acknowledge()
+
+def test_multiple_replies_allowed():
+    msg = receive_message(reply_to="responses")
+    msg.reply(1)
+    msg.reply(2)
+    msg.reply(3)
+    msg.acknowledge()  # OK - replies before finalization
+
+
+def test_reply_after_finalization_raises():
+    msg = receive_message(reply_to="responses")
+    msg.acknowledge()
+
+    with pytest.raises(MessageFinalizedError):
+        msg.reply("too late")
 ```
 
 ## Limitations
@@ -343,3 +390,9 @@ def test_mainloop_processes_request():
 - **No built-in DLQ.** Implement via `delivery_count` threshold.
 - **No deduplication.** Handle at application level if needed.
 - **No transactions.** Send and receive are independent operations.
+
+## Related Specifications
+
+- `specs/MAILBOX_RESOLVER.md` - Service discovery for mailbox instances
+- `specs/MAIN_LOOP.md` - MainLoop orchestration using mailboxes
+- `specs/RESOURCE_REGISTRY.md` - DI container for lifecycle-scoped resources
