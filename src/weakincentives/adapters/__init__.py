@@ -32,6 +32,12 @@ from .core import (
     PromptResponse,
     ProviderAdapter,
 )
+from .exceptions import (
+    ClaudeAgentSDKError,
+    LiteLLMError,
+    OpenAIError,
+    RateLimitError,
+)
 from .throttle import ThrottleError, ThrottlePolicy, new_throttle_policy
 
 __all__ = [
@@ -39,14 +45,18 @@ __all__ = [
     "LITELLM_ADAPTER_NAME",
     "OPENAI_ADAPTER_NAME",
     "AdapterName",
+    "ClaudeAgentSDKError",
     "LLMConfig",
     "LiteLLMClientConfig",
+    "LiteLLMError",
     "LiteLLMModelConfig",
     "OpenAIClientConfig",
+    "OpenAIError",
     "OpenAIModelConfig",
     "PromptEvaluationError",
     "PromptResponse",
     "ProviderAdapter",
+    "RateLimitError",
     "ThrottleError",
     "ThrottlePolicy",
     "new_throttle_policy",

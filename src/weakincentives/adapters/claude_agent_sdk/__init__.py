@@ -73,6 +73,7 @@ Example:
 
 from __future__ import annotations
 
+from ..exceptions import ClaudeAgentSDKError
 from ._notifications import Notification, NotificationSource
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
@@ -98,6 +99,7 @@ __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "ClaudeAgentSDKAdapter",
     "ClaudeAgentSDKClientConfig",
+    "ClaudeAgentSDKError",
     "ClaudeAgentSDKModelConfig",
     "ClaudeAgentWorkspaceSection",
     "EphemeralHome",
