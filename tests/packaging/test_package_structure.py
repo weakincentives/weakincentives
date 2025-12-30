@@ -27,6 +27,12 @@ import pytest
 
 
 @pytest.fixture(scope="module")
+def project_root() -> Path:
+    """Return the project root directory."""
+    return Path(__file__).parent.parent.parent
+
+
+@pytest.fixture(scope="module")
 def wheel_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Build a wheel and return its path.
 
@@ -83,33 +89,30 @@ class TestDocsPackaging:
         """WINK_GUIDE.md (usage guide) must be bundled."""
         assert "weakincentives/docs/WINK_GUIDE.md" in wheel_contents
 
-    def test_specs_directory_exists(self, wheel_contents: frozenset[str]) -> None:
-        """Specs directory must contain markdown files."""
-        specs_files = [
-            f for f in wheel_contents if f.startswith("weakincentives/docs/specs/")
-        ]
-        assert len(specs_files) > 0, "No spec files found in wheel"
-
-    @pytest.mark.parametrize(
-        "spec_file",
-        [
-            "ADAPTERS.md",
-            "DATACLASSES.md",
-            "DBC.md",
-            "PROMPTS.md",
-            "SESSIONS.md",
-            "TOOLS.md",
-            "WINK_DOCS.md",
-        ],
-    )
-    def test_core_specs_bundled(
+    def test_all_specs_bundled(
         self,
         wheel_contents: frozenset[str],
-        spec_file: str,
+        project_root: Path,
     ) -> None:
-        """Core spec files must be bundled."""
-        expected_path = f"weakincentives/docs/specs/{spec_file}"
-        assert expected_path in wheel_contents, f"{spec_file} not found in wheel"
+        """All spec files from specs/ directory must be bundled in the wheel."""
+        # Get all .md files from source specs/ directory
+        source_specs = {f.name for f in (project_root / "specs").glob("*.md")}
+        assert len(source_specs) > 0, "No spec files found in source specs/ directory"
+
+        # Get all .md files bundled in the wheel
+        bundled_specs = {
+            Path(f).name
+            for f in wheel_contents
+            if f.startswith("weakincentives/docs/specs/") and f.endswith(".md")
+        }
+
+        # Every source spec must be bundled
+        missing = source_specs - bundled_specs
+        assert not missing, f"Spec files missing from wheel: {sorted(missing)}"
+
+        # Bundled specs should match source (no extra files)
+        extra = bundled_specs - source_specs
+        assert not extra, f"Unexpected spec files in wheel: {sorted(extra)}"
 
 
 class TestCorePackaging:
