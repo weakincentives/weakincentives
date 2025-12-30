@@ -49,6 +49,7 @@ from weakincentives.runtime import (
     MainLoopResult,
 )
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
+from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
 
@@ -264,27 +265,29 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
     """Auto-optimization runs when first request is processed."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
-    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
+    responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
         name="responses"
     )
+    resolver: MailboxResolver[MainLoopResult[ReviewResponse]] = RegistryResolver(
+        {"responses": responses}
+    )
+    requests: InMemoryMailbox[
+        MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+    ] = InMemoryMailbox(name="requests", reply_resolver=resolver)
     try:
         loop = CodeReviewLoop(
             adapter=cast(ProviderAdapter[ReviewResponse], adapter),
             requests=requests,
-            responses=responses,
             overrides_store=overrides_store,
         )
 
         assert loop.override_tag == "latest"
 
-        # Send request via mailbox
+        # Send request via mailbox with reply_to
         request_event = MainLoopRequest(
             request=ReviewTurnParams(request="test request")
         )
-        requests.send(request_event)
+        requests.send(request_event, reply_to="responses")
 
         # Process one iteration
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -307,17 +310,19 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
-    requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox(
+    responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
         name="responses"
     )
+    resolver: MailboxResolver[MainLoopResult[ReviewResponse]] = RegistryResolver(
+        {"responses": responses}
+    )
+    requests: InMemoryMailbox[
+        MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+    ] = InMemoryMailbox(name="requests", reply_resolver=resolver)
     try:
         loop = CodeReviewLoop(
             adapter=adapter,
             requests=requests,
-            responses=responses,
             overrides_store=overrides_store,
         )
 
@@ -331,7 +336,8 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
             MainLoopRequest(
                 request=ReviewTurnParams(request="first"),
                 deadline=first_deadline,
-            )
+            ),
+            reply_to="responses",
         )
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -339,7 +345,8 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
             MainLoopRequest(
                 request=ReviewTurnParams(request="second"),
                 deadline=second_deadline,
-            )
+            ),
+            reply_to="responses",
         )
         loop.run(max_iterations=1, wait_time_seconds=0)
 

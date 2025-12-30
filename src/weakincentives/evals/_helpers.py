@@ -26,7 +26,7 @@ ExpectedT = TypeVar("ExpectedT")
 
 def submit_dataset(
     dataset: Dataset[InputT, ExpectedT],
-    requests: Mailbox[EvalRequest[InputT, ExpectedT]],
+    requests: Mailbox[EvalRequest[InputT, ExpectedT], None],
 ) -> None:
     """Submit all samples in a dataset for evaluation.
 
@@ -47,7 +47,7 @@ def submit_dataset(
 
 
 def collect_results(
-    results: Mailbox[EvalResult],
+    results: Mailbox[EvalResult, None],
     expected_count: int,
     *,
     timeout_seconds: float = 300,

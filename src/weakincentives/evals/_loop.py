@@ -19,29 +19,37 @@ provided MainLoop, scores the output, and aggregates results into a report.
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Self
 
 from ..runtime.lifecycle import wait_until
-from ..runtime.mailbox import Mailbox, Message, ReceiptHandleExpiredError
+from ..runtime.mailbox import (
+    Mailbox,
+    Message,
+    ReceiptHandleExpiredError,
+    ReplyNotAvailableError,
+)
 from ._types import EvalRequest, EvalResult, Score
 
 if TYPE_CHECKING:
     from ..runtime import MainLoop
+
+_logger = logging.getLogger(__name__)
 
 
 class EvalLoop[InputT, OutputT, ExpectedT]:
     """Mailbox-driven evaluation loop.
 
     Receives EvalRequest messages, executes through MainLoop, scores
-    with evaluator, and sends EvalResult to results mailbox. Designed
+    with evaluator, and sends EvalResult via Message.reply(). Designed
     to run alongside MainLoop workers in distributed deployments.
 
-    The two-mailbox pattern matches MainLoop for distributed deployments:
-    - requests mailbox: receives EvalRequest messages
-    - results mailbox: sends EvalResult messages
+    The single mailbox pattern with reply_to routing:
+    - requests mailbox: receives EvalRequest messages with reply_to
+    - Workers use msg.reply(result) to route responses
 
     Lifecycle:
         - Use ``run()`` to start processing messages
@@ -54,15 +62,13 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         ...     loop=main_loop,
         ...     evaluator=exact_match,
         ...     requests=requests_mailbox,
-        ...     results=results_mailbox,
         ... )
         >>> eval_loop.run(max_iterations=1)
     """
 
     _loop: MainLoop[InputT, OutputT]
     _evaluator: Callable[[OutputT, ExpectedT], Score]
-    _requests: Mailbox[EvalRequest[InputT, ExpectedT]]
-    _results: Mailbox[EvalResult]
+    _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
     _shutdown_event: threading.Event
     _running: bool
     _lock: threading.Lock
@@ -72,8 +78,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         *,
         loop: MainLoop[InputT, OutputT],
         evaluator: Callable[[OutputT, ExpectedT], Score],
-        requests: Mailbox[EvalRequest[InputT, ExpectedT]],
-        results: Mailbox[EvalResult],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -81,13 +86,12 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             loop: MainLoop instance for executing samples.
             evaluator: Scoring function (output, expected) -> Score.
             requests: Mailbox to receive EvalRequest messages from.
-            results: Mailbox to send EvalResult messages to.
+                Response routing derives from each message's reply_to field.
         """
         super().__init__()
         self._loop = loop
         self._evaluator = evaluator
         self._requests = requests
-        self._results = results
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
@@ -102,7 +106,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         """Process evaluation requests from mailbox.
 
         Polls the requests mailbox, evaluates each sample through
-        MainLoop, and sends results to the results mailbox.
+        MainLoop, and sends results via Message.reply().
 
         The loop exits when:
         - max_iterations is reached
@@ -153,7 +157,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                             latency_ms=0,
                             error=str(e),
                         )
-                    self._send_and_ack(msg, result)
+                    self._reply_and_ack(msg, result)
                 iterations += 1
         finally:
             with self._lock:
@@ -194,30 +198,35 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         _ = (exc_type, exc_val, exc_tb)
         _ = self.shutdown()
 
-    def _send_and_ack(
+    def _reply_and_ack(
         self,
-        msg: Message[EvalRequest[InputT, ExpectedT]],
+        msg: Message[EvalRequest[InputT, ExpectedT], EvalResult],
         result: EvalResult,
     ) -> None:
-        """Send result and acknowledge message, handling failures gracefully.
+        """Reply with result and acknowledge message, handling failures gracefully.
 
-        Mirrors MainLoop._send_and_ack: on send failure, nack for retry instead
-        of fabricating an error result that would lose successful evaluations.
+        Uses Message.reply() for response routing based on reply_to.
+        On reply failure, nack for retry instead of losing successful evaluations.
         """
+        _ = self  # Uses self implicitly via Message callbacks
         try:
-            _ = self._results.send(result)
+            _ = msg.reply(result)
             msg.acknowledge()
+        except ReplyNotAvailableError:
+            # No reply_to specified - log and acknowledge without reply
+            _logger.warning(
+                "No reply_to for message %s, acknowledging without reply", msg.id
+            )
+            with contextlib.suppress(ReceiptHandleExpiredError):
+                msg.acknowledge()
         except ReceiptHandleExpiredError:
             # Handle expired during processing - message already requeued.
             pass
         except Exception:
-            # Response send failed - nack so message is retried
-            try:
+            # Reply send failed - nack so message is retried
+            with contextlib.suppress(ReceiptHandleExpiredError):
                 backoff = min(60 * msg.delivery_count, 900)
                 msg.nack(visibility_timeout=backoff)
-            except ReceiptHandleExpiredError:
-                # Handle expired - message already requeued
-                pass
 
     def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
         """Execute and score a single sample."""

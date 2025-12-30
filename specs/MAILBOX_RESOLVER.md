@@ -23,7 +23,7 @@ lifecycle management (singletons, per-tool instances).
 ## Comparison with ResourceResolver
 
 | Aspect | ResourceResolver | MailboxResolver |
-|--------|------------------|-----------------|
+| ------------- | ---------------------------- | --------------------------- |
 | Key type | `type[T]` | `str` |
 | Purpose | DI container | Service discovery |
 | Resolution | Static bindings | Dynamic lookup + factory |

@@ -39,6 +39,7 @@ from weakincentives.runtime import (
     ShutdownCoordinator,
     wait_until,
 )
+from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
 from weakincentives.runtime.session.protocols import SessionProtocol
 
 if TYPE_CHECKING:
@@ -113,10 +114,9 @@ class _TestLoop(MainLoop[_Request, _Output]):
         self,
         *,
         adapter: ProviderAdapter[_Output],
-        requests: InMemoryMailbox[MainLoopRequest[_Request]],
-        responses: InMemoryMailbox[MainLoopResult[_Output]],
+        requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
     ) -> None:
-        super().__init__(adapter=adapter, requests=requests, responses=responses)
+        super().__init__(adapter=adapter, requests=requests)
         self._template = PromptTemplate[_Output](
             ns="test",
             key="test-prompt",
@@ -142,13 +142,10 @@ def _create_test_loop(
 ) -> _TestLoop:
     """Create a test MainLoop with mock adapter."""
     adapter = _MockAdapter(delay=delay, error=error)
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="dummy-requests"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="dummy-requests")
     )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="dummy-responses"
-    )
-    return _TestLoop(adapter=adapter, requests=requests, responses=responses)
+    return _TestLoop(adapter=adapter, requests=requests)
 
 
 class _MockRunnable:
@@ -468,16 +465,13 @@ def test_loop_group_with_signals(reset_coordinator: None) -> None:
 
 def test_main_loop_shutdown_stops_loop() -> None:
     """MainLoop.shutdown() stops the run loop."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         thread = threading.Thread(
             target=loop.run, kwargs={"wait_time_seconds": 1, "max_iterations": None}
@@ -495,22 +489,18 @@ def test_main_loop_shutdown_stops_loop() -> None:
         assert not thread.is_alive()
     finally:
         requests.close()
-        responses.close()
 
 
 def test_main_loop_shutdown_completes_in_flight() -> None:
     """MainLoop.shutdown() waits for in-flight message to complete."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         # Adapter with delay to simulate in-flight work
         adapter = _MockAdapter(delay=0.2)
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         # Send a request
         requests.send(MainLoopRequest(request=_Request(message="test")))
@@ -529,25 +519,20 @@ def test_main_loop_shutdown_completes_in_flight() -> None:
 
         assert result is True
         assert adapter.call_count == 1
-        assert responses.approximate_count() == 1
     finally:
         requests.close()
-        responses.close()
 
 
 def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
     """MainLoop.shutdown() nacks unprocessed messages from batch."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         # Slow adapter to allow shutdown during batch processing
         adapter = _MockAdapter(delay=0.1)
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         # Send multiple requests
         for i in range(3):
@@ -569,21 +554,17 @@ def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
         assert adapter.call_count >= 1
     finally:
         requests.close()
-        responses.close()
 
 
 def test_main_loop_running_property() -> None:
     """MainLoop.running property reflects loop state."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         assert not loop.running
 
@@ -601,21 +582,17 @@ def test_main_loop_running_property() -> None:
         assert not loop.running
     finally:
         requests.close()
-        responses.close()
 
 
 def test_main_loop_context_manager() -> None:
     """MainLoop supports context manager protocol."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         with loop:
             thread = threading.Thread(
@@ -629,22 +606,18 @@ def test_main_loop_context_manager() -> None:
         assert not thread.is_alive()
     finally:
         requests.close()
-        responses.close()
 
 
 def test_main_loop_shutdown_timeout_returns_false() -> None:
     """MainLoop.shutdown() returns False when timeout expires."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         # Very slow adapter
         adapter = _MockAdapter(delay=5.0)
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         requests.send(MainLoopRequest(request=_Request(message="slow")))
 
@@ -664,40 +637,31 @@ def test_main_loop_shutdown_timeout_returns_false() -> None:
 
         assert result is False
     finally:
-        responses.close()
+        pass
 
 
 def test_main_loop_can_restart_after_shutdown() -> None:
     """MainLoop can run again after shutdown."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         # First run
         requests.send(MainLoopRequest(request=_Request(message="first")))
         loop.run(max_iterations=1, wait_time_seconds=0)
-        assert responses.approximate_count() == 1
-
-        # Consume response
-        for msg in responses.receive(max_messages=1):
-            msg.acknowledge()
+        assert adapter.call_count == 1
 
         # Second run
         requests.send(MainLoopRequest(request=_Request(message="second")))
         loop.run(max_iterations=1, wait_time_seconds=0)
-        assert responses.approximate_count() == 1
 
         assert adapter.call_count == 2
     finally:
         requests.close()
-        responses.close()
 
 
 def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
@@ -736,7 +700,9 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
                 self._loop._shutdown_event.set()
             return result
 
-    class _MultiMessageMailbox(InMemoryMailbox[MainLoopRequest[_Request]]):
+    class _MultiMessageMailbox(
+        InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
+    ):
         """Mailbox that returns all messages in a single receive call."""
 
         def receive(
@@ -745,7 +711,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             max_messages: int = 10,
             visibility_timeout: int = 30,
             wait_time_seconds: int = 0,
-        ) -> Sequence[Message[MainLoopRequest[_Request]]]:
+        ) -> Sequence[Message[MainLoopRequest[_Request], MainLoopResult[_Output]]]:
             # Override to return up to 10 messages at once
             return super().receive(
                 max_messages=10,
@@ -754,17 +720,13 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             )
 
     requests = _MultiMessageMailbox(name="requests")
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
 
     try:
         # Create a loop with a temporary adapter, then replace
         temp_adapter = _MockAdapter()
         loop = _TestLoop(
             adapter=temp_adapter,
-            requests=requests,
-            responses=responses,
+            requests=requests,  # type: ignore[arg-type]
         )
 
         # Now create the shutdown-triggering adapter
@@ -780,12 +742,8 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
 
         # First message should be processed
         assert adapter.call_count == 1
-
-        # One response should be sent
-        assert responses.approximate_count() == 1
     finally:
         requests.close()
-        responses.close()
 
 
 def test_main_loop_nacks_with_expired_receipt_handle() -> None:
@@ -822,7 +780,9 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
                 self._loop._shutdown_event.set()
             return result
 
-    class _ExpiredNackMailbox(InMemoryMailbox[MainLoopRequest[_Request]]):
+    class _ExpiredNackMailbox(
+        InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
+    ):
         """Mailbox that returns multiple messages and raises ReceiptHandleExpiredError on nack."""
 
         def receive(
@@ -831,7 +791,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             max_messages: int = 10,
             visibility_timeout: int = 30,
             wait_time_seconds: int = 0,
-        ) -> list[Message[MainLoopRequest[_Request]]]:
+        ) -> list[Message[MainLoopRequest[_Request], MainLoopResult[_Output]]]:
             msgs = super().receive(
                 max_messages=10,  # Return multiple messages
                 visibility_timeout=visibility_timeout,
@@ -843,7 +803,9 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
     class _ExpiredNackMessage:
         """Message that raises ReceiptHandleExpiredError on nack."""
 
-        def __init__(self, inner: Message[MainLoopRequest[_Request]]) -> None:
+        def __init__(
+            self, inner: Message[MainLoopRequest[_Request], MainLoopResult[_Output]]
+        ) -> None:
             self._inner = inner
 
         @property
@@ -861,16 +823,12 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             raise ReceiptHandleExpiredError("Handle expired")
 
     requests = _ExpiredNackMailbox(name="requests")
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
-    )
 
     try:
         temp_adapter = _MockAdapter()
         loop = _TestLoop(
             adapter=temp_adapter,
             requests=requests,  # type: ignore[arg-type]
-            responses=responses,
         )
 
         # Create adapter that triggers shutdown after first message
@@ -888,7 +846,6 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
         assert adapter.call_count == 1
     finally:
         requests.close()
-        responses.close()
 
 
 # =============================================================================
@@ -898,16 +855,13 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
 
 def test_main_loop_implements_runnable() -> None:
     """MainLoop conforms to Runnable protocol."""
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         # Type check - MainLoop should be usable where Runnable is expected
         runnable: Runnable = loop
@@ -918,7 +872,6 @@ def test_main_loop_implements_runnable() -> None:
         assert hasattr(runnable, "__exit__")
     finally:
         requests.close()
-        responses.close()
 
 
 # =============================================================================
@@ -969,10 +922,11 @@ def test_eval_loop_shutdown_stops_loop() -> None:
     """EvalLoop.shutdown() stops the run loop."""
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
-        name="eval-requests"
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests", reply_resolver=resolver
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
 
     try:
         main_loop = _create_test_loop()
@@ -982,7 +936,6 @@ def test_eval_loop_shutdown_stops_loop() -> None:
                 value=1.0 if o.result == e else 0.0, passed=o.result == e
             ),
             requests=requests,
-            results=results,
         )
 
         thread = threading.Thread(
@@ -1009,33 +962,33 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
     """EvalLoop.shutdown() nacks unprocessed messages."""
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Sample, Score
 
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
-        name="eval-requests"
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests", reply_resolver=resolver
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
 
     try:
         # Slow adapter to allow shutdown during batch processing
         adapter = _MockAdapter(delay=0.1)
-        main_requests: InMemoryMailbox[object] = InMemoryMailbox(name="main-requests")
-        main_responses: InMemoryMailbox[object] = InMemoryMailbox(name="main-responses")
+        main_requests: InMemoryMailbox[
+            MainLoopRequest[str], MainLoopResult[_Output]
+        ] = InMemoryMailbox(name="main-requests")
         main_loop = _TestLoop(
             adapter=adapter,
             requests=main_requests,
-            responses=main_responses,  # type: ignore[arg-type]
         )
 
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=lambda o, e: Score(value=1.0, passed=True),
             requests=requests,
-            results=results,
         )
 
         # Send multiple samples
         for i in range(3):
             sample = Sample(id=str(i), input=f"input-{i}", expected="success")
-            requests.send(EvalRequest(sample=sample))
+            requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
         thread = threading.Thread(
             target=eval_loop.run,
@@ -1054,19 +1007,19 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
         assert results.approximate_count() >= 0
     finally:
         requests.close()
-        results.close()
         main_requests.close()
-        main_responses.close()
+        results.close()
 
 
 def test_eval_loop_context_manager() -> None:
     """EvalLoop supports context manager protocol."""
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
-        name="eval-requests"
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests", reply_resolver=resolver
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
 
     try:
         main_loop = _create_test_loop()
@@ -1074,7 +1027,6 @@ def test_eval_loop_context_manager() -> None:
             loop=main_loop,
             evaluator=lambda o, e: Score(value=1.0, passed=True),
             requests=requests,
-            results=results,
         )
 
         with eval_loop:
@@ -1097,10 +1049,11 @@ def test_eval_loop_running_property() -> None:
     """EvalLoop.running property reflects loop state."""
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
-    requests: InMemoryMailbox[EvalRequest[str, str]] = InMemoryMailbox(
-        name="eval-requests"
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests", reply_resolver=resolver
     )
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
 
     try:
         main_loop = _create_test_loop()
@@ -1108,7 +1061,6 @@ def test_eval_loop_running_property() -> None:
             loop=main_loop,
             evaluator=lambda o, e: Score(value=1.0, passed=True),
             requests=requests,
-            results=results,
         )
 
         assert not eval_loop.running
@@ -1134,7 +1086,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Sample, Score
     from weakincentives.runtime.mailbox import Message
 
-    class _MultiMessageMailbox(InMemoryMailbox[EvalRequest[_Request, str]]):
+    class _MultiMessageMailbox(InMemoryMailbox[EvalRequest[_Request, str], EvalResult]):
         """Mailbox that returns all messages in a single receive call."""
 
         def receive(
@@ -1143,7 +1095,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
             max_messages: int = 10,
             visibility_timeout: int = 30,
             wait_time_seconds: int = 0,
-        ) -> Sequence[Message[EvalRequest[_Request, str]]]:
+        ) -> Sequence[Message[EvalRequest[_Request, str], EvalResult]]:
             return super().receive(
                 max_messages=10,
                 visibility_timeout=visibility_timeout,
@@ -1151,19 +1103,13 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
             )
 
     requests = _MultiMessageMailbox(name="eval-requests")
-    results: InMemoryMailbox[EvalResult] = InMemoryMailbox(name="eval-results")
 
     try:
         adapter = _MockAdapter(delay=0)
-        main_requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-            name="main-requests"
-        )
-        main_responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-            name="main-responses"
-        )
-        main_loop = _TestLoop(
-            adapter=adapter, requests=main_requests, responses=main_responses
-        )
+        main_requests: InMemoryMailbox[
+            MainLoopRequest[_Request], MainLoopResult[_Output]
+        ] = InMemoryMailbox(name="main-requests")
+        main_loop = _TestLoop(adapter=adapter, requests=main_requests)
 
         # Track number of evaluations and trigger shutdown after first
         eval_count = 0
@@ -1179,10 +1125,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
             return Score(value=1.0, passed=True)
 
         eval_loop: EvalLoop[_Request, _Output, str] = EvalLoop(
-            loop=main_loop,
-            evaluator=shutdown_after_first,
-            requests=requests,
-            results=results,
+            loop=main_loop, evaluator=shutdown_after_first, requests=requests
         )
         eval_loop_ref.append(eval_loop)
 
@@ -1203,9 +1146,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
         assert eval_count == 1
     finally:
         requests.close()
-        results.close()
         main_requests.close()
-        main_responses.close()
 
 
 # =============================================================================

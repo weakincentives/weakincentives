@@ -63,13 +63,34 @@ class MailboxConnectionError(MailboxError):
     """
 
 
-@dataclass(frozen=True, slots=True)
-class Message[T]:
+class ReplyNotAvailableError(MailboxError):
+    """Cannot resolve reply_to destination.
+
+    Raised when Message.reply() is called but:
+    - No reply_to was specified in the original send()
+    - The reply_to identifier cannot be resolved by the resolver
+    """
+
+
+class MessageFinalizedError(MailboxError):
+    """Message has already been acknowledged or nacked.
+
+    Raised when reply() is called after acknowledge() or nack().
+    Once a message is finalized, no further replies are allowed.
+    """
+
+
+@dataclass(slots=True)
+class Message[T, R]:
     """A received message with delivery metadata and lifecycle methods.
 
-    Messages are immutable snapshots of delivery state. The lifecycle methods
-    (acknowledge, nack, extend_visibility) operate on the message via the
+    Messages are snapshots of delivery state. The lifecycle methods
+    (acknowledge, nack, extend_visibility, reply) operate on the message via
     bound callback references stored at receive time.
+
+    Type parameters:
+        T: Message body type.
+        R: Reply type (None if no replies expected).
     """
 
     id: str
@@ -89,6 +110,9 @@ class Message[T]:
     enqueued_at: datetime
     """Timestamp when message was originally sent (UTC)."""
 
+    reply_to: str | None = None
+    """Identifier for response mailbox. Workers resolve this via reply()."""
+
     attributes: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
     """Backend-specific message attributes (e.g., SQS MessageAttributes)."""
 
@@ -107,23 +131,59 @@ class Message[T]:
     )
     """Internal callback for extend_visibility operation."""
 
+    _reply_fn: Callable[[R], str] = field(
+        default=lambda _: "", repr=False, compare=False
+    )
+    """Internal callback for reply operation."""
+
+    _finalized: bool = field(default=False, repr=False, compare=False)
+    """True if message has been acknowledged or nacked."""
+
+    def reply(self, body: R) -> str:
+        """Send reply to reply_to destination.
+
+        Multiple replies are allowed before finalization (acknowledge/nack).
+        The reply_to identifier is resolved internally via the mailbox's
+        reply_resolver.
+
+        Args:
+            body: Reply payload to send.
+
+        Returns:
+            Message ID of the sent reply.
+
+        Raises:
+            MessageFinalizedError: Message already acknowledged or nacked.
+            ReplyNotAvailableError: No reply_to specified or cannot resolve.
+        """
+        if self._finalized:
+            raise MessageFinalizedError(
+                f"Message '{self.id}' already finalized; cannot reply"
+            )
+        if self.reply_to is None:
+            raise ReplyNotAvailableError(f"Message '{self.id}' has no reply_to")
+        return self._reply_fn(body)
+
     def acknowledge(self) -> None:
         """Delete the message from the queue.
 
         Call after successfully processing the message. The receipt handle
         must still be valid (message not timed out or already acknowledged).
+        Finalizes the message - no further replies allowed.
 
         Raises:
             ReceiptHandleExpiredError: Handle no longer valid.
         """
         self._acknowledge_fn()
+        self._finalized = True
 
     def nack(self, *, visibility_timeout: int = 0) -> None:
         """Return message to queue immediately or after delay.
 
         Use when processing fails and the message should be retried.
         Setting ``visibility_timeout=0`` makes the message immediately
-        visible to other consumers.
+        visible to other consumers. Finalizes the message - no further
+        replies allowed.
 
         Args:
             visibility_timeout: Seconds before message becomes visible again.
@@ -132,6 +192,7 @@ class Message[T]:
             ReceiptHandleExpiredError: Handle no longer valid.
         """
         self._nack_fn(visibility_timeout)
+        self._finalized = True
 
     def extend_visibility(self, timeout: int) -> None:
         """Extend the visibility timeout for long-running processing.
@@ -147,14 +208,23 @@ class Message[T]:
         """
         self._extend_fn(timeout)
 
+    @property
+    def is_finalized(self) -> bool:
+        """True if message has been acknowledged or nacked."""
+        return self._finalized
+
 
 @runtime_checkable
-class Mailbox[T](Protocol):
+class Mailbox[T, R](Protocol):
     """Point-to-point message queue with visibility timeout semantics.
 
     Mailbox provides SQS-compatible semantics for durable, at-least-once
     message delivery. Messages are invisible to other consumers after receive
     until acknowledged, nacked, or visibility times out.
+
+    Type parameters:
+        T: Message body type.
+        R: Reply type (None if no replies expected).
     """
 
     @property
@@ -164,12 +234,13 @@ class Mailbox[T](Protocol):
         ...
 
     @abstractmethod
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
-        """Enqueue a message, optionally delaying visibility.
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
+        """Enqueue a message.
 
         Args:
             body: Message payload (must be serializable).
-            delay_seconds: Seconds before message becomes visible (0-900).
+            reply_to: Identifier for response mailbox. Workers resolve this
+                via Message.reply().
 
         Returns:
             Message ID (unique within this queue).
@@ -187,7 +258,7 @@ class Mailbox[T](Protocol):
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Receive messages from the queue.
 
         Received messages become invisible to other consumers for
@@ -246,6 +317,8 @@ __all__ = [
     "MailboxError",
     "MailboxFullError",
     "Message",
+    "MessageFinalizedError",
     "ReceiptHandleExpiredError",
+    "ReplyNotAvailableError",
     "SerializationError",
 ]

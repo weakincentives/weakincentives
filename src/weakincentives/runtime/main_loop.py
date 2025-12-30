@@ -14,7 +14,7 @@
 
 MainLoop provides a mailbox-based pattern for durable request processing with
 at-least-once delivery semantics. Requests are received from a mailbox queue
-and results are sent to a response mailbox.
+and results are sent via Message.reply().
 
 Example::
 
@@ -23,10 +23,9 @@ Example::
             self,
             *,
             adapter: ProviderAdapter[ReviewResult],
-            requests: Mailbox[MainLoopRequest[ReviewRequest]],
-            responses: Mailbox[MainLoopResult[ReviewResult]],
+            requests: Mailbox[MainLoopRequest[ReviewRequest], MainLoopResult[ReviewResult]],
         ) -> None:
-            super().__init__(adapter=adapter, requests=requests, responses=responses)
+            super().__init__(adapter=adapter, requests=requests)
             self._template = PromptTemplate[ReviewResult](...)
 
         def prepare(
@@ -37,13 +36,14 @@ Example::
             return prompt, session
 
     # Run the worker loop
-    loop = CodeReviewLoop(adapter=adapter, requests=requests, responses=responses)
+    loop = CodeReviewLoop(adapter=adapter, requests=requests)
     loop.run(max_iterations=100)
 """
 
 from __future__ import annotations
 
 import contextlib
+import logging
 import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -57,13 +57,15 @@ from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
 from ..resources import ResourceRegistry
 from .lifecycle import wait_until
-from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
+from .mailbox import Mailbox, Message, ReceiptHandleExpiredError, ReplyNotAvailableError
 from .session import Session
 from .session.visibility_overrides import SetVisibilityOverride
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
     from ..prompt import Prompt
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,11 +128,12 @@ class MainLoop[UserRequestT, OutputT](ABC):
     """Abstract orchestrator for mailbox-based agent workflow execution.
 
     MainLoop processes requests from a mailbox queue and sends responses
-    to a response mailbox. This pattern supports durable, distributed processing
+    via Message.reply(). This pattern supports durable, distributed processing
     with at-least-once delivery semantics.
 
     Features:
         - Polls requests mailbox for incoming work
+        - Uses Message.reply() for response routing (derives from reply_to)
         - Acknowledges messages after successful processing
         - Visibility timeout prevents duplicate processing
         - Automatic retry with backoff on response send failure
@@ -142,13 +145,13 @@ class MainLoop[UserRequestT, OutputT](ABC):
         3. Evaluate with adapter
         4. On ``VisibilityExpansionRequired``: accumulate overrides, retry step 3
         5. Call ``finalize(prompt, session)`` for post-processing
-        6. Send ``MainLoopResult`` to responses mailbox
+        6. Send ``MainLoopResult`` via msg.reply()
         7. Acknowledge the request message
 
     Error handling:
-        - On success: send result, acknowledge request
-        - On failure: send error result, acknowledge request
-        - On response send failure: nack with backoff (will retry)
+        - On success: reply with result, acknowledge request
+        - On failure: reply with error result, acknowledge request
+        - On reply send failure: nack with backoff (will retry)
 
     Lifecycle:
         - Use ``run()`` to start processing messages
@@ -158,8 +161,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
     """
 
     _adapter: ProviderAdapter[OutputT]
-    _requests: Mailbox[MainLoopRequest[UserRequestT]]
-    _responses: Mailbox[MainLoopResult[OutputT]]
+    _requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
     _config: MainLoopConfig
     _shutdown_event: threading.Event
     _running: bool
@@ -169,8 +171,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        requests: Mailbox[MainLoopRequest[UserRequestT]],
-        responses: Mailbox[MainLoopResult[OutputT]],
+        requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         config: MainLoopConfig | None = None,
     ) -> None:
         """Initialize the MainLoop.
@@ -178,13 +179,12 @@ class MainLoop[UserRequestT, OutputT](ABC):
         Args:
             adapter: Provider adapter for prompt evaluation.
             requests: Mailbox to receive MainLoopRequest messages from.
-            responses: Mailbox to send MainLoopResult messages to.
+                Response routing derives from each message's reply_to field.
             config: Optional configuration for default deadline/budget.
         """
         super().__init__()
         self._adapter = adapter
         self._requests = requests
-        self._responses = responses
         self._config = config if config is not None else MainLoopConfig()
         self._shutdown_event = threading.Event()
         self._running = False
@@ -297,7 +297,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 self.finalize(prompt, session)
                 return response, session
 
-    def _handle_message(self, msg: Message[MainLoopRequest[UserRequestT]]) -> None:
+    def _handle_message(
+        self, msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
+    ) -> None:
         """Process a single message from the requests mailbox."""
         request_event = msg.body
 
@@ -310,7 +312,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 session_id=session.session_id,
             )
 
-            self._send_and_ack(msg, result)
+            self._reply_and_ack(msg, result)
 
         except Exception as exc:
             result = MainLoopResult[OutputT](
@@ -318,30 +320,35 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 error=str(exc),
             )
 
-            self._send_and_ack(msg, result)
+            self._reply_and_ack(msg, result)
 
-    def _send_and_ack(
+    def _reply_and_ack(
         self,
-        msg: Message[MainLoopRequest[UserRequestT]],
+        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         result: MainLoopResult[OutputT],
     ) -> None:
-        """Send result and acknowledge message, handling expired handles gracefully."""
+        """Reply with result and acknowledge message, handling expired handles gracefully."""
+        _ = self  # Uses self implicitly via Message callbacks
         try:
-            _ = self._responses.send(result)
+            _ = msg.reply(result)
             msg.acknowledge()
+        except ReplyNotAvailableError:
+            # No reply_to specified - log and acknowledge without reply
+            _logger.warning(
+                "No reply_to for message %s, acknowledging without reply", msg.id
+            )
+            with contextlib.suppress(ReceiptHandleExpiredError):
+                msg.acknowledge()
         except ReceiptHandleExpiredError:
             # Handle expired during processing - message already requeued by reaper.
             # This is expected for long-running requests. The duplicate response
             # will be sent when the message is reprocessed.
             pass
         except Exception:
-            # Response send failed - nack so message is retried
-            try:
+            # Reply send failed - nack so message is retried
+            with contextlib.suppress(ReceiptHandleExpiredError):
                 backoff = min(60 * msg.delivery_count, 900)
                 msg.nack(visibility_timeout=backoff)
-            except ReceiptHandleExpiredError:
-                # Handle expired - message already requeued, nothing to do
-                pass
 
     def run(
         self,

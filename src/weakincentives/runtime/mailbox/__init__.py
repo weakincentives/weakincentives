@@ -31,17 +31,25 @@ delivers messages to one consumer at a time with at-least-once delivery.
 
 Example::
 
-    from weakincentives.runtime.mailbox import InMemoryMailbox, Message
+    from weakincentives.runtime.mailbox import (
+        InMemoryMailbox,
+        Message,
+        RegistryResolver,
+    )
 
-    mailbox: InMemoryMailbox[str] = InMemoryMailbox(name="tasks")
+    # Setup with reply routing
+    responses = InMemoryMailbox(name="responses")
+    resolver = RegistryResolver({"responses": responses})
+    requests = InMemoryMailbox(name="requests", reply_resolver=resolver)
 
-    # Send a message
-    msg_id = mailbox.send("process this")
+    # Send request with reply_to
+    requests.send("process this", reply_to="responses")
 
-    # Receive and process
-    for msg in mailbox.receive(visibility_timeout=60):
+    # Receive and process with reply
+    for msg in requests.receive(visibility_timeout=60):
         try:
-            do_work(msg.body)
+            result = do_work(msg.body)
+            msg.reply(result)
             msg.acknowledge()
         except Exception:
             msg.nack(visibility_timeout=30)  # Retry after 30s
@@ -52,6 +60,13 @@ See ``specs/MAILBOX.md`` for the complete specification.
 from __future__ import annotations
 
 from ._in_memory import InMemoryMailbox
+from ._resolver import (
+    CompositeResolver,
+    MailboxFactory,
+    MailboxResolutionError,
+    MailboxResolver,
+    RegistryResolver,
+)
 from ._testing import CollectingMailbox, FakeMailbox, NullMailbox
 from ._types import (
     Mailbox,
@@ -59,21 +74,30 @@ from ._types import (
     MailboxError,
     MailboxFullError,
     Message,
+    MessageFinalizedError,
     ReceiptHandleExpiredError,
+    ReplyNotAvailableError,
     SerializationError,
 )
 
 __all__ = [
     "CollectingMailbox",
+    "CompositeResolver",
     "FakeMailbox",
     "InMemoryMailbox",
     "Mailbox",
     "MailboxConnectionError",
     "MailboxError",
+    "MailboxFactory",
     "MailboxFullError",
+    "MailboxResolutionError",
+    "MailboxResolver",
     "Message",
+    "MessageFinalizedError",
     "NullMailbox",
     "ReceiptHandleExpiredError",
+    "RegistryResolver",
+    "ReplyNotAvailableError",
     "SerializationError",
 ]
 

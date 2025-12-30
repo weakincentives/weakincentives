@@ -239,6 +239,7 @@ msg.reply(Result(value=2))  # Raises MessageFinalizedError
 ```
 
 This prevents:
+
 - Sending replies to a deleted message (after ack)
 - Sending replies that race with redelivery (after nack)
 
@@ -316,7 +317,7 @@ class MainLoopResult[OutputT]:
 ### Backend Differences
 
 | Aspect | SQS Standard | SQS FIFO | Redis | InMemory |
-| ----------------- | ------------ | -------- | ----- | -------- |
+| -------------- | ------------ | ---------- | ------ | -------- |
 | Ordering | Best-effort | Strict | FIFO | FIFO |
 | Long poll max | 20 sec | 20 sec | ∞ | ∞ |
 | Visibility max | 12 hours | 12 hours | ∞ | ∞ |

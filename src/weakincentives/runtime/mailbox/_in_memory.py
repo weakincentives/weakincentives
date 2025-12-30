@@ -20,13 +20,19 @@ from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ._resolver import MailboxResolutionError
 from ._types import (
     MailboxFullError,
     Message,
     ReceiptHandleExpiredError,
+    ReplyNotAvailableError,
 )
+
+if TYPE_CHECKING:
+    from ._resolver import MailboxResolver
 
 
 @dataclass
@@ -38,11 +44,12 @@ class _InFlightMessage[T]:
     enqueued_at: datetime
     delivery_count: int
     receipt_handle: str
+    reply_to: str | None
     expires_at: float  # time.monotonic() value
 
 
 @dataclass(slots=True)
-class InMemoryMailbox[T]:
+class InMemoryMailbox[T, R]:
     """Thread-safe in-memory mailbox implementation.
 
     Messages are stored in memory and lost on process restart.
@@ -54,13 +61,18 @@ class InMemoryMailbox[T]:
     - Exact message counts
     - No persistence
 
+    Type parameters:
+        T: Message body type.
+        R: Reply type (None if no replies expected).
+
     Example::
 
-        mailbox: Mailbox[MyEvent] = InMemoryMailbox(name="events")
-        mailbox.send(MyEvent(data="hello"))
+        mailbox: Mailbox[MyEvent, MyResult] = InMemoryMailbox(name="events")
+        mailbox.send(MyEvent(data="hello"), reply_to="responses")
         messages = mailbox.receive(max_messages=1)
         if messages:
             process(messages[0].body)
+            messages[0].reply(MyResult(success=True))
             messages[0].acknowledge()
     """
 
@@ -69,6 +81,9 @@ class InMemoryMailbox[T]:
 
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited."""
+
+    reply_resolver: MailboxResolver[R] | None = None
+    """Resolver for reply_to identifiers. Required for Message.reply() to work."""
 
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _condition: threading.Condition = field(init=False, repr=False)
@@ -118,12 +133,13 @@ class InMemoryMailbox[T]:
                 self._pending.append(msg)
                 self._condition.notify_all()
 
-    def send(self, body: T, *, delay_seconds: int = 0) -> str:
-        """Enqueue a message, optionally delaying visibility.
+    def send(self, body: T, *, reply_to: str | None = None) -> str:
+        """Enqueue a message.
 
         Args:
             body: Message payload.
-            delay_seconds: Seconds before message becomes visible (0-900).
+            reply_to: Identifier for response mailbox. Workers resolve this
+                via Message.reply().
 
         Returns:
             Message ID (unique within this queue).
@@ -146,17 +162,12 @@ class InMemoryMailbox[T]:
                 enqueued_at=datetime.now(UTC),
                 delivery_count=0,
                 receipt_handle="",
+                reply_to=reply_to,
                 expires_at=0.0,
             )
 
-            if delay_seconds > 0:
-                # Put in invisible with delay as expiry
-                in_flight.receipt_handle = f"delay-{uuid4()}"
-                in_flight.expires_at = time.monotonic() + delay_seconds
-                self._invisible[in_flight.receipt_handle] = in_flight
-            else:
-                self._pending.append(in_flight)
-                self._condition.notify_all()
+            self._pending.append(in_flight)
+            self._condition.notify_all()
 
         return msg_id
 
@@ -166,7 +177,7 @@ class InMemoryMailbox[T]:
         max_messages: int = 1,
         visibility_timeout: int = 30,
         wait_time_seconds: int = 0,
-    ) -> Sequence[Message[T]]:
+    ) -> Sequence[Message[T, R]]:
         """Receive messages from the queue.
 
         Args:
@@ -180,7 +191,7 @@ class InMemoryMailbox[T]:
         max_messages = min(max(1, max_messages), 10)
         deadline = time.monotonic() + wait_time_seconds
 
-        messages: list[Message[T]] = []
+        messages: list[Message[T, R]] = []
 
         with self._lock:
             while len(messages) < max_messages:
@@ -205,16 +216,20 @@ class InMemoryMailbox[T]:
                     self._invisible[receipt_handle] = in_flight
 
                     # Create message with bound callbacks
-                    message = Message(
+                    message = Message[T, R](
                         id=in_flight.id,
                         body=in_flight.body,
                         receipt_handle=receipt_handle,
                         delivery_count=in_flight.delivery_count,
                         enqueued_at=in_flight.enqueued_at,
+                        reply_to=in_flight.reply_to,
                         attributes={},
                         _acknowledge_fn=lambda h=receipt_handle: self._acknowledge(h),
                         _nack_fn=lambda t, h=receipt_handle: self._nack(h, t),
                         _extend_fn=lambda t, h=receipt_handle: self._extend(h, t),
+                        _reply_fn=lambda body, rt=in_flight.reply_to: self._reply(
+                            rt, body
+                        ),
                     )
                     messages.append(message)
                 else:
@@ -230,6 +245,18 @@ class InMemoryMailbox[T]:
                     _ = self._condition.wait(timeout=remaining)
 
         return messages
+
+    def _reply(self, reply_to: str | None, body: R) -> str:
+        """Send a reply to the reply_to mailbox."""
+        if reply_to is None:  # pragma: no cover
+            raise ReplyNotAvailableError("No reply_to specified")
+        if self.reply_resolver is None:
+            raise ReplyNotAvailableError("No reply_resolver configured")
+        try:
+            mailbox = self.reply_resolver.resolve(reply_to)
+        except MailboxResolutionError as e:
+            raise ReplyNotAvailableError(f"Cannot resolve reply_to '{reply_to}'") from e
+        return mailbox.send(body)
 
     def _acknowledge(self, receipt_handle: str) -> None:
         """Delete message from queue."""

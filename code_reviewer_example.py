@@ -79,6 +79,7 @@ from weakincentives.runtime import (
     Session,
     ShutdownCoordinator,
 )
+from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
 from weakincentives.types import SupportsDataclass
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -177,13 +178,16 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 
     Example::
 
-        requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]] = InMemoryMailbox()
-        responses: InMemoryMailbox[MainLoopResult[ReviewResponse]] = InMemoryMailbox()
-        loop = CodeReviewLoop(
-            adapter=adapter,
-            requests=requests,
-            responses=responses,
+        responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
+            name="responses"
         )
+        resolver: MailboxResolver[MainLoopResult[ReviewResponse]] = RegistryResolver(
+            {"responses": responses}
+        )
+        requests: InMemoryMailbox[
+            MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+        ] = InMemoryMailbox(name="requests", reply_resolver=resolver)
+        loop = CodeReviewLoop(adapter=adapter, requests=requests)
         # Run in background thread
         thread = threading.Thread(target=lambda: loop.run(max_iterations=None))
         thread.start()
@@ -201,15 +205,16 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         self,
         *,
         adapter: ProviderAdapter[ReviewResponse],
-        requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]],
-        responses: InMemoryMailbox[MainLoopResult[ReviewResponse]],
+        requests: InMemoryMailbox[
+            MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+        ],
         overrides_store: LocalPromptOverridesStore | None = None,
         override_tag: str | None = None,
         use_podman: bool = False,
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
     ) -> None:
-        super().__init__(adapter=adapter, requests=requests, responses=responses)
+        super().__init__(adapter=adapter, requests=requests)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = resolve_override_tag(
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
@@ -306,11 +311,13 @@ class CodeReviewApp:
 
     Runs the MainLoop in a background thread while the main thread handles
     user input. Requests are sent via the request mailbox and results are
-    received from the response mailbox.
+    received from the response mailbox via reply routing.
     """
 
-    _requests: InMemoryMailbox[MainLoopRequest[ReviewTurnParams]]
-    _responses: InMemoryMailbox[MainLoopResult[ReviewResponse]]
+    _requests: InMemoryMailbox[
+        MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+    ]
+    _responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None]
     _loop: CodeReviewLoop
     _worker_thread: threading.Thread | None
     _pending_requests: dict[UUID, str]  # request_id -> user prompt for display
@@ -333,13 +340,17 @@ class CodeReviewApp:
         self._worker_thread = None
         self._pending_requests = {}
         self._shutdown_requested = False
-        # Create mailboxes for the loop
-        self._requests = InMemoryMailbox(name="code-review-requests")
+        # Create mailboxes with reply routing
         self._responses = InMemoryMailbox(name="code-review-responses")
+        resolver: MailboxResolver[MainLoopResult[ReviewResponse]] = RegistryResolver(
+            {"code-review-responses": self._responses}
+        )
+        self._requests = InMemoryMailbox(
+            name="code-review-requests", reply_resolver=resolver
+        )
         self._loop = CodeReviewLoop(
             adapter=adapter,
             requests=self._requests,
-            responses=self._responses,
             overrides_store=overrides_store,
             override_tag=override_tag,
             use_podman=use_podman,
@@ -435,7 +446,7 @@ class CodeReviewApp:
                     deadline=_default_deadline(),
                 )
                 self._pending_requests[request_event.request_id] = user_prompt
-                self._requests.send(request_event)
+                self._requests.send(request_event, reply_to="code-review-responses")
                 print("Processing request...")
 
                 # Wait for response
