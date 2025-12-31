@@ -830,6 +830,346 @@ def test_any_of_requires_one():
     assert score.passed is True  # contains passes
 ```
 
+## State Assertions
+
+Beyond evaluating output correctness, agent evals often need to verify side
+effects: Did the agent update session state correctly? Did it create the right
+files? State assertions address this by inspecting Session and Filesystem after
+MainLoop execution.
+
+### Design Principles
+
+- **Assertions are functions** - Pure `(state) -> Score`, composable like evaluators
+- **Separate from output evaluation** - State assertions run independently
+- **Optional** - EvalLoop works without them; add when needed
+- **Combinable** - Use `all_of`/`any_of` patterns for multi-criteria checks
+
+### Architecture
+
+```
+┌──────────────┐     ┌───────────────┐     ┌─────────────────┐
+│  MainLoop    │────▶│    Session    │────▶│ SessionAssertion│
+│  .execute()  │     │   (state)     │     │   (scoring)     │
+└──────────────┘     └───────────────┘     └─────────────────┘
+```
+
+`MainLoop.execute()` returns `(response, session)`. The Session is now captured
+by EvalLoop and passed to session assertions.
+
+### Type Alias
+
+```python
+SessionAssertion = Callable[[Session], Score]
+"""Assertion against session state. Pure function: (session) -> Score."""
+```
+
+### Session Assertions
+
+#### session_has
+
+Assert a slice contains a specific number of items:
+
+```python
+def session_has[T: SupportsDataclass](
+    slice_type: type[T],
+    *,
+    count: int | None = None,
+    min_count: int | None = None,
+    max_count: int | None = None,
+) -> SessionAssertion:
+    """Assert slice has expected item count.
+
+    Args:
+        slice_type: The slice type to check.
+        count: Exact count required (mutually exclusive with min/max).
+        min_count: Minimum items required.
+        max_count: Maximum items allowed.
+
+    Returns:
+        SessionAssertion that scores based on count constraints.
+
+    Example:
+        >>> assertion = session_has(Plan, count=1)
+        >>> score = assertion(session)
+        >>> score.passed  # True if exactly 1 Plan in session
+    """
+```
+
+#### session_latest
+
+Assert the most recent item in a slice matches a predicate:
+
+```python
+def session_latest[T: SupportsDataclass](
+    slice_type: type[T],
+    predicate: Callable[[T], bool],
+    *,
+    reason: str = "",
+) -> SessionAssertion:
+    """Assert latest item in slice matches predicate.
+
+    Args:
+        slice_type: The slice type to check.
+        predicate: Function that returns True if item matches.
+        reason: Optional reason included in Score on failure.
+
+    Returns:
+        SessionAssertion that passes if latest item matches.
+
+    Example:
+        >>> assertion = session_latest(Plan, lambda p: p.status == "complete")
+        >>> score = assertion(session)
+    """
+```
+
+#### session_contains
+
+Assert at least one item in a slice matches a predicate:
+
+```python
+def session_contains[T: SupportsDataclass](
+    slice_type: type[T],
+    predicate: Callable[[T], bool],
+    *,
+    reason: str = "",
+) -> SessionAssertion:
+    """Assert at least one item in slice matches predicate.
+
+    Args:
+        slice_type: The slice type to check.
+        predicate: Function that returns True if item matches.
+        reason: Optional reason included in Score on failure.
+
+    Returns:
+        SessionAssertion that passes if any item matches.
+
+    Example:
+        >>> assertion = session_contains(ToolCall, lambda t: t.name == "search")
+        >>> score = assertion(session)
+    """
+```
+
+#### session_all
+
+Assert all items in a slice match a predicate:
+
+```python
+def session_all[T: SupportsDataclass](
+    slice_type: type[T],
+    predicate: Callable[[T], bool],
+    *,
+    reason: str = "",
+) -> SessionAssertion:
+    """Assert all items in slice match predicate.
+
+    Args:
+        slice_type: The slice type to check.
+        predicate: Function that returns True if item matches.
+        reason: Optional reason included in Score on failure.
+
+    Returns:
+        SessionAssertion that passes if all items match (or slice is empty).
+
+    Example:
+        >>> assertion = session_all(ToolCall, lambda t: t.success)
+        >>> score = assertion(session)
+    """
+```
+
+### Assertion Combinators
+
+Reuse the same combinator pattern as evaluators:
+
+```python
+def all_session_assertions(*assertions: SessionAssertion) -> SessionAssertion:
+    """All session assertions must pass. Score is the mean.
+
+    Example:
+        >>> combined = all_session_assertions(
+        ...     session_has(Plan, count=1),
+        ...     session_latest(Plan, lambda p: p.complete),
+        ... )
+    """
+
+
+def any_session_assertions(*assertions: SessionAssertion) -> SessionAssertion:
+    """At least one session assertion must pass. Score is the max."""
+```
+
+### EvalLoop with Session Assertions
+
+EvalLoop gains an optional parameter for session assertions:
+
+```python
+class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
+    def __init__(
+        self,
+        *,
+        loop: MainLoop[InputT, OutputT],
+        evaluator: Evaluator[OutputT, ExpectedT],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT]],
+        results: Mailbox[EvalResult],
+        # Session assertions (optional)
+        session_assertions: SessionAssertion | None = None,
+    ) -> None:
+        """Initialize EvalLoop with optional session assertions.
+
+        Args:
+            loop: MainLoop instance for executing samples.
+            evaluator: Output scoring function (output, expected) -> Score.
+            requests: Mailbox to receive EvalRequest messages from.
+            results: Mailbox to send EvalResult messages to.
+            session_assertions: Optional assertions against session state.
+        """
+```
+
+**Score Aggregation:**
+
+When session assertions are provided, the final score combines both components
+using `all_of` semantics:
+
+1. Output evaluator score
+1. Session assertions score (if provided)
+
+Both must pass for the sample to pass. The combined score value is the mean
+of both component scores.
+
+```python
+def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
+    """Execute and score a single sample."""
+    sample = request.sample
+    start = time.monotonic()
+
+    # Execute and capture session
+    response, session = self._loop.execute(sample.input)
+    latency_ms = int((time.monotonic() - start) * 1000)
+
+    if response.output is None:
+        return EvalResult(
+            sample_id=sample.id,
+            score=Score(value=0.0, passed=False, reason="No output"),
+            latency_ms=latency_ms,
+            error="No output from MainLoop",
+        )
+
+    # Collect all scores
+    scores: list[Score] = []
+
+    # Output evaluation
+    scores.append(self._evaluator(response.output, sample.expected))
+
+    # Session assertions
+    if self._session_assertions is not None:
+        scores.append(self._session_assertions(session))
+
+    # Combine scores (all_of semantics)
+    passed = all(s.passed for s in scores)
+    value = sum(s.value for s in scores) / len(scores)
+    reasons = [s.reason for s in scores if s.reason]
+
+    return EvalResult(
+        sample_id=sample.id,
+        score=Score(value=value, passed=passed, reason="; ".join(reasons)),
+        latency_ms=latency_ms,
+    )
+```
+
+### Usage Examples
+
+#### Evaluating Agent Planning
+
+```python
+from weakincentives.evals import (
+    EvalLoop, exact_match,
+    session_has, session_latest, all_session_assertions,
+)
+
+# Verify agent creates exactly one plan and marks it complete
+session_checks = all_session_assertions(
+    session_has(Plan, count=1),
+    session_latest(Plan, lambda p: p.status == "complete"),
+)
+
+eval_loop = EvalLoop(
+    loop=planning_agent,
+    evaluator=exact_match,
+    requests=requests,
+    results=results,
+    session_assertions=session_checks,
+)
+```
+
+#### Combined Output and Session Evaluation
+
+```python
+from weakincentives.evals import (
+    EvalLoop, all_of, contains, llm_judge,
+    session_has, session_contains,
+    all_session_assertions,
+)
+
+# Output must contain expected answer and be well-formatted
+output_eval = all_of(
+    contains,
+    llm_judge(judge_adapter, "Response is clear and actionable"),
+)
+
+# Session must have tool calls, including a successful search
+session_checks = all_session_assertions(
+    session_has(ToolCall, min_count=1),
+    session_contains(ToolCall, lambda t: t.name == "search" and t.success),
+)
+
+eval_loop = EvalLoop(
+    loop=research_agent,
+    evaluator=output_eval,
+    requests=requests,
+    results=results,
+    session_assertions=session_checks,
+)
+```
+
+### Testing Session Assertions
+
+Session assertions are pure functions—test them directly:
+
+```python
+def test_session_has_exact_count():
+    session = Session()
+    session[Plan].seed(Plan(status="complete"))
+
+    assertion = session_has(Plan, count=1)
+    score = assertion(session)
+
+    assert score.passed is True
+    assert score.value == 1.0
+
+
+def test_session_has_fails_wrong_count():
+    session = Session()
+    # No plans seeded
+
+    assertion = session_has(Plan, count=1)
+    score = assertion(session)
+
+    assert score.passed is False
+    assert "expected 1" in score.reason
+
+
+def test_combined_assertions():
+    session = Session()
+    session[Plan].seed(Plan(status="complete"))
+
+    combined = all_session_assertions(
+        session_has(Plan, count=1),
+        session_latest(Plan, lambda p: p.status == "complete"),
+    )
+    score = combined(session)
+
+    assert score.passed is True
+    assert score.value == 1.0  # Mean of two 1.0 scores
+```
+
 ## Limitations
 
 - **Sequential execution** - MainLoop is synchronous; samples run one at a time

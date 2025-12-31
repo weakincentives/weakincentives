@@ -29,6 +29,14 @@ Combinators:
 - **all_of**: All evaluators must pass (mean score)
 - **any_of**: At least one must pass (max score)
 
+Session assertions:
+- **session_has**: Assert slice has expected item count
+- **session_latest**: Assert latest item matches predicate
+- **session_contains**: Assert any item matches predicate
+- **session_all**: Assert all items match predicate
+- **all_session_assertions**: All assertions must pass (mean score)
+- **any_session_assertions**: At least one must pass (max score)
+
 LLM-as-Judge:
 - **llm_judge**: Create evaluator using LLM to judge outputs
 - **JudgeOutput/JudgeParams**: Structured types for judge prompt
@@ -53,6 +61,15 @@ Example:
 
 from __future__ import annotations
 
+from ._assertions import (
+    SessionAssertion,
+    all_session_assertions,
+    any_session_assertions,
+    session_all,
+    session_contains,
+    session_has,
+    session_latest,
+)
 from ._evaluators import all_of, any_of, contains, exact_match
 from ._helpers import collect_results, submit_dataset
 from ._judge import (
@@ -90,12 +107,19 @@ __all__ = [  # noqa: RUF022
     "Rating",
     "Sample",
     "Score",
+    "SessionAssertion",
     "all_of",
+    "all_session_assertions",
     "any_of",
+    "any_session_assertions",
     "collect_results",
     "contains",
     "exact_match",
     "llm_judge",
+    "session_all",
+    "session_contains",
+    "session_has",
+    "session_latest",
     "submit_dataset",
 ]
 

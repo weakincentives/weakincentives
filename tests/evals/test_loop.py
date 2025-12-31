@@ -843,3 +843,56 @@ def test_eval_loop_handles_no_reply_to() -> None:
         assert requests.approximate_count() == 0
     finally:
         requests.close()
+
+
+def test_eval_loop_with_session_assertions() -> None:
+    """EvalLoop processes session assertions and combines scores."""
+    from weakincentives.evals import session_has
+
+    @dataclass(slots=True, frozen=True)
+    class _TestPayload:
+        """Test payload for session slice."""
+
+        value: str
+
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests", reply_resolver=resolver
+    )
+
+    try:
+        main_loop = _create_test_loop(result="correct")
+
+        # Session assertion that checks for _TestPayload slice
+        # Since test loop doesn't add anything to session, this should fail
+        session_check = session_has(_TestPayload, count=1)
+
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            session_assertions=session_check,
+        )
+
+        # Submit a sample with reply_to
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+
+        # Run single iteration
+        eval_loop.run(max_iterations=1)
+
+        # Check result - output evaluation passes (1.0), session assertion fails (0.0)
+        # Combined: passed=False (not all pass), value=0.5 (mean)
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        result = msgs[0].body
+        assert result.sample_id == "1"
+        assert result.score.passed is False  # session assertion fails
+        assert result.score.value == 0.5  # mean of 1.0 and 0.0
+        assert "expected 1" in result.score.reason  # session assertion failure reason
+        assert result.error is None
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()

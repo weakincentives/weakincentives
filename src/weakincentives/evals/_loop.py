@@ -32,6 +32,7 @@ from ..runtime.mailbox import (
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
 )
+from ._assertions import SessionAssertion
 from ._types import EvalRequest, EvalResult, Score
 
 if TYPE_CHECKING:
@@ -69,6 +70,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     _loop: MainLoop[InputT, OutputT]
     _evaluator: Callable[[OutputT, ExpectedT], Score]
     _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
+    _session_assertions: SessionAssertion | None
     _shutdown_event: threading.Event
     _running: bool
     _lock: threading.Lock
@@ -79,6 +81,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         loop: MainLoop[InputT, OutputT],
         evaluator: Callable[[OutputT, ExpectedT], Score],
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
+        session_assertions: SessionAssertion | None = None,
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -87,11 +90,13 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             evaluator: Scoring function (output, expected) -> Score.
             requests: Mailbox to receive EvalRequest messages from.
                 Response routing derives from each message's reply_to field.
+            session_assertions: Optional assertions against session state.
         """
         super().__init__()
         self._loop = loop
         self._evaluator = evaluator
         self._requests = requests
+        self._session_assertions = session_assertions
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
@@ -233,7 +238,8 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         sample = request.sample
         start = time.monotonic()
 
-        response, _ = self._loop.execute(sample.input)
+        # Execute and capture session
+        response, session = self._loop.execute(sample.input)
         latency_ms = int((time.monotonic() - start) * 1000)
 
         if response.output is None:
@@ -244,11 +250,24 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 error="No output from MainLoop",
             )
 
-        score = self._evaluator(response.output, sample.expected)
+        # Collect all scores
+        scores: list[Score] = []
+
+        # Output evaluation
+        scores.append(self._evaluator(response.output, sample.expected))
+
+        # Session assertions
+        if self._session_assertions is not None:
+            scores.append(self._session_assertions(session))
+
+        # Combine scores (all_of semantics)
+        passed = all(s.passed for s in scores)
+        value = sum(s.value for s in scores) / len(scores)
+        reasons = [s.reason for s in scores if s.reason]
 
         return EvalResult(
             sample_id=sample.id,
-            score=score,
+            score=Score(value=value, passed=passed, reason="; ".join(reasons)),
             latency_ms=latency_ms,
         )
 
