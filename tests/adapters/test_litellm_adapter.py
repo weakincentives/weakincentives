@@ -854,9 +854,7 @@ def test_litellm_adapter_surfaces_tool_type_errors() -> None:
         del context, params
         nonlocal invoked
         invoked = True
-        return ToolResult.ok(
-            ToolPayload(answer="should not run"), message="completed"
-        )
+        return ToolResult.ok(ToolPayload(answer="should not run"), message="completed")
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
