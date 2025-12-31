@@ -7,7 +7,8 @@ Release highlights for weakincentives.
 ### Lifecycle Management for MainLoop and EvalLoop
 
 New primitives for coordinating graceful shutdown across multiple loop instances
-running in the same process.
+running in the same process, with health endpoints and watchdog monitoring for
+Kubernetes deployments.
 
 ```python
 from weakincentives.runtime import LoopGroup, ShutdownCoordinator
@@ -15,6 +16,14 @@ from weakincentives.runtime import LoopGroup, ShutdownCoordinator
 # Run multiple loops with coordinated shutdown
 group = LoopGroup(loops=[main_loop, eval_loop])
 group.run()  # Blocks until SIGTERM/SIGINT
+
+# With health endpoints and watchdog monitoring
+group = LoopGroup(
+    loops=[main_loop],
+    health_port=8080,           # Exposes /health/live and /health/ready
+    watchdog_threshold=720.0,   # Terminate if worker stalls for 12 minutes
+)
+group.run()
 
 # Or manual coordination
 coordinator = ShutdownCoordinator.install()
@@ -25,10 +34,16 @@ loop.run()
 **New types:**
 
 - `Runnable`: Protocol for loops that support graceful shutdown (`run()`,
-  `shutdown()`, `running` property)
+  `shutdown()`, `running`, `heartbeat` properties)
 - `ShutdownCoordinator`: Singleton that installs SIGTERM/SIGINT handlers and
   invokes registered callbacks on shutdown
-- `LoopGroup`: Runs each loop in a dedicated thread with coordinated shutdown
+- `LoopGroup`: Runs each loop in a dedicated thread with coordinated shutdown,
+  optional health endpoints, and watchdog monitoring
+- `Heartbeat`: Thread-safe timestamp tracker for worker liveness
+- `Watchdog`: Daemon thread that monitors heartbeats and terminates the process
+  via SIGKILL when workers stall
+- `HealthServer`: Minimal HTTP server for Kubernetes liveness (`/health/live`)
+  and readiness (`/health/ready`) probes
 - `wait_until`: Helper for polling predicates with timeout
 
 ### Enhanced Resource Registry with Dependency Injection
