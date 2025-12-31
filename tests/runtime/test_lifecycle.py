@@ -878,16 +878,13 @@ def test_main_loop_has_heartbeat_property() -> None:
     """MainLoop exposes heartbeat property for watchdog monitoring."""
     from weakincentives.runtime.watchdog import Heartbeat
 
-    requests: InMemoryMailbox[MainLoopRequest[_Request]] = InMemoryMailbox(
-        name="requests"
-    )
-    responses: InMemoryMailbox[MainLoopResult[_Output]] = InMemoryMailbox(
-        name="responses"
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
     )
 
     try:
         adapter = _MockAdapter()
-        loop = _TestLoop(adapter=adapter, requests=requests, responses=responses)
+        loop = _TestLoop(adapter=adapter, requests=requests)
 
         # MainLoop should have heartbeat property
         assert hasattr(loop, "heartbeat")
@@ -896,7 +893,6 @@ def test_main_loop_has_heartbeat_property() -> None:
         assert hb.elapsed() < 1.0  # Recently created
     finally:
         requests.close()
-        responses.close()
 
 
 # =============================================================================
