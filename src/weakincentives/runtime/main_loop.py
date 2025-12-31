@@ -60,6 +60,7 @@ from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError, ReplyNotAvailableError
 from .session import Session
 from .session.visibility_overrides import SetVisibilityOverride
+from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
@@ -166,6 +167,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
     _shutdown_event: threading.Event
     _running: bool
     _lock: threading.Lock
+    _heartbeat: Heartbeat
 
     def __init__(
         self,
@@ -189,6 +191,16 @@ class MainLoop[UserRequestT, OutputT](ABC):
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
+        self._heartbeat = Heartbeat()
+
+    @property
+    def heartbeat(self) -> Heartbeat:
+        """Heartbeat tracker for watchdog monitoring.
+
+        The loop beats after receiving messages and after processing each
+        message, enabling the watchdog to detect stuck workers.
+        """
+        return self._heartbeat
 
     @abstractmethod
     def prepare(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]:
@@ -397,6 +409,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     wait_time_seconds=wait_time_seconds,
                 )
 
+                # Beat after receive (proves we're not stuck waiting)
+                self._heartbeat.beat()
+
                 for msg in messages:
                     # Check shutdown between messages
                     if self._shutdown_event.is_set():
@@ -406,6 +421,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
                         break
 
                     self._handle_message(msg)
+
+                    # Beat after each message (proves processing completes)
+                    self._heartbeat.beat()
 
                 iterations += 1
         finally:

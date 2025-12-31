@@ -43,7 +43,7 @@ from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
 from weakincentives.runtime.session.protocols import SessionProtocol
 
 if TYPE_CHECKING:
-    pass
+    from weakincentives.runtime.watchdog import Heartbeat
 
 # =============================================================================
 # Test Fixtures
@@ -874,6 +874,27 @@ def test_main_loop_implements_runnable() -> None:
         requests.close()
 
 
+def test_main_loop_has_heartbeat_property() -> None:
+    """MainLoop exposes heartbeat property for watchdog monitoring."""
+    from weakincentives.runtime.watchdog import Heartbeat
+
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        # MainLoop should have heartbeat property
+        assert hasattr(loop, "heartbeat")
+        hb = loop.heartbeat
+        assert isinstance(hb, Heartbeat)
+        assert hb.elapsed() < 1.0  # Recently created
+    finally:
+        requests.close()
+
+
 # =============================================================================
 # Signal Handler Tests
 # =============================================================================
@@ -1416,3 +1437,159 @@ def test_loop_group_health_server_stops_on_shutdown(reset_coordinator: None) -> 
 
     # After shutdown, health server should be stopped
     assert group._health_server is None
+
+
+# =============================================================================
+# LoopGroup Watchdog Integration Tests
+# =============================================================================
+
+
+class _MockRunnableWithHeartbeat(_MockRunnable):
+    """Mock implementation of Runnable with heartbeat for testing watchdog."""
+
+    def __init__(self, *, run_delay: float = 0.0) -> None:
+        super().__init__(run_delay=run_delay)
+        from weakincentives.runtime.watchdog import Heartbeat as HeartbeatCls
+
+        self._heartbeat: Heartbeat = HeartbeatCls()
+        self.name = "test-loop"
+
+    @property
+    def heartbeat(self) -> Heartbeat:
+        return self._heartbeat
+
+    def run(
+        self,
+        *,
+        max_iterations: int | None = None,
+        visibility_timeout: int = 300,
+        wait_time_seconds: int = 20,
+    ) -> None:
+        # Beat the heartbeat before calling parent run
+        self._heartbeat.beat()
+        super().run(
+            max_iterations=max_iterations,
+            visibility_timeout=visibility_timeout,
+            wait_time_seconds=wait_time_seconds,
+        )
+
+
+def test_loop_group_starts_watchdog_with_heartbeats(reset_coordinator: None) -> None:
+    """LoopGroup starts watchdog when loops have heartbeat properties."""
+    from weakincentives.runtime import LoopGroup
+
+    _ = reset_coordinator
+    loops = [_MockRunnableWithHeartbeat(run_delay=0.05)]
+    group = LoopGroup(
+        loops=loops,
+        watchdog_threshold=60.0,
+        watchdog_interval=1.0,
+    )
+
+    thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
+    thread.start()
+
+    try:
+        time.sleep(0.02)
+        # Watchdog should be started
+        assert group._watchdog is not None
+    finally:
+        group.shutdown(timeout=1.0)
+        thread.join(timeout=2.0)
+
+    # Watchdog should be stopped after shutdown
+    assert group._watchdog is None
+
+
+def test_loop_group_watchdog_disabled_when_threshold_none(
+    reset_coordinator: None,
+) -> None:
+    """LoopGroup does not start watchdog when watchdog_threshold is None."""
+    from weakincentives.runtime import LoopGroup
+
+    _ = reset_coordinator
+    loops = [_MockRunnableWithHeartbeat(run_delay=0.05)]
+    group = LoopGroup(
+        loops=loops,
+        watchdog_threshold=None,  # Disable watchdog
+    )
+
+    thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
+    thread.start()
+
+    try:
+        time.sleep(0.02)
+        # Watchdog should not be started
+        assert group._watchdog is None
+    finally:
+        group.shutdown(timeout=1.0)
+        thread.join(timeout=2.0)
+
+
+def test_loop_group_build_readiness_check_with_heartbeats(
+    reset_coordinator: None,
+) -> None:
+    """LoopGroup._build_readiness_check incorporates heartbeat freshness."""
+    from weakincentives.runtime import LoopGroup
+
+    _ = reset_coordinator
+
+    loop = _MockRunnableWithHeartbeat()
+    group = LoopGroup(
+        loops=[loop],
+        watchdog_threshold=0.1,  # Short threshold for testing
+    )
+
+    # Build the readiness check manually
+    heartbeats = [loop._heartbeat]
+    check = group._build_readiness_check(heartbeats)
+
+    # Initially loop is not running, so check should fail
+    assert check() is False
+
+    # Simulate loop running
+    loop._running = True
+    loop._heartbeat.beat()
+
+    # Now should be healthy
+    assert check() is True
+
+    # Wait for heartbeat to go stale
+    time.sleep(0.15)
+
+    # Now should be unhealthy due to stale heartbeat
+    assert check() is False
+
+    # Beat again to restore
+    loop._heartbeat.beat()
+    assert check() is True
+
+
+def test_loop_group_build_readiness_check_without_threshold(
+    reset_coordinator: None,
+) -> None:
+    """LoopGroup._build_readiness_check works when watchdog_threshold is None."""
+    from weakincentives.runtime import LoopGroup
+
+    _ = reset_coordinator
+
+    loop = _MockRunnableWithHeartbeat()
+    group = LoopGroup(
+        loops=[loop],
+        watchdog_threshold=None,  # No threshold
+    )
+
+    # Build the readiness check manually with heartbeats
+    heartbeats = [loop._heartbeat]
+    check = group._build_readiness_check(heartbeats)
+
+    # Simulate loop running
+    loop._running = True
+
+    # Should be healthy regardless of heartbeat age when threshold is None
+    time.sleep(0.05)  # Let heartbeat go a bit stale
+    assert check() is True
+
+    # Even with very stale heartbeat, still healthy (no threshold check)
+    time.sleep(0.1)
+    assert check() is True
