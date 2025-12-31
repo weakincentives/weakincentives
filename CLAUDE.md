@@ -208,11 +208,14 @@ prompt = Prompt[OutputType](
 
 ```python
 from weakincentives.runtime import Session, InProcessDispatcher
-from weakincentives.runtime.session import InitializeSlice, ClearSlice
+from weakincentives.runtime.session import InitializeSlice, ClearSlice, replace_latest
 from weakincentives.contrib.tools import Plan, AddStep
 
 bus = InProcessDispatcher()
 session = Session(bus=bus)
+
+# Simple slice registration (one-liner)
+session.install(Plan, initial=Plan(...), reducer=replace_latest)
 
 # Query state via indexing
 session[Plan].latest()                            # Most recent value

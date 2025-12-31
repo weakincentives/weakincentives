@@ -400,39 +400,73 @@ class Session(SessionProtocol):
         self,
         slice_type: type[S],
         *,
-        initial: Callable[[], S] | None = None,
+        initial: S | Callable[[], S] | None = None,
+        reducer: TypedReducer[S] | None = None,
     ) -> None:
-        """Install a declarative state slice.
+        """Install a state slice with optional initial value and reducer.
 
-        Auto-registers all reducers defined with ``@reducer`` decorators
-        on the slice class. The ``@state_slice`` decorator is optional.
+        This is the primary way to set up a slice. It can auto-register reducers
+        from ``@reducer`` decorated methods on the class, or accept an explicit
+        reducer for simple cases.
 
         Args:
-            slice_type: A frozen dataclass with ``@reducer`` decorated methods.
-            initial: Optional factory function to create initial state when empty.
+            slice_type: A frozen dataclass representing the slice state.
+            initial: Optional initial value (instance) or factory function.
+                When an instance is provided, it's used directly as the
+                initial state. When a callable is provided, it's invoked
+                to create the initial state when needed.
+            reducer: Optional reducer for events of the slice type itself.
+                When provided, the slice is registered without scanning for
+                ``@reducer`` methods, enabling a simpler one-liner setup.
 
         Raises:
             TypeError: If the class is not a frozen dataclass.
-            ValueError: If no @reducer methods are found.
+            ValueError: If no @reducer methods are found and no reducer provided.
 
-        Example::
+        Example (simplified form)::
+
+            # One-liner for simple slices using built-in reducers
+            session.install(Plan, initial=Plan(steps=()), reducer=replace_latest)
+
+        Example (declarative form)::
 
             @dataclass(frozen=True)
             class AgentPlan:
                 steps: tuple[str, ...]
 
                 @reducer(on=AddStep)
-                def add_step(self, event: AddStep) -> "AgentPlan":
-                    return replace(self, steps=(*self.steps, event.step))
+                def add_step(self, event: AddStep) -> Replace[AgentPlan]:
+                    return Replace((replace(self, steps=(*self.steps, event.step)),))
 
-            session.install(AgentPlan)
-            session[AgentPlan].latest()
+            session.install(AgentPlan, initial=AgentPlan(steps=()))
 
         """
-        # Lazy import to avoid import cycle
-        from .state_slice import install_state_slice
+        # Normalize initial: convert instance to factory if needed
+        initial_factory: Callable[[], S] | None = None
+        if initial is not None:
+            if is_dataclass_instance(initial):
+                # Instance provided - wrap in lambda
+                initial_instance = cast(S, initial)
+                initial_factory = lambda: initial_instance  # noqa: E731
+            else:
+                # Must be a factory callable
+                initial_factory = cast(Callable[[], S], initial)
 
-        install_state_slice(self, slice_type, initial=initial)
+        if reducer is not None:
+            # Simple mode: register the explicit reducer for slice_type events
+            self._mutation_register_reducer(
+                slice_type,
+                reducer,
+                slice_type=slice_type,
+            )
+            # Seed initial value if provided
+            if initial_factory is not None:
+                self[slice_type].seed((initial_factory(),))
+        else:
+            # Declarative mode: scan for @reducer methods
+            from .state_slice import install_state_slice
+
+            install_state_slice(self, slice_type, initial=initial_factory)
 
     # ──────────────────────────────────────────────────────────────────────
     # Dispatch API

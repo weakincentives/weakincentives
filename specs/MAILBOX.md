@@ -13,10 +13,11 @@ requests: Mailbox[MainLoopRequest, MainLoopResult]
 responses: Mailbox[MainLoopResult, None]
 ```
 
-**Use Mailbox for:** Durable request processing, work distribution, cross-process
-communication, tasks requiring acknowledgment.
+**Use Mailbox for:** Durable request processing, work distribution,
+cross-process communication, tasks requiring acknowledgment.
 
-**Use Dispatcher for:** Telemetry, in-process events, fire-and-forget broadcasts.
+**Use Dispatcher for:** Telemetry, in-process events, fire-and-forget
+broadcasts.
 
 ## Core Types
 
@@ -144,8 +145,8 @@ send() ──► Queued ──► receive() ──► Invisible ──► acknow
 **At-least-once delivery.** Messages may be delivered multiple times if
 visibility expires or consumer crashes. Consumers must be idempotent.
 
-**Receipt handle.** Each delivery generates a unique handle. Operations
-require the current handle; after timeout, old handles become invalid.
+**Receipt handle.** Each delivery generates a unique handle. Operations require
+the current handle; after timeout, old handles become invalid.
 
 ## Reply Pattern
 
@@ -208,8 +209,8 @@ for msg in requests.receive(visibility_timeout=300, wait_time_seconds=20):
 
 ### Multiple Replies
 
-Messages support multiple replies before finalization. This enables
-progress reporting, streaming results, or multi-part responses:
+Messages support multiple replies before finalization. This enables progress
+reporting, streaming results, or multi-part responses:
 
 ```python
 for msg in requests.receive(visibility_timeout=600):
@@ -239,6 +240,7 @@ msg.reply(Result(value=2))  # Raises MessageFinalizedError
 ```
 
 This prevents:
+
 - Sending replies to a deleted message (after ack)
 - Sending replies that race with redelivery (after nack)
 
@@ -300,28 +302,27 @@ class MainLoopResult[OutputT]:
 
 ### Error Handling Guidelines
 
-1. **Set visibility_timeout > max execution time.** 5 minutes for 4-minute tasks.
+1. **Set visibility_timeout > max execution time.** 5 minutes for 4-minute
+   tasks.
 1. **Send response before acknowledging.** Crash-safe ordering.
-1. **Use delivery_count for backoff.** `min(60 * delivery_count, 900)` = 1-15 min.
+1. **Use delivery_count for backoff.** `min(60 * delivery_count, 900)` = 1-15
+   min.
 1. **Dead-letter after N retries.** `delivery_count > 5` → log and acknowledge.
 
 ## Implementations
 
-| Implementation | Backend | Use Case |
-| ----------------- | ------- | ---------------------------------- |
-| `InMemoryMailbox` | Dict | Testing, single process |
-| `RedisMailbox` | Redis | Multi-process, self-hosted |
-| `SQSMailbox` | AWS SQS | Production, managed infrastructure |
+| Implementation | Backend | Use Case | | ----------------- | ------- |
+---------------------------------- | | `InMemoryMailbox` | Dict | Testing,
+single process | | `RedisMailbox` | Redis | Multi-process, self-hosted | |
+`SQSMailbox` | AWS SQS | Production, managed infrastructure |
 
 ### Backend Differences
 
-| Aspect | SQS Standard | SQS FIFO | Redis | InMemory |
-| ----------------- | ------------ | -------- | ----- | -------- |
-| Ordering | Best-effort | Strict | FIFO | FIFO |
-| Long poll max | 20 sec | 20 sec | ∞ | ∞ |
-| Visibility max | 12 hours | 12 hours | ∞ | ∞ |
-| Count accuracy | ~1 min lag | ~1 min | Exact | Exact |
-| Durability | Replicated | Replicated | Config | None |
+| Aspect | SQS Standard | SQS FIFO | Redis | InMemory | | ----------------- |
+------------ | -------- | ----- | -------- | | Ordering | Best-effort | Strict |
+FIFO | FIFO | | Long poll max | 20 sec | 20 sec | ∞ | ∞ | | Visibility max | 12
+hours | 12 hours | ∞ | ∞ | | Count accuracy | ~1 min lag | ~1 min | Exact |
+Exact | | Durability | Replicated | Replicated | Config | None |
 
 ### RedisMailbox Data Structures
 
@@ -386,7 +387,8 @@ def test_reply_after_finalization_raises():
 ## Limitations
 
 - **At-least-once only.** No exactly-once. Consumers must be idempotent.
-- **Ordering varies.** SQS Standard is best-effort. Use FIFO or Redis for strict.
+- **Ordering varies.** SQS Standard is best-effort. Use FIFO or Redis for
+  strict.
 - **No built-in DLQ.** Implement via `delivery_count` threshold.
 - **No deduplication.** Handle at application level if needed.
 - **No transactions.** Send and receive are independent operations.

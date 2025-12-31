@@ -274,10 +274,11 @@ session.dispatch(AddStep(step="Implement"))
 latest = session[AgentPlan].latest()
 ```
 
-### Initial State Factory
+### Initial State
 
 For slices that need auto-initialization when empty, provide an `initial`
-factory to `session.install()`:
+value to `session.install()`. This can be either an instance directly or a
+factory callable:
 
 ```python
 @dataclass(frozen=True)
@@ -288,13 +289,16 @@ class Counters:
     def increment(self, event: Increment) -> "Counters":
         return replace(self, count=self.count + event.amount)
 
-# Install with initial factory
+# Install with initial instance (preferred - simpler)
+session.install(Counters, initial=Counters(count=0))
+
+# Or with initial factory (callable)
 session.install(Counters, initial=Counters)
 ```
 
-With an initial factory, reducers can handle events even when no state exists
-yet. The factory creates the initial instance, then the reducer method is
-called.
+With an initial value, reducers can handle events even when no state exists
+yet. The initial value is used to create the first instance, then the reducer
+method is called.
 
 ### How It Works
 
@@ -343,6 +347,27 @@ Use built-in reducers (`append_all`, `replace_latest`, etc.) when:
 - **Latest-wins semantics** - Only the most recent value matters (`replace_latest`)
 - **Key-based updates** - Upserting by a derived key (`upsert_by`, `replace_latest_by`)
 
+### Simplified Registration
+
+For simple slices using built-in reducers, use the one-liner `install()` form:
+
+```python
+from weakincentives.runtime.session import replace_latest
+
+# One-liner: slice type + initial value + reducer
+session.install(Plan, initial=Plan(steps=()), reducer=replace_latest)
+
+# Dispatch events directly - the reducer handles them
+session.dispatch(Plan(steps=("step1", "step2")))
+```
+
+This accepts:
+
+- `initial`: Either an instance directly or a factory callable
+- `reducer`: A built-in reducer to handle events of the slice type itself
+
+### Comparison
+
 ```python
 # Good fit for @reducer: complex state transitions
 @dataclass(frozen=True)
@@ -354,11 +379,11 @@ class Plan:
         # Complex logic: find step, update status, check completion
         ...
 
-# Good fit for built-in: event stream / ledger (default for all slices)
-session[ToolInvoked].register(ToolInvoked, append_all)
+# Good fit for simplified install: simple slices with built-in reducers
+session.install(Plan, initial=Plan(steps=()), reducer=replace_latest)
 
-# Good fit for built-in: latest value only
-session[PodmanWorkspace].register(PodmanWorkspace, replace_latest)
+# Alternative: register reducer separately
+session[ToolInvoked].register(ToolInvoked, append_all)
 ```
 
 ### Session Hierarchy

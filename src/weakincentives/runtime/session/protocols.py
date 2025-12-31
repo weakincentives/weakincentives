@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from typing import TYPE_CHECKING, Protocol, Self
+from typing import TYPE_CHECKING, Any, Protocol, Self
 
 from ...types.dataclass import SupportsDataclass
 from ..events._types import DispatchResult, TelemetryDispatcher
@@ -76,7 +76,9 @@ class SessionProtocol(Protocol):
         self,
         slice_type: type[T],
         *,
-        initial: Callable[[], T] | None = None,
+        initial: T | Callable[[], T] | None = None,
+        reducer: Any  # noqa: ANN401
+        | None = None,  # TypedReducer[T] - avoiding import cycle
     ) -> None: ...
 
     def dispatch(self, event: SupportsDataclass) -> DispatchResult:

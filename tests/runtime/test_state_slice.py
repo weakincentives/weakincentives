@@ -189,6 +189,64 @@ def test_install_without_initial_factory_ignores_empty(
     assert result is None
 
 
+def test_install_with_initial_instance(session_factory: SessionFactory) -> None:
+    """Verify install() accepts an instance directly for initial value."""
+    session, _ = session_factory()
+    # Pass an instance directly instead of a factory
+    session.install(Counter, initial=Counter(count=10))
+
+    # Apply event - should use the initial instance
+    session.dispatch(Increment(amount=5))
+
+    result = session[Counter].latest()
+    assert result is not None
+    assert result.count == 15
+
+
+def test_install_with_reducer(session_factory: SessionFactory) -> None:
+    """Verify install() with reducer parameter registers a simple reducer."""
+    from weakincentives.runtime.session import replace_latest
+
+    session, _ = session_factory()
+    # Use simple mode with a reducer - no @reducer methods needed
+    session.install(AddItem, reducer=replace_latest)
+
+    # Dispatch event - should use the registered reducer
+    session.dispatch(AddItem(item="first"))
+    session.dispatch(AddItem(item="second"))
+
+    result = session[AddItem].latest()
+    assert result is not None
+    assert result.item == "second"  # replace_latest keeps only the last one
+
+
+def test_install_with_initial_and_reducer(session_factory: SessionFactory) -> None:
+    """Verify install() with both initial instance and reducer (one-liner pattern)."""
+    from weakincentives.runtime.session import replace_latest
+
+    @dataclass(frozen=True)
+    class SimpleState:
+        value: str = ""
+
+    session, _ = session_factory()
+    # One-liner pattern: instance + reducer
+    session.install(
+        SimpleState, initial=SimpleState(value="initial"), reducer=replace_latest
+    )
+
+    # Query initial state
+    result = session[SimpleState].latest()
+    assert result is not None
+    assert result.value == "initial"
+
+    # Dispatch event to update
+    session.dispatch(SimpleState(value="updated"))
+
+    result = session[SimpleState].latest()
+    assert result is not None
+    assert result.value == "updated"
+
+
 # ──────────────────────────────────────────────────────────────────────
 # session[SliceType] indexing tests
 # ──────────────────────────────────────────────────────────────────────
