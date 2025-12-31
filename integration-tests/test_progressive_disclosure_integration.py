@@ -114,10 +114,7 @@ def _build_verify_tool() -> Tool[VerifyRequest, VerifyResult]:
             verified=True,
             message=f"Successfully verified: {params.value}",
         )
-        return ToolResult(
-            message=f"Verified value: {params.value}",
-            value=result,
-        )
+        return ToolResult.ok(result, message=f"Verified value: {params.value}")
 
     return Tool[VerifyRequest, VerifyResult](
         name="verify_result",

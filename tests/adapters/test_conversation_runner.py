@@ -227,7 +227,7 @@ def echo_handler(
     params: EchoParams, *, context: ToolContext
 ) -> ToolResult[EchoPayload]:
     del context
-    return ToolResult(message="initial", value=EchoPayload(value=params.value))
+    return ToolResult.ok(EchoPayload(value=params.value), message="initial")
 
 
 def tool_rendered_prompt(tool: Tool[EchoParams, EchoPayload]) -> RenderedPrompt[object]:

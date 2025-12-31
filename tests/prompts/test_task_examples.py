@@ -78,25 +78,21 @@ class AnalysisOutput:
 
 def read_handler(params: ReadParams, *, context: ToolContext) -> ToolResult[ReadResult]:
     del context
-    return ToolResult(
-        message="Read file", value=ReadResult(content="..."), success=True
-    )
+    return ToolResult.ok(ReadResult(content="..."), message="Read file")
 
 
 def search_handler(
     params: SearchParams, *, context: ToolContext
 ) -> ToolResult[SearchResult]:
     del context
-    return ToolResult(message="Searched", value=SearchResult(matches=[]), success=True)
+    return ToolResult.ok(SearchResult(matches=[]), message="Searched")
 
 
 def report_handler(
     params: ReportParams, *, context: ToolContext
 ) -> ToolResult[ReportResult]:
     del context
-    return ToolResult(
-        message="Reported", value=ReportResult(issue_id="SEC-1"), success=True
-    )
+    return ToolResult.ok(ReportResult(issue_id="SEC-1"), message="Reported")
 
 
 @pytest.fixture
@@ -1192,11 +1188,7 @@ def _array_handler(
     params: SearchParams, *, context: ToolContext
 ) -> ToolResult[list[ArrayItem]]:
     del params, context
-    return ToolResult(
-        message="Done",
-        value=[ArrayItem(value="a")],
-        success=True,
-    )
+    return ToolResult.ok([ArrayItem(value="a")], message="Done")
 
 
 class TestArrayOutputValidation:

@@ -72,7 +72,7 @@ def _lookup_handler(
         document_url="https://example.com",
     )
     message = f"Fetched entity {result.entity_id}."
-    return ToolResult(message=message, value=result)
+    return ToolResult.ok(result, message=message)
 
 
 def _lookup_handler_with_optional_list(
@@ -84,7 +84,7 @@ def _lookup_handler_with_optional_list(
         document_url="https://example.com",
     )
     message = f"Fetched entity {result.entity_id}."
-    return ToolResult(message=message, value=[result])
+    return ToolResult.ok([result], message=message)
 
 
 def _lookup_handler_with_render(
@@ -95,7 +95,7 @@ def _lookup_handler_with_render(
         entity_id=params.entity_id,
         description="Rendered value from handler.",
     )
-    return ToolResult(message="Rendered output", value=result)
+    return ToolResult.ok(result, message="Rendered output")
 
 
 def test_prompt_tools_integration_example() -> None:
