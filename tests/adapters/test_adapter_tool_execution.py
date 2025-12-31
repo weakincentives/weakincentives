@@ -433,9 +433,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
         del context, params
         nonlocal invoked
         invoked = True
-        return ToolResult.ok(
-            ToolPayload(answer="should not run"), message="completed"
-        )
+        return ToolResult.ok(ToolPayload(answer="should not run"), message="completed")
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -491,9 +489,7 @@ def test_adapter_tool_execution_rejects_type_errors(
         del context, params
         nonlocal invoked
         invoked = True
-        return ToolResult.ok(
-            ToolPayload(answer="should not run"), message="completed"
-        )
+        return ToolResult.ok(ToolPayload(answer="should not run"), message="completed")
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 

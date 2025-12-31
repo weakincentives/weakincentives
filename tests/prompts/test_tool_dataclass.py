@@ -43,9 +43,7 @@ def _example_handler(
     params: ExampleParams, *, context: ToolContext
 ) -> ToolResult[ExampleResult]:
     del context
-    return ToolResult.ok(
-        ExampleResult(message=params.message), message=params.message
-    )
+    return ToolResult.ok(ExampleResult(message=params.message), message=params.message)
 
 
 def test_tool_infers_param_and_result_types() -> None:
