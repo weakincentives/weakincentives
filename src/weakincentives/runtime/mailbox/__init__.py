@@ -31,21 +31,16 @@ delivers messages to one consumer at a time with at-least-once delivery.
 
 Example::
 
-    from weakincentives.runtime.mailbox import (
-        InMemoryMailbox,
-        Message,
-        RegistryResolver,
-    )
+    from weakincentives.runtime.mailbox import InMemoryMailbox
 
-    # Setup with reply routing
-    responses = InMemoryMailbox(name="responses")
-    resolver = RegistryResolver({"responses": responses})
-    requests = InMemoryMailbox(name="requests", reply_resolver=resolver)
+    # Create request mailbox - response mailboxes auto-created on send
+    requests = InMemoryMailbox(name="requests")
 
-    # Send request with reply_to
-    requests.send("process this", reply_to="responses")
+    # Client: send request with reply_to (auto-creates response mailbox)
+    requests.send("process this", reply_to="my-responses")
+    responses = requests.resolver.resolve("my-responses")
 
-    # Receive and process with reply
+    # Worker: process and reply (routes automatically)
     for msg in requests.receive(visibility_timeout=60):
         try:
             result = do_work(msg.body)
@@ -54,12 +49,17 @@ Example::
         except Exception:
             msg.nack(visibility_timeout=30)  # Retry after 30s
 
+    # Client: receive response
+    for msg in responses.receive():
+        print(msg.body)
+        msg.acknowledge()
+
 See ``specs/MAILBOX.md`` for the complete specification.
 """
 
 from __future__ import annotations
 
-from ._in_memory import InMemoryMailbox
+from ._in_memory import InMemoryMailbox, InMemoryMailboxFactory
 from ._resolver import (
     CompositeResolver,
     MailboxFactory,
@@ -85,6 +85,7 @@ __all__ = [
     "CompositeResolver",
     "FakeMailbox",
     "InMemoryMailbox",
+    "InMemoryMailboxFactory",
     "Mailbox",
     "MailboxConnectionError",
     "MailboxError",

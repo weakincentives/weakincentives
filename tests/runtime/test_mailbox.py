@@ -501,15 +501,24 @@ class TestInMemoryMailbox:  # noqa: PLR0904
             requests.close()
             responses.close()
 
-    def test_reply_without_resolver_raises(self) -> None:
-        """Message.reply() raises when no reply_resolver configured."""
+    def test_reply_auto_creates_response_mailbox(self) -> None:
+        """Reply auto-creates response mailbox via default resolver."""
         mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
         try:
+            # Send with reply_to - auto-creates response mailbox
             mailbox.send("hello", reply_to="responses")
             messages = mailbox.receive(max_messages=1)
 
-            with pytest.raises(ReplyNotAvailableError, match="No reply_resolver"):
-                messages[0].reply("response")
+            # Reply should work - resolver auto-created
+            messages[0].reply("response")
+            messages[0].acknowledge()
+
+            # Response mailbox should be accessible via resolver
+            responses = mailbox.resolver.resolve("responses")
+            response_msgs = responses.receive(max_messages=1)
+            assert len(response_msgs) == 1
+            assert response_msgs[0].body == "response"
+            response_msgs[0].acknowledge()
         finally:
             mailbox.close()
 
@@ -855,14 +864,20 @@ def test_fake_mailbox_reply_without_reply_to_raises() -> None:
         responses.close()
 
 
-def test_fake_mailbox_reply_without_resolver_raises() -> None:
-    """FakeMailbox Message.reply() raises when no reply_resolver configured."""
+def test_fake_mailbox_reply_auto_creates_collecting_mailbox() -> None:
+    """FakeMailbox auto-creates CollectingMailbox for reply_to identifiers."""
     mailbox: FakeMailbox[str, str] = FakeMailbox(name="test")
     mailbox.send("hello", reply_to="responses")
     messages = mailbox.receive(max_messages=1)
 
-    with pytest.raises(ReplyNotAvailableError, match="No reply_resolver"):
-        messages[0].reply("response")
+    # Reply should work - auto-creates CollectingMailbox
+    messages[0].reply("response")
+    messages[0].acknowledge()
+
+    # Response mailbox should be a CollectingMailbox
+    responses = mailbox.resolver.resolve("responses")
+    assert hasattr(responses, "sent")  # CollectingMailbox has sent attribute
+    assert responses.sent == ["response"]
 
 
 def test_fake_mailbox_reply_with_unknown_reply_to_raises() -> None:

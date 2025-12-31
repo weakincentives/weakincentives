@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
-from ._resolver import MailboxResolutionError
+from ._resolver import CompositeResolver, MailboxResolutionError
 from ._types import (
     MailboxError,
     Message,
@@ -30,6 +30,7 @@ from ._types import (
 
 if TYPE_CHECKING:
     from ._resolver import MailboxResolver
+    from ._types import Mailbox
 
 
 @dataclass(slots=True)
@@ -165,12 +166,33 @@ class CollectingMailbox[T, R]:
         self._closed = True
 
 
+class _CollectingMailboxFactory[R]:
+    """Factory that creates CollectingMailbox instances for reply routing in tests."""
+
+    __slots__ = ("_registry",)
+
+    _registry: dict[str, Mailbox[R, None]]
+
+    def __init__(self, registry: dict[str, Mailbox[R, None]]) -> None:
+        super().__init__()
+        self._registry = registry
+
+    def create(self, identifier: str) -> Mailbox[R, None]:
+        """Create or return cached CollectingMailbox for the given identifier."""
+        if identifier in self._registry:  # pragma: no cover - defensive
+            return self._registry[identifier]
+        mailbox: Mailbox[R, None] = CollectingMailbox(name=identifier)
+        self._registry[identifier] = mailbox
+        return mailbox
+
+
 @dataclass
 class FakeMailbox[T, R]:
     """Full in-memory implementation with controllable behavior for testing edge cases.
 
     Extends InMemoryMailbox semantics with methods to simulate failures
-    and edge conditions.
+    and edge conditions. Auto-creates CollectingMailbox instances for
+    reply_to identifiers, accessible via the resolver property.
 
     Type parameters:
         T: Message body type.
@@ -179,6 +201,10 @@ class FakeMailbox[T, R]:
     Example::
 
         mailbox: FakeMailbox[Event, Result] = FakeMailbox()
+
+        # Send with reply_to (auto-creates CollectingMailbox)
+        mailbox.send(Event(...), reply_to="responses")
+        responses = mailbox.resolver.resolve("responses")
 
         # Simulate receipt handle expiry
         msg = mailbox.receive()[0]
@@ -194,7 +220,8 @@ class FakeMailbox[T, R]:
 
     name: str = "fake"
     reply_resolver: MailboxResolver[R] | None = None
-    """Resolver for reply_to identifiers."""
+    """Resolver for reply_to identifiers. If None, a default resolver is created
+    that auto-registers CollectingMailbox instances for reply_to identifiers."""
 
     _pending: list[tuple[str, T, datetime, int, str | None]] = field(
         init=False, repr=False
@@ -205,6 +232,9 @@ class FakeMailbox[T, R]:
         init=False, repr=False
     )
     """Map of receipt_handle -> (id, body, enqueued_at, delivery_count, reply_to)."""
+
+    _reply_registry: dict[str, Mailbox[R, None]] = field(init=False, repr=False)
+    """Registry of auto-created response mailboxes."""
 
     _expired_handles: set[str] = field(init=False, repr=False)
     """Handles that have been manually expired."""
@@ -218,7 +248,30 @@ class FakeMailbox[T, R]:
     def __post_init__(self) -> None:
         self._pending = []
         self._invisible = {}
+        self._reply_registry = {}
         self._expired_handles = set()
+        # Set up default resolver if none provided
+        if self.reply_resolver is None:
+            factory = _CollectingMailboxFactory[R](registry=self._reply_registry)
+            object.__setattr__(
+                self,
+                "reply_resolver",
+                CompositeResolver(registry=self._reply_registry, factory=factory),
+            )
+
+    @property
+    def resolver(self) -> MailboxResolver[R]:
+        """Return the reply resolver for accessing auto-created mailboxes.
+
+        Use this to retrieve CollectingMailbox instances created for reply_to::
+
+            mailbox.send(msg, reply_to="responses")
+            responses = mailbox.resolver.resolve("responses")
+            assert responses.sent == [expected_reply]
+        """
+        if self.reply_resolver is None:  # pragma: no cover
+            raise RuntimeError("No resolver configured")
+        return self.reply_resolver
 
     @property
     def closed(self) -> bool:
@@ -226,9 +279,22 @@ class FakeMailbox[T, R]:
         return self._closed
 
     def send(self, body: T, *, reply_to: str | None = None) -> str:
-        """Enqueue a message."""
+        """Enqueue a message.
+
+        If reply_to is provided and a default resolver is configured, this
+        automatically creates and registers a CollectingMailbox that can be
+        retrieved via ``resolver.resolve(reply_to)``.
+        """
         if self._connection_error is not None:
             raise self._connection_error
+
+        # Auto-register reply_to mailbox if using default resolver
+        if (
+            reply_to is not None
+            and reply_to not in self._reply_registry
+            and self.reply_resolver is not None
+        ):
+            _ = self.reply_resolver.resolve_optional(reply_to)
 
         msg_id = str(uuid4())
         self._pending.append((msg_id, body, datetime.now(UTC), 0, reply_to))
@@ -282,7 +348,9 @@ class FakeMailbox[T, R]:
         """Send a reply to the reply_to mailbox."""
         if reply_to is None:  # pragma: no cover
             raise ReplyNotAvailableError("No reply_to specified")
-        if self.reply_resolver is None:
+        if (
+            self.reply_resolver is None
+        ):  # pragma: no cover - always set in __post_init__
             raise ReplyNotAvailableError("No reply_resolver configured")
         try:
             mailbox = self.reply_resolver.resolve(reply_to)
