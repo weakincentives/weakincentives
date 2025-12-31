@@ -375,6 +375,96 @@ template = PromptTemplate(
 prompt = Prompt(template)
 ```
 
+## Tool.wrap()
+
+`Tool.wrap()` creates a Tool from a handler function, inferring types from the
+handler's signature. This reduces boilerplate when the handler already has
+proper type annotations.
+
+### Signature
+
+```python
+@staticmethod
+def wrap(
+    fn: ToolHandler[ParamsT, ResultT],
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    examples: tuple[ToolExample[ParamsT, ResultT], ...] = (),
+    accepts_overrides: bool = True,
+) -> Tool[ParamsT, ResultT]: ...
+```
+
+### Parameters
+
+| Parameter | Default | Description |
+| ------------------- | ------- | ------------------------------------------------- |
+| `fn` | | Handler function (required) |
+| `name` | `None` | Tool name; defaults to `fn.__name__` |
+| `description` | `None` | Tool description; defaults to `fn` docstring |
+| `examples` | `()` | Representative invocations for documentation |
+| `accepts_overrides` | `True` | Whether the tool accepts parameter overrides |
+
+### Inference Rules
+
+- **ParamsT**: Extracted from the first parameter's type annotation
+- **ResultT**: Extracted from the return type `ToolResult[ResultT]`
+- **Name**: Falls back to `fn.__name__` when not provided
+- **Description**: Falls back to `inspect.getdoc(fn)` when not provided
+
+### Example Usage
+
+```python
+# Minimal: infer everything from the handler
+lookup_tool = Tool.wrap(lookup_handler)
+
+# Override name and description
+lookup_tool = Tool.wrap(
+    lookup_handler,
+    name="lookup_entity",
+    description="Fetch information for an entity ID.",
+)
+
+# Full specification with examples
+lookup_tool = Tool.wrap(
+    lookup_handler,
+    name="lookup_entity",
+    description="Fetch entity information.",
+    examples=(
+        ToolExample(
+            description="Basic lookup",
+            input=LookupParams(entity_id="abc-123"),
+            output=LookupResult(entity_id="abc-123", url="https://..."),
+        ),
+    ),
+    accepts_overrides=False,
+)
+```
+
+### When to Use
+
+Prefer `Tool.wrap()` when the handler signature provides all type information
+and you want to reduce redundant type parameters:
+
+```python
+# Verbose: type params duplicate handler signature
+Tool[LookupParams, LookupResult](
+    name="lookup_entity",
+    description="Fetch entity information.",
+    handler=lookup_handler,
+)
+
+# Concise: types inferred from handler
+Tool.wrap(
+    lookup_handler,
+    name="lookup_entity",
+    description="Fetch entity information.",
+)
+```
+
+Use explicit `Tool[ParamsT, ResultT](...)` when defining tools without handlers
+or when type annotations aren't available on the handler.
+
 ## Failure Semantics
 
 ### ToolResult Contract

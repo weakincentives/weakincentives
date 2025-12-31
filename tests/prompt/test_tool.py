@@ -505,3 +505,118 @@ def test_tool_wrap_handles_empty_toolresult_args(
         match=r"Tool handler return annotation must be ToolResult\[ResultT\].",
     ):
         Tool.wrap(handler)
+
+
+def test_tool_wrap_accepts_explicit_name() -> None:
+    def lookup(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Lookup information."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    tool = Tool.wrap(lookup, name="custom_lookup")
+
+    assert tool.name == "custom_lookup"
+    assert tool.description == "Lookup information."
+    assert tool.params_type is ExampleParams
+    assert tool.result_type is ExampleResult
+
+
+def test_tool_wrap_accepts_explicit_description() -> None:
+    def lookup(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Original docstring."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    tool = Tool.wrap(lookup, description="Custom description.")
+
+    assert tool.name == "lookup"
+    assert tool.description == "Custom description."
+
+
+def test_tool_wrap_with_explicit_description_skips_docstring_check() -> None:
+    def docless(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    # Handler has no docstring, but explicit description is provided
+    tool = Tool.wrap(docless, description="Explicit description.")
+
+    assert tool.name == "docless"
+    assert tool.description == "Explicit description."
+
+
+def test_tool_wrap_accepts_examples() -> None:
+    def lookup(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Lookup information."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    examples = (
+        ToolExample[ExampleParams, ExampleResult](
+            description="Basic lookup",
+            input=ExampleParams(query="test"),
+            output=ExampleResult(value="result"),
+        ),
+    )
+
+    tool = Tool.wrap(lookup, examples=examples)
+
+    assert len(tool.examples) == 1
+    assert tool.examples[0].description == "Basic lookup"
+    assert tool.examples[0].input == ExampleParams(query="test")
+    assert tool.examples[0].output == ExampleResult(value="result")
+
+
+def test_tool_wrap_accepts_overrides_parameter() -> None:
+    def lookup(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Lookup information."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    tool_with_overrides = Tool.wrap(lookup, accepts_overrides=True)
+    tool_without_overrides = Tool.wrap(lookup, accepts_overrides=False)
+
+    assert tool_with_overrides.accepts_overrides is True
+    assert tool_without_overrides.accepts_overrides is False
+
+
+def test_tool_wrap_with_all_parameters() -> None:
+    def handler(
+        params: ExampleParams, *, context: ToolContext
+    ) -> ToolResult[ExampleResult]:
+        """Original docstring."""
+
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
+
+    examples = (
+        ToolExample[ExampleParams, ExampleResult](
+            description="Example invocation",
+            input=ExampleParams(query="widgets"),
+            output=ExampleResult(value="found widgets"),
+        ),
+    )
+
+    tool = Tool.wrap(
+        handler,
+        name="custom_handler",
+        description="Custom description.",
+        examples=examples,
+        accepts_overrides=False,
+    )
+
+    assert tool.name == "custom_handler"
+    assert tool.description == "Custom description."
+    assert len(tool.examples) == 1
+    assert tool.accepts_overrides is False
+    assert tool.handler is handler
+    assert tool.params_type is ExampleParams
+    assert tool.result_type is ExampleResult

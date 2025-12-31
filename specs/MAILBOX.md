@@ -239,6 +239,7 @@ msg.reply(Result(value=2))  # Raises MessageFinalizedError
 ```
 
 This prevents:
+
 - Sending replies to a deleted message (after ack)
 - Sending replies that race with redelivery (after nack)
 

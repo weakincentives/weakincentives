@@ -575,10 +575,38 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
         ResultT_runtime: SupportsToolResult,
     ](
         fn: ToolHandler[ParamsT_runtime, ResultT_runtime],
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        examples: tuple[ToolExample[ParamsT_runtime, ResultT_runtime], ...] = (),
+        accepts_overrides: bool = True,
     ) -> Tool[ParamsT_runtime, ResultT_runtime]:
-        """Create a Tool from a handler using its name and docstring."""
+        """Create a Tool from a handler, inferring types from its signature.
 
-        description = Tool._resolve_wrapped_description(fn)
+        Types are inferred from the handler's parameter and return annotations.
+        Name and description can be inferred from the handler's __name__ and
+        docstring, or explicitly provided.
+
+        Args:
+            fn: Handler function with signature (params: ParamsT, *, context: ToolContext)
+                -> ToolResult[ResultT].
+            name: Tool name. Defaults to handler's __name__.
+            description: Tool description. Defaults to handler's docstring.
+            examples: Representative invocations for documentation.
+            accepts_overrides: Whether the tool accepts parameter overrides.
+
+        Returns:
+            A Tool with types inferred from the handler signature.
+
+        Raises:
+            PromptValidationError: If handler lacks required annotations or docstring
+                (when description not provided).
+        """
+        resolved_description = (
+            description
+            if description is not None
+            else Tool._resolve_wrapped_description(fn)
+        )
 
         signature = inspect.signature(fn)
         parameter = Tool._validate_parameter_count(
@@ -603,12 +631,16 @@ class Tool[ParamsT: SupportsDataclassOrNone, ResultT: SupportsToolResult]:
             tool_type,
         )
 
-        handler_name = getattr(fn, "__name__", type(fn).__name__)
+        resolved_name = (
+            name if name is not None else getattr(fn, "__name__", type(fn).__name__)
+        )
 
         return specialized_tool_type(
-            name=handler_name,
-            description=description,
+            name=resolved_name,
+            description=resolved_description,
             handler=fn,
+            examples=examples,
+            accepts_overrides=accepts_overrides,
         )
 
 
