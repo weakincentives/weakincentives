@@ -15,6 +15,7 @@
 This package contains mailbox implementations that require optional dependencies.
 
 - ``RedisMailbox``: Redis-backed mailbox (requires ``redis`` package)
+- ``RedisMailboxFactory``: Factory for creating RedisMailbox instances
 
 Example::
 
@@ -22,14 +23,17 @@ Example::
     from weakincentives.contrib.mailbox import RedisMailbox
 
     client = Redis(host="localhost", port=6379)
-    mailbox: RedisMailbox[MyEvent] = RedisMailbox(
+    mailbox: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
         name="events",
         client=client,
     )
+
+    # reply_to automatically resolves to queues on the same Redis server
+    mailbox.send(MyEvent(data="hello"), reply_to="responses")
 """
 
 from __future__ import annotations
 
-from ._redis import RedisMailbox
+from ._redis import RedisMailbox, RedisMailboxFactory
 
-__all__ = ["RedisMailbox"]
+__all__ = ["RedisMailbox", "RedisMailboxFactory"]

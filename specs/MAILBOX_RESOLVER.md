@@ -23,7 +23,7 @@ lifecycle management (singletons, per-tool instances).
 ## Comparison with ResourceResolver
 
 | Aspect | ResourceResolver | MailboxResolver |
-|--------|------------------|-----------------|
+| ------------- | ---------------------------- | --------------------------- |
 | Key type | `type[T]` | `str` |
 | Purpose | DI container | Service discovery |
 | Resolution | Static bindings | Dynamic lookup + factory |
@@ -68,7 +68,7 @@ class MailboxFactory[R](Protocol):
 ### CompositeResolver
 
 ```python
-@dataclass(slots=True)
+@dataclass(slots=True, frozen=True)
 class CompositeResolver[R]:
     """Combines a registry with a factory for dynamic resolution.
 
@@ -120,26 +120,27 @@ class MailboxResolutionError(MailboxError):
 
 ## Message Integration
 
-`Message.reply()` resolves the mailbox internally and tracks finalization:
+`Message.reply()` uses a bound callback that was set at receive time:
 
 ```python
 def reply(self, body: R) -> str:
     if self._finalized:
         raise MessageFinalizedError(...)
-    mailbox = self._resolver.resolve(self.reply_to)
-    return mailbox.send(body)
+    if self.reply_to is None:
+        raise ReplyNotAvailableError(...)
+    return self._reply_fn(body)  # Callback resolves and sends
 
 def acknowledge(self) -> None:
     self._acknowledge_fn()
     self._finalized = True
 ```
 
-Mailboxes bind their resolver to messages at receive time:
+Mailboxes bind their resolver to messages at receive time via the `_reply_fn` callback:
 
 ```python
 requests = InMemoryMailbox(reply_resolver=resolver)
-msg = requests.receive()[0]  # msg._resolver = resolver
-msg.reply(result)            # Uses bound resolver
+msg = requests.receive()[0]  # msg._reply_fn bound to resolver
+msg.reply(result)            # Callback resolves reply_to and sends
 ```
 
 ## Backend Factories
@@ -258,30 +259,29 @@ def my_tool(params, *, context):
 
 ## Testing
 
-### FakeMailboxResolver
-
-```python
-class FakeMailboxResolver[T]:
-    mailboxes: dict[str, Mailbox[T]]  # Auto-creates CollectingMailbox
-    resolution_log: list[str]          # Tracks resolve() calls
-    fail_on: set[str]                  # Identifiers that raise
-```
-
 ### Testing Reply
 
 ```python
 def test_reply_resolves_and_sends():
-    resolver = FakeMailboxResolver()
-    msg = make_message(reply_to="responses", resolver=resolver)
+    responses = CollectingMailbox()
+    resolver = RegistryResolver({"responses": responses})
+    requests = InMemoryMailbox(reply_resolver=resolver)
 
-    msg.reply("hello")
+    requests.send("hello", reply_to="responses")
+    msg = requests.receive()[0]
+    msg.reply("world")
+    msg.acknowledge()
 
-    assert resolver.resolution_log == ["responses"]
-    assert resolver.mailboxes["responses"].sent == ["hello"]
+    assert responses.sent == ["world"]
 
 
 def test_reply_after_ack_raises():
-    msg = make_message(reply_to="responses")
+    responses = CollectingMailbox()
+    resolver = RegistryResolver({"responses": responses})
+    requests = InMemoryMailbox(reply_resolver=resolver)
+
+    requests.send("hello", reply_to="responses")
+    msg = requests.receive()[0]
     msg.acknowledge()
 
     with pytest.raises(MessageFinalizedError):

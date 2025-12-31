@@ -77,6 +77,20 @@ class Mailbox(Protocol[T, R]):
     def approximate_count(self) -> int:
         """Approximate message count (eventually consistent)."""
         ...
+
+    def close(self) -> None:
+        """Close the mailbox and release resources.
+
+        After closing:
+        - receive() returns empty immediately
+        - send() behavior is implementation-defined
+        """
+        ...
+
+    @property
+    def closed(self) -> bool:
+        """Return True if the mailbox has been closed."""
+        ...
 ```
 
 ### Message
@@ -156,23 +170,17 @@ mailbox internally. Multiple replies are permitted before acknowledgment.
 
 ```python
 # Registry for resolving reply_to identifiers
-registry: dict[str, Mailbox] = {}
+registry: dict[str, Mailbox] = {"responses": InMemoryMailbox(name="responses")}
 
 # Request mailbox with resolver
 requests: Mailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
     name="requests",
-    reply_resolver=registry.get,
+    reply_resolver=RegistryResolver(registry),
 )
 ```
 
 **Important:** Resolvers should cache mailbox instances to avoid resource leaks.
 See `specs/MAILBOX_RESOLVER.md` for resolver patterns.
-
-```python
-@cache
-def redis_resolver(reply_to: str) -> RedisMailbox[MainLoopResult, None]:
-    return RedisMailbox(name=reply_to, client=redis_client)
-```
 
 ### Client
 
@@ -239,6 +247,7 @@ msg.reply(Result(value=2))  # Raises MessageFinalizedError
 ```
 
 This prevents:
+
 - Sending replies to a deleted message (after ack)
 - Sending replies that race with redelivery (after nack)
 
@@ -316,7 +325,7 @@ class MainLoopResult[OutputT]:
 ### Backend Differences
 
 | Aspect | SQS Standard | SQS FIFO | Redis | InMemory |
-| ----------------- | ------------ | -------- | ----- | -------- |
+| -------------- | ------------ | ---------- | ------ | -------- |
 | Ordering | Best-effort | Strict | FIFO | FIFO |
 | Long poll max | 20 sec | 20 sec | ∞ | ∞ |
 | Visibility max | 12 hours | 12 hours | ∞ | ∞ |

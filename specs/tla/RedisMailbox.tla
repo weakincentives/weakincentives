@@ -110,22 +110,6 @@ Send(body) ==
           /\ nextMsgId' = nextMsgId + 1
     /\ UNCHANGED <<invisible, handles, deleted, now, nextHandle, consumerState>>
 
-(* SendDelayed: Add a new message with delayed visibility.
- * Message goes directly to invisible set with future expiry.
- * This matches Python's send(delay_seconds > 0) behavior.
- *)
-SendDelayed(body, delay) ==
-    /\ nextMsgId <= MaxMessages
-    /\ delay > 0
-    /\ LET msgId == nextMsgId
-           expiry == now + delay
-       IN /\ invisible' = UpdateFunc(invisible, msgId, [expiresAt |-> expiry, handle |-> 0])
-          /\ data' = UpdateFunc(data, msgId, body)
-          /\ deliveryCounts' = UpdateFunc(deliveryCounts, msgId, 0)
-          /\ deliveryHistory' = UpdateFunc(deliveryHistory, msgId, <<>>)
-          /\ nextMsgId' = nextMsgId + 1
-    /\ UNCHANGED <<pending, handles, deleted, now, nextHandle, consumerState>>
-
 (* Receive: Atomically move message from pending to invisible *)
 Receive(consumer) ==
     /\ Len(pending) > 0
@@ -269,7 +253,6 @@ Tick ==
 
 Next ==
     \/ \E body \in {"a", "b", "c"}: Send(body)
-    \/ \E body \in {"a", "b", "c"}, d \in 1..VisibilityTimeout: SendDelayed(body, d)
     \/ \E c \in 1..NumConsumers: Receive(c)
     \/ \E c \in 1..NumConsumers: Acknowledge(c)
     \/ \E c \in 1..NumConsumers: AcknowledgeFail(c)
