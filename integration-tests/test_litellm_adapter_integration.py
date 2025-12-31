@@ -176,7 +176,7 @@ def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
         del context
         transformed = params.text.upper()
         message = f"Transformed '{params.text}' to uppercase."
-        return ToolResult(message=message, value=TransformResult(text=transformed))
+        return ToolResult.ok(TransformResult(text=transformed), message=message)
 
     return Tool[TransformRequest, TransformResult](
         name="uppercase_text",

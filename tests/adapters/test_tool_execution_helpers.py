@@ -122,7 +122,7 @@ def _tool_call(arguments: object) -> DummyToolCall:
 def test_tool_execution_success_path() -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         assert context.session is not None
-        return ToolResult(message="done", value=ToolPayload(answer=params.query))
+        return ToolResult.ok(ToolPayload(answer=params.query), message="done")
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
     tool_call = _tool_call({"query": "policies"})
@@ -138,7 +138,7 @@ def test_tool_execution_success_path() -> None:
 def test_tool_execution_records_validation_failure() -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
-        return ToolResult(message="ok", value=ToolPayload(answer="noop"))
+        return ToolResult.ok(ToolPayload(answer="noop"), message="ok")
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
     tool_call = _tool_call({"query": "policies", "extra": True})
@@ -156,7 +156,7 @@ def test_tool_execution_raises_on_expired_deadline(
 ) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
-        return ToolResult(message="should not run", value=ToolPayload(answer="x"))
+        return ToolResult.ok(ToolPayload(answer="x"), message="should not run")
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
     anchor = datetime.now(UTC)

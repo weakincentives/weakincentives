@@ -76,7 +76,7 @@ class _BareSection(Section[SectionParams]):
 
 def _handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
     del context
-    return ToolResult(message=params.name, value=ToolPayload(message=params.name))
+    return ToolResult.ok(ToolPayload(message=params.name), message=params.name)
 
 
 def _build_tool(

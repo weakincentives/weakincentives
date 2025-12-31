@@ -26,7 +26,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
 
 
 def test_serialize_tool_message_overrides_mapping_payload() -> None:
-    result = ToolResult(message="ok", value=None)
+    result = ToolResult.ok(None, message="ok")
 
     serialized = serialize_tool_message(
         cast(ToolResult[SupportsToolResult], result),
@@ -39,7 +39,7 @@ def test_serialize_tool_message_overrides_mapping_payload() -> None:
 
 
 def test_serialize_tool_message_overrides_sequence_payload() -> None:
-    result = ToolResult(message="ok", value=None)
+    result = ToolResult.ok(None, message="ok")
 
     payload = [ToolPayload(answer="first"), ToolPayload(answer="second")]
     serialized = serialize_tool_message(
@@ -82,7 +82,7 @@ def test_serialize_tool_message_falls_back_to_stringification() -> None:
         def __str__(self) -> str:
             return "payload"
 
-    result = ToolResult(message="ok", value=None)
+    result = ToolResult.ok(None, message="ok")
 
     serialized = serialize_tool_message(
         cast(ToolResult[SupportsToolResult], result),
@@ -93,7 +93,7 @@ def test_serialize_tool_message_falls_back_to_stringification() -> None:
 
 def test_serialize_tool_message_without_message() -> None:
     payload = ToolPayload(answer="value")
-    result = ToolResult(message="", value=payload)
+    result = ToolResult.ok(payload, message="")
 
     serialized = serialize_tool_message(cast(ToolResult[SupportsToolResult], result))
 
@@ -101,7 +101,7 @@ def test_serialize_tool_message_without_message() -> None:
 
 
 def test_serialize_tool_message_without_payload_defaults_to_message() -> None:
-    result = ToolResult(message="fallback", value=None)
+    result = ToolResult.ok(None, message="fallback")
 
     serialized = serialize_tool_message(cast(ToolResult[SupportsToolResult], result))
 

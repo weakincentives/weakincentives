@@ -58,10 +58,8 @@ def search_handler(
     params: SearchParams, *, context: ToolContext
 ) -> ToolResult[SearchResult]:
     del context
-    return ToolResult(
-        message=f"Found matches for {params.query}",
-        value=SearchResult(matches=5),
-        success=True,
+    return ToolResult.ok(
+        SearchResult(matches=5), message=f"Found matches for {params.query}"
     )
 
 
@@ -260,10 +258,8 @@ class TestBridgedTool:
             params: SearchParams, *, context: ToolContext
         ) -> ToolResult[EmptyRenderResult]:
             del context
-            return ToolResult(
-                message=f"Searched for {params.query}",
-                value=EmptyRenderResult(),
-                success=True,
+            return ToolResult.ok(
+                EmptyRenderResult(), message=f"Searched for {params.query}"
             )
 
         empty_tool = Tool[SearchParams, EmptyRenderResult](
@@ -415,7 +411,7 @@ class TestCreateBridgedTools:
     ) -> None:
         def null_handler(params: None, *, context: ToolContext) -> ToolResult[None]:
             del params, context
-            return ToolResult(message="ok", value=None, success=True)
+            return ToolResult.ok(None, message="ok")
 
         null_tool = Tool[None, None](
             name="null_tool",
@@ -446,7 +442,7 @@ class TestCreateBridgedTools:
 
         def null_handler(params: None, *, context: ToolContext) -> ToolResult[None]:
             del params, context
-            return ToolResult(message="executed", value=None, success=True)
+            return ToolResult.ok(None, message="executed")
 
         null_tool = Tool[None, None](
             name="null_tool",
@@ -731,10 +727,8 @@ class TestVisibilityExpansionRequiredPropagation:
             params: SearchParams, *, context: ToolContext
         ) -> ToolResult[SearchResult]:
             captured_filesystem.append(context.filesystem)
-            return ToolResult(
-                message=f"Searched for {params.query}",
-                value=SearchResult(matches=3),
-                success=True,
+            return ToolResult.ok(
+                SearchResult(matches=3), message=f"Searched for {params.query}"
             )
 
         capture_tool = Tool[SearchParams, SearchResult](
@@ -784,10 +778,8 @@ class TestCreateBridgedToolsWithFilesystem:
             params: SearchParams, *, context: ToolContext
         ) -> ToolResult[SearchResult]:
             captured_filesystem.append(context.filesystem)
-            return ToolResult(
-                message=f"Searched for {params.query}",
-                value=SearchResult(matches=3),
-                success=True,
+            return ToolResult.ok(
+                SearchResult(matches=3), message=f"Searched for {params.query}"
             )
 
         capture_tool = Tool[SearchParams, SearchResult](
@@ -833,10 +825,8 @@ class TestBudgetTrackerInResourceRegistry:
             params: SearchParams, *, context: ToolContext
         ) -> ToolResult[SearchResult]:
             captured_budget_tracker.append(context.budget_tracker)
-            return ToolResult(
-                message=f"Searched for {params.query}",
-                value=SearchResult(matches=3),
-                success=True,
+            return ToolResult.ok(
+                SearchResult(matches=3), message=f"Searched for {params.query}"
             )
 
         capture_tool = Tool[SearchParams, SearchResult](
@@ -884,10 +874,8 @@ class TestBudgetTrackerInResourceRegistry:
             params: SearchParams, *, context: ToolContext
         ) -> ToolResult[SearchResult]:
             captured_budget_tracker.append(context.budget_tracker)
-            return ToolResult(
-                message=f"Searched for {params.query}",
-                value=SearchResult(matches=3),
-                success=True,
+            return ToolResult.ok(
+                SearchResult(matches=3), message=f"Searched for {params.query}"
             )
 
         capture_tool = Tool[SearchParams, SearchResult](
@@ -1134,11 +1122,7 @@ class TestBridgedToolTransactionalExecution:
             params: SearchParams, *, context: ToolContext
         ) -> ToolResult[SearchResult]:
             captured_filesystem.append(context.filesystem)
-            return ToolResult(
-                message="Tool executed",
-                value=SearchResult(matches=0),
-                success=True,
-            )
+            return ToolResult.ok(SearchResult(matches=0), message="Tool executed")
 
         capture_tool = Tool[SearchParams, SearchResult](
             name="capture_tool",

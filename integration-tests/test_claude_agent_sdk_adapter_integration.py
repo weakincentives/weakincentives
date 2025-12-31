@@ -148,7 +148,7 @@ def _build_uppercase_tool() -> Tool[TransformRequest, TransformResult]:
         del context
         transformed = params.text.upper()
         message = f"Transformed '{params.text}' to uppercase."
-        return ToolResult(message=message, value=TransformResult(text=transformed))
+        return ToolResult.ok(TransformResult(text=transformed), message=message)
 
     return Tool[TransformRequest, TransformResult](
         name="uppercase_text",
@@ -506,9 +506,9 @@ def _build_renderable_tool() -> Tool[ComputeParams, RenderableResult]:
     ) -> ToolResult[RenderableResult]:
         del context
         result = params.x + params.y
-        return ToolResult(
+        return ToolResult.ok(
+            RenderableResult(value=result, message=f"{params.x} + {params.y}"),
             message=f"Computed {params.x} + {params.y} = {result}",
-            value=RenderableResult(value=result, message=f"{params.x} + {params.y}"),
         )
 
     return Tool[ComputeParams, RenderableResult](
@@ -721,9 +721,8 @@ def _build_simple_tool() -> Tool[EchoParams, EchoResult]:
         params: EchoParams, *, context: ToolContext
     ) -> ToolResult[EchoResult]:
         del context
-        return ToolResult(
-            message=f"Echo: {params.text}",
-            value=EchoResult(echoed=params.text),
+        return ToolResult.ok(
+            EchoResult(echoed=params.text), message=f"Echo: {params.text}"
         )
 
     return Tool[EchoParams, EchoResult](
@@ -1947,20 +1946,15 @@ def _build_mcp_file_writer_tool() -> Tool[WriteFileRequest, WriteFileResponse]:
         params: WriteFileRequest, *, context: ToolContext
     ) -> ToolResult[WriteFileResponse]:
         if context.filesystem is None:
-            return ToolResult(
-                message="No filesystem available",
-                value=None,
-                success=False,
-            )
+            return ToolResult.error("No filesystem available")
 
         # Write the file using the filesystem from context
         context.filesystem.write(params.filename, params.content, mode="create")
         bytes_written = len(params.content.encode("utf-8"))
 
-        return ToolResult(
+        return ToolResult.ok(
+            WriteFileResponse(path=params.filename, bytes_written=bytes_written),
             message=f"Successfully wrote {bytes_written} bytes to {params.filename}",
-            value=WriteFileResponse(path=params.filename, bytes_written=bytes_written),
-            success=True,
         )
 
     return Tool[WriteFileRequest, WriteFileResponse](
