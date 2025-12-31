@@ -591,3 +591,87 @@ def test_markdown_section_placeholder_extraction_with_braced_syntax() -> None:
 
     rendered = prompt.render()
     assert "Title: Hello" in rendered.text
+
+
+class TestPromptTemplateDirectBinding:
+    """Tests for PromptTemplate.bind() direct binding shortcut."""
+
+    def test_template_bind_creates_prompt_and_binds_params(self) -> None:
+        """PromptTemplate.bind() creates a Prompt wrapper with bound params."""
+        template = build_prompt()
+
+        bound = template.bind(
+            IntroParams(title="hello"),
+            DetailsParams(body="world"),
+        )
+
+        assert isinstance(bound, Prompt)
+        assert bound.template is template
+        assert len(bound.params) == 2
+
+        rendered = bound.render()
+        assert "Intro: hello" in rendered.text
+        assert "Details: world" in rendered.text
+        assert "Outro: bye" in rendered.text  # default_params
+
+    def test_template_bind_with_overrides_store(self) -> None:
+        """PromptTemplate.bind() passes through overrides_store."""
+        from unittest.mock import MagicMock
+
+        template = build_prompt()
+        store = MagicMock()
+
+        bound = template.bind(
+            IntroParams(title="test"),
+            DetailsParams(body="test"),
+            overrides_store=store,
+        )
+
+        assert bound.overrides_store is store
+        assert bound.overrides_tag == "latest"
+
+    def test_template_bind_with_overrides_tag(self) -> None:
+        """PromptTemplate.bind() passes through overrides_tag."""
+        template = build_prompt()
+
+        bound = template.bind(
+            IntroParams(title="test"),
+            DetailsParams(body="test"),
+            overrides_tag="v2",
+        )
+
+        assert bound.overrides_tag == "v2"
+
+    def test_template_bind_without_params(self) -> None:
+        """PromptTemplate.bind() works with no params for paramless templates."""
+        static_section = MarkdownSection(
+            title="Static", key="static", template="Static content."
+        )
+        template = PromptTemplate(
+            ns="tests.prompts",
+            key="paramless",
+            sections=(static_section,),
+        )
+
+        bound = template.bind()
+
+        assert isinstance(bound, Prompt)
+        assert bound.params == ()
+        rendered = bound.render()
+        assert "Static content." in rendered.text
+
+    def test_template_bind_equivalent_to_two_step(self) -> None:
+        """PromptTemplate.bind() produces identical results to two-step pattern."""
+        template = build_prompt()
+        params = (IntroParams(title="test"), DetailsParams(body="body"))
+
+        # Two-step pattern (without overrides store for simplicity)
+        two_step = Prompt(template, overrides_tag="v1").bind(*params)
+
+        # Direct binding pattern
+        direct = template.bind(*params, overrides_tag="v1")
+
+        # Both should produce same rendered output
+        assert two_step.render().text == direct.render().text
+        assert two_step.overrides_store is direct.overrides_store
+        assert two_step.overrides_tag == direct.overrides_tag

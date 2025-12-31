@@ -77,6 +77,24 @@ prompt = Prompt(template).bind(MyParams(field="value"))
 rendered = prompt.render()
 ```
 
+For single-use prompts, `PromptTemplate.bind()` provides a shortcut that creates
+the `Prompt` wrapper internally:
+
+```python
+# Direct binding from template (equivalent to above)
+prompt = template.bind(MyParams(field="value"))
+
+# With overrides configuration
+prompt = template.bind(
+    MyParams(field="value"),
+    overrides_store=store,
+    overrides_tag="v2",
+)
+```
+
+The two-step `Prompt(template).bind()` pattern remains available for cases
+requiring the intermediate `Prompt` object or multiple rebinds.
+
 **Construction Rules:**
 
 - `ns` and `key` are required and non-empty.
@@ -385,6 +403,10 @@ template = PromptTemplate[TaskResult](
     ],
 )
 
+# Direct binding from template
+rendered = template.bind(TaskParams(objective="Refactor auth module")).render()
+
+# Or use the two-step pattern for more control
 rendered = Prompt(template).bind(TaskParams(objective="Refactor auth module")).render()
 
 # After adapter evaluation...

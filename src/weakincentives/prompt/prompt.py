@@ -246,6 +246,37 @@ class PromptTemplate[OutputT]:
             f"Section matching {candidates!r} not found in prompt {self.ns}:{self.key}."
         )
 
+    def bind(
+        self,
+        *params: SupportsDataclass,
+        overrides_store: PromptOverridesStore | None = None,
+        overrides_tag: str = "latest",
+    ) -> Prompt[OutputT]:
+        """Create a Prompt wrapper and bind parameters in one step.
+
+        This is a convenience method that combines Prompt creation and parameter
+        binding for the common single-use case::
+
+            # Instead of:
+            prompt = Prompt(template, overrides_store=store, overrides_tag=tag).bind(request)
+
+            # You can write:
+            prompt = template.bind(request, overrides_store=store, overrides_tag=tag)
+
+        Args:
+            *params: Dataclass instances to bind as parameters.
+            overrides_store: Optional store for prompt overrides.
+            overrides_tag: Tag for override resolution (default: "latest").
+
+        Returns:
+            A new Prompt instance with the given parameters bound.
+        """
+        return Prompt(
+            self,
+            overrides_store=overrides_store,
+            overrides_tag=overrides_tag,
+        ).bind(*params)
+
 
 class Prompt[OutputT]:
     """Bind a prompt template with overrides and parameters for rendering.
