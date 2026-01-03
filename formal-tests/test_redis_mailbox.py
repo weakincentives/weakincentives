@@ -13,13 +13,13 @@
 """Formal verification of RedisMailbox using TLA+ model checking.
 
 This test extracts the TLA+ specification embedded in RedisMailbox via
-the @formal_spec decorator and optionally validates it using TLC.
+the @formal_spec decorator and validates it using TLC.
 
-FAST by default (~1s):
+Model checking is ENABLED by default (~30s):
     pytest formal-tests/test_redis_mailbox.py
 
-Full verification with model checking (~30s):
-    pytest formal-tests/test_redis_mailbox.py --model-check
+For development speed (extraction only, ~1s):
+    pytest formal-tests/test_redis_mailbox.py --skip-model-check
 
 Persist extracted specs:
     pytest formal-tests/test_redis_mailbox.py --persist-specs
@@ -41,10 +41,10 @@ def test_redis_mailbox_spec(
     enable_model_checking: bool,
     tlc_config: dict[str, str | bool],
 ) -> None:
-    """Extract and optionally verify RedisMailbox TLA+ specification.
+    """Extract and verify RedisMailbox TLA+ specification.
 
-    By default: Fast extraction only (~1s, temp dir)
-    With --model-check: Full TLC verification (~30s)
+    By default: Full TLC model checking (~30s, temp dir)
+    With --skip-model-check: Fast extraction only (~1s, development)
     With --persist-specs: Write to specs/tla/extracted/
     """
     # Check if TLC is available if model checking is requested
@@ -94,6 +94,7 @@ def test_redis_mailbox_spec(
         )
         print(f"✓ Spec written to {tla_file}")
     else:
-        print(f"\n✓ Extraction validated (skipped model checking for speed)")
+        print(f"\n✓ Extraction validated (model checking skipped)")
         print(f"✓ Spec written to {tla_file}")
-        print("\nTo run full verification: pytest formal-tests/ --model-check")
+        print("\n⚠️  Model checking was skipped - use for development only!")
+        print("Run without --skip-model-check for full verification")

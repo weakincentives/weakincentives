@@ -15,18 +15,17 @@
 This directory contains tests that extract and validate TLA+ specifications
 embedded in Python code using the @formal_spec decorator.
 
-Tests are FAST by default:
-- Use temporary directory (no filesystem pollution)
-- Skip model checking (extraction only, ~1s)
+Model checking is ENABLED by default (critical for verification):
+- Uses temporary directory (no filesystem pollution)
+- Runs TLC model checker to verify all invariants (~30s)
 
-For full verification:
-    pytest formal-tests/ --model-check           # Run TLC model checker
+For development speed:
+    pytest formal-tests/ --skip-model-check      # Extract only (~1s)
     pytest formal-tests/ --persist-specs         # Write to specs/tla/extracted/
-    pytest formal-tests/ --model-check --persist-specs  # Both
 
 Makefile convenience targets:
-    make verify-formal        # Fast extraction (temp dir)
-    make verify-formal-full   # Full model checking + persist
+    make verify-formal        # Full model checking (temp dir, ~30s)
+    make verify-formal-fast   # Skip model checking (~1s, development only)
 """
 
 from __future__ import annotations
@@ -54,10 +53,10 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     )
 
     group.addoption(
-        "--model-check",
+        "--skip-model-check",
         action="store_true",
         default=False,
-        help="Run TLC model checking (slow, default: extraction only)",
+        help="Skip TLC model checking (fast, for development only)",
     )
 
 
@@ -86,10 +85,10 @@ def extracted_specs_dir(
 def enable_model_checking(request: pytest.FixtureRequest) -> bool:
     """Whether to run TLC model checking.
 
-    Disabled by default for fast test runs (extraction only).
-    Use --model-check to enable full verification.
+    ENABLED by default for correct verification.
+    Use --skip-model-check to disable (development only).
     """
-    return bool(request.config.getoption("--model-check"))
+    return not request.config.getoption("--skip-model-check")
 
 
 @pytest.fixture(scope="session")
