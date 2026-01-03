@@ -152,23 +152,20 @@ verify-mailbox: check-tla property-tests
 # Embedded TLA+ Specifications
 # =============================================================================
 
-# Extract TLA+ specs from @formal_spec decorators
+# Extract TLA+ specs from @formal_spec decorators (fast)
 extract-tla:
 	@echo "Extracting embedded TLA+ specifications..."
-	@uv run pytest --extract-tla --collect-only -q >/dev/null 2>&1 || true
+	@uv run --all-extras pytest formal-tests/ --no-cov -v -k "not model"
 	@echo "✓ Specs extracted to specs/tla/extracted/"
 
-# Extract and model check embedded TLA+ specs
+# Extract and model check embedded TLA+ specs (slow)
 check-tla:
 	@echo "Extracting and validating embedded TLA+ specifications..."
-	@uv run pytest --check-tla --collect-only -q >/dev/null 2>&1 || true
+	@uv run --all-extras pytest formal-tests/ --no-cov -v
 	@echo "✓ All embedded specs passed model checking"
 
-# Extract embedded specs without model checking (fast)
-check-tla-fast:
-	@echo "Extracting embedded TLA+ specifications (no model checking)..."
-	@uv run pytest --extract-tla --collect-only -q >/dev/null 2>&1 || true
-	@echo "✓ Specs extracted (skipped model checking)"
+# Extract embedded specs without model checking (alias for extract-tla)
+check-tla-fast: extract-tla
 
 # Alias for check-tla
 verify-embedded: check-tla
