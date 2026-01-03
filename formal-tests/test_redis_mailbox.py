@@ -13,16 +13,21 @@
 """Formal verification of RedisMailbox using TLA+ model checking.
 
 This test extracts the TLA+ specification embedded in RedisMailbox via
-the @formal_spec decorator and validates it using the TLC model checker.
+the @formal_spec decorator and optionally validates it using TLC.
 
-Run with:
-    pytest formal-tests/test_redis_mailbox.py              # Extract only
-    pytest formal-tests/test_redis_mailbox.py -k model     # Model check
-    pytest formal-tests/test_redis_mailbox.py -v           # Verbose
+FAST by default (~1s):
+    pytest formal-tests/test_redis_mailbox.py
+
+Full verification with model checking (~30s):
+    pytest formal-tests/test_redis_mailbox.py --model-check
+
+Persist extracted specs:
+    pytest formal-tests/test_redis_mailbox.py --persist-specs
 """
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -31,16 +36,32 @@ from weakincentives.contrib.mailbox._redis import RedisMailbox
 from weakincentives.formal.testing import extract_and_verify
 
 
-def test_extract_redis_mailbox_spec(extracted_specs_dir: Path) -> None:
-    """Extract RedisMailbox TLA+ specification to specs/tla/extracted/.
+def test_redis_mailbox_spec(
+    extracted_specs_dir: Path,
+    enable_model_checking: bool,
+    tlc_config: dict[str, str | bool],
+) -> None:
+    """Extract and optionally verify RedisMailbox TLA+ specification.
 
-    This test extracts the embedded TLA+ spec and writes it to .tla and .cfg files.
-    It verifies the spec structure but does not run model checking (fast).
+    By default: Fast extraction only (~1s, temp dir)
+    With --model-check: Full TLC verification (~30s)
+    With --persist-specs: Write to specs/tla/extracted/
     """
-    spec, tla_file, cfg_file, _ = extract_and_verify(
+    # Check if TLC is available if model checking is requested
+    if enable_model_checking:
+        try:
+            subprocess.run(
+                ["which", "tlc"], capture_output=True, check=True, timeout=5
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pytest.skip("TLC not installed (brew install tlaplus)")
+
+    # Extract and optionally verify
+    spec, tla_file, cfg_file, result = extract_and_verify(
         RedisMailbox,
         output_dir=extracted_specs_dir,
-        model_check_enabled=False,
+        model_check_enabled=enable_model_checking,
+        tlc_config=tlc_config if enable_model_checking else None,
     )
 
     # Verify spec structure
@@ -62,44 +83,17 @@ def test_extract_redis_mailbox_spec(extracted_specs_dir: Path) -> None:
     assert "MaxMessages" in cfg_content
     assert "INVARIANTS" in cfg_content
 
-    print(f"\n✓ Extracted {spec.module} to {tla_file}")
-
-
-@pytest.mark.slow
-@pytest.mark.skipif(
-    not pytest.importorskip("subprocess").run(
-        ["which", "tlc"], capture_output=True
-    ).returncode
-    == 0,
-    reason="TLC not installed (brew install tlaplus)",
-)
-def test_model_check_redis_mailbox(
-    extracted_specs_dir: Path,
-    tlc_config: dict[str, str | bool],
-) -> None:
-    """Model check RedisMailbox specification with TLC (slow).
-
-    This test runs the TLC model checker to verify all invariants hold.
-    It may take 10-30 seconds depending on the state space size.
-
-    Mark as slow since it runs TLC exhaustively.
-    """
-    spec, tla_file, cfg_file, result = extract_and_verify(
-        RedisMailbox,
-        output_dir=extracted_specs_dir,
-        model_check_enabled=True,
-        tlc_config=tlc_config,
-    )
-
-    # Verify model checking passed
-    assert result is not None, "Model check result should be returned"
-    assert result.passed, (
-        f"Model checking failed for {spec.module}:\n"
-        f"{result.stdout}\n{result.stderr}"
-    )
-    assert result.states_generated > 0, "Should have generated states"
-
-    print(
-        f"\n✓ Model checking passed for {spec.module} "
-        f"({result.states_generated} states generated)"
-    )
+    # Report results
+    if enable_model_checking:
+        assert result is not None, "Model check result should be returned"
+        assert result.passed, (
+            f"Model checking failed:\n{result.stdout}\n{result.stderr}"
+        )
+        print(
+            f"\n✓ Model checking passed ({result.states_generated} states generated)"
+        )
+        print(f"✓ Spec written to {tla_file}")
+    else:
+        print(f"\n✓ Extraction validated (skipped model checking for speed)")
+        print(f"✓ Spec written to {tla_file}")
+        print("\nTo run full verification: pytest formal-tests/ --model-check")

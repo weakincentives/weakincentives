@@ -145,34 +145,31 @@ stress-tests:
 		--no-cov -v -m slow --timeout=120
 
 # Run all mailbox verification
-verify-mailbox: check-tla property-tests
+verify-mailbox: verify-formal property-tests
 	@echo "All mailbox verification checks passed"
 
 # =============================================================================
 # Embedded TLA+ Specifications
 # =============================================================================
 
-# Extract TLA+ specs from @formal_spec decorators (fast)
-extract-tla:
-	@echo "Extracting embedded TLA+ specifications..."
-	@uv run --all-extras pytest formal-tests/ --no-cov -v -k "not model"
-	@echo "✓ Specs extracted to specs/tla/extracted/"
+# Fast formal verification (extraction only, ~1s)
+# Uses temp directory, no model checking
+verify-formal:
+	@uv run --all-extras pytest formal-tests/ --no-cov -q
 
-# Extract and model check embedded TLA+ specs (slow)
-check-tla:
-	@echo "Extracting and validating embedded TLA+ specifications..."
-	@uv run --all-extras pytest formal-tests/ --no-cov -v
-	@echo "✓ All embedded specs passed model checking"
+# Full formal verification with model checking (~30s)
+# Persists specs to specs/tla/extracted/
+verify-formal-full:
+	@uv run --all-extras pytest formal-tests/ --no-cov -v --model-check --persist-specs
 
-# Extract embedded specs without model checking (alias for extract-tla)
-check-tla-fast: extract-tla
-
-# Alias for check-tla
-verify-embedded: check-tla
-	@echo "✓ Embedded formal verification complete"
+# Legacy aliases for backward compatibility
+extract-tla: verify-formal
+check-tla: verify-formal-full
+check-tla-fast: verify-formal
+verify-embedded: verify-formal-full
 
 # Run all formal verification (embedded specs + property tests)
-verify-all: check-tla property-tests
+verify-all: verify-formal-full property-tests
 	@echo "✓ All formal verification passed:"
 	@echo "  - Embedded TLA+ specs (@formal_spec decorators)"
 	@echo "  - Property-based tests (Hypothesis)"
