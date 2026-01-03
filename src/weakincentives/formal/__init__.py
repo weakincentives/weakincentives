@@ -40,6 +40,7 @@ from typing import Any, Callable, TypeVar
 
 __all__ = [
     "StateVar",
+    "ActionParameter",
     "Action",
     "Invariant",
     "FormalSpec",
@@ -57,11 +58,26 @@ class StateVar:
         name: Variable name (e.g., "pending", "invisible")
         type: TLA+ type annotation (e.g., "Seq", "Function", "Set")
         description: Human-readable description
+        initial_value: Optional custom TLA+ expression for initial value
     """
 
     name: str
     type: str
     description: str = ""
+    initial_value: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ActionParameter:
+    """TLA+ action parameter with domain.
+
+    Attributes:
+        name: Parameter name (e.g., "consumer", "timeout")
+        domain: TLA+ domain expression (e.g., "1..NumConsumers", "{\"a\", \"b\", \"c\"}")
+    """
+
+    name: str
+    domain: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,14 +86,14 @@ class Action:
 
     Attributes:
         name: Action name (e.g., "Receive", "Send")
-        parameters: Action parameters (e.g., ["consumer", "timeout"])
+        parameters: Action parameters with domains (e.g., [ActionParameter("consumer", "1..NumConsumers")])
         preconditions: List of TLA+ precondition expressions
         updates: Mapping from state variable to TLA+ update expression
         description: Human-readable description
     """
 
     name: str
-    parameters: tuple[str, ...] = field(default_factory=tuple)
+    parameters: tuple[ActionParameter, ...] = field(default_factory=tuple)
     preconditions: tuple[str, ...] = field(default_factory=tuple)
     updates: dict[str, str] = field(default_factory=dict)
     description: str = ""
@@ -191,8 +207,10 @@ class FormalSpec:
             lines.append("Init ==")
             for i, var in enumerate(self.state_vars):
                 prefix = "    /\\" if i > 0 else "   "
-                # Provide sensible defaults based on type
-                if "Seq" in var.type:
+                # Use custom initial value if provided, otherwise infer from type
+                if var.initial_value is not None:
+                    default = var.initial_value
+                elif "Seq" in var.type:
                     default = "<<>>"
                 elif "Set" in var.type:
                     default = "{}"
@@ -216,7 +234,8 @@ class FormalSpec:
 
                 # Action signature
                 if action.parameters:
-                    sig = f"{action.name}({', '.join(action.parameters)})"
+                    param_names = ', '.join(p.name for p in action.parameters)
+                    sig = f"{action.name}({param_names})"
                 else:
                     sig = action.name
                 lines.append(f"{sig} ==")
@@ -249,13 +268,16 @@ class FormalSpec:
             lines.append("")
             lines.append("Next ==")
             for i, action in enumerate(self.actions):
-                # For parameterized actions, existentially quantify over parameters
+                # For parameterized actions, existentially quantify over parameters with domains
                 if action.parameters:
-                    # Assume parameters are typed (e.g., "consumer \\in 1..NumConsumers")
-                    action_call = f"\\E {', '.join(action.parameters)} : {action.name}({', '.join(action.parameters)})"
+                    # Build bounded quantifier: \E param1 \in domain1, param2 \in domain2 : Action(param1, param2)
+                    param_bindings = ', '.join(f"{p.name} \\in {p.domain}" for p in action.parameters)
+                    param_names = ', '.join(p.name for p in action.parameters)
+                    action_call = f"\\E {param_bindings} : {action.name}({param_names})"
                 else:
                     action_call = action.name
-                prefix = "    \\/" if i > 0 else "   "
+                # All disjuncts start with \/ to avoid precedence issues with \E quantifiers
+                prefix = "    \\/"
                 lines.append(f"{prefix} {action_call}")
             lines.append("")
 

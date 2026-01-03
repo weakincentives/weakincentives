@@ -51,7 +51,7 @@ Init ==
     /\ now = 0
     /\ nextMsgId = 0
     /\ nextHandle = 0
-    /\ consumerState = [x \in {} |-> 0]
+    /\ consumerState = [c \in 1..NumConsumers |-> [holding |-> NULL, handle |-> 0]]
     /\ deliveryCounts = [x \in {} |-> 0]
     /\ deliveryHistory = [x \in {} |-> 0]
 
@@ -155,14 +155,14 @@ Tick ==
 (* Next State *)
 
 Next ==
-    \E body : Send(body)
-    \/ \E consumer : Receive(consumer)
-    \/ \E consumer : Acknowledge(consumer)
-    \/ \E consumer : AcknowledgeFail(consumer)
-    \/ \E consumer, newTimeout : Nack(consumer, newTimeout)
-    \/ \E consumer : NackFail(consumer)
-    \/ \E consumer, newTimeout : Extend(consumer, newTimeout)
-    \/ \E consumer : ExtendFail(consumer)
+    \/ \E body \in 1..MaxMessages : Send(body)
+    \/ \E consumer \in 1..NumConsumers : Receive(consumer)
+    \/ \E consumer \in 1..NumConsumers : Acknowledge(consumer)
+    \/ \E consumer \in 1..NumConsumers : AcknowledgeFail(consumer)
+    \/ \E consumer \in 1..NumConsumers, newTimeout \in 0..VisibilityTimeout*2 : Nack(consumer, newTimeout)
+    \/ \E consumer \in 1..NumConsumers : NackFail(consumer)
+    \/ \E consumer \in 1..NumConsumers, newTimeout \in 1..VisibilityTimeout*2 : Extend(consumer, newTimeout)
+    \/ \E consumer \in 1..NumConsumers : ExtendFail(consumer)
     \/ ReapOne
     \/ Tick
 

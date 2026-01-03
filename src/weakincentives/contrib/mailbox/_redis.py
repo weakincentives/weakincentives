@@ -40,7 +40,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-from weakincentives.formal import Action, Invariant, StateVar, formal_spec
+from weakincentives.formal import Action, ActionParameter, Invariant, StateVar, formal_spec
 from weakincentives.runtime.mailbox import (
     CompositeResolver,
     MailboxConnectionError,
@@ -285,7 +285,12 @@ class RedisMailboxFactory[R]:
         StateVar("now", "Nat", "Abstract time counter"),
         StateVar("nextMsgId", "Nat", "Counter for generating message IDs"),
         StateVar("nextHandle", "Nat", "Counter for generating handle suffixes"),
-        StateVar("consumerState", "Function", "consumer_id -> {holding, handle}"),
+        StateVar(
+            "consumerState",
+            "Function",
+            "consumer_id -> {holding, handle}",
+            initial_value="[c \\in 1..NumConsumers |-> [holding |-> NULL, handle |-> 0]]",
+        ),
         StateVar("deliveryCounts", "Function", "msg_id -> count (persists across requeue)"),
         StateVar("deliveryHistory", "Function", "msg_id -> Seq of (count, handle) for INV-4"),
     ],
@@ -298,7 +303,7 @@ class RedisMailboxFactory[R]:
     actions=[
         Action(
             name="Send",
-            parameters=("body",),
+            parameters=(ActionParameter("body", "1..MaxMessages"),),
             preconditions=("nextMsgId <= MaxMessages",),
             updates={
                 "pending": "Append(pending, nextMsgId)",
@@ -311,7 +316,7 @@ class RedisMailboxFactory[R]:
         ),
         Action(
             name="Receive",
-            parameters=("consumer",),
+            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
             preconditions=(
                 "Len(pending) > 0",
                 "consumerState[consumer].holding = NULL",
@@ -329,7 +334,7 @@ class RedisMailboxFactory[R]:
         ),
         Action(
             name="Acknowledge",
-            parameters=("consumer",),
+            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
             preconditions=(
                 "consumerState[consumer].holding /= NULL",
                 r"consumerState[consumer].holding \in DOMAIN handles",
@@ -348,7 +353,7 @@ class RedisMailboxFactory[R]:
         ),
         Action(
             name="AcknowledgeFail",
-            parameters=("consumer",),
+            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
             preconditions=(
                 "consumerState[consumer].holding /= NULL",
                 r"consumerState[consumer].holding \notin DOMAIN handles \/ handles[consumerState[consumer].holding] /= consumerState[consumer].handle \/ consumerState[consumer].holding \notin DOMAIN invisible",
@@ -360,7 +365,10 @@ class RedisMailboxFactory[R]:
         ),
         Action(
             name="Nack",
-            parameters=("consumer", "newTimeout"),
+            parameters=(
+                ActionParameter("consumer", "1..NumConsumers"),
+                ActionParameter("newTimeout", "0..VisibilityTimeout*2"),
+            ),
             preconditions=(
                 "consumerState[consumer].holding /= NULL",
                 r"consumerState[consumer].holding \in DOMAIN handles",
@@ -377,7 +385,7 @@ class RedisMailboxFactory[R]:
         ),
         Action(
             name="NackFail",
-            parameters=("consumer",),
+            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
             preconditions=(
                 "consumerState[consumer].holding /= NULL",
                 r"consumerState[consumer].holding \notin DOMAIN handles \/ handles[consumerState[consumer].holding] /= consumerState[consumer].handle \/ consumerState[consumer].holding \notin DOMAIN invisible",
@@ -389,7 +397,10 @@ class RedisMailboxFactory[R]:
         ),
         Action(
             name="Extend",
-            parameters=("consumer", "newTimeout"),
+            parameters=(
+                ActionParameter("consumer", "1..NumConsumers"),
+                ActionParameter("newTimeout", "1..VisibilityTimeout*2"),
+            ),
             preconditions=(
                 "consumerState[consumer].holding /= NULL",
                 r"consumerState[consumer].holding \in DOMAIN handles",
@@ -403,7 +414,7 @@ class RedisMailboxFactory[R]:
         ),
         Action(
             name="ExtendFail",
-            parameters=("consumer",),
+            parameters=(ActionParameter("consumer", "1..NumConsumers"),),
             preconditions=(
                 "consumerState[consumer].holding /= NULL",
                 r"consumerState[consumer].holding \notin DOMAIN handles \/ handles[consumerState[consumer].holding] /= consumerState[consumer].handle \/ consumerState[consumer].holding \notin DOMAIN invisible",
