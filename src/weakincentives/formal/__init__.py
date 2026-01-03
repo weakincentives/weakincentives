@@ -130,8 +130,16 @@ class FormalSpec:
         Returns:
             Complete TLA+ module as a string
         """
+        # Generate header line with consistent width (77 chars total)
+        # Format: "---- MODULE ModuleName ----" with padding to 77 chars
+        module_line = f"MODULE {self.module}"
+        dashes_needed = 77 - len(module_line) - 2  # -2 for spaces
+        left_dashes = dashes_needed // 2
+        right_dashes = dashes_needed - left_dashes
+        header = f"{'-' * left_dashes} {module_line} {'-' * right_dashes}"
+
         lines = [
-            f"{'─' * 24} MODULE {self.module} {'─' * (53 - len(self.module))}",
+            header,
             "(* Generated from Python formal specification metadata *)",
             "",
         ]
@@ -143,17 +151,20 @@ class FormalSpec:
 
         # Constants
         if self.constants:
+            const_names = list(self.constants.keys())
             lines.append("CONSTANTS")
-            for name in self.constants:
-                lines.append(f"    {name}")
+            for i, name in enumerate(const_names):
+                comma = "," if i < len(const_names) - 1 else ""
+                lines.append(f"    {name}{comma}")
             lines.append("")
 
         # State variables
         if self.state_vars:
             lines.append("VARIABLES")
-            for var in self.state_vars:
+            for i, var in enumerate(self.state_vars):
+                comma = "," if i < len(self.state_vars) - 1 else ""
                 comment = f"  \\* {var.description}" if var.description else ""
-                lines.append(f"    {var.name}{comment}")
+                lines.append(f"    {var.name}{comma}{comment}")
             lines.append("")
 
             # vars tuple
@@ -171,6 +182,28 @@ class FormalSpec:
                 for line in definition.split("\n"):
                     lines.append(f"    {line}" if line.strip() else "")
                 lines.append("")
+
+        # Init formula (default: all variables at default values)
+        if self.state_vars:
+            lines.append("-----------------------------------------------------------------------------")
+            lines.append("(* Initial State *)")
+            lines.append("")
+            lines.append("Init ==")
+            for i, var in enumerate(self.state_vars):
+                prefix = "    /\\" if i > 0 else "   "
+                # Provide sensible defaults based on type
+                if "Seq" in var.type:
+                    default = "<<>>"
+                elif "Set" in var.type:
+                    default = "{}"
+                elif "Function" in var.type:
+                    default = "[x \\in {} |-> 0]"
+                elif "Nat" in var.type or "Int" in var.type:
+                    default = "0"
+                else:
+                    default = "NULL"  # fallback
+                lines.append(f"{prefix} {var.name} = {default}")
+            lines.append("")
 
         # Actions
         if self.actions:
@@ -209,6 +242,31 @@ class FormalSpec:
 
                 lines.append("")
 
+        # Next formula (disjunction of all actions)
+        if self.actions:
+            lines.append("-----------------------------------------------------------------------------")
+            lines.append("(* Next State *)")
+            lines.append("")
+            lines.append("Next ==")
+            for i, action in enumerate(self.actions):
+                # For parameterized actions, existentially quantify over parameters
+                if action.parameters:
+                    # Assume parameters are typed (e.g., "consumer \\in 1..NumConsumers")
+                    action_call = f"\\E {', '.join(action.parameters)} : {action.name}({', '.join(action.parameters)})"
+                else:
+                    action_call = action.name
+                prefix = "    \\/" if i > 0 else "   "
+                lines.append(f"{prefix} {action_call}")
+            lines.append("")
+
+        # Spec formula (Init /\ [][Next]_vars)
+        if self.state_vars and self.actions:
+            lines.append("-----------------------------------------------------------------------------")
+            lines.append("(* Specification *)")
+            lines.append("")
+            lines.append("Spec == Init /\\ [][Next]_vars")
+            lines.append("")
+
         # Invariants
         if self.invariants:
             lines.append("-----------------------------------------------------------------------------")
@@ -231,27 +289,39 @@ class FormalSpec:
 
                 lines.append("")
 
-        lines.append("=" * 77)
+        # Footer line must match header width
+        lines.append("=" * len(header))
         return "\n".join(lines)
 
     def to_tla_config(
         self,
         *,
-        spec: str = "Spec",
-        check_deadlock: bool = True,
+        init: str | None = None,
+        next: str | None = None,
+        check_deadlock: bool = False,
         state_constraint: str | None = None,
     ) -> str:
         """Generate TLC model checker configuration.
 
         Args:
-            spec: Specification to check (default: "Spec")
+            init: Initial state formula (optional, for simulation mode)
+            next: Next-state formula (optional, for simulation mode)
             check_deadlock: Whether to check for deadlocks
             state_constraint: Optional state constraint expression
 
         Returns:
             TLC configuration file content
         """
-        lines = [f"SPECIFICATION {spec}", ""]
+        lines = []
+
+        # Use SPECIFICATION Spec if available
+        if init is None and next is None:
+            lines.append("SPECIFICATION Spec")
+            lines.append("")
+        elif init and next:
+            lines.append(f"INIT {init}")
+            lines.append(f"NEXT {next}")
+            lines.append("")
 
         # Constants
         if self.constants:

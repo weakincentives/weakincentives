@@ -227,3 +227,4 @@ specs/tla/states/
 
 # Redis dump
 dump.rdb
+tla2tools.jar

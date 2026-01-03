@@ -1,25 +1,25 @@
-──────────────────────── MODULE RedisMailbox ─────────────────────────────────────────
+---------------------------- MODULE RedisMailbox ----------------------------
 (* Generated from Python formal specification metadata *)
 
 EXTENDS Integers, Sequences, FiniteSets, TLC
 
 CONSTANTS
-    MaxMessages
-    MaxDeliveries
-    NumConsumers
+    MaxMessages,
+    MaxDeliveries,
+    NumConsumers,
     VisibilityTimeout
 
 VARIABLES
-    pending  \* Sequence of message IDs in pending list
-    invisible  \* msg_id -> {expiresAt, handle}
-    data  \* msg_id -> body (or NULL if deleted)
-    handles  \* msg_id -> current valid handle suffix
-    deleted  \* Set of deleted message IDs
-    now  \* Abstract time counter
-    nextMsgId  \* Counter for generating message IDs
-    nextHandle  \* Counter for generating handle suffixes
-    consumerState  \* consumer_id -> {holding, handle}
-    deliveryCounts  \* msg_id -> count (persists across requeue)
+    pending,  \* Sequence of message IDs in pending list
+    invisible,  \* msg_id -> {expiresAt, handle}
+    data,  \* msg_id -> body (or NULL if deleted)
+    handles,  \* msg_id -> current valid handle suffix
+    deleted,  \* Set of deleted message IDs
+    now,  \* Abstract time counter
+    nextMsgId,  \* Counter for generating message IDs
+    nextHandle,  \* Counter for generating handle suffixes
+    consumerState,  \* consumer_id -> {holding, handle}
+    deliveryCounts,  \* msg_id -> count (persists across requeue)
     deliveryHistory  \* msg_id -> Seq of (count, handle) for INV-4
 
 vars == <<pending, invisible, data, handles, deleted, now, nextMsgId, nextHandle, consumerState, deliveryCounts, deliveryHistory>>
@@ -38,6 +38,22 @@ RemoveKey(f, k) ==
 
 UpdateFunc(f, k, v) ==
     [m \in (DOMAIN f) \cup {k} |-> IF m = k THEN v ELSE f[m]]
+
+-----------------------------------------------------------------------------
+(* Initial State *)
+
+Init ==
+    pending = <<>>
+    /\ invisible = [x \in {} |-> 0]
+    /\ data = [x \in {} |-> 0]
+    /\ handles = [x \in {} |-> 0]
+    /\ deleted = {}
+    /\ now = 0
+    /\ nextMsgId = 0
+    /\ nextHandle = 0
+    /\ consumerState = [x \in {} |-> 0]
+    /\ deliveryCounts = [x \in {} |-> 0]
+    /\ deliveryHistory = [x \in {} |-> 0]
 
 -----------------------------------------------------------------------------
 (* Actions *)
@@ -134,6 +150,26 @@ ReapOne ==
 Tick ==
     /\ now' = now + 1
     /\ UNCHANGED <<pending, invisible, data, handles, deleted, nextMsgId, nextHandle, consumerState, deliveryCounts, deliveryHistory>>
+
+-----------------------------------------------------------------------------
+(* Next State *)
+
+Next ==
+    \E body : Send(body)
+    \/ \E consumer : Receive(consumer)
+    \/ \E consumer : Acknowledge(consumer)
+    \/ \E consumer : AcknowledgeFail(consumer)
+    \/ \E consumer, newTimeout : Nack(consumer, newTimeout)
+    \/ \E consumer : NackFail(consumer)
+    \/ \E consumer, newTimeout : Extend(consumer, newTimeout)
+    \/ \E consumer : ExtendFail(consumer)
+    \/ ReapOne
+    \/ Tick
+
+-----------------------------------------------------------------------------
+(* Specification *)
+
+Spec == Init /\ [][Next]_vars
 
 -----------------------------------------------------------------------------
 (* Invariants *)
