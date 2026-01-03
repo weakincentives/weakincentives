@@ -271,10 +271,10 @@ class RedisMailboxFactory[R]:
     module="RedisMailbox",
     extends=("Integers", "Sequences", "FiniteSets", "TLC"),
     constants={
-        "MaxMessages": 1,
+        "MaxMessages": 2,
         "MaxDeliveries": 2,
-        "NumConsumers": 1,
-        "VisibilityTimeout": 1,
+        "NumConsumers": 2,
+        "VisibilityTimeout": 2,
     },
     state_vars=[
         StateVar("pending", "Seq(MessageId)", "Sequence of message IDs in pending list"),
@@ -517,7 +517,7 @@ class RedisMailboxFactory[R]:
             description="Each delivery of a message gets a unique handle",
         ),
     ],
-    constraint="now <= 1",
+    constraint="now <= 2",
 )
 class RedisMailbox[T, R]:
     """Redis-backed mailbox with SQS-compatible visibility timeout semantics.
