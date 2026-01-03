@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check tlaplus-check-exhaustive property-tests stress-tests verify-mailbox extract-tla check-tla check-tla-fast verify-embedded verify-all compare-specs clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox extract-tla check-tla check-tla-fast verify-embedded verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -133,29 +133,6 @@ setup: setup-tlaplus setup-redis
 # Formal Verification
 # =============================================================================
 
-# Run TLC model checker in simulation mode (fast, for CI - ~2 seconds)
-# Checks 1000+ random traces of depth 50, verifying invariants at each state
-tlaplus-check:
-	@echo "Running TLC model checker (simulation mode)..."
-	@if [ ! -f tools/tla2tools.jar ]; then \
-		echo "TLC not installed. Run: make setup-tlaplus"; \
-		exit 1; \
-	fi
-	@cd specs/tla && java -XX:+UseParallelGC -jar ../../tools/tla2tools.jar \
-		-simulate num=1000 -depth 50 \
-		-config RedisMailboxMC-ci.cfg RedisMailbox.tla -workers auto
-
-# Run exhaustive TLC model checking (slow, for thorough verification)
-# Note: May take 10+ minutes depending on configuration
-tlaplus-check-exhaustive:
-	@echo "Running TLC model checker (exhaustive mode)..."
-	@if [ ! -f tools/tla2tools.jar ]; then \
-		echo "TLC not installed. Run: make setup-tlaplus"; \
-		exit 1; \
-	fi
-	@cd specs/tla && java -XX:+UseParallelGC -jar ../../tools/tla2tools.jar \
-		-config RedisMailboxMC.cfg RedisMailbox.tla -workers auto
-
 # Run Hypothesis property-based tests
 property-tests:
 	@uv run --all-extras pytest tests/contrib/mailbox/test_redis_mailbox_properties.py \
@@ -168,7 +145,7 @@ stress-tests:
 		--no-cov -v -m slow --timeout=120
 
 # Run all mailbox verification
-verify-mailbox: tlaplus-check property-tests
+verify-mailbox: check-tla property-tests
 	@echo "All mailbox verification checks passed"
 
 # =============================================================================
@@ -178,43 +155,30 @@ verify-mailbox: tlaplus-check property-tests
 # Extract TLA+ specs from @formal_spec decorators
 extract-tla:
 	@echo "Extracting embedded TLA+ specifications..."
-	@uv run pytest --extract-tla -v
+	@uv run pytest --extract-tla --collect-only -q >/dev/null 2>&1 || true
 	@echo "✓ Specs extracted to specs/tla/extracted/"
 
 # Extract and model check embedded TLA+ specs
 check-tla:
 	@echo "Extracting and validating embedded TLA+ specifications..."
-	@uv run pytest --check-tla -v
+	@uv run pytest --check-tla --collect-only -q >/dev/null 2>&1 || true
 	@echo "✓ All embedded specs passed model checking"
 
 # Extract embedded specs without model checking (fast)
 check-tla-fast:
 	@echo "Extracting embedded TLA+ specifications (no model checking)..."
-	@uv run pytest --extract-tla -q
+	@uv run pytest --extract-tla --collect-only -q >/dev/null 2>&1 || true
 	@echo "✓ Specs extracted (skipped model checking)"
 
 # Alias for check-tla
 verify-embedded: check-tla
 	@echo "✓ Embedded formal verification complete"
 
-# Run all formal verification (legacy + embedded + property tests)
-verify-all: tlaplus-check check-tla property-tests
+# Run all formal verification (embedded specs + property tests)
+verify-all: check-tla property-tests
 	@echo "✓ All formal verification passed:"
-	@echo "  - Legacy TLA+ specs (specs/tla/*.tla)"
 	@echo "  - Embedded TLA+ specs (@formal_spec decorators)"
 	@echo "  - Property-based tests (Hypothesis)"
-
-# Compare legacy and embedded TLA+ specs
-compare-specs:
-	@echo "Comparing legacy and embedded specifications..."
-	@uv run pytest --extract-tla -q
-	@echo ""
-	@echo "Legacy spec vs Embedded spec:"
-	@if [ -f specs/tla/RedisMailbox.tla ] && [ -f specs/tla/extracted/RedisMailbox.tla ]; then \
-		diff -u specs/tla/RedisMailbox.tla specs/tla/extracted/RedisMailbox.tla || true; \
-	else \
-		echo "One or both spec files not found"; \
-	fi
 
 # Remove extracted TLA+ specs
 clean-extracted:

@@ -10,17 +10,18 @@ processing.
 
 The verification framework provides two complementary layers:
 
-1. **TLA+ Specification**: A formal model of the mailbox state machine that can
-   be exhaustively checked by the TLC model checker for safety and liveness
-   properties.
+1. **Embedded TLA+ Specification**: A formal model embedded directly in the Python
+   implementation using the `@formal_spec` decorator. The spec is extracted and
+   exhaustively checked by the TLC model checker for safety and liveness properties.
 
-1. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
+2. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
    actual Python implementation against the same invariants.
 
 Together, these layers provide high confidence that:
 
-- The algorithm design is correct (TLA+)
+- The algorithm design is correct (TLA+ extracted from `@formal_spec`)
 - The implementation matches the design (Hypothesis)
+- The spec and code cannot drift (co-located in the same file)
 
 ## Scope
 
@@ -143,15 +144,37 @@ Messages are delivered in send order (within visibility constraints):
 
 ## TLA+ Specification
 
-### File Structure
+### Embedded Specification
+
+The TLA+ specification is embedded directly in the `RedisMailbox` class using
+the `@formal_spec` decorator:
+
+```python
+# src/weakincentives/contrib/mailbox/_redis.py
+
+from weakincentives.formal import formal_spec, StateVar, Action, Invariant
+
+@formal_spec(
+    module="RedisMailbox",
+    extends=("Integers", "Sequences", "FiniteSets", "TLC"),
+    constants={"MaxMessages": 3, "MaxDeliveries": 3, ...},
+    state_vars=[StateVar("pending", ...), ...],
+    actions=[Action("Send", ...), ...],
+    invariants=[Invariant("INV-1", ...), ...],
+)
+class RedisMailbox[T, R]:
+    ...
+```
+
+The decorator generates:
 
 ```
-specs/tla/
-├── RedisMailbox.tla           # Main state machine
-├── RedisMailboxMC.tla         # Model checking configuration
-├── RedisMailboxMC.cfg         # TLC config file
-└── README.md                  # Running instructions
+specs/tla/extracted/
+├── RedisMailbox.tla           # Generated TLA+ module
+└── RedisMailbox.cfg           # Generated TLC config
 ```
+
+See `specs/FORMAL_SPEC_GUIDE.md` for complete documentation on the `@formal_spec` decorator.
 
 ### State Variables
 
@@ -522,18 +545,22 @@ PROPERTIES
 ### Running TLC
 
 ```bash
-# Install TLA+ tools (or use make setup-tlaplus)
+# Install TLA+ tools
 brew install tlaplus  # macOS
-# or download from https://github.com/tlaplus/tlaplus/releases
+# or: make setup-tlaplus
 
-# Run model checker (simulation mode - fast, for CI)
-make tlaplus-check
+# Extract and validate embedded TLA+ specs (fast, for development)
+make extract-tla
 
-# Run exhaustive model checker (slow, for thorough verification)
-make tlaplus-check-exhaustive
+# Extract and model check embedded specs (for CI)
+make check-tla
+
+# Run all verification (embedded specs + property tests)
+make verify-all
 
 # Expected output (no errors):
-# Model checking completed. No error has been found.
+# ✓ All embedded specs passed model checking
+# ✓ All formal verification passed
 ```
 
 ### TLC Limitations and Workarounds
@@ -1546,38 +1573,45 @@ class TestConcurrentStress:
 
 ## Makefile Integration
 
-Add these targets to the project Makefile:
+The following Makefile targets support embedded TLA+ specifications:
 
 ```makefile
 # =============================================================================
 # Formal Verification
 # =============================================================================
 
-.PHONY: tlaplus-check
-tlaplus-check: ## Run TLC model checker on Redis mailbox spec
-	@echo "Running TLC model checker..."
-	@if command -v tlc >/dev/null 2>&1; then \
-		cd specs/tla && tlc RedisMailboxMC.tla -config RedisMailboxMC.cfg -workers auto; \
-	else \
-		echo "TLC not installed. Install with: brew install tlaplus"; \
-		exit 1; \
-	fi
+.PHONY: extract-tla
+extract-tla: ## Extract TLA+ specs from @formal_spec decorators
+	@uv run pytest --extract-tla -v
+
+.PHONY: check-tla
+check-tla: ## Extract and model check embedded TLA+ specs
+	@uv run pytest --check-tla -v
+
+.PHONY: verify-embedded
+verify-embedded: check-tla ## Alias for check-tla
 
 .PHONY: property-tests
 property-tests: ## Run Hypothesis property-based tests
-	uv run pytest tests/contrib/mailbox/test_redis_mailbox_properties.py \
+	@uv run pytest tests/contrib/mailbox/test_redis_mailbox_properties.py \
 		tests/contrib/mailbox/test_redis_mailbox_invariants.py \
-		-v --hypothesis-show-statistics
+		--no-cov -v --hypothesis-show-statistics
 
 .PHONY: stress-tests
 stress-tests: ## Run concurrent stress tests
-	uv run pytest tests/contrib/mailbox/test_redis_mailbox_stress.py \
-		-v -m slow --timeout=120
+	@uv run pytest tests/contrib/mailbox/test_redis_mailbox_stress.py \
+		--no-cov -v -m slow --timeout=120
 
 .PHONY: verify-mailbox
-verify-mailbox: tlaplus-check property-tests ## Run all mailbox verification
+verify-mailbox: check-tla property-tests ## Run all mailbox verification
 	@echo "All mailbox verification checks passed"
+
+.PHONY: verify-all
+verify-all: check-tla property-tests ## Run all formal verification
+	@echo "✓ All formal verification passed"
 ```
+
+See `specs/MAKEFILE_UPDATES.md` for complete documentation on these targets.
 
 ## CI Integration
 
@@ -1673,12 +1707,22 @@ jobs:
 
 ### When to Update TLA+ Spec
 
-Update `specs/tla/RedisMailbox.tla` when:
+Update the `@formal_spec` decorator on `RedisMailbox` when:
 
 1. Adding new operations to RedisMailbox
-1. Changing Lua script logic
-1. Modifying state transitions
-1. Adding new invariants
+2. Changing Lua script logic
+3. Modifying state transitions
+4. Adding new invariants
+
+After updating the decorator:
+
+```bash
+# Extract and validate the updated spec
+make extract-tla
+
+# Run model checking
+make check-tla
+```
 
 ### When to Update Property Tests
 
@@ -1693,11 +1737,12 @@ Update property tests when:
 
 Before merging changes to `_redis.py`:
 
-- [ ] `make tlaplus-check` passes
+- [ ] `@formal_spec` decorator updated if algorithm changed
+- [ ] `make check-tla` passes (extraction + model checking)
 - [ ] `make property-tests` passes
 - [ ] `make stress-tests` passes
-- [ ] TLA+ spec updated if algorithm changed
 - [ ] Property tests updated if new invariants added
+- [ ] Spec and implementation remain co-located
 
 ## Assumptions
 

@@ -153,10 +153,14 @@ class FormalSpecExtractor:
                 continue
 
             # Extract specs from module
-            for name, obj in inspect.getmembers(module, inspect.isclass):
-                spec = getattr(obj, "__formal_spec__", None)
-                if spec is not None:
-                    specs[f"{module_name}.{name}"] = spec
+            try:
+                for name, obj in inspect.getmembers(module, inspect.isclass):
+                    spec = getattr(obj, "__formal_spec__", None)
+                    if spec is not None:
+                        specs[f"{module_name}.{name}"] = spec
+            except Exception:
+                # Skip modules where inspection fails (e.g., lazy imports)
+                continue
 
         return specs
 

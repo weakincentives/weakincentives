@@ -106,6 +106,14 @@ a goal at any time.
   helpers or shared state.
 - **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
   modifying tools.
+- **VERIFICATION.md**: Redis mailbox formal verification with embedded TLA+ and
+  property-based testing—when modifying mailbox implementations.
+- **FORMAL_SPEC_GUIDE.md**: Using `@formal_spec` decorator for embedded TLA+
+  specifications—when adding formal specs to new code.
+- **TLA_EMBEDDING_INDEX.md**: Navigation guide for all TLA+ embedding
+  documentation—starting point for formal verification work.
+- **TLA_MIGRATION_GUIDE.md**: Migrating legacy TLA+ specs to embedded
+  `@formal_spec` form—when refactoring existing TLA+ files.
 - **WORKSPACE.md**: VFS, Podman sandbox, asteval, and workspace digest—when
   editing workspace tooling.
 
