@@ -268,7 +268,7 @@ def simple_handler(
     params: ToolParams, *, context: ToolContext
 ) -> ToolResult[ToolPayload]:
     del context
-    return ToolResult(message="ok", value=ToolPayload(answer=params.query))
+    return ToolResult.ok(ToolPayload(answer=params.query), message="ok")
 
 
 class RecordingCompletion:

@@ -72,10 +72,7 @@ class ExampleOutput:
 
 def make_tool_event(value: int) -> ToolInvoked:
     payload = ExamplePayload(value=value)
-    tool_result = cast(
-        ToolResult[object],
-        ToolResult(message="ok", value=payload),
-    )
+    tool_result = cast(ToolResult[object], ToolResult.ok(payload, message="ok"))
     rendered_output = tool_result.render()
     return ToolInvoked(
         prompt_name="example",
@@ -148,7 +145,7 @@ def test_tool_invoked_extracts_value_from_result(
     session, bus = session_factory()
 
     payload = ExamplePayload(value=7)
-    tool_result = cast(ToolResult[object], ToolResult(message="ok", value=payload))
+    tool_result = cast(ToolResult[object], ToolResult.ok(payload, message="ok"))
     event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
@@ -288,7 +285,7 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
 
     event = make_tool_event(1)
     non_dataclass_result = cast(
-        ToolResult[object], ToolResult(message="ok", value="not a dataclass")
+        ToolResult[object], ToolResult.ok("not a dataclass", message="ok")
     )
     non_dataclass_event = ToolInvoked(
         prompt_name="example",
@@ -349,10 +346,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
 
     bus.dispatch(make_tool_event(1))
 
-    failure = cast(
-        ToolResult[object],
-        ToolResult(message="failed", value=None, success=False),
-    )
+    failure = cast(ToolResult[object], ToolResult.error("failed"))
     failure_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,

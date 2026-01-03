@@ -43,9 +43,7 @@ def _example_handler(
     params: ExampleParams, *, context: ToolContext
 ) -> ToolResult[ExampleResult]:
     del context
-    return ToolResult(
-        message=params.message, value=ExampleResult(message=params.message)
-    )
+    return ToolResult.ok(ExampleResult(message=params.message), message=params.message)
 
 
 def test_tool_infers_param_and_result_types() -> None:
@@ -184,7 +182,7 @@ def test_tool_accepts_variadic_tuple_result_type() -> None:
     ) -> ToolResult[tuple[ExampleResult, ...]]:
         del context
         value = (ExampleResult(message=params.message),)
-        result = ToolResult(message=params.message, value=value)
+        result = ToolResult.ok(value, message=params.message)
         return cast(ToolResult[tuple[ExampleResult, ...]], result)
 
     tool = Tool[ExampleParams, tuple[ExampleResult, ...]](
@@ -202,9 +200,8 @@ def test_tool_accepts_list_result_type() -> None:
         params: ExampleParams, *, context: ToolContext
     ) -> ToolResult[list[ExampleResult]]:
         del context
-        return ToolResult(
-            message=params.message,
-            value=[ExampleResult(message=params.message)],
+        return ToolResult.ok(
+            [ExampleResult(message=params.message)], message=params.message
         )
 
     tool = Tool[ExampleParams, list[ExampleResult]](
@@ -282,8 +279,8 @@ def test_tool_accepts_annotated_param_and_return() -> None:
         context: Annotated[ToolContext, "meta"],
     ) -> Annotated[ToolResult[ExampleResult], "meta"]:
         del context
-        return ToolResult(
-            message=params.message, value=ExampleResult(message=params.message)
+        return ToolResult.ok(
+            ExampleResult(message=params.message), message=params.message
         )
 
     tool = Tool[ExampleParams, ExampleResult](
