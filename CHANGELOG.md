@@ -4,6 +4,21 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### ToolResult Convenience Constructors
+
+New class methods for creating `ToolResult` instances with less boilerplate:
+
+```python
+# Success with typed value
+ToolResult.ok(MyResult(...), message="Done")
+
+# Failure with no value
+ToolResult.error("Something went wrong")
+```
+
+The full constructor form remains available when `exclude_value_from_context` is
+needed.
+
 ### Lifecycle Management for MainLoop and EvalLoop
 
 New primitives for coordinating graceful shutdown across multiple loop instances
