@@ -219,4 +219,9 @@ HandleUniqueness ==
         IN \A i, j \in 1..Len(history):
             i /= j => history[i].handle /= history[j].handle
 
+-----------------------------------------------------------------------------
+(* State Constraint *)
+
+StateConstraint == now <= 1
+
 =============================================================================

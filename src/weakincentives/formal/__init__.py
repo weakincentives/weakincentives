@@ -130,6 +130,7 @@ class FormalSpec:
         actions: Action definitions
         invariants: Invariant definitions
         helpers: Helper operator definitions (raw TLA+)
+        constraint: Optional state constraint to limit TLC exploration (e.g., "now <= 3")
     """
 
     module: str
@@ -139,6 +140,7 @@ class FormalSpec:
     actions: tuple[Action, ...] = field(default_factory=tuple)
     invariants: tuple[Invariant, ...] = field(default_factory=tuple)
     helpers: dict[str, str] = field(default_factory=dict)
+    constraint: str | None = None
 
     def to_tla(self) -> str:
         """Generate TLA+ module from metadata.
@@ -311,6 +313,14 @@ class FormalSpec:
 
                 lines.append("")
 
+        # State constraint (for limiting TLC exploration)
+        if self.constraint:
+            lines.append("-----------------------------------------------------------------------------")
+            lines.append("(* State Constraint *)")
+            lines.append("")
+            lines.append(f"StateConstraint == {self.constraint}")
+            lines.append("")
+
         # Footer line must match header width
         lines.append("=" * len(header))
         return "\n".join(lines)
@@ -359,9 +369,14 @@ class FormalSpec:
                 lines.append(f"    {inv.name}")
             lines.append("")
 
-        # State constraint
+        # State constraint (use parameter if provided, otherwise use instance field)
         if state_constraint:
+            # Custom constraint provided as parameter
             lines.append(f"CONSTRAINT {state_constraint}")
+            lines.append("")
+        elif self.constraint:
+            # Use the StateConstraint operator defined in the spec
+            lines.append("CONSTRAINT StateConstraint")
             lines.append("")
 
         # Deadlock checking
@@ -381,6 +396,7 @@ def formal_spec(
     actions: list[Action] | None = None,
     invariants: list[Invariant] | None = None,
     helpers: dict[str, str] | None = None,
+    constraint: str | None = None,
 ) -> Callable[[type[T]], type[T]]:
     """Attach formal specification metadata to a class.
 
@@ -419,6 +435,7 @@ def formal_spec(
             actions=tuple(actions) if actions else (),
             invariants=tuple(invariants) if invariants else (),
             helpers=helpers or {},
+            constraint=constraint,
         )
         setattr(cls, "__formal_spec__", spec)
         return cls
