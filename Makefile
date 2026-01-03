@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check tlaplus-check-exhaustive property-tests stress-tests verify-mailbox setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check tlaplus-check-exhaustive property-tests stress-tests verify-mailbox extract-tla check-tla check-tla-fast verify-embedded verify-all compare-specs clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -171,6 +171,61 @@ stress-tests:
 verify-mailbox: tlaplus-check property-tests
 	@echo "All mailbox verification checks passed"
 
+# =============================================================================
+# Embedded TLA+ Specifications
+# =============================================================================
+
+# Extract TLA+ specs from @formal_spec decorators
+extract-tla:
+	@echo "Extracting embedded TLA+ specifications..."
+	@uv run pytest --extract-tla -v
+	@echo "✓ Specs extracted to specs/tla/extracted/"
+
+# Extract and model check embedded TLA+ specs
+check-tla:
+	@echo "Extracting and validating embedded TLA+ specifications..."
+	@uv run pytest --check-tla -v
+	@echo "✓ All embedded specs passed model checking"
+
+# Extract embedded specs without model checking (fast)
+check-tla-fast:
+	@echo "Extracting embedded TLA+ specifications (no model checking)..."
+	@uv run pytest --extract-tla -q
+	@echo "✓ Specs extracted (skipped model checking)"
+
+# Alias for check-tla
+verify-embedded: check-tla
+	@echo "✓ Embedded formal verification complete"
+
+# Run all formal verification (legacy + embedded + property tests)
+verify-all: tlaplus-check check-tla property-tests
+	@echo "✓ All formal verification passed:"
+	@echo "  - Legacy TLA+ specs (specs/tla/*.tla)"
+	@echo "  - Embedded TLA+ specs (@formal_spec decorators)"
+	@echo "  - Property-based tests (Hypothesis)"
+
+# Compare legacy and embedded TLA+ specs
+compare-specs:
+	@echo "Comparing legacy and embedded specifications..."
+	@uv run pytest --extract-tla -q
+	@echo ""
+	@echo "Legacy spec vs Embedded spec:"
+	@if [ -f specs/tla/RedisMailbox.tla ] && [ -f specs/tla/extracted/RedisMailbox.tla ]; then \
+		diff -u specs/tla/RedisMailbox.tla specs/tla/extracted/RedisMailbox.tla || true; \
+	else \
+		echo "One or both spec files not found"; \
+	fi
+
+# Remove extracted TLA+ specs
+clean-extracted:
+	@echo "Cleaning extracted TLA+ specs..."
+	@rm -rf specs/tla/extracted/
+	@echo "✓ Cleaned specs/tla/extracted/"
+
+# =============================================================================
+# Demos
+# =============================================================================
+
 # Launch the interactive code reviewer demo
 demo:
 	@uv run --all-extras python code_reviewer_example.py
@@ -204,5 +259,6 @@ all: format lint-fix bandit deptry pip-audit typecheck test
 # Clean cache files
 clean:
 	rm -rf .pytest_cache .ruff_cache __pycache__
+	rm -rf specs/tla/extracted/
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
