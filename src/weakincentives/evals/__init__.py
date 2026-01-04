@@ -25,9 +25,18 @@ Built-in evaluators:
 - **exact_match**: Strict equality check
 - **contains**: Substring presence check
 
+Session-aware evaluators (behavioral assertions):
+- **tool_called**: Assert a tool was called
+- **tool_not_called**: Assert a tool was NOT called
+- **tool_call_count**: Assert tool call count within bounds
+- **all_tools_succeeded**: Assert all tool calls succeeded
+- **token_usage_under**: Assert token usage under budget
+- **slice_contains**: Assert custom slice contains matching items
+
 Combinators:
 - **all_of**: All evaluators must pass (mean score)
 - **any_of**: At least one must pass (max score)
+- **adapt**: Convert standard evaluator to session-aware
 
 LLM-as-Judge:
 - **llm_judge**: Create evaluator using LLM to judge outputs
@@ -49,11 +58,21 @@ Example:
     >>> eval_loop.run(max_iterations=1)
     >>> report = collect_results(results_mailbox, expected_count=len(dataset))
     >>> print(f"Pass rate: {report.pass_rate:.1%}")
+
+Session-aware evaluation example:
+    >>> from weakincentives.evals import (
+    ...     all_of, exact_match, tool_called, all_tools_succeeded,
+    ... )
+    >>> evaluator = all_of(
+    ...     exact_match,                    # Output must match
+    ...     tool_called("search"),          # Must use search tool
+    ...     all_tools_succeeded(),          # No tool failures
+    ... )
 """
 
 from __future__ import annotations
 
-from ._evaluators import all_of, any_of, contains, exact_match
+from ._evaluators import adapt, all_of, any_of, contains, exact_match, is_session_aware
 from ._helpers import collect_results, submit_dataset
 from ._judge import (
     JUDGE_TEMPLATE,
@@ -65,6 +84,14 @@ from ._judge import (
     llm_judge,
 )
 from ._loop import EvalLoop
+from ._session_evaluators import (
+    all_tools_succeeded,
+    slice_contains,
+    token_usage_under,
+    tool_call_count,
+    tool_called,
+    tool_not_called,
+)
 from ._types import (
     Dataset,
     EvalReport,
@@ -73,6 +100,7 @@ from ._types import (
     Evaluator,
     Sample,
     Score,
+    SessionEvaluator,
 )
 
 __all__ = [  # noqa: RUF022
@@ -90,13 +118,22 @@ __all__ = [  # noqa: RUF022
     "Rating",
     "Sample",
     "Score",
+    "SessionEvaluator",
+    "adapt",
     "all_of",
+    "all_tools_succeeded",
     "any_of",
     "collect_results",
     "contains",
     "exact_match",
+    "is_session_aware",
     "llm_judge",
+    "slice_contains",
     "submit_dataset",
+    "token_usage_under",
+    "tool_call_count",
+    "tool_called",
+    "tool_not_called",
 ]
 
 

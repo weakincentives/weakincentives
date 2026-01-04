@@ -22,7 +22,6 @@ import contextlib
 import logging
 import threading
 import time
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Self
 
 from ..runtime.lifecycle import wait_until
@@ -32,7 +31,8 @@ from ..runtime.mailbox import (
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
 )
-from ._types import EvalRequest, EvalResult, Score
+from ._evaluators import is_session_aware
+from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
 if TYPE_CHECKING:
     from ..runtime import MainLoop
@@ -46,6 +46,9 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     Receives EvalRequest messages, executes through MainLoop, scores
     with evaluator, and sends EvalResult via Message.reply(). Designed
     to run alongside MainLoop workers in distributed deployments.
+
+    Supports both standard and session-aware evaluators. Session-aware
+    evaluators receive a SessionViewProtocol for behavioral assertions.
 
     The single mailbox pattern with reply_to routing:
     - requests mailbox: receives EvalRequest messages with reply_to
@@ -67,7 +70,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     """
 
     _loop: MainLoop[InputT, OutputT]
-    _evaluator: Callable[[OutputT, ExpectedT], Score]
+    _evaluator: Evaluator | SessionEvaluator
     _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
     _shutdown_event: threading.Event
     _running: bool
@@ -77,14 +80,16 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         self,
         *,
         loop: MainLoop[InputT, OutputT],
-        evaluator: Callable[[OutputT, ExpectedT], Score],
+        evaluator: Evaluator | SessionEvaluator,
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
     ) -> None:
         """Initialize the EvalLoop.
 
         Args:
             loop: MainLoop instance for executing samples.
-            evaluator: Scoring function (output, expected) -> Score.
+            evaluator: Scoring function. Can be either:
+                - Standard: (output, expected) -> Score
+                - Session-aware: (output, expected, session) -> Score
             requests: Mailbox to receive EvalRequest messages from.
                 Response routing derives from each message's reply_to field.
         """
@@ -233,7 +238,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         sample = request.sample
         start = time.monotonic()
 
-        response, _ = self._loop.execute(sample.input)
+        response, session = self._loop.execute(sample.input)
         latency_ms = int((time.monotonic() - start) * 1000)
 
         if response.output is None:
@@ -244,11 +249,16 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 error="No output from MainLoop",
             )
 
-        score = self._evaluator(response.output, sample.expected)
+        # Invoke evaluator with session if session-aware
+        # Type ignore needed: is_session_aware narrows the type at runtime
+        if is_session_aware(self._evaluator):
+            score = self._evaluator(response.output, sample.expected, session)  # type: ignore[call-arg]
+        else:
+            score = self._evaluator(response.output, sample.expected)  # type: ignore[call-arg]
 
         return EvalResult(
             sample_id=sample.id,
-            score=score,
+            score=score,  # pyright: ignore[reportUnknownArgumentType]
             latency_ms=latency_ms,
         )
 
