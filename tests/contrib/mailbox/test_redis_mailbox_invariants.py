@@ -468,6 +468,106 @@ class TestEventualRequeue:
             mailbox.purge()
 
 
+class TestDecodeResponsesCompatibility:
+    """Tests for Redis client with decode_responses=True."""
+
+    def test_receive_with_decode_responses_true(
+        self, redis_client: Redis[bytes]
+    ) -> None:
+        """Mailbox works when Redis client uses decode_responses=True.
+
+        When decode_responses=True, Redis returns str instead of bytes.
+        The _deserialize method must handle both cases.
+        """
+        from redis import Redis
+
+        from weakincentives.contrib.mailbox import RedisMailbox
+
+        # Create client with decode_responses=True
+        str_client: Redis[str] = Redis(
+            host="localhost",
+            port=6379,
+            db=15,
+            decode_responses=True,
+        )
+
+        try:
+            str_client.ping()
+        except Exception:
+            pytest.skip("Redis not available")
+
+        mailbox: RedisMailbox[str] = RedisMailbox(
+            name=f"test-decode-responses-{uuid4().hex[:8]}",
+            client=str_client,  # type: ignore[arg-type]
+            reaper_interval=0.1,
+        )
+
+        try:
+            # Send and receive should work
+            msg_id = mailbox.send("test message")
+            msgs = mailbox.receive(visibility_timeout=30)
+
+            assert len(msgs) == 1
+            assert msgs[0].id == msg_id
+            assert msgs[0].body == "test message"
+            assert msgs[0].delivery_count == 1
+
+            msgs[0].acknowledge()
+        finally:
+            mailbox.close()
+            mailbox.purge()
+            str_client.close()
+
+    def test_dataclass_body_with_decode_responses_true(
+        self, redis_client: Redis[bytes]
+    ) -> None:
+        """Dataclass bodies deserialize correctly with decode_responses=True."""
+        from dataclasses import dataclass
+
+        from redis import Redis
+
+        from weakincentives.contrib.mailbox import RedisMailbox
+
+        @dataclass
+        class TestEvent:
+            name: str
+            value: int
+
+        str_client: Redis[str] = Redis(
+            host="localhost",
+            port=6379,
+            db=15,
+            decode_responses=True,
+        )
+
+        try:
+            str_client.ping()
+        except Exception:
+            pytest.skip("Redis not available")
+
+        mailbox: RedisMailbox[TestEvent] = RedisMailbox(
+            name=f"test-decode-dataclass-{uuid4().hex[:8]}",
+            client=str_client,  # type: ignore[arg-type]
+            body_type=TestEvent,
+            reaper_interval=0.1,
+        )
+
+        try:
+            event = TestEvent(name="test", value=42)
+            mailbox.send(event)
+
+            msgs = mailbox.receive(visibility_timeout=30)
+            assert len(msgs) == 1
+            assert msgs[0].body.name == "test"
+            assert msgs[0].body.value == 42
+
+            msgs[0].acknowledge()
+        finally:
+            mailbox.close()
+            mailbox.purge()
+            str_client.close()
+
+
 class TestFIFOOrdering:
     """Tests for INV-7: FIFO Ordering."""
 
