@@ -14,9 +14,14 @@
 
 from __future__ import annotations
 
+import inspect
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
-from ._types import Score
+from ._types import Evaluator, Score, SessionEvaluator
+
+if TYPE_CHECKING:
+    from ..runtime.session import SessionProtocol, SessionViewProtocol
 
 
 def exact_match[T](output: T, expected: T) -> Score:
@@ -65,69 +70,147 @@ def contains(output: str, expected: str) -> Score:
     return Score(value=1.0 if passed else 0.0, passed=passed)
 
 
-def all_of[O, E](*evaluators: Callable[[O, E], Score]) -> Callable[[O, E], Score]:
+_SESSION_AWARE_PARAM_COUNT = 3
+"""Minimum parameter count for session-aware evaluators (output, expected, session)."""
+
+
+def is_session_aware(fn: Callable[..., Score]) -> bool:
+    """Check if evaluator accepts session parameter.
+
+    Inspects the function signature to determine if it expects a session
+    parameter (3+ parameters indicates session-aware evaluator).
+
+    Args:
+        fn: The evaluator function to check.
+
+    Returns:
+        True if the evaluator accepts a session parameter.
+    """
+    sig = inspect.signature(fn)
+    return len(sig.parameters) >= _SESSION_AWARE_PARAM_COUNT
+
+
+def adapt[O, E](evaluator: Evaluator) -> SessionEvaluator:
+    """Adapt a standard evaluator to session-aware signature.
+
+    The session parameter is ignored, allowing standard evaluators
+    to compose with session-aware evaluators.
+
+    Args:
+        evaluator: A standard (output, expected) -> Score evaluator.
+
+    Returns:
+        A session-aware evaluator that ignores the session parameter.
+
+    Example:
+        >>> adapted = adapt(exact_match)
+        >>> score = adapted(output, expected, session)  # session is ignored
+    """
+
+    def evaluate(
+        output: O,
+        expected: E,
+        session: SessionProtocol | SessionViewProtocol,
+    ) -> Score:
+        _ = session  # Unused - adapts standard evaluator to session-aware signature
+        return evaluator(output, expected)
+
+    return evaluate  # type: ignore[return-value]
+
+
+def all_of[O, E](
+    *evaluators: Evaluator | SessionEvaluator,
+) -> SessionEvaluator:
     """All evaluators must pass. Score is the mean.
 
     Combines multiple evaluators conjunctively. All must pass for
     the combined score to pass. The score value is the mean of all
     individual scores.
 
+    Automatically adapts standard evaluators to session-aware signature.
+
     Args:
-        *evaluators: Variable number of evaluator functions.
+        *evaluators: Variable number of evaluator functions (standard or
+            session-aware).
 
     Returns:
-        A combined evaluator function.
+        A session-aware combined evaluator function.
 
     Example:
-        >>> evaluator = all_of(exact_match, contains)
-        >>> score = evaluator("hello", "hello")
-        >>> score.passed  # Both pass
-        True
+        >>> from weakincentives.evals import exact_match, tool_called
+        >>> evaluator = all_of(exact_match, tool_called("search"))
+        >>> score = evaluator("hello", "hello", session)
+        >>> score.passed  # Both must pass
     """
+    # Adapt standard evaluators to session-aware signature at runtime
+    # Type ignore needed: is_session_aware narrows the type at runtime but
+    # the static type checker cannot verify this transformation
+    adapted: list[SessionEvaluator] = [  # type: ignore[assignment]
+        e if is_session_aware(e) else adapt(e)  # type: ignore[arg-type]
+        for e in evaluators
+    ]
 
-    def evaluate(output: O, expected: E) -> Score:
-        scores = [e(output, expected) for e in evaluators]
+    def evaluate(
+        output: O, expected: E, session: SessionProtocol | SessionViewProtocol
+    ) -> Score:
+        scores: list[Score] = [e(output, expected, session) for e in adapted]
         passed = all(s.passed for s in scores)
         value = sum(s.value for s in scores) / len(scores)
         reasons = [s.reason for s in scores if s.reason]
         return Score(value=value, passed=passed, reason="; ".join(reasons))
 
-    return evaluate
+    return evaluate  # type: ignore[return-value]
 
 
-def any_of[O, E](*evaluators: Callable[[O, E], Score]) -> Callable[[O, E], Score]:
+def any_of[O, E](
+    *evaluators: Evaluator | SessionEvaluator,
+) -> SessionEvaluator:
     """At least one evaluator must pass. Score is the max.
 
     Combines multiple evaluators disjunctively. At least one must pass
     for the combined score to pass. The score value is the maximum of
     all individual scores.
 
+    Automatically adapts standard evaluators to session-aware signature.
+
     Args:
-        *evaluators: Variable number of evaluator functions.
+        *evaluators: Variable number of evaluator functions (standard or
+            session-aware).
 
     Returns:
-        A combined evaluator function.
+        A session-aware combined evaluator function.
 
     Example:
-        >>> evaluator = any_of(exact_match, contains)
-        >>> score = evaluator("hello world", "hello")
-        >>> score.passed  # contains passes
-        True
+        >>> from weakincentives.evals import exact_match, tool_called
+        >>> evaluator = any_of(exact_match, tool_called("search"))
+        >>> score = evaluator("hello world", "hello", session)
+        >>> score.passed  # At least one must pass
     """
+    # Adapt standard evaluators to session-aware signature at runtime
+    # Type ignore needed: is_session_aware narrows the type at runtime but
+    # the static type checker cannot verify this transformation
+    adapted: list[SessionEvaluator] = [  # type: ignore[assignment]
+        e if is_session_aware(e) else adapt(e)  # type: ignore[arg-type]
+        for e in evaluators
+    ]
 
-    def evaluate(output: O, expected: E) -> Score:
-        scores = [e(output, expected) for e in evaluators]
+    def evaluate(
+        output: O, expected: E, session: SessionProtocol | SessionViewProtocol
+    ) -> Score:
+        scores: list[Score] = [e(output, expected, session) for e in adapted]
         passed = any(s.passed for s in scores)
         value = max(s.value for s in scores)
         reasons = [s.reason for s in scores if s.reason]
         return Score(value=value, passed=passed, reason="; ".join(reasons))
 
-    return evaluate
+    return evaluate  # type: ignore[return-value]
 
 
 __all__ = [
+    "adapt",
     "all_of",
     "any_of",
     "contains",
     "exact_match",
+    "is_session_aware",
 ]

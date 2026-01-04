@@ -22,10 +22,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
-from ..serde import parse
-
 if TYPE_CHECKING:
-    pass
+    from ..runtime.session import SessionProtocol, SessionViewProtocol
+
+from ..serde import parse
 
 
 @dataclass(slots=True, frozen=True)
@@ -74,6 +74,17 @@ Evaluator = Callable[[object, object], Score]
 """An evaluator is any callable: (output, expected) -> Score.
 
 Evaluators are pure functions - no side effects, no state.
+"""
+
+# Type alias for session-aware evaluator functions
+SessionEvaluator = Callable[
+    [object, object, "SessionProtocol | SessionViewProtocol"], Score
+]
+"""A session-aware evaluator: (output, expected, session) -> Score.
+
+Session-aware evaluators receive a SessionProtocol or SessionViewProtocol
+providing access to session state for behavioral assertions (tool calls,
+token usage, custom slices).
 """
 
 
@@ -282,4 +293,5 @@ __all__ = [
     "Evaluator",
     "Sample",
     "Score",
+    "SessionEvaluator",
 ]
