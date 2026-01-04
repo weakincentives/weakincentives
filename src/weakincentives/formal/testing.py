@@ -111,7 +111,7 @@ def model_check(
     *,
     tlc_config: dict[str, Any] | None = None,
 ) -> ModelCheckResult:
-    """Run TLC model checker on a specification with 60s timeout.
+    """Run TLC model checker on a specification with 5-minute timeout.
 
     If TLC times out without finding violations, the check is considered passed.
     This allows bounded verification within reasonable time limits.
@@ -166,10 +166,10 @@ def model_check(
         if cleanup:
             cmd.append("-cleanup")
 
-        # Run TLC with 60-second timeout
+        # Run TLC with 5-minute timeout
         try:
             result = subprocess.run(  # nosec B603 B607
-                cmd, capture_output=True, text=True, check=False, timeout=60
+                cmd, capture_output=True, text=True, check=False, timeout=300
             )
             stdout = result.stdout
             stderr = result.stderr
@@ -193,7 +193,7 @@ def model_check(
                 return ModelCheckResult(
                     passed=True,
                     states_generated=_extract_state_count(stdout),
-                    stdout=stdout + "\n[Timeout: No violations found in 60s]",
+                    stdout=stdout + "\n[Timeout: No violations found in 5 minutes]",
                     stderr=stderr,
                     returncode=returncode,
                 )
