@@ -218,23 +218,11 @@ def create_read_section_handler(
         section_key = params.section_key
         path = _parse_section_key(section_key)
 
-        # Validate section exists
-        valid_paths: Set[SectionPath] = set(registry.section_paths)
-        if path not in valid_paths:
+        # Find the section node using O(1) lookup
+        target_node = registry.node_by_path.get(path)
+        if target_node is None:
             raise PromptValidationError(
                 f"Section '{section_key}' does not exist in this prompt."
-            )
-
-        # Find the section node
-        target_node = None
-        for node in registry.sections:
-            if node.path == path:
-                target_node = node
-                break
-
-        if target_node is None:  # pragma: no cover - defensive
-            raise PromptValidationError(
-                f"Section '{section_key}' not found in registry."
             )
 
         # Check section is actually summarized
@@ -389,24 +377,11 @@ def _collect_child_keys_for_node(
     parent_node: SectionNode[SupportsDataclass],
     registry: RegistrySnapshot,
 ) -> tuple[str, ...]:
-    """Collect the keys of direct child sections for a parent node."""
-    child_keys: list[str] = []
-    parent_depth = parent_node.depth
-    parent_path = parent_node.path
-    in_parent = False
+    """Collect the keys of direct child sections for a parent node.
 
-    for node in registry.sections:
-        if node is parent_node:
-            in_parent = True
-            continue
-
-        if in_parent:
-            if node.depth == parent_depth + 1 and node.path[:-1] == parent_path:
-                child_keys.append(node.section.key)
-            elif node.depth <= parent_depth:
-                break
-
-    return tuple(child_keys)
+    Uses precomputed children_by_path index for O(1) lookup.
+    """
+    return registry.children_by_path.get(parent_node.path, ())
 
 
 def build_summary_suffix(

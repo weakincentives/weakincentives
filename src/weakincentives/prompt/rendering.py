@@ -286,55 +286,20 @@ class PromptRenderer[OutputT]:
     def _section_or_descendants_have_tools(
         self, parent_node: SectionNode[SupportsDataclass]
     ) -> bool:
-        """Check if section or any descendant has tools attached."""
-        # Check the section itself
-        if parent_node.section.tools():
-            return True
+        """Check if section or any descendant has tools attached.
 
-        # Check descendants
-        parent_depth = parent_node.depth
-        in_parent = False
-
-        for node in self._registry.sections:
-            if node is parent_node:
-                in_parent = True
-                continue
-
-            if in_parent:
-                # Descendants have depth > parent_depth
-                if node.depth > parent_depth:
-                    if node.section.tools():
-                        return True
-                else:
-                    # We've left the parent's subtree
-                    break
-
-        return False
+        Uses precomputed subtree_has_tools index for O(1) lookup.
+        """
+        return self._registry.subtree_has_tools.get(parent_node.path, False)
 
     def _collect_child_keys(
         self, parent_node: SectionNode[SupportsDataclass]
     ) -> tuple[str, ...]:
-        """Collect the keys of direct child sections for a parent node."""
-        child_keys: list[str] = []
-        parent_depth = parent_node.depth
-        parent_path = parent_node.path
-        in_parent = False
+        """Collect the keys of direct child sections for a parent node.
 
-        for node in self._registry.sections:
-            if node is parent_node:
-                in_parent = True
-                continue
-
-            if in_parent:
-                # Direct children have depth == parent_depth + 1
-                # and their path starts with parent's path
-                if node.depth == parent_depth + 1 and node.path[:-1] == parent_path:
-                    child_keys.append(node.section.key)
-                elif node.depth <= parent_depth:
-                    # We've moved past the parent's children
-                    break
-
-        return tuple(child_keys)
+        Uses precomputed children_by_path index for O(1) lookup.
+        """
+        return self._registry.children_by_path.get(parent_node.path, ())
 
     def _collect_section_tools(
         self,

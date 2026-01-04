@@ -53,6 +53,10 @@ class RegistrySnapshot:
     defaults_by_type: Mapping[type[SupportsDataclass], SupportsDataclass]
     placeholders: Mapping[SectionPath, frozenset[str]]
     tool_name_registry: Mapping[str, SectionPath]
+    # Precomputed indices for O(1) lookups
+    node_by_path: Mapping[SectionPath, SectionNode[SupportsDataclass]]
+    children_by_path: Mapping[SectionPath, tuple[str, ...]]
+    subtree_has_tools: Mapping[SectionPath, bool]
 
     def resolve_section_params(
         self,
@@ -265,6 +269,65 @@ def _validate_param_nodes(
             )
 
     return True
+
+
+def _build_registry_indices(
+    sections: tuple[SectionNode[SupportsDataclass], ...],
+) -> tuple[
+    Mapping[SectionPath, SectionNode[SupportsDataclass]],
+    Mapping[SectionPath, tuple[str, ...]],
+    Mapping[SectionPath, bool],
+]:
+    """Build precomputed indices for O(1) lookups in registry operations.
+
+    Computes in a single O(n) pass:
+    - node_by_path: Maps section path to its node
+    - children_by_path: Maps section path to tuple of direct child keys
+    - subtree_has_tools: Maps section path to whether section or descendants have tools
+
+    Returns:
+        Tuple of (node_by_path, children_by_path, subtree_has_tools) as frozen mappings.
+    """
+    # Build node_by_path in O(n)
+    node_by_path: dict[SectionPath, SectionNode[SupportsDataclass]] = {
+        node.path: node for node in sections
+    }
+
+    # Build children_by_path in O(n)
+    children_by_path: dict[SectionPath, list[str]] = {
+        node.path: [] for node in sections
+    }
+    for node in sections:
+        parent_path = node.path[:-1]
+        if parent_path in children_by_path:
+            children_by_path[parent_path].append(node.section.key)
+
+    # Build subtree_has_tools using reverse traversal in O(n)
+    # Traverse in reverse DFS order to compute children before parents
+    subtree_has_tools: dict[SectionPath, bool] = {}
+    for node in reversed(sections):
+        # Check if this section has tools
+        has_tools = bool(node.section.tools())
+        if has_tools:
+            subtree_has_tools[node.path] = True
+        else:
+            # Check if any child subtree has tools
+            child_has_tools = any(
+                subtree_has_tools.get((*node.path, child_key), False)
+                for child_key in children_by_path[node.path]
+            )
+            subtree_has_tools[node.path] = child_has_tools
+
+    # Freeze the mappings
+    frozen_children: dict[SectionPath, tuple[str, ...]] = {
+        path: tuple(children) for path, children in children_by_path.items()
+    }
+
+    return (
+        MappingProxyType(node_by_path),
+        MappingProxyType(frozen_children),
+        MappingProxyType(subtree_has_tools),
+    )
 
 
 @invariant(
@@ -500,13 +563,22 @@ class PromptRegistry:
         )
         tool_name_registry = MappingProxyType(dict(self._tool_name_registry))
 
+        # Build precomputed indices for O(1) lookups
+        sections_tuple = tuple(self._section_nodes)
+        node_by_path, children_by_path, subtree_has_tools = _build_registry_indices(
+            sections_tuple
+        )
+
         return RegistrySnapshot(
-            sections=tuple(self._section_nodes),
+            sections=sections_tuple,
             params_registry=MappingProxyType(params_registry),
             defaults_by_path=defaults_by_path,
             defaults_by_type=defaults_by_type,
             placeholders=placeholders,
             tool_name_registry=tool_name_registry,
+            node_by_path=node_by_path,
+            children_by_path=children_by_path,
+            subtree_has_tools=subtree_has_tools,
         )
 
     def _validate_task_examples(
