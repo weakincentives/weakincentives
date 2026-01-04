@@ -41,13 +41,7 @@ jobs:
 
       - name: Install TLA+ Tools
         if: steps.cache-tlaplus.outputs.cache-hit != 'true'
-        run: |
-          wget -q https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
-          sudo mkdir -p /usr/local/lib
-          sudo mv tla2tools.jar /usr/local/lib/
-          echo '#!/bin/bash' | sudo tee /usr/local/bin/tlc
-          echo 'java -XX:+UseParallelGC -jar /usr/local/lib/tla2tools.jar "$@"' | sudo tee -a /usr/local/bin/tlc
-          sudo chmod +x /usr/local/bin/tlc
+        run: make setup-tlaplus
 
       - name: Install uv
         run: pip install uv

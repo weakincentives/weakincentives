@@ -15,6 +15,9 @@
 This directory contains tests that extract and validate TLA+ specifications
 embedded in Python code using the @formal_spec decorator.
 
+Prerequisites:
+    make setup-tlaplus       # Install TLA+ tools (required once)
+
 Model checking is ENABLED by default (critical for verification):
 - Uses temporary directory (no filesystem pollution)
 - Runs TLC model checker to verify all invariants (~30s)

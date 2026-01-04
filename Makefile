@@ -96,16 +96,24 @@ validate-integration-tests:
 # Setup
 # =============================================================================
 
-# Download TLA+ tools (requires Java)
+# Download and install TLA+ tools (requires Java)
 setup-tlaplus:
 	@echo "Setting up TLA+ tools..."
-	@mkdir -p tools
-	@if [ ! -f tools/tla2tools.jar ]; then \
-		echo "Downloading TLA+ tools..."; \
-		curl -sL -o tools/tla2tools.jar \
-			https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar; \
+	@if [ -f /usr/local/lib/tla2tools.jar ]; then \
+		echo "TLA+ tools already installed at /usr/local/lib/tla2tools.jar"; \
 	else \
-		echo "TLA+ tools already installed"; \
+		echo "Downloading TLA+ tools..."; \
+		curl -sL -o /tmp/tla2tools.jar \
+			https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar; \
+		echo "Installing to /usr/local/lib/..."; \
+		sudo mkdir -p /usr/local/lib; \
+		sudo mv /tmp/tla2tools.jar /usr/local/lib/; \
+		echo "Creating tlc wrapper script..."; \
+		sudo mkdir -p /usr/local/bin; \
+		echo '#!/bin/bash' | sudo tee /usr/local/bin/tlc > /dev/null; \
+		echo 'exec java -XX:+UseParallelGC -jar /usr/local/lib/tla2tools.jar "$$@"' | sudo tee -a /usr/local/bin/tlc > /dev/null; \
+		sudo chmod +x /usr/local/bin/tlc; \
+		echo "✓ TLA+ tools installed successfully"; \
 	fi
 
 # Start Redis server for testing (if not running)
