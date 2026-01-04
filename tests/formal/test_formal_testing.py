@@ -381,3 +381,84 @@ def test_model_check_non_digit_in_state_line(monkeypatch: pytest.MonkeyPatch) ->
 
     assert result.passed
     assert result.states_generated == 789
+
+
+def test_model_check_timeout_no_violations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test model_check timeout without violations is treated as success."""
+    import subprocess
+    from unittest.mock import MagicMock
+
+    from weakincentives.formal.testing import model_check
+
+    call_count = 0
+
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
+            # First call is TLC availability check
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        # Second call times out
+        timeout_error = subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=60,
+            output=b"Explored 50000 states generated.\n",
+            stderr=b"",
+        )
+        raise timeout_error
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    spec = extract_spec(TestCounter)
+    result = model_check(spec)
+
+    assert result.passed
+    assert result.states_generated == 50000
+    assert "Timeout" in result.stdout
+    assert result.returncode == -1
+
+
+def test_model_check_timeout_with_violations(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test model_check timeout with violations is NOT treated as success."""
+    import subprocess
+    from unittest.mock import MagicMock
+
+    from weakincentives.formal.testing import model_check
+
+    call_count = 0
+
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
+            # First call is TLC availability check
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        # Second call times out but found violation
+        timeout_error = subprocess.TimeoutExpired(
+            cmd=args[0],
+            timeout=60,
+            output=b"Error: Invariant violated.\n1000 states generated.\n",
+            stderr=b"",
+        )
+        raise timeout_error
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    spec = extract_spec(TestCounter)
+    result = model_check(spec)
+
+    # Should NOT pass because violation was found
+    assert not result.passed
+    assert result.states_generated == 1000

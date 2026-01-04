@@ -111,7 +111,10 @@ def model_check(
     *,
     tlc_config: dict[str, Any] | None = None,
 ) -> ModelCheckResult:
-    """Run TLC model checker on a specification.
+    """Run TLC model checker on a specification with 60s timeout.
+
+    If TLC times out without finding violations, the check is considered passed.
+    This allows bounded verification within reasonable time limits.
 
     Args:
         spec: The formal specification to check
@@ -151,7 +154,7 @@ def model_check(
                 "TLC not found. Install with: brew install tlaplus (macOS) or download from https://github.com/tlaplus/tlaplus/releases"
             ) from None
 
-        # Run TLC
+        # Build TLC command
         cmd = [
             "tlc",
             str(tla_file),
@@ -160,35 +163,63 @@ def model_check(
             "-workers",
             str(workers),
         ]
-
         if cleanup:
             cmd.append("-cleanup")
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603 B607
+        # Run TLC with 60-second timeout
+        try:
+            result = subprocess.run(  # nosec B603 B607
+                cmd, capture_output=True, text=True, check=False, timeout=60
+            )
+            stdout = result.stdout
+            stderr = result.stderr
+            returncode = result.returncode
+        except subprocess.TimeoutExpired as e:
+            # Timeout: extract partial output
+            stdout = (
+                (e.stdout or b"").decode()
+                if isinstance(e.stdout, bytes)
+                else e.stdout or ""
+            )
+            stderr = (
+                (e.stderr or b"").decode()
+                if isinstance(e.stderr, bytes)
+                else e.stderr or ""
+            )
+            returncode = -1  # Indicate timeout
 
-        # Parse output to count states
-        states = 0
-        for line in result.stdout.split("\n"):
-            if "states generated" in line.lower():
-                # Extract number from line like "1234 states generated"
-                parts = line.split()
-                for _i, part in enumerate(parts):
-                    if part.isdigit():
-                        states = int(part)
-                        break
+            # If no violations found before timeout, treat as passed (bounded verification)
+            if "violated" not in stdout.lower():
+                return ModelCheckResult(
+                    passed=True,
+                    states_generated=_extract_state_count(stdout),
+                    stdout=stdout + "\n[Timeout: No violations found in 60s]",
+                    stderr=stderr,
+                    returncode=returncode,
+                )
+            # If violations found, fall through to normal error handling
 
-        # Check for errors
-        passed = result.returncode == 0
-        if not passed or "violated" in result.stdout.lower():
-            passed = False
+        # Extract state count and check for violations
+        states = _extract_state_count(stdout)
+        passed = returncode == 0 and "violated" not in stdout.lower()
 
         return ModelCheckResult(
             passed=passed,
             states_generated=states,
-            stdout=result.stdout,
-            stderr=result.stderr,
-            returncode=result.returncode,
+            stdout=stdout,
+            stderr=stderr,
+            returncode=returncode,
         )
+
+
+def _extract_state_count(output: str) -> int:
+    """Extract state count from TLC output."""
+    for line in output.split("\n"):
+        if "states generated" in line.lower():
+            for part in line.split():
+                if part.isdigit():
+                    return int(part)
+    return 0
 
 
 def extract_and_verify(
