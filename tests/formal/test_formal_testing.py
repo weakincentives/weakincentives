@@ -500,3 +500,40 @@ def test_extract_state_count_no_digits(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.passed
     assert result.states_generated == 0  # No parseable number found
+
+
+def test_model_check_tlc_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test model_check detects TLC configuration errors (e.g., missing JAR)."""
+    from unittest.mock import MagicMock
+
+    from weakincentives.formal.testing import model_check
+
+    call_count = 0
+
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+        nonlocal call_count
+        call_count += 1
+
+        if call_count == 1:
+            # First call is TLC availability check
+            result = MagicMock()
+            result.returncode = 0
+            result.stdout = ""
+            result.stderr = ""
+            return result
+
+        # Second call fails with JAR file error
+        result = MagicMock()
+        result.returncode = 1
+        result.stdout = ""
+        result.stderr = "Error: Unable to access jarfile /usr/local/lib/tla2tools.jar"
+        return result
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    spec = extract_spec(TestCounter)
+
+    with pytest.raises(ModelCheckError, match="TLC configuration error"):
+        model_check(spec)

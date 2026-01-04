@@ -201,6 +201,14 @@ def model_check(
 
         # Extract state count and check for violations
         states = _extract_state_count(stdout)
+
+        # Check for TLC configuration errors (e.g., missing JAR file)
+        if "jarfile" in stderr.lower() or "unable to access" in stderr.lower():
+            raise ModelCheckError(
+                f"TLC configuration error. {stderr.strip()}\n"
+                "Install TLC: brew install tlaplus (macOS) or download from https://github.com/tlaplus/tlaplus/releases"
+            )
+
         passed = returncode == 0 and "violated" not in stdout.lower()
 
         return ModelCheckResult(

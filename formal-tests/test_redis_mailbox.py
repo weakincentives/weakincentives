@@ -33,7 +33,7 @@ from pathlib import Path
 import pytest
 
 from weakincentives.contrib.mailbox._redis import RedisMailbox
-from weakincentives.formal.testing import extract_and_verify
+from weakincentives.formal.testing import ModelCheckError, extract_and_verify
 
 
 def test_redis_mailbox_spec(
@@ -55,12 +55,19 @@ def test_redis_mailbox_spec(
             pytest.skip("TLC not installed (brew install tlaplus)")
 
     # Extract and optionally verify
-    spec, tla_file, cfg_file, result = extract_and_verify(
-        RedisMailbox,
-        output_dir=extracted_specs_dir,
-        model_check_enabled=enable_model_checking,
-        tlc_config=tlc_config if enable_model_checking else None,
-    )
+    try:
+        spec, tla_file, cfg_file, result = extract_and_verify(
+            RedisMailbox,
+            output_dir=extracted_specs_dir,
+            model_check_enabled=enable_model_checking,
+            tlc_config=tlc_config if enable_model_checking else None,
+        )
+    except ModelCheckError as e:
+        # Skip if TLC is not properly configured (e.g., missing JAR file)
+        if "configuration error" in str(e).lower() or "jarfile" in str(e).lower():
+            pytest.skip(f"TLC not properly configured: {e}")
+        # Re-raise if it's an actual model checking failure (invariant violation)
+        raise
 
     # Verify spec structure
     assert spec.module == "RedisMailbox"
