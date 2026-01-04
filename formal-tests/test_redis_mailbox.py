@@ -93,14 +93,14 @@ def test_redis_mailbox_spec(
         assert result is not None, "Model check result should be returned"
 
         # Print TLC output
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("TLC MODEL CHECKER OUTPUT")
-        print("="*80)
+        print("=" * 80)
         print(result.stdout)
         if result.stderr:
             print("\n--- STDERR ---")
             print(result.stderr)
-        print("="*80)
+        print("=" * 80)
 
         assert result.passed, (
             f"Model checking failed:\n{result.stdout}\n{result.stderr}"

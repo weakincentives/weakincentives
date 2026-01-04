@@ -86,11 +86,11 @@ def test_violation_detected(
 
         # Print TLC violation output
         error_msg = str(exc_info.value)
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("TLC VIOLATION DETECTED (Expected)")
-        print("="*80)
+        print("=" * 80)
         print(error_msg)
-        print("="*80)
+        print("=" * 80)
 
         # Verify the error message indicates the violation
         assert "violated" in error_msg.lower() or "failed" in error_msg.lower()
