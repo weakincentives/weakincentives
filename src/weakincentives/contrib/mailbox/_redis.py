@@ -547,6 +547,24 @@ class RedisMailboxFactory[R]:
 """.strip(),
             description="Each delivery of a message gets a unique handle",
         ),
+        Invariant(
+            id="INV-8",
+            name="PendingNoDuplicates",
+            predicate=r"""
+\A i, j \in 1..Len(pending):
+    i /= j => pending[i] /= pending[j]
+""".strip(),
+            description="The pending queue contains no duplicate message IDs",
+        ),
+        Invariant(
+            id="INV-9",
+            name="DataIntegrity",
+            predicate=r"""
+\A msgId \in 1..nextMsgId-1:
+    (InPending(msgId) \/ msgId \in DOMAIN invisible) => msgId \in DOMAIN data
+""".strip(),
+            description="Every message in pending or invisible has associated data",
+        ),
     ],
     constraint="now <= 2",
 )
@@ -585,6 +603,8 @@ class RedisMailbox[T, R]:
         - INV-4/4b: Delivery Count Monotonicity (counts never decrease)
         - INV-5: No Message Loss (messages tracked until acknowledged)
         - INV-7: Handle Uniqueness (each delivery gets unique handle)
+        - INV-8: Pending No Duplicates (no duplicate IDs in pending queue)
+        - INV-9: Data Integrity (queued messages have associated data)
 
         See specs/VERIFICATION.md for complete verification documentation.
 
