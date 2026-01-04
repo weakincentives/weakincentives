@@ -291,8 +291,18 @@ class RedisMailboxFactory[R]:
         StateVar("handles", "Function", "msg_id -> current valid handle suffix"),
         StateVar("deleted", "Set", "Set of deleted message IDs"),
         StateVar("now", "Nat", "Abstract time counter"),
-        StateVar("nextMsgId", "Nat", "Counter for generating message IDs"),
-        StateVar("nextHandle", "Nat", "Counter for generating handle suffixes"),
+        StateVar(
+            "nextMsgId",
+            "Nat",
+            "Counter for generating message IDs",
+            initial_value="1",
+        ),
+        StateVar(
+            "nextHandle",
+            "Nat",
+            "Counter for generating handle suffixes",
+            initial_value="1",
+        ),
         StateVar(
             "consumerState",
             "Function",
