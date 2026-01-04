@@ -553,11 +553,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._overlay_path.mkdir(parents=True, exist_ok=True)
             for mount in self._resolved_mounts:
                 self._copy_mount_into_overlay(overlay=self._overlay_path, mount=mount)
-            # Use /workspace as the mount point so paths like /workspace/file.txt
-            # are correctly interpreted as file.txt in the overlay directory
-            self._filesystem = HostFilesystem(
-                _root=str(self._overlay_path), _mount_point=_DEFAULT_WORKDIR
-            )
+            self._filesystem = HostFilesystem(_root=str(self._overlay_path))
         self._clock = config.clock or (lambda: datetime.now(UTC))
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
@@ -585,7 +581,11 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
 
         session[PodmanWorkspace].register(PodmanWorkspace, replace_latest)
 
-        self._fs_handlers = FilesystemToolHandlers(clock=self._clock)
+        # Use /workspace as the mount point so paths like /workspace/file.txt
+        # are correctly interpreted as file.txt in the overlay directory
+        self._fs_handlers = FilesystemToolHandlers(
+            clock=self._clock, mount_point=_DEFAULT_WORKDIR
+        )
         self._shell_suite = _PodmanShellSuite(section=self)
         self._eval_suite = PodmanEvalSuite(section=self)
         accepts_overrides = config.accepts_overrides

@@ -49,19 +49,6 @@ class Filesystem(Protocol):
     All paths are relative strings. Backends normalize paths internally.
     """
 
-    @property
-    def mount_point(self) -> str | None:
-        """Virtual mount point prefix for path normalization.
-
-        When set (e.g., "/workspace"), absolute paths like "/workspace/file.txt"
-        are interpreted as "file.txt" relative to the workspace root. This
-        allows models to use absolute paths that match container working
-        directories while the underlying filesystem uses relative paths.
-
-        Returns None if no mount point is configured (default behavior).
-        """
-        ...
-
     # --- Read Operations ---
 
     def read(
