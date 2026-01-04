@@ -335,19 +335,6 @@ class Filesystem(Protocol):
     def read_only(self) -> bool:
         """True if write operations are disabled."""
         ...
-
-    @property
-    def mount_point(self) -> str | None:
-        """Virtual mount point prefix for path normalization.
-
-        When set (e.g., "/workspace"), absolute paths like "/workspace/file.txt"
-        are interpreted as "file.txt" relative to the workspace root. This
-        allows models to use absolute paths that match container working
-        directories while the underlying filesystem uses relative paths.
-
-        Returns None if no mount point is configured (default behavior).
-        """
-        ...
 ```
 
 ## ToolContext Integration
@@ -526,7 +513,6 @@ class InMemoryFilesystem:
     _files: dict[str, _InMemoryFile] = field(default_factory=dict)
     _directories: set[str] = field(default_factory=set)
     _read_only: bool = False
-    _mount_point: str | None = None
 
     @property
     def root(self) -> str:
@@ -535,10 +521,6 @@ class InMemoryFilesystem:
     @property
     def read_only(self) -> bool:
         return self._read_only
-
-    @property
-    def mount_point(self) -> str | None:
-        return self._mount_point
 
     def read(self, path: str, *, offset: int = 0, limit: int | None = None, encoding: str = "utf-8") -> ReadResult:
         normalized = self._normalize_path(path)
@@ -611,7 +593,6 @@ class HostFilesystem:
 
     _root: str
     _read_only: bool = False
-    _mount_point: str | None = None
 
     @property
     def root(self) -> str:
@@ -620,10 +601,6 @@ class HostFilesystem:
     @property
     def read_only(self) -> bool:
         return self._read_only
-
-    @property
-    def mount_point(self) -> str | None:
-        return self._mount_point
 
     def _resolve_path(self, path: str) -> Path:
         """Resolve a relative path to an absolute path within root.
@@ -951,7 +928,6 @@ class HostFilesystem:
 
     _root: str
     _read_only: bool = False
-    _mount_point: str | None = None
     _git_initialized: bool = False
     _git_dir: str | None = None  # External git directory path
 
@@ -1077,7 +1053,6 @@ class PodmanSandboxSection:
         self._overlay_path = self._create_overlay()
         self._filesystem = HostFilesystem(
             _root=str(self._overlay_path),
-            _mount_point="/workspace",
         )
 
     def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
