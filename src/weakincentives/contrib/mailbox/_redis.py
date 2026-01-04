@@ -57,6 +57,10 @@ from weakincentives.runtime.mailbox import (
     ReplyNotAvailableError,
     SerializationError,
 )
+from weakincentives.runtime.mailbox._types import (
+    validate_visibility_timeout,
+    validate_wait_time,
+)
 from weakincentives.serde import dump, parse
 
 if TYPE_CHECKING:
@@ -800,8 +804,12 @@ class RedisMailbox[T, R]:
             Sequence of messages (may be empty). Returns empty if mailbox closed.
 
         Raises:
+            InvalidParameterError: visibility_timeout or wait_time_seconds out of range.
             MailboxConnectionError: Cannot connect to Redis.
         """
+        validate_visibility_timeout(visibility_timeout)
+        validate_wait_time(wait_time_seconds)
+
         if self._closed:
             return []
 
