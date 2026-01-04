@@ -73,7 +73,7 @@ def test_redis_mailbox_spec(
     assert spec.module == "RedisMailbox"
     assert len(spec.state_vars) == 11, "Should have 11 state variables"
     assert len(spec.actions) == 10, "Should have 10 actions"
-    assert len(spec.invariants) == 6, "Should have 6 invariants"
+    assert len(spec.invariants) == 8, "Should have 8 invariants"
 
     # Verify files were created
     assert tla_file.exists(), f"TLA+ file should exist at {tla_file}"
