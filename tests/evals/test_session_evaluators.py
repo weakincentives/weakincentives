@@ -674,14 +674,14 @@ def test_is_session_aware_with_builtin_evaluators() -> None:
     assert is_session_aware(tool_called("search")) is True
 
 
-def test_is_session_aware_handles_unannotated_third_param() -> None:
-    """is_session_aware falls back to True for unannotated 3+ param functions."""
+def test_is_session_aware_rejects_unannotated_third_param() -> None:
+    """is_session_aware returns False for unannotated 3+ param functions."""
     from collections.abc import Callable
 
     from weakincentives.evals import is_session_aware
 
     # Create a function with 3 params but no type annotations dynamically
-    # This avoids ruff's ANN rules while testing the fallback behavior
+    # This avoids ruff's ANN rules while testing the behavior
     def make_unannotated() -> Callable[..., None]:
         exec(
             """
@@ -694,8 +694,8 @@ def unannotated_evaluator(output, expected, session):
         return result["unannotated_evaluator"]  # type: ignore[return-value]
 
     evaluator = make_unannotated()
-    # Fallback behavior: assume session-aware for backwards compatibility
-    assert is_session_aware(evaluator) is True
+    # Requires explicit type hints - unannotated functions are not session-aware
+    assert is_session_aware(evaluator) is False
 
 
 def test_is_session_aware_handles_non_session_type_object() -> None:

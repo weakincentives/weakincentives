@@ -124,13 +124,14 @@ def is_session_aware(fn: Callable[..., Score]) -> bool:
     parameter. A session-aware evaluator has a third parameter typed as
     SessionProtocol, SessionViewProtocol, or a union containing them.
 
-    Falls back to parameter count (3+) if type hints are unavailable.
+    Requires explicit type hints - functions without session type annotations
+    are not considered session-aware.
 
     Args:
         fn: The evaluator function to check.
 
     Returns:
-        True if the evaluator accepts a session parameter.
+        True if the evaluator has an explicit session type hint.
     """
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())
@@ -160,9 +161,8 @@ def is_session_aware(fn: Callable[..., Score]) -> bool:
             return _check_string_annotation(hint, getattr(fn, "__globals__", {}))
         return _is_session_type(hint)
 
-    # Fallback: assume 3+ params with no type hint means session-aware
-    # This maintains backwards compatibility for functions without annotations
-    return True
+    # No type hint found - require explicit annotation
+    return False
 
 
 def adapt[O, E](evaluator: Evaluator) -> SessionEvaluator:
