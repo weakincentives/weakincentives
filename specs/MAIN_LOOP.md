@@ -202,10 +202,10 @@ def prepare(self, request: Request) -> tuple[Prompt[Output], Session]:
 
 ## Error Handling
 
-| Exception | Behavior |
+| Exception                     | Behavior                           |
 | ----------------------------- | ---------------------------------- |
-| `VisibilityExpansionRequired` | Retry with updated overrides |
-| All others | Publish `MainLoopFailed`, re-raise |
+| `VisibilityExpansionRequired` | Retry with updated overrides       |
+| All others                    | Publish `MainLoopFailed`, re-raise |
 
 ## Code Reviewer Integration
 

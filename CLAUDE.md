@@ -154,7 +154,10 @@ Consult these specs before modifying related code:
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
-| `specs/VERIFICATION.md` | Redis mailbox formal verification, TLA+, property tests |
+| `specs/VERIFICATION.md` | Redis mailbox formal verification, embedded TLA+, property tests |
+| `specs/FORMAL_SPEC_GUIDE.md` | Using `@formal_spec` decorator for embedded TLA+ specifications |
+| `specs/TLA_EMBEDDING_INDEX.md` | Navigation guide for all TLA+ embedding documentation |
+| `specs/TLA_MIGRATION_GUIDE.md` | Migrating legacy TLA+ specs to embedded `@formal_spec` form |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/HEALTH.md` | Health endpoints, watchdog, stuck worker detection, process termination |

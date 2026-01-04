@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check tlaplus-check tlaplus-check-exhaustive property-tests stress-tests verify-mailbox setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist extract-tla check-tla check-tla-fast verify-embedded verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -133,29 +133,6 @@ setup: setup-tlaplus setup-redis
 # Formal Verification
 # =============================================================================
 
-# Run TLC model checker in simulation mode (fast, for CI - ~2 seconds)
-# Checks 1000+ random traces of depth 50, verifying invariants at each state
-tlaplus-check:
-	@echo "Running TLC model checker (simulation mode)..."
-	@if [ ! -f tools/tla2tools.jar ]; then \
-		echo "TLC not installed. Run: make setup-tlaplus"; \
-		exit 1; \
-	fi
-	@cd specs/tla && java -XX:+UseParallelGC -jar ../../tools/tla2tools.jar \
-		-simulate num=1000 -depth 50 \
-		-config RedisMailboxMC-ci.cfg RedisMailbox.tla -workers auto
-
-# Run exhaustive TLC model checking (slow, for thorough verification)
-# Note: May take 10+ minutes depending on configuration
-tlaplus-check-exhaustive:
-	@echo "Running TLC model checker (exhaustive mode)..."
-	@if [ ! -f tools/tla2tools.jar ]; then \
-		echo "TLC not installed. Run: make setup-tlaplus"; \
-		exit 1; \
-	fi
-	@cd specs/tla && java -XX:+UseParallelGC -jar ../../tools/tla2tools.jar \
-		-config RedisMailboxMC.cfg RedisMailbox.tla -workers auto
-
 # Run Hypothesis property-based tests
 property-tests:
 	@uv run --all-extras pytest tests/contrib/mailbox/test_redis_mailbox_properties.py \
@@ -168,8 +145,48 @@ stress-tests:
 		--no-cov -v -m slow --timeout=120
 
 # Run all mailbox verification
-verify-mailbox: tlaplus-check property-tests
+verify-mailbox: verify-formal property-tests
 	@echo "All mailbox verification checks passed"
+
+# =============================================================================
+# Embedded TLA+ Specifications
+# =============================================================================
+
+# Full formal verification with TLC model checking (~30s)
+# Uses temp directory (no filesystem pollution)
+verify-formal:
+	@uv run --all-extras pytest formal-tests/ --no-cov -q
+
+# Fast extraction only (development, ~1s)
+# Skips model checking - use only for rapid iteration
+verify-formal-fast:
+	@uv run --all-extras pytest formal-tests/ --no-cov -q --skip-model-check
+
+# Full verification + persist specs to specs/tla/extracted/
+verify-formal-persist:
+	@uv run --all-extras pytest formal-tests/ --no-cov -v --persist-specs
+
+# Legacy aliases for backward compatibility
+extract-tla: verify-formal-fast
+check-tla: verify-formal
+check-tla-fast: verify-formal-fast
+verify-embedded: verify-formal
+
+# Run all formal verification (embedded specs + property tests)
+verify-all: verify-formal property-tests
+	@echo "✓ All formal verification passed:"
+	@echo "  - Embedded TLA+ specs with TLC model checking"
+	@echo "  - Property-based tests (Hypothesis)"
+
+# Remove extracted TLA+ specs
+clean-extracted:
+	@echo "Cleaning extracted TLA+ specs..."
+	@rm -rf specs/tla/extracted/
+	@echo "✓ Cleaned specs/tla/extracted/"
+
+# =============================================================================
+# Demos
+# =============================================================================
 
 # Launch the interactive code reviewer demo
 demo:
@@ -204,5 +221,6 @@ all: format lint-fix bandit deptry pip-audit typecheck test
 # Clean cache files
 clean:
 	rm -rf .pytest_cache .ruff_cache __pycache__
+	rm -rf specs/tla/extracted/
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete

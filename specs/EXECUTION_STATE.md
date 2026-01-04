@@ -123,11 +123,11 @@ class Snapshotable(Protocol[SnapshotT]):
 
 ### Implementations
 
-| Component | Snapshot Type | Storage Strategy |
+| Component            | Snapshot Type        | Storage Strategy                 |
 | -------------------- | -------------------- | -------------------------------- |
-| `Session` | `Snapshot` | Slice values as frozen tuples |
+| `Session`            | `Snapshot`           | Slice values as frozen tuples    |
 | `InMemoryFilesystem` | `FilesystemSnapshot` | Structural sharing of file dicts |
-| `HostFilesystem` | `FilesystemSnapshot` | Git commits |
+| `HostFilesystem`     | `FilesystemSnapshot` | Git commits                      |
 
 ## Session
 
@@ -187,15 +187,15 @@ session[ToolInvoked].register(ToolInvoked, append_all, policy=SlicePolicy.LOG)
 
 Default policies:
 
-| Slice Type | Policy | Rationale |
+| Slice Type            | Policy | Rationale         |
 | --------------------- | ------ | ----------------- |
-| `Plan` | STATE | Working state |
-| `VisibilityOverrides` | STATE | Working state |
-| `WorkspaceDigest` | STATE | Working state |
-| `ToolInvoked` | LOG | Historical record |
-| `PromptRendered` | LOG | Historical record |
-| `PromptExecuted` | LOG | Historical record |
-| Custom slices | STATE | Safe default |
+| `Plan`                | STATE  | Working state     |
+| `VisibilityOverrides` | STATE  | Working state     |
+| `WorkspaceDigest`     | STATE  | Working state     |
+| `ToolInvoked`         | LOG    | Historical record |
+| `PromptRendered`      | LOG    | Historical record |
+| `PromptExecuted`      | LOG    | Historical record |
+| Custom slices         | STATE  | Safe default      |
 
 ### Snapshot
 
@@ -266,13 +266,13 @@ sequenceDiagram
 
 ### Restore Triggers
 
-| Condition | Behavior |
+| Condition                     | Behavior                                     |
 | ----------------------------- | -------------------------------------------- |
-| Handler raises exception | Restore, wrap in `ToolResult(success=False)` |
-| `ToolResult.success == False` | Restore, return result |
-| `ToolValidationError` | Restore, wrap in `ToolResult(success=False)` |
-| `VisibilityExpansionRequired` | Restore, re-raise for retry |
-| `DeadlineExceededError` | Restore, convert to `PromptEvaluationError` |
+| Handler raises exception      | Restore, wrap in `ToolResult(success=False)` |
+| `ToolResult.success == False` | Restore, return result                       |
+| `ToolValidationError`         | Restore, wrap in `ToolResult(success=False)` |
+| `VisibilityExpansionRequired` | Restore, re-raise for retry                  |
+| `DeadlineExceededError`       | Restore, convert to `PromptEvaluationError`  |
 
 ## Filesystem
 

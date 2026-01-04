@@ -14,29 +14,29 @@ wink debug <snapshot_path> [--host HOST] [--port PORT] [--open-browser|--no-open
 
 ### Arguments
 
-| Argument | Required | Default | Description |
+| Argument         | Required | Default     | Description                                                     |
 | ---------------- | -------- | ----------- | --------------------------------------------------------------- |
-| `snapshot_path` | Yes | - | Path to a JSONL snapshot file or directory containing snapshots |
-| `--host` | No | `127.0.0.1` | Host interface to bind the server |
-| `--port` | No | `8000` | Port to bind the server |
-| `--open-browser` | No | `True` | Open the default browser automatically |
+| `snapshot_path`  | Yes      | -           | Path to a JSONL snapshot file or directory containing snapshots |
+| `--host`         | No       | `127.0.0.1` | Host interface to bind the server                               |
+| `--port`         | No       | `8000`      | Port to bind the server                                         |
+| `--open-browser` | No       | `True`      | Open the default browser automatically                          |
 
 ### Global Options
 
 The CLI inherits global options from the `wink` command:
 
-| Option | Default | Description |
+| Option        | Default | Description                                                        |
 | ------------- | ------- | ------------------------------------------------------------------ |
-| `--log-level` | `None` | Override log level (CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET) |
-| `--json-logs` | `True` | Emit structured JSON logs (disable with `--no-json-logs`) |
+| `--log-level` | `None`  | Override log level (CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET) |
+| `--json-logs` | `True`  | Emit structured JSON logs (disable with `--no-json-logs`)          |
 
 ### Exit Codes
 
-| Code | Meaning |
+| Code | Meaning                               |
 | ---- | ------------------------------------- |
-| `0` | Server stopped normally |
-| `2` | Snapshot validation failed at startup |
-| `3` | Server failed to start |
+| `0`  | Server stopped normally               |
+| `2`  | Snapshot validation failed at startup |
+| `3`  | Server failed to start                |
 
 ## Snapshot Loading
 
@@ -269,25 +269,25 @@ Thread-safe in-memory store for loaded snapshots with support for:
 
 The web UI is served from `src/weakincentives/cli/static/`:
 
-| File | Purpose |
+| File         | Purpose                |
 | ------------ | ---------------------- |
-| `index.html` | Main HTML page |
-| `style.css` | Stylesheet |
-| `app.js` | Client-side JavaScript |
+| `index.html` | Main HTML page         |
+| `style.css`  | Stylesheet             |
+| `app.js`     | Client-side JavaScript |
 
 Static files are mounted at `/static/`.
 
 ## Logging
 
-| Event | Level | Context |
+| Event                        | Level   | Context                        |
 | ---------------------------- | ------- | ------------------------------ |
-| `wink.debug.snapshot_error` | WARNING | `path`, `line_number`, `error` |
-| `debug.server.start` | INFO | `url` |
-| `debug.server.reload` | INFO | `path` |
-| `debug.server.reload_failed` | WARNING | `path`, `error` |
-| `debug.server.switch` | INFO | `path` |
-| `debug.server.error` | ERROR | `url`, `error` |
-| `debug.server.browser` | WARNING | `url`, `error` |
+| `wink.debug.snapshot_error`  | WARNING | `path`, `line_number`, `error` |
+| `debug.server.start`         | INFO    | `url`                          |
+| `debug.server.reload`        | INFO    | `path`                         |
+| `debug.server.reload_failed` | WARNING | `path`, `error`                |
+| `debug.server.switch`        | INFO    | `path`                         |
+| `debug.server.error`         | ERROR   | `url`, `error`                 |
+| `debug.server.browser`       | WARNING | `url`, `error`                 |
 
 ## Implementation Notes
 

@@ -160,11 +160,11 @@ receive lifecycle events without modifying adapter or prompt code.
 
 **Available Events:**
 
-| Event | When Fired | Key Fields |
+| Event            | When Fired                         | Key Fields                                                                           |
 | ---------------- | ---------------------------------- | ------------------------------------------------------------------------------------ |
 | `PromptRendered` | After render, before provider call | `prompt_ns`, `prompt_key`, `prompt_name`, `adapter`, `rendered_prompt`, `descriptor` |
-| `ToolInvoked` | After each tool handler | `name`, `params`, `result`, `usage`, `call_id` |
-| `PromptExecuted` | After final parse | `result`, `usage`, `prompt_name` |
+| `ToolInvoked`    | After each tool handler            | `name`, `params`, `result`, `usage`, `call_id`                                       |
+| `PromptExecuted` | After final parse                  | `result`, `usage`, `prompt_name`                                                     |
 
 **Mapping to LangSmith Runs:**
 
@@ -199,11 +199,11 @@ class PromptOverridesStore(Protocol):
 
 **Hub Mapping:**
 
-| WINK Concept | LangSmith Hub Concept |
+| WINK Concept               | LangSmith Hub Concept        |
 | -------------------------- | ---------------------------- |
-| `ns/prompt_key` | Prompt name |
-| `tag` | Commit hash or alias |
-| `SectionOverride.body` | Prompt template content |
+| `ns/prompt_key`            | Prompt name                  |
+| `tag`                      | Commit hash or alias         |
+| `SectionOverride.body`     | Prompt template content      |
 | `ToolOverride.description` | Tool description in template |
 
 ## Architecture
@@ -312,11 +312,11 @@ flowchart TB
 
 The Claude Agent SDK adapter's hooks map to LangSmith runs:
 
-| SDK Hook | WINK Event | LangSmith Run |
+| SDK Hook      | WINK Event        | LangSmith Run      |
 | ------------- | ----------------- | ------------------ |
-| `PreToolUse` | (none - internal) | Child span start |
-| `PostToolUse` | `ToolInvoked` | Tool run complete |
-| `Stop` | `PromptExecuted` | Chain run complete |
+| `PreToolUse`  | (none - internal) | Child span start   |
+| `PostToolUse` | `ToolInvoked`     | Tool run complete  |
+| `Stop`        | `PromptExecuted`  | Chain run complete |
 
 ### Deduplication
 
@@ -508,12 +508,12 @@ class LangSmithConfig:
 
 ### Environment Variables
 
-| Variable | Description | Default |
+| Variable               | Description          | Default                             |
 | ---------------------- | -------------------- | ----------------------------------- |
-| `LANGCHAIN_API_KEY` | LangSmith API key | (required) |
-| `LANGCHAIN_PROJECT` | Default project name | `"default"` |
-| `LANGCHAIN_TRACING_V2` | Enable tracing | `"true"` |
-| `LANGCHAIN_ENDPOINT` | API endpoint | `"https://api.smith.langchain.com"` |
+| `LANGCHAIN_API_KEY`    | LangSmith API key    | (required)                          |
+| `LANGCHAIN_PROJECT`    | Default project name | `"default"`                         |
+| `LANGCHAIN_TRACING_V2` | Enable tracing       | `"true"`                            |
+| `LANGCHAIN_ENDPOINT`   | API endpoint         | `"https://api.smith.langchain.com"` |
 
 ## Implementation Components
 
