@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, get_args, get_type_hints
 
 from ._types import Evaluator, Score, SessionEvaluator
 
@@ -70,15 +70,61 @@ def contains(output: str, expected: str) -> Score:
     return Score(value=1.0 if passed else 0.0, passed=passed)
 
 
-_SESSION_AWARE_PARAM_COUNT = 3
-"""Minimum parameter count for session-aware evaluators (output, expected, session)."""
+_SESSION_TYPE_NAMES = frozenset({"SessionProtocol", "SessionViewProtocol"})
+"""Names of session protocol types that indicate a session-aware evaluator."""
+
+
+def _is_session_type(type_hint: object) -> bool:
+    """Check if a type hint is or contains a session protocol type.
+
+    Uses type name matching to avoid runtime protocol checks.
+    Handles Union types (e.g., SessionProtocol | SessionViewProtocol).
+    """
+    # Get type name for direct comparison
+    type_name = getattr(type_hint, "__name__", None)
+    if type_name in _SESSION_TYPE_NAMES:
+        return True
+
+    # Handle Union types (including | syntax which becomes UnionType at runtime)
+    # Use get_args directly - works for both Union and | syntax
+    args = get_args(type_hint)
+    if args:
+        return any(_is_session_type(arg) for arg in args)
+
+    return False
+
+
+def _check_string_annotation(hint: str, fn_globals: dict[str, object]) -> bool:
+    """Check if a string type annotation refers to a session type.
+
+    Args:
+        hint: The string annotation to check.
+        fn_globals: The function's __globals__ dict for resolving names.
+
+    Returns:
+        True if the string annotation refers to a session type.
+    """
+    # Direct name match
+    if hint in _SESSION_TYPE_NAMES:
+        return True
+    # Try to resolve the string in the function's global namespace
+    # This handles cases like `session: SVP` where SVP is an alias
+    if hint in fn_globals:
+        resolved = fn_globals[hint]
+        return _is_session_type(resolved)
+    # String annotation that couldn't be resolved - check for substring match
+    # to catch patterns like "SessionProtocol" within longer type strings
+    return any(name in hint for name in _SESSION_TYPE_NAMES)
 
 
 def is_session_aware(fn: Callable[..., Score]) -> bool:
     """Check if evaluator accepts session parameter.
 
-    Inspects the function signature to determine if it expects a session
-    parameter (3+ parameters indicates session-aware evaluator).
+    Inspects the function's type hints to determine if it expects a session
+    parameter. A session-aware evaluator has a third parameter typed as
+    SessionProtocol, SessionViewProtocol, or a union containing them.
+
+    Falls back to parameter count (3+) if type hints are unavailable.
 
     Args:
         fn: The evaluator function to check.
@@ -87,7 +133,36 @@ def is_session_aware(fn: Callable[..., Score]) -> bool:
         True if the evaluator accepts a session parameter.
     """
     sig = inspect.signature(fn)
-    return len(sig.parameters) >= _SESSION_AWARE_PARAM_COUNT
+    params = list(sig.parameters.values())
+
+    # Must have at least 3 parameters to be session-aware
+    if len(params) < 3:  # noqa: PLR2004
+        return False
+
+    third_param = params[2].name
+
+    # Try to get type hints for proper detection
+    # First try get_type_hints for resolved annotations
+    try:
+        hints = get_type_hints(fn)
+        if third_param in hints:
+            return _is_session_type(hints[third_param])
+    except Exception:  # nosec B110
+        # get_type_hints can fail with nested functions due to unresolved forward refs
+        # Fall back to raw annotations
+        pass
+
+    # Try raw __annotations__ (may contain string forward refs or unresolved types)
+    annotations = getattr(fn, "__annotations__", {})
+    if third_param in annotations:
+        hint = annotations[third_param]
+        if isinstance(hint, str):
+            return _check_string_annotation(hint, getattr(fn, "__globals__", {}))
+        return _is_session_type(hint)
+
+    # Fallback: assume 3+ params with no type hint means session-aware
+    # This maintains backwards compatibility for functions without annotations
+    return True
 
 
 def adapt[O, E](evaluator: Evaluator) -> SessionEvaluator:
