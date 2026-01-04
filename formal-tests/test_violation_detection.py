@@ -84,9 +84,17 @@ def test_violation_detected(
                 tlc_config=tlc_config,
             )
 
-        # Verify the error message indicates the violation
+        # Print TLC violation output
         error_msg = str(exc_info.value)
+        print("\n" + "="*80)
+        print("TLC VIOLATION DETECTED (Expected)")
+        print("="*80)
+        print(error_msg)
+        print("="*80)
+
+        # Verify the error message indicates the violation
         assert "violated" in error_msg.lower() or "failed" in error_msg.lower()
+        print("\n✓ Violation correctly detected by TLC")
     else:
         # Just test extraction when model checking is disabled
         spec, tla_file, cfg_file, _result = extract_and_verify(
