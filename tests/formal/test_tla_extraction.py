@@ -102,9 +102,14 @@ def test_formal_spec_decorator_attachment():
 
 def test_action_with_parameters():
     """Test Action with parameters."""
+    from weakincentives.formal import ActionParameter
+
     action = Action(
         name="Receive",
-        parameters=("consumer", "timeout"),
+        parameters=(
+            ActionParameter("consumer", "1..NumConsumers"),
+            ActionParameter("timeout", "0..MaxTimeout"),
+        ),
         preconditions=("timeout > 0", "Len(pending) > 0"),
         updates={"pending": "Tail(pending)"},
         description="Receive a message",
