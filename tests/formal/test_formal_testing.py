@@ -59,17 +59,40 @@ def mock_subprocess_for_tlc(monkeypatch: pytest.MonkeyPatch, run_mock: Any) -> N
 
     Creates a Popen mock that delegates to run_mock for compatibility.
     """
-    from unittest.mock import MagicMock
     import subprocess
+    from unittest.mock import MagicMock
 
     def popen_wrapper(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
-        # Call run_mock to get the result
-        run_result = run_mock(*args, **kwargs)
-
         # Create Popen-compatible mock
         proc = MagicMock()
-        proc.communicate.return_value = (run_result.stdout, run_result.stderr)
-        proc.returncode = run_result.returncode
+        call_count = 0
+
+        def communicate_mock(timeout: int | None = None) -> tuple[str, str]:
+            nonlocal call_count
+            call_count += 1
+
+            # Call run_mock to get the result (might raise TimeoutExpired)
+            try:
+                run_result = run_mock(*args, **kwargs)
+                proc.returncode = run_result.returncode
+                return (run_result.stdout, run_result.stderr)
+            except subprocess.TimeoutExpired as e:
+                # First call: raise TimeoutExpired
+                if call_count == 1:
+                    raise subprocess.TimeoutExpired(
+                        cmd=e.cmd,
+                        timeout=timeout or e.timeout,
+                        output=e.output,
+                        stderr=e.stderr,
+                    ) from None
+                # Second call (after kill): return output from exception
+                # Decode bytes to strings since text=True is used
+                stdout_str = e.output.decode() if isinstance(e.output, bytes) else (e.output or "")
+                stderr_str = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+                proc.returncode = -1
+                return (stdout_str, stderr_str)
+
+        proc.communicate = communicate_mock
         return proc
 
     monkeypatch.setattr(subprocess, "run", run_mock)
@@ -157,9 +180,7 @@ def test_model_check_error_tlc_not_found(monkeypatch: pytest.MonkeyPatch) -> Non
     def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
         raise FileNotFoundError("tlc not found")
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
 
@@ -194,9 +215,7 @@ def test_model_check_success(monkeypatch: pytest.MonkeyPatch) -> None:
         result.stderr = ""
         return result
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
     result = model_check(spec, tlc_config={"workers": "4", "cleanup": True})
@@ -235,9 +254,7 @@ def test_model_check_invariant_violation(monkeypatch: pytest.MonkeyPatch) -> Non
         result.stderr = ""
         return result
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
     result = model_check(spec, tlc_config={"workers": "auto", "cleanup": False})
@@ -312,9 +329,7 @@ def test_extract_and_verify_with_model_check_success(
         result.stderr = ""
         return result
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     _spec, _tla_file, _cfg_file, result = extract_and_verify(
         TestCounter,
@@ -355,9 +370,7 @@ def test_model_check_no_state_count(monkeypatch: pytest.MonkeyPatch) -> None:
         result.stderr = ""
         return result
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
     result = model_check(spec)
@@ -434,7 +447,7 @@ def test_model_check_timeout_no_violations(monkeypatch: pytest.MonkeyPatch) -> N
         )
         raise timeout_error
 
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
     result = model_check(spec)
@@ -475,7 +488,7 @@ def test_model_check_timeout_with_violations(monkeypatch: pytest.MonkeyPatch) ->
         )
         raise timeout_error
 
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
     result = model_check(spec)
@@ -483,6 +496,49 @@ def test_model_check_timeout_with_violations(monkeypatch: pytest.MonkeyPatch) ->
     # Should NOT pass because violation was found
     assert not result.passed
     assert result.states_generated == 1000
+
+
+def test_model_check_with_jar_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test model_check when TLC JAR file exists (uses Java directly)."""
+    import subprocess
+    from unittest.mock import MagicMock
+
+    from weakincentives.formal.testing import model_check
+
+    call_count = 0
+
+    def mock_run(*args: Any, **kwargs: Any) -> MagicMock:  # noqa: ANN401
+        nonlocal call_count
+        call_count += 1
+
+        result = MagicMock()
+        result.returncode = 0
+        result.stdout = "Model checking completed.\n500 states generated.\n"
+        result.stderr = ""
+        return result
+
+    # Mock Path.exists to return True so JAR path is used
+    monkeypatch.setattr(Path, "exists", lambda self: True)
+    monkeypatch.setattr(subprocess, "run", mock_run)
+
+    # Create Popen mock
+    def popen_wrapper(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+        proc = MagicMock()
+        run_result = mock_run(*args, **kwargs)
+        proc.communicate.return_value = (run_result.stdout, run_result.stderr)
+        proc.returncode = run_result.returncode
+        return proc
+
+    monkeypatch.setattr(subprocess, "Popen", popen_wrapper)
+
+    spec = extract_spec(TestCounter)
+    result = model_check(spec)
+
+    assert result.passed
+    assert result.states_generated == 500
+
+    # Verify Java command was used (not 'tlc')
+    # We can't directly check the command, but we can verify it succeeded
 
 
 def test_extract_state_count_no_digits(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -512,9 +568,7 @@ def test_extract_state_count_no_digits(monkeypatch: pytest.MonkeyPatch) -> None:
         result.stderr = ""
         return result
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
     result = model_check(spec)
@@ -550,9 +604,7 @@ def test_model_check_tlc_config_error(monkeypatch: pytest.MonkeyPatch) -> None:
         result.stderr = "Error: Unable to access jarfile /usr/local/lib/tla2tools.jar"
         return result
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
 
