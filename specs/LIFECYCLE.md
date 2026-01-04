@@ -524,7 +524,7 @@ sequenceDiagram
 When shutdown interrupts processing:
 
 | Scenario | Message State | Recovery |
-|----------|---------------|----------|
+| --------------------------------------- | ------------------ | ------------------------- |
 | In-flight when shutdown triggered | Completes normally | Acknowledged |
 | Received but not started | Nacked immediately | Redelivered |
 | Never received | Still in queue | Picked up by other worker |
@@ -558,7 +558,7 @@ take too long are naturally handled by the mailbox's redelivery semantics.
 ### Timeouts
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
+| -------------------- | ------- | --------------------------- |
 | `shutdown_timeout` | 30.0s | Max wait for in-flight work |
 | `visibility_timeout` | 300s | Mailbox invisibility period |
 | `wait_time_seconds` | 20s | Long poll duration |

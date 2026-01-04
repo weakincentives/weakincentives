@@ -82,7 +82,7 @@ class Scope(Enum):
 ### Scope Selection Guidelines
 
 | Scope | Use When | Examples |
-|-------|----------|----------|
+| ----------- | ----------------------------------------------------------- | ----------------------------------------- |
 | `SINGLETON` | Expensive to create, stateless or thread-safe | HTTP clients, connection pools, config |
 | `TOOL_CALL` | Needs fresh state per tool, or tracks tool-specific context | Request tracers, tool-scoped transactions |
 | `PROTOTYPE` | Cheap to create, each caller needs independent instance | Builders, temporary buffers |

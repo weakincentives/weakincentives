@@ -223,7 +223,9 @@ __marimo__/
 tools/
 
 # TLA+ model checker generated files
-specs/tla/states/
+states/
+specs/tla/
 
 # Redis dump
 dump.rdb
+tla2tools.jar

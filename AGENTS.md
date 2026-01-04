@@ -106,6 +106,11 @@ a goal at any time.
   helpers or shared state.
 - **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
   modifying tools.
+- **FORMAL_VERIFICATION.md**: Embedding TLA+ specifications in Python using
+  `@formal_spec` decorator, running TLC model checker, and verification
+  testing—when adding formal specs or modifying verified code.
+- **VERIFICATION.md**: Redis mailbox detailed specification with invariants
+  and property-based tests—when modifying mailbox implementations.
 - **WORKSPACE.md**: VFS, Podman sandbox, asteval, and workspace digest—when
   editing workspace tooling.
 

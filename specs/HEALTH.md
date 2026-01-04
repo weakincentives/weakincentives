@@ -36,7 +36,7 @@ replaced by the orchestrator.
 Returns 200 if the process is responsive (liveness probe).
 
 ```json
-{"status": "healthy"}
+{ "status": "healthy" }
 ```
 
 Use for Kubernetes `livenessProbe`. A failed liveness check causes the
@@ -48,11 +48,11 @@ Returns 200 if all loops are running and healthy, 503 otherwise (readiness
 probe).
 
 ```json
-{"status": "healthy"}
+{ "status": "healthy" }
 ```
 
 ```json
-{"status": "unhealthy"}
+{ "status": "unhealthy" }
 ```
 
 Use for Kubernetes `readinessProbe`. A failed readiness check removes the pod
@@ -458,7 +458,7 @@ This allows Kubernetes to stop routing traffic before the watchdog terminates.
 ### LoopGroup Parameters
 
 | Parameter | Default | Description |
-|-----------|---------|-------------|
+| -------------------- | ------- | -------------------------------------------- |
 | `health_port` | None | Port for health endpoints (disabled if None) |
 | `watchdog_threshold` | 720.0s | Seconds without heartbeat before termination |
 | `watchdog_interval` | 60.0s | Seconds between watchdog checks |
@@ -472,7 +472,7 @@ Defaults are calibrated for:
 - **30-second long poll**: Maximum `wait_time_seconds` for mailbox receive
 
 | Parameter | Default | Rationale |
-|-----------|---------|-----------|
+| -------------------- | -------------- | ------------------------------------- |
 | `wait_time_seconds` | 30s | Maximum long poll duration |
 | `watchdog_threshold` | 720s (12 min) | > 30s + 600s with 90s margin |
 | `watchdog_interval` | 60s | < 720s / 3, checks ~12x per threshold |
@@ -657,7 +657,7 @@ spec:
 ### Probe Timing Recommendations
 
 | Probe | Period | Threshold | Rationale |
-|-------|--------|-----------|-----------|
+| --------- | ------ | ---------- | ------------------------------------------- |
 | Liveness | 10s | 3 failures | Avoid false positives from transient issues |
 | Readiness | 5s | 2 failures | Remove unhealthy pods quickly |
 

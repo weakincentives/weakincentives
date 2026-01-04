@@ -452,7 +452,7 @@ def _apply_slice_op[S: SupportsDataclass](
 ### Performance Characteristics
 
 | Reducer Pattern | MemorySlice | JsonlSlice |
-|-----------------|-------------|------------|
+| ------------------------ | ----------- | -------------------------- |
 | `Append(item)` | O(n) copy | **O(1) file append** |
 | `Extend(items)` | O(n) copy | **O(k) file append** |
 | `Replace(items)` | O(1) | O(n) file rewrite |
@@ -1031,7 +1031,7 @@ def unlock(f):
 ## Performance Characteristics
 
 | Operation | MemorySlice | JsonlSlice (cached) | JsonlSlice (cold) |
-|-----------|-------------|---------------------|-------------------|
+| ----------- | ------------ | ------------------- | ------------------- |
 | `all()` | O(1) | O(1) | O(n) file read |
 | `latest()` | O(1) | O(1) | O(n) file read |
 | `append()` | O(n) copy | O(1) file append | O(1) file append |

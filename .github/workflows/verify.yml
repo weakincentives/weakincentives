@@ -1,29 +1,30 @@
 # Formal Verification Workflow
 #
-# Runs TLA+ model checking and property-based tests when Redis mailbox
-# code or verification specs change.
+# Runs TLA+ model checking (via embedded @formal_spec) and property-based
+# tests on all pull requests to ensure correctness.
 
 name: Formal Verification
 
 on:
   push:
-    paths:
-      - 'src/weakincentives/contrib/mailbox/_redis.py'
-      - 'specs/tla/**'
-      - 'tests/contrib/mailbox/test_redis_mailbox_*.py'
+    branches: [main]
   pull_request:
-    paths:
-      - 'src/weakincentives/contrib/mailbox/_redis.py'
-      - 'specs/tla/**'
-      - 'tests/contrib/mailbox/test_redis_mailbox_*.py'
+    branches: [main]
 
 jobs:
-  tlaplus:
+  formal-verification:
+    name: TLA+ Model Checking
     runs-on: ubuntu-latest
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Java
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Java (for TLC)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
@@ -33,26 +34,36 @@ jobs:
         id: cache-tlaplus
         uses: actions/cache@v4
         with:
-          path: /usr/local/lib/tla2tools.jar
+          path: |
+            /usr/local/bin/tlc
+            /usr/local/lib/tla2tools.jar
           key: tlaplus-v1.8.0
 
       - name: Install TLA+ Tools
         if: steps.cache-tlaplus.outputs.cache-hit != 'true'
-        run: |
-          wget -q https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
-          sudo mv tla2tools.jar /usr/local/lib/
+        run: make setup-tlaplus
 
-      - name: Run TLC (simulation mode)
-        run: |
-          cd specs/tla
-          java -XX:+UseParallelGC -jar /usr/local/lib/tla2tools.jar \
-            -simulate num=1000 -depth 50 \
-            -config RedisMailboxMC-ci.cfg \
-            RedisMailbox.tla \
-            -workers auto
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run formal verification (TLC model checking)
+        run: make verify-formal
+
+      - name: Upload extracted specs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted-tla-specs
+          path: specs/tla/extracted/
+          if-no-files-found: ignore
 
   property-tests:
+    name: Property-Based Tests
     runs-on: ubuntu-latest
+
     services:
       redis:
         image: redis:7
@@ -73,15 +84,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      - name: Run property tests
-        run: |
-          uv run --all-extras pytest \
-            tests/contrib/mailbox/test_redis_mailbox_properties.py \
-            tests/contrib/mailbox/test_redis_mailbox_invariants.py \
-            --no-cov -v --hypothesis-show-statistics
+      - name: Run Hypothesis property tests
+        run: make property-tests
 
-      - name: Run stress tests
-        run: |
-          uv run --all-extras pytest \
-            tests/contrib/mailbox/test_redis_mailbox_stress.py \
-            --no-cov -v -m slow --timeout=120
+      - name: Run concurrent stress tests
+        run: make stress-tests
