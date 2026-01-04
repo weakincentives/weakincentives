@@ -10,6 +10,21 @@ Release highlights for weakincentives.
   `--changelog` flag to print the bundled CHANGELOG.md, making release history
   accessible without repository access.
 
+### ToolResult Convenience Constructors
+
+New class methods for creating `ToolResult` instances with less boilerplate:
+
+```python
+# Success with typed value
+ToolResult.ok(MyResult(...), message="Done")
+
+# Failure with no value
+ToolResult.error("Something went wrong")
+```
+
+The full constructor form remains available when `exclude_value_from_context` is
+needed.
+
 ## v0.18.0 - 2026-01-05
 
 ### Lifecycle Management for MainLoop and EvalLoop

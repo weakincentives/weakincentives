@@ -80,6 +80,20 @@ class ToolResult(Generic[PayloadT]):
     exclude_value_from_context: bool = False  # Hide from provider
 ```
 
+**Convenience Constructors:**
+
+Use these for common cases instead of the full constructor:
+
+```python
+# Success with typed value (most common)
+ToolResult.ok(MyResult(...), message="Done")
+
+# Failure with no value
+ToolResult.error("Something went wrong")
+```
+
+The full constructor form is needed when `exclude_value_from_context=True`.
+
 **Result Rendering Protocol:**
 
 ```python

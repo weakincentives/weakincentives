@@ -223,7 +223,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
 
     def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
         del context
-        return ToolResult(message="", value=EchoResult(content=params.content))
+        return ToolResult.ok(EchoResult(content=params.content), message="")
 
     tool = Tool[EchoParams, EchoResult](
         name="echo",
@@ -275,7 +275,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
 
     def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
         del context
-        return ToolResult(message="done", value=EchoResult(content=params.content))
+        return ToolResult.ok(EchoResult(content=params.content), message="done")
 
     tool = Tool[EchoParams, EchoResult](
         name="echo",

@@ -103,7 +103,7 @@ class EchoPayload:
 def echo_handler(
     params: EchoParams, *, context: ToolContext
 ) -> ToolResult[EchoPayload]:
-    return ToolResult(message="echoed", value=EchoPayload(value=params.value))
+    return ToolResult.ok(EchoPayload(value=params.value), message="echoed")
 
 
 def serialize_tool_message(
@@ -114,7 +114,7 @@ def serialize_tool_message(
 
 def test_tool_to_spec_accepts_none_params() -> None:
     def handler(params: None, *, context: ToolContext) -> ToolResult[EchoPayload]:
-        return ToolResult(message="ok", value=EchoPayload(value="hi"))
+        return ToolResult.ok(EchoPayload(value="hi"), message="ok")
 
     tool = Tool[None, EchoPayload](
         name="no_params",
@@ -136,7 +136,7 @@ def testparse_tool_params_rejects_arguments_for_none_params() -> None:
         params: None, *, context: ToolContext
     ) -> ToolResult[EchoPayload]:
         del context
-        return ToolResult(message="ok", value=EchoPayload(value="hi"))
+        return ToolResult.ok(EchoPayload(value="hi"), message="ok")
 
     tool = Tool[None, EchoPayload](
         name="no_params",
@@ -290,7 +290,7 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
         handler=echo_handler,
     )
     params = EchoParams(value="hello")
-    result = ToolResult(message="echoed", value=EchoPayload(value="hello"))
+    result = ToolResult.ok(EchoPayload(value="hello"), message="echoed")
     log = get_logger(__name__)
 
     bus = RecordingBus()
@@ -802,7 +802,7 @@ class TestToolExecutionFilesystemIntegration:
             filesystem = context.filesystem
             if filesystem:
                 filesystem.write("/test.txt", "modified")
-            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
 
         tool = Tool[_ModifyParams, EchoPayload](
             name="modify",
@@ -898,9 +898,7 @@ class TestPublishInvocationFilesystemRestore:
             handler=echo_handler,
         )
         params = EchoParams(value="hello")
-        result = ToolResult(
-            message="echoed", value=EchoPayload(value="hello"), success=True
-        )
+        result = ToolResult.ok(EchoPayload(value="hello"), message="echoed")
         log = get_logger(__name__)
 
         typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
@@ -1200,7 +1198,7 @@ class TestFilesystemSnapshotIntegration:
             filesystem = context.filesystem
             if filesystem:
                 filesystem.write("/file.txt", "modified")
-            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
 
         tool = Tool[_InvalidParams, EchoPayload](
             name="invalid_tool",
@@ -1268,7 +1266,7 @@ class TestFilesystemSnapshotIntegration:
                 filesystem.write("/file2.txt", "modified2")
                 filesystem.write("/newfile.txt", "new content")
                 filesystem.delete("/file2.txt")
-            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
 
         tool = Tool[_MultiFileParams, EchoPayload](
             name="success_modify",
@@ -1403,7 +1401,7 @@ class TestFilesystemSnapshotIntegration:
                 filesystem.write("/step2.txt", "modified2")
                 # Then crash before third modification
                 raise RuntimeError("Crash after partial modifications")
-            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
 
         tool = Tool[_FailParams, EchoPayload](
             name="partial_tool",
@@ -1542,7 +1540,7 @@ class TestHostFilesystemToolIntegration:
             filesystem = context.filesystem
             if filesystem:
                 filesystem.write("file.txt", "modified by tool")
-            return ToolResult(message="ok", value=EchoPayload(value="ok"))
+            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
 
         tool = Tool[_FailParams, EchoPayload](
             name="host_success",
