@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist extract-tla check-tla check-tla-fast verify-embedded verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # Format code with ruff
 format:
@@ -165,12 +165,6 @@ verify-formal-fast:
 # Full verification + persist specs to specs/tla/extracted/
 verify-formal-persist:
 	@uv run --all-extras pytest formal-tests/ --no-cov -v --persist-specs
-
-# Legacy aliases for backward compatibility
-extract-tla: verify-formal-fast
-check-tla: verify-formal
-check-tla-fast: verify-formal-fast
-verify-embedded: verify-formal
 
 # Run all formal verification (embedded specs + property tests)
 verify-all: verify-formal property-tests
