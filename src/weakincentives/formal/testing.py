@@ -18,7 +18,7 @@ TLA+ specifications embedded in Python code via @formal_spec decorators.
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -100,8 +100,8 @@ def write_spec(
     tla_file = output_dir / f"{spec.module}.tla"
     cfg_file = output_dir / f"{spec.module}.cfg"
 
-    tla_file.write_text(spec.to_tla())
-    cfg_file.write_text(spec.to_tla_config())
+    _ = tla_file.write_text(spec.to_tla())
+    _ = cfg_file.write_text(spec.to_tla_config())
 
     return tla_file, cfg_file
 
@@ -143,13 +143,12 @@ def model_check(
 
         # Check if tlc is available
         try:
-            subprocess.run(
+            _ = subprocess.run(  # nosec B603 B607
                 ["tlc", "-h"], capture_output=True, check=False, timeout=5
             )
         except FileNotFoundError:
             raise ModelCheckError(
-                "TLC not found. Install with: brew install tlaplus (macOS) or "
-                "download from https://github.com/tlaplus/tlaplus/releases"
+                "TLC not found. Install with: brew install tlaplus (macOS) or download from https://github.com/tlaplus/tlaplus/releases"
             ) from None
 
         # Run TLC
@@ -165,7 +164,7 @@ def model_check(
         if cleanup:
             cmd.append("-cleanup")
 
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # nosec B603 B607
 
         # Parse output to count states
         states = 0
@@ -173,7 +172,7 @@ def model_check(
             if "states generated" in line.lower():
                 # Extract number from line like "1234 states generated"
                 parts = line.split()
-                for i, part in enumerate(parts):
+                for _i, part in enumerate(parts):
                     if part.isdigit():
                         states = int(part)
                         break
@@ -237,9 +236,7 @@ def extract_and_verify(
         result = model_check(spec, tlc_config=tlc_config)
         if not result.passed:
             raise ModelCheckError(
-                f"Model checking failed for {spec.module}:\n\n"
-                f"STDOUT:\n{result.stdout}\n\n"
-                f"STDERR:\n{result.stderr}"
+                f"Model checking failed for {spec.module}:\n\nSTDOUT:\n{result.stdout}\n\nSTDERR:\n{result.stderr}"
             )
 
     return spec, tla_file, cfg_file, result

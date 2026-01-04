@@ -2,13 +2,13 @@
 
 ## Quick Navigation
 
-| Document | Purpose | Audience |
-|----------|---------|----------|
-| **[TLA_EMBEDDING.md](TLA_EMBEDDING.md)** | Design exploration of 5 approaches | Architects, contributors |
-| **[FORMAL_SPEC_GUIDE.md](FORMAL_SPEC_GUIDE.md)** | User guide with examples | Developers using `@formal_spec` |
-| **[TLA_MIGRATION_GUIDE.md](TLA_MIGRATION_GUIDE.md)** | Step-by-step migration from legacy specs | Maintainers migrating code |
-| **[MAKEFILE_UPDATES.md](MAKEFILE_UPDATES.md)** | Makefile targets and CI integration | DevOps, contributors |
-| **[EMBEDDING_TLA_SUMMARY.md](EMBEDDING_TLA_SUMMARY.md)** | Implementation summary | Project overview |
+| Document                                                 | Purpose                                  | Audience                        |
+| -------------------------------------------------------- | ---------------------------------------- | ------------------------------- |
+| **[TLA_EMBEDDING.md](TLA_EMBEDDING.md)**                 | Design exploration of 5 approaches       | Architects, contributors        |
+| **[FORMAL_SPEC_GUIDE.md](FORMAL_SPEC_GUIDE.md)**         | User guide with examples                 | Developers using `@formal_spec` |
+| **[TLA_MIGRATION_GUIDE.md](TLA_MIGRATION_GUIDE.md)**     | Step-by-step migration from legacy specs | Maintainers migrating code      |
+| **[MAKEFILE_UPDATES.md](MAKEFILE_UPDATES.md)**           | Makefile targets and CI integration      | DevOps, contributors            |
+| **[EMBEDDING_TLA_SUMMARY.md](EMBEDDING_TLA_SUMMARY.md)** | Implementation summary                   | Project overview                |
 
 ## At a Glance
 
@@ -21,12 +21,14 @@ implementation, specs and code live together.
 ### Why?
 
 **Problem:**
+
 ```
 specs/tla/RedisMailbox.tla    ← TLA+ spec (can drift)
 src/mailbox/_redis.py         ← Implementation (separate)
 ```
 
 **Solution:**
+
 ```python
 @formal_spec(...)             ← TLA+ spec embedded
 class RedisMailbox:
@@ -34,6 +36,7 @@ class RedisMailbox:
 ```
 
 **Benefits:**
+
 - ✅ Single source of truth
 - ✅ Specs visible in code review
 - ✅ Automatic extraction and validation
@@ -74,6 +77,7 @@ make verify-all
 #### 3. Generated output
 
 The decorator automatically generates:
+
 - `specs/tla/extracted/Counter.tla` - Complete TLA+ module
 - `specs/tla/extracted/Counter.cfg` - TLC configuration
 
@@ -88,6 +92,7 @@ The decorator automatically generates:
    - Troubleshooting
 
 2. **Try the examples:**
+
    ```bash
    uv run python examples/formal_spec_example.py
    ```
@@ -142,6 +147,7 @@ The decorator automatically generates:
 **Purpose:** Explore and compare different approaches for embedding TLA+ in Python.
 
 **Approaches evaluated:**
+
 1. ❌ Docstring blocks - mixes concerns, hard to parse
 2. ❌ String decorator literals - brittle, no IDE support
 3. ❌ Python DSL - huge effort, limited expressiveness
@@ -149,6 +155,7 @@ The decorator automatically generates:
 5. ✅ **Structured metadata** - chosen for type safety and composability
 
 **Key sections:**
+
 - Approach 1-5: Detailed analysis with code examples
 - Pytest plugin design
 - Recommended approach (hybrid)
@@ -164,6 +171,7 @@ over other approaches.
 **Purpose:** Teach developers how to use `@formal_spec` decorator.
 
 **Contents:**
+
 - Quick start (3 steps)
 - Complete example walkthrough
 - `@formal_spec` parameter reference
@@ -181,6 +189,7 @@ over other approaches.
 **Purpose:** Step-by-step guide for migrating existing TLA+ specs to embedded form.
 
 **Process:**
+
 1. Understand current spec
 2. Create skeleton decorator
 3. Migrate constants
@@ -194,6 +203,7 @@ over other approaches.
 11. Update documentation
 
 **Includes:**
+
 - Complete `RedisMailbox` migration example
 - Verification checklist
 - Troubleshooting common issues
@@ -208,6 +218,7 @@ over other approaches.
 **Purpose:** Document Makefile changes for TLA+ extraction and validation.
 
 **New targets:**
+
 - `make extract-tla` - Extract specs (fast, 1-2s)
 - `make check-tla` - Extract + model check (slow, 5-60s)
 - `make check-tla-fast` - Extract only (alias)
@@ -217,6 +228,7 @@ over other approaches.
 - `make clean-extracted` - Remove extracted files
 
 **Includes:**
+
 - Complete Makefile diff
 - Usage examples
 - CI integration
@@ -232,6 +244,7 @@ over other approaches.
 **Purpose:** High-level summary of what was implemented and why.
 
 **Contents:**
+
 - What was implemented
 - How it works (3 steps)
 - Design rationale
@@ -315,6 +328,7 @@ make verify-all
 ```
 
 This runs:
+
 - Legacy TLA+ specs (`specs/tla/*.tla`)
 - Embedded specs (`@formal_spec` decorators)
 - Property-based tests (Hypothesis)
@@ -366,6 +380,7 @@ The `@formal_spec` decorator uses structured metadata classes:
 - **`FormalSpec(...)`** - Complete TLA+ module
 
 These are **Python dataclasses**, providing:
+
 - Type checking
 - IDE autocomplete
 - Validation
@@ -402,6 +417,7 @@ class MyClass:
 ```
 
 **Division of labor:**
+
 - `@formal_spec`: High-level semantics for TLC model checking
 - `@require/@ensure/@invariant`: Runtime validation during tests
 

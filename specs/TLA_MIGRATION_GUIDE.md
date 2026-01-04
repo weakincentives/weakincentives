@@ -9,6 +9,7 @@ decorators.
 ## Overview
 
 **Before (Current):**
+
 ```
 specs/tla/
 ├── RedisMailbox.tla          # 370 lines of TLA+
@@ -20,6 +21,7 @@ src/weakincentives/contrib/mailbox/
 ```
 
 **After (Target):**
+
 ```
 src/weakincentives/contrib/mailbox/
 └── _redis.py                 # Implementation + embedded spec
@@ -80,6 +82,7 @@ class RedisMailbox:
 ### Step 3: Migrate Constants
 
 From `RedisMailbox.tla`:
+
 ```tla
 CONSTANTS
     MaxMessages,
@@ -89,6 +92,7 @@ CONSTANTS
 ```
 
 To Python:
+
 ```python
 @formal_spec(
     module="RedisMailbox",
@@ -105,6 +109,7 @@ To Python:
 ### Step 4: Migrate Variables
 
 From `RedisMailbox.tla`:
+
 ```tla
 VARIABLES
     pending,            \* Sequence of message IDs in pending list
@@ -121,6 +126,7 @@ VARIABLES
 ```
 
 To Python:
+
 ```python
 @formal_spec(
     module="RedisMailbox",
@@ -144,6 +150,7 @@ To Python:
 ### Step 5: Migrate Helper Operators
 
 From `RedisMailbox.tla`:
+
 ```tla
 NULL == 0
 
@@ -158,6 +165,7 @@ UpdateFunc(f, k, v) ==
 ```
 
 To Python:
+
 ```python
 @formal_spec(
     module="RedisMailbox",
@@ -176,6 +184,7 @@ To Python:
 ### Step 6: Migrate Actions
 
 From `RedisMailbox.tla`:
+
 ```tla
 Send(body) ==
     /\ nextMsgId <= MaxMessages
@@ -189,6 +198,7 @@ Send(body) ==
 ```
 
 To Python:
+
 ```python
 @formal_spec(
     module="RedisMailbox",
@@ -220,6 +230,7 @@ not mentioned in `updates`.
 ### Step 7: Migrate Invariants
 
 From `RedisMailbox.tla`:
+
 ```tla
 MessageStateExclusive ==
     \A msgId \in 1..nextMsgId-1:
@@ -232,6 +243,7 @@ MessageStateExclusive ==
 ```
 
 To Python:
+
 ```python
 @formal_spec(
     module="RedisMailbox",
@@ -528,6 +540,7 @@ diff specs/tla/RedisMailbox.tla specs/tla/extracted/RedisMailbox.tla
 ```
 
 **Note:** Some differences are expected:
+
 - Generated code has comments like `(* Generated from Python ... *)`
 - Variable ordering may differ
 - Helper operators may be in a different order
@@ -546,6 +559,7 @@ pytest --check-tla
 ```
 
 Common issues:
+
 - Syntax errors in TLA+ expressions (missing escapes, typos)
 - Missing helper operators
 - Incorrect action updates
@@ -597,6 +611,7 @@ Before archiving the original spec, verify:
 **Problem:** Invalid TLA+ syntax in `Action` or `Invariant`.
 
 **Solution:**
+
 - Use raw strings (`r"..."`) for backslashes
 - Check TLA+ syntax in extracted file
 - Consult TLA+ manual for correct syntax
@@ -606,6 +621,7 @@ Before archiving the original spec, verify:
 **Problem:** Referring to a variable that doesn't exist in `updates`.
 
 **Solution:**
+
 - Ensure all state variables are defined in `state_vars`
 - Check spelling matches exactly
 
@@ -614,6 +630,7 @@ Before archiving the original spec, verify:
 **Problem:** Semantic differences between specs.
 
 **Solution:**
+
 - Compare action by action
 - Check preconditions and updates
 - Verify invariant predicates
@@ -624,6 +641,7 @@ Before archiving the original spec, verify:
 **Problem:** TLC finds a counterexample.
 
 **Solution:**
+
 - This might be a **real bug**!
 - Review the counterexample trace
 - Check if bug is in spec or implementation
@@ -646,6 +664,7 @@ Before archiving the original spec, verify:
 ### CI Integration
 
 Recommendation:
+
 - Run extraction on every commit (fast)
 - Run model checking on changes to formal specs only (slow)
 - Cache extracted specs between runs

@@ -523,12 +523,12 @@ sequenceDiagram
 
 When shutdown interrupts processing:
 
-| Scenario | Message State | Recovery |
-|----------|---------------|----------|
-| In-flight when shutdown triggered | Completes normally | Acknowledged |
-| Received but not started | Nacked immediately | Redelivered |
-| Never received | Still in queue | Picked up by other worker |
-| Visibility expired during long shutdown | Requeued by reaper | Redelivered |
+| Scenario                                | Message State      | Recovery                  |
+| --------------------------------------- | ------------------ | ------------------------- |
+| In-flight when shutdown triggered       | Completes normally | Acknowledged              |
+| Received but not started                | Nacked immediately | Redelivered               |
+| Never received                          | Still in queue     | Picked up by other worker |
+| Visibility expired during long shutdown | Requeued by reaper | Redelivered               |
 
 The visibility timeout mechanism ensures no messages are lost. Workers that
 take too long are naturally handled by the mailbox's redelivery semantics.
@@ -557,11 +557,11 @@ take too long are naturally handled by the mailbox's redelivery semantics.
 
 ### Timeouts
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `shutdown_timeout` | 30.0s | Max wait for in-flight work |
-| `visibility_timeout` | 300s | Mailbox invisibility period |
-| `wait_time_seconds` | 20s | Long poll duration |
+| Parameter            | Default | Description                 |
+| -------------------- | ------- | --------------------------- |
+| `shutdown_timeout`   | 30.0s   | Max wait for in-flight work |
+| `visibility_timeout` | 300s    | Mailbox invisibility period |
+| `wait_time_seconds`  | 20s     | Long poll duration          |
 
 **Relationship**: `visibility_timeout` should be greater than
 `shutdown_timeout` + maximum expected message processing time. This ensures

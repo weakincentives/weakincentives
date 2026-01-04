@@ -29,14 +29,14 @@ This specification covers verification of `RedisMailbox` in
 `src/weakincentives/contrib/mailbox/_redis.py`. The following operations are
 modeled:
 
-| Operation | Lua Script | Verification Priority |
-|-----------|------------|----------------------|
-| `send()` | Pipeline | Medium |
-| `receive()` | `_LUA_RECEIVE` | Critical |
-| `acknowledge()` | `_LUA_ACKNOWLEDGE` | Critical |
-| `nack()` | `_LUA_NACK` | High |
-| `extend()` | `_LUA_EXTEND` | High |
-| `_reap_expired()` | `_LUA_REAP` | Critical |
+| Operation         | Lua Script         | Verification Priority |
+| ----------------- | ------------------ | --------------------- |
+| `send()`          | Pipeline           | Medium                |
+| `receive()`       | `_LUA_RECEIVE`     | Critical              |
+| `acknowledge()`   | `_LUA_ACKNOWLEDGE` | Critical              |
+| `nack()`          | `_LUA_NACK`        | High                  |
+| `extend()`        | `_LUA_EXTEND`      | High                  |
+| `_reap_expired()` | `_LUA_REAP`        | Critical              |
 
 ## Key Invariants
 
@@ -1625,14 +1625,14 @@ name: Formal Verification
 on:
   push:
     paths:
-      - 'src/weakincentives/contrib/mailbox/_redis.py'
-      - 'specs/tla/**'
-      - 'tests/contrib/mailbox/test_redis_mailbox_*.py'
+      - "src/weakincentives/contrib/mailbox/_redis.py"
+      - "specs/tla/**"
+      - "tests/contrib/mailbox/test_redis_mailbox_*.py"
   pull_request:
     paths:
-      - 'src/weakincentives/contrib/mailbox/_redis.py'
-      - 'specs/tla/**'
-      - 'tests/contrib/mailbox/test_redis_mailbox_*.py'
+      - "src/weakincentives/contrib/mailbox/_redis.py"
+      - "specs/tla/**"
+      - "tests/contrib/mailbox/test_redis_mailbox_*.py"
 
 jobs:
   tlaplus:
@@ -1643,8 +1643,8 @@ jobs:
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
-          distribution: 'temurin'
-          java-version: '17'
+          distribution: "temurin"
+          java-version: "17"
 
       - name: Cache TLA+ Tools
         id: cache-tlaplus
@@ -1681,7 +1681,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install uv
         run: pip install uv
@@ -1792,7 +1792,7 @@ environment. If any assumption is violated, the invariants may not hold.
 11. **Handle Secrecy**: Receipt handles are not shared between consumers. A
     consumer uses only handles from its own receive calls.
 
-01. **Single Acknowledgment**: A consumer attempts to acknowledge each message
+1.  **Single Acknowledgment**: A consumer attempts to acknowledge each message
     at most once. The implementation is idempotent, but redundant acks waste
     resources.
 

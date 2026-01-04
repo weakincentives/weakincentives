@@ -50,9 +50,7 @@ def test_redis_mailbox_spec(
     # Check if TLC is available if model checking is requested
     if enable_model_checking:
         try:
-            subprocess.run(
-                ["which", "tlc"], capture_output=True, check=True, timeout=5
-            )
+            subprocess.run(["which", "tlc"], capture_output=True, check=True, timeout=5)
         except (subprocess.CalledProcessError, FileNotFoundError):
             pytest.skip("TLC not installed (brew install tlaplus)")
 
@@ -89,12 +87,10 @@ def test_redis_mailbox_spec(
         assert result.passed, (
             f"Model checking failed:\n{result.stdout}\n{result.stderr}"
         )
-        print(
-            f"\n✓ Model checking passed ({result.states_generated} states generated)"
-        )
+        print(f"\n✓ Model checking passed ({result.states_generated} states generated)")
         print(f"✓ Spec written to {tla_file}")
     else:
-        print(f"\n✓ Extraction validated (model checking skipped)")
+        print("\n✓ Extraction validated (model checking skipped)")
         print(f"✓ Spec written to {tla_file}")
         print("\n⚠️  Model checking was skipped - use for development only!")
         print("Run without --skip-model-check for full verification")

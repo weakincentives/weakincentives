@@ -35,15 +35,16 @@ Example:
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, TypeVar
+from typing import Any, TypeVar
 
 __all__ = [
-    "StateVar",
-    "ActionParameter",
     "Action",
-    "Invariant",
+    "ActionParameter",
     "FormalSpec",
+    "Invariant",
+    "StateVar",
     "formal_spec",
 ]
 
@@ -95,7 +96,7 @@ class Action:
     name: str
     parameters: tuple[ActionParameter, ...] = field(default_factory=tuple)
     preconditions: tuple[str, ...] = field(default_factory=tuple)
-    updates: dict[str, str] = field(default_factory=dict)
+    updates: dict[str, str] = field(default_factory=lambda: {})
     description: str = ""
 
 
@@ -135,11 +136,11 @@ class FormalSpec:
 
     module: str
     extends: tuple[str, ...] = ("Integers", "Sequences", "FiniteSets")
-    constants: dict[str, Any] = field(default_factory=dict)
+    constants: dict[str, Any] = field(default_factory=lambda: {})
     state_vars: tuple[StateVar, ...] = field(default_factory=tuple)
     actions: tuple[Action, ...] = field(default_factory=tuple)
     invariants: tuple[Invariant, ...] = field(default_factory=tuple)
-    helpers: dict[str, str] = field(default_factory=dict)
+    helpers: dict[str, str] = field(default_factory=lambda: {})
     constraint: str | None = None
 
     def to_tla(self) -> str:
@@ -192,7 +193,9 @@ class FormalSpec:
 
         # Helper operators
         if self.helpers:
-            lines.append("-----------------------------------------------------------------------------")
+            lines.append(
+                "-----------------------------------------------------------------------------"
+            )
             lines.append("(* Helper Operators *)")
             lines.append("")
             for name, definition in self.helpers.items():
@@ -203,7 +206,9 @@ class FormalSpec:
 
         # Init formula (default: all variables at default values)
         if self.state_vars:
-            lines.append("-----------------------------------------------------------------------------")
+            lines.append(
+                "-----------------------------------------------------------------------------"
+            )
             lines.append("(* Initial State *)")
             lines.append("")
             lines.append("Init ==")
@@ -227,7 +232,9 @@ class FormalSpec:
 
         # Actions
         if self.actions:
-            lines.append("-----------------------------------------------------------------------------")
+            lines.append(
+                "-----------------------------------------------------------------------------"
+            )
             lines.append("(* Actions *)")
             lines.append("")
             for action in self.actions:
@@ -236,7 +243,7 @@ class FormalSpec:
 
                 # Action signature
                 if action.parameters:
-                    param_names = ', '.join(p.name for p in action.parameters)
+                    param_names = ", ".join(p.name for p in action.parameters)
                     sig = f"{action.name}({param_names})"
                 else:
                     sig = action.name
@@ -265,16 +272,20 @@ class FormalSpec:
 
         # Next formula (disjunction of all actions)
         if self.actions:
-            lines.append("-----------------------------------------------------------------------------")
+            lines.append(
+                "-----------------------------------------------------------------------------"
+            )
             lines.append("(* Next State *)")
             lines.append("")
             lines.append("Next ==")
-            for i, action in enumerate(self.actions):
+            for _i, action in enumerate(self.actions):
                 # For parameterized actions, existentially quantify over parameters with domains
                 if action.parameters:
                     # Build bounded quantifier: \E param1 \in domain1, param2 \in domain2 : Action(param1, param2)
-                    param_bindings = ', '.join(f"{p.name} \\in {p.domain}" for p in action.parameters)
-                    param_names = ', '.join(p.name for p in action.parameters)
+                    param_bindings = ", ".join(
+                        f"{p.name} \\in {p.domain}" for p in action.parameters
+                    )
+                    param_names = ", ".join(p.name for p in action.parameters)
                     action_call = f"\\E {param_bindings} : {action.name}({param_names})"
                 else:
                     action_call = action.name
@@ -285,7 +296,9 @@ class FormalSpec:
 
         # Spec formula (Init /\ [][Next]_vars)
         if self.state_vars and self.actions:
-            lines.append("-----------------------------------------------------------------------------")
+            lines.append(
+                "-----------------------------------------------------------------------------"
+            )
             lines.append("(* Specification *)")
             lines.append("")
             lines.append("Spec == Init /\\ [][Next]_vars")
@@ -293,7 +306,9 @@ class FormalSpec:
 
         # Invariants
         if self.invariants:
-            lines.append("-----------------------------------------------------------------------------")
+            lines.append(
+                "-----------------------------------------------------------------------------"
+            )
             lines.append("(* Invariants *)")
             lines.append("")
             for inv in self.invariants:
@@ -315,7 +330,9 @@ class FormalSpec:
 
         # State constraint (for limiting TLC exploration)
         if self.constraint:
-            lines.append("-----------------------------------------------------------------------------")
+            lines.append(
+                "-----------------------------------------------------------------------------"
+            )
             lines.append("(* State Constraint *)")
             lines.append("")
             lines.append(f"StateConstraint == {self.constraint}")
@@ -344,7 +361,7 @@ class FormalSpec:
         Returns:
             TLC configuration file content
         """
-        lines = []
+        lines: list[str] = []
 
         # Use SPECIFICATION Spec if available
         if init is None and next is None:
@@ -429,7 +446,9 @@ def formal_spec(
     def decorator(cls: type[T]) -> type[T]:
         spec = FormalSpec(
             module=module,
-            extends=tuple(extends) if extends else ("Integers", "Sequences", "FiniteSets"),
+            extends=tuple(extends)
+            if extends
+            else ("Integers", "Sequences", "FiniteSets"),
             constants=constants or {},
             state_vars=tuple(state_vars) if state_vars else (),
             actions=tuple(actions) if actions else (),

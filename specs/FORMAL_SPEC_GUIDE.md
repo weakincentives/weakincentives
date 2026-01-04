@@ -47,6 +47,7 @@ cat specs/tla/extracted/Counter.tla
 ```
 
 Output:
+
 ```tla
 ------------------------ MODULE Counter ------------------------
 (* Generated from Python formal specification metadata *)
@@ -84,6 +85,7 @@ src/counter.py                 ← Python implementation
 ```
 
 **Problems:**
+
 - Specs and code can drift apart
 - Developers might not know specs exist
 - Hard to keep synchronized during refactoring
@@ -97,6 +99,7 @@ class Counter:
 ```
 
 **Benefits:**
+
 - Single source of truth
 - Specs visible during code review
 - Automatic extraction and validation
@@ -142,6 +145,7 @@ List of state variables. Each is a `StateVar(name, type, description)`.
 ```
 
 **Common TLA+ types:**
+
 - `Nat` - Natural numbers
 - `Int` - Integers
 - `BOOLEAN` - Boolean values
@@ -170,6 +174,7 @@ Action(
 ```
 
 **Notes:**
+
 - Use raw strings (`r"..."`) for TLA+ with backslashes
 - Preconditions are ANDed together
 - Updates specify `var' = expr` for each variable
@@ -189,6 +194,7 @@ Invariant(
 ```
 
 **Tips:**
+
 - Use unique IDs (e.g., "INV-1", "INV-MessageExclusive")
 - Name should be a valid TLA+ identifier
 - Predicate is raw TLA+ expression
@@ -249,6 +255,7 @@ class Account:
 ```
 
 **Best practices:**
+
 - Use `@formal_spec` for high-level state machine
 - Use DbC decorators for detailed runtime checks
 - Keep formal specs focused on critical invariants
@@ -275,6 +282,7 @@ pytest --check-tla
 ```
 
 **Requirements:**
+
 - TLC must be installed (`brew install tlaplus` on macOS)
 - Specs must be well-formed TLA+
 - Model checking completes without errors
@@ -313,7 +321,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Install dependencies
         run: |
@@ -338,11 +346,13 @@ jobs:
 The plugin generates default `.cfg` files. For custom configuration:
 
 1. Extract specs once:
+
    ```bash
    pytest --extract-tla
    ```
 
 2. Edit generated `.cfg` file:
+
    ```bash
    vim specs/tla/extracted/MyModule.cfg
    ```
@@ -352,6 +362,7 @@ The plugin generates default `.cfg` files. For custom configuration:
 4. Future runs will use your custom `.cfg`
 
 Example custom config:
+
 ```
 SPECIFICATION Spec
 
@@ -375,6 +386,7 @@ PROPERTIES
 ### "No @formal_spec decorators found"
 
 Make sure your module is importable:
+
 ```bash
 python -c "import mymodule"
 ```
@@ -384,6 +396,7 @@ If import fails, fix the error first.
 ### "TLC not found"
 
 Install TLA+ tools:
+
 ```bash
 # macOS
 brew install tlaplus
@@ -395,11 +408,13 @@ wget https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar
 ### "Model checking failed"
 
 Check the extracted `.tla` file for syntax errors:
+
 ```bash
 cat specs/tla/extracted/MyModule.tla
 ```
 
 Common issues:
+
 - Typos in TLA+ syntax
 - Unescaped backslashes (use `r"..."` raw strings)
 - Missing helper operators

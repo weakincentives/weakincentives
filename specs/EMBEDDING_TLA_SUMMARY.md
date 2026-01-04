@@ -122,13 +122,13 @@ After exploring 5 different approaches (see `specs/TLA_EMBEDDING.md`), the
 
 ### Alternative Approaches Considered
 
-| Approach | Pros | Cons | Verdict |
-|----------|------|------|---------|
-| **1. Docstring blocks** | Easy, no new syntax | Mixes concerns, hard to parse | Supplement only |
-| **2. String decorators** | Familiar | No validation, poor IDE support | Too brittle |
-| **3. Python DSL** | Type-safe | Huge implementation effort | Overengineered |
-| **4. DbC + TLA fragments** | Minimal change | Duplication, incomplete specs | Good for simple cases |
-| **5. Structured metadata** | ✅ Best balance | Requires new API | **✅ CHOSEN** |
+| Approach                   | Pros                | Cons                            | Verdict               |
+| -------------------------- | ------------------- | ------------------------------- | --------------------- |
+| **1. Docstring blocks**    | Easy, no new syntax | Mixes concerns, hard to parse   | Supplement only       |
+| **2. String decorators**   | Familiar            | No validation, poor IDE support | Too brittle           |
+| **3. Python DSL**          | Type-safe           | Huge implementation effort      | Overengineered        |
+| **4. DbC + TLA fragments** | Minimal change      | Duplication, incomplete specs   | Good for simple cases |
+| **5. Structured metadata** | ✅ Best balance     | Requires new API                | **✅ CHOSEN**         |
 
 ## Architecture
 
@@ -144,6 +144,7 @@ Captures complete TLA+ module:
 - **Helpers**: Raw TLA+ operator definitions
 
 Methods:
+
 - `to_tla()` → Generate TLA+ module text
 - `to_tla_config()` → Generate TLC configuration
 
@@ -182,6 +183,7 @@ class Account:
 ```
 
 **Division of labor:**
+
 - `@formal_spec`: High-level state machine semantics for TLC
 - `@require/@ensure/@invariant`: Runtime validation for tests
 - Both can coexist and provide complementary coverage
@@ -201,6 +203,7 @@ uv run python -m examples.formal_spec_example
 See `examples/formal_spec_example.py::SimpleMailbox`
 
 Demonstrates:
+
 - Multiple state variables
 - Actions with preconditions
 - Multiple invariants
@@ -231,6 +234,7 @@ uv run pytest tests/formal/test_tla_extraction.py -v
 ```
 
 Tests cover:
+
 - `FormalSpec.to_tla()` generation
 - `FormalSpec.to_tla_config()` generation
 - Decorator attachment (`__formal_spec__`)
@@ -369,24 +373,26 @@ verify: check-tla  ## Full formal verification
 
 ### Design Trade-offs
 
-| Trade-off | Choice | Rationale |
-|-----------|--------|-----------|
-| Metadata vs Raw TLA+ | Metadata | Type-safe, validatable, IDE-friendly |
-| Decorator vs Docstring | Decorator | Structured, extractable, composable |
-| Full DSL vs Strings | Strings | Simpler, uses real TLA+ syntax |
-| Runtime vs Extract-time | Extract | Zero runtime overhead |
+| Trade-off               | Choice    | Rationale                            |
+| ----------------------- | --------- | ------------------------------------ |
+| Metadata vs Raw TLA+    | Metadata  | Type-safe, validatable, IDE-friendly |
+| Decorator vs Docstring  | Decorator | Structured, extractable, composable  |
+| Full DSL vs Strings     | Strings   | Simpler, uses real TLA+ syntax       |
+| Runtime vs Extract-time | Extract   | Zero runtime overhead                |
 
 ## Comparison with Other Approaches
 
 ### vs. Separate TLA+ Files
 
 **Before:**
+
 - ✅ Full TLA+ expressiveness
 - ❌ Drift from implementation
 - ❌ Hard to discover
 - ❌ Extra maintenance burden
 
 **After (Embedded):**
+
 - ✅ Co-located with code
 - ✅ Harder to ignore/forget
 - ✅ Discoverable via decorators
@@ -395,11 +401,13 @@ verify: check-tla  ## Full formal verification
 ### vs. Runtime Verification (DbC)
 
 **DbC decorators:**
+
 - ✅ Catch bugs during testing
 - ✅ Fast feedback
 - ❌ Can't exhaustively check all states
 
 **TLA+ model checking:**
+
 - ✅ Exhaustively checks state space
 - ✅ Finds subtle race conditions
 - ❌ Slower (seconds to minutes)

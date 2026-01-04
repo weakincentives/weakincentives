@@ -37,10 +37,10 @@ class TaskStep(Generic[ParamsT, ResultT]):
 
 **Fields:**
 
-| Field | Type | Description |
+| Field       | Type                            | Description                                                      |
 | ----------- | ------------------------------- | ---------------------------------------------------------------- |
-| `tool_name` | `str` | Name of the tool being invoked (must match `^[a-z0-9_-]{1,64}$`) |
-| `example` | `ToolExample[ParamsT, ResultT]` | The invocation details (description, input, output) |
+| `tool_name` | `str`                           | Name of the tool being invoked (must match `^[a-z0-9_-]{1,64}$`) |
+| `example`   | `ToolExample[ParamsT, ResultT]` | The invocation details (description, input, output)              |
 
 The `example.description` field describes the reasoning or purpose for this
 specific step within the trajectory (e.g., "Fetch user profile to check
@@ -70,13 +70,13 @@ class TaskExample(Section[TaskExampleParamsT]):
 
 **Constructor Arguments:**
 
-| Argument | Required | Description |
+| Argument    | Required | Description                                                                                                                                                                        |
 | ----------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `key` | Yes | Section identifier (e.g., `"example-auth-review"`) |
-| `objective` | Yes | The task goal (1-500 ASCII chars) |
-| `outcome` | Yes | Expected outcome. For prompts without structured output, this must be a `str`. For prompts with structured output, this must be an instance of the prompt's output dataclass type. |
-| `steps` | Yes | Non-empty ordered sequence of `TaskStep` instances |
-| `title` | No | Display title; defaults to truncated objective |
+| `key`       | Yes      | Section identifier (e.g., `"example-auth-review"`)                                                                                                                                 |
+| `objective` | Yes      | The task goal (1-500 ASCII chars)                                                                                                                                                  |
+| `outcome`   | Yes      | Expected outcome. For prompts without structured output, this must be a `str`. For prompts with structured output, this must be an instance of the prompt's output dataclass type. |
+| `steps`     | Yes      | Non-empty ordered sequence of `TaskStep` instances                                                                                                                                 |
+| `title`     | No       | Display title; defaults to truncated objective                                                                                                                                     |
 
 **Section Properties:**
 
@@ -105,11 +105,11 @@ class TaskExamplesSection(Section[TaskExamplesParamsT]):
 
 **Constructor Arguments:**
 
-| Argument | Required | Description |
+| Argument   | Required | Description                                     |
 | ---------- | -------- | ----------------------------------------------- |
-| `key` | No | Section identifier (default: `"task-examples"`) |
-| `title` | No | Display title (default: `"Task Examples"`) |
-| `examples` | Yes | One or more `TaskExample` instances |
+| `key`      | No       | Section identifier (default: `"task-examples"`) |
+| `title`    | No       | Display title (default: `"Task Examples"`)      |
+| `examples` | Yes      | One or more `TaskExample` instances             |
 
 The `examples` argument is **required** and must contain only
 `TaskExample` instances. These are registered as `Section.children`.
@@ -578,16 +578,16 @@ All validation errors raise `PromptValidationError` with:
 
 ### Error Scenarios
 
-| Scenario | Error Message |
+| Scenario              | Error Message                                                  |
 | --------------------- | -------------------------------------------------------------- |
-| Empty objective | `"objective must not be empty"` |
-| Objective too long | `"objective must be <= 500 characters"` |
-| Outcome type mismatch | `"Task example outcome type mismatch. Expected: X, got: Y."` |
-| Empty steps | `"steps must not be empty"` |
-| Unknown tool name | `"Unknown tool \"X\" in task example step N"` |
-| Input type mismatch | `"Task example step N input type mismatch for tool \"X\""` |
-| Output type mismatch | `"Task example step N output type mismatch for tool \"X\""` |
-| Wrong example type | `"TaskExamplesSection examples must be TaskExample instances"` |
+| Empty objective       | `"objective must not be empty"`                                |
+| Objective too long    | `"objective must be <= 500 characters"`                        |
+| Outcome type mismatch | `"Task example outcome type mismatch. Expected: X, got: Y."`   |
+| Empty steps           | `"steps must not be empty"`                                    |
+| Unknown tool name     | `"Unknown tool \"X\" in task example step N"`                  |
+| Input type mismatch   | `"Task example step N input type mismatch for tool \"X\""`     |
+| Output type mismatch  | `"Task example step N output type mismatch for tool \"X\""`    |
+| Wrong example type    | `"TaskExamplesSection examples must be TaskExample instances"` |
 
 ## Usage Example
 

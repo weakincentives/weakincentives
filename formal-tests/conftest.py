@@ -76,9 +76,9 @@ def extracted_specs_dir(
         output_dir = Path("specs/tla/extracted")
         output_dir.mkdir(parents=True, exist_ok=True)
         return output_dir
-    else:
-        # Use pytest's temp directory (auto-cleaned after session)
-        return tmp_path_factory.mktemp("tla_specs")
+
+    # Use pytest's temp directory (auto-cleaned after session)
+    return tmp_path_factory.mktemp("tla_specs")
 
 
 @pytest.fixture(scope="session")

@@ -26,8 +26,7 @@ Run extraction + model checking:
 from __future__ import annotations
 
 from weakincentives.dbc import ensure, invariant, require
-from weakincentives.formal import Action, FormalSpec, Invariant, StateVar, formal_spec
-
+from weakincentives.formal import Action, Invariant, StateVar, formal_spec
 
 # =============================================================================
 # Example 1: Simple Counter with Embedded Spec

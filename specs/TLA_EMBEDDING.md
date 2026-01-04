@@ -42,7 +42,7 @@ parses docstrings, extracts TLA+ blocks, and validates them.
 
 ### Example
 
-```python
+````python
 from weakincentives.dbc import require, ensure
 
 class RedisMailbox:
@@ -103,7 +103,7 @@ class RedisMailbox:
         TLA+ Action: Receive(consumer)
         """
         # Implementation...
-```
+````
 
 ### Pros
 
@@ -121,7 +121,7 @@ class RedisMailbox:
 
 ### Implementation
 
-```python
+````python
 # tests/plugins/tla_extraction.py
 
 import ast
@@ -167,7 +167,7 @@ def pytest_configure(config):
 
     # Run TLC model checker
     # ... (invoke TLC on extracted specs)
-```
+````
 
 ## Approach 2: Decorator-Based TLA+ Annotations
 
@@ -1054,6 +1054,7 @@ with **Approach 4 (Hybrid DbC)** provides the best balance:
 ### Hybrid Recommendation
 
 1. **For simple properties**: Extend DbC decorators with `tla=` parameter
+
    ```python
    @require(
        lambda x: x > 0,
@@ -1063,6 +1064,7 @@ with **Approach 4 (Hybrid DbC)** provides the best balance:
    ```
 
 2. **For complex state machines**: Use `@formal_spec` with structured metadata
+
    ```python
    @formal_spec(
        module="RedisMailbox",
@@ -1075,7 +1077,8 @@ with **Approach 4 (Hybrid DbC)** provides the best balance:
    ```
 
 3. **For supplementary documentation**: Use docstring TLA+ blocks
-   ```python
+
+   ````python
    def receive(self):
        """Receive messages.
 
@@ -1083,7 +1086,7 @@ with **Approach 4 (Hybrid DbC)** provides the best balance:
        Receive == ...
        ```
        """
-   ```
+   ````
 
 ### Implementation Priority
 

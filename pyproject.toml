@@ -141,10 +141,10 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 # C901 is ignored because test functions can legitimately have higher complexity.
-"tests/**" = ["C901", "PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
+"tests/**" = ["C901", "PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "ANN201"]
 "integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
 # Examples may use higher complexity for illustration purposes.
-"examples/**" = ["C901"]
+"examples/**" = ["C901", "CPY001", "ANN201", "ANN204"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
@@ -166,6 +166,8 @@ combine-as-imports = true
 "src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR6301", "ANN401", "TRY300"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]
 "src/weakincentives/contrib/mailbox/_redis.py" = ["PLR0914", "PLR6301", "C901", "TRY300", "TRY301", "SIM108"]
+"src/weakincentives/formal/__init__.py" = ["C901", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "A002", "B010", "PERF401"]
+"formal-tests/**" = ["PLR2004"]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 8

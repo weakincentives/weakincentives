@@ -40,7 +40,13 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
-from weakincentives.formal import Action, ActionParameter, Invariant, StateVar, formal_spec
+from weakincentives.formal import (
+    Action,
+    ActionParameter,
+    Invariant,
+    StateVar,
+    formal_spec,
+)
 from weakincentives.runtime.mailbox import (
     CompositeResolver,
     MailboxConnectionError,
@@ -277,7 +283,9 @@ class RedisMailboxFactory[R]:
         "VisibilityTimeout": 2,
     },
     state_vars=[
-        StateVar("pending", "Seq(MessageId)", "Sequence of message IDs in pending list"),
+        StateVar(
+            "pending", "Seq(MessageId)", "Sequence of message IDs in pending list"
+        ),
         StateVar("invisible", "Function", "msg_id -> {expiresAt, handle}"),
         StateVar("data", "Function", "msg_id -> body (or NULL if deleted)"),
         StateVar("handles", "Function", "msg_id -> current valid handle suffix"),
@@ -291,8 +299,12 @@ class RedisMailboxFactory[R]:
             "consumer_id -> {holding, handle}",
             initial_value="[c \\in 1..NumConsumers |-> [holding |-> NULL, handle |-> 0]]",
         ),
-        StateVar("deliveryCounts", "Function", "msg_id -> count (persists across requeue)"),
-        StateVar("deliveryHistory", "Function", "msg_id -> Seq of (count, handle) for INV-4"),
+        StateVar(
+            "deliveryCounts", "Function", "msg_id -> count (persists across requeue)"
+        ),
+        StateVar(
+            "deliveryHistory", "Function", "msg_id -> Seq of (count, handle) for INV-4"
+        ),
     ],
     helpers={
         "NULL": "0",

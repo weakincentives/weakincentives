@@ -205,6 +205,7 @@ For CI, you'll want to run both legacy and embedded verification:
 ```
 
 This ensures:
+
 1. Legacy TLA+ specs in `specs/tla/*.tla` are checked
 2. Embedded `@formal_spec` decorators are extracted and checked
 3. Property-based tests validate implementation
@@ -236,15 +237,15 @@ mv specs/tla/RedisMailbox.tla specs/tla/archive/
 
 ## Target Descriptions
 
-| Target | Description | Speed | When to Use |
-|--------|-------------|-------|-------------|
-| `extract-tla` | Extract specs without checking | Fast (1-2s) | Development, syntax check |
-| `check-tla` | Extract and model check | Slow (5-60s) | Before commit, CI |
-| `check-tla-fast` | Extract only (alias) | Fast (1-2s) | Quick validation |
-| `verify-embedded` | Alias for check-tla | Slow (5-60s) | Semantic clarity |
-| `verify-all` | All verification methods | Very slow (1-5m) | CI, pre-release |
-| `compare-specs` | Diff legacy vs embedded | Fast (1-2s) | Migration validation |
-| `clean-extracted` | Remove extracted files | Instant | Cleanup |
+| Target            | Description                    | Speed            | When to Use               |
+| ----------------- | ------------------------------ | ---------------- | ------------------------- |
+| `extract-tla`     | Extract specs without checking | Fast (1-2s)      | Development, syntax check |
+| `check-tla`       | Extract and model check        | Slow (5-60s)     | Before commit, CI         |
+| `check-tla-fast`  | Extract only (alias)           | Fast (1-2s)      | Quick validation          |
+| `verify-embedded` | Alias for check-tla            | Slow (5-60s)     | Semantic clarity          |
+| `verify-all`      | All verification methods       | Very slow (1-5m) | CI, pre-release           |
+| `compare-specs`   | Diff legacy vs embedded        | Fast (1-2s)      | Migration validation      |
+| `clean-extracted` | Remove extracted files         | Instant          | Cleanup                   |
 
 ## Incremental Adoption
 
@@ -279,6 +280,7 @@ check: format-check lint typecheck test check-tla
 **Problem:** Pytest not installed.
 
 **Solution:**
+
 ```bash
 uv sync --all-extras
 ```
@@ -288,11 +290,13 @@ uv sync --all-extras
 **Problem:** TLA+ tools not installed.
 
 **Solution:**
+
 ```bash
 make setup-tlaplus
 ```
 
 Or manually:
+
 ```bash
 brew install tlaplus  # macOS
 ```
@@ -302,6 +306,7 @@ brew install tlaplus  # macOS
 **Problem:** No embedded specs in codebase yet.
 
 **Solution:**
+
 - This is expected during migration
 - Add `@formal_spec` decorator following the migration guide
 - Or skip with: `make check || true` (non-fatal)
@@ -311,6 +316,7 @@ brew install tlaplus  # macOS
 **Problem:** State space too large.
 
 **Solution:**
+
 - Reduce constants in `@formal_spec` (e.g., `MaxMessages: 3` → `MaxMessages: 2`)
 - Add state constraints
 - Use `make extract-tla` for syntax-only validation
