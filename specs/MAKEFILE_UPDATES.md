@@ -365,4 +365,4 @@ After applying these changes:
 5. ✅ Incremental adoption path (extract → check → require)
 6. ✅ CI integration with `make verify-all`
 
-See `specs/TLA_MIGRATION_GUIDE.md` for step-by-step migration instructions.
+See `specs/FORMAL_VERIFICATION.md` for step-by-step migration instructions.

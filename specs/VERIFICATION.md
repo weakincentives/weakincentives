@@ -174,7 +174,7 @@ specs/tla/extracted/
 └── RedisMailbox.cfg           # Generated TLC config
 ```
 
-See `specs/FORMAL_SPEC_GUIDE.md` for complete documentation on the `@formal_spec` decorator.
+See `specs/FORMAL_VERIFICATION.md` for complete documentation on the `@formal_spec` decorator.
 
 ### State Variables
 
