@@ -16,11 +16,11 @@
 This demonstrates how to use the @formal_spec decorator to co-locate
 TLA+ formal specifications with Python code.
 
-Run extraction:
-    pytest --extract-tla
+Run fast extraction (no model checking):
+    make verify-formal-fast
 
-Run extraction + model checking:
-    pytest --check-tla
+Run full verification with TLC model checking:
+    make verify-formal
 """
 
 from __future__ import annotations

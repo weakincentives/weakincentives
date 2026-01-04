@@ -12,10 +12,11 @@ The verification framework provides two complementary layers:
 
 1. **Embedded TLA+ Specification**: A formal model embedded directly in the Python
    implementation using the `@formal_spec` decorator. The spec is extracted and
-   exhaustively checked by the TLC model checker for safety and liveness properties.
+   exhaustively checked by the TLC model checker for safety invariants.
 
 1. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
-   actual Python implementation against the same invariants.
+   actual Python implementation against the same invariants, and also verify
+   liveness properties (e.g., eventual requeue) that TLC cannot check.
 
 Together, these layers provide high confidence that:
 
@@ -31,7 +32,7 @@ modeled:
 
 | Operation | Lua Script | Verification Priority |
 | ----------------- | ------------------ | --------------------- |
-| `send()` | Pipeline | Medium |
+| `send()` | `_LUA_SEND` | Medium |
 | `receive()` | `_LUA_RECEIVE` | Critical |
 | `acknowledge()` | `_LUA_ACKNOWLEDGE` | Critical |
 | `nack()` | `_LUA_NACK` | High |
@@ -129,9 +130,26 @@ Messages with expired visibility timeout eventually return to pending:
 **Implementation guarantee**: Background reaper thread runs `_LUA_REAP` every
 `reaper_interval` seconds.
 
-### INV-7: FIFO Ordering
+### INV-7: Handle Uniqueness
 
-Messages are delivered in send order (within visibility constraints):
+Each delivery of a message gets a unique receipt handle:
+
+```
+∀ msg ∈ Messages:
+    ∀ d1, d2 ∈ DeliveryHistory(msg):
+        d1.seq ≠ d2.seq ⟹ d1.handle ≠ d2.handle
+```
+
+**Violation scenario**: If handles were reused, a consumer could accidentally
+acknowledge a message that was redelivered to another consumer.
+
+**Implementation guarantee**: Each `receive()` generates a new UUID suffix stored
+in the `:meta` hash. Handle validation compares against the current suffix.
+
+### FIFO Ordering (Structural Property)
+
+Messages are delivered in send order (within visibility constraints). This is a
+structural property of the Redis LIST data structure, not a numbered invariant:
 
 ```
 ∀ m1, m2 ∈ Messages:
@@ -549,11 +567,11 @@ PROPERTIES
 brew install tlaplus  # macOS
 # or: make setup-tlaplus
 
-# Extract and validate embedded TLA+ specs (fast, for development)
-make extract-tla
+# Fast extraction only (development, ~1s)
+make verify-formal-fast
 
-# Extract and model check embedded specs (for CI)
-make check-tla
+# Full formal verification with TLC model checking (~30s)
+make verify-formal
 
 # Run all verification (embedded specs + property tests)
 make verify-all
@@ -1382,7 +1400,7 @@ class TestVisibilityTimeout:
 
 
 class TestFIFOOrdering:
-    """Tests for INV-7: FIFO Ordering."""
+    """Tests for FIFO ordering (structural property of Redis LIST)."""
 
     def test_messages_received_in_send_order(self, mailbox):
         """Messages are delivered in FIFO order."""
@@ -1580,38 +1598,41 @@ The following Makefile targets support embedded TLA+ specifications:
 # Formal Verification
 # =============================================================================
 
-.PHONY: extract-tla
-extract-tla: ## Extract TLA+ specs from @formal_spec decorators
-	@uv run pytest --extract-tla -v
+# Full formal verification with TLC model checking (~30s)
+# Uses temp directory (no filesystem pollution)
+verify-formal:
+	@uv run --all-extras pytest formal-tests/ --no-cov -q --timeout=240
 
-.PHONY: check-tla
-check-tla: ## Extract and model check embedded TLA+ specs
-	@uv run pytest --check-tla -v
+# Fast extraction only (development, ~1s)
+# Skips model checking - use only for rapid iteration
+verify-formal-fast:
+	@uv run --all-extras pytest formal-tests/ --no-cov -q --skip-model-check
 
-.PHONY: verify-embedded
-verify-embedded: check-tla ## Alias for check-tla
+# Full verification + persist specs to specs/tla/extracted/
+verify-formal-persist:
+	@uv run --all-extras pytest formal-tests/ --no-cov -v --persist-specs
 
-.PHONY: property-tests
-property-tests: ## Run Hypothesis property-based tests
-	@uv run pytest tests/contrib/mailbox/test_redis_mailbox_properties.py \
+# Run Hypothesis property-based tests
+property-tests:
+	@uv run --all-extras pytest tests/contrib/mailbox/test_redis_mailbox_properties.py \
 		tests/contrib/mailbox/test_redis_mailbox_invariants.py \
 		--no-cov -v --hypothesis-show-statistics
 
-.PHONY: stress-tests
-stress-tests: ## Run concurrent stress tests
-	@uv run pytest tests/contrib/mailbox/test_redis_mailbox_stress.py \
+# Run concurrent stress tests
+stress-tests:
+	@uv run --all-extras pytest tests/contrib/mailbox/test_redis_mailbox_stress.py \
 		--no-cov -v -m slow --timeout=120
 
-.PHONY: verify-mailbox
-verify-mailbox: check-tla property-tests ## Run all mailbox verification
+# Run all mailbox verification
+verify-mailbox: verify-formal property-tests
 	@echo "All mailbox verification checks passed"
 
-.PHONY: verify-all
-verify-all: check-tla property-tests ## Run all formal verification
+# Run all formal verification (embedded specs + property tests)
+verify-all: verify-formal property-tests
 	@echo "✓ All formal verification passed"
 ```
 
-See `specs/MAKEFILE_UPDATES.md` for complete documentation on these targets.
+These targets match the actual Makefile in the repository root.
 
 ## CI Integration
 
@@ -1717,11 +1738,11 @@ Update the `@formal_spec` decorator on `RedisMailbox` when:
 After updating the decorator:
 
 ```bash
-# Extract and validate the updated spec
-make extract-tla
+# Fast extraction only (validate spec syntax)
+make verify-formal-fast
 
-# Run model checking
-make check-tla
+# Full verification with TLC model checking
+make verify-formal
 ```
 
 ### When to Update Property Tests
@@ -1738,7 +1759,7 @@ Update property tests when:
 Before merging changes to `_redis.py`:
 
 - [ ] `@formal_spec` decorator updated if algorithm changed
-- [ ] `make check-tla` passes (extraction + model checking)
+- [ ] `make verify-formal` passes (extraction + model checking)
 - [ ] `make property-tests` passes
 - [ ] `make stress-tests` passes
 - [ ] Property tests updated if new invariants added

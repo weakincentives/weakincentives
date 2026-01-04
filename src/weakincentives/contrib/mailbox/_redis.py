@@ -537,7 +537,7 @@ class RedisMailbox[T, R]:
     This implementation is formally verified against the embedded TLA+ specification.
     The specification can be extracted and model-checked with:
 
-        make check-tla
+        make verify-formal
 
     Supports both standalone Redis and Redis Cluster deployments. Uses Lua scripts
     for atomic operations and a background reaper thread for visibility timeout

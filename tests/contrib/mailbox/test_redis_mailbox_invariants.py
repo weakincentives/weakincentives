@@ -469,7 +469,7 @@ class TestEventualRequeue:
 
 
 class TestFIFOOrdering:
-    """Tests for INV-7: FIFO Ordering."""
+    """Tests for FIFO ordering (structural property of Redis LIST)."""
 
     def test_messages_received_in_send_order(self, mailbox: RedisMailbox[Any]) -> None:
         """Messages are delivered in FIFO order."""
