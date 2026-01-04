@@ -329,7 +329,7 @@ def _dummy_handler(
     params: _ToolParams, *, context: ToolContext
 ) -> ToolResult[_ToolResult]:
     del context
-    return ToolResult(message="ok", value=_ToolResult(answer=params.query))
+    return ToolResult.ok(_ToolResult(answer=params.query), message="ok")
 
 
 @dataclass

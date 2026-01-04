@@ -367,9 +367,8 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
 - Tool handlers are synchronous callables; use them to gate filesystem or
   network access and to enforce policy before applying patches. Handlers
   accept the typed params plus a keyword-only `context` and return
-  `ToolResult` instances
-  (`ToolResult(message=..., value=..., success=True/False)`) to keep session
-  logs consistent.
+  `ToolResult` instances. Use convenience constructors `ToolResult.ok(value)`
+  for success or `ToolResult.error(message)` for failures.
 - `PromptResponse` carries the prompt name, rendered text, and parsed output
   (when structured output is requested) so you can safely resume after partial
   failures or retries.
@@ -421,7 +420,7 @@ class PatchResult:
 
 def apply_patch(params: PatchArgs, *, context: ToolContext) -> ToolResult[PatchResult]:
     # context.session, context.deadline, context.dispatcher available
-    return ToolResult(message="Applied", value=PatchResult(applied=True), success=True)
+    return ToolResult.ok(PatchResult(applied=True), message="Applied")
 
 patch_tool = Tool[PatchArgs, PatchResult](
     name="apply_patch", description="Apply a unified diff.", handler=apply_patch
@@ -488,7 +487,7 @@ Creates a Tool using the function's `__name__` and docstring:
 ```python
 def search(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
     """Search for content."""  # Becomes tool description
-    return ToolResult(message="Done", value=SearchResult(...), success=True)
+    return ToolResult.ok(SearchResult(...), message="Done")
 
 search_tool = Tool.wrap(search)  # name="search", description="Search for content."
 ```
@@ -504,9 +503,16 @@ Available in tool handlers via `context`:
 - `context.budget_tracker` - Sugar for `context.resources.get(BudgetTracker)`
 - `context.prompt` / `context.rendered_prompt` / `context.adapter`
 
-### ToolResult fields
+### ToolResult convenience constructors
 
 ```python
+# Success with typed value
+ToolResult.ok(MyResult(...), message="Done")  # success=True
+
+# Failure with no value
+ToolResult.error("File not found")  # success=False, value=None
+
+# Full form (when exclude_value_from_context is needed)
 ToolResult(message="...", value=MyResult(...), success=True, exclude_value_from_context=False)
 ```
 

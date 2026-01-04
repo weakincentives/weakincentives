@@ -156,7 +156,7 @@ class _RecordingAdapter(ProviderAdapter):
                 adapter=OPENAI_ADAPTER_NAME,
                 name="optimize-tool",
                 params=_ToolEventParams(),
-                result=ToolResult(message="ok", value=None),
+                result=ToolResult.ok(None, message="ok"),
                 session_id=getattr(session, "session_id", None) if session else None,
                 created_at=datetime.now(UTC),
             )
