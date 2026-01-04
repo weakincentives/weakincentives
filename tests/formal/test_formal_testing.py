@@ -74,8 +74,6 @@ def mock_subprocess_for_tlc(monkeypatch: pytest.MonkeyPatch, run_mock: Any) -> N
             # Call run_mock to get the result (might raise TimeoutExpired)
             try:
                 run_result = run_mock(*args, **kwargs)
-                proc.returncode = run_result.returncode
-                return (run_result.stdout, run_result.stderr)
             except subprocess.TimeoutExpired as e:
                 # First call: raise TimeoutExpired
                 if call_count == 1:
@@ -87,10 +85,21 @@ def mock_subprocess_for_tlc(monkeypatch: pytest.MonkeyPatch, run_mock: Any) -> N
                     ) from None
                 # Second call (after kill): return output from exception
                 # Decode bytes to strings since text=True is used
-                stdout_str = e.output.decode() if isinstance(e.output, bytes) else (e.output or "")
-                stderr_str = e.stderr.decode() if isinstance(e.stderr, bytes) else (e.stderr or "")
+                stdout_str = (
+                    e.output.decode()
+                    if isinstance(e.output, bytes)
+                    else (e.output or "")
+                )
+                stderr_str = (
+                    e.stderr.decode()
+                    if isinstance(e.stderr, bytes)
+                    else (e.stderr or "")
+                )
                 proc.returncode = -1
                 return (stdout_str, stderr_str)
+            else:
+                proc.returncode = run_result.returncode
+                return (run_result.stdout, run_result.stderr)
 
         proc.communicate = communicate_mock
         return proc
