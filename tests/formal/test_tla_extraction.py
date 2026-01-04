@@ -100,6 +100,210 @@ def test_formal_spec_decorator_attachment():
     assert spec.state_vars[0].name == "x"
 
 
+def test_state_var_type_defaults():
+    """Test StateVar type defaults in Init block."""
+    # Test all type-based defaults
+    spec = FormalSpec(
+        module="TestTypes",
+        state_vars=(
+            StateVar("seq_var", "Seq(Int)", "Sequence variable"),
+            StateVar("set_var", "Set(Int)", "Set variable"),
+            StateVar("func_var", "Function", "Function variable"),
+            StateVar("custom_var", "CustomType", "Custom type with NULL default"),
+            StateVar("explicit_var", "Int", "Explicit initial", initial_value="42"),
+        ),
+    )
+
+    tla = spec.to_tla()
+
+    # Check Seq default
+    assert "seq_var = <<>>" in tla
+
+    # Check Set default
+    assert "set_var = {}" in tla
+
+    # Check Function default
+    assert "func_var = [x \\in {} |-> 0]" in tla
+
+    # Check NULL fallback for unknown type
+    assert "custom_var = NULL" in tla
+
+    # Check explicit initial value overrides type default
+    assert "explicit_var = 42" in tla
+
+
+def test_action_with_updates():
+    """Test action with state updates."""
+    spec = FormalSpec(
+        module="TestUpdates",
+        state_vars=(
+            StateVar("x", "Int"),
+            StateVar("y", "Int"),
+            StateVar("z", "Int"),
+        ),
+        actions=(
+            Action(
+                name="Update",
+                preconditions=("x > 0",),
+                updates={"x": "x - 1", "y": "y + 1"},
+                # z is unchanged
+            ),
+        ),
+    )
+
+    tla = spec.to_tla()
+
+    # Check updates are generated
+    assert "x' = x - 1" in tla
+    assert "y' = y + 1" in tla
+
+    # Check UNCHANGED for non-updated vars
+    assert "UNCHANGED <<z>>" in tla
+
+
+def test_spec_with_constraint():
+    """Test spec with state constraint."""
+    spec = FormalSpec(
+        module="TestConstraint",
+        state_vars=(StateVar("depth", "Nat"),),
+        constraint="depth <= 100",
+    )
+
+    tla = spec.to_tla()
+
+    # Check StateConstraint operator is generated
+    assert "StateConstraint == depth <= 100" in tla
+    assert "(* State Constraint *)" in tla
+
+    # Check .cfg uses StateConstraint
+    cfg = spec.to_tla_config()
+    assert "CONSTRAINT StateConstraint" in cfg
+
+
+def test_config_with_init_next():
+    """Test config with custom INIT and NEXT."""
+    spec = FormalSpec(
+        module="TestCustom",
+        constants={"N": 5},
+        invariants=(Invariant("INV-1", "Safety", "TRUE"),),
+    )
+
+    cfg = spec.to_tla_config(init="CustomInit", next="CustomNext")
+
+    # Check INIT/NEXT instead of SPECIFICATION
+    assert "INIT CustomInit" in cfg
+    assert "NEXT CustomNext" in cfg
+    assert "SPECIFICATION Spec" not in cfg
+
+
+def test_config_with_state_constraint_param():
+    """Test config with state constraint parameter."""
+    spec = FormalSpec(
+        module="TestConstraintParam",
+        constraint="depth <= 50",  # Instance constraint
+    )
+
+    # Override with parameter constraint
+    cfg = spec.to_tla_config(state_constraint="depth <= 25")
+
+    # Parameter constraint takes precedence
+    assert "CONSTRAINT depth <= 25" in cfg
+    assert "CONSTRAINT StateConstraint" not in cfg
+
+
+def test_config_check_deadlock_true():
+    """Test config with deadlock checking enabled (default)."""
+    spec = FormalSpec(module="TestDeadlock")
+
+    # Default: check_deadlock=True (no CHECK_DEADLOCK line)
+    cfg = spec.to_tla_config(check_deadlock=True)
+    assert "CHECK_DEADLOCK" not in cfg
+
+    # Explicit False adds the line
+    cfg = spec.to_tla_config(check_deadlock=False)
+    assert "CHECK_DEADLOCK FALSE" in cfg
+
+
+def test_spec_without_constants():
+    """Test spec without constants section."""
+    spec = FormalSpec(
+        module="TestNoConstants",
+        state_vars=(StateVar("x", "Int"),),
+    )
+
+    cfg = spec.to_tla_config()
+
+    # Should not have CONSTANTS section
+    assert "CONSTANTS" not in cfg
+
+
+def test_spec_without_invariants():
+    """Test spec without invariants section."""
+    spec = FormalSpec(
+        module="TestNoInvariants",
+        state_vars=(StateVar("x", "Int"),),
+    )
+
+    cfg = spec.to_tla_config()
+
+    # Should not have INVARIANTS section
+    assert "INVARIANTS" not in cfg
+
+
+def test_spec_without_extends():
+    """Test spec without extends clause."""
+    spec = FormalSpec(
+        module="TestNoExtends",
+        extends=(),  # Empty extends
+        state_vars=(StateVar("x", "Int"),),
+    )
+
+    tla = spec.to_tla()
+
+    # Should not have EXTENDS line
+    assert "EXTENDS" not in tla
+
+
+def test_action_without_updates():
+    """Test action without state updates (only preconditions)."""
+    spec = FormalSpec(
+        module="TestNoUpdates",
+        state_vars=(
+            StateVar("x", "Int"),
+            StateVar("y", "Int"),
+        ),
+        actions=(
+            Action(
+                name="CheckOnly",
+                preconditions=("x > 0", "y > 0"),
+                # No updates - all vars unchanged
+            ),
+        ),
+    )
+
+    tla = spec.to_tla()
+
+    # Check preconditions are generated
+    assert "x > 0" in tla
+    assert "y > 0" in tla
+
+    # Check all vars are UNCHANGED
+    assert "UNCHANGED <<x, y>>" in tla
+
+
+def test_config_with_only_init():
+    """Test config with only init parameter (edge case)."""
+    spec = FormalSpec(module="TestOnlyInit")
+
+    # Only init, no next (neither branch executes - no SPEC line generated)
+    cfg = spec.to_tla_config(init="CustomInit", next=None)
+
+    # Neither default nor custom INIT/NEXT is generated
+    assert "SPECIFICATION" not in cfg
+    assert "INIT" not in cfg
+    assert "NEXT" not in cfg
+
+
 def test_action_with_parameters():
     """Test Action with parameters."""
     from weakincentives.formal import ActionParameter
