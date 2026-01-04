@@ -51,9 +51,11 @@ def _read_specs() -> str:
 
 def _handle_docs(args: argparse.Namespace) -> int:
     """Handle the docs subcommand."""
-    if not (args.reference or args.guide or args.specs):
-        print("Error: At least one of --reference, --guide, or --specs required")
-        print("Usage: wink docs [--reference] [--guide] [--specs]")
+    if not (args.reference or args.guide or args.specs or args.changelog):
+        print(
+            "Error: At least one of --reference, --guide, --specs, or --changelog required"
+        )
+        print("Usage: wink docs [--reference] [--guide] [--specs] [--changelog]")
         return 1
 
     parts: list[str] = []
@@ -65,6 +67,8 @@ def _handle_docs(args: argparse.Namespace) -> int:
             parts.append(_read_doc("WINK_GUIDE.md"))
         if args.specs:
             parts.append(_read_specs())
+        if args.changelog:
+            parts.append(_read_doc("CHANGELOG.md"))
     except FileNotFoundError as e:
         print(f"Error: Documentation not found: {e}", file=sys.stderr)
         print("This may indicate a packaging error.", file=sys.stderr)
@@ -161,6 +165,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--specs",
         action="store_true",
         help="Print all specification files",
+    )
+    _ = docs_parser.add_argument(
+        "--changelog",
+        action="store_true",
+        help="Print changelog (CHANGELOG.md)",
     )
 
     return parser
