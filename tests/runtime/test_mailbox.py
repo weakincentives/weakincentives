@@ -1182,3 +1182,126 @@ def test_composite_resolver_resolve_optional_catches_resolution_error() -> None:
 
     resolver = CompositeResolver[str](registry={}, factory=_FailingFactory())
     assert resolver.resolve_optional("dynamic") is None
+
+
+# =============================================================================
+# Parameter Validation Tests
+# =============================================================================
+
+
+from weakincentives.runtime.mailbox import InvalidParameterError  # noqa: E402
+
+
+class TestParameterValidation:
+    """Tests for timeout parameter validation."""
+
+    def test_receive_negative_visibility_timeout_raises(self) -> None:
+        """receive() raises InvalidParameterError for negative visibility_timeout."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            with pytest.raises(
+                InvalidParameterError, match="visibility_timeout must be non-negative"
+            ):
+                mailbox.receive(visibility_timeout=-1)
+        finally:
+            mailbox.close()
+
+    def test_receive_excessive_visibility_timeout_raises(self) -> None:
+        """receive() raises InvalidParameterError for visibility_timeout > 43200."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            with pytest.raises(InvalidParameterError, match="must be at most 43200"):
+                mailbox.receive(visibility_timeout=43201)
+        finally:
+            mailbox.close()
+
+    def test_receive_negative_wait_time_raises(self) -> None:
+        """receive() raises InvalidParameterError for negative wait_time_seconds."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            with pytest.raises(
+                InvalidParameterError, match="wait_time_seconds must be non-negative"
+            ):
+                mailbox.receive(wait_time_seconds=-1)
+        finally:
+            mailbox.close()
+
+    def test_receive_zero_visibility_timeout_allowed(self) -> None:
+        """receive() allows visibility_timeout=0."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            mailbox.send("hello")
+            messages = mailbox.receive(visibility_timeout=0)
+            assert len(messages) == 1
+        finally:
+            mailbox.close()
+
+    def test_receive_max_visibility_timeout_allowed(self) -> None:
+        """receive() allows visibility_timeout=43200 (max value)."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            mailbox.send("hello")
+            messages = mailbox.receive(visibility_timeout=43200)
+            assert len(messages) == 1
+            messages[0].acknowledge()
+        finally:
+            mailbox.close()
+
+    def test_nack_negative_visibility_timeout_raises(self) -> None:
+        """nack() raises InvalidParameterError for negative visibility_timeout."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            mailbox.send("hello")
+            messages = mailbox.receive()
+            with pytest.raises(
+                InvalidParameterError, match="visibility_timeout must be non-negative"
+            ):
+                messages[0].nack(visibility_timeout=-1)
+        finally:
+            mailbox.close()
+
+    def test_nack_excessive_visibility_timeout_raises(self) -> None:
+        """nack() raises InvalidParameterError for visibility_timeout > 43200."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            mailbox.send("hello")
+            messages = mailbox.receive()
+            with pytest.raises(InvalidParameterError, match="must be at most 43200"):
+                messages[0].nack(visibility_timeout=43201)
+        finally:
+            mailbox.close()
+
+    def test_extend_visibility_negative_timeout_raises(self) -> None:
+        """extend_visibility() raises InvalidParameterError for negative timeout."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            mailbox.send("hello")
+            messages = mailbox.receive()
+            with pytest.raises(
+                InvalidParameterError, match="timeout must be non-negative"
+            ):
+                messages[0].extend_visibility(-1)
+        finally:
+            mailbox.close()
+
+    def test_extend_visibility_excessive_timeout_raises(self) -> None:
+        """extend_visibility() raises InvalidParameterError for timeout > 43200."""
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        try:
+            mailbox.send("hello")
+            messages = mailbox.receive()
+            with pytest.raises(InvalidParameterError, match="must be at most 43200"):
+                messages[0].extend_visibility(43201)
+        finally:
+            mailbox.close()
+
+    def test_fake_mailbox_receive_validates_parameters(self) -> None:
+        """FakeMailbox.receive() also validates parameters."""
+        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox.send("hello")
+
+        with pytest.raises(InvalidParameterError):
+            mailbox.receive(visibility_timeout=-1)
+
+        with pytest.raises(InvalidParameterError):
+            mailbox.receive(wait_time_seconds=-1)
