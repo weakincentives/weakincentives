@@ -520,14 +520,14 @@ constants={
 ActionParameter("priority", "1..3")  # Not "1..10"
 ```
 
-### Custom Operators
+### Custom Helper Operators
 
 Define helper operators in the spec:
 
 ```python
 @formal_spec(
     module="Queue",
-    operators={
+    helpers={
         "IsEmpty": "queue = <<>>",
         "IsFull": "Len(queue) >= MaxSize",
         "Contains(msg)": "msg \\in Range(queue)",
