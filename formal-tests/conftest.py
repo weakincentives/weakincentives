@@ -36,7 +36,7 @@ import pytest
 
 # Default TLC model checker configuration (fast settings)
 DEFAULT_TLC_CONFIG = {
-    "workers": "auto",  # Use all available CPUs
+    "workers": 1,  # Single-threaded for reliable timeout enforcement
     "cleanup": True,  # Remove temporary files after checking
 }
 

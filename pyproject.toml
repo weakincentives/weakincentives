@@ -167,6 +167,7 @@ combine-as-imports = true
 "src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]
 "src/weakincentives/contrib/mailbox/_redis.py" = ["PLR0914", "PLR6301", "C901", "TRY300", "TRY301", "SIM108"]
 "src/weakincentives/formal/__init__.py" = ["C901", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "A002", "B010", "PERF401"]
+"src/weakincentives/formal/testing.py" = ["PLR0914"]
 "formal-tests/**" = ["PLR2004"]
 
 [tool.ruff.lint.mccabe]

@@ -54,6 +54,31 @@ class TestCounter:
     pass
 
 
+def mock_subprocess_for_tlc(monkeypatch: pytest.MonkeyPatch, run_mock: Any) -> None:  # noqa: ANN401
+    """Helper to mock both subprocess.run and Popen, and disable JAR file check.
+
+    Creates a Popen mock that delegates to run_mock for compatibility.
+    """
+    from unittest.mock import MagicMock
+    import subprocess
+
+    def popen_wrapper(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+        # Call run_mock to get the result
+        run_result = run_mock(*args, **kwargs)
+
+        # Create Popen-compatible mock
+        proc = MagicMock()
+        proc.communicate.return_value = (run_result.stdout, run_result.stderr)
+        proc.returncode = run_result.returncode
+        return proc
+
+    monkeypatch.setattr(subprocess, "run", run_mock)
+    monkeypatch.setattr(subprocess, "Popen", popen_wrapper)
+
+    # Force fallback to 'tlc' command by pretending JAR doesn't exist
+    monkeypatch.setattr(Path, "exists", lambda self: False)
+
+
 def test_extract_spec() -> None:
     """Test extracting formal spec from decorated class."""
     spec = extract_spec(TestCounter)
@@ -243,15 +268,13 @@ def test_extract_and_verify_with_model_check_failure(
             result.stderr = ""
             return result
 
-        # Second call is actual model checking - fails
+        # Second call is actual model checking via Popen - fails
         result.returncode = 1
         result.stdout = "Error: Invariant violated.\n"
         result.stderr = "Model checking failed"
         return result
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     with pytest.raises(ModelCheckError, match="Model checking failed for TestCounter"):
         extract_and_verify(
@@ -372,9 +395,7 @@ def test_model_check_non_digit_in_state_line(monkeypatch: pytest.MonkeyPatch) ->
         result.stderr = ""
         return result
 
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "run", mock_run)
+    mock_subprocess_for_tlc(monkeypatch, mock_run)
 
     spec = extract_spec(TestCounter)
     result = model_check(spec)

@@ -155,7 +155,7 @@ verify-mailbox: verify-formal property-tests
 # Full formal verification with TLC model checking (~30s)
 # Uses temp directory (no filesystem pollution)
 verify-formal:
-	@uv run --all-extras pytest formal-tests/ --no-cov -q
+	@uv run --all-extras pytest formal-tests/ --no-cov -q --timeout=360
 
 # Fast extraction only (development, ~1s)
 # Skips model checking - use only for rapid iteration

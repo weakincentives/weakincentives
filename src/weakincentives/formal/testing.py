@@ -144,54 +144,62 @@ def model_check(
         workers = config.get("workers", "auto")
         cleanup = config.get("cleanup", True)
 
-        # Check if tlc is available
-        try:
-            _ = subprocess.run(  # nosec B603 B607
-                ["tlc", "-h"], capture_output=True, check=False, timeout=5
-            )
-        except FileNotFoundError:
-            raise ModelCheckError(
-                "TLC not found. Install with: brew install tlaplus (macOS) or download from https://github.com/tlaplus/tlaplus/releases"
-            ) from None
+        # Check if TLC JAR is available
+        tlc_jar = Path("/usr/local/lib/tla2tools.jar")
+        if not tlc_jar.exists():
+            # Fall back to tlc command (e.g., on macOS with brew install)
+            try:
+                _ = subprocess.run(  # nosec B603 B607
+                    ["tlc", "-h"], capture_output=True, check=False, timeout=5
+                )
+                use_jar = False
+            except FileNotFoundError:
+                raise ModelCheckError(
+                    "TLC not found. Install with: brew install tlaplus (macOS) or download from https://github.com/tlaplus/tlaplus/releases"
+                ) from None
+        else:
+            use_jar = True
 
-        # Build TLC command
-        cmd = [
-            "tlc",
-            str(tla_file),
-            "-config",
-            str(cfg_file),
-            "-workers",
-            str(workers),
-        ]
+        # Build TLC command - use Java directly to avoid wrapper script issues
+        if use_jar:
+            cmd = [
+                "java",
+                "-XX:+UseParallelGC",
+                "-jar",
+                str(tlc_jar),
+                str(tla_file),
+                "-config",
+                str(cfg_file),
+                "-workers",
+                str(workers),
+            ]
+        else:
+            cmd = [
+                "tlc",
+                str(tla_file),
+                "-config",
+                str(cfg_file),
+                "-workers",
+                str(workers),
+            ]
         if cleanup:
             cmd.append("-cleanup")
 
-        # Run TLC with 5-minute timeout
-        # Use process_group=0 to ensure all worker processes are killed on timeout
+        # Run TLC with 5-minute timeout using Popen for reliable timeout enforcement
+        process = subprocess.Popen(  # nosec B603 B607
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
         try:
-            result = subprocess.run(  # nosec B603 B607
-                cmd,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=300,
-                process_group=0,
-            )
-            stdout = result.stdout
-            stderr = result.stderr
-            returncode = result.returncode
-        except subprocess.TimeoutExpired as e:
-            # Timeout: extract partial output
-            stdout = (
-                (e.stdout or b"").decode()
-                if isinstance(e.stdout, bytes)
-                else e.stdout or ""
-            )
-            stderr = (
-                (e.stderr or b"").decode()
-                if isinstance(e.stderr, bytes)
-                else e.stderr or ""
-            )
+            stdout, stderr = process.communicate(timeout=300)
+            returncode = process.returncode
+        except subprocess.TimeoutExpired:
+            # Timeout: kill process and extract partial output
+            process.kill()
+            stdout, stderr = process.communicate()
             returncode = -1  # Indicate timeout
 
             # If no violations found before timeout, treat as passed (bounded verification)
