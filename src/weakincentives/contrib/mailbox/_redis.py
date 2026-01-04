@@ -367,7 +367,7 @@ class RedisMailboxFactory[R]:
             name="Nack",
             parameters=(
                 ActionParameter("consumer", "1..NumConsumers"),
-                ActionParameter("newTimeout", "0..VisibilityTimeout*2"),
+                ActionParameter("newTimeout", "0..VisibilityTimeout"),
             ),
             preconditions=(
                 "consumerState[consumer].holding /= NULL",
@@ -399,7 +399,7 @@ class RedisMailboxFactory[R]:
             name="Extend",
             parameters=(
                 ActionParameter("consumer", "1..NumConsumers"),
-                ActionParameter("newTimeout", "1..VisibilityTimeout*2"),
+                ActionParameter("newTimeout", "1..VisibilityTimeout"),
             ),
             preconditions=(
                 "consumerState[consumer].holding /= NULL",

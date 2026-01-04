@@ -159,9 +159,9 @@ Next ==
     \/ \E consumer \in 1..NumConsumers : Receive(consumer)
     \/ \E consumer \in 1..NumConsumers : Acknowledge(consumer)
     \/ \E consumer \in 1..NumConsumers : AcknowledgeFail(consumer)
-    \/ \E consumer \in 1..NumConsumers, newTimeout \in 0..VisibilityTimeout*2 : Nack(consumer, newTimeout)
+    \/ \E consumer \in 1..NumConsumers, newTimeout \in 0..VisibilityTimeout : Nack(consumer, newTimeout)
     \/ \E consumer \in 1..NumConsumers : NackFail(consumer)
-    \/ \E consumer \in 1..NumConsumers, newTimeout \in 1..VisibilityTimeout*2 : Extend(consumer, newTimeout)
+    \/ \E consumer \in 1..NumConsumers, newTimeout \in 1..VisibilityTimeout : Extend(consumer, newTimeout)
     \/ \E consumer \in 1..NumConsumers : ExtendFail(consumer)
     \/ ReapOne
     \/ Tick
