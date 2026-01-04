@@ -114,7 +114,6 @@ class InMemoryFilesystem:
     _files: dict[str, _InMemoryFile] = field(default_factory=_empty_files_dict)
     _directories: set[str] = field(default_factory=_empty_directories_set)
     _read_only: bool = False
-    _mount_point: str | None = None
     _snapshots: dict[str, _InMemoryState] = field(default_factory=_empty_snapshots_dict)
     _version: int = 0
 
@@ -131,11 +130,6 @@ class InMemoryFilesystem:
     def read_only(self) -> bool:
         """True if write operations are disabled."""
         return self._read_only
-
-    @property
-    def mount_point(self) -> str | None:
-        """Virtual mount point prefix for path normalization."""
-        return self._mount_point
 
     def read(
         self,
