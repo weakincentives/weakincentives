@@ -46,13 +46,9 @@ _TEMPLATE_PREVIEW_LIMIT: Final[int] = 10
 class WorkspaceBudgetExceededError(WinkError):
     """Raised when a workspace mount exceeds its byte budget."""
 
-    pass
-
 
 class WorkspaceSecurityError(WinkError):
     """Raised when a workspace mount violates security constraints."""
-
-    pass
 
 
 def _utcnow() -> datetime:
@@ -277,8 +273,6 @@ def _create_workspace(
 @dataclass(slots=True, frozen=True)
 class _ClaudeAgentWorkspaceSectionParams:
     """Default params for ClaudeAgentWorkspaceSection (empty placeholder)."""
-
-    pass
 
 
 def _render_workspace_template(previews: tuple[HostMountPreview, ...]) -> str:

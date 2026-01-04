@@ -95,7 +95,9 @@ class BudgetTracker:
     """
 
     budget: Budget
-    _per_evaluation: dict[str, TokenUsage] = field(default_factory=lambda: {})
+    _per_evaluation: dict[str, TokenUsage] = field(
+        default_factory=lambda: {}  # noqa: PIE807 - TokenUsage is TYPE_CHECKING only
+    )
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def record_cumulative(self, evaluation_id: str, usage: TokenUsage) -> None:

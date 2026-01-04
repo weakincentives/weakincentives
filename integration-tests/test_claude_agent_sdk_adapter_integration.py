@@ -1352,8 +1352,6 @@ class EnvTestResult:
 class EmptyParams:
     """Empty params placeholder for prompts without parameters."""
 
-    pass
-
 
 def _build_env_test_prompt() -> PromptTemplate[EnvTestResult]:
     """Build a prompt that tests environment variable inheritance."""

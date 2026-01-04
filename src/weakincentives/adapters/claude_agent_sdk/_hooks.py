@@ -459,7 +459,7 @@ def _is_tool_error_response(response: Any) -> bool:  # noqa: ANN401
             if isinstance(text, str):
                 text_lower = text.lower()
                 # Common error indicators in tool output
-                if text_lower.startswith("error:") or text_lower.startswith("error -"):
+                if text_lower.startswith(("error:", "error -")):
                     return True
 
     return False

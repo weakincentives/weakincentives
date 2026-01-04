@@ -52,8 +52,6 @@ from weakincentives.formal.testing import ModelCheckError, extract_and_verify
 class BrokenCounter:
     """Counter with intentional invariant violation for testing."""
 
-    pass
-
 
 def test_violation_detected(
     extracted_specs_dir: Path,

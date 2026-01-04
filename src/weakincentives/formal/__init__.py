@@ -96,7 +96,7 @@ class Action:
     name: str
     parameters: tuple[ActionParameter, ...] = field(default_factory=tuple)
     preconditions: tuple[str, ...] = field(default_factory=tuple)
-    updates: dict[str, str] = field(default_factory=lambda: {})
+    updates: dict[str, str] = field(default_factory=dict[str, str])
     description: str = ""
 
 
@@ -136,11 +136,11 @@ class FormalSpec:
 
     module: str
     extends: tuple[str, ...] = ("Integers", "Sequences", "FiniteSets")
-    constants: dict[str, Any] = field(default_factory=lambda: {})
+    constants: dict[str, Any] = field(default_factory=dict[str, Any])
     state_vars: tuple[StateVar, ...] = field(default_factory=tuple)
     actions: tuple[Action, ...] = field(default_factory=tuple)
     invariants: tuple[Invariant, ...] = field(default_factory=tuple)
-    helpers: dict[str, str] = field(default_factory=lambda: {})
+    helpers: dict[str, str] = field(default_factory=dict[str, str])
     constraint: str | None = None
 
     def to_tla(self) -> str:

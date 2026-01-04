@@ -130,9 +130,13 @@ extend-select = [
     "TRY",
     "PLR",
     "PERF",
+    # Static analysis for common patterns (added 2026-01-04)
+    "BLE",   # Blind except catching - detects bare except blocks without re-raise
+    "PIE",   # Misc lints: unnecessary pass, startswith tuple, useless lambda
+    "ASYNC", # Async patterns including context manager usage
 ]
 extend-ignore = ["TRY003"]
-fixable = ["I001", "F401"]
+fixable = ["I001", "F401", "PIE790", "PIE807", "PIE810"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["weakincentives"]
@@ -141,29 +145,42 @@ combine-as-imports = true
 [tool.ruff.lint.per-file-ignores]
 # Tests rely on readable inline status codes, simple fixtures, and helper signatures.
 # C901 is ignored because test functions can legitimately have higher complexity.
-"tests/**" = ["C901", "PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "ANN201"]
-"integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029"]
+# BLE001 ignored as tests may use defensive exception patterns.
+"tests/**" = ["C901", "PLR2004", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "ANN201", "BLE001"]
+"integration-tests/**" = ["C901", "PLR2004", "PLR0904", "PLR0913", "PLR0914", "PLR6301", "SIM117", "RUF029", "BLE001"]
 # Examples may use higher complexity for illustration purposes.
-"examples/**" = ["C901", "CPY001", "ANN201", "ANN204"]
+"examples/**" = ["C901", "CPY001", "ANN201", "ANN204", "BLE001"]
 "src/weakincentives/prompt/overrides/validation.py" = ["PLR0913"]
 "src/weakincentives/prompt/prompt.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/protocols.py" = ["PLR0913"]
 "src/weakincentives/adapters/core.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/adapters/openai.py" = ["PLR0913"]
-"src/weakincentives/dbc/__init__.py" = ["PLR0913"]
+# BLE001: Defensive exception handling is intentional in DbC decorators.
+"src/weakincentives/dbc/__init__.py" = ["PLR0913", "BLE001"]
 "src/weakincentives/prompt/_enabled_predicate.py" = ["PLR6201"]
 "src/weakincentives/prompt/composition.py" = ["PLR6301"]
 "src/weakincentives/prompt/markdown.py" = ["PLR0913"]
 "src/weakincentives/prompt/rendering.py" = ["PLR6301"]
 "src/weakincentives/prompt/section.py" = ["PLR0913", "PLR6301"]
 "src/weakincentives/prompt/structured_output.py" = ["PLR0913"]
-"src/weakincentives/prompt/tool_result.py" = ["PLR0911"]
+"src/weakincentives/prompt/tool_result.py" = ["PLR0911", "BLE001"]
 "src/weakincentives/serde/parse.py" = ["PLR0911", "PLR0912", "PLR0913", "PLR0914", "PLR0915"]
 "src/weakincentives/serde/schema.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
 "src/weakincentives/tools/asteval.py" = ["PLR0912", "PLR0914", "PLR0915", "PLR2004"]
 "src/weakincentives/tools/planning.py" = ["PLR6301"]
-"src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300"]
-"src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR6301", "ANN401", "TRY300"]
+# Claude Agent SDK adapter uses defensive exception patterns (BLE001).
+"src/weakincentives/adapters/claude_agent_sdk/_bridge.py" = ["PLR0913", "TRY300", "BLE001"]
+"src/weakincentives/adapters/claude_agent_sdk/adapter.py" = ["PLR0913", "PLR6301", "ANN401", "TRY300", "BLE001"]
+# Defensive exception handlers for best-effort operations (browser open, response parsing).
+"src/weakincentives/adapters/provider_response.py" = ["BLE001"]
+"src/weakincentives/adapters/tool_executor.py" = ["BLE001"]
+"src/weakincentives/cli/debug_app.py" = ["BLE001"]
+# Eval loop uses defensive patterns for sample evaluation errors.
+"src/weakincentives/evals/_loop.py" = ["BLE001"]
+# Defensive exception handlers for type hint introspection and resource cleanup.
+"src/weakincentives/prompt/tool.py" = ["BLE001"]
+"src/weakincentives/resources/context.py" = ["BLE001"]
+"src/weakincentives/runtime/main_loop.py" = ["BLE001"]
 "src/weakincentives/runtime/session/session.py" = ["PLR0904", "PLR0913"]
 "src/weakincentives/contrib/mailbox/_redis.py" = ["PLR0914", "PLR6301", "C901", "TRY300", "TRY301", "SIM108"]
 "src/weakincentives/formal/__init__.py" = ["C901", "PLR0912", "PLR0913", "PLR0914", "PLR0915", "A002", "B010", "PERF401"]

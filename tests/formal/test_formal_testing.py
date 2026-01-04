@@ -51,8 +51,6 @@ from weakincentives.formal.testing import (
 class TestCounter:
     """Test counter class with formal spec."""
 
-    pass
-
 
 def mock_subprocess_for_tlc(monkeypatch: pytest.MonkeyPatch, run_mock: Any) -> None:  # noqa: ANN401
     """Helper to mock both subprocess.run and Popen, and disable JAR file check.

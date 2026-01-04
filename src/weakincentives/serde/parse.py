@@ -126,7 +126,7 @@ def _is_empty_string_coercible_to_none(
 def _raise_union_error(last_error: Exception, path: str) -> None:
     """Raise an appropriately prefixed error from union coercion."""
     message = str(last_error)
-    if message.startswith(f"{path}:") or message.startswith(f"{path}."):
+    if message.startswith((f"{path}:", f"{path}.")):
         raise last_error
     if isinstance(last_error, TypeError):
         raise TypeError(f"{path}: {message}") from last_error

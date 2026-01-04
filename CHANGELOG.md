@@ -4,6 +4,21 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Static Analysis for Common Patterns
+
+Enabled additional Ruff lint rules to catch common bug patterns at development
+time:
+
+- **BLE**: Detects bare `except` blocks without re-raise, which can mask errors
+- **PIE**: Catches unnecessary `pass` statements, redundant `startswith` calls,
+  and useless `lambda: {}` patterns
+- **ASYNC**: Validates async context manager usage and async patterns
+
+These rules are configured with per-file ignores for legitimate defensive
+exception handling (resource cleanup, best-effort operations). Auto-fixes
+enabled for PIE790 (unnecessary pass), PIE807 (useless lambda), and PIE810
+(startswith tuple).
+
 ### Lifecycle Management for MainLoop and EvalLoop
 
 New primitives for coordinating graceful shutdown across multiple loop instances
