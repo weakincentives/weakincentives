@@ -692,10 +692,14 @@ class RedisMailbox[T, R]:
         except Exception as e:
             raise SerializationError(f"Failed to serialize message body: {e}") from e
 
-    def _deserialize(self, data: bytes) -> T:
-        """Deserialize message body from JSON bytes."""
+    def _deserialize(self, data: bytes | str) -> T:
+        """Deserialize message body from JSON bytes or string.
+
+        Handles both bytes (default Redis client) and str (decode_responses=True).
+        """
         try:
-            json_data = json.loads(data.decode("utf-8"))
+            json_str = data.decode("utf-8") if isinstance(data, bytes) else data
+            json_data = json.loads(json_str)
             if self.body_type is not None:
                 # Use parse() only for dataclass types
                 if hasattr(self.body_type, "__dataclass_fields__"):
