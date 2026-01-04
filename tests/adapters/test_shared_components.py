@@ -216,6 +216,72 @@ def test_tool_executor_success() -> None:
     assert len(executor.tool_message_records) == 1
 
 
+def test_tool_executor_succeeds_with_parameterless_tool() -> None:
+    """Verify that tools with no parameters execute successfully.
+
+    This tests the fix for the bug where the validation check at line 478
+    incorrectly raised RuntimeError for parameterless tools, even though
+    None is a valid value for tool_params when tool.params_type is type(None).
+    """
+
+    def no_param_handler(
+        params: None, *, context: ToolContext
+    ) -> ToolResult[EchoPayload]:
+        del context
+        return ToolResult(message="no_params_success", value=EchoPayload(value="done"))
+
+    tool = Tool[None, EchoPayload](
+        name="no_params_tool",
+        description="A tool that accepts no parameters.",
+        handler=no_param_handler,
+    )
+    rendered = RenderedPrompt(
+        text="system",
+        _tools=cast(
+            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+            (tool,),
+        ),
+    )
+    bus = RecordingBus()
+    session = Session(bus=bus)
+    execution_state = ExecutionState(session=session)
+    tool_registry = cast(
+        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
+        {tool.name: tool},
+    )
+
+    executor = ToolExecutor(
+        adapter_name=TEST_ADAPTER_NAME,
+        adapter=cast(ProviderAdapter[Any], object()),
+        prompt=Prompt(PromptTemplate(ns="test", key="tool")),
+        prompt_name="test",
+        rendered=rendered,
+        execution_state=execution_state,
+        tool_registry=tool_registry,
+        serialize_tool_message_fn=serialize_tool_message,
+        format_dispatch_failures=lambda x: "",
+        parse_arguments=parse_tool_arguments,
+    )
+
+    # Empty arguments for parameterless tool
+    tool_call = SimpleNamespace(
+        id="call-no-params",
+        function=SimpleNamespace(name="no_params_tool", arguments="{}"),
+    )
+
+    messages, next_choice = executor.execute([cast(Any, tool_call)], None)
+    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
+
+    assert len(messages) == 1
+    assert messages[0]["role"] == "tool"
+    assert messages[0]["tool_call_id"] == "call-no-params"
+    assert messages[0]["content"] == {"message": "no_params_success", "payload": None}
+    assert next_choice == "auto"
+    assert len(tool_events) == 1
+    # Verify the tool event recorded None for params (which is correct)
+    assert tool_events[0].params is None
+
+
 def testdispatch_tool_invocation_attaches_usage() -> None:
     tool = Tool[EchoParams, EchoPayload](
         name="echo",

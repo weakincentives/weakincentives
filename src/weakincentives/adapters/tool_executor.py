@@ -475,8 +475,9 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
             )
         _log_tool_completion(log, tool_result)
 
-    if tool_params is None:  # pragma: no cover - defensive
-        raise RuntimeError("Tool parameters were not parsed.")
+    # Note: tool_params may legitimately be None for parameterless tools
+    # (when tool.params_type is type(None)). The ToolExecutionOutcome
+    # dataclass explicitly allows params: SupportsDataclass | None.
 
     yield ToolExecutionOutcome(
         tool=tool,
