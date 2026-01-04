@@ -36,6 +36,7 @@ from weakincentives.contrib.mailbox._redis import RedisMailbox
 from weakincentives.formal.testing import ModelCheckError, extract_and_verify
 
 
+@pytest.mark.timeout(360)  # 6 minutes: allow 5min for TLC + 1min overhead
 def test_redis_mailbox_spec(
     extracted_specs_dir: Path,
     enable_model_checking: bool,

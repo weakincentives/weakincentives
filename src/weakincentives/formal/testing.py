@@ -167,9 +167,15 @@ def model_check(
             cmd.append("-cleanup")
 
         # Run TLC with 5-minute timeout
+        # Use process_group=0 to ensure all worker processes are killed on timeout
         try:
             result = subprocess.run(  # nosec B603 B607
-                cmd, capture_output=True, text=True, check=False, timeout=300
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=300,
+                process_group=0,
             )
             stdout = result.stdout
             stderr = result.stderr
