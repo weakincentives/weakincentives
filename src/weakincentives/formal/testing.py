@@ -204,10 +204,12 @@ def model_check(
 
         # Check for TLC configuration errors (e.g., missing JAR file)
         if "jarfile" in stderr.lower() or "unable to access" in stderr.lower():
-            raise ModelCheckError(
+            msg = (
                 f"TLC configuration error. {stderr.strip()}\n"
-                "Install TLC: brew install tlaplus (macOS) or download from https://github.com/tlaplus/tlaplus/releases"
+                f"Install TLC: brew install tlaplus (macOS) or download from "
+                f"https://github.com/tlaplus/tlaplus/releases"
             )
+            raise ModelCheckError(msg)
 
         passed = returncode == 0 and "violated" not in stdout.lower()
 

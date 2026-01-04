@@ -451,14 +451,14 @@ def _apply_slice_op[S: SupportsDataclass](
 
 ### Performance Characteristics
 
-| Reducer Pattern          | MemorySlice | JsonlSlice                 |
+| Reducer Pattern | MemorySlice | JsonlSlice |
 | ------------------------ | ----------- | -------------------------- |
-| `Append(item)`           | O(n) copy   | **O(1) file append**       |
-| `Extend(items)`          | O(n) copy   | **O(k) file append**       |
-| `Replace(items)`         | O(1)        | O(n) file rewrite          |
-| `view.all()` + transform | O(1) read   | O(n) file read             |
-| `view.latest()`          | O(1)        | O(n) or **O(1) optimized** |
-| `view.is_empty`          | O(1)        | **O(1) file stat**         |
+| `Append(item)` | O(n) copy | **O(1) file append** |
+| `Extend(items)` | O(n) copy | **O(k) file append** |
+| `Replace(items)` | O(1) | O(n) file rewrite |
+| `view.all()` + transform | O(1) read | O(n) file read |
+| `view.latest()` | O(1) | O(n) or **O(1) optimized** |
+| `view.is_empty` | O(1) | **O(1) file stat** |
 
 **Key insight**: Append-only reducers (the common case) become O(1) for
 file-backed slices because they never access the view.
@@ -1030,14 +1030,14 @@ def unlock(f):
 
 ## Performance Characteristics
 
-| Operation   | MemorySlice  | JsonlSlice (cached) | JsonlSlice (cold)   |
+| Operation | MemorySlice | JsonlSlice (cached) | JsonlSlice (cold) |
 | ----------- | ------------ | ------------------- | ------------------- |
-| `all()`     | O(1)         | O(1)                | O(n) file read      |
-| `latest()`  | O(1)         | O(1)                | O(n) file read      |
-| `append()`  | O(n) copy    | O(1) file append    | O(1) file append    |
-| `replace()` | O(1)         | O(n) file write     | O(n) file write     |
-| `clear()`   | O(1) or O(n) | O(1) delete or O(n) | O(1) delete or O(n) |
-| Memory      | O(n)         | O(n) when cached    | O(1) base           |
+| `all()` | O(1) | O(1) | O(n) file read |
+| `latest()` | O(1) | O(1) | O(n) file read |
+| `append()` | O(n) copy | O(1) file append | O(1) file append |
+| `replace()` | O(1) | O(n) file write | O(n) file write |
+| `clear()` | O(1) or O(n) | O(1) delete or O(n) | O(1) delete or O(n) |
+| Memory | O(n) | O(n) when cached | O(1) base |
 
 ### Recommendations
 

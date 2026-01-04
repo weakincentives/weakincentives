@@ -653,13 +653,13 @@ class HostFilesystem:
 
 Backends enforce their own limits. Recommended defaults:
 
-| Limit              | Value        | Notes                     |
+| Limit | Value | Notes |
 | ------------------ | ------------ | ------------------------- |
-| Max file size      | 48,000 chars | Per write operation       |
-| Max path depth     | 16 segments  | Prevents deep nesting     |
-| Max segment length | 80 chars     | Per path component        |
-| Default read limit | 2,000 lines  | Pagination default        |
-| Max grep matches   | 1,000        | Prevents runaway searches |
+| Max file size | 48,000 chars | Per write operation |
+| Max path depth | 16 segments | Prevents deep nesting |
+| Max segment length | 80 chars | Per path component |
+| Default read limit | 2,000 lines | Pagination default |
+| Max grep matches | 1,000 | Prevents runaway searches |
 
 ## Error Handling
 
@@ -667,15 +667,15 @@ Backends enforce their own limits. Recommended defaults:
 
 All backends map internal errors to standard Python exceptions:
 
-| Backend Error       | Python Exception     |
+| Backend Error | Python Exception |
 | ------------------- | -------------------- |
-| File not found      | `FileNotFoundError`  |
-| Path is directory   | `IsADirectoryError`  |
-| Path is file        | `NotADirectoryError` |
-| Access denied       | `PermissionError`    |
-| File exists         | `FileExistsError`    |
-| Invalid content     | `ValueError`         |
-| Backend unavailable | `RuntimeError`       |
+| File not found | `FileNotFoundError` |
+| Path is directory | `IsADirectoryError` |
+| Path is file | `NotADirectoryError` |
+| Access denied | `PermissionError` |
+| File exists | `FileExistsError` |
+| Invalid content | `ValueError` |
+| Backend unavailable | `RuntimeError` |
 
 ### Tool Handler Pattern
 

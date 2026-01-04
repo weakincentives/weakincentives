@@ -82,15 +82,15 @@ class VirtualFileSystem:
 
 ### Tools
 
-| Tool         | Parameters                                             | Description               |
+| Tool | Parameters | Description |
 | ------------ | ------------------------------------------------------ | ------------------------- |
-| `ls`         | `path: str`                                            | List directory entries    |
-| `read_file`  | `file_path`, `offset`, `limit`                         | Read file with pagination |
-| `write_file` | `file_path`, `content`                                 | Create new file           |
-| `edit_file`  | `file_path`, `old_string`, `new_string`, `replace_all` | String replacement        |
-| `glob`       | `pattern`, `path`                                      | Match files by pattern    |
-| `grep`       | `pattern`, `path`, `glob`                              | Regex search              |
-| `rm`         | `path`                                                 | Remove file or directory  |
+| `ls` | `path: str` | List directory entries |
+| `read_file` | `file_path`, `offset`, `limit` | Read file with pagination |
+| `write_file` | `file_path`, `content` | Create new file |
+| `edit_file` | `file_path`, `old_string`, `new_string`, `replace_all` | String replacement |
+| `glob` | `pattern`, `path` | Match files by pattern |
+| `grep` | `pattern`, `path`, `glob` | Regex search |
+| `rm` | `path` | Remove file or directory |
 
 ### Limits
 
@@ -156,9 +156,9 @@ stateDiagram-v2
 
 All VFS tools plus:
 
-| Tool              | Description                             |
+| Tool | Description |
 | ----------------- | --------------------------------------- |
-| `shell_execute`   | Run command in container (\<=120s)      |
+| `shell_execute` | Run command in container (\<=120s) |
 | `evaluate_python` | Execute Python via `python3 -c` (\<=5s) |
 
 ### Shell Execution

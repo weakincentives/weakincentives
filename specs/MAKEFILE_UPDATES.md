@@ -207,8 +207,8 @@ For CI, you'll want to run both legacy and embedded verification:
 This ensures:
 
 1. Legacy TLA+ specs in `specs/tla/*.tla` are checked
-2. Embedded `@formal_spec` decorators are extracted and checked
-3. Property-based tests validate implementation
+1. Embedded `@formal_spec` decorators are extracted and checked
+1. Property-based tests validate implementation
 
 ### Migration Workflow
 
@@ -237,15 +237,15 @@ mv specs/tla/RedisMailbox.tla specs/tla/archive/
 
 ## Target Descriptions
 
-| Target            | Description                    | Speed            | When to Use               |
+| Target | Description | Speed | When to Use |
 | ----------------- | ------------------------------ | ---------------- | ------------------------- |
-| `extract-tla`     | Extract specs without checking | Fast (1-2s)      | Development, syntax check |
-| `check-tla`       | Extract and model check        | Slow (5-60s)     | Before commit, CI         |
-| `check-tla-fast`  | Extract only (alias)           | Fast (1-2s)      | Quick validation          |
-| `verify-embedded` | Alias for check-tla            | Slow (5-60s)     | Semantic clarity          |
-| `verify-all`      | All verification methods       | Very slow (1-5m) | CI, pre-release           |
-| `compare-specs`   | Diff legacy vs embedded        | Fast (1-2s)      | Migration validation      |
-| `clean-extracted` | Remove extracted files         | Instant          | Cleanup                   |
+| `extract-tla` | Extract specs without checking | Fast (1-2s) | Development, syntax check |
+| `check-tla` | Extract and model check | Slow (5-60s) | Before commit, CI |
+| `check-tla-fast` | Extract only (alias) | Fast (1-2s) | Quick validation |
+| `verify-embedded` | Alias for check-tla | Slow (5-60s) | Semantic clarity |
+| `verify-all` | All verification methods | Very slow (1-5m) | CI, pre-release |
+| `compare-specs` | Diff legacy vs embedded | Fast (1-2s) | Migration validation |
+| `clean-extracted` | Remove extracted files | Instant | Cleanup |
 
 ## Incremental Adoption
 
@@ -359,10 +359,10 @@ extract-tla-parallel:
 After applying these changes:
 
 1. ✅ `make extract-tla` - Extract specs during development
-2. ✅ `make check-tla` - Validate specs before commit
-3. ✅ `make verify-all` - Complete verification suite
-4. ✅ `make compare-specs` - Aid migration from legacy
-5. ✅ Incremental adoption path (extract → check → require)
-6. ✅ CI integration with `make verify-all`
+1. ✅ `make check-tla` - Validate specs before commit
+1. ✅ `make verify-all` - Complete verification suite
+1. ✅ `make compare-specs` - Aid migration from legacy
+1. ✅ Incremental adoption path (extract → check → require)
+1. ✅ CI integration with `make verify-all`
 
 See `specs/FORMAL_VERIFICATION.md` for step-by-step migration instructions.

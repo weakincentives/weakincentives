@@ -13,8 +13,8 @@ WINK supports embedding formal specifications directly in Python code using TLA+
 The framework consists of three components:
 
 1. **`@formal_spec` decorator** - Embed TLA+ metadata in Python classes
-2. **Test utilities** - Extract specs and run TLC model checker
-3. **CI integration** - Automated verification via `make verify-formal`
+1. **Test utilities** - Extract specs and run TLC model checker
+1. **CI integration** - Automated verification via `make verify-formal`
 
 ## Quick Start
 
@@ -136,6 +136,7 @@ class StateVar:
 ```
 
 **Type-based initial values:**
+
 - `Nat`, `Int` → `0`
 - `Seq(...)` → `<<>>`
 - `Set(...)` → `{}`
@@ -251,6 +252,7 @@ assert result.states_generated > 0
 ```
 
 **Timeout behavior:**
+
 - TLC runs with a 60-second timeout
 - Timeout **without violations** → Pass (bounded verification)
 - Timeout **with violations** → Fail
@@ -275,6 +277,7 @@ assert result.passed
 ```
 
 **Parameters:**
+
 - `target_class` - Class decorated with `@formal_spec`
 - `output_dir` - Directory for `.tla` and `.cfg` files
 - `model_check_enabled` - Whether to run TLC (default: `False`)
@@ -290,6 +293,7 @@ for a distributed message queue with visibility timeouts.
 ### Specification Highlights
 
 **State variables:**
+
 ```python
 state_vars=[
     StateVar("queue", "Seq(Message)", "Pending messages"),
@@ -302,6 +306,7 @@ state_vars=[
 ```
 
 **Actions with bounded parameters:**
+
 ```python
 Action(
     name="Receive",
@@ -316,6 +321,7 @@ Action(
 ```
 
 **Invariants:**
+
 ```python
 Invariant(
     id="INV-1",
@@ -346,11 +352,13 @@ ActionParameter("newTimeout", "0..VisibilityTimeout")
 ```
 
 **Constraint:** Limit exploration depth
+
 ```python
 constraint="now <= 2"  # Bound logical time
 ```
 
 **Constants:** Small values for bounded checking
+
 ```python
 constants={
     "MaxMessages": 2,
@@ -490,11 +498,13 @@ Action(
 ### Bounding State Space
 
 **Constraint on exploration depth:**
+
 ```python
 constraint="now <= 5"  # Limit time-based exploration
 ```
 
 **Small constants:**
+
 ```python
 constants={
     "MaxMessages": 2,      # Not 100
@@ -504,6 +514,7 @@ constants={
 ```
 
 **Careful parameter domains:**
+
 ```python
 # Each additional value multiplies state space
 ActionParameter("priority", "1..3")  # Not "1..10"
@@ -551,11 +562,13 @@ verify-formal:
 ```
 
 **Environment requirements:**
+
 - TLC model checker installed (`brew install tlaplus` on macOS)
 - 60-second timeout per spec
 - Graceful skip if TLC not configured
 
 **GitHub Actions:**
+
 ```yaml
 - name: Run formal verification
   run: make verify-formal
@@ -569,6 +582,7 @@ verify-formal:
 **Error:** `ModelCheckError: TLC not found`
 
 **Solution:**
+
 ```bash
 # macOS
 brew install tlaplus
@@ -593,30 +607,32 @@ will skip gracefully with appropriate message.
 **Symptom:** TLC runs for 60s and times out
 
 **Solutions:**
+
 1. Reduce constant values (`MaxMessages: 10` → `MaxMessages: 2`)
-2. Add state constraint (`constraint="depth <= 5"`)
-3. Narrow parameter domains (`"0..10"` → `"0..2"`)
-4. Reduce number of actions modeled
+1. Add state constraint (`constraint="depth <= 5"`)
+1. Narrow parameter domains (`"0..10"` → `"0..2"`)
+1. Reduce number of actions modeled
 
 ### Invariant Violations
 
 **Symptom:** `Model checking failed: Invariant violated`
 
 **Debugging:**
+
 1. Check TLC output for counterexample trace
-2. Add intermediate invariants to narrow down issue
-3. Add `ASSUME` statements for expected constraints
-4. Review action preconditions
+1. Add intermediate invariants to narrow down issue
+1. Add `ASSUME` statements for expected constraints
+1. Review action preconditions
 
 ## Best Practices
 
 1. **Start small** - Model 2-3 core actions first, expand gradually
-2. **Tight bounds** - Use smallest constants that still test interesting behavior
-3. **Clear invariants** - Each invariant tests one specific property
-4. **Meaningful names** - Action/invariant names match domain concepts
-5. **Document constraints** - Explain why constants/domains are bounded
-6. **Verify incrementally** - Add one action at a time, verify each step
-7. **Test the tests** - Intentionally violate invariants to verify detection
+1. **Tight bounds** - Use smallest constants that still test interesting behavior
+1. **Clear invariants** - Each invariant tests one specific property
+1. **Meaningful names** - Action/invariant names match domain concepts
+1. **Document constraints** - Explain why constants/domains are bounded
+1. **Verify incrementally** - Add one action at a time, verify each step
+1. **Test the tests** - Intentionally violate invariants to verify detection
 
 ## See Also
 

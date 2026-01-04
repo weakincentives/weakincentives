@@ -106,31 +106,31 @@ adapter = OpenAIAdapter(
 
 **Configuration:**
 
-| Field          | Type            | Description                 |
+| Field | Type | Description |
 | -------------- | --------------- | --------------------------- |
-| `api_key`      | `str \| None`   | API key (falls back to env) |
-| `base_url`     | `str \| None`   | Custom API endpoint         |
-| `organization` | `str \| None`   | Organization ID             |
-| `timeout`      | `float \| None` | Request timeout seconds     |
-| `max_retries`  | `int \| None`   | SDK-level retries           |
+| `api_key` | `str \| None` | API key (falls back to env) |
+| `base_url` | `str \| None` | Custom API endpoint |
+| `organization` | `str \| None` | Organization ID |
+| `timeout` | `float \| None` | Request timeout seconds |
+| `max_retries` | `int \| None` | SDK-level retries |
 
 **Model Parameters (OpenAIModelConfig):**
 
-| Field                 | Type           | Description               |
+| Field | Type | Description |
 | --------------------- | -------------- | ------------------------- |
-| `logprobs`            | `bool \| None` | Return log probabilities  |
-| `top_logprobs`        | `int \| None`  | Number of top logprobs    |
+| `logprobs` | `bool \| None` | Return log probabilities |
+| `top_logprobs` | `int \| None` | Number of top logprobs |
 | `parallel_tool_calls` | `bool \| None` | Allow parallel tool calls |
-| `store`               | `bool \| None` | Store conversation        |
-| `user`                | `str \| None`  | End-user identifier       |
+| `store` | `bool \| None` | Store conversation |
+| `user` | `str \| None` | End-user identifier |
 
 **Constructor Parameters:**
 
-| Parameter       | Type                         | Default  | Description      |
+| Parameter | Type | Default | Description |
 | --------------- | ---------------------------- | -------- | ---------------- |
-| `model`         | `str`                        | required | Model identifier |
-| `client_config` | `OpenAIClientConfig \| None` | `None`   | Client settings  |
-| `model_config`  | `OpenAIModelConfig \| None`  | `None`   | Model parameters |
+| `model` | `str` | required | Model identifier |
+| `client_config` | `OpenAIClientConfig \| None` | `None` | Client settings |
+| `model_config` | `OpenAIModelConfig \| None` | `None` | Model parameters |
 
 Note: `max_tokens` is renamed to `max_output_tokens` for Responses API. The
 Responses API does not accept `seed`, `stop`, `presence_penalty`, or
@@ -162,23 +162,23 @@ adapter = LiteLLMAdapter(
 
 **Constructor Parameters:**
 
-| Parameter            | Type                          | Default  | Description               |
+| Parameter | Type | Default | Description |
 | -------------------- | ----------------------------- | -------- | ------------------------- |
-| `model`              | `str`                         | required | Model identifier          |
-| `completion_config`  | `LiteLLMClientConfig \| None` | `None`   | Client settings           |
-| `model_config`       | `LiteLLMModelConfig \| None`  | `None`   | Model parameters          |
-| `completion`         | `LiteLLMCompletion \| None`   | `None`   | Pre-configured completion |
-| `completion_factory` | `Callable \| None`            | `None`   | Factory for completions   |
-| `completion_kwargs`  | `Mapping \| None`             | `None`   | Extra completion kwargs   |
+| `model` | `str` | required | Model identifier |
+| `completion_config` | `LiteLLMClientConfig \| None` | `None` | Client settings |
+| `model_config` | `LiteLLMModelConfig \| None` | `None` | Model parameters |
+| `completion` | `LiteLLMCompletion \| None` | `None` | Pre-configured completion |
+| `completion_factory` | `Callable \| None` | `None` | Factory for completions |
+| `completion_kwargs` | `Mapping \| None` | `None` | Extra completion kwargs |
 
 **Configuration:**
 
-| Field         | Type            | Description             |
+| Field | Type | Description |
 | ------------- | --------------- | ----------------------- |
-| `api_key`     | `str \| None`   | Provider API key        |
-| `api_base`    | `str \| None`   | Custom API endpoint     |
-| `timeout`     | `float \| None` | Request timeout seconds |
-| `num_retries` | `int \| None`   | LiteLLM-level retries   |
+| `api_key` | `str \| None` | Provider API key |
+| `api_base` | `str \| None` | Custom API endpoint |
+| `timeout` | `float \| None` | Request timeout seconds |
+| `num_retries` | `int \| None` | LiteLLM-level retries |
 
 **Constraints and Caveats:**
 
@@ -208,21 +208,21 @@ policy = new_throttle_policy(
 )
 ```
 
-| Field             | Default | Description              |
+| Field | Default | Description |
 | ----------------- | ------- | ------------------------ |
-| `max_attempts`    | `5`     | Maximum retry attempts   |
-| `base_delay`      | `500ms` | Initial backoff delay    |
-| `max_delay`       | `8s`    | Cap on individual delays |
-| `max_total_delay` | `30s`   | Total time budget        |
+| `max_attempts` | `5` | Maximum retry attempts |
+| `base_delay` | `500ms` | Initial backoff delay |
+| `max_delay` | `8s` | Cap on individual delays |
+| `max_total_delay` | `30s` | Total time budget |
 
 ### Signal Classification
 
-| Signal               | Examples                   | Behavior                  |
+| Signal | Examples | Behavior |
 | -------------------- | -------------------------- | ------------------------- |
-| **Rate limit**       | HTTP 429, `RateLimitError` | Retry with backoff        |
-| **Quota exhaustion** | `insufficient_quota`       | Longer backoff, alerting  |
-| **Timeout**          | Connection/read timeout    | Retry if deadline permits |
-| **Server error**     | HTTP 500-503               | Retry with backoff        |
+| **Rate limit** | HTTP 429, `RateLimitError` | Retry with backoff |
+| **Quota exhaustion** | `insufficient_quota` | Longer backoff, alerting |
+| **Timeout** | Connection/read timeout | Retry if deadline permits |
+| **Server error** | HTTP 500-503 | Retry with backoff |
 
 ### Backoff Strategy
 
@@ -429,11 +429,11 @@ def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
 
 Adapters emit events through `session.dispatcher`:
 
-| Event            | When           | Payload                  |
+| Event | When | Payload |
 | ---------------- | -------------- | ------------------------ |
-| `PromptRendered` | After render   | Text, tools, metadata    |
-| `PromptExecuted` | After parse    | Response, tokens, timing |
-| `ToolInvoked`    | After dispatch | Name, params, result     |
+| `PromptRendered` | After render | Text, tools, metadata |
+| `PromptExecuted` | After parse | Response, tokens, timing |
+| `ToolInvoked` | After dispatch | Name, params, result |
 
 Structured logs include:
 

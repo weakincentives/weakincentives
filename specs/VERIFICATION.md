@@ -14,7 +14,7 @@ The verification framework provides two complementary layers:
    implementation using the `@formal_spec` decorator. The spec is extracted and
    exhaustively checked by the TLC model checker for safety and liveness properties.
 
-2. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
+1. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
    actual Python implementation against the same invariants.
 
 Together, these layers provide high confidence that:
@@ -29,14 +29,14 @@ This specification covers verification of `RedisMailbox` in
 `src/weakincentives/contrib/mailbox/_redis.py`. The following operations are
 modeled:
 
-| Operation         | Lua Script         | Verification Priority |
+| Operation | Lua Script | Verification Priority |
 | ----------------- | ------------------ | --------------------- |
-| `send()`          | Pipeline           | Medium                |
-| `receive()`       | `_LUA_RECEIVE`     | Critical              |
-| `acknowledge()`   | `_LUA_ACKNOWLEDGE` | Critical              |
-| `nack()`          | `_LUA_NACK`        | High                  |
-| `extend()`        | `_LUA_EXTEND`      | High                  |
-| `_reap_expired()` | `_LUA_REAP`        | Critical              |
+| `send()` | Pipeline | Medium |
+| `receive()` | `_LUA_RECEIVE` | Critical |
+| `acknowledge()` | `_LUA_ACKNOWLEDGE` | Critical |
+| `nack()` | `_LUA_NACK` | High |
+| `extend()` | `_LUA_EXTEND` | High |
+| `_reap_expired()` | `_LUA_REAP` | Critical |
 
 ## Key Invariants
 
@@ -1710,9 +1710,9 @@ jobs:
 Update the `@formal_spec` decorator on `RedisMailbox` when:
 
 1. Adding new operations to RedisMailbox
-2. Changing Lua script logic
-3. Modifying state transitions
-4. Adding new invariants
+1. Changing Lua script logic
+1. Modifying state transitions
+1. Adding new invariants
 
 After updating the decorator:
 
@@ -1792,7 +1792,7 @@ environment. If any assumption is violated, the invariants may not hold.
 11. **Handle Secrecy**: Receipt handles are not shared between consumers. A
     consumer uses only handles from its own receive calls.
 
-1.  **Single Acknowledgment**: A consumer attempts to acknowledge each message
+01. **Single Acknowledgment**: A consumer attempts to acknowledge each message
     at most once. The implementation is idempotent, but redundant acks waste
     resources.
 

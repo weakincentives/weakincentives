@@ -230,12 +230,12 @@ class Plan:
 
 ### Tools
 
-| Tool                   | Purpose                     |
+| Tool | Purpose |
 | ---------------------- | --------------------------- |
-| `planning_setup_plan`  | Create or replace the plan  |
-| `planning_add_step`    | Append steps to active plan |
+| `planning_setup_plan` | Create or replace the plan |
+| `planning_add_step` | Append steps to active plan |
 | `planning_update_step` | Modify step title or status |
-| `planning_read_plan`   | Retrieve current plan state |
+| `planning_read_plan` | Retrieve current plan state |
 
 ### Tool Parameters
 

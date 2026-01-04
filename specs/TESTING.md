@@ -37,6 +37,7 @@ exclude_lines = [
 
 1. **Simplify over exclude**: If a branch is defensive code that "should never
    happen", either:
+
    - Remove it (trust type annotations and upstream validation)
    - Add a test that proves the branch can be reached
    - Simplify the code to eliminate the branch
@@ -55,11 +56,11 @@ The following patterns are automatically excluded from coverage:
 
 Mutation testing protects correctness-critical modules. Expand scope beyond current hotspots:
 
-| Module                 | Minimum Score | Rationale                                 |
+| Module | Minimum Score | Rationale |
 | ---------------------- | ------------- | ----------------------------------------- |
-| `runtime/session/*.py` | 90%           | State management core                     |
-| `serde/*.py`           | 85%           | Snapshot integrity depends on round-trips |
-| `dbc/decorators.py`    | 85%           | Contract enforcement must be watertight   |
+| `runtime/session/*.py` | 90% | State management core |
+| `serde/*.py` | 85% | Snapshot integrity depends on round-trips |
+| `dbc/decorators.py` | 85% | Contract enforcement must be watertight |
 
 ```toml
 # pyproject.toml
@@ -158,16 +159,16 @@ jobs:
 
 ### Gate Enforcement
 
-| Gate               | Threshold       | Where        |
+| Gate | Threshold | Where |
 | ------------------ | --------------- | ------------ |
-| Line coverage      | 100%            | `make check` |
-| Branch coverage    | 100%            | `make check` |
-| Type errors        | 0               | `make check` |
-| Lint errors        | 0               | `make check` |
-| Security issues    | 0 high/critical | `make check` |
-| Mutation (session) | 90%             | CI only      |
-| Mutation (serde)   | 85%             | CI only      |
-| Mutation (dbc)     | 85%             | CI only      |
+| Line coverage | 100% | `make check` |
+| Branch coverage | 100% | `make check` |
+| Type errors | 0 | `make check` |
+| Lint errors | 0 | `make check` |
+| Security issues | 0 high/critical | `make check` |
+| Mutation (session) | 90% | CI only |
+| Mutation (serde) | 85% | CI only |
+| Mutation (dbc) | 85% | CI only |
 
 ## Test Organization
 

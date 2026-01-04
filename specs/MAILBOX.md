@@ -316,21 +316,21 @@ class MainLoopResult[OutputT]:
 
 ## Implementations
 
-| Implementation    | Backend | Use Case                           |
+| Implementation | Backend | Use Case |
 | ----------------- | ------- | ---------------------------------- |
-| `InMemoryMailbox` | Dict    | Testing, single process            |
-| `RedisMailbox`    | Redis   | Multi-process, self-hosted         |
-| `SQSMailbox`      | AWS SQS | Production, managed infrastructure |
+| `InMemoryMailbox` | Dict | Testing, single process |
+| `RedisMailbox` | Redis | Multi-process, self-hosted |
+| `SQSMailbox` | AWS SQS | Production, managed infrastructure |
 
 ### Backend Differences
 
-| Aspect         | SQS Standard | SQS FIFO   | Redis  | InMemory |
+| Aspect | SQS Standard | SQS FIFO | Redis | InMemory |
 | -------------- | ------------ | ---------- | ------ | -------- |
-| Ordering       | Best-effort  | Strict     | FIFO   | FIFO     |
-| Long poll max  | 20 sec       | 20 sec     | ∞      | ∞        |
-| Visibility max | 12 hours     | 12 hours   | ∞      | ∞        |
-| Count accuracy | ~1 min lag   | ~1 min     | Exact  | Exact    |
-| Durability     | Replicated   | Replicated | Config | None     |
+| Ordering | Best-effort | Strict | FIFO | FIFO |
+| Long poll max | 20 sec | 20 sec | ∞ | ∞ |
+| Visibility max | 12 hours | 12 hours | ∞ | ∞ |
+| Count accuracy | ~1 min lag | ~1 min | Exact | Exact |
+| Durability | Replicated | Replicated | Config | None |
 
 ### RedisMailbox Data Structures
 

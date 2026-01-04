@@ -457,11 +457,11 @@ This allows Kubernetes to stop routing traffic before the watchdog terminates.
 
 ### LoopGroup Parameters
 
-| Parameter            | Default | Description                                  |
+| Parameter | Default | Description |
 | -------------------- | ------- | -------------------------------------------- |
-| `health_port`        | None    | Port for health endpoints (disabled if None) |
-| `watchdog_threshold` | 720.0s  | Seconds without heartbeat before termination |
-| `watchdog_interval`  | 60.0s   | Seconds between watchdog checks              |
+| `health_port` | None | Port for health endpoints (disabled if None) |
+| `watchdog_threshold` | 720.0s | Seconds without heartbeat before termination |
+| `watchdog_interval` | 60.0s | Seconds between watchdog checks |
 
 ### Default Timeout Calibration
 
@@ -471,11 +471,11 @@ Defaults are calibrated for:
   per message in MainLoop
 - **30-second long poll**: Maximum `wait_time_seconds` for mailbox receive
 
-| Parameter            | Default        | Rationale                             |
+| Parameter | Default | Rationale |
 | -------------------- | -------------- | ------------------------------------- |
-| `wait_time_seconds`  | 30s            | Maximum long poll duration            |
-| `watchdog_threshold` | 720s (12 min)  | > 30s + 600s with 90s margin          |
-| `watchdog_interval`  | 60s            | < 720s / 3, checks ~12x per threshold |
+| `wait_time_seconds` | 30s | Maximum long poll duration |
+| `watchdog_threshold` | 720s (12 min) | > 30s + 600s with 90s margin |
+| `watchdog_interval` | 60s | < 720s / 3, checks ~12x per threshold |
 | `visibility_timeout` | 1800s (30 min) | > 720s + 600s with margin for retries |
 
 ### Threshold Guidelines
@@ -656,10 +656,10 @@ spec:
 
 ### Probe Timing Recommendations
 
-| Probe     | Period | Threshold  | Rationale                                   |
+| Probe | Period | Threshold | Rationale |
 | --------- | ------ | ---------- | ------------------------------------------- |
-| Liveness  | 10s    | 3 failures | Avoid false positives from transient issues |
-| Readiness | 5s     | 2 failures | Remove unhealthy pods quickly               |
+| Liveness | 10s | 3 failures | Avoid false positives from transient issues |
+| Readiness | 5s | 2 failures | Remove unhealthy pods quickly |
 
 The readiness probe should be faster than the watchdog threshold to stop
 routing traffic before termination.
