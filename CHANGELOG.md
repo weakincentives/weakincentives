@@ -4,6 +4,12 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Added
+
+- **`wink docs --changelog` flag.** The `wink docs` CLI command now supports a
+  `--changelog` flag to print the bundled CHANGELOG.md, making release history
+  accessible without repository access.
+
 ## v0.18.0 - 2026-01-05
 
 ### Lifecycle Management for MainLoop and EvalLoop
