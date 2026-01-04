@@ -263,12 +263,17 @@ class RedisMailboxFactory[R]:
 
         Returns:
             A new RedisMailbox connected to the shared client.
+
+        Note:
+            Created mailboxes are send-only: they do not start reaper threads
+            and do not support nested reply resolution. This prevents resource
+            leaks when creating ephemeral reply mailboxes.
         """
         return RedisMailbox(
             name=identifier,
             client=self.client,
             body_type=self.body_type,
-            reply_resolver=None,  # Reply mailboxes don't need nested resolution
+            _send_only=True,  # Send-only: no reaper thread, no nested resolution
         )
 
 
@@ -630,11 +635,24 @@ class RedisMailbox[T, R]:
     )
     _closed: bool = field(default=False, repr=False, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _send_only: bool = field(default=False, repr=False)
+    """Internal flag for send-only mailboxes. Send-only mailboxes don't start
+    reaper threads and don't support reply resolution. Used by RedisMailboxFactory
+    to prevent resource leaks when creating ephemeral reply mailboxes."""
 
     def __post_init__(self) -> None:
-        """Initialize keys, register Lua scripts, and start reaper thread."""
+        """Initialize keys, register Lua scripts, and optionally start reaper thread.
+
+        Send-only mailboxes (created by RedisMailboxFactory for replies) skip
+        reaper thread creation and auto-resolver setup to prevent resource leaks.
+        """
         object.__setattr__(self, "_keys", _QueueKeys.for_queue(self.name))
         self._register_scripts()
+
+        # Send-only mailboxes don't need reaper threads or reply resolution
+        if self._send_only:
+            return
+
         self._start_reaper()
         # Set up default resolver if none provided
         if self.reply_resolver is None:
@@ -1025,13 +1043,16 @@ class RedisMailbox[T, R]:
             raise MailboxConnectionError(f"Failed to get queue count: {e}") from e
 
     def close(self) -> None:
-        """Stop the reaper thread. Does not close the Redis client."""
+        """Stop the reaper thread if running. Does not close the Redis client.
+
+        For send-only mailboxes, this is a no-op since no reaper thread is started.
+        """
         with self._lock:
             self._closed = True
 
-        # Stop reaper thread
+        # Stop reaper thread (not started for send-only mailboxes)
         self._stop_reaper.set()
-        if self._reaper_thread is not None:  # pragma: no branch
+        if self._reaper_thread is not None:
             self._reaper_thread.join(timeout=2.0)
 
     @property
