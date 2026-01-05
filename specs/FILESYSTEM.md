@@ -32,8 +32,8 @@ flowchart TB
 
     subgraph Backends["Backend Implementations"]
         InMemory["InMemoryFilesystem"]
-        Podman["PodmanFilesystem"]
         Host["HostFilesystem"]
+        PodmanSection["PodmanSandboxSection<br/>(uses HostFilesystem)"]
     end
 
     subgraph Operations["Protocol Operations"]
@@ -50,8 +50,8 @@ flowchart TB
     ToolContext --> FS
     PromptFS --> FS
     FS --> InMemory
-    FS --> Podman
     FS --> Host
+    PodmanSection --> Host
     FS --> Operations
 ```
 
@@ -558,47 +558,54 @@ class InMemoryFilesystem:
     # ... remaining methods
 ```
 
-### PodmanFilesystem
+### PodmanSandboxSection
 
-Wraps container file operations via `podman exec`. Owned by
-`PodmanSandboxSection`.
+`PodmanSandboxSection` provides containerized workspace tools. It manages an
+overlay directory on the host that is bind-mounted into the Podman container.
+Filesystem operations use a `HostFilesystem` instance rooted at the overlay
+path, with a mount point set to `/workspace` so that paths like
+`/workspace/file.txt` are correctly interpreted as relative paths.
 
 ```python
-@dataclass(slots=True)
-class PodmanFilesystem:
-    """Filesystem backed by a Podman container."""
-
-    container_id: str
-    workdir: str = "/workspace"
-    _client: PodmanClient = field(repr=False)
-
-    def read(self, path: str, **kwargs) -> ReadResult:
-        full_path = self._resolve_path(path)
-        result = self._client.exec(
-            self.container_id,
-            ["cat", full_path],
-        )
-        # ... process output
-        return _PodmanReadResult(...)
-
-    # ... remaining methods
-
-
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     """Prompt section providing containerized workspace tools."""
 
-    def __init__(self, *, image: str = "python:3.12-slim", ...) -> None:
-        self._container = self._create_container(image)
-        self._filesystem = PodmanFilesystem(
-            container_id=self._container.id,
-            _client=self._client,
+    def __init__(
+        self,
+        *,
+        session: Session,
+        config: PodmanSandboxConfig | None = None,
+    ) -> None:
+        config = config or PodmanSandboxConfig()
+        self._session = session
+        self._image = config.image
+
+        # Create overlay directory for bind-mounting into container
+        self._overlay_path = self._overlay_root / str(self._session.session_id)
+        self._overlay_path.mkdir(parents=True, exist_ok=True)
+
+        # Hydrate host mounts into overlay eagerly
+        for mount in self._resolved_mounts:
+            self._copy_mount_into_overlay(overlay=self._overlay_path, mount=mount)
+
+        # Use HostFilesystem rooted at overlay with /workspace mount point
+        self._filesystem = HostFilesystem(
+            _root=str(self._overlay_path),
+            _mount_point="/workspace",
         )
         ...
 
     @property
     def filesystem(self) -> Filesystem:
+        """Return the filesystem managed by this section."""
         return self._filesystem
 ```
+
+The overlay directory is bind-mounted into the container at `/workspace`. When
+agents write files via filesystem tools, those changes appear both on the host
+(in the overlay) and inside the container. This design ensures filesystem
+operations work before a container is started and persist across container
+restarts.
 
 ### HostFilesystem
 
@@ -823,8 +830,9 @@ class FilesystemSnapshot:
     tag: str | None = None  # Optional human-readable label
 ```
 
-The `commit_ref` field stores a git commit hash for `HostFilesystem` and
-`PodmanFilesystem`, or an internal version identifier for `InMemoryFilesystem`.
+The `commit_ref` field stores a git commit hash for `HostFilesystem` (including
+when used by `PodmanSandboxSection`), or an internal version identifier for
+`InMemoryFilesystem`.
 
 The `git_dir` field stores the path to the external git repository for
 `HostFilesystem`, enabling cross-session restore when the filesystem instance
@@ -1062,11 +1070,12 @@ class HostFilesystem:
 - The `restore()` method can use `git_dir` from a snapshot if the filesystem
   instance doesn't have one set
 
-### PodmanFilesystem Implementation
+### PodmanSandboxSection Snapshots
 
-The Podman backend uses the same git strategy on its overlay directory. Since
-the overlay directory is bind-mounted into the container, git commits capture
-the workspace state as seen by both the host and container.
+`PodmanSandboxSection` uses the same git strategy via its internal
+`HostFilesystem` on the overlay directory. Since the overlay directory is
+bind-mounted into the container, git commits capture the workspace state as
+seen by both the host and container.
 
 ```python
 class PodmanSandboxSection:
