@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from . import events, lifecycle, mailbox, main_loop, session, watchdog
+from . import events, lifecycle, mailbox, main_loop, session, transcript, watchdog
 from .events import (
     ControlDispatcher,
     Dispatcher,
@@ -75,6 +75,12 @@ from .session import (
     upsert_by,
 )
 from .snapshotable import Snapshotable
+from .transcript import (
+    TranscriptEntry,
+    TranscriptRole,
+    convert_claude_transcript_entry,
+    format_transcript,
+)
 from .transactions import (
     CompositeSnapshot,
     PendingToolExecution,
@@ -139,13 +145,17 @@ __all__ = [
     "TelemetryDispatcher",
     "TokenUsage",
     "ToolInvoked",
+    "TranscriptEntry",
+    "TranscriptRole",
     "TypedReducer",
     "Watchdog",
     "append_all",
     "build_reducer_context",
     "configure_logging",
+    "convert_claude_transcript_entry",
     "create_snapshot",
     "events",
+    "format_transcript",
     "get_logger",
     "iter_sessions_bottom_up",
     "lifecycle",
@@ -156,6 +166,7 @@ __all__ = [
     "restore_snapshot",
     "session",
     "tool_transaction",
+    "transcript",
     "upsert_by",
     "wait_until",
     "watchdog",

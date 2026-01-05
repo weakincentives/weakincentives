@@ -57,6 +57,13 @@ class ClaudeAgentSDKClientConfig:
             ~/.claude configuration. See :class:`IsolationConfig` for details.
         betas: Beta features to enable. Passed to the SDK as a list of
             beta feature identifiers. None means no beta features.
+        capture_transcript: If True, capture the full conversation transcript
+            from the .claude folder after execution completes. Transcripts are
+            stored as TranscriptEntry objects in a LOG slice.
+        capture_subagent_transcripts: If True, also capture transcripts from
+            subagents spawned via the Task tool. Requires capture_transcript
+            to be True. Each subagent's transcript entries are tagged with
+            a source identifier.
     """
 
     permission_mode: PermissionMode = "bypassPermissions"
@@ -67,6 +74,8 @@ class ClaudeAgentSDKClientConfig:
     stop_on_structured_output: bool = True
     isolation: IsolationConfig | None = None
     betas: tuple[str, ...] | None = None
+    capture_transcript: bool = False
+    capture_subagent_transcripts: bool = False
 
 
 @FrozenDataclass()

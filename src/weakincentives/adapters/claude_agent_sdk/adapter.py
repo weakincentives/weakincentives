@@ -17,6 +17,7 @@ from __future__ import annotations
 import shutil
 import tempfile
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, cast, override
 
 from ...budget import Budget, BudgetTracker
@@ -30,6 +31,7 @@ from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import append_all
+from ...runtime.transcript import TranscriptEntry, convert_claude_transcript_entry
 from ...runtime.session.protocols import SessionProtocol
 from ...serde import parse, schema
 from .._names import AdapterName
@@ -39,6 +41,7 @@ from ._bridge import create_bridged_tools, create_mcp_server
 from ._errors import normalize_sdk_error
 from ._hooks import (
     HookContext,
+    _read_transcript_file,
     create_notification_hook,
     create_post_tool_use_hook,
     create_pre_compact_hook,
@@ -352,6 +355,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 ephemeral_home=ephemeral_home,
                 effective_cwd=effective_cwd,
             )
+
+            # Capture transcripts before cleanup (while files still exist)
+            self._capture_transcripts(
+                ephemeral_home=ephemeral_home,
+                session=session,
+                source="primary",
+            )
         except VisibilityExpansionRequired:
             # Progressive disclosure: let this propagate to the caller
             raise
@@ -587,3 +597,80 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             budget_tracker.record_cumulative(prompt_name, usage)
 
         return result_text, structured_output, usage
+
+    def _find_transcript_files(self, claude_dir: Path) -> list[Path]:
+        """Find all transcript JSONL files in the .claude directory.
+
+        Transcripts are stored at: .claude/projects/<hash>/transcripts/<session>.jsonl
+
+        Args:
+            claude_dir: Path to the .claude directory.
+
+        Returns:
+            List of paths to transcript files, sorted by modification time.
+        """
+        transcript_files: list[Path] = []
+        projects_dir = claude_dir / "projects"
+
+        if not projects_dir.exists():
+            return []
+
+        # Find all transcript JSONL files
+        for project_dir in projects_dir.iterdir():
+            if not project_dir.is_dir():
+                continue
+            transcripts_dir = project_dir / "transcripts"
+            if not transcripts_dir.exists():
+                continue
+            for transcript_file in transcripts_dir.glob("*.jsonl"):
+                transcript_files.append(transcript_file)
+
+        # Sort by modification time (most recent first)
+        transcript_files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        return transcript_files
+
+    def _capture_transcripts(
+        self,
+        *,
+        ephemeral_home: EphemeralHome,
+        session: SessionProtocol,
+        source: str = "primary",
+    ) -> None:
+        """Capture transcripts from the .claude folder to the session.
+
+        Reads all transcript JSONL files from the ephemeral home's .claude
+        directory and dispatches TranscriptEntry events to the session.
+
+        Args:
+            ephemeral_home: The ephemeral home containing the .claude folder.
+            session: Session to dispatch transcript entries to.
+            source: Source identifier for the transcript entries.
+        """
+        if not self._client_config.capture_transcript:
+            return
+
+        claude_dir = ephemeral_home.claude_dir
+        transcript_files = self._find_transcript_files(claude_dir)
+
+        sequence = 0
+        for transcript_file in transcript_files:
+            raw_entries = _read_transcript_file(str(transcript_file))
+            for raw_entry in raw_entries:
+                entry = convert_claude_transcript_entry(
+                    raw_entry,
+                    source=source,
+                    sequence=sequence,
+                )
+                session.dispatch(entry)
+                sequence += 1
+
+        if transcript_files:
+            logger.debug(
+                "claude_agent_sdk.transcript.captured",
+                event="transcript.captured",
+                context={
+                    "file_count": len(transcript_files),
+                    "entry_count": sequence,
+                    "source": source,
+                },
+            )

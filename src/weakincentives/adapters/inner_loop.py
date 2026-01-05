@@ -22,6 +22,7 @@ lifecycle with a provider:
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
@@ -34,6 +35,7 @@ from ..deadlines import Deadline
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..runtime.events import HandlerFailure, PromptExecuted, PromptRendered
 from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.transcript import TranscriptEntry, TranscriptRole
 from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
@@ -137,6 +139,7 @@ class InnerLoopConfig:
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
+    capture_transcript: bool = False
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> InnerLoopConfig:
         """Fill in optional settings using rendered prompt metadata."""
@@ -169,6 +172,8 @@ class InnerLoop[OutputT]:
     _response_parser: ResponseParser[OutputT] = field(init=False)
     _rendered: RenderedPrompt[OutputT] = field(init=False)
     _deadline: Deadline | None = field(init=False)
+    _transcript_sequence: int = field(init=False, default=0)
+    _captured_tool_record_count: int = field(init=False, default=0)
 
     def __post_init__(self) -> None:
         normalized_config = self.config.with_defaults(self.inputs.rendered)
@@ -223,6 +228,33 @@ class InnerLoop[OutputT]:
                 phase=PROMPT_EVALUATION_PHASE_BUDGET,
                 provider_payload=self._provider_payload,
             ) from error
+
+    def _capture_transcript(
+        self,
+        role: TranscriptRole,
+        content: str,
+        *,
+        tool_name: str | None = None,
+        tool_call_id: str | None = None,
+        tool_input: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Append a transcript entry to the session if capture is enabled."""
+        if not self.config.capture_transcript:
+            return
+
+        entry = TranscriptEntry(
+            role=role,
+            content=content,
+            created_at=datetime.now(UTC),
+            tool_name=tool_name,
+            tool_call_id=tool_call_id,
+            tool_input=tool_input,
+            metadata=metadata,
+            sequence=self._transcript_sequence,
+        )
+        self._transcript_sequence += 1
+        _ = self.config.session.dispatch(entry)
 
     def run(self) -> PromptResponse[OutputT]:
         """Execute the inner loop and return the final response."""
@@ -375,6 +407,7 @@ class InnerLoop[OutputT]:
         )
 
         self._dispatch_rendered_event()
+        self._capture_initial_messages()
 
     def _dispatch_rendered_event(self) -> None:
         """Dispatch the PromptRendered event."""
@@ -413,6 +446,30 @@ class InnerLoop[OutputT]:
                 context={"handler_count": dispatch_result.handled_count},
             )
 
+    def _capture_initial_messages(self) -> None:
+        """Capture initial messages to transcript if enabled."""
+        if not self.config.capture_transcript:
+            return
+
+        for message in self.inputs.initial_messages:
+            role_str = message.get("role", "user")
+            content = message.get("content", "")
+
+            # Map message roles to transcript roles
+            role_map: dict[str, TranscriptRole] = {
+                "system": "system",
+                "user": "user",
+                "assistant": "assistant",
+                "developer": "system",  # OpenAI developer role maps to system
+            }
+            role: TranscriptRole = role_map.get(role_str, "user")
+
+            self._capture_transcript(
+                role=role,
+                content=str(content) if content else "",
+                metadata={"adapter": self.inputs.adapter_name},
+            )
+
     def _handle_tool_calls(
         self,
         message: ProviderMessage,
@@ -429,16 +486,82 @@ class InnerLoop[OutputT]:
             }
         )
 
+        # Capture assistant message with tool calls to transcript
+        self._capture_tool_call_messages(message, tool_calls)
+
         tool_messages, next_choice = self._tool_executor.execute(
             tool_calls, self._provider_payload
         )
         self._messages.extend(tool_messages)
+
+        # Capture tool results to transcript
+        self._capture_tool_results()
 
         self._check_budget()
 
         if isinstance(self._next_tool_choice, Mapping):
             # Mapping tool_choice always specifies a function call - reset to auto
             self._next_tool_choice = next_choice
+
+    def _capture_tool_call_messages(
+        self,
+        message: ProviderMessage,
+        tool_calls: Sequence[ProviderToolCall],
+    ) -> None:
+        """Capture assistant message with tool calls to transcript."""
+        if not self.config.capture_transcript:
+            return
+
+        # Capture each tool call as an assistant entry
+        for call in tool_calls:
+            tool_name = call.function.name if call.function else "unknown"
+            arguments_str = call.function.arguments if call.function else "{}"
+
+            # Parse arguments for structured storage
+            tool_input: dict[str, Any] | None = None
+            try:
+                parsed = (
+                    json.loads(arguments_str)
+                    if isinstance(arguments_str, str)
+                    else arguments_str
+                )
+                if isinstance(parsed, dict):
+                    tool_input = cast(dict[str, Any], parsed)
+            except (json.JSONDecodeError, TypeError):
+                tool_input = {"raw": str(arguments_str) if arguments_str else ""}
+
+            self._capture_transcript(
+                role="assistant",
+                content=f"Calling tool: {tool_name}\n{arguments_str}",
+                tool_name=tool_name,
+                tool_call_id=call.id,
+                tool_input=tool_input,
+                metadata={"adapter": self.inputs.adapter_name},
+            )
+
+    def _capture_tool_results(self) -> None:
+        """Capture tool execution results to transcript."""
+        if not self.config.capture_transcript:
+            return
+
+        # Get only new tool execution records since last capture
+        all_records = self._tool_executor.tool_message_records
+        new_records = all_records[self._captured_tool_record_count :]
+        self._captured_tool_record_count = len(all_records)
+
+        for result, tool_message in new_records:
+            call_id = tool_message.get("tool_call_id") or tool_message.get("call_id")
+            content = tool_message.get("content") or tool_message.get("output") or ""
+
+            self._capture_transcript(
+                role="tool",
+                content=str(content)[:2000],  # Truncate long tool output
+                tool_call_id=str(call_id) if call_id else None,
+                metadata={
+                    "success": result.success,
+                    "adapter": self.inputs.adapter_name,
+                },
+            )
 
     def _finalize_response(self, message: ProviderMessage) -> PromptResponse[OutputT]:
         """Assemble and dispatch the final prompt response."""
@@ -473,6 +596,16 @@ class InnerLoop[OutputT]:
             prompt_name=self.inputs.prompt_name,
             text=text_value,
             output=output,
+        )
+
+        # Capture final assistant message to transcript
+        self._capture_transcript(
+            role="assistant",
+            content=text_value or "",
+            metadata={
+                "adapter": self.inputs.adapter_name,
+                "has_structured_output": output is not None,
+            },
         )
 
         self._dispatch_executed_event(response_payload)
