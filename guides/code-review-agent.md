@@ -13,7 +13,7 @@ planning, and the `MainLoop` pattern in one place.
   `test-repositories/`. Mounts are read-only with a 600 KB payload cap.
 - **Principles**: Declarative prompt assembly, ergonomic overrides (tagged by
   namespace/key), reusable planning/workspace tools, and full observability via
-  event subscribers.
+  logging.
 
 ## Transactional Tool Execution
 
@@ -35,49 +35,59 @@ automatically. See [Sessions](../specs/SESSIONS.md) for details.
 
 ## Runtime Architecture
 
-The example uses a two-layer design:
+The example uses a two-layer design with mailbox-driven orchestration:
 
-- `CodeReviewLoop` extends `MainLoop[ReviewTurnParams, ReviewResponse]` for
-  request handling with auto-optimization
-- `CodeReviewApp` owns the interactive REPL and delegates execution to the loop
+- `CodeReviewLoop` extends `MainLoop[ReviewTurnParams, ReviewResponse]` and
+  runs as a background worker processing requests from a mailbox
+- `CodeReviewApp` owns the interactive REPL and sends requests via the mailbox
 
 ### CodeReviewLoop
 
 Implements the `MainLoop` protocol with these responsibilities:
 
 - **Persistent Session**: Creates a single `Session` at construction time,
-  reused across all `execute()` calls
+  reused across all requests
 - **Auto-Optimization**: Runs workspace digest optimization automatically on
   first request if no `WorkspaceDigest` exists in the session
-- **Deadline Management**: Applies a default 5-minute deadline to each request
-- **Prompt Binding**: Creates and binds prompts via `create_prompt()`
+- **Prompt Binding**: Builds prompts via `prepare()` which returns the bound
+  prompt and persistent session
 
 ```python
 class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
-    def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]: ...
-    def create_session(self) -> Session: ...
-    def execute(self, request: ReviewTurnParams, *, budget=None, deadline=None) -> PromptResponse[ReviewResponse]: ...
+    def prepare(self, request: ReviewTurnParams) -> tuple[Prompt[ReviewResponse], Session]:
+        """Prepare prompt and session for the given request."""
+        ...
 ```
+
+The loop runs via `loop.run()` which polls the request mailbox and processes
+each `MainLoopRequest`. Results are routed back via the `reply_to` address.
 
 ### CodeReviewApp
 
-Owns user interaction:
+Owns user interaction and mailbox setup:
 
-- Creates an `Dispatcher` with logging subscribers
-- Instantiates `CodeReviewLoop` with the adapter and bus
-- Runs the interactive REPL loop
+- Creates request and response `InMemoryMailbox` instances with reply routing
+- Instantiates `CodeReviewLoop` with the adapter and request mailbox
+- Runs the loop in a background thread via `loop.run()`
+- Sends `MainLoopRequest` messages with `reply_to` routing
+- Receives `MainLoopResult` from the response mailbox
 - Dumps session state on exit
 
 ### Startup Sequence
 
 1. `configure_logging()` sets up logging
 1. `build_adapter()` creates the OpenAI adapter (requires `OPENAI_API_KEY`)
-1. `CodeReviewApp` creates the event bus and `CodeReviewLoop`
+1. `CodeReviewApp.__init__`:
+   - Creates response mailbox (`InMemoryMailbox`)
+   - Creates request mailbox with `RegistryResolver` for reply routing
+   - Instantiates `CodeReviewLoop` with adapter and request mailbox
 1. `CodeReviewLoop.__init__`:
    - Creates a persistent `Session` via `build_logged_session()`
    - Builds the `PromptTemplate` via `build_task_prompt()`
    - Seeds prompt overrides via `_seed_overrides()`
-1. `CodeReviewApp.run()` starts the REPL
+1. `CodeReviewApp.run()`:
+   - Starts the worker thread running `loop.run()`
+   - Enters the interactive REPL
 
 ### REPL Loop
 
@@ -86,11 +96,14 @@ Each turn:
 1. Reads user input
 1. Handles exit commands (`exit`, `quit`, empty input)
 1. Creates `ReviewTurnParams(request=...)` from user input
-1. Calls `loop.execute()` which:
+1. Wraps it in `MainLoopRequest` with default deadline
+1. Sends to request mailbox with `reply_to="code-review-responses"`
+1. Polls response mailbox until matching `MainLoopResult` arrives
+1. Worker thread (running `loop.run()`) processes the request:
    - Auto-optimizes workspace digest if needed (first request only)
-   - Applies default deadline
-   - Delegates to `MainLoop.execute()` for prompt evaluation
-1. Renders response via `_render_response_payload`
+   - Calls `prepare()` to build prompt and get session
+   - Evaluates prompt and sends `MainLoopResult` to reply address
+1. Main thread renders response via `_render_response`
 1. Prints plan snapshot via `render_plan_snapshot`
 
 On exit, dumps session state to `snapshots/` via `dump_session_tree`.
@@ -207,10 +220,10 @@ The Reference Documentation section demonstrates progressive disclosure:
 
 The example automatically optimizes the workspace digest on first use:
 
-1. `CodeReviewLoop.execute()` checks if `WorkspaceDigest` exists in session
-1. If missing, calls `_run_optimization()` before processing the request
+1. `CodeReviewLoop.prepare()` checks if `WorkspaceDigest` exists in session
+1. If missing, calls `_run_optimization()` before building the prompt
 1. Creates a child session via `build_logged_session(parent=...)`
-1. Builds `OptimizationContext` with adapter, bus, store, tag
+1. Builds `OptimizationContext` with adapter, dispatcher, store, tag
 1. Runs `WorkspaceDigestOptimizer` with `PersistenceScope.SESSION`
 1. Digest is stored in the session for subsequent requests
 
@@ -245,19 +258,18 @@ def _default_deadline() -> Deadline:
     )
 ```
 
-Custom deadlines can be passed to `execute()` if needed.
+Custom deadlines can be passed in `MainLoopRequest` if needed.
 
 ## Observability
 
-### Event Subscribers
+### Logging
 
-Attached via `attach_logging_subscribers(bus)` from `examples.logging`:
+The example uses Python's standard `logging` module configured via
+`configure_logging()`. Key logging points:
 
-| Event | Output |
-| ---------------- | ------------------------------------ |
-| `PromptRendered` | Full prompt text with label |
-| `ToolInvoked` | Params, result, payload, token usage |
-| `PromptExecuted` | Token usage summary |
+- Workspace optimization progress (`_LOGGER.info`)
+- Worker thread lifecycle events
+- Request/response flow in the mailbox-based architecture
 
 ### Plan Snapshots
 
@@ -302,12 +314,11 @@ OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 The example imports several helpers from the `examples` package:
 
 | Function | Purpose |
-| ---------------------------- | -------------------------------- |
+| ----------------------- | -------------------------------- |
 | `build_logged_session` | Create session with logging tags |
 | `configure_logging` | Set up console logging |
 | `render_plan_snapshot` | Format plan state for display |
 | `resolve_override_tag` | Resolve tag from arg/env/default |
-| `attach_logging_subscribers` | Attach event logging to bus |
 
 ## Key Files
 
