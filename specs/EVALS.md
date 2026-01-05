@@ -429,16 +429,20 @@ class EvalRequest(Generic[InputT, ExpectedT]):
 
 ### EvalLoop
 
-Mailbox-driven evaluation loop. Follows the same two-mailbox pattern as
-`MainLoop` for distributed deployments:
+Mailbox-driven evaluation loop. Uses the single-mailbox pattern with `reply_to`
+routing, matching `MainLoop`:
 
 ```python
 class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
     """Mailbox-driven evaluation loop.
 
     Receives EvalRequest messages, executes through MainLoop, scores
-    with evaluator, and sends EvalResult to results mailbox. Designed
+    with evaluator, and sends EvalResult via Message.reply(). Designed
     to run alongside MainLoop workers in distributed deployments.
+
+    The single mailbox pattern with reply_to routing:
+    - requests mailbox: receives EvalRequest messages with reply_to
+    - Workers use msg.reply(result) to route responses
     """
 
     def __init__(
@@ -446,19 +450,17 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
         *,
         loop: MainLoop[InputT, OutputT],
         evaluator: Evaluator[OutputT, ExpectedT],
-        requests: Mailbox[EvalRequest[InputT, ExpectedT]],
-        results: Mailbox[EvalResult],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
     ) -> None:
         self._loop = loop
         self._evaluator = evaluator
         self._requests = requests
-        self._results = results
 
     def run(self, *, max_iterations: int | None = None) -> None:
         """Process evaluation requests from mailbox.
 
         Polls the requests mailbox, evaluates each sample through
-        MainLoop, and sends results to the results mailbox.
+        MainLoop, and sends results via Message.reply().
 
         Args:
             max_iterations: Stop after N iterations (None = run forever)
@@ -471,7 +473,10 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
             ):
                 try:
                     result = self._evaluate_sample(msg.body)
-                    self._results.send(result)
+                    msg.reply(result)
+                    msg.acknowledge()
+                except ReplyNotAvailableError:
+                    # No reply_to specified - log and acknowledge
                     msg.acknowledge()
                 except Exception as e:
                     self._handle_failure(msg, e)
@@ -494,45 +499,55 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
 
     def _handle_failure(
         self,
-        msg: Message[EvalRequest[InputT, ExpectedT]],
+        msg: Message[EvalRequest[InputT, ExpectedT], EvalResult],
         error: Exception,
     ) -> None:
         """Handle evaluation failure with backoff retry."""
         latency_ms = 0  # Unknown on failure
+        result = EvalResult(
+            sample_id=msg.body.sample.id,
+            score=Score(value=0.0, passed=False, reason=str(error)),
+            latency_ms=latency_ms,
+            error=str(error),
+        )
         try:
-            self._results.send(EvalResult(
-                sample_id=msg.body.sample.id,
-                score=Score(value=0.0, passed=False, reason=str(error)),
-                latency_ms=latency_ms,
-                error=str(error),
-            ))
+            msg.reply(result)
             msg.acknowledge()  # Error result sent - don't retry
         except Exception:
-            # Result send failed - nack for retry with backoff
+            # Reply send failed - nack for retry with backoff
             msg.nack(visibility_timeout=min(60 * msg.delivery_count, 900))
 ```
 
 ### Submitting Samples
 
-Submit samples to the requests mailbox for evaluation:
+Submit samples to the requests mailbox with `reply_to` for result routing:
 
 ```python
 def submit_dataset(
     dataset: Dataset[InputT, ExpectedT],
-    requests: Mailbox[EvalRequest[InputT, ExpectedT]],
+    requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
+    *,
+    reply_to: str,
 ) -> None:
-    """Submit all samples in a dataset for evaluation."""
+    """Submit all samples in a dataset for evaluation.
+
+    Args:
+        dataset: Dataset containing samples to evaluate.
+        requests: Mailbox to send evaluation requests to.
+        reply_to: Identifier for the results mailbox. Workers use
+            Message.reply() to route results to this destination.
+    """
     for sample in dataset:
-        requests.send(EvalRequest(sample=sample))
+        requests.send(EvalRequest(sample=sample), reply_to=reply_to)
 ```
 
 ### Collecting Results
 
-Collect results from the results mailbox:
+Collect results from the reply mailbox (specified via `reply_to` when submitting):
 
 ```python
 def collect_results(
-    results: Mailbox[EvalResult],
+    results: Mailbox[EvalResult, None],
     expected_count: int,
     *,
     timeout_seconds: float = 300,
@@ -540,12 +555,13 @@ def collect_results(
     """Collect evaluation results into a report.
 
     Args:
-        results: Mailbox to receive results from
-        expected_count: Number of results to collect
-        timeout_seconds: Maximum time to wait for all results
+        results: Mailbox to receive results from (must be registered
+            for reply_to resolution).
+        expected_count: Number of results to collect.
+        timeout_seconds: Maximum time to wait for all results.
 
     Returns:
-        EvalReport with all collected results
+        EvalReport with all collected results.
     """
     collected: list[EvalResult] = []
     deadline = time.time() + timeout_seconds
@@ -608,11 +624,15 @@ class QALoop(MainLoop[str, str]):
 # Load dataset
 dataset = Dataset.load(Path("tests/fixtures/qa.jsonl"), str, str)
 
-# Create mailboxes
-requests: Mailbox[EvalRequest[str, str]] = InMemoryMailbox(name="eval-requests")
-results: Mailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+# Create mailboxes with reply_to resolution
+results: Mailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+registry: dict[str, Mailbox] = {"eval-results": results}
+requests: Mailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+    name="eval-requests",
+    reply_resolver=registry.get,
+)
 
-# Create MainLoop and EvalLoop
+# Create MainLoop and EvalLoop (no results mailbox - uses reply_to routing)
 adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
 bus = ControlDispatcher()
 main_loop = QALoop(adapter=adapter, bus=bus)
@@ -620,14 +640,13 @@ eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=exact_match,
     requests=requests,
-    results=results,
 )
 
-# Submit samples and run worker
-submit_dataset(dataset, requests)
+# Submit samples with reply_to and run worker
+submit_dataset(dataset, requests, reply_to="eval-results")
 eval_loop.run(max_iterations=1)
 
-# Collect results
+# Collect results from reply mailbox
 report = collect_results(results, expected_count=len(dataset))
 
 # Inspect results
@@ -655,15 +674,14 @@ evaluator = all_of(
     llm_judge(judge_adapter, "Well-structured response"),
 )
 
-# Create EvalLoop with composite evaluator
+# Create EvalLoop with composite evaluator (no results= parameter)
 eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=evaluator,
     requests=requests,
-    results=results,
 )
 
-submit_dataset(dataset, requests)
+submit_dataset(dataset, requests, reply_to="eval-results")
 eval_loop.run(max_iterations=1)
 report = collect_results(results, expected_count=len(dataset))
 ```
@@ -684,8 +702,8 @@ samples = tuple(
 )
 dataset = Dataset(samples=samples)
 
-# Submit and evaluate
-submit_dataset(dataset, requests)
+# Submit and evaluate (with reply_to for result routing)
+submit_dataset(dataset, requests, reply_to="eval-results")
 eval_loop.run(max_iterations=1)
 report = collect_results(results, expected_count=len(dataset))
 ```
@@ -701,15 +719,15 @@ from redis import Redis
 from weakincentives.runtime import RedisMailbox, ControlDispatcher
 from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match
 
-# Redis-backed mailboxes for cross-process durability
+# Redis-backed mailbox for cross-process durability
 redis_client = Redis(host="localhost", port=6379)
-requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
+
+# Create requests mailbox with reply resolver for routing results
+# The resolver looks up reply_to destinations in Redis
+requests: Mailbox[EvalRequest[str, str], EvalResult] = RedisMailbox(
     name="eval-requests",
     client=redis_client,
-)
-results: Mailbox[EvalResult] = RedisMailbox(
-    name="eval-results",
-    client=redis_client,
+    # RedisMailbox resolves reply_to to other Redis mailboxes automatically
 )
 
 # Create MainLoop (same as basic example)
@@ -717,12 +735,11 @@ adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
 bus = ControlDispatcher()
 main_loop = QALoop(adapter=adapter, bus=bus)
 
-# Create and run worker (runs forever)
+# Create and run worker (no results= parameter - uses reply_to routing)
 eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=exact_match,
     requests=requests,
-    results=results,
 )
 eval_loop.run()  # Blocks, processing requests
 ```
@@ -738,22 +755,27 @@ from weakincentives.evals import (
     Dataset, EvalRequest, EvalResult, submit_dataset, collect_results,
 )
 
-# Connect to same Redis mailboxes
+# Connect to Redis
 redis_client = Redis(host="localhost", port=6379)
-requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
+
+# Create requests mailbox
+requests: Mailbox[EvalRequest[str, str], EvalResult] = RedisMailbox(
     name="eval-requests",
     client=redis_client,
 )
-results: Mailbox[EvalResult] = RedisMailbox(
-    name="eval-results",
+
+# Create dedicated results mailbox for this client
+# Workers route results here via reply_to
+results: Mailbox[EvalResult, None] = RedisMailbox(
+    name="eval-results-client-1",
     client=redis_client,
 )
 
-# Submit dataset
+# Submit dataset with reply_to pointing to our results mailbox
 dataset = Dataset.load(Path("qa.jsonl"), str, str)
-submit_dataset(dataset, requests)
+submit_dataset(dataset, requests, reply_to="eval-results-client-1")
 
-# Wait for results (workers process in background)
+# Wait for results (workers process in background, reply to our mailbox)
 report = collect_results(
     results,
     expected_count=len(dataset),

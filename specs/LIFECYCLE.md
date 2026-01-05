@@ -417,12 +417,36 @@ from weakincentives.runtime import MainLoop, ShutdownCoordinator
 # Install signal handlers
 coordinator = ShutdownCoordinator.install()
 
-# Create and register loop
-loop = MyMainLoop(adapter=adapter, requests=requests, responses=responses)
+# Create loop (no responses mailbox - replies route via reply_to)
+loop = MyMainLoop(adapter=adapter, requests=requests)
 coordinator.register(loop.shutdown)
 
 # Run until signal
 loop.run()
+```
+
+### Sending Requests with Reply Routing
+
+Callers set `reply_to` when sending requests. Workers use `Message.reply()` to
+route responses back:
+
+```python
+from weakincentives.runtime.mailbox import InMemoryMailbox
+
+# Create a dedicated response queue for this client
+responses = InMemoryMailbox(name="my-responses")
+registry["my-responses"] = responses  # Register for reply_to resolution
+
+# Send request with reply_to
+requests.send(
+    MainLoopRequest(request=MyRequest(...)),
+    reply_to="my-responses",
+)
+
+# Collect response from reply mailbox
+for msg in responses.receive(wait_time_seconds=30):
+    result = msg.body  # MainLoopResult
+    msg.acknowledge()
 ```
 
 ### Multiple Loops with LoopGroup
@@ -431,9 +455,9 @@ loop.run()
 from weakincentives.runtime import MainLoop, LoopGroup
 from weakincentives.evals import EvalLoop
 
-# Create loops
-main_loop = AnalystLoop(...)
-eval_loop = EvalLoop(loop=main_loop, evaluator=scorer, ...)
+# Create loops (no responses/results mailboxes - replies route via reply_to)
+main_loop = AnalystLoop(adapter=adapter, requests=requests)
+eval_loop = EvalLoop(loop=main_loop, evaluator=scorer, requests=eval_requests)
 
 # Run as a group
 group = LoopGroup(loops=[main_loop, eval_loop])
