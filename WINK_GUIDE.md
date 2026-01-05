@@ -119,8 +119,9 @@ ______________________________________________________________________
    1. [The composition philosophy](#81-the-composition-philosophy)
    1. [Core types](#82-core-types)
    1. [LLM-as-judge](#83-llm-as-judge)
-   1. [Running evaluations](#84-running-evaluations)
-   1. [Production deployment pattern](#85-production-deployment-pattern)
+   1. [Session evaluators](#84-session-evaluators)
+   1. [Running evaluations](#85-running-evaluations)
+   1. [Production deployment pattern](#86-production-deployment-pattern)
 1. [Lifecycle Management](#9-lifecycle-management)
    1. [LoopGroup: running multiple loops](#91-loopgroup-running-multiple-loops)
    1. [ShutdownCoordinator: manual signal handling](#92-shutdowncoordinator-manual-signal-handling)
@@ -1238,6 +1239,41 @@ This is especially valuable for agents that modify files, update plans, or
 maintain complex working state. A failed `write_file` or `update_plan` doesn't
 corrupt your agent's world model.
 
+**Manual transaction control:**
+
+For advanced use cases, you can use the transaction API directly:
+
+```python
+from weakincentives.runtime import (
+    CompositeSnapshot,
+    create_snapshot,
+    restore_snapshot,
+    tool_transaction,
+    PendingToolTracker,
+)
+
+# Option 1: Context manager (auto-rollback on exception)
+with tool_transaction(session, resources, tag="my_operation") as snapshot:
+    # Do work that might fail
+    result = risky_operation()
+    if not result.success:
+        restore_snapshot(session, resources, snapshot)  # Manual rollback
+
+# Option 2: Manual snapshot/restore
+snapshot = create_snapshot(session, resources, tag="checkpoint")
+try:
+    do_work()
+except Exception:
+    restore_snapshot(session, resources, snapshot)
+    raise
+
+# Option 3: Hook-based tracking (for Claude Agent SDK)
+tracker = PendingToolTracker(session=session, resources=resources)
+tracker.begin_tool_execution(tool_use_id="abc", tool_name="write_file")
+# ... native tool executes ...
+tracker.end_tool_execution(tool_use_id="abc", success=False)  # Auto-rollback
+```
+
 ______________________________________________________________________
 
 ## 5. Sessions
@@ -1705,7 +1741,80 @@ The `llm_judge` factory creates an evaluator that prompts the model to rate
 outputs as "excellent", "good", "fair", "poor", or "wrong"—each mapping to a
 numeric value.
 
-### 8.4 Running evaluations
+### 8.4 Session evaluators
+
+Sometimes you need to evaluate not just _what_ the agent produced, but _how_ it
+got there. Session evaluators receive a read-only `SessionView` and can assert
+on tool usage patterns, token budgets, and custom state invariants.
+
+**Built-in session evaluators:**
+
+```python
+from weakincentives.evals import (
+    tool_called,
+    tool_not_called,
+    tool_call_count,
+    all_tools_succeeded,
+    token_usage_under,
+    slice_contains,
+    all_of,
+    adapt,
+)
+
+# Combine output evaluation with behavioral assertions
+evaluator = all_of(
+    exact_match,                           # Output must match expected
+    tool_called("search"),                 # Agent must have used search
+    tool_not_called("fallback"),           # Should not have used fallback
+    all_tools_succeeded(),                 # No tool failures
+    token_usage_under(max_tokens=5000),    # Stay within budget
+)
+```
+
+**Available session evaluators:**
+
+- `tool_called(name)` - Assert a specific tool was invoked
+- `tool_not_called(name)` - Assert a tool was never invoked
+- `tool_call_count(name, min_count, max_count)` - Assert call count within
+  bounds
+- `all_tools_succeeded()` - Assert no tool failures occurred
+- `token_usage_under(max_tokens)` - Assert total token usage under limit
+- `slice_contains(T, predicate)` - Assert session slice contains matching value
+
+**Converting standard evaluators:**
+
+Standard evaluators (that only see output and expected) can be converted to
+session-aware evaluators using `adapt()`:
+
+```python
+from weakincentives.evals import adapt, exact_match, all_of, tool_called
+
+# adapt() wraps a standard evaluator to ignore the session
+evaluator = all_of(
+    adapt(exact_match),    # Now works with session evaluators
+    tool_called("search"),
+)
+```
+
+**Custom session evaluators:**
+
+```python
+from weakincentives.evals import Score, SessionEvaluator
+from weakincentives.runtime import SessionView, ToolInvoked
+
+def custom_session_check(
+    output: str,
+    expected: str,
+    session: SessionView,
+) -> Score:
+    # Check how many tools were called
+    tool_events = session[ToolInvoked].all()
+    if len(tool_events) > 10:
+        return Score(value=0.0, passed=False, reason="Too many tool calls")
+    return Score(value=1.0, passed=True)
+```
+
+### 8.5 Running evaluations
 
 **EvalLoop wraps your MainLoop:**
 
@@ -1753,7 +1862,7 @@ for result in report.failed_samples():
     print(f"Failed: {result.sample_id} - {result.score.reason}")
 ```
 
-### 8.5 Production deployment pattern
+### 8.6 Production deployment pattern
 
 In production, run both `MainLoop` and `EvalLoop` workers from the same process
 or container. This ensures your evaluation suite runs against the exact same
@@ -2840,6 +2949,18 @@ contains(output, expected) -> Score
 all_of(*evaluators) -> Evaluator
 any_of(*evaluators) -> Evaluator
 llm_judge(adapter, criterion) -> Evaluator
+adapt(evaluator) -> SessionEvaluator  # Convert standard to session-aware
+```
+
+**Session evaluators:**
+
+```python
+tool_called(name) -> SessionEvaluator
+tool_not_called(name) -> SessionEvaluator
+tool_call_count(name, min_count, max_count) -> SessionEvaluator
+all_tools_succeeded() -> SessionEvaluator
+token_usage_under(max_tokens) -> SessionEvaluator
+slice_contains(T, predicate) -> SessionEvaluator
 ```
 
 **Loop and helpers:**
@@ -2903,6 +3024,8 @@ ______________________________________________________________________
 - **Workspace**: [specs/WORKSPACE.md](specs/WORKSPACE.md)
 - **Overrides & optimization**:
   [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)
+- **Formal verification**: [specs/FORMAL_VERIFICATION.md](specs/FORMAL_VERIFICATION.md)
+  (embedding TLA+ specs in Python)
 - **Code review example**:
   [guides/code-review-agent.md](guides/code-review-agent.md)
 - **Contributor guide**: [AGENTS.md](AGENTS.md)
