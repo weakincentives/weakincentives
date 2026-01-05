@@ -167,6 +167,7 @@ Consult these specs before modifying related code:
 | `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
+| `specs/TRANSCRIPTS.md` | Conversation transcript capture, TranscriptEntry, human-readable logs |
 | `specs/HEALTH.md` | Health endpoints, watchdog, stuck worker detection, process termination |
 | `specs/LOGGING.md` | Logging surfaces |
 | `specs/LANGSMITH.md` | LangSmith telemetry, prompt hub, evaluation integration |
