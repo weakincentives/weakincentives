@@ -189,9 +189,9 @@ Guides cover quickstarts, patterns, recipes, and best practices. Design specs
 ### Creating a Prompt
 
 ```python
-from weakincentives import Prompt, MarkdownSection, Tool
+from weakincentives import Prompt, PromptTemplate, MarkdownSection, Tool
 
-prompt = Prompt[OutputType](
+template = PromptTemplate[OutputType](
     ns="my-namespace",
     key="my-prompt",
     name="my_prompt",
@@ -200,10 +200,11 @@ prompt = Prompt[OutputType](
             title="Instructions",
             template="Do something with $param",
             key="instructions",
-            tools=(my_tool,),
+            tools=[my_tool],
         ),
     ],
 )
+prompt = Prompt(template).bind(param="value")
 ```
 
 ### Session State
@@ -244,7 +245,7 @@ session.restore(snapshot)                         # Restore from snapshot
 from weakincentives.adapters.openai import OpenAIAdapter
 
 adapter = OpenAIAdapter(model="gpt-4o")
-response = adapter.evaluate(prompt, bus=bus, session=session)
+response = adapter.evaluate(prompt, session=session)
 output = response.output  # Typed result
 ```
 
