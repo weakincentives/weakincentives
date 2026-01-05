@@ -143,57 +143,15 @@ fixed response mailbox at construction.
 **Specification additions:**
 
 - `reply_to` field on `Message` for storing reply destination identifier
-- `reply_mailbox()` method on `Message` for resolving the reply `Mailbox`
+- `reply()` method on `Message` for sending replies to reply destination
 - `send(body, reply_to=...)` parameter for specifying reply destination
 - `MailboxResolver` protocol for backend-specific mailbox resolution
-- `ReplyMailboxUnavailableError` for resolution failures
+- `ReplyNotAvailableError` for missing reply_to, `MailboxResolutionError` for
+  resolver failures
 
 This enables patterns like eval run collection where all samples specify the
 same `reply_to` and results collect into one mailbox regardless of which worker
 processes each sample.
-
-### Session Evaluators for Evals Framework
-
-The evaluation framework now supports behavioral assertions against session
-data, enabling evaluation of not just what the agent produced, but how it got
-there—including tool usage patterns, token budgets, and custom state invariants.
-
-```python
-from weakincentives.evals import (
-    EvalLoop,
-    tool_called,
-    tool_not_called,
-    all_tools_succeeded,
-    token_usage_under,
-    all_of,
-)
-
-# Combine output evaluation with session assertions
-evaluator = all_of(
-    exact_match,                      # Output matches expected
-    tool_called("search"),            # Agent used search tool
-    tool_not_called("fallback"),      # Didn't use fallback
-    all_tools_succeeded(),            # No tool failures
-    token_usage_under(max_tokens=1000),
-)
-
-loop = EvalLoop(main_loop=my_loop, evaluator=evaluator)
-report = loop.execute(dataset)
-```
-
-**New types:**
-
-- `SessionEvaluator`: Evaluator that receives `SessionView` for inspection
-- `adapt()`: Converts standard evaluators to session-aware evaluators
-
-**Built-in session evaluators:**
-
-- `tool_called(name)`: Assert a specific tool was invoked
-- `tool_not_called(name)`: Assert a tool was never invoked
-- `tool_call_count(name, count)`: Assert exact number of tool invocations
-- `all_tools_succeeded()`: Assert no tool failures occurred
-- `token_usage_under(max_tokens)`: Assert token budget was respected
-- `slice_contains(T, predicate)`: Assert session slice contains matching value
 
 ### TLA+ Specification Embedding Framework
 
@@ -230,19 +188,6 @@ class Counter:
 
 ### Added
 
-- **`wink docs --changelog` command.** The `wink docs` CLI now supports a
-  `--changelog` flag that prints the bundled CHANGELOG.md, making release
-  history accessible to users without repository access.
-
-- **ToolResult convenience constructors.** `ToolResult` now provides class
-  methods for common construction patterns: `ToolResult.success(value, message)`
-  and `ToolResult.failure(message)` reduce boilerplate in tool handlers.
-
-- **Parameter validation for mailbox timeouts.** Negative `visibility_timeout`
-  and `wait_time_seconds` values are now rejected at the Python boundary with
-  `InvalidParameterError`. The `visibility_timeout` is also validated against
-  the SQS-compatible maximum of 43200 seconds (12 hours).
-
 ### Changed
 
 - **MainLoop.initialize renamed to prepare.** The method name `prepare` better
@@ -269,13 +214,6 @@ class Counter:
 - **Redis decode_responses compatibility.** The `_deserialize` method in
   `RedisMailbox` now handles both `bytes` and `str` return types, fixing crashes
   when Redis clients are constructed with `decode_responses=True`.
-
-### Breaking
-
-- **Removed `mount_point` from Filesystem protocol.** The `mount_point` property
-  was defined in the `Filesystem` protocol but never used for path resolution.
-  Mount point handling has moved to `FilesystemToolHandlers`. Update any custom
-  filesystem implementations to remove the `mount_point` property.
 
 ### Internal
 
@@ -351,7 +289,7 @@ at-least-once message delivery between processes. Unlike the pub/sub
 and explicit acknowledgment.
 
 ```python
-from weakincentives.mailbox import InMemoryMailbox, Message
+from weakincentives.runtime.mailbox import InMemoryMailbox, Message
 
 # Create a typed mailbox
 mailbox: Mailbox[WorkRequest] = InMemoryMailbox()
@@ -386,16 +324,32 @@ A minimal evaluation framework built on MainLoop for testing agent behavior.
 MainLoop handles orchestration; evals add datasets and scoring.
 
 ```python
-from weakincentives.evals import Dataset, EvalLoop, exact_match
+from weakincentives.evals import (
+    Dataset, EvalLoop, exact_match, submit_dataset, collect_results,
+)
+from weakincentives.runtime.mailbox import InMemoryMailbox
 
 # Load a dataset
 dataset = Dataset.load(Path("qa.jsonl"), str, str)
 
-# Run evaluation
-loop = EvalLoop(main_loop=my_loop, evaluator=exact_match)
-report = loop.execute(dataset)
+# Create mailboxes for request/response routing
+requests_mailbox = InMemoryMailbox(name="eval-requests")
 
-print(f"Accuracy: {report.accuracy:.2%}")
+# Create and run evaluation loop
+eval_loop = EvalLoop(
+    loop=main_loop,
+    evaluator=exact_match,
+    requests=requests_mailbox,
+)
+
+# Submit samples and run evaluation
+submit_dataset(dataset, requests_mailbox, reply_to="results")
+eval_loop.run(max_iterations=len(dataset))
+
+# Collect results
+results_mailbox = requests_mailbox.resolver.resolve("results")
+report = collect_results(results_mailbox, expected_count=len(dataset))
+print(f"Pass rate: {report.pass_rate:.1%}")
 ```
 
 **Core types:**
