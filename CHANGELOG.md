@@ -167,7 +167,7 @@ fixed response mailbox at construction.
 - `reply_mailbox()` method on `Message` for resolving the reply `Mailbox`
 - `send(body, reply_to=...)` parameter for specifying reply destination
 - `MailboxResolver` protocol for backend-specific mailbox resolution
-- `ReplyMailboxUnavailableError` for resolution failures
+- `ReplyNotAvailableError` for resolution failures
 
 This enables patterns like eval run collection where all samples specify the
 same `reply_to` and results collect into one mailbox regardless of which worker
@@ -211,7 +211,7 @@ report = loop.execute(dataset)
 
 - `tool_called(name)`: Assert a specific tool was invoked
 - `tool_not_called(name)`: Assert a tool was never invoked
-- `tool_call_count(name, count)`: Assert exact number of tool invocations
+- `tool_call_count(name, min_count, max_count)`: Assert tool call count within bounds
 - `all_tools_succeeded()`: Assert no tool failures occurred
 - `token_usage_under(max_tokens)`: Assert token budget was respected
 - `slice_contains(T, predicate)`: Assert session slice contains matching value
@@ -244,10 +244,12 @@ class Counter:
 - `Invariant`: Declares a TLA+ invariant with ID, name, and predicate
 - `FormalSpec`: Container for all specification metadata
 
-**Pytest integration:**
+**Testing utilities (`weakincentives.formal.testing`):**
 
-- `--extract-tla`: Extract TLA+ specs from decorated Python classes
-- `--check-tla`: Run TLC model checker on extracted specifications
+- `extract_spec(cls)`: Extract TLA+ specification from decorated class
+- `write_spec(spec, output_dir)`: Write TLA+ and config files to disk
+- `model_check(spec)`: Run TLC model checker with 3-minute timeout
+- `extract_and_verify(cls, output_dir)`: Combined extraction and verification
 
 ### Added
 
@@ -256,8 +258,8 @@ class Counter:
   history accessible to users without repository access.
 
 - **ToolResult convenience constructors.** `ToolResult` now provides class
-  methods for common construction patterns: `ToolResult.success(value, message)`
-  and `ToolResult.failure(message)` reduce boilerplate in tool handlers.
+  methods for common construction patterns: `ToolResult.ok(value, message)`
+  and `ToolResult.error(message)` reduce boilerplate in tool handlers.
 
 - **Parameter validation for mailbox timeouts.** Negative `visibility_timeout`
   and `wait_time_seconds` values are now rejected at the Python boundary with
