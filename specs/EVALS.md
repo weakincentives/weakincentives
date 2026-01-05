@@ -14,20 +14,22 @@ this spec adds datasets and scoring.
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────┐     ┌───────────┐     ┌────────────┐
-│   Dataset   │────▶│ EvalLoop │────▶│ MainLoop  │────▶│  Adapter   │
-│  (samples)  │     │.execute()│     │ .execute()│     │            │
-└─────────────┘     └────┬─────┘     └───────────┘     └────────────┘
-                         │
-                         ▼
-                   ┌───────────┐     ┌────────────┐
-                   │ Evaluator │────▶│ EvalReport │
-                   │ (scoring) │     │ (metrics)  │
-                   └───────────┘     └────────────┘
+┌─────────────┐     ┌──────────────────┐     ┌───────────┐     ┌────────────┐
+│   Dataset   │────▶│ Requests Mailbox │────▶│ EvalLoop  │────▶│  MainLoop  │
+│  (samples)  │     │ (EvalRequest)    │     │  .run()   │     │ .execute() │
+└─────────────┘     └──────────────────┘     └─────┬─────┘     └────────────┘
+                                                   │
+                                                   ▼
+                           ┌───────────┐     ┌────────────────┐
+                           │ Evaluator │◀────│ msg.reply()    │
+                           │ (scoring) │     │ (EvalResult)   │
+                           └───────────┘     └────────────────┘
 ```
 
-`EvalLoop` orchestrates evaluation: for each sample, it executes through the
-provided `MainLoop`, scores the output, and aggregates results into a report.
+`EvalLoop` is mailbox-driven: it receives `EvalRequest` messages from a
+requests mailbox, executes each sample through `MainLoop`, scores the output,
+and routes `EvalResult` back via `Message.reply()` based on the message's
+`reply_to` field.
 
 ## Core Types
 
@@ -322,7 +324,8 @@ def llm_judge(
             output=output,
             expected=expected,
         ))
-        response = adapter.evaluate(prompt)
+        judge_session = Session()
+        response = adapter.evaluate(prompt, session=judge_session)
         rating = response.output.rating
         return Score(
             value=RATING_VALUES[rating],
@@ -429,16 +432,20 @@ class EvalRequest(Generic[InputT, ExpectedT]):
 
 ### EvalLoop
 
-Mailbox-driven evaluation loop. Follows the same two-mailbox pattern as
-`MainLoop` for distributed deployments:
+Mailbox-driven evaluation loop. Uses a single-mailbox pattern with reply-to
+routing for result delivery:
 
 ```python
 class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
     """Mailbox-driven evaluation loop.
 
     Receives EvalRequest messages, executes through MainLoop, scores
-    with evaluator, and sends EvalResult to results mailbox. Designed
+    with evaluator, and sends EvalResult via Message.reply(). Designed
     to run alongside MainLoop workers in distributed deployments.
+
+    The single mailbox pattern with reply_to routing:
+    - requests mailbox: receives EvalRequest messages with reply_to
+    - Workers use msg.reply(result) to route responses
     """
 
     def __init__(
@@ -446,19 +453,17 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
         *,
         loop: MainLoop[InputT, OutputT],
         evaluator: Evaluator[OutputT, ExpectedT],
-        requests: Mailbox[EvalRequest[InputT, ExpectedT]],
-        results: Mailbox[EvalResult],
+        requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
     ) -> None:
         self._loop = loop
         self._evaluator = evaluator
         self._requests = requests
-        self._results = results
 
     def run(self, *, max_iterations: int | None = None) -> None:
         """Process evaluation requests from mailbox.
 
         Polls the requests mailbox, evaluates each sample through
-        MainLoop, and sends results to the results mailbox.
+        MainLoop, and sends results via Message.reply().
 
         Args:
             max_iterations: Stop after N iterations (None = run forever)
@@ -471,10 +476,14 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
             ):
                 try:
                     result = self._evaluate_sample(msg.body)
-                    self._results.send(result)
-                    msg.acknowledge()
                 except Exception as e:
-                    self._handle_failure(msg, e)
+                    result = EvalResult(
+                        sample_id=msg.body.sample.id,
+                        score=Score(value=0.0, passed=False, reason=str(e)),
+                        latency_ms=0,
+                        error=str(e),
+                    )
+                self._reply_and_ack(msg, result)
             iterations += 1
 
     def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
@@ -492,47 +501,49 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
             latency_ms=latency_ms,
         )
 
-    def _handle_failure(
+    def _reply_and_ack(
         self,
-        msg: Message[EvalRequest[InputT, ExpectedT]],
-        error: Exception,
+        msg: Message[EvalRequest[InputT, ExpectedT], EvalResult],
+        result: EvalResult,
     ) -> None:
-        """Handle evaluation failure with backoff retry."""
-        latency_ms = 0  # Unknown on failure
+        """Reply with result and acknowledge message."""
         try:
-            self._results.send(EvalResult(
-                sample_id=msg.body.sample.id,
-                score=Score(value=0.0, passed=False, reason=str(error)),
-                latency_ms=latency_ms,
-                error=str(error),
-            ))
-            msg.acknowledge()  # Error result sent - don't retry
+            msg.reply(result)
+            msg.acknowledge()
         except Exception:
-            # Result send failed - nack for retry with backoff
+            # Reply send failed - nack for retry with backoff
             msg.nack(visibility_timeout=min(60 * msg.delivery_count, 900))
 ```
 
 ### Submitting Samples
 
-Submit samples to the requests mailbox for evaluation:
+Submit samples to the requests mailbox for evaluation. Each request includes
+a `reply_to` mailbox where results will be delivered:
 
 ```python
 def submit_dataset(
     dataset: Dataset[InputT, ExpectedT],
-    requests: Mailbox[EvalRequest[InputT, ExpectedT]],
+    requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
+    results: Mailbox[EvalResult, None],
 ) -> None:
-    """Submit all samples in a dataset for evaluation."""
+    """Submit all samples in a dataset for evaluation.
+
+    Args:
+        dataset: Dataset containing samples to evaluate.
+        requests: Mailbox to send requests to.
+        results: Mailbox where results should be delivered (via reply_to).
+    """
     for sample in dataset:
-        requests.send(EvalRequest(sample=sample))
+        requests.send(EvalRequest(sample=sample), reply_to=results)
 ```
 
 ### Collecting Results
 
-Collect results from the results mailbox:
+Collect results from the reply_to mailbox:
 
 ```python
 def collect_results(
-    results: Mailbox[EvalResult],
+    results: Mailbox[EvalResult, None],
     expected_count: int,
     *,
     timeout_seconds: float = 300,
@@ -540,7 +551,7 @@ def collect_results(
     """Collect evaluation results into a report.
 
     Args:
-        results: Mailbox to receive results from
+        results: Mailbox to receive results from (the reply_to target)
         expected_count: Number of results to collect
         timeout_seconds: Maximum time to wait for all results
 
@@ -608,9 +619,11 @@ class QALoop(MainLoop[str, str]):
 # Load dataset
 dataset = Dataset.load(Path("tests/fixtures/qa.jsonl"), str, str)
 
-# Create mailboxes
-requests: Mailbox[EvalRequest[str, str]] = InMemoryMailbox(name="eval-requests")
-results: Mailbox[EvalResult] = InMemoryMailbox(name="eval-results")
+# Create mailboxes (requests sends EvalResult replies to results)
+requests: Mailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+    name="eval-requests"
+)
+results: Mailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
 
 # Create MainLoop and EvalLoop
 adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
@@ -620,14 +633,13 @@ eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=exact_match,
     requests=requests,
-    results=results,
 )
 
-# Submit samples and run worker
-submit_dataset(dataset, requests)
+# Submit samples (with reply_to routing) and run worker
+submit_dataset(dataset, requests, results)
 eval_loop.run(max_iterations=1)
 
-# Collect results
+# Collect results from the reply_to mailbox
 report = collect_results(results, expected_count=len(dataset))
 
 # Inspect results
@@ -660,10 +672,9 @@ eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=evaluator,
     requests=requests,
-    results=results,
 )
 
-submit_dataset(dataset, requests)
+submit_dataset(dataset, requests, results)
 eval_loop.run(max_iterations=1)
 report = collect_results(results, expected_count=len(dataset))
 ```
@@ -685,7 +696,7 @@ samples = tuple(
 dataset = Dataset(samples=samples)
 
 # Submit and evaluate
-submit_dataset(dataset, requests)
+submit_dataset(dataset, requests, results)
 eval_loop.run(max_iterations=1)
 report = collect_results(results, expected_count=len(dataset))
 ```
@@ -698,17 +709,14 @@ EvalLoop workers run alongside MainLoop workers, polling the requests mailbox:
 
 ```python
 from redis import Redis
-from weakincentives.runtime import RedisMailbox, ControlDispatcher
+from weakincentives.contrib.mailbox import RedisMailbox
+from weakincentives.runtime import ControlDispatcher, Mailbox
 from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match
 
-# Redis-backed mailboxes for cross-process durability
+# Redis-backed mailbox for cross-process durability
 redis_client = Redis(host="localhost", port=6379)
-requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
+requests: Mailbox[EvalRequest[str, str], EvalResult] = RedisMailbox(
     name="eval-requests",
-    client=redis_client,
-)
-results: Mailbox[EvalResult] = RedisMailbox(
-    name="eval-results",
     client=redis_client,
 )
 
@@ -722,7 +730,6 @@ eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=exact_match,
     requests=requests,
-    results=results,
 )
 eval_loop.run()  # Blocks, processing requests
 ```
@@ -733,25 +740,26 @@ Submit samples and collect results from a separate process:
 
 ```python
 from redis import Redis
-from weakincentives.runtime import RedisMailbox, Mailbox
+from weakincentives.contrib.mailbox import RedisMailbox
+from weakincentives.runtime import Mailbox
 from weakincentives.evals import (
     Dataset, EvalRequest, EvalResult, submit_dataset, collect_results,
 )
 
 # Connect to same Redis mailboxes
 redis_client = Redis(host="localhost", port=6379)
-requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
+requests: Mailbox[EvalRequest[str, str], EvalResult] = RedisMailbox(
     name="eval-requests",
     client=redis_client,
 )
-results: Mailbox[EvalResult] = RedisMailbox(
+results: Mailbox[EvalResult, None] = RedisMailbox(
     name="eval-results",
     client=redis_client,
 )
 
-# Submit dataset
+# Submit dataset with reply_to routing
 dataset = Dataset.load(Path("qa.jsonl"), str, str)
-submit_dataset(dataset, requests)
+submit_dataset(dataset, requests, results)
 
 # Wait for results (workers process in background)
 report = collect_results(
@@ -783,13 +791,18 @@ Scale horizontally by running multiple EvalLoop workers:
            └─────────────────┼─────────────────┘
                              ▼
                     ┌─────────────────┐
-                    │ Results Queue   │
-                    │ (Redis/SQS)     │
+                    │  Reply routing  │
+                    │ (via reply_to)  │
                     └─────────────────┘
 ```
 
 Visibility timeout ensures each sample is processed by exactly one worker.
-Failed evaluations retry automatically with exponential backoff.
+
+**Error handling:** Evaluation errors are recorded in the `EvalResult.error`
+field and the result is still delivered via `msg.reply()`. The message is then
+acknowledged—no automatic retry of the evaluation itself. Backoff with retry
+only occurs when the reply send fails (message-level failures), in which case
+the message is nacked and redelivered for reprocessing.
 
 With LangSmith enabled, MainLoop executions are automatically traced.
 
@@ -835,4 +848,4 @@ def test_any_of_requires_one():
 - **Sequential execution** - MainLoop is synchronous; samples run one at a time
 - **No caching** - Repeated samples re-execute; add caching at adapter level
 - **No checkpoints** - Cannot resume interrupted runs
-- **Single loop** - Each `EvalLoop.execute()` uses one MainLoop instance
+- **Single loop** - Each `EvalLoop.run()` uses one MainLoop instance
