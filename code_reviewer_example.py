@@ -40,6 +40,8 @@ from weakincentives.adapters.claude_agent_sdk import (
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    SkillConfig,
+    SkillMount,
 )
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
@@ -83,6 +85,7 @@ from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
 from weakincentives.types import SupportsDataclass
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+DEMO_SKILLS_ROOT = PROJECT_ROOT / "demo-skills"
 
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
 SNAPSHOT_DIR = PROJECT_ROOT / "snapshots"
@@ -170,11 +173,11 @@ class ReferenceParams:
 
 
 class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
-    """MainLoop implementation for code review with auto-optimization.
+    """MainLoop implementation for code review with optional optimization.
 
     This loop runs as a background worker processing requests from a mailbox.
-    It maintains a persistent session across all requests and automatically
-    runs workspace digest optimization on first use.
+    It maintains a persistent session across all requests and optionally
+    runs workspace digest optimization on first use when enabled.
 
     Example::
 
@@ -199,6 +202,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     _override_tag: str
     _use_podman: bool
     _use_claude_agent: bool
+    _enable_optimization: bool
     _optimization_done: bool
 
     def __init__(  # noqa: PLR0913
@@ -213,6 +217,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         use_podman: bool = False,
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
+        enable_optimization: bool = False,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
@@ -221,6 +226,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         )
         self._use_podman = use_podman
         self._use_claude_agent = use_claude_agent
+        self._enable_optimization = enable_optimization
         self._optimization_done = False
         # Create persistent session at construction time
         self._persistent_session = build_logged_session(tags={"app": "code-reviewer"})
@@ -245,11 +251,11 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     ) -> tuple[Prompt[ReviewResponse], Session]:
         """Prepare prompt and session for the given request.
 
-        Runs workspace optimization on first request if needed, then creates
+        Runs workspace optimization on first request if enabled, then creates
         the review prompt and returns the persistent session.
         """
-        # Run optimization once on first request
-        if not self._optimization_done:
+        # Run optimization once on first request (if enabled)
+        if self._enable_optimization and not self._optimization_done:
             needs_optimization = (
                 self._persistent_session[WorkspaceDigest].latest() is None
             )
@@ -322,6 +328,7 @@ class CodeReviewApp:
     _worker_thread: threading.Thread | None
     _pending_requests: dict[UUID, str]  # request_id -> user prompt for display
     _use_claude_agent: bool
+    _enable_optimization: bool
     _workspace_section: ClaudeAgentWorkspaceSection | None
     _shutdown_requested: bool
 
@@ -334,8 +341,10 @@ class CodeReviewApp:
         use_podman: bool = False,
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
+        enable_optimization: bool = False,
     ) -> None:
         self._use_claude_agent = use_claude_agent
+        self._enable_optimization = enable_optimization
         self._workspace_section = workspace_section
         self._worker_thread = None
         self._pending_requests = {}
@@ -356,6 +365,7 @@ class CodeReviewApp:
             use_podman=use_podman,
             use_claude_agent=use_claude_agent,
             workspace_section=workspace_section,
+            enable_optimization=enable_optimization,
         )
 
     def _run_worker(self) -> None:
@@ -409,6 +419,7 @@ class CodeReviewApp:
                 self._loop.override_tag,
                 use_podman=self._loop.use_podman,
                 use_claude_agent=self._use_claude_agent,
+                enable_optimization=self._enable_optimization,
             )
         )
         print("Type a review prompt to begin. (Type 'exit' to quit.)")
@@ -502,6 +513,11 @@ def parse_args() -> argparse.Namespace:
             "Requires ANTHROPIC_API_KEY. Uses SDK's built-in tools."
         ),
     )
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Enable workspace digest optimization on first request.",
+    )
     return parser.parse_args()
 
 
@@ -517,10 +533,15 @@ def main() -> None:
             use_podman=False,
             use_claude_agent=True,
             workspace_section=workspace_section,
+            enable_optimization=args.optimize,
         )
     else:
         adapter = build_adapter()
-        app = CodeReviewApp(adapter, use_podman=args.podman)
+        app = CodeReviewApp(
+            adapter,
+            use_podman=args.podman,
+            enable_optimization=args.optimize,
+        )
 
     app.run()
 
@@ -536,18 +557,30 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
 def build_claude_agent_adapter() -> tuple[
     ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection
 ]:
-    """Build the Claude Agent SDK adapter with workspace section and isolation.
+    """Build the Claude Agent SDK adapter with fully hermetic isolation.
 
     Creates a workspace section with the test repository mounted, and configures
-    the adapter to use the SDK's native agentic capabilities with hermetic
-    isolation. The sandbox has network access to Python documentation sites
-    for code quality reference.
+    the adapter to use the SDK's native agentic capabilities with complete
+    hermetic isolation. The adapter operates from an isolated ephemeral home
+    directory with no access to host configuration or environment variables.
+
+    Hermetic isolation guarantees:
+    - Ephemeral HOME directory (no access to ~/.claude)
+    - Explicit API key passed through IsolationConfig (not inherited from host)
+    - No host environment variables inherited
+    - Sandboxed execution with OS-level enforcement
+    - Network restricted to Python documentation domains only
+    - Skills mounted from demo-skills/ directory
 
     Returns:
         Tuple of (adapter, workspace_section). The workspace section should be
         cloned with the real session before use in prompts.
+
+    Raises:
+        SystemExit: If ANTHROPIC_API_KEY is not set in the environment.
     """
-    if "ANTHROPIC_API_KEY" not in os.environ:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
         raise SystemExit("Set ANTHROPIC_API_KEY before running with --claude-agent.")
 
     _ensure_test_repository_available()
@@ -571,8 +604,25 @@ def build_claude_agent_adapter() -> tuple[
         allowed_host_roots=(str(TEST_REPOSITORIES_ROOT),),
     )
 
-    # Configure hermetic isolation with access to Python documentation
+    # Auto-discover and mount all skills from demo-skills/
+    skill_mounts = (
+        tuple(
+            SkillMount(source=skill_dir)
+            for skill_dir in DEMO_SKILLS_ROOT.iterdir()
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
+        )
+        if DEMO_SKILLS_ROOT.exists()
+        else ()
+    )
+
+    # Configure fully hermetic isolation:
+    # - Explicit API key (not inherited from host environment)
+    # - No host environment variables inherited
+    # - Sandboxed execution with network restrictions
+    # - Skills mounted in ephemeral home
     isolation = IsolationConfig(
+        api_key=api_key,
+        include_host_env=False,
         network_policy=NetworkPolicy(
             allowed_domains=CODE_REVIEW_ALLOWED_DOMAINS,
         ),
@@ -583,6 +633,7 @@ def build_claude_agent_adapter() -> tuple[
             # Auto-approve bash commands in sandbox (safe with network restrictions)
             bash_auto_allow=True,
         ),
+        skills=SkillConfig(skills=skill_mounts),
     )
 
     model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
@@ -847,8 +898,13 @@ def _build_workspace_section(
 
 
 def _build_intro(
-    override_tag: str, *, use_podman: bool, use_claude_agent: bool = False
+    override_tag: str,
+    *,
+    use_podman: bool,
+    use_claude_agent: bool = False,
+    enable_optimization: bool = False,
 ) -> str:
+    optimization_status = "enabled (--optimize)" if enable_optimization else "disabled"
     if use_claude_agent:
         return textwrap.dedent(
             f"""
@@ -857,7 +913,9 @@ def _build_intro(
             - Isolation: Hermetic sandbox with ephemeral home directory
             - Repository: test-repositories/sunfish mounted in workspace
             - Tools: SDK's native Read, Write, Bash + custom MCP tools (planning, open_sections)
+            - Skills: Auto-discovered from demo-skills/ (code-review, python-style, ascii-art)
             - Network: Access to peps.python.org, docs.python.org for code quality reference
+            - Optimization: {optimization_status}
             - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
 
             Note: Custom MCP tools are bridged via streaming mode for full feature parity.
@@ -870,8 +928,8 @@ def _build_intro(
         Launching example code reviewer agent.
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
         - Workspace: {workspace_mode} (use --podman flag to enable Podman sandbox).
+        - Optimization: {optimization_status}
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-        - Auto-optimization: Workspace digest generated on first request.
 
         Note: Full prompt text and tool calls will be logged to the console for observability.
         """

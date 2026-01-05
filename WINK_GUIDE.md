@@ -1772,12 +1772,13 @@ adapter = ClaudeAgentSDKAdapter(
 **IsolationConfig** attributes:
 
 | Field | Default | Description |
-| ---------------- | ------- | ---------------------------------------------------- |
+| ----------------- | ------- | ---------------------------------------------------- |
 | `network_policy` | `None` | Network access constraints (None = no network) |
 | `sandbox` | `None` | Sandbox configuration (None = secure defaults) |
 | `env` | `None` | Additional env vars for SDK subprocess |
 | `api_key` | `None` | API key (None = uses ANTHROPIC_API_KEY from env) |
-| `include_host_env`| `False`| Inherit non-sensitive host env vars |
+| `include_host_env`| `False` | Inherit non-sensitive host env vars |
+| `skills` | `None` | Skills to mount in hermetic environment |
 
 ##### NetworkPolicy
 
@@ -1823,6 +1824,128 @@ sandbox = SandboxConfig(
 | `excluded_commands` | `()` | Commands that bypass sandbox (use sparingly) |
 | `allow_unsandboxed_commands`| `False`| Allow commands outside sandbox |
 | `bash_auto_allow` | `True` | Auto-approve Bash when sandboxed |
+
+##### SkillConfig
+
+Mount skills into the hermetic environment. Skills are markdown files
+(`SKILL.md`) or directories containing a `SKILL.md` that provide domain-specific
+instructions to Claude Code. Skills are copied to `~/.claude/skills/` in the
+ephemeral home before Claude Code starts.
+
+```python
+from pathlib import Path
+
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+    SkillConfig,
+    SkillMount,
+)
+
+# Mount a single skill from a file
+isolation = IsolationConfig(
+    skills=SkillConfig(
+        skills=(
+            SkillMount(source=Path("skills/code-review.md")),
+        ),
+    ),
+)
+
+# Mount multiple skills from directories
+isolation = IsolationConfig(
+    skills=SkillConfig(
+        skills=(
+            SkillMount(source=Path("demo-skills/code-review")),
+            SkillMount(source=Path("demo-skills/ascii-art")),
+            # Override the skill name
+            SkillMount(source=Path("my-skill.md"), name="custom-name"),
+            # Disable a skill without removing from config
+            SkillMount(source=Path("experimental"), enabled=False),
+        ),
+        validate_on_mount=True,  # Default: validate SKILL.md presence
+    ),
+)
+
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(isolation=isolation),
+)
+```
+
+**SkillMount** attributes:
+
+| Field | Default | Description |
+| --------- | ------- | --------------------------------------------------------- |
+| `source` | — | Path to skill file (`.md`) or directory with `SKILL.md` |
+| `name` | `None` | Override skill name (default: derived from source path) |
+| `enabled` | `True` | Whether to mount this skill |
+
+**SkillConfig** attributes:
+
+| Field | Default | Description |
+| ------------------- | ------- | ---------------------------------------------- |
+| `skills` | `()` | Tuple of `SkillMount` instances |
+| `validate_on_mount` | `True` | Validate skill structure before copying |
+
+**Skill structure:**
+
+A skill can be either:
+
+1. **A markdown file** (e.g., `code-review.md`): Copied as `SKILL.md` into a
+   directory named after the file (without extension)
+1. **A directory** (e.g., `code-review/`): Must contain a `SKILL.md` file. The
+   entire directory is copied, preserving structure.
+
+**Validation** (when `validate_on_mount=True`):
+
+- Directory skills must contain `SKILL.md`
+- File skills must have `.md` extension
+- Individual files limited to 1 MiB
+- Total skill size limited to 10 MiB
+
+**Auto-discovering skills:**
+
+```python
+from pathlib import Path
+
+SKILLS_ROOT = Path("demo-skills")
+
+# Find all valid skill directories
+skill_mounts = tuple(
+    SkillMount(source=skill_dir)
+    for skill_dir in SKILLS_ROOT.iterdir()
+    if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
+)
+
+isolation = IsolationConfig(
+    skills=SkillConfig(skills=skill_mounts),
+)
+```
+
+**Creating a skill:**
+
+Create a `SKILL.md` file with instructions for Claude Code:
+
+```markdown
+# Code Review Skill
+
+You are a thorough code reviewer. When reviewing code:
+
+## Review Checklist
+
+- [ ] Check for security vulnerabilities
+- [ ] Verify error handling covers edge cases
+- [ ] Ensure tests cover new functionality
+
+## Output Format
+
+1. **Summary**: One-paragraph overview
+2. **Issues**: Problems found (severity: high/medium/low)
+3. **Suggestions**: Non-blocking improvements
+```
+
+See `demo-skills/` in the repository for example skills. For more information
+about Claude Code skills, see [What are Skills?](https://agentskills.io/what-are-skills).
 
 #### 6.4.6 Tool bridging via MCP
 

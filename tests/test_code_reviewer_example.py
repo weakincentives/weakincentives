@@ -262,7 +262,7 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
 
 
 def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
-    """Auto-optimization runs when first request is processed."""
+    """Auto-optimization runs when first request is processed (if enabled)."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
     responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
@@ -279,6 +279,7 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
             adapter=cast(ProviderAdapter[ReviewResponse], adapter),
             requests=requests,
             overrides_store=overrides_store,
+            enable_optimization=True,
         )
 
         assert loop.override_tag == "latest"
