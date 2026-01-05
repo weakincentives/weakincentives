@@ -143,57 +143,14 @@ fixed response mailbox at construction.
 **Specification additions:**
 
 - `reply_to` field on `Message` for storing reply destination identifier
-- `reply_mailbox()` method on `Message` for resolving the reply `Mailbox`
+- `reply()` method on `Message` for sending responses to the reply destination
 - `send(body, reply_to=...)` parameter for specifying reply destination
 - `MailboxResolver` protocol for backend-specific mailbox resolution
-- `ReplyMailboxUnavailableError` for resolution failures
+- `ReplyNotAvailableError` for resolution failures
 
 This enables patterns like eval run collection where all samples specify the
 same `reply_to` and results collect into one mailbox regardless of which worker
 processes each sample.
-
-### Session Evaluators for Evals Framework
-
-The evaluation framework now supports behavioral assertions against session
-data, enabling evaluation of not just what the agent produced, but how it got
-there—including tool usage patterns, token budgets, and custom state invariants.
-
-```python
-from weakincentives.evals import (
-    EvalLoop,
-    tool_called,
-    tool_not_called,
-    all_tools_succeeded,
-    token_usage_under,
-    all_of,
-)
-
-# Combine output evaluation with session assertions
-evaluator = all_of(
-    exact_match,                      # Output matches expected
-    tool_called("search"),            # Agent used search tool
-    tool_not_called("fallback"),      # Didn't use fallback
-    all_tools_succeeded(),            # No tool failures
-    token_usage_under(max_tokens=1000),
-)
-
-loop = EvalLoop(main_loop=my_loop, evaluator=evaluator)
-report = loop.execute(dataset)
-```
-
-**New types:**
-
-- `SessionEvaluator`: Evaluator that receives `SessionView` for inspection
-- `adapt()`: Converts standard evaluators to session-aware evaluators
-
-**Built-in session evaluators:**
-
-- `tool_called(name)`: Assert a specific tool was invoked
-- `tool_not_called(name)`: Assert a tool was never invoked
-- `tool_call_count(name, count)`: Assert exact number of tool invocations
-- `all_tools_succeeded()`: Assert no tool failures occurred
-- `token_usage_under(max_tokens)`: Assert token budget was respected
-- `slice_contains(T, predicate)`: Assert session slice contains matching value
 
 ### TLA+ Specification Embedding Framework
 
@@ -202,7 +159,7 @@ implementation code using decorators. This reduces drift between specs and code
 by making specifications a first-class part of the development workflow.
 
 ```python
-from weakincentives.dbc import formal_spec, StateVar, Action, Invariant
+from weakincentives.formal import formal_spec, StateVar, Action, Invariant
 
 @formal_spec(
     module="Counter",
@@ -222,26 +179,6 @@ class Counter:
 - `Action`: Declares a TLA+ action with guard and state updates
 - `Invariant`: Declares a TLA+ invariant with ID, name, and predicate
 - `FormalSpec`: Container for all specification metadata
-
-**Pytest integration:**
-
-- `--extract-tla`: Extract TLA+ specs from decorated Python classes
-- `--check-tla`: Run TLC model checker on extracted specifications
-
-### Added
-
-- **`wink docs --changelog` command.** The `wink docs` CLI now supports a
-  `--changelog` flag that prints the bundled CHANGELOG.md, making release
-  history accessible to users without repository access.
-
-- **ToolResult convenience constructors.** `ToolResult` now provides class
-  methods for common construction patterns: `ToolResult.success(value, message)`
-  and `ToolResult.failure(message)` reduce boilerplate in tool handlers.
-
-- **Parameter validation for mailbox timeouts.** Negative `visibility_timeout`
-  and `wait_time_seconds` values are now rejected at the Python boundary with
-  `InvalidParameterError`. The `visibility_timeout` is also validated against
-  the SQS-compatible maximum of 43200 seconds (12 hours).
 
 ### Changed
 
@@ -269,13 +206,6 @@ class Counter:
 - **Redis decode_responses compatibility.** The `_deserialize` method in
   `RedisMailbox` now handles both `bytes` and `str` return types, fixing crashes
   when Redis clients are constructed with `decode_responses=True`.
-
-### Breaking
-
-- **Removed `mount_point` from Filesystem protocol.** The `mount_point` property
-  was defined in the `Filesystem` protocol but never used for path resolution.
-  Mount point handling has moved to `FilesystemToolHandlers`. Update any custom
-  filesystem implementations to remove the `mount_point` property.
 
 ### Internal
 
