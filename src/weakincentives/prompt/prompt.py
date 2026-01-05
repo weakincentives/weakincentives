@@ -107,11 +107,7 @@ class PromptTemplate[OutputT]:
     ns: str
     key: str
     name: str | None = None
-    # Field accepts Section sequence as input and stores SectionNode tuple
-    sections: (
-        Sequence[Section[SupportsDataclass]]
-        | tuple[SectionNode[SupportsDataclass], ...]
-    ) = ()
+    sections: tuple[Section[SupportsDataclass], ...] = ()
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
@@ -151,10 +147,7 @@ class PromptTemplate[OutputT]:
         ns: str | object = MISSING,
         key: str | object = MISSING,
         name: str | object | None = MISSING,
-        sections: Sequence[Section[SupportsDataclass]]
-        | tuple[SectionNode[SupportsDataclass], ...]
-        | object
-        | None = MISSING,
+        sections: Sequence[Section[SupportsDataclass]] | object | None = MISSING,
         allow_extra_keys: bool | object = MISSING,
         resources: ResourceRegistry | object = MISSING,
     ) -> dict[str, Any]:
@@ -203,7 +196,7 @@ class PromptTemplate[OutputT]:
             "ns": stripped_ns,
             "key": stripped_key,
             "name": name_val,
-            "sections": snapshot.sections,
+            "sections": sections_tuple,
             "allow_extra_keys": allow_extra,
             "resources": resources_val,
             "_snapshot": snapshot,
@@ -217,6 +210,14 @@ class PromptTemplate[OutputT]:
         if snapshot is None:  # pragma: no cover
             raise RuntimeError("PromptTemplate._snapshot not initialized")
         return snapshot.params_types
+
+    @property
+    def nodes(self) -> tuple[SectionNode[SupportsDataclass], ...]:
+        """Return the flattened section nodes with depth, path, and numbering metadata."""
+        snapshot = self._snapshot
+        if snapshot is None:  # pragma: no cover
+            raise RuntimeError("PromptTemplate._snapshot not initialized")
+        return snapshot.sections
 
     @cached_property
     def descriptor(self) -> PromptDescriptor:
@@ -303,9 +304,14 @@ class Prompt[OutputT]:
         return self._params
 
     @property
-    def sections(self) -> tuple[SectionNode[SupportsDataclass], ...]:
-        # sections is always SectionNode tuple after construction
-        return cast(tuple[SectionNode[SupportsDataclass], ...], self.template.sections)
+    def sections(self) -> tuple[Section[SupportsDataclass], ...]:
+        """Return the sections registered in this prompt's template."""
+        return self.template.sections
+
+    @property
+    def nodes(self) -> tuple[SectionNode[SupportsDataclass], ...]:
+        """Return the flattened section nodes with depth, path, and numbering metadata."""
+        return self.template.nodes
 
     @property
     def descriptor(self) -> PromptDescriptor:

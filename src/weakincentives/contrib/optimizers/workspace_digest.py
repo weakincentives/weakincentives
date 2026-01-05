@@ -227,7 +227,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         self, prompt: Prompt[object], prompt_name: str
     ) -> WorkspaceSection:
         """Find a section implementing the WorkspaceSection protocol."""
-        for node in prompt.sections:
+        for node in prompt.nodes:
             if isinstance(node.section, WorkspaceSection):
                 return node.section
         raise PromptEvaluationError(
@@ -275,7 +275,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
     def _find_section_path(  # noqa: PLR6301
         self, prompt: Prompt[object], section_key: str
     ) -> tuple[str, ...]:
-        for node in prompt.sections:
+        for node in prompt.nodes:
             if node.section.key == section_key:
                 return node.path
         message = f"Section path not found for key: {section_key}"
