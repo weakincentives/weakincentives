@@ -253,11 +253,16 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `MainLoopFailed`: Failure event published via bus.
   - Lifecycle management:
     - `Runnable`: Protocol for loops supporting graceful shutdown (`run()`,
-      `shutdown()`, `running`).
+      `shutdown()`, `running`, `heartbeat` properties).
     - `ShutdownCoordinator`: Singleton for SIGTERM/SIGINT handling and
       coordinated callback invocation.
     - `LoopGroup`: Runs multiple loops in dedicated threads with coordinated
-      shutdown.
+      shutdown, optional health endpoints, and watchdog monitoring.
+    - `Heartbeat`: Thread-safe timestamp tracker for worker liveness.
+    - `Watchdog`: Daemon thread that monitors heartbeats and terminates the
+      process via SIGKILL when workers stall.
+    - `HealthServer`: Minimal HTTP server for Kubernetes liveness
+      (`/health/live`) and readiness (`/health/ready`) probes.
     - `wait_until`: Helper for polling predicates with timeout.
   - Session ledger:
     - `DataEvent`: Event carrying data.
@@ -292,6 +297,57 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `ClearSlice[T]`: System event for clearing a slice.
     - `MemorySlice` / `MemorySliceView`: In-memory tuple-backed storage.
     - `JsonlSlice` / `JsonlSliceView`: JSONL file-backed persistent storage.
+  - Transactions (`weakincentives.runtime.transactions`):
+    - `CompositeSnapshot`: Combines session + resource snapshots with JSON
+      serialization.
+    - `create_snapshot()`: Capture session and resource state.
+    - `restore_snapshot()`: Restore session and resource state.
+    - `tool_transaction()`: Context manager for automatic rollback on exception.
+    - `PendingToolTracker`: Thread-safe tracker for hook-based tool execution.
+    - `SnapshotMetadata`: Context for when/why a snapshot was taken.
+- `weakincentives.mailbox`: Message queue abstraction with SQS-compatible
+  semantics.
+  - Core types:
+    - `Mailbox[T]`: Protocol for durable, at-least-once message delivery.
+    - `Message[T]`: Message wrapper with body, metadata, and acknowledgment.
+    - `InMemoryMailbox`: Single-process queues for testing and development.
+    - `RedisMailbox`: Distributed queues using Redis for production.
+  - Reply-to routing:
+    - `Message.reply_to`: Field storing reply destination identifier.
+    - `Message.reply_mailbox()`: Resolve the reply `Mailbox` from message.
+    - `Mailbox.send(body, reply_to=...)`: Specify reply destination.
+    - `MailboxResolver`: Protocol for backend-specific mailbox resolution.
+    - `ReplyMailboxUnavailableError`: Raised when reply resolution fails.
+  - Errors:
+    - `InvalidParameterError`: Raised for invalid timeout values (negative or
+      exceeding SQS maximum of 43200 seconds).
+- `weakincentives.evals`: Evaluation framework for testing agent behavior.
+  - Core types:
+    - `Sample[InputT, ExpectedT]`: Single evaluation case with input and
+      expected output.
+    - `Dataset[InputT, ExpectedT]`: Immutable collection of samples with JSONL
+      loading via `Dataset.load()`.
+    - `Score`: Result from evaluating a single sample (0.0–1.0 with optional
+      metadata).
+    - `EvalResult`: Pairs a sample with its output and score.
+    - `EvalReport`: Aggregated metrics across all samples.
+    - `EvalLoop`: Runs evaluations using a MainLoop and evaluator.
+  - Evaluators:
+    - `Evaluator`: Protocol for scoring agent output against expected values.
+    - `exact_match`: Strict equality comparison.
+    - `contains`: Substring matching with `all_of`/`any_of` combinators.
+    - `llm_judge`: LLM-as-Judge with categorical ratings.
+    - `all_of`: Combine multiple evaluators (all must pass).
+  - Session evaluators (behavioral assertions against session state):
+    - `SessionEvaluator`: Evaluator receiving `SessionView` for inspection.
+    - `adapt()`: Converts standard evaluators to session-aware evaluators.
+    - `tool_called(name)`: Assert a specific tool was invoked.
+    - `tool_not_called(name)`: Assert a tool was never invoked.
+    - `tool_call_count(name, count)`: Assert exact number of tool invocations.
+    - `all_tools_succeeded()`: Assert no tool failures occurred.
+    - `token_usage_under(max_tokens)`: Assert token budget was respected.
+    - `slice_contains(T, predicate)`: Assert session slice contains matching
+      value.
 - `weakincentives.optimizers`: Prompt optimization algorithms and utilities.
   - Protocol and base classes:
     - `PromptOptimizer`: Protocol for prompt optimization algorithms.
@@ -320,13 +376,17 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     `WorkspaceDigestOptimizer`).
 - `weakincentives.resources`: Resource injection with scoped lifecycles.
   - `Binding[T]`: Associates protocol type with provider function and scope.
+    Use `Binding.instance(T, obj)` for pre-constructed instances.
   - `Scope`: Enum for instance lifetime (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
-  - `ScopedResourceContext`: Resolution context with dependency graph walking.
+  - `ScopedResourceContext`: Resolution context with dependency graph walking
+    and cycle detection. Use `ctx.tool_scope()` for tool-call scoped resources.
   - `ResourceRegistry`: Container for bindings with `of()` and `create_context()`.
+    Supports `merge(other, strict=True)` to raise `DuplicateBindingError` on
+    conflicts and `conflicts(other)` to detect overlapping bindings.
   - `ResourceResolver`: Protocol for dependency resolution in providers.
   - `Provider[T]`: Type alias for factory functions accepting a resolver.
   - `Closeable`: Protocol for resources with `close()` method (auto-cleanup).
-  - `PostConstruct`: Protocol for resources with `post_construct()` hook.
+  - `PostConstruct`: Protocol for resources with `post_construct()` initialization.
   - Errors: `CircularDependencyError`, `DuplicateBindingError`, `ProviderError`,
     `UnboundResourceError`, `ResourceError`.
 - `weakincentives.serde`: Dataclass serialization helpers.
@@ -353,6 +413,14 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - `pure`: Validate that the wrapped callable behaves like a pure function.
   - `require`: Validate preconditions before invoking the wrapped callable.
   - `skip_invariant`: Mark a method so invariants are not evaluated around it.
+  - TLA+ specification embedding:
+    - `@formal_spec`: Decorator for embedding TLA+ metadata in Python classes.
+    - `StateVar`: Declares a TLA+ state variable with name and type.
+    - `Action`: Declares a TLA+ action with guard and state updates.
+    - `Invariant`: Declares a TLA+ invariant with ID, name, and predicate.
+    - `FormalSpec`: Container for all specification metadata.
+  - Pytest integration: `--extract-tla` and `--check-tla` flags for TLC
+    verification.
 - `weakincentives.cli`: CLI entrypoints, notably the `wink` module.
 
 ## Agent-facing operational notes
@@ -508,6 +576,10 @@ Available in tool handlers via `context`:
 
 ```python
 ToolResult(message="...", value=MyResult(...), success=True, exclude_value_from_context=False)
+
+# Convenience constructors
+ToolResult.success(value=MyResult(...), message="Done")
+ToolResult.failure(message="Operation failed")
 ```
 
 ### Additional components
@@ -833,11 +905,15 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
             ns="reviews", key="code-review", sections=[...],
         )
 
-    def create_prompt(self, request: ReviewRequest) -> Prompt[ReviewResult]:
-        return Prompt(self._template).bind(ReviewParams.from_request(request))
+    def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
+        """Prepare prompt and session for evaluation."""
+        prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
+        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        return prompt, session
 
-    def create_session(self) -> Session:
-        return Session(bus=self._bus, tags={"loop": "code-review"})
+    def finalize(self, prompt: Prompt[ReviewResult], session: Session) -> None:
+        """Optional cleanup hook called after successful evaluation."""
+        pass
 ```
 
 ### Direct execution
@@ -872,6 +948,67 @@ bus.dispatch(MainLoopRequest(
 MainLoop automatically handles `VisibilityExpansionRequired` exceptions by
 accumulating visibility overrides and retrying evaluation. A shared
 `BudgetTracker` enforces limits cumulatively across retries.
+
+### Lifecycle Management with LoopGroup
+
+Run multiple loops with coordinated shutdown, health endpoints, and watchdog
+monitoring for Kubernetes deployments:
+
+```python
+from weakincentives.runtime import LoopGroup, ShutdownCoordinator
+
+# Run multiple loops with coordinated shutdown
+group = LoopGroup(loops=[main_loop, eval_loop])
+group.run()  # Blocks until SIGTERM/SIGINT
+
+# With health endpoints and watchdog monitoring
+group = LoopGroup(
+    loops=[main_loop],
+    health_port=8080,           # Exposes /health/live and /health/ready
+    watchdog_threshold=720.0,   # Terminate if worker stalls for 12 minutes
+)
+group.run()
+
+# Or manual coordination
+coordinator = ShutdownCoordinator.install()
+coordinator.register(loop.shutdown)
+loop.run()
+```
+
+## Evaluation Framework
+
+Run evaluations using MainLoop with behavioral assertions against session state:
+
+```python
+from weakincentives.evals import (
+    Dataset,
+    EvalLoop,
+    exact_match,
+    tool_called,
+    tool_not_called,
+    all_tools_succeeded,
+    token_usage_under,
+    all_of,
+)
+
+# Load a dataset
+dataset = Dataset.load(Path("qa.jsonl"), str, str)
+
+# Combine output evaluation with session assertions
+evaluator = all_of(
+    exact_match,                        # Output matches expected
+    tool_called("search"),              # Agent used search tool
+    tool_not_called("fallback"),        # Didn't use fallback
+    all_tools_succeeded(),              # No tool failures
+    token_usage_under(max_tokens=1000), # Within budget
+)
+
+# Run evaluation
+loop = EvalLoop(main_loop=my_loop, evaluator=evaluator)
+report = loop.execute(dataset)
+
+print(f"Accuracy: {report.accuracy:.2%}")
+```
 
 ## Event Subscription
 
@@ -972,6 +1109,26 @@ from weakincentives.dbc import require, ensure
 def handler(params, *, context): ...
 ```
 
+### TLA+ formal specifications
+
+Embed TLA+ specifications in Python classes for model checking:
+
+```python
+from weakincentives.dbc import formal_spec, StateVar, Action, Invariant
+
+@formal_spec(
+    module="Counter",
+    state_vars=[StateVar("count", "Nat")],
+    actions=[Action("Increment", updates={"count": "count + 1"})],
+    invariants=[Invariant("INV-1", "NonNeg", "count >= 0")],
+)
+class Counter:
+    def increment(self) -> None:
+        self.count += 1
+```
+
+Run `pytest --extract-tla` to extract specs, `pytest --check-tla` to verify.
+
 ### Section visibility (progressive disclosure)
 
 ```python
@@ -1023,6 +1180,16 @@ resources = ResourceRegistry.of(
     Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per tool
 )
 
+# Create resolution context for manual lifecycle control
+ctx = resources.create_context()
+ctx.start()
+try:
+    http = ctx.get(HTTPClient)  # Lazily constructed
+    with ctx.tool_scope() as resolver:
+        tracer = resolver.get(Tracer)  # Fresh per tool scope
+finally:
+    ctx.close()
+
 # Pass to adapter - merged with workspace resources (e.g., filesystem)
 response = adapter.evaluate(prompt, session=session, resources=resources)
 
@@ -1046,13 +1213,20 @@ def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
 
 `ResourceRegistry.merge()` combines registries with the second taking
 precedence on conflicts, enabling layered resource injection where
-caller-provided resources override workspace defaults.
+caller-provided resources override workspace defaults. Use
+`registry.conflicts(other)` to detect overlapping bindings before merging.
 
 ## CLI
 
 ```bash
 pip install "weakincentives[wink]"
 wink --help
+
+# Access bundled documentation
+wink docs --reference    # Print llms.md (API reference)
+wink docs --guide        # Print WINK_GUIDE.md
+wink docs --specs        # Print all spec files
+wink docs --changelog    # Print CHANGELOG.md
 ```
 
 ## Example
