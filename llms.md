@@ -247,10 +247,9 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `MainLoop`: Abstract base class for standardized agent workflow
       orchestration.
     - `MainLoopConfig`: Configuration for default deadline/budget/resources.
-    - `MainLoopRequest`: Event requesting execution with optional constraints
-      (budget, deadline, resources).
-    - `MainLoopCompleted`: Success event published via bus.
-    - `MainLoopFailed`: Failure event published via bus.
+    - `MainLoopRequest`: Request envelope with optional constraints
+      (budget, deadline).
+    - `MainLoopResult`: Response envelope with output or error.
   - Lifecycle management:
     - `Runnable`: Protocol for loops supporting graceful shutdown (`run()`,
       `shutdown()`, `running`).
@@ -811,60 +810,76 @@ def handler(params, *, context: ToolContext) -> ToolResult:
 ## MainLoop Orchestration
 
 `MainLoop` standardizes agent workflow orchestration: receive request, build
-prompt, evaluate, handle visibility expansion, publish result. Implementations
-define only the domain-specific factories.
+prompt, evaluate, handle visibility expansion, return result. Implementations
+define only the domain-specific `prepare()` method.
 
 ### Implementing a MainLoop
 
 ```python
-from weakincentives.runtime import MainLoop, MainLoopConfig, Session
+from weakincentives.runtime import MainLoop, MainLoopConfig, MainLoopRequest, MainLoopResult, Session
+from weakincentives.runtime import InMemoryMailbox, Mailbox
 from weakincentives.prompt import Prompt, PromptTemplate
 
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
     def __init__(
-        self, *, adapter: ProviderAdapter[ReviewResult], bus: Dispatcher
+        self,
+        *,
+        adapter: ProviderAdapter[ReviewResult],
+        requests: Mailbox[MainLoopRequest[ReviewRequest], MainLoopResult[ReviewResult]],
+        config: MainLoopConfig | None = None,
     ) -> None:
-        super().__init__(
-            adapter=adapter,
-            bus=bus,
-            config=MainLoopConfig(budget=Budget(max_total_tokens=50000)),
-        )
+        super().__init__(adapter=adapter, requests=requests, config=config)
         self._template = PromptTemplate[ReviewResult](
             ns="reviews", key="code-review", sections=[...],
         )
 
-    def create_prompt(self, request: ReviewRequest) -> Prompt[ReviewResult]:
-        return Prompt(self._template).bind(ReviewParams.from_request(request))
-
-    def create_session(self) -> Session:
-        return Session(bus=self._bus, tags={"loop": "code-review"})
+    def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
+        prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
+        session = Session(tags={"loop": "code-review"})
+        return prompt, session
 ```
 
 ### Direct execution
 
 ```python
-loop = CodeReviewLoop(adapter=adapter, bus=bus)
+requests: Mailbox = InMemoryMailbox(name="reviews")
+loop = CodeReviewLoop(adapter=adapter, requests=requests)
 response, session = loop.execute(ReviewRequest(...))
 ```
 
-### Bus-driven execution
+### Mailbox-driven execution
 
 ```python
-from weakincentives.runtime import MainLoopRequest, MainLoopCompleted, MainLoopFailed
+from weakincentives.runtime import MainLoopRequest, MainLoopResult, InMemoryMailbox
 
-# MainLoop auto-subscribes to MainLoopRequest in __init__.
+# Create request and response mailboxes
+requests = InMemoryMailbox[MainLoopRequest, MainLoopResult](name="requests")
+responses = InMemoryMailbox[MainLoopResult, None](name="responses")
 
-# Handle results
-bus.subscribe(MainLoopCompleted, lambda e: print(f"Done: {e.response}"))
-bus.subscribe(MainLoopFailed, lambda e: print(f"Failed: {e.error}"))
+# Create loop with requests mailbox
+loop = CodeReviewLoop(adapter=adapter, requests=requests)
 
-# Submit request with optional per-request constraints
-bus.dispatch(MainLoopRequest(
-    request=ReviewRequest(...),
-    budget=Budget(max_total_tokens=10000),  # Overrides config default
-    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
-    resources=resources,                     # Custom resources for this request
-))
+# Send request with reply_to for routing responses
+requests.send(
+    MainLoopRequest(
+        request=ReviewRequest(...),
+        budget=Budget(max_total_tokens=10000),  # Overrides config default
+        deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+    ),
+    reply_to="responses",
+)
+
+# Start loop (typically in a worker thread or process)
+loop.run()  # Blocks, processing requests until shutdown
+
+# Collect response from the responses mailbox
+for msg in responses.receive(wait_time_seconds=20):
+    result: MainLoopResult = msg.body
+    if result.error:
+        print(f"Failed: {result.error}")
+    else:
+        print(f"Done: {result.output}")
+    msg.acknowledge()
 ```
 
 ### Visibility expansion handling
@@ -1023,8 +1038,9 @@ resources = ResourceRegistry.of(
     Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per tool
 )
 
-# Pass to adapter - merged with workspace resources (e.g., filesystem)
-response = adapter.evaluate(prompt, session=session, resources=resources)
+# Bind resources to prompt before evaluation
+prompt = prompt.bind(resources=resources)
+response = adapter.evaluate(prompt, session=session)
 
 # Or configure at MainLoop level for all requests
 config = MainLoopConfig(resources=resources)
