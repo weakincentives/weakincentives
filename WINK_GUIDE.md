@@ -1653,7 +1653,7 @@ adapter = ClaudeAgentSDKAdapter(client_config=config)
 | `max_budget_usd` | `None` | Budget cap in USD (None = unlimited) |
 | `suppress_stderr` | `True` | Hide stderr from Claude Code CLI |
 | `stop_on_structured_output`| `True` | Stop immediately after structured output |
-| `isolation` | `None` | Hermetic isolation config (see below) |
+| `isolation` | `None` | Custom isolation config (isolation is always enabled) |
 | `betas` | `None` | Beta feature identifiers to enable |
 
 **ClaudeAgentSDKModelConfig** controls model-specific parameters:
@@ -1733,8 +1733,19 @@ directory.
 
 #### 6.4.5 Isolation configuration
 
-`IsolationConfig` creates a hermetic environment that prevents the SDK from
-accessing the host's `~/.claude` configuration, credentials, and session state.
+The adapter **always runs in hermetic isolation by default**. This prevents the
+SDK from accessing the host's `~/.claude` configuration, credentials, and
+session state—ensuring reproducible behavior regardless of the host environment.
+
+The adapter automatically:
+
+1. Creates an ephemeral `HOME` directory containing `.claude/settings.json`
+1. Disables alternative providers (AWS Bedrock, etc.) to ensure Anthropic API usage
+1. Passes the environment to the SDK subprocess
+1. Cleans up the ephemeral directory after execution
+
+Use `IsolationConfig` to customize isolation behavior (network policy, sandbox
+settings, environment variables):
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
@@ -1745,6 +1756,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     SandboxConfig,
 )
 
+# Customize isolation with restricted network and explicit API key
 isolation = IsolationConfig(
     network_policy=NetworkPolicy.no_network(),
     sandbox=SandboxConfig(enabled=True),
@@ -1756,13 +1768,6 @@ adapter = ClaudeAgentSDKAdapter(
     client_config=ClaudeAgentSDKClientConfig(isolation=isolation),
 )
 ```
-
-When isolation is configured, the adapter:
-
-1. Creates an ephemeral `HOME` directory containing `.claude/settings.json`
-2. Passes the environment to the SDK subprocess so Claude Code reads settings
-   from the redirected home
-3. Cleans up the ephemeral directory after execution
 
 **IsolationConfig** attributes:
 
