@@ -27,13 +27,34 @@ from pathlib import Path
 from typing import Any
 
 from ...dataclasses import FrozenDataclass
+from ...errors import WinkError
 
 __all__ = [
     "EphemeralHome",
     "IsolationConfig",
     "NetworkPolicy",
     "SandboxConfig",
+    "SkillConfig",
+    "SkillMount",
+    "SkillMountError",
+    "SkillNotFoundError",
+    "SkillValidationError",
 ]
+
+
+# Skill error classes
+
+
+class SkillValidationError(WinkError):
+    """Raised when skill validation fails."""
+
+
+class SkillNotFoundError(WinkError):
+    """Raised when a skill source path does not exist."""
+
+
+class SkillMountError(WinkError):
+    """Raised when skill mounting fails."""
 
 
 @FrozenDataclass()
@@ -95,6 +116,40 @@ class SandboxConfig:
 
 
 @FrozenDataclass()
+class SkillMount:
+    """Mount a skill into the hermetic environment.
+
+    Attributes:
+        source: Path to a skill file (SKILL.md) or skill directory on the
+            host filesystem. Relative paths are resolved against the current
+            working directory.
+        name: Optional skill name override. If None, derived from the source
+            path (directory name or filename without extension).
+        enabled: Whether the skill is active. Disabled skills are not copied.
+            Defaults to True.
+    """
+
+    source: Path
+    name: str | None = None
+    enabled: bool = True
+
+
+@FrozenDataclass()
+class SkillConfig:
+    """Skills to install in the hermetic environment.
+
+    Attributes:
+        skills: Tuple of skill mounts to copy into the workspace.
+        validate_on_mount: If True, validate skill structure before copying.
+            Validation checks for required SKILL.md file in directories.
+            Defaults to True.
+    """
+
+    skills: tuple[SkillMount, ...] = ()
+    validate_on_mount: bool = True
+
+
+@FrozenDataclass()
 class IsolationConfig:
     """Configuration for hermetic SDK isolation.
 
@@ -111,6 +166,9 @@ class IsolationConfig:
         include_host_env: If True, inherit non-sensitive host env vars.
             Sensitive vars (HOME, CLAUDE_*, ANTHROPIC_*, AWS_*, GOOGLE_*)
             are always excluded.
+        skills: Skills to mount in the hermetic environment. Skills are
+            copied to {ephemeral_home}/.claude/skills/ before spawning
+            Claude Code.
     """
 
     network_policy: NetworkPolicy | None = None
@@ -118,6 +176,7 @@ class IsolationConfig:
     env: Mapping[str, str] | None = None
     api_key: str | None = None
     include_host_env: bool = False
+    skills: SkillConfig | None = None
 
 
 # Prefixes of environment variables that should never be inherited
@@ -130,6 +189,127 @@ _SENSITIVE_ENV_PREFIXES: tuple[str, ...] = (
     "AZURE_",
     "OPENAI_",
 )
+
+# Skill constants
+_MAX_SKILL_FILE_BYTES: int = 1024 * 1024  # 1 MiB per file
+_MAX_SKILL_TOTAL_BYTES: int = 10 * 1024 * 1024  # 10 MiB per skill
+
+
+def resolve_skill_name(mount: SkillMount) -> str:
+    """Resolve the effective skill name from a mount.
+
+    Args:
+        mount: The skill mount to resolve a name for.
+
+    Returns:
+        The skill name to use for the destination directory.
+    """
+    if mount.name is not None:
+        return mount.name
+    if mount.source.is_dir():
+        return mount.source.name
+    # File: strip .md extension
+    return mount.source.stem
+
+
+def _validate_skill_name(name: str) -> None:
+    """Validate that a skill name is safe for filesystem use.
+
+    Args:
+        name: The skill name to validate.
+
+    Raises:
+        SkillMountError: If the name contains path traversal characters.
+    """
+    if "/" in name or "\\" in name or ".." in name:
+        msg = f"Skill name contains invalid characters: {name}"
+        raise SkillMountError(msg)
+    if not name or name in {".", ".."}:
+        msg = f"Invalid skill name: {name}"
+        raise SkillMountError(msg)
+
+
+def _validate_skill(source: Path) -> None:
+    """Validate skill structure before copying.
+
+    Args:
+        source: Path to the skill file or directory.
+
+    Raises:
+        SkillValidationError: If the skill structure is invalid.
+    """
+    if source.is_dir():
+        # Directory skill must contain SKILL.md
+        skill_file = source / "SKILL.md"
+        if not skill_file.is_file():
+            msg = f"Skill directory missing SKILL.md: {source}"
+            raise SkillValidationError(msg)
+    else:
+        # File skill must be markdown
+        if source.suffix.lower() != ".md":
+            msg = f"Skill file must be markdown (.md): {source}"
+            raise SkillValidationError(msg)
+        # Check file size
+        size = source.stat().st_size
+        if size > _MAX_SKILL_FILE_BYTES:
+            msg = f"Skill file exceeds size limit ({size} > {_MAX_SKILL_FILE_BYTES}): {source}"
+            raise SkillValidationError(msg)
+
+
+def _copy_skill(
+    source: Path,
+    dest_dir: Path,
+    *,
+    follow_symlinks: bool = False,
+    max_total_bytes: int = _MAX_SKILL_TOTAL_BYTES,
+) -> int:
+    """Copy a skill to the destination directory.
+
+    Args:
+        source: Path to the skill file or directory.
+        dest_dir: Destination directory for the skill.
+        follow_symlinks: Whether to follow symlinks during copy.
+        max_total_bytes: Maximum total bytes to copy.
+
+    Returns:
+        Total bytes copied.
+
+    Raises:
+        SkillMountError: If copy fails or exceeds byte limit.
+    """
+    total_bytes = 0
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if source.is_dir():
+            # Recursive directory copy
+            for item in source.rglob("*"):
+                if item.is_symlink() and not follow_symlinks:
+                    continue
+                if item.is_file():
+                    rel_path = item.relative_to(source)
+                    dest_file = dest_dir / rel_path
+                    dest_file.parent.mkdir(parents=True, exist_ok=True)
+                    size = item.stat().st_size
+                    total_bytes += size
+                    if total_bytes > max_total_bytes:
+                        msg = f"Skill exceeds total size limit ({total_bytes} > {max_total_bytes})"
+                        raise SkillMountError(msg)
+                    shutil.copy2(item, dest_file)
+        else:
+            # Single file skill - wrap in directory as SKILL.md
+            dest_file = dest_dir / "SKILL.md"
+            size = source.stat().st_size
+            total_bytes = size
+            if total_bytes > max_total_bytes:
+                msg = f"Skill exceeds total size limit ({total_bytes} > {max_total_bytes})"
+                raise SkillMountError(msg)
+            shutil.copy2(source, dest_file)
+    except OSError as e:
+        msg = f"Failed to copy skill: {e}"
+        raise SkillMountError(msg) from e
+
+    return total_bytes
 
 
 class EphemeralHome:
@@ -176,6 +356,7 @@ class EphemeralHome:
         self._claude_dir = Path(self._temp_dir) / ".claude"
         self._claude_dir.mkdir(parents=True, exist_ok=True)
         self._generate_settings()
+        self._mount_skills()
         self._cleaned_up = False
 
     def _generate_settings(self) -> None:
@@ -221,6 +402,39 @@ class EphemeralHome:
         # Write settings
         settings_path = self._claude_dir / "settings.json"
         settings_path.write_text(json.dumps(settings, indent=2))
+
+    def _mount_skills(self) -> None:
+        """Mount configured skills into the ephemeral home."""
+        skills_config = self._isolation.skills
+        if skills_config is None:
+            return
+
+        skills_dir = self._claude_dir / "skills"
+        skills_dir.mkdir(parents=True, exist_ok=True)
+
+        seen_names: set[str] = set()
+        for mount in skills_config.skills:
+            if not mount.enabled:
+                continue
+
+            name = resolve_skill_name(mount)
+            _validate_skill_name(name)
+
+            if name in seen_names:
+                msg = f"Duplicate skill name: {name}"
+                raise SkillMountError(msg)
+            seen_names.add(name)
+
+            source = Path(mount.source).resolve()
+            if not source.exists():
+                msg = f"Skill not found: {mount.source}"
+                raise SkillNotFoundError(msg)
+
+            if skills_config.validate_on_mount:
+                _validate_skill(source)
+
+            dest = skills_dir / name
+            _copy_skill(source, dest)
 
     def get_env(self) -> dict[str, str]:
         """Build environment variables for SDK subprocess.
@@ -287,7 +501,7 @@ class EphemeralHome:
         Safe to call multiple times. After cleanup, the ephemeral home
         should not be used.
         """
-        if not self._cleaned_up:
+        if not getattr(self, "_cleaned_up", True):
             shutil.rmtree(self._temp_dir, ignore_errors=True)
             self._cleaned_up = True
 
@@ -305,6 +519,11 @@ class EphemeralHome:
     def settings_path(self) -> Path:
         """Path to the generated settings.json file."""
         return self._claude_dir / "settings.json"
+
+    @property
+    def skills_dir(self) -> Path:
+        """Path to the skills directory within ephemeral home."""
+        return self._claude_dir / "skills"
 
     def __enter__(self) -> EphemeralHome:
         """Context manager entry."""

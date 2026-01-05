@@ -80,6 +80,7 @@ def build_claude_agent_adapter() -> tuple[
 You are a thorough code reviewer. When reviewing code:
 
 ## Review Checklist
+
 - [ ] Check for security vulnerabilities (injection, XSS, auth bypass)
 - [ ] Verify error handling covers edge cases
 - [ ] Ensure tests cover new functionality
@@ -87,7 +88,9 @@ You are a thorough code reviewer. When reviewing code:
 - [ ] Check for proper logging and observability
 
 ## Output Format
+
 Structure your review as:
+
 1. **Summary**: One-paragraph overview
 2. **Issues**: Concrete problems found (severity: high/medium/low)
 3. **Suggestions**: Improvements that aren't blocking
@@ -104,18 +107,21 @@ Structure your review as:
 Apply Python best practices when reviewing or writing code.
 
 ## Style Guidelines
+
 - Follow PEP 8 for formatting
 - Use type annotations for all public functions (PEP 484)
 - Write docstrings for public APIs (PEP 257)
 - Prefer f-strings over .format() or % formatting
 
 ## Common Issues to Flag
+
 - Missing type annotations on public functions
 - Mutable default arguments (def foo(items=[]))
 - Bare except clauses (except: instead of except Exception:)
 - Using assert for validation (stripped in optimized mode)
 
 ## References
+
 - PEP 8: https://peps.python.org/pep-0008/
 - PEP 484: https://peps.python.org/pep-0484/
 - PEP 257: https://peps.python.org/pep-0257/
@@ -280,7 +286,7 @@ class SkillMountError(WinkError):
 Validation errors include:
 
 | Error | Condition |
-| ----------------------- | ----------------------------------------------- |
+| ---------------------- | ------------------------------- |
 | `SkillNotFoundError` | Source path does not exist |
 | `SkillValidationError` | Directory missing SKILL.md |
 | `SkillValidationError` | File not a markdown file |
@@ -310,7 +316,7 @@ def resolve_skill_name(mount: SkillMount) -> str:
 Skills are copied to `{ephemeral_home}/.claude/skills/{skill_name}/`:
 
 | Source Type | Destination |
-| ----------- | ------------------------------------------------- |
+| ----------- | ----------------------------------------------- |
 | Directory | `{skills_dir}/{name}/` (recursive copy) |
 | File | `{skills_dir}/{name}/SKILL.md` (wrapped in dir) |
 

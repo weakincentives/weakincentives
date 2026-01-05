@@ -40,6 +40,8 @@ from weakincentives.adapters.claude_agent_sdk import (
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    SkillConfig,
+    SkillMount,
 )
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
@@ -83,6 +85,7 @@ from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
 from weakincentives.types import SupportsDataclass
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+DEMO_SKILLS_ROOT = PROJECT_ROOT / "demo-skills"
 
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
 SNAPSHOT_DIR = PROJECT_ROOT / "snapshots"
@@ -541,7 +544,8 @@ def build_claude_agent_adapter() -> tuple[
     Creates a workspace section with the test repository mounted, and configures
     the adapter to use the SDK's native agentic capabilities with hermetic
     isolation. The sandbox has network access to Python documentation sites
-    for code quality reference.
+    for code quality reference. Skills from demo-skills/ are auto-discovered
+    and mounted for Claude Code to use.
 
     Returns:
         Tuple of (adapter, workspace_section). The workspace section should be
@@ -571,6 +575,17 @@ def build_claude_agent_adapter() -> tuple[
         allowed_host_roots=(str(TEST_REPOSITORIES_ROOT),),
     )
 
+    # Auto-discover and mount all skills from demo-skills/
+    skill_mounts = (
+        tuple(
+            SkillMount(source=skill_dir)
+            for skill_dir in DEMO_SKILLS_ROOT.iterdir()
+            if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
+        )
+        if DEMO_SKILLS_ROOT.exists()
+        else ()
+    )
+
     # Configure hermetic isolation with access to Python documentation
     isolation = IsolationConfig(
         network_policy=NetworkPolicy(
@@ -583,6 +598,7 @@ def build_claude_agent_adapter() -> tuple[
             # Auto-approve bash commands in sandbox (safe with network restrictions)
             bash_auto_allow=True,
         ),
+        skills=SkillConfig(skills=skill_mounts),
     )
 
     model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")

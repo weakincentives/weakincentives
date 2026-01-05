@@ -19,11 +19,22 @@ import os
 from pathlib import Path
 from unittest import mock
 
+import pytest
+
 from weakincentives.adapters.claude_agent_sdk.isolation import (
     EphemeralHome,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    SkillConfig,
+    SkillMount,
+    SkillMountError,
+    SkillNotFoundError,
+    SkillValidationError,
+    _copy_skill,
+    _validate_skill,
+    _validate_skill_name,
+    resolve_skill_name,
 )
 
 
@@ -379,3 +390,370 @@ class TestEphemeralHomeWorkspacePath:
             assert home._workspace_path == "/my/workspace"
         finally:
             home.cleanup()
+
+
+class TestSkillMount:
+    def test_defaults(self, tmp_path: Path) -> None:
+        source = tmp_path / "my-skill"
+        source.mkdir()
+        mount = SkillMount(source=source)
+        assert mount.source == source
+        assert mount.name is None
+        assert mount.enabled is True
+
+    def test_with_name(self, tmp_path: Path) -> None:
+        source = tmp_path / "my-skill"
+        source.mkdir()
+        mount = SkillMount(source=source, name="custom-name")
+        assert mount.name == "custom-name"
+
+    def test_disabled(self, tmp_path: Path) -> None:
+        source = tmp_path / "my-skill"
+        source.mkdir()
+        mount = SkillMount(source=source, enabled=False)
+        assert mount.enabled is False
+
+
+class TestSkillConfig:
+    def test_defaults(self) -> None:
+        config = SkillConfig()
+        assert config.skills == ()
+        assert config.validate_on_mount is True
+
+    def test_with_skills(self, tmp_path: Path) -> None:
+        source = tmp_path / "my-skill"
+        source.mkdir()
+        mount = SkillMount(source=source)
+        config = SkillConfig(skills=(mount,))
+        assert config.skills == (mount,)
+
+    def test_validation_disabled(self) -> None:
+        config = SkillConfig(validate_on_mount=False)
+        assert config.validate_on_mount is False
+
+
+class TestResolveSkillName:
+    def test_explicit_name(self, tmp_path: Path) -> None:
+        source = tmp_path / "my-skill"
+        source.mkdir()
+        mount = SkillMount(source=source, name="explicit")
+        assert resolve_skill_name(mount) == "explicit"
+
+    def test_directory_name(self, tmp_path: Path) -> None:
+        source = tmp_path / "my-skill-dir"
+        source.mkdir()
+        mount = SkillMount(source=source)
+        assert resolve_skill_name(mount) == "my-skill-dir"
+
+    def test_file_name_strips_extension(self, tmp_path: Path) -> None:
+        source = tmp_path / "my-skill.md"
+        source.write_text("# Test")
+        mount = SkillMount(source=source)
+        assert resolve_skill_name(mount) == "my-skill"
+
+
+class TestValidateSkillName:
+    def test_valid_name(self) -> None:
+        _validate_skill_name("my-skill")
+        _validate_skill_name("skill_v2")
+        _validate_skill_name("123-test")
+
+    def test_rejects_forward_slash(self) -> None:
+        with pytest.raises(SkillMountError, match="invalid characters"):
+            _validate_skill_name("path/traversal")
+
+    def test_rejects_backslash(self) -> None:
+        with pytest.raises(SkillMountError, match="invalid characters"):
+            _validate_skill_name("path\\traversal")
+
+    def test_rejects_double_dot(self) -> None:
+        with pytest.raises(SkillMountError, match="invalid characters"):
+            _validate_skill_name("..evil")
+
+    def test_rejects_empty_name(self) -> None:
+        with pytest.raises(SkillMountError, match="Invalid skill name"):
+            _validate_skill_name("")
+
+    def test_rejects_dot(self) -> None:
+        with pytest.raises(SkillMountError, match="Invalid skill name"):
+            _validate_skill_name(".")
+
+
+class TestValidateSkill:
+    def test_valid_directory_skill(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "test-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Test Skill\n\nContent")
+        _validate_skill(skill_dir)  # Should not raise
+
+    def test_directory_missing_skill_md(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "test-skill"
+        skill_dir.mkdir()
+        with pytest.raises(SkillValidationError, match=r"missing SKILL\.md"):
+            _validate_skill(skill_dir)
+
+    def test_valid_file_skill(self, tmp_path: Path) -> None:
+        skill_file = tmp_path / "test-skill.md"
+        skill_file.write_text("# Test Skill\n\nContent")
+        _validate_skill(skill_file)  # Should not raise
+
+    def test_file_wrong_extension(self, tmp_path: Path) -> None:
+        skill_file = tmp_path / "test-skill.txt"
+        skill_file.write_text("# Test Skill\n\nContent")
+        with pytest.raises(SkillValidationError, match="must be markdown"):
+            _validate_skill(skill_file)
+
+    def test_file_too_large(self, tmp_path: Path) -> None:
+        skill_file = tmp_path / "huge-skill.md"
+        # Create a file larger than 1 MiB
+        skill_file.write_text("x" * (1024 * 1024 + 1))
+        with pytest.raises(SkillValidationError, match="exceeds size limit"):
+            _validate_skill(skill_file)
+
+
+class TestCopySkill:
+    def test_copy_directory_skill(self, tmp_path: Path) -> None:
+        # Create source skill directory
+        source = tmp_path / "source-skill"
+        source.mkdir()
+        (source / "SKILL.md").write_text("# Test Skill")
+        (source / "examples").mkdir()
+        (source / "examples" / "example.py").write_text("print('hello')")
+
+        dest = tmp_path / "dest-skill"
+        bytes_copied = _copy_skill(source, dest)
+
+        assert dest.is_dir()
+        assert (dest / "SKILL.md").read_text() == "# Test Skill"
+        assert (dest / "examples" / "example.py").read_text() == "print('hello')"
+        assert bytes_copied > 0
+
+    def test_copy_file_skill_wraps_in_directory(self, tmp_path: Path) -> None:
+        # Create source skill file
+        source = tmp_path / "skill.md"
+        source.write_text("# Single File Skill")
+
+        dest = tmp_path / "dest-skill"
+        bytes_copied = _copy_skill(source, dest)
+
+        assert dest.is_dir()
+        assert (dest / "SKILL.md").read_text() == "# Single File Skill"
+        assert bytes_copied > 0
+
+    def test_copy_directory_exceeds_size_limit(self, tmp_path: Path) -> None:
+        # Create large skill directory
+        source = tmp_path / "large-skill"
+        source.mkdir()
+        (source / "SKILL.md").write_text("# Large Skill")
+        (source / "big_file.txt").write_text("x" * 100)
+
+        dest = tmp_path / "dest-skill"
+        # Use a very small limit to trigger the error
+        with pytest.raises(SkillMountError, match="exceeds total size limit"):
+            _copy_skill(source, dest, max_total_bytes=10)
+
+    def test_copy_file_exceeds_size_limit(self, tmp_path: Path) -> None:
+        # Create large single-file skill
+        source = tmp_path / "large-skill.md"
+        source.write_text("# Large Skill\n" + "x" * 100)
+
+        dest = tmp_path / "dest-skill"
+        # Use a very small limit to trigger the error
+        with pytest.raises(SkillMountError, match="exceeds total size limit"):
+            _copy_skill(source, dest, max_total_bytes=10)
+
+    def test_copy_ignores_symlinks_by_default(self, tmp_path: Path) -> None:
+        # Create source skill directory with symlink
+        source = tmp_path / "source-skill"
+        source.mkdir()
+        (source / "SKILL.md").write_text("# Test Skill")
+        external_file = tmp_path / "external.txt"
+        external_file.write_text("external content")
+        (source / "link.txt").symlink_to(external_file)
+
+        dest = tmp_path / "dest-skill"
+        _copy_skill(source, dest, follow_symlinks=False)
+
+        assert dest.is_dir()
+        assert (dest / "SKILL.md").exists()
+        assert not (dest / "link.txt").exists()  # Symlink should be skipped
+
+    def test_copy_raises_on_io_error(self, tmp_path: Path) -> None:
+        # Create a source file
+        source = tmp_path / "skill.md"
+        source.write_text("# Test Skill")
+
+        dest = tmp_path / "dest-skill"
+
+        # Mock shutil.copy2 to raise OSError
+        with mock.patch("shutil.copy2", side_effect=OSError("Disk full")):
+            with pytest.raises(SkillMountError, match="Failed to copy skill"):
+                _copy_skill(source, dest)
+
+
+class TestEphemeralHomeSkillMounting:
+    def test_mounts_directory_skill(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "my-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# My Skill")
+
+        config = IsolationConfig(
+            skills=SkillConfig(skills=(SkillMount(source=skill_dir),))
+        )
+        with EphemeralHome(config) as home:
+            assert home.skills_dir.is_dir()
+            skill_dest = home.skills_dir / "my-skill"
+            assert skill_dest.is_dir()
+            assert (skill_dest / "SKILL.md").read_text() == "# My Skill"
+
+    def test_mounts_file_skill(self, tmp_path: Path) -> None:
+        skill_file = tmp_path / "my-skill.md"
+        skill_file.write_text("# File Skill")
+
+        config = IsolationConfig(
+            skills=SkillConfig(skills=(SkillMount(source=skill_file),))
+        )
+        with EphemeralHome(config) as home:
+            skill_dest = home.skills_dir / "my-skill"
+            assert skill_dest.is_dir()
+            assert (skill_dest / "SKILL.md").read_text() == "# File Skill"
+
+    def test_mounts_skill_with_custom_name(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "original-name"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Custom Named")
+
+        config = IsolationConfig(
+            skills=SkillConfig(
+                skills=(SkillMount(source=skill_dir, name="custom-name"),)
+            )
+        )
+        with EphemeralHome(config) as home:
+            assert (home.skills_dir / "custom-name").is_dir()
+            assert not (home.skills_dir / "original-name").exists()
+
+    def test_skips_disabled_skills(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "disabled-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Disabled")
+
+        config = IsolationConfig(
+            skills=SkillConfig(skills=(SkillMount(source=skill_dir, enabled=False),))
+        )
+        with EphemeralHome(config) as home:
+            assert not (home.skills_dir / "disabled-skill").exists()
+
+    def test_mounts_multiple_skills(self, tmp_path: Path) -> None:
+        # Create two skills
+        skill1 = tmp_path / "skill-one"
+        skill1.mkdir()
+        (skill1 / "SKILL.md").write_text("# Skill One")
+
+        skill2 = tmp_path / "skill-two"
+        skill2.mkdir()
+        (skill2 / "SKILL.md").write_text("# Skill Two")
+
+        config = IsolationConfig(
+            skills=SkillConfig(
+                skills=(
+                    SkillMount(source=skill1),
+                    SkillMount(source=skill2),
+                )
+            )
+        )
+        with EphemeralHome(config) as home:
+            assert (home.skills_dir / "skill-one").is_dir()
+            assert (home.skills_dir / "skill-two").is_dir()
+
+    def test_rejects_duplicate_skill_names(self, tmp_path: Path) -> None:
+        skill1 = tmp_path / "skill-a"
+        skill1.mkdir()
+        (skill1 / "SKILL.md").write_text("# Skill A")
+
+        skill2 = tmp_path / "skill-b"
+        skill2.mkdir()
+        (skill2 / "SKILL.md").write_text("# Skill B")
+
+        config = IsolationConfig(
+            skills=SkillConfig(
+                skills=(
+                    SkillMount(source=skill1, name="same-name"),
+                    SkillMount(source=skill2, name="same-name"),
+                )
+            )
+        )
+        with pytest.raises(SkillMountError, match="Duplicate skill name"):
+            EphemeralHome(config)
+
+    def test_raises_on_missing_skill_source(self, tmp_path: Path) -> None:
+        nonexistent = tmp_path / "does-not-exist"
+        config = IsolationConfig(
+            skills=SkillConfig(skills=(SkillMount(source=nonexistent),))
+        )
+        with pytest.raises(SkillNotFoundError, match="Skill not found"):
+            EphemeralHome(config)
+
+    def test_validates_skill_when_enabled(self, tmp_path: Path) -> None:
+        # Directory without SKILL.md
+        invalid_skill = tmp_path / "invalid-skill"
+        invalid_skill.mkdir()
+
+        config = IsolationConfig(
+            skills=SkillConfig(
+                skills=(SkillMount(source=invalid_skill),),
+                validate_on_mount=True,
+            )
+        )
+        with pytest.raises(SkillValidationError, match=r"missing SKILL\.md"):
+            EphemeralHome(config)
+
+    def test_skips_validation_when_disabled(self, tmp_path: Path) -> None:
+        # Directory without SKILL.md (would fail validation)
+        invalid_skill = tmp_path / "invalid-skill"
+        invalid_skill.mkdir()
+        # Create some content to copy
+        (invalid_skill / "README.md").write_text("# Not a skill")
+
+        config = IsolationConfig(
+            skills=SkillConfig(
+                skills=(SkillMount(source=invalid_skill),),
+                validate_on_mount=False,
+            )
+        )
+        # Should not raise because validation is disabled
+        with EphemeralHome(config) as home:
+            assert (home.skills_dir / "invalid-skill").is_dir()
+
+    def test_no_skills_directory_when_no_skills_configured(self) -> None:
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            # skills_dir property should return path but dir shouldn't exist
+            assert home.skills_dir == home.claude_dir / "skills"
+            assert not home.skills_dir.exists()
+
+    def test_skills_dir_property(self, tmp_path: Path) -> None:
+        skill_dir = tmp_path / "test-skill"
+        skill_dir.mkdir()
+        (skill_dir / "SKILL.md").write_text("# Test")
+
+        config = IsolationConfig(
+            skills=SkillConfig(skills=(SkillMount(source=skill_dir),))
+        )
+        with EphemeralHome(config) as home:
+            assert home.skills_dir == home.claude_dir / "skills"
+            assert home.skills_dir.is_dir()
+
+
+class TestIsolationConfigWithSkills:
+    def test_isolation_config_accepts_skills(self, tmp_path: Path) -> None:
+        source = tmp_path / "skill"
+        source.mkdir()
+        (source / "SKILL.md").write_text("# Test")
+
+        skills = SkillConfig(skills=(SkillMount(source=source),))
+        config = IsolationConfig(skills=skills)
+        assert config.skills is skills
+
+    def test_isolation_config_skills_default_none(self) -> None:
+        config = IsolationConfig()
+        assert config.skills is None
