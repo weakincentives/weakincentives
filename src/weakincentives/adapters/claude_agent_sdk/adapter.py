@@ -165,7 +165,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using Claude Agent SDK with hook-based state sync.
 
@@ -173,14 +172,16 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         VisibilityOverrides state slice. Use session[VisibilityOverrides]
         to set visibility overrides before calling evaluate().
 
+        Resources should be bound to the prompt via ``prompt.bind(resources=...)``
+        before calling evaluate(). The adapter will merge workspace resources
+        (filesystem) with any pre-bound resources.
+
         Args:
             prompt: The prompt to evaluate.
             session: Session for state management and event dispatching.
             deadline: Optional deadline for execution timeout.
             budget: Optional token budget constraints.
             budget_tracker: Optional shared budget tracker.
-            resources: Optional resources to inject (merged with workspace resources,
-                user-provided resources take precedence).
 
         Returns:
             PromptResponse with structured output and events dispatched.
@@ -206,7 +207,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 session=session,
                 deadline=effective_deadline,
                 budget_tracker=budget_tracker,
-                resources=resources,
             )
         )
 
@@ -217,7 +217,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         session: SessionProtocol,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
-        resources: ResourceRegistry | None,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
         sdk = _import_sdk()
@@ -256,15 +255,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             workspace_root = self._client_config.cwd or str(Path.cwd())
             filesystem = HostFilesystem(_root=workspace_root)
 
-        # Bind resources to prompt for lifecycle management
-        # Both bridged MCP tools and native SDK tools will use this for rollback
+        # Bind workspace resources to prompt for lifecycle management.
+        # Both bridged MCP tools and native SDK tools will use this for rollback.
+        # User resources should be pre-bound via prompt.bind() before evaluate().
         workspace_resources = ResourceRegistry.build({Filesystem: filesystem})
-        effective_resources = (
-            workspace_resources.merge(resources, strict=False)
-            if resources is not None
-            else workspace_resources
-        )
-        prompt = prompt.bind(resources=effective_resources)
+        prompt = prompt.bind(resources=workspace_resources)
 
         # Enter prompt context for resource lifecycle
         with prompt:
