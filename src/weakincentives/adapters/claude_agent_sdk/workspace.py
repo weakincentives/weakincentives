@@ -285,9 +285,11 @@ class _ClaudeAgentWorkspaceSectionParams:
 def _render_workspace_template(previews: tuple[HostMountPreview, ...]) -> str:
     """Render the workspace section template from mount previews."""
     lines = [
-        "Claude Code provides direct access to the workspace via its native tools "
-        "(Read, Write, Edit, Glob, Grep, Bash). The workspace has the following "
-        "mounted content:"
+        (
+            "Claude Code provides direct access to the workspace via its native tools "
+            "(Read, Write, Edit, Glob, Grep, Bash). The workspace has the following "
+            "mounted content:"
+        )
     ]
 
     if not previews:
