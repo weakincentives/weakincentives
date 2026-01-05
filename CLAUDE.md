@@ -10,9 +10,11 @@ side-effect-free background agents. It provides:
 
 - **Redux-style sessions** with immutable event ledgers and pure reducers
 - **Typed prompt composition** using dataclass-backed sections
-- **Provider-agnostic adapters** (OpenAI, LiteLLM)
+- **Provider-agnostic adapters** (OpenAI, LiteLLM, Claude Agent SDK)
 - **Design-by-contract enforcement** via decorators
 - **Sandboxed tooling** (VFS, asteval, Podman)
+- **Evaluation framework** with session-aware evaluators
+- **Formal verification support** via TLA+ spec embedding
 
 ## Essential Commands
 
@@ -49,12 +51,16 @@ src/weakincentives/
 ├── cli/             # wink CLI entrypoints
 ├── contrib/         # Batteries for specific agent styles
 │   ├── tools/       # Planning, VFS, asteval, Podman, workspace digest
-│   └── optimizers/  # Workspace digest optimizer
+│   ├── optimizers/  # Workspace digest optimizer
+│   └── mailbox/     # Redis mailbox implementation
 ├── dataclasses/     # FrozenDataclass utilities
 ├── dbc/             # Design-by-contract decorators
+├── evals/           # Evaluation framework (datasets, evaluators, EvalLoop)
+├── formal/          # TLA+ formal specification support
 ├── optimizers/      # Optimizer framework and protocols
 ├── prompt/          # Section/Prompt composition, overrides, tools
-├── runtime/         # Session, events, logging
+├── resources/       # Dependency injection with scoped lifecycles
+├── runtime/         # Session, events, logging, mailbox, transactions
 ├── serde/           # Dataclass serialization (no Pydantic)
 └── types/           # JSON type aliases
 ```
@@ -108,7 +114,10 @@ Tool handlers follow a consistent signature:
 
 ```python
 def my_handler(params: ParamsType, *, context: ToolContext) -> ToolResult[ResultType]:
-    return ToolResult(message="done", value=ResultType(...), success=True)
+    # Success case
+    return ToolResult.ok(ResultType(...), message="done")
+    # Or failure case
+    return ToolResult.error("Something went wrong")
 ```
 
 ### Imports

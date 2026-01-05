@@ -237,11 +237,9 @@ class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         self._session = Session(bus=bus)
         self._template = build_task_prompt(session=self._session)
 
-    def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]:
-        return Prompt(self._template).bind(request)
-
-    def create_session(self) -> Session:
-        return self._session
+    def prepare(self, request: ReviewTurnParams) -> tuple[Prompt[ReviewResponse], Session]:
+        prompt = Prompt(self._template).bind(request)
+        return prompt, self._session
 
 bus = InProcessDispatcher()
 adapter = OpenAIAdapter(model="gpt-5.1")
