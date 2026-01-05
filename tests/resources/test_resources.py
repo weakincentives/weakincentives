@@ -159,7 +159,7 @@ class TestBinding:
 # === ResourceRegistry Tests ===
 
 
-class TestResourceRegistry:  # noqa: PLR0904 - test classes often have many methods
+class TestResourceRegistry:
     def test_empty_registry(self) -> None:
         registry = ResourceRegistry.of()
         assert len(registry) == 0
@@ -226,7 +226,9 @@ class TestResourceRegistry:  # noqa: PLR0904 - test classes often have many meth
         registry = ResourceRegistry.build({Config: config})
         assert Config in registry
         assert len(registry) == 1
-        assert registry.get(Config) is config
+        ctx = registry.create_context()
+        ctx.start()
+        assert ctx.get(Config) is config
 
     def test_build_filters_none_values(self) -> None:
         config = ConcreteConfig(value=42)
@@ -278,61 +280,6 @@ class TestResourceRegistry:  # noqa: PLR0904 - test classes often have many meth
         eager = registry.eager_bindings()
         assert len(eager) == 1
         assert eager[0].protocol is Config
-
-    def test_get_with_provider_binding(self) -> None:
-        """registry.get() resolves provider bindings via context."""
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig(value=42))
-        )
-        # get() should resolve the provider and return the constructed instance
-        config = registry.get(Config)
-        assert config is not None
-        assert config.value == 42
-
-    def test_get_returns_default_when_unbound(self) -> None:
-        """registry.get() returns default when protocol is not bound."""
-        registry = ResourceRegistry.of()
-        default_config = ConcreteConfig(value=999)
-
-        result = registry.get(Config, default=default_config)
-        assert result is default_config
-
-    def test_get_returns_none_when_unbound_no_default(self) -> None:
-        """registry.get() returns None when protocol is not bound and no default."""
-        registry = ResourceRegistry.of()
-        result = registry.get(Config)
-        assert result is None
-
-    def test_get_all_with_predicate(self) -> None:
-        """get_all() returns instances matching a predicate."""
-        config = ConcreteConfig(value=10)
-        registry = ResourceRegistry.build({Config: config})
-        # Match instances where value > 5
-        result = registry.get_all(
-            lambda x: isinstance(x, ConcreteConfig) and x.value > 5
-        )
-        assert Config in result
-        assert result[Config] is config
-
-    def test_get_all_excludes_non_matching(self) -> None:
-        """get_all() excludes instances that don't match."""
-        config = ConcreteConfig(value=3)
-        registry = ResourceRegistry.build({Config: config})
-        # Match instances where value > 5 (config.value is 3)
-        result = registry.get_all(
-            lambda x: isinstance(x, ConcreteConfig) and x.value > 5
-        )
-        assert len(result) == 0
-
-    def test_get_all_only_includes_eager_bindings(self) -> None:
-        """get_all() only includes eager (instance) bindings, not lazy providers."""
-        # Lazy provider binding - not resolved until accessed
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig()),
-        )
-        result = registry.get_all(lambda x: isinstance(x, ConcreteConfig))
-        # Lazy bindings aren't in singleton cache after start()
-        assert len(result) == 0
 
     def test_conflicts_returns_shared_protocols(self) -> None:
         """conflicts() returns protocols bound in both registries."""

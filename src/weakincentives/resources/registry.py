@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
@@ -143,54 +143,6 @@ class ResourceRegistry:
         """Return the binding for a protocol, or None if unbound."""
         binding = self._bindings.get(protocol)
         return cast(Binding[T], binding) if binding else None
-
-    def get[T](self, protocol: type[T], default: T | None = None) -> T | None:
-        """Return the resource for the given protocol, or default if absent.
-
-        Creates a temporary context, starts it, and resolves the protocol.
-        For instance bindings (eager), the instance is resolved during start().
-
-        Args:
-            protocol: The protocol type to look up.
-            default: Value to return if not found.
-
-        Returns:
-            The resource instance if found, otherwise default.
-        """
-        if protocol not in self._bindings:
-            return default
-        ctx = self.create_context()
-        ctx.start()
-        return ctx.get(protocol)
-
-    def get_all[T](self, predicate: Callable[[object], bool]) -> Mapping[type[T], T]:
-        """Return all resolved instances matching a predicate.
-
-        Creates a context, starts it (resolving all eager bindings),
-        and returns instances from the singleton cache that match.
-
-        This is the generic way to introspect resources. For example,
-        to find all Snapshotable resources::
-
-            from weakincentives.runtime.snapshotable import Snapshotable
-
-            snapshotable = registry.get_all(
-                lambda x: isinstance(x, Snapshotable)
-            )
-
-        Args:
-            predicate: Function that returns True for matching instances.
-
-        Returns:
-            Mapping from protocol type to matching instance.
-        """
-        ctx = self.create_context()
-        ctx.start()
-        result: dict[type[T], T] = {}
-        for protocol, instance in ctx.singleton_cache.items():
-            if predicate(instance):
-                result[cast(type[T], protocol)] = cast(T, instance)
-        return result
 
     # === Composition ===
 
