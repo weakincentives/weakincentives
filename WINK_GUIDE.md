@@ -112,6 +112,16 @@ ______________________________________________________________________
    1. [OpenAIAdapter](#62-openaiadapter)
    1. [LiteLLMAdapter](#63-litellmadapter)
    1. [Claude Agent SDK adapter](#64-claude-agent-sdk-adapter)
+      1. [Requirements](#641-requirements)
+      1. [Basic usage](#642-basic-usage)
+      1. [Client and model configuration](#643-client-and-model-configuration)
+      1. [Workspace management](#644-workspace-management)
+      1. [Isolation configuration](#645-isolation-configuration)
+      1. [Tool bridging via MCP](#646-tool-bridging-via-mcp)
+      1. [Events](#647-events)
+      1. [Complete example: secure code review](#648-complete-example-secure-code-review)
+      1. [Docs assistant with domain allowlist](#649-docs-assistant-with-domain-allowlist)
+      1. [Operational notes](#6410-operational-notes)
 1. [Orchestration with MainLoop](#7-orchestration-with-mainloop)
    1. [The minimal MainLoop](#71-the-minimal-mainloop)
    1. [Deadlines and budgets](#72-deadlines-and-budgets)
@@ -1569,6 +1579,449 @@ native tooling with WINK's prompt composition and session management.
 
 See [specs/CLAUDE_AGENT_SDK.md](specs/CLAUDE_AGENT_SDK.md) for full
 configuration reference and isolation guarantees.
+
+#### 6.4.1 Requirements
+
+- **Python package:** `pip install 'weakincentives[claude-agent-sdk]'`
+- **Claude Code CLI:** `npm install -g @anthropic-ai/claude-code`
+- **Linux sandboxing:** bubblewrap (`bwrap`) available on PATH (for sandbox
+  enforcement)
+
+#### 6.4.2 Basic usage
+
+The simplest usage requires minimal configuration:
+
+```python
+from dataclasses import dataclass
+
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.runtime import InProcessDispatcher, Session
+
+
+@dataclass(frozen=True)
+class Hello:
+    message: str
+
+
+session = Session(bus=InProcessDispatcher())
+
+template = PromptTemplate[Hello](
+    ns="demo",
+    key="hello",
+    sections=[
+        MarkdownSection(
+            title="Task",
+            key="task",
+            template="Say hello. Return JSON with a single field: message.",
+        ),
+    ],
+)
+
+response = ClaudeAgentSDKAdapter().evaluate(Prompt(template), session=session)
+print(response.output)  # Hello(message="...")
+```
+
+#### 6.4.3 Client and model configuration
+
+**ClaudeAgentSDKClientConfig** controls how the SDK subprocess operates:
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+)
+
+config = ClaudeAgentSDKClientConfig(
+    permission_mode="bypassPermissions",  # "default", "acceptEdits", "plan", "bypassPermissions"
+    cwd="/path/to/workspace",             # Working directory for SDK
+    max_turns=10,                         # Limit conversation turns
+    max_budget_usd=1.0,                   # Budget cap in USD
+    suppress_stderr=True,                 # Hide CLI noise
+    stop_on_structured_output=True,       # Stop after structured output
+    betas=("feature-x",),                 # Enable beta features
+)
+
+adapter = ClaudeAgentSDKAdapter(client_config=config)
+```
+
+| Field | Default | Description |
+| -------------------------- | --------------------- | --------------------------------------------------- |
+| `permission_mode` | `"bypassPermissions"` | Tool permission handling mode |
+| `cwd` | `None` | Working directory (None = current directory) |
+| `max_turns` | `None` | Max conversation turns (None = unlimited) |
+| `max_budget_usd` | `None` | Budget cap in USD (None = unlimited) |
+| `suppress_stderr` | `True` | Hide stderr from Claude Code CLI |
+| `stop_on_structured_output`| `True` | Stop immediately after structured output |
+| `isolation` | `None` | Hermetic isolation config (see below) |
+| `betas` | `None` | Beta feature identifiers to enable |
+
+**ClaudeAgentSDKModelConfig** controls model-specific parameters:
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKModelConfig,
+)
+
+model_config = ClaudeAgentSDKModelConfig(
+    model="claude-sonnet-4-5-20250929",
+    max_thinking_tokens=4096,  # Extended thinking mode
+)
+
+adapter = ClaudeAgentSDKAdapter(model_config=model_config)
+```
+
+| Field | Default | Description |
+| -------------------- | --------------------------- | -------------------------------------------------- |
+| `model` | `"claude-sonnet-4-5-20250929"` | Claude model identifier |
+| `max_thinking_tokens`| `None` | Tokens for extended thinking (None = disabled) |
+
+Note: The SDK does not support `seed`, `stop`, `presence_penalty`, or
+`frequency_penalty`. Providing these raises `ValueError`.
+
+#### 6.4.4 Workspace management
+
+`ClaudeAgentWorkspaceSection` creates an isolated workspace with host files
+mounted in. Claude Code's native tools (Read, Write, Edit, Glob, Grep, Bash)
+operate on this workspace.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentWorkspaceSection,
+    HostMount,
+)
+from weakincentives.runtime import InProcessDispatcher, Session
+
+session = Session(bus=InProcessDispatcher())
+
+workspace = ClaudeAgentWorkspaceSection(
+    session=session,
+    mounts=(
+        HostMount(
+            host_path="/abs/path/to/repo",
+            mount_path="repo",                           # Appears as "repo/" in workspace
+            exclude_glob=(".git/*", "*.pyc", "__pycache__/*"),
+            max_bytes=5_000_000,                         # 5MB limit
+        ),
+    ),
+    allowed_host_roots=("/abs/path/to",),  # Security boundary
+)
+
+# workspace.temp_dir is the path to pass as cwd
+# workspace.cleanup() removes the temp directory when done
+```
+
+**HostMount** attributes:
+
+| Field | Default | Description |
+| --------------- | ------- | ------------------------------------------------- |
+| `host_path` | required| Absolute or relative path to host file/directory |
+| `mount_path` | `None` | Relative path in temp dir (default: basename) |
+| `include_glob` | `()` | Patterns to include (empty = all) |
+| `exclude_glob` | `()` | Patterns to exclude |
+| `max_bytes` | `None` | Maximum bytes to copy (None = unlimited) |
+| `follow_symlinks`| `False` | Whether to follow symlinks when copying |
+
+**Security:** The `allowed_host_roots` parameter restricts which host paths can
+be mounted. Paths outside these roots raise `WorkspaceSecurityError`. Exceeding
+`max_bytes` raises `WorkspaceBudgetExceededError`.
+
+The workspace section automatically contributes a `Filesystem` resource that
+tools can use. Claude Code's native tools operate directly on the temp
+directory.
+
+#### 6.4.5 Isolation configuration
+
+`IsolationConfig` creates a hermetic environment that prevents the SDK from
+accessing the host's `~/.claude` configuration, credentials, and session state.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
+)
+
+isolation = IsolationConfig(
+    network_policy=NetworkPolicy.no_network(),
+    sandbox=SandboxConfig(enabled=True),
+    api_key="sk-ant-...",          # Or uses ANTHROPIC_API_KEY from env
+    include_host_env=False,        # Don't inherit host env vars
+)
+
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(isolation=isolation),
+)
+```
+
+When isolation is configured, the adapter:
+
+1. Creates an ephemeral `HOME` directory containing `.claude/settings.json`
+2. Passes the environment to the SDK subprocess so Claude Code reads settings
+   from the redirected home
+3. Cleans up the ephemeral directory after execution
+
+**IsolationConfig** attributes:
+
+| Field | Default | Description |
+| ---------------- | ------- | ---------------------------------------------------- |
+| `network_policy` | `None` | Network access constraints (None = no network) |
+| `sandbox` | `None` | Sandbox configuration (None = secure defaults) |
+| `env` | `None` | Additional env vars for SDK subprocess |
+| `api_key` | `None` | API key (None = uses ANTHROPIC_API_KEY from env) |
+| `include_host_env`| `False`| Inherit non-sensitive host env vars |
+
+##### NetworkPolicy
+
+Controls which network resources tools can access. This affects tools making
+outbound connections (curl, wget, etc.) but **not** the Claude API connection.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import NetworkPolicy
+
+# Block all tool network access
+policy = NetworkPolicy.no_network()
+
+# Allow specific domains
+policy = NetworkPolicy.with_domains("docs.python.org", "pypi.org")
+
+# Unrestricted (not recommended for production)
+policy = NetworkPolicy(allowed_domains=("*",))
+```
+
+##### SandboxConfig
+
+Provides programmatic control over OS-level sandboxing (bubblewrap on Linux,
+seatbelt on macOS).
+
+```python
+from weakincentives.adapters.claude_agent_sdk import SandboxConfig
+
+sandbox = SandboxConfig(
+    enabled=True,                          # Enable OS-level sandboxing
+    writable_paths=("/tmp/output",),       # Additional writable paths
+    readable_paths=("/etc/ssl/certs",),    # Additional readable paths
+    excluded_commands=("docker",),         # Commands that bypass sandbox
+    allow_unsandboxed_commands=False,      # Require sandbox for all commands
+    bash_auto_allow=True,                  # Auto-approve bash in sandbox mode
+)
+```
+
+| Field | Default | Description |
+| ------------------------- | ------- | ------------------------------------------------- |
+| `enabled` | `True` | Enable OS-level sandboxing |
+| `writable_paths` | `()` | Paths the SDK can write beyond workspace |
+| `readable_paths` | `()` | Additional readable paths beyond workspace |
+| `excluded_commands` | `()` | Commands that bypass sandbox (use sparingly) |
+| `allow_unsandboxed_commands`| `False`| Allow commands outside sandbox |
+| `bash_auto_allow` | `True` | Auto-approve Bash when sandboxed |
+
+#### 6.4.6 Tool bridging via MCP
+
+WINK tools attached to prompt sections are automatically exposed to Claude Code
+as MCP tools under the server key `"wink"`. This lets you keep side effects and
+validation in Python while Claude uses the tools natively.
+
+```python
+from dataclasses import dataclass
+
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+from weakincentives.prompt import (
+    MarkdownSection,
+    Prompt,
+    PromptTemplate,
+    Tool,
+    ToolContext,
+    ToolResult,
+)
+from weakincentives.runtime import InProcessDispatcher, Session
+
+
+@dataclass(frozen=True)
+class SearchParams:
+    query: str
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    matches: int
+
+    def render(self) -> str:
+        return f"Found {self.matches} matches"
+
+
+def search(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
+    # Your search logic here
+    return ToolResult(message="ok", value=SearchResult(matches=3))
+
+
+search_tool = Tool[SearchParams, SearchResult](
+    name="search",
+    description="Search the internal index",
+    handler=search,
+)
+
+session = Session(bus=InProcessDispatcher())
+
+template = PromptTemplate[None](
+    ns="demo",
+    key="mcp-tool",
+    sections=[
+        MarkdownSection(
+            title="Task",
+            key="task",
+            template="Use the search tool for query: weakincentives.",
+            tools=(search_tool,),  # Tool attached here
+        ),
+    ],
+)
+
+response = ClaudeAgentSDKAdapter().evaluate(Prompt(template), session=session)
+```
+
+Each bridged tool call:
+
+- Publishes a `ToolInvoked` event to the session
+- Executes within a transaction (state rolls back on failure)
+- Has access to the full `ToolContext` including session and resources
+
+#### 6.4.7 Events
+
+The adapter publishes these events to the session's dispatcher:
+
+| Event | When | Fields |
+| --------------- | --------------------------------- | ------------------------------------- |
+| `PromptRendered`| After prompt render, before SDK | `rendered_prompt`, `adapter`, etc. |
+| `ToolInvoked` | Each native + bridged tool call | `tool_name`, `params`, `result`, etc. |
+| `PromptExecuted`| After completion | `result`, `usage` (TokenUsage) |
+
+Native Claude Code tools (Read, Write, Bash, etc.) are tracked via SDK hooks
+and also publish `ToolInvoked` events.
+
+#### 6.4.8 Complete example: secure code review
+
+This example combines workspace management, isolation, and structured output
+for a secure code review agent:
+
+```python
+from dataclasses import dataclass
+
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    ClaudeAgentWorkspaceSection,
+    HostMount,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
+)
+from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.runtime import InProcessDispatcher, Session
+
+
+@dataclass(frozen=True)
+class Review:
+    summary: str
+    findings: list[str]
+
+
+session = Session(bus=InProcessDispatcher())
+
+# Create workspace with mounted repository
+workspace = ClaudeAgentWorkspaceSection(
+    session=session,
+    mounts=(
+        HostMount(
+            host_path="/abs/path/to/repo",
+            mount_path="repo",
+            exclude_glob=(".git/*", "*.pyc", "__pycache__/*"),
+            max_bytes=5_000_000,
+        ),
+    ),
+    allowed_host_roots=("/abs/path/to",),
+)
+
+try:
+    # Configure adapter with isolation (no tool network access)
+    adapter = ClaudeAgentSDKAdapter(
+        client_config=ClaudeAgentSDKClientConfig(
+            permission_mode="bypassPermissions",
+            cwd=str(workspace.temp_dir),
+            isolation=IsolationConfig(
+                network_policy=NetworkPolicy.no_network(),
+                sandbox=SandboxConfig(
+                    enabled=True,
+                    readable_paths=(str(workspace.temp_dir),),
+                ),
+            ),
+        ),
+    )
+
+    template = PromptTemplate[Review](
+        ns="review",
+        key="security",
+        sections=[
+            MarkdownSection(
+                title="Task",
+                key="task",
+                template=(
+                    "Review the code in repo/ for security issues. "
+                    "Return JSON with: summary (string), findings (list of strings)."
+                ),
+            ),
+            workspace,
+        ],
+    )
+
+    response = adapter.evaluate(Prompt(template), session=session)
+    print(response.output)  # Review(summary="...", findings=["...", ...])
+finally:
+    workspace.cleanup()
+```
+
+#### 6.4.9 Docs assistant with domain allowlist
+
+For agents that need controlled network access:
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+    NetworkPolicy,
+    SandboxConfig,
+)
+
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            network_policy=NetworkPolicy.with_domains(
+                "docs.python.org",
+                "pypi.org",
+            ),
+            sandbox=SandboxConfig(enabled=True),
+        ),
+    ),
+)
+```
+
+Tools can now access `docs.python.org` and `pypi.org` but no other domains.
+
+#### 6.4.10 Operational notes
+
+- **Token tracking:** Pass a `BudgetTracker` to `evaluate(..., budget_tracker=...)`
+  to track usage across multiple evaluations.
+- **Structured output:** `stop_on_structured_output=True` (default) stops the
+  agent immediately after the StructuredOutput tool runs, ensuring clean turn
+  termination.
+- **Windows:** Sandbox settings may not be enforced; HOME redirection still
+  applies.
+- **Extended thinking:** Set `max_thinking_tokens` in `ClaudeAgentSDKModelConfig`
+  to enable Claude's extended thinking mode (requires minimum ~1024 tokens).
 
 ______________________________________________________________________
 
