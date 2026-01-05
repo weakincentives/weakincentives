@@ -121,6 +121,11 @@ ______________________________________________________________________
    1. [LLM-as-judge](#83-llm-as-judge)
    1. [Running evaluations](#84-running-evaluations)
    1. [Production deployment pattern](#85-production-deployment-pattern)
+1. [Lifecycle Management](#9-lifecycle-management)
+   1. [LoopGroup: running multiple loops](#91-loopgroup-running-multiple-loops)
+   1. [ShutdownCoordinator: manual signal handling](#92-shutdowncoordinator-manual-signal-handling)
+   1. [The Runnable protocol](#93-the-runnable-protocol)
+   1. [Health and watchdog configuration](#94-health-and-watchdog-configuration)
 1. [Progressive disclosure](#10-progressive-disclosure)
    1. [SectionVisibility: FULL vs SUMMARY](#101-sectionvisibility-full-vs-summary)
    1. [open_sections and read_section](#102-open_sections-and-read_section)
@@ -1026,10 +1031,55 @@ response, session = loop.execute(request)
 - `Scope.TOOL_CALL`: Fresh instance per tool invocation
 - `Scope.PROTOTYPE`: Fresh instance on every access
 
+**Dependency injection with providers:**
+
+Bindings support lazy construction with dependency resolution. The provider
+function receives a resolver that can look up other resources:
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry, Scope
+
+resources = ResourceRegistry.of(
+    # Config is constructed first (no dependencies)
+    Binding(Config, lambda r: Config.from_env()),
+
+    # HTTPClient depends on Config
+    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+
+    # Tracer is fresh per tool call
+    Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+)
+
+# Create resolution context with lifecycle management
+ctx = resources.create_context()
+ctx.start()  # Resolves eager bindings
+
+try:
+    # Lazy resolution with dependency graph walking
+    http = ctx.get(HTTPClient)  # Also resolves Config
+
+    # Tool-call scoped resources
+    with ctx.tool_scope() as resolver:
+        tracer = resolver.get(Tracer)  # Fresh instance
+finally:
+    ctx.close()  # Cleanup Closeable resources
+```
+
+**Lifecycle protocols:**
+
+Resources can implement lifecycle protocols for automatic management:
+
+- `Closeable`: Resources with a `close()` method are closed when the context
+  ends
+- `PostConstruct`: Resources with a `post_construct()` method are initialized
+  after construction
+
 **Key behaviors:**
 
 - `ResourceRegistry.merge()` combines registries with the second taking
   precedence on conflicts
+- `ResourceRegistry.conflicts()` returns protocols bound in both registries
+- Circular dependencies raise `CircularDependencyError`
 - User-provided resources override workspace defaults (e.g., custom filesystem)
 - Tool handlers access resources via `context.resources.get(ResourceType)`
 - All adapters (OpenAI, LiteLLM, Claude Agent SDK) support resource injection
@@ -1518,7 +1568,8 @@ response, session = loop.execute(request)
 ```
 
 Resources configured this way are available to all tool handlers during
-execution. You can also pass resources directly to `loop.execute(request, resources=...)` for per-request overrides.
+execution. You can also pass resources directly to
+`loop.execute(request, resources=...)` for per-request overrides.
 
 ### 7.2 Deadlines and budgets
 
@@ -1758,6 +1809,108 @@ if report.pass_rate < 0.95:
 
 This is the control plane for safe model upgrades: verify behavior
 programmatically before promoting changes.
+
+______________________________________________________________________
+
+## 9. Lifecycle Management
+
+_Canonical spec: [specs/HEALTH.md](specs/HEALTH.md)_
+
+When running agents in production—especially in containerized environments like
+Kubernetes—you need coordinated shutdown, health monitoring, and watchdog
+protection. WINK provides lifecycle primitives that integrate with MainLoop and
+EvalLoop.
+
+### 9.1 LoopGroup: running multiple loops
+
+`LoopGroup` runs multiple loops in separate threads with coordinated shutdown
+and optional health endpoints:
+
+```python
+from weakincentives.runtime import LoopGroup
+
+# Run MainLoop and EvalLoop together
+group = LoopGroup(loops=[main_loop, eval_loop])
+group.run()  # Blocks until SIGTERM/SIGINT
+```
+
+For Kubernetes deployments, enable health endpoints and watchdog monitoring:
+
+```python
+group = LoopGroup(
+    loops=[main_loop],
+    health_port=8080,           # Exposes /health/live and /health/ready
+    watchdog_threshold=720.0,   # Terminate if worker stalls for 12 minutes
+)
+group.run()
+```
+
+**Key features:**
+
+- **Health endpoints**: `/health/live` (liveness) and `/health/ready`
+  (readiness) for Kubernetes probes
+- **Watchdog monitoring**: Detects stuck workers and terminates the process via
+  SIGKILL when heartbeats stall
+- **Coordinated shutdown**: SIGTERM/SIGINT triggers graceful shutdown of all
+  loops
+
+### 9.2 ShutdownCoordinator: manual signal handling
+
+For finer control, use `ShutdownCoordinator` directly:
+
+```python
+from weakincentives.runtime import ShutdownCoordinator
+
+coordinator = ShutdownCoordinator.install()
+coordinator.register(loop.shutdown)
+loop.run()
+```
+
+The coordinator installs signal handlers for SIGTERM and SIGINT. When a signal
+arrives, all registered callbacks are invoked in registration order.
+
+### 9.3 The Runnable protocol
+
+Both `MainLoop` and `EvalLoop` implement the `Runnable` protocol:
+
+```python
+from weakincentives.runtime import Runnable
+
+class Runnable(Protocol):
+    def run(self, *, max_iterations: int | None = None, ...) -> None: ...
+    def shutdown(self, *, timeout: float = 30.0) -> bool: ...
+
+    @property
+    def running(self) -> bool: ...
+
+    @property
+    def heartbeat(self) -> Heartbeat | None: ...
+```
+
+This enables `LoopGroup` to manage any compliant loop implementation.
+
+### 9.4 Health and watchdog configuration
+
+The watchdog monitors heartbeats from loops and terminates the process if any
+loop stalls beyond the threshold. This prevents "stuck worker" scenarios where a
+loop hangs indefinitely without processing requests.
+
+```python
+group = LoopGroup(
+    loops=[main_loop, eval_loop],
+    health_port=8080,           # Health endpoint port
+    health_host="0.0.0.0",      # Bind to all interfaces
+    watchdog_threshold=720.0,   # 12 minutes (calibrated for 10-min prompts)
+    watchdog_interval=60.0,     # Check every minute
+)
+```
+
+**Timeout calibration:**
+
+- `watchdog_threshold` should exceed your maximum expected prompt evaluation
+  time
+- `visibility_timeout` (in `run()`) should exceed `watchdog_threshold` to
+  prevent message redelivery during long evaluations
 
 ______________________________________________________________________
 
@@ -2566,9 +2719,14 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 
 **Lifecycle management:**
 
-- `Runnable`: Protocol for loops with graceful shutdown (`run()`, `shutdown()`)
+- `Runnable`: Protocol for loops with graceful shutdown (`run()`, `shutdown()`,
+  `running`, `heartbeat`)
 - `ShutdownCoordinator.install()`: Singleton for SIGTERM/SIGINT handling
-- `LoopGroup(loops)`: Run multiple loops with coordinated shutdown
+- `LoopGroup(loops, health_port=..., watchdog_threshold=...)`: Run multiple
+  loops with coordinated shutdown, health endpoints, and watchdog monitoring
+- `Heartbeat`: Thread-safe timestamp tracker for worker liveness
+- `Watchdog`: Daemon thread that monitors heartbeats and terminates on stall
+- `HealthServer`: Minimal HTTP server for `/health/live` and `/health/ready`
 - `wait_until(predicate, timeout=...)`: Poll predicate with timeout
 
 ### 18.4 weakincentives.adapters
@@ -2591,8 +2749,12 @@ PromptEvaluationError
 - `Scope` enum: `SINGLETON`, `TOOL_CALL`, `PROTOTYPE`
 - `ResourceRegistry.of(*bindings)` - build registry from bindings
 - `ResourceRegistry.merge(base, override)` - combine registries (override wins)
+- `ResourceRegistry.conflicts(other)` - return protocols bound in both
+- `ResourceRegistry.create_context()` - create resolution context
 - `ScopedResourceContext` - resolution context with lifecycle management
 - `Closeable`, `PostConstruct` - lifecycle protocols
+- `CircularDependencyError`, `DuplicateBindingError`, `ProviderError`,
+  `UnboundResourceError` - dependency injection errors
 
 **Throttling:**
 
@@ -2699,17 +2861,23 @@ pip install "weakincentives[wink]"
 ```bash
 # Start the debug UI server
 wink debug <snapshot_path> [options]
+
+# Access bundled documentation
+wink docs --guide       # Print WINK_GUIDE.md
+wink docs --reference   # Print llms.md (API reference)
+wink docs --specs       # Print all spec files concatenated
+wink docs --changelog   # Print CHANGELOG.md
 ```
 
-**Options:**
+**Debug options:**
 
 | Option | Default | Description | | ------------------- | ----------- |
-------------------------------------------- | | `--host` | `127.0.0.1` | Host
+-------------------------------------- | | `--host` | `127.0.0.1` | Host
 interface to bind | | `--port` | `8000` | Port to bind | | `--open-browser` |
 `true` | Open browser automatically | | `--no-open-browser` | - | Disable
-auto-open | | `--log-level` | `INFO` | Log verbosity (DEBUG, INFO, WARNING,
-ERROR) | | `--json-logs` | `true` | Emit structured JSON logs | |
-`--no-json-logs` | - | Emit plain text logs |
+auto-open | | `--log-level` | `INFO` | Log verbosity (DEBUG, INFO, etc.) | |
+`--json-logs` | `true` | Emit structured JSON logs | | `--no-json-logs` | - |
+Emit plain text logs |
 
 **Exit codes:**
 
@@ -2726,6 +2894,8 @@ ______________________________________________________________________
 - **Sessions**: [specs/SESSIONS.md](specs/SESSIONS.md)
 - **MainLoop**: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)
 - **Evals**: [specs/EVALS.md](specs/EVALS.md)
+- **Health & Lifecycle**: [specs/HEALTH.md](specs/HEALTH.md)
+- **Resources**: [specs/RESOURCE_REGISTRY.md](specs/RESOURCE_REGISTRY.md)
 - **Workspace**: [specs/WORKSPACE.md](specs/WORKSPACE.md)
 - **Overrides & optimization**:
   [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)
