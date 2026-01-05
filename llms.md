@@ -116,12 +116,15 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `ToolValidationError`: Raised when tool parameters fail validation
       checks.
     - `WinkError`: Base class for all weakincentives exceptions.
+    - `TransactionError`: Base for transaction errors (renamed from
+      `ExecutionStateError`).
+    - `RestoreFailedError`: Failed to restore from snapshot.
     - `configure_logging`: Configure the root logger with sensible defaults.
     - `get_logger`: Return a `StructuredLogger` scoped to a name.
     - `parse_structured_output`: Parse a model response into the structured
       output type declared by the prompt.
-  - Modules: `adapters`, `cli`, `contrib`, `deadlines`, `debug`, `optimizers`,
-    `prompt`, `runtime`, `serde`, `types`.
+  - Modules: `adapters`, `cli`, `contrib`, `deadlines`, `debug`, `evals`,
+    `formal`, `optimizers`, `prompt`, `runtime`, `serde`, `types`.
 - `weakincentives.adapters`: Provider integrations, configuration, and
   throttling primitives.
   - Constants: `CLAUDE_AGENT_SDK_ADAPTER_NAME`, `LITELLM_ADAPTER_NAME`,
@@ -253,12 +256,36 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `MainLoopFailed`: Failure event published via bus.
   - Lifecycle management:
     - `Runnable`: Protocol for loops supporting graceful shutdown (`run()`,
-      `shutdown()`, `running`).
+      `shutdown()`, `running`, `heartbeat` properties).
     - `ShutdownCoordinator`: Singleton for SIGTERM/SIGINT handling and
       coordinated callback invocation.
     - `LoopGroup`: Runs multiple loops in dedicated threads with coordinated
-      shutdown.
+      shutdown, optional health endpoints, and watchdog monitoring.
+    - `Heartbeat`: Thread-safe timestamp tracker for worker liveness.
+    - `Watchdog`: Daemon thread that monitors heartbeats and terminates the
+      process via SIGKILL when workers stall.
+    - `HealthServer`: Minimal HTTP server for Kubernetes liveness
+      (`/health/live`) and readiness (`/health/ready`) probes.
     - `wait_until`: Helper for polling predicates with timeout.
+  - Transactions:
+    - `CompositeSnapshot`: Combines session + resource snapshots with JSON
+      serialization.
+    - `SnapshotMetadata`: Context for when/why a snapshot was taken.
+    - `PendingToolTracker`: Thread-safe tracker for hook-based tool execution.
+    - `PendingToolExecution`: Metadata for an in-flight native tool execution.
+    - `create_snapshot`: Capture session and resource state.
+    - `restore_snapshot`: Restore session and resource state.
+    - `tool_transaction`: Context manager for automatic rollback on exception.
+  - Mailbox:
+    - `Mailbox`: Protocol for point-to-point message delivery with visibility
+      timeout and acknowledgment.
+    - `Message`: Message wrapper with `acknowledge()`, `nack()`, `reply()`, and
+      `reply_mailbox()` methods.
+    - `InMemoryMailbox`: Single-process queues for testing and development.
+    - `MailboxResolver`: Protocol for backend-specific mailbox resolution.
+    - `ReplyNotAvailableError`: Raised when reply mailbox cannot be resolved.
+    - `MailboxError`, `MailboxConnectionError`, `MailboxFullError`,
+      `ReceiptHandleExpiredError`, `SerializationError`: Error types.
   - Session ledger:
     - `DataEvent`: Event carrying data.
     - `ReducerContext`: Context for reducers.
@@ -318,6 +345,64 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     `PodmanSandboxSection`.
   - `weakincentives.contrib.optimizers`: Concrete optimizers (currently
     `WorkspaceDigestOptimizer`).
+  - `weakincentives.contrib.mailbox`: Distributed mailbox implementations.
+    - `RedisMailbox`: Distributed queues using Redis lists and sorted sets for
+      visibility timeout management.
+    - `RedisMailboxFactory`: Factory for creating Redis-backed mailboxes.
+- `weakincentives.evals`: Evaluation framework for WINK agents.
+  - Core types:
+    - `Sample[InputT, ExpectedT]`: Single evaluation case with input and
+      expected output.
+    - `Dataset[InputT, ExpectedT]`: Immutable collection of samples with JSONL
+      loading.
+    - `Score`: Result from evaluating a single sample (0.0–1.0 with optional
+      metadata).
+    - `EvalResult`: Pairs a sample with its output and score.
+    - `EvalReport`: Aggregated metrics across all samples.
+    - `Evaluator`: Type alias for evaluation functions.
+    - `SessionEvaluator`: Evaluator that receives `SessionView` for inspection.
+  - Built-in evaluators:
+    - `exact_match`: Strict equality comparison.
+    - `contains`: Substring matching with `all_of`/`any_of` combinators.
+    - `llm_judge`: LLM-as-Judge with categorical ratings.
+  - Session-aware evaluators (behavioral assertions):
+    - `tool_called(name)`: Assert a specific tool was invoked.
+    - `tool_not_called(name)`: Assert a tool was never invoked.
+    - `tool_call_count(name, min_count, max_count)`: Assert tool call count
+      within bounds.
+    - `all_tools_succeeded()`: Assert no tool failures occurred.
+    - `token_usage_under(max_tokens)`: Assert token budget was respected.
+    - `slice_contains(T, predicate)`: Assert session slice contains matching
+      value.
+  - Combinators:
+    - `all_of`: All evaluators must pass (mean score).
+    - `any_of`: At least one must pass (max score).
+    - `adapt`: Convert standard evaluator to session-aware.
+  - Orchestration:
+    - `EvalLoop`: Mailbox-driven evaluation orchestration.
+    - `EvalRequest`: Request wrapper for eval samples.
+    - `submit_dataset`: Helper to submit dataset samples to a mailbox.
+    - `collect_results`: Helper to collect eval results from a mailbox.
+  - LLM-as-Judge:
+    - `JudgeOutput`: Structured output from judge prompt.
+    - `JudgeParams`: Parameters for judge prompt.
+    - `Rating`: Rating scale enum.
+    - `RATING_VALUES`, `PASSING_RATINGS`: Rating scale constants.
+    - `JUDGE_TEMPLATE`: Default judge prompt template.
+- `weakincentives.formal`: TLA+ formal specification support.
+  - `@formal_spec`: Decorator for embedding TLA+ metadata in Python classes.
+  - `StateVar`: Declares a TLA+ state variable with name and type.
+  - `Action`: Declares a TLA+ action with guard and state updates.
+  - `ActionParameter`: TLA+ action parameter with domain.
+  - `Invariant`: Declares a TLA+ invariant with ID, name, and predicate.
+  - `FormalSpec`: Container for all specification metadata with `to_tla()` and
+    `to_tla_config()` methods.
+  - Testing utilities (`weakincentives.formal.testing`):
+    - `extract_spec(cls)`: Extract TLA+ specification from decorated class.
+    - `write_spec(spec, output_dir)`: Write TLA+ and config files to disk.
+    - `model_check(spec)`: Run TLC model checker with 3-minute timeout.
+    - `extract_and_verify(cls, output_dir)`: Combined extraction and
+      verification.
 - `weakincentives.resources`: Resource injection with scoped lifecycles.
   - `Binding[T]`: Associates protocol type with provider function and scope.
   - `Scope`: Enum for instance lifetime (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
@@ -354,6 +439,9 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - `require`: Validate preconditions before invoking the wrapped callable.
   - `skip_invariant`: Mark a method so invariants are not evaluated around it.
 - `weakincentives.cli`: CLI entrypoints, notably the `wink` module.
+  - `wink docs`: Print bundled documentation (`--reference` for API reference,
+    `--guide` for user guide, `--changelog` for release history, `--specs` for
+    design specs).
 
 ## Agent-facing operational notes
 
@@ -839,11 +927,10 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
             ns="reviews", key="code-review", sections=[...],
         )
 
-    def create_prompt(self, request: ReviewRequest) -> Prompt[ReviewResult]:
-        return Prompt(self._template).bind(ReviewParams.from_request(request))
-
-    def create_session(self) -> Session:
-        return Session(bus=self._bus, tags={"loop": "code-review"})
+    def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
+        prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
+        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        return prompt, session
 ```
 
 ### Direct execution
