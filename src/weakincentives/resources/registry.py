@@ -105,6 +105,8 @@ class ResourceRegistry:
         for protocol, value in mapping.items():
             if value is None:
                 continue
+            if protocol in entries:
+                raise DuplicateBindingError(protocol)
             if isinstance(value, Binding):
                 entries[protocol] = value
             else:
@@ -189,18 +191,31 @@ class ResourceRegistry:
         """Return all bindings marked as eager."""
         return [b for b in self._bindings.values() if b.eager]
 
-    def _create_context(
+    def create_context(
         self,
         *,
         singleton_cache: dict[type[object], object] | None = None,
     ) -> ScopedResourceContext:
-        """Create a scoped resolution context (internal).
+        """Create a scoped resolution context.
+
+        Use this when you need manual control over the context lifecycle
+        (calling start() and close() yourself). For automatic lifecycle
+        management, use :meth:`open` instead.
 
         Args:
             singleton_cache: Shared cache for SINGLETON scope.
 
         Returns:
             Context that supports lazy resolution with scope awareness.
+
+        Example::
+
+            ctx = registry.create_context()
+            ctx.start()  # Initialize eager bindings
+            try:
+                service = ctx.get(MyService)
+            finally:
+                ctx.close()  # Clean up resources
         """
         from .context import ScopedResourceContext
 
@@ -226,7 +241,7 @@ class ResourceRegistry:
         Yields:
             Started ScopedResourceContext for resolving resources.
         """
-        ctx = self._create_context()
+        ctx = self.create_context()
         ctx.start()
         try:
             yield ctx

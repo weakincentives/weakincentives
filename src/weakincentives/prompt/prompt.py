@@ -515,7 +515,7 @@ class Prompt[OutputT]:
             raise RuntimeError("Prompt context already entered")
 
         collected = self._collected_resources()
-        self._resource_context = collected._create_context()  # pyright: ignore[reportPrivateUsage]
+        self._resource_context = collected.create_context()
         self._resource_context.start()
         return self
 

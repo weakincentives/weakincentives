@@ -146,7 +146,7 @@ class TestBinding:
         config = ConcreteConfig(value=42)
         registry = ResourceRegistry.build({Config: config})
 
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         # Before start, nothing in cache
         assert Config not in ctx.singleton_cache
 
@@ -196,6 +196,30 @@ class TestResourceRegistry:
         )
         with pytest.raises(DuplicateBindingError) as exc:
             base.merge(override, strict=True)
+        assert exc.value.protocol is Config
+
+    def test_build_raises_on_duplicate_from_custom_mapping(self) -> None:
+        """build() raises DuplicateBindingError if mapping yields same key twice."""
+        from collections.abc import Iterator, Mapping
+
+        class DuplicateKeyMapping(Mapping[type[object], object]):
+            """Custom Mapping that yields same key twice during iteration."""
+
+            def __getitem__(self, key: type[object]) -> object:
+                if key is Config:
+                    return ConcreteConfig()
+                raise KeyError(key)
+
+            def __len__(self) -> int:
+                return 1
+
+            def __iter__(self) -> Iterator[type[object]]:
+                # Yield Config twice to trigger duplicate detection
+                yield Config
+                yield Config
+
+        with pytest.raises(DuplicateBindingError) as exc:
+            ResourceRegistry.build(DuplicateKeyMapping())
         assert exc.value.protocol is Config
 
     def test_binding_for(self) -> None:
@@ -383,7 +407,7 @@ class TestScopedResourceContext:
             return ConcreteConfig()
 
         registry = ResourceRegistry.build({Config: Binding(Config, make_config)})
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         assert constructed == []
         _ = ctx.get(Config)
@@ -398,7 +422,7 @@ class TestScopedResourceContext:
             return ConcreteConfig()
 
         registry = ResourceRegistry.build({Config: Binding(Config, make_config)})
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         c1 = ctx.get(Config)
         c2 = ctx.get(Config)
@@ -409,7 +433,7 @@ class TestScopedResourceContext:
         """Context.get() returns pre-constructed instances from registry."""
         config = ConcreteConfig(value=99)
         registry = ResourceRegistry.build({Config: config})
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         # Should return the pre-constructed instance directly
         result = ctx.get(Config)
@@ -425,27 +449,27 @@ class TestScopedResourceContext:
                 ),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         http = ctx.get(HTTPClient)
         assert http.config.value == 99
 
     def test_get_unbound_raises(self) -> None:
         registry = ResourceRegistry.build({})
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         with pytest.raises(UnboundResourceError) as exc:
             ctx.get(Config)
         assert exc.value.protocol is Config
 
     def test_get_optional_returns_none(self) -> None:
         registry = ResourceRegistry.build({})
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         assert ctx.get_optional(Config) is None
 
     def test_get_optional_returns_value(self) -> None:
         registry = ResourceRegistry.build(
             {Config: Binding(Config, lambda r: ConcreteConfig())}
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         assert ctx.get_optional(Config) is not None
 
     def test_circular_dependency_raises(self) -> None:
@@ -463,7 +487,7 @@ class TestScopedResourceContext:
                 B: Binding(B, lambda r: B(a=r.get(A))),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         with pytest.raises(CircularDependencyError) as exc:
             ctx.get(A)
         assert A in exc.value.cycle
@@ -474,7 +498,7 @@ class TestScopedResourceContext:
             raise ValueError("Bad config")
 
         registry = ResourceRegistry.build({Config: Binding(Config, failing_provider)})
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         with pytest.raises(ProviderError) as exc:
             ctx.get(Config)
         assert exc.value.protocol is Config
@@ -493,7 +517,7 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         resource = ctx.get(PostConstructResource)
         assert resource.initialized is True
 
@@ -505,7 +529,7 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         with pytest.raises(ProviderError) as exc:
             ctx.get(FailingPostConstruct)
         assert "Initialization failed" in str(exc.value.cause)
@@ -525,7 +549,7 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         with pytest.raises(ProviderError):
             ctx.get(CloseableFailingPostConstruct)
         assert len(instances) == 1
@@ -539,7 +563,7 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         resource = ctx.get(CloseableResource)
         assert resource.closed is False
         ctx.close()
@@ -566,7 +590,7 @@ class TestLifecycle:
                 ResourceB: Binding(ResourceB, lambda r: ResourceB(a=r.get(ResourceA))),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         _ = ctx.get(ResourceB)  # Constructs A, then B
         ctx.close()
         # B was instantiated after A, so B closes first
@@ -582,7 +606,7 @@ class TestLifecycle:
         registry = ResourceRegistry.build(
             {Config: Binding(Config, make_config, eager=True)}
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         assert constructed == []
         ctx.start()
         assert constructed == ["config"]
@@ -601,7 +625,7 @@ class TestLifecycle:
         registry = ResourceRegistry.build(
             {FailingClose: Binding(FailingClose, lambda r: FailingClose())}
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         with pytest.raises(ProviderError) as exc:
             ctx.get(FailingClose)
         assert "post_construct failed" in str(exc.value.cause)
@@ -630,7 +654,7 @@ class TestLifecycle:
                 ),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         _ = ctx.get(NonCloseableResource)
         closeable = ctx.get(CloseableResource)
 
@@ -660,7 +684,7 @@ class TestLifecycle:
                 ),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         good = ctx.get(GoodResource)
         _ = ctx.get(FailingCloseResource)
 
@@ -685,7 +709,7 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         # Should not raise despite close() failure
         with ctx.tool_scope() as r:
@@ -710,7 +734,7 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         n1 = ctx.get(Numbered)
         n2 = ctx.get(Numbered)
         n3 = ctx.get(Numbered)
@@ -729,7 +753,7 @@ class TestScopeBehavior:
         registry = ResourceRegistry.build(
             {Config: Binding(Config, make_config, scope=Scope.SINGLETON)}
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         with ctx.tool_scope() as r1:
             c1 = r1.get(Config)
@@ -754,7 +778,7 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         with ctx.tool_scope() as r1:
             t1 = r1.get(Tracer)
@@ -777,7 +801,7 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         with ctx.tool_scope() as r:
             resource = r.get(CloseableResource)
@@ -799,7 +823,7 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         # First scope
         with ctx.tool_scope() as r:
@@ -833,7 +857,7 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         with ctx.tool_scope() as outer:
             t_outer = outer.get(NestedTracer)
@@ -889,7 +913,7 @@ class TestScopeBehavior:
                 ),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         with ctx.tool_scope() as outer:
             t_outer = outer.get(ScopedTracer)
@@ -955,7 +979,7 @@ class TestIntegration:
                 Service: Binding(Service, lambda r: ConcreteService(r.get(HTTPClient))),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         service = ctx.get(Service)
         assert service.http.config.value == 100
 
@@ -991,7 +1015,7 @@ class TestIntegration:
                 LevelA: Binding(LevelA, lambda r: LevelA(b=r.get(LevelB))),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         a = ctx.get(LevelA)
         assert a.b.c.d.e.value == 42
 
@@ -1017,7 +1041,7 @@ class TestIntegration:
                 DeepC: Binding(DeepC, lambda r: DeepC(a=r.get(DeepA))),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         with pytest.raises(CircularDependencyError) as exc:
             ctx.get(DeepA)
         # Cycle should include all three types
@@ -1061,7 +1085,7 @@ class TestIntegration:
                 ),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         # First tool scope
         with ctx.tool_scope() as r1:
@@ -1092,7 +1116,7 @@ class TestIntegration:
                 ),
             }
         )
-        ctx = registry._create_context()
+        ctx = registry.create_context()
 
         configs = []
         request_ids = []
@@ -1118,7 +1142,7 @@ class TestIntegration:
             }
         )
 
-        ctx = registry._create_context()
+        ctx = registry.create_context()
         ctx.start()
         try:
             resource = ctx.get(CloseableResource)

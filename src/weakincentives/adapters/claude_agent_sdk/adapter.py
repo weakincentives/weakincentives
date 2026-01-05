@@ -246,18 +246,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Register Notification reducer if not already registered
         session[Notification].register(Notification, append_all)
 
-        # Get filesystem from workspace section if present, otherwise create one
-        # from the working directory. This ensures MCP-bridged tools operate on
-        # the same filesystem as the SDK's native tools.
-        filesystem = prompt.filesystem()
-        if filesystem is None:
+        # Get filesystem from workspace section if present. WorkspaceSection
+        # contributes the filesystem via its resources() method, so we only need
+        # to create and bind a fallback when no workspace section exists.
+        if prompt.filesystem() is None:
             workspace_root = self._client_config.cwd or str(Path.cwd())
             filesystem = HostFilesystem(_root=workspace_root)
-
-        # Bind workspace resources to prompt for lifecycle management.
-        # Both bridged MCP tools and native SDK tools will use this for rollback.
-        # User resources should be pre-bound via prompt.bind() before evaluate().
-        prompt = prompt.bind(resources={Filesystem: filesystem})
+            prompt = prompt.bind(resources={Filesystem: filesystem})
 
         # Enter prompt context for resource lifecycle
         with prompt:
