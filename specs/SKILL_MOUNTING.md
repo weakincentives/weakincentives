@@ -29,7 +29,7 @@ This feature is considered complete when:
    `build_claude_agent_adapter()` function uses `SkillConfig` to mount all skills
    from the demo directory.
 
-2. **Two example skills available**: The `demo-skills/` directory contains two
+1. **Two example skills available**: The `demo-skills/` directory contains two
    working skills that demonstrate the pattern:
 
    ```
@@ -130,6 +130,7 @@ python code_reviewer_example.py --claude-agent
 ```
 
 Expected behavior:
+
 - Skills are copied to `{ephemeral_home}/.claude/skills/`
 - Claude Code discovers both skills natively
 - Review responses incorporate guidance from mounted skills
@@ -208,13 +209,13 @@ class IsolationConfig:
 Claude Code discovers skills in the following order (first match wins):
 
 1. `.claude/skills/` in the current working directory
-2. `~/.claude/skills/` in the user's home directory
+1. `~/.claude/skills/` in the user's home directory
 
 When `IsolationConfig.skills` is set, WINK:
 
 1. Creates `{ephemeral_home}/.claude/skills/` during `EphemeralHome` setup
-2. Copies each enabled `SkillMount` into the skills directory
-3. Claude Code discovers them via path #2 (redirected `HOME`)
+1. Copies each enabled `SkillMount` into the skills directory
+1. Claude Code discovers them via path #2 (redirected `HOME`)
 
 ```mermaid
 sequenceDiagram
@@ -530,9 +531,13 @@ def skill_file(tmp_path: Path) -> Path:
 ## Future Extensions
 
 - **Skill registries**: Load skills from remote registries (PyPI, npm, custom).
+
 - **Skill versioning**: Pin skill versions for reproducible agent behavior.
+
 - **Skill composition**: Define skill dependencies and load order.
+
 - **Runtime skill injection**: Add skills to running sessions via events.
+
 - **PromptOverridesStore integration**: Skills are a form of prompt customization.
   The override system could manage skill selection per tag:
 

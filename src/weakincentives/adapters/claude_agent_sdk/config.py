@@ -39,8 +39,9 @@ class ClaudeAgentSDKClientConfig:
     Attributes:
         permission_mode: Tool permission handling mode. Defaults to
             ``"bypassPermissions"`` for programmatic access.
-        cwd: Working directory for SDK operations. None uses the current
-            working directory.
+        cwd: Working directory for SDK operations. When None and no workspace
+            section is present, an empty temporary folder is created. This
+            prevents agents from inheriting the host's current working directory.
         max_turns: Maximum number of conversation turns. None means unlimited.
         max_budget_usd: Maximum budget in USD for the session. None means
             unlimited budget. When set, the SDK will stop execution if the
