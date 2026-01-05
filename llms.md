@@ -253,11 +253,16 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `MainLoopFailed`: Failure event published via bus.
   - Lifecycle management:
     - `Runnable`: Protocol for loops supporting graceful shutdown (`run()`,
-      `shutdown()`, `running`).
+      `shutdown()`, `running`, `heartbeat` properties).
     - `ShutdownCoordinator`: Singleton for SIGTERM/SIGINT handling and
       coordinated callback invocation.
     - `LoopGroup`: Runs multiple loops in dedicated threads with coordinated
-      shutdown.
+      shutdown, optional health endpoints, and watchdog monitoring.
+    - `Heartbeat`: Thread-safe timestamp tracker for worker liveness.
+    - `Watchdog`: Daemon thread monitoring heartbeats that terminates the
+      process via SIGKILL when workers stall.
+    - `HealthServer`: Minimal HTTP server for Kubernetes liveness
+      (`/health/live`) and readiness (`/health/ready`) probes.
     - `wait_until`: Helper for polling predicates with timeout.
   - Session ledger:
     - `DataEvent`: Event carrying data.
@@ -292,6 +297,15 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `ClearSlice[T]`: System event for clearing a slice.
     - `MemorySlice` / `MemorySliceView`: In-memory tuple-backed storage.
     - `JsonlSlice` / `JsonlSliceView`: JSONL file-backed persistent storage.
+  - Transactions (`weakincentives.runtime.transactions`):
+    - `CompositeSnapshot`: Combines session + resource snapshots with JSON
+      serialization.
+    - `create_snapshot()`: Capture session and resource state.
+    - `restore_snapshot()`: Restore session and resource state.
+    - `tool_transaction()`: Context manager for automatic rollback on exception.
+    - `PendingToolTracker`: Thread-safe tracker for hook-based tool execution.
+    - `SnapshotMetadata`: Context for when/why a snapshot was taken.
+    - `TransactionError`: Base error for transaction operations.
 - `weakincentives.optimizers`: Prompt optimization algorithms and utilities.
   - Protocol and base classes:
     - `PromptOptimizer`: Protocol for prompt optimization algorithms.
@@ -311,6 +325,48 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `OptimizationStarted`: Event emitted when optimizer begins work.
     - `OptimizationCompleted`: Event emitted on successful completion.
     - `OptimizationFailed`: Event emitted when optimization raises exception.
+- `weakincentives.mailbox`: Message queue abstraction for durable delivery.
+  - Protocols and types:
+    - `Mailbox[T]`: Protocol for message queues with SQS-compatible semantics.
+    - `Message[T]`: Wrapper with body, receipt handle, delivery count, and
+      `reply_to` field for routing responses.
+    - `MailboxResolver`: Protocol for backend-specific mailbox resolution.
+  - Implementations:
+    - `InMemoryMailbox`: Single-process queues for testing and development.
+    - `RedisMailbox`: Distributed queues using Redis lists and sorted sets.
+    - `MailboxFactory`: Protocol for creating mailbox instances.
+    - `RedisMailboxFactory`: Factory for Redis-backed mailboxes.
+  - Methods on `Message`:
+    - `acknowledge()`: Remove message from queue after processing.
+    - `reply_mailbox()`: Resolve the reply destination Mailbox.
+  - Methods on `Mailbox`:
+    - `send(body, reply_to=...)`: Send message with optional reply destination.
+    - `receive(visibility_timeout, wait_time_seconds)`: Receive with long poll.
+  - Errors: `ReplyMailboxUnavailableError`, `InvalidParameterError`.
+- `weakincentives.evals`: Evaluation framework for testing agent behavior.
+  - Core types:
+    - `Sample[InputT, ExpectedT]`: Single evaluation case with input and
+      expected output.
+    - `Dataset[InputT, ExpectedT]`: Immutable collection of samples with JSONL
+      loading via `Dataset.load()`.
+    - `Score`: Result from evaluating a single sample (0.0–1.0 with metadata).
+    - `EvalResult`: Pairs a sample with its output and score.
+    - `EvalReport`: Aggregated metrics across all samples with `accuracy`.
+    - `EvalLoop`: Orchestrates evaluation using a MainLoop instance.
+  - Evaluators:
+    - `exact_match`: Strict equality comparison.
+    - `contains`: Substring matching with `all_of`/`any_of` combinators.
+    - `llm_judge`: LLM-as-Judge with categorical ratings.
+  - Session evaluators (behavioral assertions):
+    - `SessionEvaluator`: Evaluator receiving `SessionView` for inspection.
+    - `adapt()`: Converts standard evaluators to session-aware evaluators.
+    - `tool_called(name)`: Assert a specific tool was invoked.
+    - `tool_not_called(name)`: Assert a tool was never invoked.
+    - `tool_call_count(name, count)`: Assert exact invocation count.
+    - `all_tools_succeeded()`: Assert no tool failures occurred.
+    - `token_usage_under(max_tokens)`: Assert token budget was respected.
+    - `slice_contains(T, predicate)`: Assert session slice contains match.
+    - `all_of(*evaluators)`: Combine evaluators with AND logic.
 - `weakincentives.contrib`: Optional, domain-specific tools and optimizers.
   - `weakincentives.contrib.tools`: Planning (`PlanningToolsSection`, `Plan`),
     VFS (`VfsToolsSection`, `VirtualFileSystem`, `HostMount`), workspace
@@ -320,9 +376,12 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     `WorkspaceDigestOptimizer`).
 - `weakincentives.resources`: Resource injection with scoped lifecycles.
   - `Binding[T]`: Associates protocol type with provider function and scope.
+    Use `Binding.instance()` for pre-constructed instances.
   - `Scope`: Enum for instance lifetime (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
-  - `ScopedResourceContext`: Resolution context with dependency graph walking.
-  - `ResourceRegistry`: Container for bindings with `of()` and `create_context()`.
+  - `ScopedResourceContext`: Resolution context with dependency graph walking
+    and cycle detection.
+  - `ResourceRegistry`: Container for bindings with `of()` factory,
+    `create_context()`, `merge(other, strict=True)`, and `conflicts(other)`.
   - `ResourceResolver`: Protocol for dependency resolution in providers.
   - `Provider[T]`: Type alias for factory functions accepting a resolver.
   - `Closeable`: Protocol for resources with `close()` method (auto-cleanup).
@@ -344,15 +403,24 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     arrays.
   - `ParseableDataclassT`: Type variable for parseable dataclasses.
 - `weakincentives.dbc`: Design-by-contract utilities.
-  - `dbc_active`: Return `True` when DbC checks should run.
-  - `dbc_enabled`: Context manager to temporarily enable DbC.
-  - `disable_dbc`: Force DbC enforcement off.
-  - `enable_dbc`: Force DbC enforcement on.
-  - `ensure`: Validate postconditions once the callable returns or raises.
-  - `invariant`: Enforce invariants before and after public method calls.
-  - `pure`: Validate that the wrapped callable behaves like a pure function.
-  - `require`: Validate preconditions before invoking the wrapped callable.
-  - `skip_invariant`: Mark a method so invariants are not evaluated around it.
+  - Contract decorators:
+    - `require`: Validate preconditions before invoking the wrapped callable.
+    - `ensure`: Validate postconditions once the callable returns or raises.
+    - `invariant`: Enforce invariants before and after public method calls.
+    - `pure`: Validate that the wrapped callable behaves like a pure function.
+    - `skip_invariant`: Mark a method so invariants are not evaluated around it.
+  - Runtime controls:
+    - `dbc_active`: Return `True` when DbC checks should run.
+    - `dbc_enabled`: Context manager to temporarily enable DbC.
+    - `disable_dbc`: Force DbC enforcement off.
+    - `enable_dbc`: Force DbC enforcement on.
+  - TLA+ formal specification embedding:
+    - `@formal_spec`: Decorator for embedding TLA+ metadata in Python classes.
+    - `StateVar`: Declares a TLA+ state variable with name and type.
+    - `Action`: Declares a TLA+ action with guard and state updates.
+    - `Invariant`: Declares a TLA+ invariant with ID, name, and predicate.
+    - `FormalSpec`: Container for all specification metadata.
+  - Pytest integration: `--extract-tla` extracts specs, `--check-tla` runs TLC.
 - `weakincentives.cli`: CLI entrypoints, notably the `wink` module.
 
 ## Agent-facing operational notes
@@ -507,7 +575,12 @@ Available in tool handlers via `context`:
 ### ToolResult fields
 
 ```python
+# Direct construction
 ToolResult(message="...", value=MyResult(...), success=True, exclude_value_from_context=False)
+
+# Convenience constructors
+ToolResult.success(value=MyResult(...), message="Done")  # success=True
+ToolResult.failure(message="Error occurred")             # success=False
 ```
 
 ### Additional components
@@ -833,11 +906,15 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
             ns="reviews", key="code-review", sections=[...],
         )
 
-    def create_prompt(self, request: ReviewRequest) -> Prompt[ReviewResult]:
-        return Prompt(self._template).bind(ReviewParams.from_request(request))
+    def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
+        """Prepare prompt and session for evaluation."""
+        prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
+        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        return prompt, session
 
-    def create_session(self) -> Session:
-        return Session(bus=self._bus, tags={"loop": "code-review"})
+    def finalize(self, prompt: Prompt[ReviewResult], session: Session) -> None:
+        """Optional hook called after successful evaluation for cleanup."""
+        pass
 ```
 
 ### Direct execution
@@ -872,6 +949,24 @@ bus.dispatch(MainLoopRequest(
 MainLoop automatically handles `VisibilityExpansionRequired` exceptions by
 accumulating visibility overrides and retrying evaluation. A shared
 `BudgetTracker` enforces limits cumulatively across retries.
+
+### Running multiple loops with LoopGroup
+
+```python
+from weakincentives.runtime import LoopGroup
+
+# Run multiple loops with coordinated shutdown
+group = LoopGroup(loops=[main_loop, eval_loop])
+group.run()  # Blocks until SIGTERM/SIGINT
+
+# With health endpoints and watchdog monitoring (for Kubernetes)
+group = LoopGroup(
+    loops=[main_loop],
+    health_port=8080,           # Exposes /health/live and /health/ready
+    watchdog_threshold=720.0,   # Terminate if worker stalls for 12 minutes
+)
+group.run()
+```
 
 ## Event Subscription
 
@@ -947,6 +1042,17 @@ copy = clone(my_dataclass)          # Deep clone
 ```
 
 ## Additional Patterns
+
+### Prompt resource lifecycle
+
+Prompts own their resource lifecycle via context manager protocol:
+
+```python
+# Resources are initialized on enter, cleaned up on exit
+with prompt:
+    result = adapter.evaluate(prompt, session=session)
+# Resources automatically cleaned up
+```
 
 ### Hierarchical sections
 
@@ -1053,6 +1159,12 @@ caller-provided resources override workspace defaults.
 ```bash
 pip install "weakincentives[wink]"
 wink --help
+
+# Access bundled documentation
+wink docs --reference   # Print llms.md (API reference)
+wink docs --guide       # Print WINK_GUIDE.md
+wink docs --specs       # Print all spec files
+wink docs --changelog   # Print CHANGELOG.md
 ```
 
 ## Example
