@@ -214,6 +214,20 @@ class TestEphemeralHomeSettingsGeneration:
             settings = json.loads(home.settings_path.read_text())
             assert settings["sandbox"]["readablePaths"] == ["/data/readonly"]
 
+    def test_env_section_disables_bedrock(self) -> None:
+        """Settings should include env section that explicitly disables Bedrock.
+
+        This is critical for hermetic isolation - the host may have Claude
+        configured for AWS Bedrock, and we must force Anthropic API usage.
+        """
+        config = IsolationConfig()
+        with EphemeralHome(config) as home:
+            settings = json.loads(home.settings_path.read_text())
+            assert "env" in settings
+            assert settings["env"]["CLAUDE_CODE_USE_BEDROCK"] == "0"
+            assert settings["env"]["CLAUDE_USE_BEDROCK"] == "0"
+            assert settings["env"]["DISABLE_AUTOUPDATER"] == "1"
+
 
 class TestEphemeralHomeEnv:
     def test_home_is_ephemeral_directory(self) -> None:
@@ -248,9 +262,13 @@ class TestEphemeralHomeEnv:
         with mock.patch.dict(os.environ, {}, clear=True):
             with EphemeralHome(config) as home:
                 env = home.get_env()
-                # Should have HOME but no ANTHROPIC_API_KEY
+                # Should have HOME and Bedrock-disabling vars but no ANTHROPIC_API_KEY
                 assert "HOME" in env
                 assert "ANTHROPIC_API_KEY" not in env
+                # Should always have Bedrock-disabling vars for hermetic isolation
+                assert env["CLAUDE_CODE_USE_BEDROCK"] == "0"
+                assert env["CLAUDE_USE_BEDROCK"] == "0"
+                assert env["DISABLE_AUTOUPDATER"] == "1"
 
     def test_custom_env_vars(self) -> None:
         config = IsolationConfig(env={"MY_CUSTOM_VAR": "custom_value"})
@@ -277,11 +295,15 @@ class TestEphemeralHomeEnv:
         ):
             with EphemeralHome(config) as home:
                 env = home.get_env()
-                # Should only have HOME and ANTHROPIC_API_KEY (from environ)
+                # Should only have HOME, ANTHROPIC_API_KEY (from environ),
+                # and Bedrock-disabling vars (always added for hermetic isolation)
                 assert "PATH" not in env
                 assert "MY_VAR" not in env
                 assert "HOME" in env
                 assert "ANTHROPIC_API_KEY" in env
+                assert env["CLAUDE_CODE_USE_BEDROCK"] == "0"
+                assert env["CLAUDE_USE_BEDROCK"] == "0"
+                assert env["DISABLE_AUTOUPDATER"] == "1"
 
     def test_include_host_env_true_copies_safe_vars(self) -> None:
         config = IsolationConfig(include_host_env=True)

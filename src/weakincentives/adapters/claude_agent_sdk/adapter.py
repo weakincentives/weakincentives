@@ -50,7 +50,7 @@ from ._hooks import (
 )
 from ._notifications import Notification
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
-from .isolation import EphemeralHome
+from .isolation import EphemeralHome, IsolationConfig
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
@@ -326,19 +326,21 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "model": self._model,
                 "tool_count": len(bridged_tools),
                 "has_structured_output": output_format is not None,
-                "isolated": self._client_config.isolation is not None,
+                "isolated": True,  # Always isolated by default
             },
         )
 
         start_time = _utcnow()
 
-        # Create ephemeral home for isolation if configured
-        ephemeral_home: EphemeralHome | None = None
-        if self._client_config.isolation:
-            ephemeral_home = EphemeralHome(
-                self._client_config.isolation,
-                workspace_path=effective_cwd,
-            )
+        # Always create ephemeral home for hermetic isolation.
+        # This prevents the SDK from reading the host's ~/.claude configuration,
+        # which may have alternative providers configured (e.g., AWS Bedrock).
+        # Use provided isolation config or a secure default.
+        isolation = self._client_config.isolation or IsolationConfig()
+        ephemeral_home = EphemeralHome(
+            isolation,
+            workspace_path=effective_cwd,
+        )
 
         try:
             messages = await self._run_sdk_query(
@@ -357,8 +359,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             raise normalize_sdk_error(error, prompt_name) from error
         finally:
             # Always clean up ephemeral home
-            if ephemeral_home:
-                ephemeral_home.cleanup()
+            ephemeral_home.cleanup()
 
         end_time = _utcnow()
         duration_ms = int((end_time - start_time).total_seconds() * 1000)
@@ -406,7 +407,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         output_format: dict[str, Any] | None,
         hook_context: HookContext,
         bridged_tools: tuple[Any, ...],
-        ephemeral_home: EphemeralHome | None = None,
+        ephemeral_home: EphemeralHome,
         effective_cwd: str | None = None,
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
@@ -442,12 +443,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         if self._disallowed_tools:
             options_kwargs["disallowed_tools"] = list(self._disallowed_tools)
 
-        # Apply isolation configuration if ephemeral home is provided
-        if ephemeral_home:
-            # Set environment variables including redirected HOME
-            options_kwargs["env"] = ephemeral_home.get_env()
-            # Prevent loading any external settings
-            options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
+        # Apply isolation configuration from ephemeral home
+        # Set environment variables including redirected HOME
+        options_kwargs["env"] = ephemeral_home.get_env()
+        # Prevent loading any external settings
+        options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
 
         # Apply model config parameters
         # Note: The Claude Agent SDK does not expose max_tokens or temperature
@@ -500,7 +500,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Use streaming mode (AsyncIterable) to enable hook support.
         # The SDK's query() function only initializes hooks when
         # is_streaming_mode=True, which requires an AsyncIterable prompt.
-        async def stream_prompt() -> Any:  # noqa: RUF029
+        async def stream_prompt() -> Any:  # noqa: RUF029 - async generator
             """Yield a single user message in streaming format."""
             yield {
                 "type": "user",
