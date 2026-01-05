@@ -2,17 +2,19 @@
 
 ## Purpose
 
-`MainLoop` standardizes agent workflow orchestration: receive request, build
-prompt, evaluate within prompt's resource context, handle visibility expansion,
-publish result. Implementations define only the domain-specific factories.
+`MainLoop` standardizes agent workflow orchestration: receive request from a
+mailbox, build prompt, evaluate within prompt's resource context, handle
+visibility expansion, reply with result. Implementations define only the
+domain-specific factories.
 
 ## Guiding Principles
 
-- **Event-driven**: Requests arrive via bus; results return the same way
+- **Mailbox-driven**: Requests arrive via mailbox; results return via `Message.reply()`
 - **Factory-based**: Subclasses own prompt and session construction
 - **Prompt-owned resources**: Resource lifecycle managed by prompt context
 - **Visibility-transparent**: Expansion exceptions retry automatically
 - **Type-safe**: Generic parameters ensure request-prompt alignment
+- **Durable**: At-least-once delivery with acknowledgement semantics
 
 ## Core Components
 
@@ -24,7 +26,7 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        bus: ControlDispatcher,
+        requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         config: MainLoopConfig | None = None,
     ) -> None: ...
 
@@ -33,106 +35,125 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
 
     def finalize(self, prompt: Prompt[OutputT], session: Session) -> None: ...
 
-    def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Session]: ...
+    def execute(
+        self,
+        request: UserRequestT,
+        *,
+        budget: Budget | None = None,
+        deadline: Deadline | None = None,
+        resources: ResourceRegistry | None = None,
+    ) -> tuple[PromptResponse[OutputT], Session]: ...
+
+    def run(
+        self,
+        *,
+        max_iterations: int | None = None,
+        visibility_timeout: int = 300,
+        wait_time_seconds: int = 20,
+    ) -> None: ...
+
+    def shutdown(self, *, timeout: float = 30.0) -> bool: ...
+
+    @property
+    def running(self) -> bool: ...
+
+    @property
+    def heartbeat(self) -> Heartbeat: ...
 ```
 
-### Events
+### MainLoopRequest
 
 ```python
 @FrozenDataclass()
 class MainLoopRequest(Generic[UserRequestT]):
+    """Request for MainLoop execution with optional constraints."""
+
     request: UserRequestT
-    budget: Budget | None = None       # Overrides config default
-    deadline: Deadline | None = None   # Overrides config default
+    """The user-defined request payload."""
+
+    budget: Budget | None = None
+    """Overrides config default budget."""
+
+    deadline: Deadline | None = None
+    """Overrides config default deadline."""
+
+    resources: ResourceRegistry | None = None
+    """Overrides config default resources."""
+
     request_id: UUID = field(default_factory=uuid4)
+    """Unique identifier for request correlation."""
+
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-@FrozenDataclass()
-class MainLoopCompleted(Generic[OutputT]):
-    request_id: UUID
-    response: PromptResponse[OutputT]
-    session_id: UUID
-    completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-
-
-@FrozenDataclass()
-class MainLoopFailed:
-    request_id: UUID
-    error: Exception
-    session_id: UUID | None
-    failed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """Timestamp when request was created."""
 ```
 
-### Configuration
+### MainLoopResult
+
+```python
+@dataclass(frozen=True, slots=True)
+class MainLoopResult(Generic[OutputT]):
+    """Response from MainLoop execution.
+
+    Consolidates success and failure into a single type. Check ``success``
+    property to determine outcome.
+    """
+
+    request_id: UUID
+    """Correlates with MainLoopRequest.request_id."""
+
+    output: OutputT | None = None
+    """Present on success. The parsed output from the prompt response."""
+
+    error: str | None = None
+    """Error message on failure."""
+
+    session_id: UUID | None = None
+    """Session that processed the request (if available)."""
+
+    completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """Timestamp when processing completed."""
+
+    @property
+    def success(self) -> bool:
+        """Return True if this result represents successful completion."""
+        return self.error is None
+```
+
+### MainLoopConfig
 
 ```python
 @FrozenDataclass()
 class MainLoopConfig:
+    """Configuration for MainLoop execution defaults."""
+
     deadline: Deadline | None = None
     budget: Budget | None = None
+    resources: ResourceRegistry | None = None
 ```
 
-Request-level `budget` and `deadline` override config defaults. A fresh
-`BudgetTracker` is created per execution.
+Request-level `budget`, `deadline`, and `resources` override config defaults.
+A fresh `BudgetTracker` is created per execution.
 
 ## Execution
 
 ```mermaid
 flowchart LR
-    Request --> Prepare --> EnterContext["Enter prompt context"]
-    EnterContext --> Evaluate
+    Receive["Receive from mailbox"] --> Prepare
+    Prepare --> Evaluate
     Evaluate --> Visibility["VisibilityExpansion"]
     Visibility -->|retry| Evaluate
-    Evaluate --> Finalize --> ExitContext["Exit prompt context"]
-    ExitContext --> Result
+    Evaluate --> Finalize --> Reply["msg.reply(result)"]
+    Reply --> Ack["Acknowledge message"]
 ```
 
-1. Receive `MainLoopRequest` via bus or direct `execute()` call
+1. Receive `Message[MainLoopRequest]` from requests mailbox
 1. Initialize prompt and session via `prepare(request)`
-1. Enter prompt context (`with prompt:`) to initialize resources
 1. Evaluate with adapter
 1. On `VisibilityExpansionRequired`: write overrides into session state, retry
-   step 4
+   step 3
 1. Call `finalize(prompt, session)` for post-processing
-1. Exit prompt context to cleanup resources
-1. Publish `MainLoopCompleted` or `MainLoopFailed`
-
-### Resource Lifecycle
-
-Resources are owned by the prompt and managed via context manager. The
-`execute()` method ensures proper lifecycle:
-
-```python
-def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Session]:
-    prompt, session = self.prepare(request)
-    budget_tracker = BudgetTracker(budget=self._effective_budget) if self._effective_budget else None
-
-    with prompt:  # Resources initialized here
-        while True:
-            try:
-                response = self._adapter.evaluate(
-                    prompt,
-                    session=session,
-                    deadline=self._effective_deadline,
-                    budget_tracker=budget_tracker,
-                )
-                self.finalize(prompt, session)
-                return response, session
-            except VisibilityExpansionRequired as e:
-                for path, visibility in e.requested_overrides.items():
-                    session[VisibilityOverrides].apply(
-                        SetVisibilityOverride(path=path, visibility=visibility)
-                    )
-    # Resources cleaned up on context exit
-```
-
-**Key points:**
-
-- Resources are initialized when entering the prompt context
-- The same resources persist across visibility expansion retries
-- Resources are cleaned up when exiting the context (success or failure)
-- Adapters access resources via `prompt.resources`
+1. Send `MainLoopResult` via `msg.reply(result)`
+1. Acknowledge the request message
 
 ### Visibility Handling
 
@@ -141,37 +162,70 @@ is not recreated. The `finalize` hook is called only on successful evaluation.
 
 ## Usage
 
-### Bus-Driven
+### Mailbox-Driven (Recommended)
 
 ```python
-loop = MyMainLoop(adapter=adapter, bus=bus)
+from weakincentives.runtime import Mailbox, MainLoopRequest, MainLoopResult
 
-# MainLoop subscribes to MainLoopRequest in __init__
+# Create request and reply mailboxes
+requests: Mailbox[MainLoopRequest[MyRequest], MainLoopResult[MyOutput]] = ...
+replies: Mailbox[MainLoopResult[MyOutput], None] = ...
 
-# With request-specific constraints
-bus.dispatch(MainLoopRequest(
-    request=MyRequest(...),
-    budget=Budget(max_total_tokens=10000),
-))
+loop = MyMainLoop(adapter=adapter, requests=requests)
+
+# Start worker in background thread
+worker = threading.Thread(target=loop.run, kwargs={"max_iterations": 100})
+worker.start()
+
+# Send request with reply_to
+request_id = uuid4()
+requests.send(
+    MainLoopRequest(
+        request=MyRequest(...),
+        budget=Budget(max_total_tokens=10000),
+        request_id=request_id,
+    ),
+    reply_to=replies,
+)
+
+# Read result from reply mailbox
+messages = replies.receive(wait_time_seconds=30)
+for msg in messages:
+    result: MainLoopResult[MyOutput] = msg.body
+    if result.success:
+        print(f"Output: {result.output}")
+    else:
+        print(f"Error: {result.error}")
+    msg.acknowledge()
+
+# Graceful shutdown
+loop.shutdown(timeout=30.0)
+worker.join()
 ```
 
-**Note:** `InProcessDispatcher` dispatches by `type(event)`, not generic alias.
-`MainLoopRequest[T]` is for static type checking; at runtime all events are
-`MainLoopRequest`. For multiple loop types on one bus, filter by request type
-in the handler or use separate buses.
+### Direct Execution
 
-### Direct
+For synchronous execution without mailbox routing:
 
 ```python
-response, session = loop.execute(MyRequest(...))
+loop = MyMainLoop(adapter=adapter, requests=requests)
+response, session = loop.execute(
+    MyRequest(...),
+    budget=Budget(max_total_tokens=10000),
+)
 ```
 
 ## Implementation
 
 ```python
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
-    def __init__(self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlDispatcher) -> None:
-        super().__init__(adapter=adapter, bus=bus)
+    def __init__(
+        self,
+        *,
+        adapter: ProviderAdapter[ReviewResult],
+        requests: Mailbox[MainLoopRequest[ReviewRequest], MainLoopResult[ReviewResult]],
+    ) -> None:
+        super().__init__(adapter=adapter, requests=requests)
         self._template = PromptTemplate[ReviewResult](
             ns="reviews",
             key="code-review",
@@ -180,7 +234,7 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 
     def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        session = Session(tags={"loop": "code-review"})
         return prompt, session
 
     def finalize(self, prompt: Prompt[ReviewResult], session: Session) -> None:
@@ -202,7 +256,7 @@ def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session
             GitClient: GitClient(repo=request.repo_path),
         }),
     )
-    session = Session(bus=self._bus)
+    session = Session()
     return prompt, session
 ```
 
@@ -211,7 +265,7 @@ def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session
 ```python
 def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
     prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-    session = Session(bus=self._bus)
+    session = Session()
     session[Plan].register(SetupPlan, plan_reducer)
     return prompt, session
 ```
@@ -233,19 +287,72 @@ def prepare(self, request: Request) -> tuple[Prompt[Output], Session]:
             ),
         ],
     )).bind(Params.from_request(request))
-    session = Session(bus=self._bus)
+    session = Session()
     return prompt, session
 ```
+
+## Worker Lifecycle
+
+### run()
+
+The `run()` method processes messages from the requests mailbox:
+
+```python
+loop.run(
+    max_iterations=100,       # Exit after N polling iterations (None = unlimited)
+    visibility_timeout=300,   # Seconds message stays invisible during processing
+    wait_time_seconds=20,     # Long poll duration
+)
+```
+
+The loop exits when:
+
+- `max_iterations` is reached
+- `shutdown()` is called
+- The requests mailbox is closed
+
+In-flight messages complete before exit. Unprocessed messages from the current
+batch are nacked for redelivery.
+
+### shutdown()
+
+Request graceful shutdown and wait for completion:
+
+```python
+stopped = loop.shutdown(timeout=30.0)  # Returns True if stopped cleanly
+```
+
+### Context Manager
+
+MainLoop supports context manager protocol for automatic cleanup:
+
+```python
+with MyMainLoop(adapter=adapter, requests=requests) as loop:
+    loop.run(max_iterations=10)
+# shutdown() called automatically on exit
+```
+
+### Heartbeat
+
+The loop exposes a `heartbeat` property for watchdog monitoring:
+
+```python
+loop.heartbeat.beat()           # Called internally after each message
+loop.heartbeat.last_beat_at     # Timestamp of last beat
+```
+
+The watchdog can detect stuck workers by monitoring heartbeat staleness.
 
 ## Error Handling
 
 | Exception | Behavior |
-| ----------------------------- | ---------------------------------- |
+| ----------------------------- | ------------------------------------------- |
 | `VisibilityExpansionRequired` | Retry with updated overrides |
-| All others | Publish `MainLoopFailed`, re-raise |
+| All others | Reply with error result, acknowledge message|
 
-Resource cleanup happens in both success and failure cases due to context
-manager semantics.
+On reply send failure, the message is nacked with exponential backoff for
+retry. If the receipt handle expires during processing (long-running request),
+the message is automatically requeued by the mailbox reaper.
 
 ## Code Reviewer Integration
 
@@ -276,7 +383,7 @@ config = MainLoopConfig(
 
 ## Limitations
 
-- Synchronous execution
+- Synchronous execution (single-threaded message processing)
 - One adapter per loop instance
 - No mid-execution cancellation
-- Events local to process
+- Message visibility timeout must exceed maximum expected execution time
