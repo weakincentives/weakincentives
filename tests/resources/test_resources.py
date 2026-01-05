@@ -144,9 +144,9 @@ class TestBinding:
     def test_binding_instance_resolved_on_start(self) -> None:
         """Instances from Binding.instance() are available immediately after start()."""
         config = ConcreteConfig(value=42)
-        registry = ResourceRegistry.of(Binding.instance(Config, config))
+        registry = ResourceRegistry.build({Config: config})
 
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         # Before start, nothing in cache
         assert Config not in ctx.singleton_cache
 
@@ -161,62 +161,85 @@ class TestBinding:
 
 class TestResourceRegistry:
     def test_empty_registry(self) -> None:
-        registry = ResourceRegistry.of()
+        registry = ResourceRegistry.build({})
         assert len(registry) == 0
         assert Config not in registry
 
     def test_single_binding(self) -> None:
-        registry = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
+        registry = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig())}
+        )
         assert len(registry) == 1
         assert Config in registry
 
     def test_multiple_bindings(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig()),
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))),
+        registry = ResourceRegistry.build(
+            {
+                Config: Binding(Config, lambda r: ConcreteConfig()),
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                ),
+            }
         )
         assert len(registry) == 2
         assert Config in registry
         assert HTTPClient in registry
 
     def test_duplicate_binding_raises(self) -> None:
+        # Note: With dict-based build(), duplicates are detected at dict level
+        # (last value wins) so we test with same key twice using update
+        base = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig())}
+        )
+        override = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig(value=99))}
+        )
         with pytest.raises(DuplicateBindingError) as exc:
-            ResourceRegistry.of(
-                Binding(Config, lambda r: ConcreteConfig()),
-                Binding(Config, lambda r: ConcreteConfig(value=99)),
-            )
+            base.merge(override, strict=True)
         assert exc.value.protocol is Config
 
     def test_binding_for(self) -> None:
         binding = Binding(Config, lambda r: ConcreteConfig())
-        registry = ResourceRegistry.of(binding)
+        registry = ResourceRegistry.build({Config: binding})
         assert registry.binding_for(Config) is binding
         assert registry.binding_for(HTTPClient) is None
 
     def test_merge(self) -> None:
-        base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig(value=1)))
-        override = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig(value=2))
+        base = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig(value=1))}
+        )
+        override = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig(value=2))}
         )
         merged = base.merge(override, strict=False)
 
-        ctx = merged.create_context()
-        config = ctx.get(Config)
-        assert config.value == 2
+        with merged.open() as ctx:
+            config = ctx.get(Config)
+            assert config.value == 2
 
     def test_merge_adds_new(self) -> None:
-        base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
-        additional = ResourceRegistry.of(
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config)))
+        base = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig())}
+        )
+        additional = ResourceRegistry.build(
+            {
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                )
+            }
         )
         merged = base.merge(additional)
         assert Config in merged
         assert HTTPClient in merged
 
     def test_iter(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig()),
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))),
+        registry = ResourceRegistry.build(
+            {
+                Config: Binding(Config, lambda r: ConcreteConfig()),
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                ),
+            }
         )
         protocols = set(registry)
         assert protocols == {Config, HTTPClient}
@@ -226,9 +249,8 @@ class TestResourceRegistry:
         registry = ResourceRegistry.build({Config: config})
         assert Config in registry
         assert len(registry) == 1
-        ctx = registry.create_context()
-        ctx.start()
-        assert ctx.get(Config) is config
+        with registry.open() as ctx:
+            assert ctx.get(Config) is config
 
     def test_build_filters_none_values(self) -> None:
         config = ConcreteConfig(value=42)
@@ -249,8 +271,8 @@ class TestResourceRegistry:
         """Test iteration yields both bindings and non-overlapping instances."""
         config = ConcreteConfig()
         # Create registry with a binding for Service and instance for Config
-        base = ResourceRegistry.of(
-            Binding(Service, lambda r: ConcreteService(r.get(HTTPClient)))
+        base = ResourceRegistry.build(
+            {Service: Binding(Service, lambda r: ConcreteService(r.get(HTTPClient)))}
         )
         instances = ResourceRegistry.build({Config: config})
         merged = base.merge(instances)
@@ -262,8 +284,8 @@ class TestResourceRegistry:
         """Test iteration doesn't yield the same protocol twice."""
         config = ConcreteConfig()
         # Create registry with a binding for Config and also an instance for Config
-        bindings = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig(value=1))
+        bindings = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig(value=1))}
         )
         instances = ResourceRegistry.build({Config: config})
         merged = bindings.merge(instances, strict=False)
@@ -273,9 +295,13 @@ class TestResourceRegistry:
         assert len(protocols) == 1
 
     def test_eager_bindings(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig(), eager=True),
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))),
+        registry = ResourceRegistry.build(
+            {
+                Config: Binding(Config, lambda r: ConcreteConfig(), eager=True),
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                ),
+            }
         )
         eager = registry.eager_bindings()
         assert len(eager) == 1
@@ -283,12 +309,18 @@ class TestResourceRegistry:
 
     def test_conflicts_returns_shared_protocols(self) -> None:
         """conflicts() returns protocols bound in both registries."""
-        base = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig()),
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))),
+        base = ResourceRegistry.build(
+            {
+                Config: Binding(Config, lambda r: ConcreteConfig()),
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                ),
+            }
         )
-        override = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig(value=2)),  # Conflicts
+        override = ResourceRegistry.build(
+            {
+                Config: Binding(Config, lambda r: ConcreteConfig(value=2)),  # Conflicts
+            }
         )
         conflicts = base.conflicts(override)
         assert conflicts == frozenset({Config})
@@ -296,18 +328,26 @@ class TestResourceRegistry:
 
     def test_conflicts_returns_empty_when_disjoint(self) -> None:
         """conflicts() returns empty set when no protocols overlap."""
-        base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
-        other = ResourceRegistry.of(
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config)))
+        base = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig())}
+        )
+        other = ResourceRegistry.build(
+            {
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                )
+            }
         )
         conflicts = base.conflicts(other)
         assert len(conflicts) == 0
 
     def test_merge_strict_raises_on_conflict(self) -> None:
         """merge(strict=True) raises DuplicateBindingError on conflict."""
-        base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
-        override = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig(value=2))
+        base = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig())}
+        )
+        override = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig(value=2))}
         )
         with pytest.raises(DuplicateBindingError) as exc:
             base.merge(override, strict=True)
@@ -315,9 +355,15 @@ class TestResourceRegistry:
 
     def test_merge_strict_allows_disjoint_registries(self) -> None:
         """merge(strict=True) succeeds when registries are disjoint."""
-        base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
-        other = ResourceRegistry.of(
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config)))
+        base = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig())}
+        )
+        other = ResourceRegistry.build(
+            {
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                )
+            }
         )
         # Should not raise
         merged = base.merge(other, strict=True)
@@ -336,8 +382,8 @@ class TestScopedResourceContext:
             constructed.append("config")
             return ConcreteConfig()
 
-        registry = ResourceRegistry.of(Binding(Config, make_config))
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build({Config: Binding(Config, make_config)})
+        ctx = registry._create_context()
 
         assert constructed == []
         _ = ctx.get(Config)
@@ -351,8 +397,8 @@ class TestScopedResourceContext:
             call_count += 1
             return ConcreteConfig()
 
-        registry = ResourceRegistry.of(Binding(Config, make_config))
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build({Config: Binding(Config, make_config)})
+        ctx = registry._create_context()
 
         c1 = ctx.get(Config)
         c2 = ctx.get(Config)
@@ -363,7 +409,7 @@ class TestScopedResourceContext:
         """Context.get() returns pre-constructed instances from registry."""
         config = ConcreteConfig(value=99)
         registry = ResourceRegistry.build({Config: config})
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         # Should return the pre-constructed instance directly
         result = ctx.get(Config)
@@ -371,29 +417,35 @@ class TestScopedResourceContext:
         assert result.value == 99
 
     def test_get_resolves_dependencies(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig(value=99)),
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))),
+        registry = ResourceRegistry.build(
+            {
+                Config: Binding(Config, lambda r: ConcreteConfig(value=99)),
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                ),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         http = ctx.get(HTTPClient)
         assert http.config.value == 99
 
     def test_get_unbound_raises(self) -> None:
-        registry = ResourceRegistry.of()
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build({})
+        ctx = registry._create_context()
         with pytest.raises(UnboundResourceError) as exc:
             ctx.get(Config)
         assert exc.value.protocol is Config
 
     def test_get_optional_returns_none(self) -> None:
-        registry = ResourceRegistry.of()
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build({})
+        ctx = registry._create_context()
         assert ctx.get_optional(Config) is None
 
     def test_get_optional_returns_value(self) -> None:
-        registry = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build(
+            {Config: Binding(Config, lambda r: ConcreteConfig())}
+        )
+        ctx = registry._create_context()
         assert ctx.get_optional(Config) is not None
 
     def test_circular_dependency_raises(self) -> None:
@@ -405,11 +457,13 @@ class TestScopedResourceContext:
         class B:
             a: object
 
-        registry = ResourceRegistry.of(
-            Binding(A, lambda r: A(b=r.get(B))),
-            Binding(B, lambda r: B(a=r.get(A))),
+        registry = ResourceRegistry.build(
+            {
+                A: Binding(A, lambda r: A(b=r.get(B))),
+                B: Binding(B, lambda r: B(a=r.get(A))),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         with pytest.raises(CircularDependencyError) as exc:
             ctx.get(A)
         assert A in exc.value.cycle
@@ -419,8 +473,8 @@ class TestScopedResourceContext:
         def failing_provider(r: ResourceResolver) -> ConcreteConfig:
             raise ValueError("Bad config")
 
-        registry = ResourceRegistry.of(Binding(Config, failing_provider))
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build({Config: Binding(Config, failing_provider)})
+        ctx = registry._create_context()
         with pytest.raises(ProviderError) as exc:
             ctx.get(Config)
         assert exc.value.protocol is Config
@@ -432,18 +486,26 @@ class TestScopedResourceContext:
 
 class TestLifecycle:
     def test_post_construct_called(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(PostConstructResource, lambda r: PostConstructResource())
+        registry = ResourceRegistry.build(
+            {
+                PostConstructResource: Binding(
+                    PostConstructResource, lambda r: PostConstructResource()
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         resource = ctx.get(PostConstructResource)
         assert resource.initialized is True
 
     def test_post_construct_failure_wrapped(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(FailingPostConstruct, lambda r: FailingPostConstruct())
+        registry = ResourceRegistry.build(
+            {
+                FailingPostConstruct: Binding(
+                    FailingPostConstruct, lambda r: FailingPostConstruct()
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         with pytest.raises(ProviderError) as exc:
             ctx.get(FailingPostConstruct)
         assert "Initialization failed" in str(exc.value.cause)
@@ -456,18 +518,28 @@ class TestLifecycle:
             instances.append(inst)
             return inst
 
-        registry = ResourceRegistry.of(Binding(CloseableFailingPostConstruct, make))
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build(
+            {
+                CloseableFailingPostConstruct: Binding(
+                    CloseableFailingPostConstruct, make
+                )
+            }
+        )
+        ctx = registry._create_context()
         with pytest.raises(ProviderError):
             ctx.get(CloseableFailingPostConstruct)
         assert len(instances) == 1
         assert instances[0].closed is True
 
     def test_close_disposes_singletons(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(CloseableResource, lambda r: CloseableResource())
+        registry = ResourceRegistry.build(
+            {
+                CloseableResource: Binding(
+                    CloseableResource, lambda r: CloseableResource()
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         resource = ctx.get(CloseableResource)
         assert resource.closed is False
         ctx.close()
@@ -488,11 +560,13 @@ class TestLifecycle:
             def close(self) -> None:
                 closed_order.append("B")
 
-        registry = ResourceRegistry.of(
-            Binding(ResourceA, lambda r: ResourceA()),
-            Binding(ResourceB, lambda r: ResourceB(a=r.get(ResourceA))),
+        registry = ResourceRegistry.build(
+            {
+                ResourceA: Binding(ResourceA, lambda r: ResourceA()),
+                ResourceB: Binding(ResourceB, lambda r: ResourceB(a=r.get(ResourceA))),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         _ = ctx.get(ResourceB)  # Constructs A, then B
         ctx.close()
         # B was instantiated after A, so B closes first
@@ -505,8 +579,10 @@ class TestLifecycle:
             constructed.append("config")
             return ConcreteConfig()
 
-        registry = ResourceRegistry.of(Binding(Config, make_config, eager=True))
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build(
+            {Config: Binding(Config, make_config, eager=True)}
+        )
+        ctx = registry._create_context()
         assert constructed == []
         ctx.start()
         assert constructed == ["config"]
@@ -522,8 +598,10 @@ class TestLifecycle:
             def close(self) -> None:
                 raise RuntimeError("close also failed")
 
-        registry = ResourceRegistry.of(Binding(FailingClose, lambda r: FailingClose()))
-        ctx = registry.create_context()
+        registry = ResourceRegistry.build(
+            {FailingClose: Binding(FailingClose, lambda r: FailingClose())}
+        )
+        ctx = registry._create_context()
         with pytest.raises(ProviderError) as exc:
             ctx.get(FailingClose)
         assert "post_construct failed" in str(exc.value.cause)
@@ -542,11 +620,17 @@ class TestLifecycle:
             def close(self) -> None:
                 self.closed = True
 
-        registry = ResourceRegistry.of(
-            Binding(NonCloseableResource, lambda r: NonCloseableResource()),
-            Binding(CloseableResource, lambda r: CloseableResource()),
+        registry = ResourceRegistry.build(
+            {
+                NonCloseableResource: Binding(
+                    NonCloseableResource, lambda r: NonCloseableResource()
+                ),
+                CloseableResource: Binding(
+                    CloseableResource, lambda r: CloseableResource()
+                ),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         _ = ctx.get(NonCloseableResource)
         closeable = ctx.get(CloseableResource)
 
@@ -568,11 +652,15 @@ class TestLifecycle:
             def close(self) -> None:
                 self.closed = True
 
-        registry = ResourceRegistry.of(
-            Binding(GoodResource, lambda r: GoodResource()),
-            Binding(FailingCloseResource, lambda r: FailingCloseResource()),
+        registry = ResourceRegistry.build(
+            {
+                GoodResource: Binding(GoodResource, lambda r: GoodResource()),
+                FailingCloseResource: Binding(
+                    FailingCloseResource, lambda r: FailingCloseResource()
+                ),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         good = ctx.get(GoodResource)
         _ = ctx.get(FailingCloseResource)
 
@@ -588,14 +676,16 @@ class TestLifecycle:
             def close(self) -> None:
                 raise RuntimeError("close failed")
 
-        registry = ResourceRegistry.of(
-            Binding(
-                FailingCloseTracer,
-                lambda r: FailingCloseTracer(),
-                scope=Scope.TOOL_CALL,
-            )
+        registry = ResourceRegistry.build(
+            {
+                FailingCloseTracer: Binding(
+                    FailingCloseTracer,
+                    lambda r: FailingCloseTracer(),
+                    scope=Scope.TOOL_CALL,
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         # Should not raise despite close() failure
         with ctx.tool_scope() as r:
@@ -613,12 +703,14 @@ class TestScopeBehavior:
         class Numbered:
             n: int
 
-        registry = ResourceRegistry.of(
-            Binding(
-                Numbered, lambda r: Numbered(n=next(counter)), scope=Scope.PROTOTYPE
-            )
+        registry = ResourceRegistry.build(
+            {
+                Numbered: Binding(
+                    Numbered, lambda r: Numbered(n=next(counter)), scope=Scope.PROTOTYPE
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         n1 = ctx.get(Numbered)
         n2 = ctx.get(Numbered)
         n3 = ctx.get(Numbered)
@@ -634,10 +726,10 @@ class TestScopeBehavior:
             call_count += 1
             return ConcreteConfig()
 
-        registry = ResourceRegistry.of(
-            Binding(Config, make_config, scope=Scope.SINGLETON)
+        registry = ResourceRegistry.build(
+            {Config: Binding(Config, make_config, scope=Scope.SINGLETON)}
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         with ctx.tool_scope() as r1:
             c1 = r1.get(Config)
@@ -655,10 +747,14 @@ class TestScopeBehavior:
         class Tracer:
             id: int
 
-        registry = ResourceRegistry.of(
-            Binding(Tracer, lambda r: Tracer(id=next(counter)), scope=Scope.TOOL_CALL)
+        registry = ResourceRegistry.build(
+            {
+                Tracer: Binding(
+                    Tracer, lambda r: Tracer(id=next(counter)), scope=Scope.TOOL_CALL
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         with ctx.tool_scope() as r1:
             t1 = r1.get(Tracer)
@@ -672,12 +768,16 @@ class TestScopeBehavior:
         assert t2.id == 1  # Fresh instance
 
     def test_tool_call_closed_on_scope_exit(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(
-                CloseableResource, lambda r: CloseableResource(), scope=Scope.TOOL_CALL
-            )
+        registry = ResourceRegistry.build(
+            {
+                CloseableResource: Binding(
+                    CloseableResource,
+                    lambda r: CloseableResource(),
+                    scope=Scope.TOOL_CALL,
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         with ctx.tool_scope() as r:
             resource = r.get(CloseableResource)
@@ -692,10 +792,14 @@ class TestScopeBehavior:
         class Tracer:
             id: int
 
-        registry = ResourceRegistry.of(
-            Binding(Tracer, lambda r: Tracer(id=next(counter)), scope=Scope.TOOL_CALL)
+        registry = ResourceRegistry.build(
+            {
+                Tracer: Binding(
+                    Tracer, lambda r: Tracer(id=next(counter)), scope=Scope.TOOL_CALL
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         # First scope
         with ctx.tool_scope() as r:
@@ -720,14 +824,16 @@ class TestScopeBehavior:
                 self.closed = True
                 close_order.append(self.id)
 
-        registry = ResourceRegistry.of(
-            Binding(
-                NestedTracer,
-                lambda r: NestedTracer(id=next(counter)),
-                scope=Scope.TOOL_CALL,
-            )
+        registry = ResourceRegistry.build(
+            {
+                NestedTracer: Binding(
+                    NestedTracer,
+                    lambda r: NestedTracer(id=next(counter)),
+                    scope=Scope.TOOL_CALL,
+                )
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         with ctx.tool_scope() as outer:
             t_outer = outer.get(NestedTracer)
@@ -771,15 +877,19 @@ class TestScopeBehavior:
             singleton_count += 1
             return SharedConfig(id=singleton_count)
 
-        registry = ResourceRegistry.of(
-            Binding(SharedConfig, make_config),
-            Binding(
-                ScopedTracer,
-                lambda r: ScopedTracer(config=r.get(SharedConfig), id=next(tool_count)),
-                scope=Scope.TOOL_CALL,
-            ),
+        registry = ResourceRegistry.build(
+            {
+                SharedConfig: Binding(SharedConfig, make_config),
+                ScopedTracer: Binding(
+                    ScopedTracer,
+                    lambda r: ScopedTracer(
+                        config=r.get(SharedConfig), id=next(tool_count)
+                    ),
+                    scope=Scope.TOOL_CALL,
+                ),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         with ctx.tool_scope() as outer:
             t_outer = outer.get(ScopedTracer)
@@ -836,12 +946,16 @@ class TestErrorMessages:
 
 class TestIntegration:
     def test_full_dependency_chain(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig(value=100)),
-            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))),
-            Binding(Service, lambda r: ConcreteService(r.get(HTTPClient))),
+        registry = ResourceRegistry.build(
+            {
+                Config: Binding(Config, lambda r: ConcreteConfig(value=100)),
+                HTTPClient: Binding(
+                    HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))
+                ),
+                Service: Binding(Service, lambda r: ConcreteService(r.get(HTTPClient))),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         service = ctx.get(Service)
         assert service.http.config.value == 100
 
@@ -868,14 +982,16 @@ class TestIntegration:
         class LevelA:
             b: LevelB
 
-        registry = ResourceRegistry.of(
-            Binding(LevelE, lambda r: LevelE(value=42)),
-            Binding(LevelD, lambda r: LevelD(e=r.get(LevelE))),
-            Binding(LevelC, lambda r: LevelC(d=r.get(LevelD))),
-            Binding(LevelB, lambda r: LevelB(c=r.get(LevelC))),
-            Binding(LevelA, lambda r: LevelA(b=r.get(LevelB))),
+        registry = ResourceRegistry.build(
+            {
+                LevelE: Binding(LevelE, lambda r: LevelE(value=42)),
+                LevelD: Binding(LevelD, lambda r: LevelD(e=r.get(LevelE))),
+                LevelC: Binding(LevelC, lambda r: LevelC(d=r.get(LevelD))),
+                LevelB: Binding(LevelB, lambda r: LevelB(c=r.get(LevelC))),
+                LevelA: Binding(LevelA, lambda r: LevelA(b=r.get(LevelB))),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         a = ctx.get(LevelA)
         assert a.b.c.d.e.value == 42
 
@@ -894,12 +1010,14 @@ class TestIntegration:
         class DeepC:
             a: object  # Cycle back to A
 
-        registry = ResourceRegistry.of(
-            Binding(DeepA, lambda r: DeepA(b=r.get(DeepB))),
-            Binding(DeepB, lambda r: DeepB(c=r.get(DeepC))),
-            Binding(DeepC, lambda r: DeepC(a=r.get(DeepA))),
+        registry = ResourceRegistry.build(
+            {
+                DeepA: Binding(DeepA, lambda r: DeepA(b=r.get(DeepB))),
+                DeepB: Binding(DeepB, lambda r: DeepB(c=r.get(DeepC))),
+                DeepC: Binding(DeepC, lambda r: DeepC(a=r.get(DeepA))),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         with pytest.raises(CircularDependencyError) as exc:
             ctx.get(DeepA)
         # Cycle should include all three types
@@ -925,23 +1043,25 @@ class TestIntegration:
             client: DeepClient
             id: int
 
-        registry = ResourceRegistry.of(
-            # SINGLETON at the root
-            Binding(DeepConfig, lambda r: DeepConfig(id=next(counter))),
-            # TOOL_CALL depends on SINGLETON
-            Binding(
-                DeepClient,
-                lambda r: DeepClient(config=r.get(DeepConfig), id=next(counter)),
-                scope=Scope.TOOL_CALL,
-            ),
-            # Another TOOL_CALL depends on first TOOL_CALL
-            Binding(
-                DeepService,
-                lambda r: DeepService(client=r.get(DeepClient), id=next(counter)),
-                scope=Scope.TOOL_CALL,
-            ),
+        registry = ResourceRegistry.build(
+            {
+                # SINGLETON at the root
+                DeepConfig: Binding(DeepConfig, lambda r: DeepConfig(id=next(counter))),
+                # TOOL_CALL depends on SINGLETON
+                DeepClient: Binding(
+                    DeepClient,
+                    lambda r: DeepClient(config=r.get(DeepConfig), id=next(counter)),
+                    scope=Scope.TOOL_CALL,
+                ),
+                # Another TOOL_CALL depends on first TOOL_CALL
+                DeepService: Binding(
+                    DeepService,
+                    lambda r: DeepService(client=r.get(DeepClient), id=next(counter)),
+                    scope=Scope.TOOL_CALL,
+                ),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         # First tool scope
         with ctx.tool_scope() as r1:
@@ -962,13 +1082,17 @@ class TestIntegration:
         class RequestId:
             id: int
 
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: ConcreteConfig()),  # SINGLETON
-            Binding(
-                RequestId, lambda r: RequestId(id=next(counter)), scope=Scope.TOOL_CALL
-            ),
+        registry = ResourceRegistry.build(
+            {
+                Config: Binding(Config, lambda r: ConcreteConfig()),  # SINGLETON
+                RequestId: Binding(
+                    RequestId,
+                    lambda r: RequestId(id=next(counter)),
+                    scope=Scope.TOOL_CALL,
+                ),
+            }
         )
-        ctx = registry.create_context()
+        ctx = registry._create_context()
 
         configs = []
         request_ids = []
@@ -986,11 +1110,15 @@ class TestIntegration:
         assert request_ids[2].id == 2
 
     def test_context_manager_pattern(self) -> None:
-        registry = ResourceRegistry.of(
-            Binding(CloseableResource, lambda r: CloseableResource())
+        registry = ResourceRegistry.build(
+            {
+                CloseableResource: Binding(
+                    CloseableResource, lambda r: CloseableResource()
+                )
+            }
         )
 
-        ctx = registry.create_context()
+        ctx = registry._create_context()
         ctx.start()
         try:
             resource = ctx.get(CloseableResource)
@@ -1002,8 +1130,12 @@ class TestIntegration:
 
     def test_registry_open_context_manager(self) -> None:
         """Test ResourceRegistry.open() context manager."""
-        registry = ResourceRegistry.of(
-            Binding(CloseableResource, lambda r: CloseableResource())
+        registry = ResourceRegistry.build(
+            {
+                CloseableResource: Binding(
+                    CloseableResource, lambda r: CloseableResource()
+                )
+            }
         )
 
         with registry.open() as ctx:
@@ -1014,8 +1146,12 @@ class TestIntegration:
 
     def test_registry_open_handles_exception(self) -> None:
         """Test that open() cleans up resources on exception."""
-        registry = ResourceRegistry.of(
-            Binding(CloseableResource, lambda r: CloseableResource())
+        registry = ResourceRegistry.build(
+            {
+                CloseableResource: Binding(
+                    CloseableResource, lambda r: CloseableResource()
+                )
+            }
         )
         resources: list[CloseableResource] = []
 
@@ -1036,7 +1172,9 @@ class TestIntegration:
             constructed.append("config")
             return ConcreteConfig()
 
-        registry = ResourceRegistry.of(Binding(Config, make_config, eager=True))
+        registry = ResourceRegistry.build(
+            {Config: Binding(Config, make_config, eager=True)}
+        )
 
         assert constructed == []
         with registry.open():

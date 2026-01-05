@@ -303,10 +303,8 @@ class TestPromptResourceLifecycle:
 
     def test_accessing_resources_outside_context_raises_runtime_error(self) -> None:
         """Accessing resources before entering context manager raises RuntimeError."""
-        from weakincentives.resources import ResourceRegistry
-
         template = PromptTemplate(ns="tests", key="resource-test")
-        prompt = Prompt(template).bind(resources=ResourceRegistry())
+        prompt = Prompt(template).bind(resources={})
 
         with pytest.raises(
             RuntimeError,
@@ -325,7 +323,6 @@ class TestPromptResourceLifecycle:
 
     def test_binding_resources_multiple_times_merges_them(self) -> None:
         """Binding resources multiple times should merge the registries."""
-        from weakincentives.resources import ResourceRegistry
 
         class Resource1:
             pass
@@ -338,8 +335,8 @@ class TestPromptResourceLifecycle:
 
         template = PromptTemplate(ns="tests", key="resource-test")
         prompt = Prompt(template)
-        prompt = prompt.bind(resources=ResourceRegistry.build({Resource1: res1}))
-        prompt = prompt.bind(resources=ResourceRegistry.build({Resource2: res2}))
+        prompt = prompt.bind(resources={Resource1: res1})
+        prompt = prompt.bind(resources={Resource2: res2})
 
         with prompt:
             assert prompt.resources.get(Resource1) is res1
@@ -347,10 +344,10 @@ class TestPromptResourceLifecycle:
 
     def test_resources_property_available_within_context(self) -> None:
         """Resources are available within the context manager."""
-        from weakincentives.resources import ResourceRegistry, ScopedResourceContext
+        from weakincentives.resources import ScopedResourceContext
 
         template = PromptTemplate(ns="tests", key="resource-test")
-        prompt = Prompt(template).bind(resources=ResourceRegistry())
+        prompt = Prompt(template).bind(resources={})
 
         with prompt:
             assert isinstance(prompt.resources, ScopedResourceContext)

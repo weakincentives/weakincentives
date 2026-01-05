@@ -575,12 +575,8 @@ class TestClaudeAgentWorkspaceSectionResources:
                 assert isinstance(registry, ResourceRegistry)
 
                 # Create a context to access the filesystem
-                context = registry.create_context()
-                context.start()
-                try:
+                with registry.open() as context:
                     fs = context.get(Filesystem)
                     assert fs is section._filesystem
-                finally:
-                    context.close()
             finally:
                 section.cleanup()

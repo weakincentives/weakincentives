@@ -25,7 +25,6 @@ from ...filesystem import Filesystem
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.protocols import PromptProtocol
-from ...resources import ResourceRegistry
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
@@ -258,8 +257,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Bind workspace resources to prompt for lifecycle management.
         # Both bridged MCP tools and native SDK tools will use this for rollback.
         # User resources should be pre-bound via prompt.bind() before evaluate().
-        workspace_resources = ResourceRegistry.build({Filesystem: filesystem})
-        prompt = prompt.bind(resources=workspace_resources)
+        prompt = prompt.bind(resources={Filesystem: filesystem})
 
         # Enter prompt context for resource lifecycle
         with prompt:

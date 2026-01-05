@@ -23,7 +23,6 @@ from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.errors import RestoreFailedError
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot, SnapshotRestoreError
@@ -39,9 +38,8 @@ from weakincentives.runtime.transactions import (
 
 def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
-    resources = ResourceRegistry.build({Filesystem: fs})
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="transactions-test"))
-    prompt = prompt.bind(resources=resources)
+    prompt = prompt.bind(resources={Filesystem: fs})
     prompt.__enter__()
     return prompt
 
@@ -318,11 +316,10 @@ class TestRestoreSnapshotErrors:
         session = Session(bus=bus)
 
         # Create prompt with failing filesystem
-        resources = ResourceRegistry.build({Filesystem: FailingFilesystem()})
         prompt: Prompt[object] = Prompt(
             PromptTemplate(ns="tests", key="failing-fs-test")
         )
-        prompt = prompt.bind(resources=resources)
+        prompt = prompt.bind(resources={Filesystem: FailingFilesystem()})
         prompt.__enter__()
 
         snapshot = create_snapshot(session, prompt.resources, tag="test")
@@ -536,11 +533,10 @@ class TestRestoreSnapshotEdgeCases:
                 self.value = "original"
 
         resource = SimpleResource()
-        resources = ResourceRegistry.build({SimpleResource: resource})
         prompt: Prompt[object] = Prompt(
             PromptTemplate(ns="tests", key="non-snapshotable-test")
         )
-        prompt = prompt.bind(resources=resources)
+        prompt = prompt.bind(resources={SimpleResource: resource})
         prompt.__enter__()
 
         # Create snapshot (won't include non-snapshotable resource)

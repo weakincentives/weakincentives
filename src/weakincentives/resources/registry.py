@@ -31,32 +31,31 @@ if TYPE_CHECKING:
 class ResourceRegistry:
     """Immutable configuration of resource bindings.
 
-    All resources are registered as bindings. Pre-constructed instances
-    are wrapped using ``Binding.instance()`` internally.
+    Resources are registered via ``build()``, which accepts a mapping of
+    protocol types to either instances or Binding objects.
 
     Example::
 
-        from weakincentives.resources import Binding, ResourceRegistry
+        from weakincentives.resources import Binding, ResourceRegistry, Scope
 
-        # Provider-based bindings (lazy construction)
-        registry = ResourceRegistry.of(
-            Binding(Config, lambda r: Config.from_env()),
-            Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-        )
-
-        # Pre-constructed instances (via Binding.instance)
-        registry = ResourceRegistry.of(
-            Binding.instance(Filesystem, InMemoryFilesystem()),
-            Binding.instance(BudgetTracker, tracker),
-        )
-
-        # Or use the convenience method
+        # Pre-constructed instances (common case)
         registry = ResourceRegistry.build({
             Filesystem: InMemoryFilesystem(),
             BudgetTracker: tracker,
         })
 
-        # Access via context manager (recommended)
+        # Lazy construction with dependencies
+        registry = ResourceRegistry.build({
+            Config: Binding(lambda r: Config.from_env()),
+            HTTPClient: Binding(lambda r: HTTPClient(r.get(Config).url)),
+        })
+
+        # Tool-call scoped resources (fresh per tool invocation)
+        registry = ResourceRegistry.build({
+            Tracer: Binding(lambda r: Tracer(), scope=Scope.TOOL_CALL),
+        })
+
+        # Access via context manager
         with registry.open() as ctx:
             http = ctx.get(HTTPClient)
     """
@@ -69,62 +68,48 @@ class ResourceRegistry:
     # === Factory Methods ===
 
     @staticmethod
-    def of(*bindings: Binding[object]) -> ResourceRegistry:
-        """Construct a registry from provider bindings.
+    def build(
+        mapping: Mapping[type[object], object | Binding[object]],
+    ) -> ResourceRegistry:
+        """Create a registry from a type-to-resource mapping.
 
-        This is the canonical way to create a registry. Use ``Binding.instance()``
-        to wrap pre-constructed instances.
+        Values can be either:
+        - Pre-constructed instances (wrapped automatically)
+        - Binding objects for lazy construction or custom scopes
 
         Args:
-            *bindings: Variable number of Binding instances.
+            mapping: Type-to-resource mapping. None values are filtered out.
 
         Returns:
-            New registry containing all bindings.
+            New registry with bindings for each entry.
 
         Raises:
             DuplicateBindingError: Same protocol bound twice.
 
         Example::
 
-            registry = ResourceRegistry.of(
-                Binding(Config, make_config),
-                Binding.instance(Filesystem, fs),
-            )
-        """
-        entries: dict[type[object], Binding[object]] = {}
-        for binding in bindings:
-            if binding.protocol in entries:
-                raise DuplicateBindingError(binding.protocol)
-            entries[binding.protocol] = binding
-        return ResourceRegistry(_bindings=MappingProxyType(entries))
-
-    @staticmethod
-    def build(mapping: Mapping[type[object], object]) -> ResourceRegistry:
-        """Convenience method to create a registry from pre-constructed instances.
-
-        Equivalent to calling ``of()`` with ``Binding.instance()`` for each entry.
-
-        Example::
-
-            # These are equivalent:
+            # Simple instances
             registry = ResourceRegistry.build({
                 Filesystem: fs,
                 BudgetTracker: tracker,
             })
 
-            registry = ResourceRegistry.of(
-                Binding.instance(Filesystem, fs),
-                Binding.instance(BudgetTracker, tracker),
-            )
-
-        Args:
-            mapping: Type-to-instance mapping. None values are filtered out.
-
-        Returns:
-            New registry with bindings for each instance.
+            # Mixed instances and bindings
+            registry = ResourceRegistry.build({
+                Config: config,  # Instance
+                HTTPClient: Binding(lambda r: HTTPClient(r.get(Config).url)),
+                Tracer: Binding(lambda r: Tracer(), scope=Scope.TOOL_CALL),
+            })
         """
-        bindings = [Binding.instance(k, v) for k, v in mapping.items() if v is not None]
-        return ResourceRegistry.of(*bindings)
+        entries: dict[type[object], Binding[object]] = {}
+        for protocol, value in mapping.items():
+            if value is None:
+                continue
+            if isinstance(value, Binding):
+                entries[protocol] = value
+            else:
+                entries[protocol] = Binding.instance(protocol, value)
+        return ResourceRegistry(_bindings=MappingProxyType(entries))
 
     # === Query Methods ===
 
@@ -204,30 +189,18 @@ class ResourceRegistry:
         """Return all bindings marked as eager."""
         return [b for b in self._bindings.values() if b.eager]
 
-    def create_context(
+    def _create_context(
         self,
         *,
         singleton_cache: dict[type[object], object] | None = None,
     ) -> ScopedResourceContext:
-        """Create a scoped resolution context.
-
-        The context resolves bindings lazily with caching per scope.
+        """Create a scoped resolution context (internal).
 
         Args:
-            singleton_cache: Shared cache for SINGLETON scope. If None,
-                creates a new cache (typical for session start).
+            singleton_cache: Shared cache for SINGLETON scope.
 
         Returns:
             Context that supports lazy resolution with scope awareness.
-
-        Example::
-
-            ctx = registry.create_context()
-            ctx.start()  # Instantiate eager singletons
-            try:
-                service = ctx.get(MyService)
-            finally:
-                ctx.close()  # Cleanup all resources
         """
         from .context import ScopedResourceContext
 
@@ -241,7 +214,6 @@ class ResourceRegistry:
         """Context manager for resource lifecycle.
 
         Creates a context, starts it, and ensures cleanup on exit.
-        This is the recommended way to use resources.
 
         Example::
 
@@ -254,7 +226,7 @@ class ResourceRegistry:
         Yields:
             Started ScopedResourceContext for resolving resources.
         """
-        ctx = self.create_context()
+        ctx = self._create_context()
         ctx.start()
         try:
             yield ctx

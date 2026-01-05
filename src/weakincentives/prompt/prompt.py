@@ -329,7 +329,7 @@ class Prompt[OutputT]:
     def bind(
         self,
         *params: SupportsDataclass,
-        resources: ResourceRegistry | None = None,
+        resources: Mapping[type[object], object] | None = None,
     ) -> Prompt[OutputT]:
         """Mutate this prompt's bound parameters; return self for chaining.
 
@@ -341,7 +341,15 @@ class Prompt[OutputT]:
         Args:
             *params: Dataclass instances to bind as section parameters.
             resources: Optional runtime resources to merge with template/section
-                resources. These take precedence over template-level resources.
+                resources. Pass a dict mapping protocol types to instances.
+                These take precedence over template-level resources.
+
+        Example::
+
+            prompt.bind(
+                MyParams(value=42),
+                resources={Filesystem: fs, BudgetTracker: tracker},
+            )
         """
         # Handle params binding
         if params:
@@ -366,11 +374,12 @@ class Prompt[OutputT]:
 
         # Handle resources binding
         if resources is not None:
+            new_registry = ResourceRegistry.build(resources)
             if self._bound_resources is None:
-                self._bound_resources = resources
+                self._bound_resources = new_registry
             else:
                 self._bound_resources = self._bound_resources.merge(
-                    resources, strict=False
+                    new_registry, strict=False
                 )
 
         return self
@@ -506,7 +515,7 @@ class Prompt[OutputT]:
             raise RuntimeError("Prompt context already entered")
 
         collected = self._collected_resources()
-        self._resource_context = collected.create_context()
+        self._resource_context = collected._create_context()  # pyright: ignore[reportPrivateUsage]
         self._resource_context.start()
         return self
 

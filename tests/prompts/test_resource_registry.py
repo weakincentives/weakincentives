@@ -55,9 +55,8 @@ class TestResourceRegistryFromMapping:
         """Test that build stores by the mapping key type."""
         resource = MockResource(value="test")
         registry = ResourceRegistry.build({MockResource: resource})
-        ctx = registry.create_context()
-        ctx.start()
-        assert ctx.get(MockResource) is resource
+        with registry.open() as ctx:
+            assert ctx.get(MockResource) is resource
 
     def test_build_skips_none_values(self) -> None:
         """Test that build filters out None values."""
@@ -68,10 +67,9 @@ class TestResourceRegistryFromMapping:
                 AnotherResource: None,
             }
         )
-        ctx = registry.create_context()
-        ctx.start()
-        assert ctx.get(MockResource) is resource
-        assert ctx.get_optional(AnotherResource) is None
+        with registry.open() as ctx:
+            assert ctx.get(MockResource) is resource
+            assert ctx.get_optional(AnotherResource) is None
 
 
 class TestResourceRegistryMerge:
@@ -86,10 +84,9 @@ class TestResourceRegistryMerge:
 
         merged = registry1.merge(registry2)
 
-        ctx = merged.create_context()
-        ctx.start()
-        assert ctx.get(MockResource) is resource1
-        assert ctx.get(AnotherResource) is resource2
+        with merged.open() as ctx:
+            assert ctx.get(MockResource) is resource1
+            assert ctx.get(AnotherResource) is resource2
 
     def test_merge_other_takes_precedence(self) -> None:
         """Test that 'other' registry values take precedence on conflicts."""
@@ -101,11 +98,10 @@ class TestResourceRegistryMerge:
         merged = registry1.merge(registry2, strict=False)
 
         # The 'other' registry (registry2) should win
-        ctx = merged.create_context()
-        ctx.start()
-        result = ctx.get(MockResource)
-        assert result is resource2
-        assert result.value == "second"
+        with merged.open() as ctx:
+            result = ctx.get(MockResource)
+            assert result is resource2
+            assert result.value == "second"
 
     def test_merge_does_not_mutate_original(self) -> None:
         """Test that merge returns a new registry without mutating originals."""
@@ -117,19 +113,16 @@ class TestResourceRegistryMerge:
         merged = registry1.merge(registry2)
 
         # Original registries should be unchanged
-        ctx1 = registry1.create_context()
-        ctx1.start()
-        assert ctx1.get_optional(AnotherResource) is None
+        with registry1.open() as ctx1:
+            assert ctx1.get_optional(AnotherResource) is None
 
-        ctx2 = registry2.create_context()
-        ctx2.start()
-        assert ctx2.get_optional(MockResource) is None
+        with registry2.open() as ctx2:
+            assert ctx2.get_optional(MockResource) is None
 
         # Merged should have both
-        ctx = merged.create_context()
-        ctx.start()
-        assert ctx.get(MockResource) is resource1
-        assert ctx.get(AnotherResource) is resource2
+        with merged.open() as ctx:
+            assert ctx.get(MockResource) is resource1
+            assert ctx.get(AnotherResource) is resource2
 
     def test_merge_with_empty_registry(self) -> None:
         """Test merging with an empty registry."""
@@ -139,15 +132,13 @@ class TestResourceRegistryMerge:
 
         # Merge non-empty with empty
         merged1 = registry.merge(empty)
-        ctx1 = merged1.create_context()
-        ctx1.start()
-        assert ctx1.get(MockResource) is resource
+        with merged1.open() as ctx1:
+            assert ctx1.get(MockResource) is resource
 
         # Merge empty with non-empty
         merged2 = empty.merge(registry)
-        ctx2 = merged2.create_context()
-        ctx2.start()
-        assert ctx2.get(MockResource) is resource
+        with merged2.open() as ctx2:
+            assert ctx2.get(MockResource) is resource
 
     def test_merge_both_empty(self) -> None:
         """Test merging two empty registries."""
@@ -156,6 +147,5 @@ class TestResourceRegistryMerge:
 
         merged = empty1.merge(empty2)
 
-        ctx = merged.create_context()
-        ctx.start()
-        assert ctx.get_optional(MockResource) is None
+        with merged.open() as ctx:
+            assert ctx.get_optional(MockResource) is None

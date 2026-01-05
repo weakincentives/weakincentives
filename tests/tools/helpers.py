@@ -30,7 +30,6 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
@@ -69,8 +68,7 @@ def build_tool_context(
     prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
     adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
     if filesystem is not None:
-        resources = ResourceRegistry.build({Filesystem: filesystem})
-        prompt = prompt.bind(resources=resources)
+        prompt = prompt.bind(resources={Filesystem: filesystem})
 
     # Enter prompt context for resource access
     prompt.__enter__()
