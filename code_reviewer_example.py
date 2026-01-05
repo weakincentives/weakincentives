@@ -529,7 +529,7 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     """Build the OpenAI adapter, checking for the required API key."""
     if "OPENAI_API_KEY" not in os.environ:
         raise SystemExit("Set OPENAI_API_KEY before running this example.")
-    model = os.getenv("OPENAI_MODEL", "gpt-5.1")
+    model = os.getenv("OPENAI_MODEL", "gpt-5.2")
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 

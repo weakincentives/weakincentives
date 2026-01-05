@@ -279,7 +279,7 @@ OPENAI_API_KEY=sk-... uv run python code_reviewer_example.py
 | Variable | Required | Default | Description |
 | ------------------------ | -------- | --------- | -------------- |
 | `OPENAI_API_KEY` | Yes | - | OpenAI API key |
-| `OPENAI_MODEL` | No | `gpt-5.1` | Model to use |
+| `OPENAI_MODEL` | No | `gpt-5.2` | Model to use |
 | `CODE_REVIEW_PROMPT_TAG` | No | `latest` | Overrides tag |
 
 ### REPL Commands

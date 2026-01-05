@@ -122,6 +122,7 @@ ______________________________________________________________________
    1. [Session evaluators](#84-session-evaluators)
    1. [Running evaluations](#85-running-evaluations)
    1. [Production deployment pattern](#86-production-deployment-pattern)
+   1. [Reply-to routing](#87-reply-to-routing)
 1. [Lifecycle Management](#9-lifecycle-management)
    1. [LoopGroup: running multiple loops](#91-loopgroup-running-multiple-loops)
    1. [ShutdownCoordinator: manual signal handling](#92-shutdowncoordinator-manual-signal-handling)
@@ -173,6 +174,7 @@ ______________________________________________________________________
    1. [CLI](#189-cli)
 1. [Appendix A: Coming from LangGraph or LangChain?](#appendix-a-coming-from-langgraph-or-langchain)
 1. [Appendix B: Coming from DSPy?](#appendix-b-coming-from-dspy)
+1. [Appendix C: Formal Verification with TLA+](#appendix-c-formal-verification-with-tla)
 
 ______________________________________________________________________
 
@@ -1922,6 +1924,80 @@ if report.pass_rate < 0.95:
 This is the control plane for safe model upgrades: verify behavior
 programmatically before promoting changes.
 
+### 8.7 Reply-to routing
+
+When workers need to send results to dynamic destinations (not a fixed result
+mailbox), use the `reply_to` pattern. The worker derives the response
+destination from the incoming message:
+
+```python
+from weakincentives.runtime import InMemoryMailbox, RegistryResolver
+
+# Setup: resolver maps identifiers to mailboxes
+client_responses = InMemoryMailbox(name="client-123")
+resolver = RegistryResolver({"client-123": client_responses})
+
+# Requests mailbox with reply resolver attached
+requests = InMemoryMailbox(name="requests", reply_resolver=resolver)
+
+# Client sends request with reply destination
+requests.send(
+    body=AnalysisRequest(query="Find all bugs"),
+    reply_to="client-123",  # Where to send the result
+)
+
+# Worker processes and replies
+for msg in requests.receive():
+    result = process(msg.body)
+    msg.reply(result)       # Resolves "client-123" → client_responses mailbox
+    msg.acknowledge()
+```
+
+**Eval run collection** is a natural fit for this pattern. All samples specify
+the same `reply_to`, and results collect into one mailbox regardless of which
+worker processes each sample:
+
+```python
+from weakincentives.runtime import RedisMailbox
+from weakincentives.contrib.mailbox import RedisMailboxFactory
+
+# Factory creates mailboxes on demand
+factory = RedisMailboxFactory(client=redis_client)
+resolver = CompositeResolver(registry={}, factory=factory)
+
+requests = RedisMailbox(name="eval-requests", reply_resolver=resolver)
+
+# Submit all samples with the same reply destination
+run_id = f"eval-run-{uuid4()}"
+for sample in dataset:
+    requests.send(
+        body=EvalRequest(sample=sample),
+        reply_to=run_id,  # All results go to same mailbox
+    )
+
+# Collect results from the run-specific mailbox
+results_mailbox = factory.create(run_id)
+collected = []
+while len(collected) < len(dataset):
+    for msg in results_mailbox.receive(wait_time_seconds=5):
+        collected.append(msg.body)
+        msg.acknowledge()
+```
+
+**Multiple replies** are also supported. Workers can send progress updates
+before the final result:
+
+```python
+for msg in requests.receive():
+    msg.reply(Progress(step=1, status="Analyzing..."))
+    msg.reply(Progress(step=2, status="Generating fix..."))
+    msg.reply(Complete(result=fix))
+    msg.acknowledge()
+```
+
+See `specs/MAILBOX_RESOLVER.md` for the full resolver protocol and advanced
+patterns like multi-tenant isolation.
+
 ______________________________________________________________________
 
 ## 9. Lifecycle Management
@@ -2493,6 +2569,11 @@ def render_template(template: str, params: dict) -> str:
 - Anywhere a comment would say "assumes X" or "requires Y"
 
 Read `specs/DBC.md` before modifying DbC-decorated modules.
+
+For safety-critical state machines (like the mailbox algorithms), WINK also
+supports **formal verification** with embedded TLA+ specifications. See
+[Appendix C: Formal Verification](#appendix-c-formal-verification-with-tla) for
+details.
 
 ### 15.3 Coverage and mutation testing
 
@@ -3247,3 +3328,174 @@ write and iterate on prompts yourself. If you've been frustrated by not knowing
 what DSPy is actually sending to the model, WINK's explicit approach may feel
 liberating. If you've relied heavily on DSPy's optimizers, you'll need to build
 or adopt optimization workflows separately.
+
+______________________________________________________________________
+
+## Appendix C: Formal Verification with TLA+
+
+WINK supports embedding TLA+ formal specifications directly in Python code
+using the `@formal_spec` decorator. This approach prevents specification drift
+by keeping specs co-located with implementation.
+
+### Why formal verification?
+
+For correctness-critical code like distributed message queues, testing alone
+isn't sufficient. The `RedisMailbox` implementation, for example, must maintain
+invariants like "each message exists in exactly one place" across all possible
+interleavings of concurrent operations.
+
+TLA+ model checking exhaustively explores these interleavings, catching subtle
+bugs that randomized testing might miss.
+
+### Quick example
+
+```python
+from weakincentives.formal import formal_spec, StateVar, Action, Invariant
+
+@formal_spec(
+    module="Counter",
+    state_vars=[
+        StateVar("count", "Nat", "Current count value"),
+    ],
+    actions=[
+        Action(
+            name="Increment",
+            preconditions=("count < MaxValue",),
+            updates={"count": "count + 1"},
+        ),
+        Action(
+            name="Decrement",
+            preconditions=("count > 0",),
+            updates={"count": "count - 1"},
+        ),
+    ],
+    invariants=[
+        Invariant("INV-1", "NonNegative", "count >= 0", "Count never goes negative"),
+        Invariant("INV-2", "BelowMax", "count <= MaxValue", "Count never exceeds max"),
+    ],
+    constants={"MaxValue": 10},
+    constraint="count <= 5",  # Limit state space exploration
+)
+class Counter:
+    """Simple counter with formal spec."""
+
+    def __init__(self):
+        self.count = 0
+
+    def increment(self):
+        if self.count < 10:
+            self.count += 1
+
+    def decrement(self):
+        if self.count > 0:
+            self.count -= 1
+```
+
+### Running verification
+
+```python
+# formal-tests/test_counter.py
+from pathlib import Path
+from weakincentives.formal.testing import extract_and_verify
+
+def test_counter_spec(tmp_path: Path):
+    """Extract and verify Counter TLA+ specification."""
+    spec, tla_file, cfg_file, result = extract_and_verify(
+        Counter,
+        output_dir=tmp_path,
+        model_check_enabled=True,
+        tlc_config={"workers": "auto", "cleanup": True},
+    )
+
+    assert spec.module == "Counter"
+    assert result.passed
+    assert result.states_generated > 0
+```
+
+Run with:
+
+```bash
+make verify-formal  # Runs TLC model checker
+```
+
+### Key concepts
+
+**State variables** declare the TLA+ state space:
+
+```python
+StateVar("queue", "Seq(Message)", "Pending messages")
+StateVar("inFlight", "[1..NumConsumers -> Seq(Message)]", "In-flight per consumer")
+```
+
+**Actions** define state transitions with preconditions and updates:
+
+```python
+Action(
+    name="Receive",
+    parameters=(ActionParameter("consumer", "1..NumConsumers"),),
+    preconditions=("queue /= <<>>",),
+    updates={
+        "inFlight": "Append(inFlight[consumer], Head(queue))",
+        "queue": "Tail(queue)",
+    },
+)
+```
+
+**Invariants** define safety properties that must always hold:
+
+```python
+Invariant("INV-1", "MessageExclusivity", "MessageInExactlyOnePlace(msg)")
+Invariant("INV-2", "NoLostMessages", "CountMessages() = InitialMessageCount")
+```
+
+### State space management
+
+The challenge with model checking is state space explosion. Strategies:
+
+1. **Small constants**: Use `MaxMessages: 2` not `100`
+1. **Tight constraints**: Add `constraint="now <= 2"` to bound exploration
+1. **Narrow domains**: Use `"0..2"` not `"0..100"` for parameters
+
+The RedisMailbox spec, for example, explores ~500K states in 60 seconds with
+carefully chosen bounds.
+
+### When to use formal verification
+
+Use `@formal_spec` for:
+
+- Distributed algorithms (message queues, consensus)
+- State machines with complex invariants
+- Concurrent data structures
+- Any code where "it works in testing" isn't enough
+
+Don't use it for:
+
+- Simple CRUD operations
+- Stateless transformations
+- Code where types + tests provide sufficient confidence
+
+### Testing utilities
+
+```python
+from weakincentives.formal.testing import (
+    extract_spec,      # Extract FormalSpec from decorated class
+    write_spec,        # Write .tla and .cfg files
+    model_check,       # Run TLC model checker
+    extract_and_verify # Combined extraction + verification
+)
+```
+
+### Installation
+
+TLC must be installed for model checking:
+
+```bash
+# macOS
+brew install tlaplus
+
+# Linux
+wget https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar
+```
+
+See `specs/FORMAL_VERIFICATION.md` for complete API documentation and advanced
+topics like modeling time, helper operators, and CI integration.

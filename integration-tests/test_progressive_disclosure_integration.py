@@ -53,7 +53,7 @@ pytestmark = [
 ]
 
 _MODEL_ENV_VAR = "OPENAI_TEST_MODEL"
-_DEFAULT_MODEL = "gpt-5.1"
+_DEFAULT_MODEL = "gpt-5.2"
 _PROMPT_NS = "integration/progressive-disclosure"
 
 # Maximum number of expansion requests expected for a two-level hierarchy

@@ -885,13 +885,13 @@ session.reset()                               # Clear all slices
 session.restore(snapshot)                     # Restore from snapshot
 ```
 
-### Legacy helpers (still available)
+### Reducer helpers
 
 ```python
-from weakincentives.runtime import append, replace_latest
+from weakincentives.runtime import append_all, replace_latest
 
-session = append(session, my_data)
-session = replace_latest(session, MyType, updated)
+# These are reducer functions, not session mutators
+# Use session[T].append() for direct mutations instead
 ```
 
 ### In tool handlers
@@ -1028,6 +1028,48 @@ tracker = BudgetTracker(budget=budget)
 tracker.record_cumulative("eval-1", usage)  # Record TokenUsage from response
 tracker.check()  # Raises BudgetExceededError if any limit breached
 ```
+
+## Mailbox (`weakincentives.runtime.mailbox`)
+
+Point-to-point message delivery with visibility timeout and acknowledgment:
+
+```python
+from weakincentives.runtime import InMemoryMailbox, Message
+
+mailbox: Mailbox[WorkRequest] = InMemoryMailbox()
+message_id = mailbox.send(WorkRequest(task="analyze"))
+
+# Receive with visibility timeout (message hidden from other consumers)
+messages = mailbox.receive(visibility_timeout=30, wait_time_seconds=5)
+for msg in messages:
+    process(msg.body)
+    msg.acknowledge()  # Remove from queue
+```
+
+### Reply-to routing
+
+Workers can send results to dynamic destinations derived from incoming messages:
+
+```python
+from weakincentives.runtime import InMemoryMailbox, RegistryResolver
+
+# Setup resolver mapping identifiers to mailboxes
+responses = InMemoryMailbox(name="client-responses")
+resolver = RegistryResolver({"client-123": responses})
+
+requests = InMemoryMailbox(name="requests", reply_resolver=resolver)
+
+# Client sends with reply destination
+requests.send(body=Request(...), reply_to="client-123")
+
+# Worker replies - resolver routes to correct mailbox
+for msg in requests.receive():
+    msg.reply(process(msg.body))  # Resolves "client-123" → responses mailbox
+    msg.acknowledge()
+```
+
+For dynamic mailbox creation (e.g., per-request reply queues), use
+`CompositeResolver` with a `MailboxFactory`. See `specs/MAILBOX_RESOLVER.md`.
 
 ## Serialization (`weakincentives.serde`)
 

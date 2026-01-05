@@ -242,7 +242,7 @@ class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         return prompt, self._session
 
 bus = InProcessDispatcher()
-adapter = OpenAIAdapter(model="gpt-5.1")
+adapter = OpenAIAdapter(model="gpt-5.2")
 loop = ReviewLoop(adapter, bus)
 
 response, session = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
