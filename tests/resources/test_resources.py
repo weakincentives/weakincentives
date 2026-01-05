@@ -146,7 +146,7 @@ class TestBinding:
         config = ConcreteConfig(value=42)
         registry = ResourceRegistry.build({Config: config})
 
-        ctx = registry.create_context()
+        ctx = registry._create_context()  # pyright: ignore[reportPrivateUsage]
         # Before start, nothing in cache
         assert Config not in ctx.singleton_cache
 
@@ -407,11 +407,11 @@ class TestScopedResourceContext:
             return ConcreteConfig()
 
         registry = ResourceRegistry.build({Config: Binding(Config, make_config)})
-        ctx = registry.create_context()
 
-        assert constructed == []
-        _ = ctx.get(Config)
-        assert constructed == ["config"]
+        with registry.open() as ctx:
+            assert constructed == []
+            _ = ctx.get(Config)
+            assert constructed == ["config"]
 
     def test_get_caches_singleton(self) -> None:
         call_count = 0
@@ -422,23 +422,23 @@ class TestScopedResourceContext:
             return ConcreteConfig()
 
         registry = ResourceRegistry.build({Config: Binding(Config, make_config)})
-        ctx = registry.create_context()
 
-        c1 = ctx.get(Config)
-        c2 = ctx.get(Config)
-        assert c1 is c2
-        assert call_count == 1
+        with registry.open() as ctx:
+            c1 = ctx.get(Config)
+            c2 = ctx.get(Config)
+            assert c1 is c2
+            assert call_count == 1
 
     def test_get_returns_preconstructed_instance(self) -> None:
         """Context.get() returns pre-constructed instances from registry."""
         config = ConcreteConfig(value=99)
         registry = ResourceRegistry.build({Config: config})
-        ctx = registry.create_context()
 
-        # Should return the pre-constructed instance directly
-        result = ctx.get(Config)
-        assert result is config
-        assert result.value == 99
+        with registry.open() as ctx:
+            # Should return the pre-constructed instance directly
+            result = ctx.get(Config)
+            assert result is config
+            assert result.value == 99
 
     def test_get_resolves_dependencies(self) -> None:
         registry = ResourceRegistry.build(
@@ -449,28 +449,28 @@ class TestScopedResourceContext:
                 ),
             }
         )
-        ctx = registry.create_context()
-        http = ctx.get(HTTPClient)
-        assert http.config.value == 99
+        with registry.open() as ctx:
+            http = ctx.get(HTTPClient)
+            assert http.config.value == 99
 
     def test_get_unbound_raises(self) -> None:
         registry = ResourceRegistry.build({})
-        ctx = registry.create_context()
-        with pytest.raises(UnboundResourceError) as exc:
-            ctx.get(Config)
-        assert exc.value.protocol is Config
+        with registry.open() as ctx:
+            with pytest.raises(UnboundResourceError) as exc:
+                ctx.get(Config)
+            assert exc.value.protocol is Config
 
     def test_get_optional_returns_none(self) -> None:
         registry = ResourceRegistry.build({})
-        ctx = registry.create_context()
-        assert ctx.get_optional(Config) is None
+        with registry.open() as ctx:
+            assert ctx.get_optional(Config) is None
 
     def test_get_optional_returns_value(self) -> None:
         registry = ResourceRegistry.build(
             {Config: Binding(Config, lambda r: ConcreteConfig())}
         )
-        ctx = registry.create_context()
-        assert ctx.get_optional(Config) is not None
+        with registry.open() as ctx:
+            assert ctx.get_optional(Config) is not None
 
     def test_circular_dependency_raises(self) -> None:
         @dataclass
@@ -487,22 +487,22 @@ class TestScopedResourceContext:
                 B: Binding(B, lambda r: B(a=r.get(A))),
             }
         )
-        ctx = registry.create_context()
-        with pytest.raises(CircularDependencyError) as exc:
-            ctx.get(A)
-        assert A in exc.value.cycle
-        assert B in exc.value.cycle
+        with registry.open() as ctx:
+            with pytest.raises(CircularDependencyError) as exc:
+                ctx.get(A)
+            assert A in exc.value.cycle
+            assert B in exc.value.cycle
 
     def test_provider_error_wrapped(self) -> None:
         def failing_provider(r: ResourceResolver) -> ConcreteConfig:
             raise ValueError("Bad config")
 
         registry = ResourceRegistry.build({Config: Binding(Config, failing_provider)})
-        ctx = registry.create_context()
-        with pytest.raises(ProviderError) as exc:
-            ctx.get(Config)
-        assert exc.value.protocol is Config
-        assert isinstance(exc.value.cause, ValueError)
+        with registry.open() as ctx:
+            with pytest.raises(ProviderError) as exc:
+                ctx.get(Config)
+            assert exc.value.protocol is Config
+            assert isinstance(exc.value.cause, ValueError)
 
 
 # === Lifecycle Tests ===
@@ -517,9 +517,9 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry.create_context()
-        resource = ctx.get(PostConstructResource)
-        assert resource.initialized is True
+        with registry.open() as ctx:
+            resource = ctx.get(PostConstructResource)
+            assert resource.initialized is True
 
     def test_post_construct_failure_wrapped(self) -> None:
         registry = ResourceRegistry.build(
@@ -529,10 +529,10 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry.create_context()
-        with pytest.raises(ProviderError) as exc:
-            ctx.get(FailingPostConstruct)
-        assert "Initialization failed" in str(exc.value.cause)
+        with registry.open() as ctx:
+            with pytest.raises(ProviderError) as exc:
+                ctx.get(FailingPostConstruct)
+            assert "Initialization failed" in str(exc.value.cause)
 
     def test_post_construct_failure_closes_resource(self) -> None:
         instances: list[CloseableFailingPostConstruct] = []
@@ -549,11 +549,11 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry.create_context()
-        with pytest.raises(ProviderError):
-            ctx.get(CloseableFailingPostConstruct)
-        assert len(instances) == 1
-        assert instances[0].closed is True
+        with registry.open() as ctx:
+            with pytest.raises(ProviderError):
+                ctx.get(CloseableFailingPostConstruct)
+            assert len(instances) == 1
+            assert instances[0].closed is True
 
     def test_close_disposes_singletons(self) -> None:
         registry = ResourceRegistry.build(
@@ -563,10 +563,10 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry.create_context()
-        resource = ctx.get(CloseableResource)
-        assert resource.closed is False
-        ctx.close()
+        with registry.open() as ctx:
+            resource = ctx.get(CloseableResource)
+            assert resource.closed is False
+        # Context exits, close() is called
         assert resource.closed is True
 
     def test_close_reverse_order(self) -> None:
@@ -590,9 +590,8 @@ class TestLifecycle:
                 ResourceB: Binding(ResourceB, lambda r: ResourceB(a=r.get(ResourceA))),
             }
         )
-        ctx = registry.create_context()
-        _ = ctx.get(ResourceB)  # Constructs A, then B
-        ctx.close()
+        with registry.open() as ctx:
+            _ = ctx.get(ResourceB)  # Constructs A, then B
         # B was instantiated after A, so B closes first
         assert closed_order == ["B", "A"]
 
@@ -606,10 +605,12 @@ class TestLifecycle:
         registry = ResourceRegistry.build(
             {Config: Binding(Config, make_config, eager=True)}
         )
-        ctx = registry.create_context()
+        # Use _create_context to test start() behavior explicitly
+        ctx = registry._create_context()  # pyright: ignore[reportPrivateUsage]
         assert constructed == []
         ctx.start()
         assert constructed == ["config"]
+        ctx.close()
 
     def test_post_construct_failure_with_close_failure(self) -> None:
         """Test that close() failure during post_construct cleanup is logged."""
@@ -625,10 +626,10 @@ class TestLifecycle:
         registry = ResourceRegistry.build(
             {FailingClose: Binding(FailingClose, lambda r: FailingClose())}
         )
-        ctx = registry.create_context()
-        with pytest.raises(ProviderError) as exc:
-            ctx.get(FailingClose)
-        assert "post_construct failed" in str(exc.value.cause)
+        with registry.open() as ctx:
+            with pytest.raises(ProviderError) as exc:
+                ctx.get(FailingClose)
+            assert "post_construct failed" in str(exc.value.cause)
 
     def test_close_skips_non_closeable_resources(self) -> None:
         """Test that close() skips resources that don't implement Closeable."""
@@ -654,11 +655,10 @@ class TestLifecycle:
                 ),
             }
         )
-        ctx = registry.create_context()
-        _ = ctx.get(NonCloseableResource)
-        closeable = ctx.get(CloseableResource)
-
-        ctx.close()  # Should not raise
+        with registry.open() as ctx:
+            _ = ctx.get(NonCloseableResource)
+            closeable = ctx.get(CloseableResource)
+        # close() should not raise
         assert closeable.closed is True
 
     def test_close_with_failing_resource(self) -> None:
@@ -684,12 +684,10 @@ class TestLifecycle:
                 ),
             }
         )
-        ctx = registry.create_context()
-        good = ctx.get(GoodResource)
-        _ = ctx.get(FailingCloseResource)
-
+        with registry.open() as ctx:
+            good = ctx.get(GoodResource)
+            _ = ctx.get(FailingCloseResource)
         # close() should not raise, but log the error
-        ctx.close()
         assert good.closed is True
 
     def test_tool_scope_close_with_failing_resource(self) -> None:
@@ -709,11 +707,10 @@ class TestLifecycle:
                 )
             }
         )
-        ctx = registry.create_context()
-
-        # Should not raise despite close() failure
-        with ctx.tool_scope() as r:
-            _ = r.get(FailingCloseTracer)
+        with registry.open() as ctx:
+            # Should not raise despite close() failure
+            with ctx.tool_scope() as r:
+                _ = r.get(FailingCloseTracer)
 
 
 # === Scope Behavior Tests ===
@@ -734,13 +731,13 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry.create_context()
-        n1 = ctx.get(Numbered)
-        n2 = ctx.get(Numbered)
-        n3 = ctx.get(Numbered)
-        assert n1.n == 0
-        assert n2.n == 1
-        assert n3.n == 2
+        with registry.open() as ctx:
+            n1 = ctx.get(Numbered)
+            n2 = ctx.get(Numbered)
+            n3 = ctx.get(Numbered)
+            assert n1.n == 0
+            assert n2.n == 1
+            assert n3.n == 2
 
     def test_singleton_shared_across_tool_scopes(self) -> None:
         call_count = 0
@@ -753,16 +750,15 @@ class TestScopeBehavior:
         registry = ResourceRegistry.build(
             {Config: Binding(Config, make_config, scope=Scope.SINGLETON)}
         )
-        ctx = registry.create_context()
+        with registry.open() as ctx:
+            with ctx.tool_scope() as r1:
+                c1 = r1.get(Config)
 
-        with ctx.tool_scope() as r1:
-            c1 = r1.get(Config)
+            with ctx.tool_scope() as r2:
+                c2 = r2.get(Config)
 
-        with ctx.tool_scope() as r2:
-            c2 = r2.get(Config)
-
-        assert c1 is c2
-        assert call_count == 1
+            assert c1 is c2
+            assert call_count == 1
 
     def test_tool_call_fresh_per_scope(self) -> None:
         counter = itertools.count()
@@ -778,18 +774,17 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry.create_context()
+        with registry.open() as ctx:
+            with ctx.tool_scope() as r1:
+                t1 = r1.get(Tracer)
+                t1_again = r1.get(Tracer)
+                assert t1 is t1_again  # Same within scope
 
-        with ctx.tool_scope() as r1:
-            t1 = r1.get(Tracer)
-            t1_again = r1.get(Tracer)
-            assert t1 is t1_again  # Same within scope
+            with ctx.tool_scope() as r2:
+                t2 = r2.get(Tracer)
 
-        with ctx.tool_scope() as r2:
-            t2 = r2.get(Tracer)
-
-        assert t1.id == 0
-        assert t2.id == 1  # Fresh instance
+            assert t1.id == 0
+            assert t2.id == 1  # Fresh instance
 
     def test_tool_call_closed_on_scope_exit(self) -> None:
         registry = ResourceRegistry.build(
@@ -801,13 +796,12 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry.create_context()
+        with registry.open() as ctx:
+            with ctx.tool_scope() as r:
+                resource = r.get(CloseableResource)
+                assert resource.closed is False
 
-        with ctx.tool_scope() as r:
-            resource = r.get(CloseableResource)
-            assert resource.closed is False
-
-        assert resource.closed is True
+            assert resource.closed is True
 
     def test_tool_scope_does_not_leak(self) -> None:
         counter = itertools.count()
@@ -823,16 +817,15 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry.create_context()
+        with registry.open() as ctx:
+            # First scope
+            with ctx.tool_scope() as r:
+                _ = r.get(Tracer)
 
-        # First scope
-        with ctx.tool_scope() as r:
-            _ = r.get(Tracer)
-
-        # Second scope should start fresh
-        with ctx.tool_scope() as r:
-            t = r.get(Tracer)
-            assert t.id == 1
+            # Second scope should start fresh
+            with ctx.tool_scope() as r:
+                t = r.get(Tracer)
+                assert t.id == 1
 
     def test_nested_tool_scopes(self) -> None:
         """Test nested tool scopes maintain proper isolation."""
@@ -857,30 +850,29 @@ class TestScopeBehavior:
                 )
             }
         )
-        ctx = registry.create_context()
+        with registry.open() as ctx:
+            with ctx.tool_scope() as outer:
+                t_outer = outer.get(NestedTracer)
+                assert t_outer.id == 0
 
-        with ctx.tool_scope() as outer:
-            t_outer = outer.get(NestedTracer)
-            assert t_outer.id == 0
+                # Nested scope
+                with ctx.tool_scope() as inner:
+                    t_inner = inner.get(NestedTracer)
+                    assert t_inner.id == 1
+                    assert t_inner is not t_outer
 
-            # Nested scope
-            with ctx.tool_scope() as inner:
-                t_inner = inner.get(NestedTracer)
-                assert t_inner.id == 1
-                assert t_inner is not t_outer
+                # Inner tracer closed on exit
+                assert t_inner.closed is True
+                assert t_outer.closed is False
 
-            # Inner tracer closed on exit
-            assert t_inner.closed is True
-            assert t_outer.closed is False
+                # Outer scope still works
+                t_outer_again = outer.get(NestedTracer)
+                assert t_outer_again is t_outer
 
-            # Outer scope still works
-            t_outer_again = outer.get(NestedTracer)
-            assert t_outer_again is t_outer
-
-        # Outer tracer closed on exit
-        assert t_outer.closed is True
-        # Inner closed first, then outer
-        assert close_order == [1, 0]
+            # Outer tracer closed on exit
+            assert t_outer.closed is True
+            # Inner closed first, then outer
+            assert close_order == [1, 0]
 
     def test_nested_tool_scopes_with_singleton(self) -> None:
         """Test nested tool scopes share singleton resources."""
@@ -913,21 +905,20 @@ class TestScopeBehavior:
                 ),
             }
         )
-        ctx = registry.create_context()
+        with registry.open() as ctx:
+            with ctx.tool_scope() as outer:
+                t_outer = outer.get(ScopedTracer)
 
-        with ctx.tool_scope() as outer:
-            t_outer = outer.get(ScopedTracer)
+                with ctx.tool_scope() as inner:
+                    t_inner = inner.get(ScopedTracer)
 
-            with ctx.tool_scope() as inner:
-                t_inner = inner.get(ScopedTracer)
+                    # Both refer to same singleton
+                    assert t_outer.config is t_inner.config
+                    # But different tool-scoped instances
+                    assert t_outer.id != t_inner.id
 
-                # Both refer to same singleton
-                assert t_outer.config is t_inner.config
-                # But different tool-scoped instances
-                assert t_outer.id != t_inner.id
-
-        # Singleton created only once
-        assert singleton_count == 1
+            # Singleton created only once
+            assert singleton_count == 1
 
 
 # === Error Message Tests ===
@@ -979,9 +970,9 @@ class TestIntegration:
                 Service: Binding(Service, lambda r: ConcreteService(r.get(HTTPClient))),
             }
         )
-        ctx = registry.create_context()
-        service = ctx.get(Service)
-        assert service.http.config.value == 100
+        with registry.open() as ctx:
+            service = ctx.get(Service)
+            assert service.http.config.value == 100
 
     def test_deeply_nested_dependency_chain(self) -> None:
         """Test resolving a 5-level dependency chain: A → B → C → D → E."""
@@ -1015,9 +1006,9 @@ class TestIntegration:
                 LevelA: Binding(LevelA, lambda r: LevelA(b=r.get(LevelB))),
             }
         )
-        ctx = registry.create_context()
-        a = ctx.get(LevelA)
-        assert a.b.c.d.e.value == 42
+        with registry.open() as ctx:
+            a = ctx.get(LevelA)
+            assert a.b.c.d.e.value == 42
 
     def test_deep_circular_dependency(self) -> None:
         """Test circular dependency detection in deep chain: A → B → C → A."""
@@ -1041,13 +1032,13 @@ class TestIntegration:
                 DeepC: Binding(DeepC, lambda r: DeepC(a=r.get(DeepA))),
             }
         )
-        ctx = registry.create_context()
-        with pytest.raises(CircularDependencyError) as exc:
-            ctx.get(DeepA)
-        # Cycle should include all three types
-        assert DeepA in exc.value.cycle
-        assert DeepB in exc.value.cycle
-        assert DeepC in exc.value.cycle
+        with registry.open() as ctx:
+            with pytest.raises(CircularDependencyError) as exc:
+                ctx.get(DeepA)
+            # Cycle should include all three types
+            assert DeepA in exc.value.cycle
+            assert DeepB in exc.value.cycle
+            assert DeepC in exc.value.cycle
 
     def test_deep_chain_with_mixed_scopes(self) -> None:
         """Test deep chain with SINGLETON depending on TOOL_CALL (and vice versa)."""
@@ -1085,19 +1076,18 @@ class TestIntegration:
                 ),
             }
         )
-        ctx = registry.create_context()
+        with registry.open() as ctx:
+            # First tool scope
+            with ctx.tool_scope() as r1:
+                s1 = r1.get(DeepService)
+                config_id = s1.client.config.id
 
-        # First tool scope
-        with ctx.tool_scope() as r1:
-            s1 = r1.get(DeepService)
-            config_id = s1.client.config.id
-
-        # Second tool scope - same config, fresh client and service
-        with ctx.tool_scope() as r2:
-            s2 = r2.get(DeepService)
-            assert s2.client.config.id == config_id  # Same singleton
-            assert s2.client.id != s1.client.id  # Fresh tool-call resource
-            assert s2.id != s1.id  # Fresh tool-call resource
+            # Second tool scope - same config, fresh client and service
+            with ctx.tool_scope() as r2:
+                s2 = r2.get(DeepService)
+                assert s2.client.config.id == config_id  # Same singleton
+                assert s2.client.id != s1.client.id  # Fresh tool-call resource
+                assert s2.id != s1.id  # Fresh tool-call resource
 
     def test_mixed_scopes(self) -> None:
         counter = itertools.count()
@@ -1116,24 +1106,24 @@ class TestIntegration:
                 ),
             }
         )
-        ctx = registry.create_context()
+        with registry.open() as ctx:
+            configs = []
+            request_ids = []
 
-        configs = []
-        request_ids = []
+            for _ in range(3):
+                with ctx.tool_scope() as r:
+                    configs.append(r.get(Config))
+                    request_ids.append(r.get(RequestId))
 
-        for _ in range(3):
-            with ctx.tool_scope() as r:
-                configs.append(r.get(Config))
-                request_ids.append(r.get(RequestId))
-
-        # Same config instance
-        assert configs[0] is configs[1] is configs[2]
-        # Different request IDs
-        assert request_ids[0].id == 0
-        assert request_ids[1].id == 1
-        assert request_ids[2].id == 2
+            # Same config instance
+            assert configs[0] is configs[1] is configs[2]
+            # Different request IDs
+            assert request_ids[0].id == 0
+            assert request_ids[1].id == 1
+            assert request_ids[2].id == 2
 
     def test_context_manager_pattern(self) -> None:
+        """Test manual lifecycle control using _create_context."""
         registry = ResourceRegistry.build(
             {
                 CloseableResource: Binding(
@@ -1142,7 +1132,7 @@ class TestIntegration:
             }
         )
 
-        ctx = registry.create_context()
+        ctx = registry._create_context()  # pyright: ignore[reportPrivateUsage]
         ctx.start()
         try:
             resource = ctx.get(CloseableResource)
