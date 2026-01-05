@@ -533,6 +533,30 @@ def skill_file(tmp_path: Path) -> Path:
 - **Skill versioning**: Pin skill versions for reproducible agent behavior.
 - **Skill composition**: Define skill dependencies and load order.
 - **Runtime skill injection**: Add skills to running sessions via events.
+- **PromptOverridesStore integration**: Skills are a form of prompt customization.
+  The override system could manage skill selection per tag:
+
+  ```python
+  # Conceptual: skills as overridable prompt artifacts
+  @FrozenDataclass()
+  class SkillOverride:
+      """Override skill configuration per environment/tag."""
+      skill_name: str
+      enabled: bool = True
+      source_override: Path | None = None  # Replace skill source
+
+  # In PromptOverridesStore
+  store.set_skill_override(
+      prompt_key="code-review-session",
+      tag="production",
+      override=SkillOverride(skill_name="experimental-review", enabled=False),
+  )
+  ```
+
+  This unifies skill management with the existing override workflow: operators
+  can enable/disable skills or swap implementations per deployment tag without
+  code changes. The `LocalPromptOverridesStore` would persist skill overrides
+  alongside section overrides.
 
 ## Related Specifications
 
