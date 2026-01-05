@@ -67,7 +67,7 @@ def test_docs_changelog_outputs_changelog(capsys: pytest.CaptureFixture[str]) ->
     assert exit_code == 0
     captured = capsys.readouterr()
     assert "# Changelog" in captured.out
-    assert "## Unreleased" in captured.out
+    assert "## v0." in captured.out  # Has at least one version header
 
 
 def test_docs_no_flags_returns_error(capsys: pytest.CaptureFixture[str]) -> None:
