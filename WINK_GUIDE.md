@@ -998,8 +998,9 @@ registry = ResourceRegistry.of(
 
 **Injecting resources at evaluation time:**
 
-You can pass custom resources directly to `adapter.evaluate()` or
-`MainLoop.execute()`. This makes tools cleaner, more testable, and portable:
+You can inject custom resources via `prompt.bind(resources=...)` or
+`MainLoopConfig(resources=...)`. This makes tools cleaner, more testable, and
+portable:
 
 ```python
 from weakincentives.resources import Binding, ResourceRegistry, Scope
@@ -1016,13 +1017,12 @@ resources = ResourceRegistry.of(
     Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per tool
 )
 
-# Pass to adapter - merged with workspace resources (e.g., filesystem)
-response = adapter.evaluate(prompt, session=session, resources=resources)
+# Bind resources to prompt - merged with workspace resources (e.g., filesystem)
+prompt = prompt.bind(resources=resources)
+response = adapter.evaluate(prompt, session=session)
 
-# Or at the MainLoop level
+# Or configure at the MainLoop level (applies to all requests)
 config = MainLoopConfig(resources=resources)
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
-response, session = loop.execute(request)
 ```
 
 **Scopes control instance lifetime:**
@@ -1430,7 +1430,6 @@ response = adapter.evaluate(
     deadline=...,        # optional
     budget=...,          # optional
     budget_tracker=...,  # optional
-    resources=...,       # optional ResourceRegistry
 )
 ```
 
@@ -1444,10 +1443,11 @@ The adapter handles all the provider-specific details: API formatting, tool
 schema translation, response parsing. Your code just calls `evaluate()` and gets
 back typed results.
 
-The optional `resources` parameter lets you inject custom resources (HTTP
-clients, databases, external services) that tool handlers can access via
-`context.resources.get(ResourceType)`. Injected resources are merged with any
-workspace-provided resources, with user-provided resources taking precedence.
+Resources (HTTP clients, databases, external services) are bound to the prompt
+via `prompt.bind(resources=...)`, not passed to `evaluate()`. Tool handlers
+access them via `context.resources.get(ResourceType)`. Bound resources merge
+with any workspace-provided resources, with user-provided resources taking
+precedence.
 
 ### 6.2 OpenAIAdapter
 
@@ -1524,14 +1524,20 @@ way.
 
 ### 7.1 The minimal MainLoop
 
+MainLoop is mailbox-driven: it receives `MainLoopRequest` messages from a
+requests mailbox and sends `MainLoopResult` responses via `Message.reply()`.
+
 You implement:
 
 - `prepare(request) -> tuple[Prompt[OutputT], Session]`
 
-Then call `loop.execute(request)`.
+Then start the loop with `loop.run()`.
 
 ```python
-from weakincentives.runtime import MainLoop, MainLoopConfig, Session
+from weakincentives.runtime import (
+    MainLoop, MainLoopConfig, MainLoopRequest, MainLoopResult,
+    InMemoryMailbox, Session,
+)
 from weakincentives.prompt import Prompt
 
 class MyLoop(MainLoop[RequestType, OutputType]):
@@ -1539,6 +1545,21 @@ class MyLoop(MainLoop[RequestType, OutputType]):
         prompt = Prompt(self._template).bind(request)
         session = Session(tags={"loop": "my-loop"})
         return prompt, session
+
+# Create mailbox and loop
+requests = InMemoryMailbox[MainLoopRequest[RequestType], MainLoopResult[OutputType]](
+    name="requests"
+)
+loop = MyLoop(adapter=adapter, requests=requests, config=MainLoopConfig())
+
+# Send a request with reply_to for response routing
+requests.send(
+    MainLoopRequest(request=my_request, budget=budget, deadline=deadline),
+    reply_to="results-queue",
+)
+
+# Run the loop (processes messages until shutdown or mailbox closes)
+loop.run(max_iterations=1)
 ```
 
 `MainLoop` also catches `VisibilityExpansionRequired` and retries automatically.
@@ -1563,13 +1584,11 @@ resources = ResourceRegistry.of(
 )
 
 config = MainLoopConfig(resources=resources)
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
-response, session = loop.execute(request)
+loop = MyLoop(adapter=adapter, requests=requests, config=config)
 ```
 
 Resources configured this way are available to all tool handlers during
-execution. You can also pass resources directly to
-`loop.execute(request, resources=...)` for per-request overrides.
+execution. Per-request resources can be passed via `MainLoopRequest(resources=...)`.
 
 ### 7.2 Deadlines and budgets
 
@@ -1581,11 +1600,16 @@ deadline. `BudgetTracker` accumulates usage across retries.
 ```python
 from datetime import timedelta
 from weakincentives import Deadline, Budget
+from weakincentives.runtime import MainLoopRequest
 
 deadline = Deadline.from_timeout(timedelta(seconds=30))
 budget = Budget(max_total_tokens=20_000)
 
-response, session = loop.execute(request, deadline=deadline, budget=budget)
+# Pass budget and deadline via the request message
+requests.send(
+    MainLoopRequest(request=my_request, deadline=deadline, budget=budget),
+    reply_to="results-queue",
+)
 ```
 
 Deadlines prevent runaway agents. Budgets prevent runaway costs. Both are
@@ -1706,39 +1730,57 @@ numeric value.
 
 **EvalLoop wraps your MainLoop:**
 
+EvalLoop is mailbox-driven: it receives `EvalRequest` messages and sends
+`EvalResult` responses via `Message.reply()`. This follows the same pattern
+as MainLoop.
+
 ```python
 from weakincentives.evals import EvalLoop, EvalRequest, EvalResult
-from weakincentives.runtime import InMemoryMailbox
+from weakincentives.runtime import InMemoryMailbox, MainLoopRequest, MainLoopResult
 
-# Your existing MainLoop
-main_loop = MyLoop(adapter=adapter, bus=bus, config=config)
+# Your existing MainLoop (mailbox-driven)
+main_requests = InMemoryMailbox[MainLoopRequest[str], MainLoopResult[str]](
+    name="main-requests"
+)
+main_loop = MyLoop(adapter=adapter, requests=main_requests, config=config)
 
-# Create mailboxes for evaluation requests and results
-requests = InMemoryMailbox[EvalRequest[str, str]](name="eval-requests")
-results = InMemoryMailbox[EvalResult](name="eval-results")
+# Create mailbox for evaluation requests
+eval_requests = InMemoryMailbox[EvalRequest[str, str], EvalResult](
+    name="eval-requests"
+)
 
 # Create EvalLoop wrapping your MainLoop
 eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=exact_match,
-    requests=requests,
-    results=results,
+    requests=eval_requests,
 )
 ```
 
-**Submit samples and collect results:**
+**Submit samples with reply_to routing:**
+
+EvalLoop sends results via `Message.reply()`, so you must set `reply_to` when
+submitting samples. This explicit routing supports distributed deployments.
 
 ```python
-from weakincentives.evals import submit_dataset, collect_results
+from weakincentives.evals import EvalRequest, EvalResult, EvalReport
 
-# Submit all samples to the requests mailbox
-submit_dataset(dataset, requests)
+# Create a results mailbox
+results = InMemoryMailbox[EvalResult, None](name="eval-results")
+
+# Submit samples with explicit reply_to
+for sample in dataset.samples:
+    eval_requests.send(
+        EvalRequest(sample=sample),
+        reply_to=results.name,
+    )
 
 # Run the evaluation worker
-eval_loop.run(max_iterations=1)
+eval_loop.run(max_iterations=len(dataset.samples))
 
 # Collect results into a report
-report = collect_results(results, expected_count=len(dataset))
+collected = list(results.receive(visibility_timeout=0))
+report = EvalReport(results=tuple(msg.body for msg in collected))
 
 # Inspect the report
 print(f"Pass rate: {report.pass_rate:.1%}")
@@ -1757,38 +1799,34 @@ or container. This ensures your evaluation suite runs against the exact same
 configuration as your production agent:
 
 ```python
-from threading import Thread
-from weakincentives.runtime import RedisMailbox
+from weakincentives.contrib.mailbox import RedisMailbox
+from weakincentives.runtime import MainLoopRequest, MainLoopResult, LoopGroup
 
-# Production mailboxes (Redis-backed for durability)
-prod_requests = RedisMailbox(name="agent-requests", client=redis_client)
-prod_results = RedisMailbox(name="agent-results", client=redis_client)
+# Production mailbox (Redis-backed for durability)
+prod_requests = RedisMailbox[MainLoopRequest[str], MainLoopResult[str]](
+    name="agent-requests",
+    client=redis_client,
+)
 
-eval_requests = RedisMailbox(name="eval-requests", client=redis_client)
-eval_results = RedisMailbox(name="eval-results", client=redis_client)
+# Eval mailbox (separate queue, same MainLoop config)
+eval_requests = RedisMailbox[EvalRequest[str, str], EvalResult](
+    name="eval-requests",
+    client=redis_client,
+)
 
-# Same MainLoop used for both production and eval
-main_loop = MyAgentLoop(adapter=adapter, bus=bus, config=config)
+# MainLoop processes production requests
+main_loop = MyAgentLoop(adapter=adapter, requests=prod_requests, config=config)
 
-# Production worker
-def run_production():
-    while True:
-        for msg in prod_requests.receive():
-            response, session = main_loop.execute(msg.body)
-            prod_results.send(response)
-            msg.acknowledge()
-
-# Eval worker (wraps the same MainLoop)
+# EvalLoop wraps the same adapter and config, but uses eval mailbox
 eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=my_evaluator,
     requests=eval_requests,
-    results=eval_results,
 )
 
-# Run both in parallel
-Thread(target=run_production, daemon=True).start()
-eval_loop.run()  # Blocks, processing eval requests
+# Run both loops with coordinated shutdown
+group = LoopGroup(loops=[main_loop, eval_loop])
+group.run()  # Blocks until SIGTERM/SIGINT
 ```
 
 **Canary deployment:**
@@ -1797,11 +1835,28 @@ Before rolling out prompt or configuration changes, submit your eval dataset to
 the new worker and verify the pass rate meets your threshold:
 
 ```python
-# Submit eval dataset to canary worker
-submit_dataset(regression_dataset, canary_eval_requests)
+from weakincentives.evals import EvalRequest, EvalReport
 
-# Collect and check results
-report = collect_results(canary_eval_results, expected_count=len(regression_dataset))
+# Submit samples with reply_to for result routing
+results_mailbox = RedisMailbox[EvalResult, None](
+    name="canary-eval-results",
+    client=redis_client,
+)
+
+for sample in regression_dataset.samples:
+    canary_eval_requests.send(
+        EvalRequest(sample=sample),
+        reply_to=results_mailbox.name,
+    )
+
+# Wait for all results (with timeout)
+collected = []
+while len(collected) < len(regression_dataset.samples):
+    for msg in results_mailbox.receive(wait_time_seconds=30):
+        collected.append(msg.body)
+        msg.acknowledge()
+
+report = EvalReport(results=tuple(collected))
 
 if report.pass_rate < 0.95:
     raise RollbackError(f"Canary failed: {report.pass_rate:.1%} pass rate")
@@ -2649,8 +2704,8 @@ Import from `weakincentives` when you want the "90% API":
 **Runtime primitives:**
 
 - `Session`, `InProcessDispatcher`
-- `MainLoop`, `MainLoopConfig` and loop events (`MainLoopRequest`,
-  `MainLoopCompleted`, `MainLoopFailed`)
+- `MainLoop`, `MainLoopConfig`, `MainLoopRequest`, `MainLoopResult`
+- `InMemoryMailbox` (for development/testing)
 - Reducer helpers (`append_all`, `replace_latest`, `upsert_by`, ...)
 - Logging helpers (`configure_logging`, `get_logger`)
 
@@ -2693,9 +2748,13 @@ VisibilityOverrides, SetVisibilityOverride, ClearVisibilityOverride
 session.snapshot(include_all=False)
 session.restore(snapshot, preserve_logs=True)
 
-# MainLoop configuration
+# MainLoop (mailbox-driven)
 MainLoopConfig(deadline=..., budget=..., resources=...)
-MainLoop.execute(request, deadline=..., budget=..., resources=...)
+MainLoopRequest(request=..., budget=..., deadline=..., resources=...)
+MainLoopResult(request_id=..., output=..., session=..., error=...)
+MainLoop(adapter=..., requests=mailbox, config=...)
+    .run(max_iterations=None)
+    .shutdown()
 ```
 
 **Slice storage (in runtime.session):**
@@ -2732,10 +2791,13 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 ### 18.4 weakincentives.adapters
 
 ```python
-ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=..., resources=...)
+ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=..., budget_tracker=...)
 PromptResponse(prompt_name, text, output)
 PromptEvaluationError
 ```
+
+Note: Resources are bound to the prompt via `prompt.bind(resources=...)`, not
+passed to `evaluate()`.
 
 **Configs:**
 
@@ -2838,14 +2900,24 @@ any_of(*evaluators) -> Evaluator
 llm_judge(adapter, criterion) -> Evaluator
 ```
 
-**Loop and helpers:**
+**Loop (mailbox-driven):**
 
 ```python
-EvalLoop(loop, evaluator, requests, results)
+EvalLoop(loop=..., evaluator=..., requests=mailbox)
     .run(max_iterations=None)
+    .shutdown()
 
-submit_dataset(dataset, requests)
-collect_results(results, expected_count, timeout_seconds=300)
+EvalRequest(sample=...)  # send with reply_to for result routing
+EvalResult(sample_id=..., score=..., latency_ms=..., error=...)
+```
+
+Note: EvalLoop sends results via `Message.reply()`. Set `reply_to` when sending
+`EvalRequest` messages to route results to a collection mailbox.
+
+**Redis mailbox (for production):**
+
+```python
+from weakincentives.contrib.mailbox import RedisMailbox
 ```
 
 ### 18.9 CLI
