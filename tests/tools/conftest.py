@@ -22,9 +22,6 @@ from typing import cast
 
 import pytest
 
-from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.runtime.session import Session
-
 
 def _compile_stub_segments(source: str) -> tuple[CodeType, CodeType | None]:
     parsed = ast.parse(source, filename="<asteval-stub>", mode="exec")
@@ -94,9 +91,3 @@ def _install_asteval_stub(
     if request.node.name == "test_missing_dependency_instructs_extra_install":
         return
     monkeypatch.setitem(sys.modules, "asteval", _asteval_stub_module)
-
-
-@pytest.fixture()
-def session_and_bus() -> tuple[Session, InProcessDispatcher]:
-    bus = InProcessDispatcher()
-    return Session(bus=bus), bus

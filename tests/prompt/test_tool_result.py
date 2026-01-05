@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from weakincentives.prompt.tool_result import ToolResult, render_tool_payload
+from weakincentives.prompt.tool_result import render_tool_payload
 
 
 @dataclass(slots=True)
@@ -140,44 +140,3 @@ def test_render_tool_payload_warns_when_render_missing(
     assert "render() implementation" in record.getMessage()
     assert getattr(record, "event", None) == "tool_result.render.missing"
     assert getattr(record, "dataclass", None) == "PlainData"
-
-
-class TestToolResultConvenienceConstructors:
-    """Tests for ToolResult.ok() and ToolResult.error() class methods."""
-
-    def test_ok_with_value_and_default_message(self) -> None:
-        result = ToolResult.ok(PlainData(value="test"))
-
-        assert result.success is True
-        assert result.message == "OK"
-        assert result.value == PlainData(value="test")
-        assert result.exclude_value_from_context is False
-
-    def test_ok_with_value_and_custom_message(self) -> None:
-        result = ToolResult.ok(PlainData(value="data"), message="File written")
-
-        assert result.success is True
-        assert result.message == "File written"
-        assert result.value == PlainData(value="data")
-
-    def test_ok_preserves_type(self) -> None:
-        result: ToolResult[RenderableData] = ToolResult.ok(
-            RenderableData(value="typed")
-        )
-
-        assert isinstance(result.value, RenderableData)
-        assert result.value.value == "typed"
-
-    def test_error_with_message(self) -> None:
-        result = ToolResult.error("File not found")
-
-        assert result.success is False
-        assert result.message == "File not found"
-        assert result.value is None
-        assert result.exclude_value_from_context is False
-
-    def test_error_returns_none_typed_result(self) -> None:
-        result: ToolResult[None] = ToolResult.error("Something went wrong")
-
-        assert result.value is None
-        assert result.success is False

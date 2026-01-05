@@ -57,7 +57,6 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
-from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import (
     DEFAULT_SNAPSHOT_POLICIES,
     SessionProtocol,
@@ -171,11 +170,12 @@ def build_inner_loop(
     throttle_policy: ThrottlePolicy | None = None,
     budget_tracker: BudgetTracker | None = None,
     deadline: Deadline | None = None,
-    execution_state: ExecutionState | None = None,
 ) -> InnerLoop[object]:
     """Build an InnerLoop instance using the new API."""
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template).bind(*(render_inputs or ()))
+    # Enter prompt context for resource lifecycle
+    prompt.__enter__()
 
     inputs = InnerLoopInputs[object](
         adapter_name=DUMMY_ADAPTER_NAME,
@@ -186,8 +186,9 @@ def build_inner_loop(
         render_inputs=prompt.params,
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
+
     config = InnerLoopConfig(
-        execution_state=execution_state or ExecutionState(session=session),
+        session=session,
         tool_choice=tool_choice,
         response_format=response_format,
         require_structured_output_text=False,
@@ -227,7 +228,7 @@ def echo_handler(
     params: EchoParams, *, context: ToolContext
 ) -> ToolResult[EchoPayload]:
     del context
-    return ToolResult.ok(EchoPayload(value=params.value), message="initial")
+    return ToolResult(message="initial", value=EchoPayload(value=params.value))
 
 
 def tool_rendered_prompt(tool: Tool[EchoParams, EchoPayload]) -> RenderedPrompt[object]:
@@ -433,6 +434,8 @@ def test_run_inner_loop_function() -> None:
 
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template)
+    # Enter prompt context for resource lifecycle
+    prompt.__enter__()
     session: SessionProtocol = Session(bus=bus)
 
     inputs = InnerLoopInputs[object](
@@ -445,7 +448,7 @@ def test_run_inner_loop_function() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        execution_state=ExecutionState(session=session),
+        session=session,
         tool_choice="auto",
         response_format=None,
         require_structured_output_text=False,
@@ -597,13 +600,11 @@ def test_inner_loop_rolls_back_on_tool_dispatch_failure() -> None:
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
     session = SessionStub(dispatcher=RecordingBus(fail_tool=True))
-    execution_state = ExecutionState(session=session)
 
     loop = build_inner_loop(
         rendered=rendered,
         provider=provider,
         session=session,
-        execution_state=execution_state,
     )
     response = loop.run()
 

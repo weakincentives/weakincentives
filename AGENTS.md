@@ -87,8 +87,6 @@ a goal at any time.
   modules.
 - **EVALS.md**: Evaluation framework—when implementing evals, datasets,
   evaluators, or metrics aggregation.
-- **EXECUTION_STATE.md**: ExecutionState, transactional tool execution, and
-  composite snapshots—when modifying tool transaction boundaries or rollback.
 - **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
   ToolContext integration—when adding or modifying filesystem operations.
 - **LANGSMITH.md**: LangSmith integration—when implementing telemetry, prompt

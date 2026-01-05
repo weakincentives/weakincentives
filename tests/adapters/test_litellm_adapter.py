@@ -396,7 +396,7 @@ def test_litellm_adapter_executes_tools_and_parses_output() -> None:
         del context
         calls.append(params.query)
         payload = ToolPayload(answer=f"Result for {params.query}")
-        return ToolResult.ok(payload, message="completed")
+        return ToolResult(message="completed", value=payload)
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -718,7 +718,7 @@ def test_litellm_adapter_handles_tool_call_without_arguments() -> None:
         del context
         recorded.append(params.query)
         payload = OptionalPayload(value=params.query)
-        return ToolResult.ok(payload, message="used default")
+        return ToolResult(message="used default", value=payload)
 
     tool_handler: ToolHandler[OptionalParams, OptionalPayload] = handler
 
@@ -854,7 +854,10 @@ def test_litellm_adapter_surfaces_tool_type_errors() -> None:
         del context, params
         nonlocal invoked
         invoked = True
-        return ToolResult.ok(ToolPayload(answer="should not run"), message="completed")
+        return ToolResult(
+            message="completed",
+            value=ToolPayload(answer="should not run"),
+        )
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -1884,7 +1887,7 @@ def test_litellm_adapter_uses_tool_choice_directive() -> None:
     def fake_handler(
         params: GreetingParams, *, context: ToolContext
     ) -> ToolResult[ToolPayload]:
-        return ToolResult.ok(ToolPayload(answer="hello"), message="ok")
+        return ToolResult(message="ok", value=ToolPayload(answer="hello"))
 
     tool = Tool[GreetingParams, ToolPayload](
         name="greet",

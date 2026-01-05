@@ -27,11 +27,6 @@ from .events import (
     TokenUsage,
     ToolInvoked,
 )
-from .execution_state import (
-    CompositeSnapshot,
-    ExecutionState,
-    SnapshotMetadata,
-)
 from .lifecycle import (
     LoopGroup,
     Runnable,
@@ -80,6 +75,15 @@ from .session import (
     upsert_by,
 )
 from .snapshotable import Snapshotable
+from .transactions import (
+    CompositeSnapshot,
+    PendingToolExecution,
+    PendingToolTracker,
+    SnapshotMetadata,
+    create_snapshot,
+    restore_snapshot,
+    tool_transaction,
+)
 from .watchdog import (
     HealthServer,
     Heartbeat,
@@ -94,7 +98,6 @@ __all__ = [
     "DataEvent",
     "DispatchResult",
     "Dispatcher",
-    "ExecutionState",
     "FakeMailbox",
     "HandlerFailure",
     "HealthServer",
@@ -112,6 +115,8 @@ __all__ = [
     "MainLoopResult",
     "Message",
     "NullMailbox",
+    "PendingToolExecution",
+    "PendingToolTracker",
     "PromptExecuted",
     "PromptRendered",
     "ReceiptHandleExpiredError",
@@ -139,6 +144,7 @@ __all__ = [
     "append_all",
     "build_reducer_context",
     "configure_logging",
+    "create_snapshot",
     "events",
     "get_logger",
     "iter_sessions_bottom_up",
@@ -147,7 +153,9 @@ __all__ = [
     "main_loop",
     "replace_latest",
     "replace_latest_by",
+    "restore_snapshot",
     "session",
+    "tool_transaction",
     "upsert_by",
     "wait_until",
     "watchdog",

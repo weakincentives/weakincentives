@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -39,11 +39,31 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
 )
 from weakincentives.adapters.claude_agent_sdk._notifications import Notification
 from weakincentives.budget import Budget, BudgetTracker
+from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.deadlines import Deadline
+from weakincentives.filesystem import Filesystem
+from weakincentives.prompt import Prompt, PromptTemplate
+from weakincentives.prompt.protocols import PromptProtocol
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.events._types import TokenUsage, ToolInvoked
-from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, append_all
+
+
+def _make_prompt() -> Prompt[object]:
+    """Create a prompt in active context."""
+    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
+    prompt.__enter__()
+    return prompt
+
+
+def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
+    """Create a prompt with filesystem bound in active context."""
+    resources = ResourceRegistry.build({Filesystem: fs})
+    prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
+    prompt = prompt.bind(resources=resources)
+    prompt.__enter__()
+    return prompt
 
 
 @pytest.fixture
@@ -55,7 +75,8 @@ def session() -> Session:
 @pytest.fixture
 def hook_context(session: Session) -> HookContext:
     return HookContext(
-        execution_state=ExecutionState(session=session),
+        session=session,
+        prompt=cast("PromptProtocol[object]", _make_prompt()),
         adapter_name="claude_agent_sdk",
         prompt_name="test_prompt",
     )
@@ -64,7 +85,8 @@ def hook_context(session: Session) -> HookContext:
 class TestHookContext:
     def test_basic_construction(self, session: Session) -> None:
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -86,7 +108,8 @@ class TestHookContext:
         tracker = BudgetTracker(budget)
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             deadline=deadline,
@@ -114,7 +137,8 @@ class TestPreToolUseHook:
         frozen_utcnow.advance(timedelta(seconds=10))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             deadline=deadline,
@@ -137,7 +161,8 @@ class TestPreToolUseHook:
         )
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             budget_tracker=tracker,
@@ -160,7 +185,8 @@ class TestPreToolUseHook:
         )
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
             budget_tracker=tracker,
@@ -179,7 +205,8 @@ class TestPostToolUseHook:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -229,7 +256,8 @@ class TestPostToolUseHook:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -252,7 +280,8 @@ class TestPostToolUseHook:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -276,7 +305,8 @@ class TestPostToolUseHook:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -295,7 +325,8 @@ class TestPostToolUseHook:
 
     def test_stops_on_structured_output_by_default(self, session: Session) -> None:
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -314,7 +345,8 @@ class TestPostToolUseHook:
         self, session: Session
     ) -> None:
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -335,7 +367,8 @@ class TestPostToolUseHook:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -360,7 +393,8 @@ class TestPostToolUseHook:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -564,7 +598,8 @@ class TestPostToolUseHookWithTypedParsing:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -603,7 +638,8 @@ class TestPostToolUseHookWithTypedParsing:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -627,7 +663,8 @@ class TestPostToolUseHookWithTypedParsing:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -651,7 +688,8 @@ class TestPostToolUseHookWithTypedParsing:
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -705,7 +743,8 @@ class TestSubagentStartHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -741,7 +780,8 @@ class TestSubagentStopHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -779,7 +819,8 @@ class TestSubagentStopHook:
         )
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -811,7 +852,8 @@ class TestSubagentStopHook:
         transcript_file.write_text('{"event": "tool_call", "name": "Read"}\n')
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -842,7 +884,8 @@ class TestSubagentStopHook:
         agent_transcript_file.write_text('{"event": "start"}\n')
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -867,7 +910,8 @@ class TestSubagentStopHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -997,7 +1041,8 @@ class TestPreCompactHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1030,7 +1075,8 @@ class TestNotificationHook:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1064,7 +1110,8 @@ class TestMultipleNotificationsAccumulate:
         session[Notification].register(Notification, append_all)
 
         context = HookContext(
-            execution_state=ExecutionState(session=session),
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
@@ -1107,20 +1154,15 @@ class TestMultipleNotificationsAccumulate:
 class TestPreToolUseHookTransactional:
     """Tests for pre-tool hook transactional snapshot functionality."""
 
-    def test_takes_snapshot_with_execution_state(self, session: Session) -> None:
-        """Pre-tool hook takes snapshot when execution_state is present."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-        from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
-        from weakincentives.runtime.execution_state import ExecutionState
-
+    def test_takes_snapshot_with_session_and_prompt(self, session: Session) -> None:
+        """Pre-tool hook takes snapshot when session and prompt are present."""
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "initial")
-        resources = ResourceRegistry.build({Filesystem: fs})
-        execution_state = ExecutionState(session=session, resources=resources)
+        prompt = _make_prompt_with_fs(fs)
 
         context = HookContext(
-            execution_state=execution_state,
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
         )
@@ -1129,23 +1171,18 @@ class TestPreToolUseHookTransactional:
         result = asyncio.run(hook({"tool_name": "Edit"}, "tool-123", None))
 
         assert result == {}
-        assert "tool-123" in execution_state.pending_tool_executions
-        pending = execution_state.pending_tool_executions["tool-123"]
+        assert "tool-123" in context._tracker._pending_tools
+        pending = context._tracker._pending_tools["tool-123"]
         assert pending.tool_name == "Edit"
 
     def test_skips_snapshot_for_mcp_wink_tools(self, session: Session) -> None:
         """Pre-tool hook skips snapshot for MCP WINK tools."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-        from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
-        from weakincentives.runtime.execution_state import ExecutionState
-
         fs = InMemoryFilesystem()
-        resources = ResourceRegistry.build({Filesystem: fs})
-        execution_state = ExecutionState(session=session, resources=resources)
+        prompt = _make_prompt_with_fs(fs)
 
         context = HookContext(
-            execution_state=execution_state,
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
         )
@@ -1153,8 +1190,11 @@ class TestPreToolUseHookTransactional:
         hook = create_pre_tool_use_hook(context)
         asyncio.run(hook({"tool_name": "mcp__wink__search"}, "tool-123", None))
 
-        # Should NOT have pending execution for MCP tools
-        assert "tool-123" not in execution_state.pending_tool_executions
+        # Should NOT have pending execution for MCP tools (tracker not even initialized)
+        assert (
+            context._tool_tracker is None
+            or "tool-123" not in context._tracker._pending_tools
+        )
 
 
 class TestPostToolUseHookTransactional:
@@ -1162,18 +1202,13 @@ class TestPostToolUseHookTransactional:
 
     def test_restores_state_on_tool_failure(self, session: Session) -> None:
         """Post-tool hook restores state when tool fails."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-        from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
-        from weakincentives.runtime.execution_state import ExecutionState
-
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "initial")
-        resources = ResourceRegistry.build({Filesystem: fs})
-        execution_state = ExecutionState(session=session, resources=resources)
+        prompt = _make_prompt_with_fs(fs)
 
         context = HookContext(
-            execution_state=execution_state,
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
         )
@@ -1201,22 +1236,17 @@ class TestPostToolUseHookTransactional:
 
         # State should be restored
         assert fs.read("/test.txt").content == "initial"
-        assert "tool-123" not in execution_state.pending_tool_executions
+        assert "tool-123" not in context._tracker._pending_tools
 
     def test_no_restore_on_success(self, session: Session) -> None:
         """Post-tool hook doesn't restore state on success."""
-        from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
-        from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
-        from weakincentives.runtime.execution_state import ExecutionState
-
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "initial")
-        resources = ResourceRegistry.build({Filesystem: fs})
-        execution_state = ExecutionState(session=session, resources=resources)
+        prompt = _make_prompt_with_fs(fs)
 
         context = HookContext(
-            execution_state=execution_state,
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
             adapter_name="claude_agent_sdk",
             prompt_name="test_prompt",
         )
@@ -1244,6 +1274,7 @@ class TestPostToolUseHookTransactional:
 
         # State should NOT be restored
         assert fs.read("/test.txt").content == "modified"
+        assert "tool-123" not in context._tracker._pending_tools
 
 
 class TestIsToolErrorResponse:

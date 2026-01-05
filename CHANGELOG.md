@@ -4,27 +4,6 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-### Added
-
-- **`wink docs --changelog` flag.** The `wink docs` CLI command now supports a
-  `--changelog` flag to print the bundled CHANGELOG.md, making release history
-  accessible without repository access.
-
-### ToolResult Convenience Constructors
-
-New class methods for creating `ToolResult` instances with less boilerplate:
-
-```python
-# Success with typed value
-ToolResult.ok(MyResult(...), message="Done")
-
-# Failure with no value
-ToolResult.error("Something went wrong")
-```
-
-The full constructor form remains available when `exclude_value_from_context` is
-needed.
-
 ### Lifecycle Management for MainLoop and EvalLoop
 
 New primitives for coordinating graceful shutdown across multiple loop instances
@@ -114,6 +93,44 @@ finally:
 - `DuplicateBindingError`: Raised when binding for a type already exists
 - `ProviderError`: Raised when provider function fails
 - `UnboundResourceError`: Raised when resolving unbound type
+
+### Prompt-Bound Resource Lifecycle
+
+Resources now share lifecycle with `Prompt` rather than a separate `ExecutionState`.
+This simplifies the API by removing an intermediate abstraction.
+
+```python
+# Before: ExecutionState as intermediary
+execution_state = ExecutionState(session=session, resources=resources)
+result = adapter.evaluate(prompt, execution_state=execution_state)
+
+# After: Prompt owns resource lifecycle directly
+with prompt:  # Resources initialized
+    result = adapter.evaluate(prompt, session=session)
+# Resources cleaned up
+```
+
+**Breaking changes:**
+
+- Removed `ExecutionState` class entirely
+- Removed `ResourceSnapshot` and `SnapshotMetadata` from resources module
+- Removed `snapshot()` and `restore()` methods from `ScopedResourceContext`
+- Renamed `ExecutionStateError` to `TransactionError`
+- Removed `SnapshotMismatchError` (unused)
+
+**New in `runtime.transactions` module:**
+
+- `CompositeSnapshot`: Combines session + resource snapshots with JSON serialization
+- `create_snapshot()`: Capture session and resource state
+- `restore_snapshot()`: Restore session and resource state
+- `tool_transaction()`: Context manager for automatic rollback on exception
+- `PendingToolTracker`: Thread-safe tracker for hook-based tool execution
+- `SnapshotMetadata`: Context for when/why a snapshot was taken
+
+**New methods on `ResourceRegistry`:**
+
+- `merge(other, strict=True)`: Raise `DuplicateBindingError` on conflicts
+- `conflicts(other)`: Return protocols bound in both registries
 
 ### Reply-to Routing in Mailbox Specification
 

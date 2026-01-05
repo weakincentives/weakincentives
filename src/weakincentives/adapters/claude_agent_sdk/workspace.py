@@ -29,6 +29,7 @@ from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
 from ...filesystem import Filesystem
 from ...prompt import MarkdownSection
+from ...resources import ResourceRegistry
 from ...runtime.session import Session
 
 __all__ = [
@@ -427,6 +428,15 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
         # HostFilesystem.cleanup() removes external git directories used for snapshots
         if isinstance(self._filesystem, HostFilesystem):
             self._filesystem.cleanup()
+
+    @override
+    def resources(self) -> ResourceRegistry:
+        """Return resources required by this workspace section.
+
+        Contributes the filesystem managed by this section to the prompt's
+        resource registry.
+        """
+        return ResourceRegistry.build({Filesystem: self._filesystem})
 
     @override
     def clone(self, **kwargs: Any) -> ClaudeAgentWorkspaceSection:

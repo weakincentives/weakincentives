@@ -69,7 +69,6 @@ from ._resolver import (
 )
 from ._testing import CollectingMailbox, FakeMailbox, NullMailbox
 from ._types import (
-    InvalidParameterError,
     Mailbox,
     MailboxConnectionError,
     MailboxError,
@@ -87,7 +86,6 @@ __all__ = [
     "FakeMailbox",
     "InMemoryMailbox",
     "InMemoryMailboxFactory",
-    "InvalidParameterError",
     "Mailbox",
     "MailboxConnectionError",
     "MailboxError",

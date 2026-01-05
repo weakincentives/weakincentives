@@ -24,11 +24,9 @@ from typing import Any, Final, Protocol, cast, override
 
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
-from ..filesystem import Filesystem
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
 from ..resources import ResourceRegistry
-from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import SupportsDataclass
 from ._names import OPENAI_ADAPTER_NAME
@@ -604,7 +602,6 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[OutputT]:
         context = self._setup_evaluation(
             prompt,
@@ -617,43 +614,41 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         if effective_tracker is None and budget is not None:
             effective_tracker = BudgetTracker(budget=budget)
 
-        # Create ExecutionState for transactional tool execution
-        # Build workspace resources from prompt, then merge with user-provided resources
-        filesystem = prompt.filesystem()
-        workspace_resources = ResourceRegistry.build({Filesystem: filesystem})
-        effective_resources = (
-            workspace_resources.merge(resources)
-            if resources is not None
-            else workspace_resources
-        )
-        execution_state = ExecutionState(session=session, resources=effective_resources)
+        # Bind budget tracker to prompt resources if provided
+        if effective_tracker is not None:
+            budget_resources = ResourceRegistry.build(
+                {BudgetTracker: effective_tracker}
+            )
+            prompt = prompt.bind(resources=budget_resources)
 
-        config = InnerLoopConfig(
-            execution_state=execution_state,
-            tool_choice=self._tool_choice,
-            response_format=context.response_format,
-            require_structured_output_text=False,
-            call_provider=self._build_provider_invoker(context.prompt_name),
-            select_choice=self._build_choice_selector(context.prompt_name),
-            serialize_tool_message_fn=serialize_tool_message,
-            format_dispatch_failures=format_dispatch_failures,
-            parse_arguments=parse_tool_arguments,
-            logger_override=self._conversation_logger(),
-            deadline=deadline,
-            budget_tracker=effective_tracker,
-        )
+        # Enter prompt context for resource lifecycle
+        with prompt:
+            config = InnerLoopConfig(
+                session=session,
+                tool_choice=self._tool_choice,
+                response_format=context.response_format,
+                require_structured_output_text=False,
+                call_provider=self._build_provider_invoker(context.prompt_name),
+                select_choice=self._build_choice_selector(context.prompt_name),
+                serialize_tool_message_fn=serialize_tool_message,
+                format_dispatch_failures=format_dispatch_failures,
+                parse_arguments=parse_tool_arguments,
+                logger_override=self._conversation_logger(),
+                deadline=deadline,
+                budget_tracker=effective_tracker,
+            )
 
-        inputs = InnerLoopInputs[OutputT](
-            adapter_name=OPENAI_ADAPTER_NAME,
-            adapter=cast("ProviderAdapter[OutputT]", self),
-            prompt=prompt,
-            prompt_name=context.prompt_name,
-            rendered=context.rendered,
-            render_inputs=context.render_inputs,
-            initial_messages=[{"role": "system", "content": context.rendered.text}],
-        )
+            inputs = InnerLoopInputs[OutputT](
+                adapter_name=OPENAI_ADAPTER_NAME,
+                adapter=cast("ProviderAdapter[OutputT]", self),
+                prompt=prompt,
+                prompt_name=context.prompt_name,
+                rendered=context.rendered,
+                render_inputs=context.render_inputs,
+                initial_messages=[{"role": "system", "content": context.rendered.text}],
+            )
 
-        return run_inner_loop(inputs=inputs, config=config)
+            return run_inner_loop(inputs=inputs, config=config)
 
     def _setup_evaluation[OutputT](
         self,

@@ -217,15 +217,11 @@ def _create_math_dataset() -> Dataset[MathProblem, str]:
 # =============================================================================
 
 
-def _math_evaluator(output: object, expected: object) -> Score:
+def _math_evaluator(output: MathAnswer, expected: str) -> Score:
     """Evaluate if the math answer matches expected value.
 
     Handles various numeric formats (e.g., "12.0" == "12").
     """
-    # Type assertions - Evaluator requires (object, object) -> Score signature
-    assert isinstance(output, MathAnswer)
-    assert isinstance(expected, str)
-
     # Normalize strings first
     actual_str = output.answer.strip()
     expected_str = expected.strip()

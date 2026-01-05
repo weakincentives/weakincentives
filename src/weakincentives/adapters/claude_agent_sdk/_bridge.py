@@ -21,14 +21,16 @@ from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
-from ...filesystem import Filesystem
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ...runtime.events import ToolInvoked
-from ...runtime.execution_state import CompositeSnapshot, ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.transactions import (
+    CompositeSnapshot,
+    restore_snapshot,
+    tool_transaction,
+)
 from ...serde import parse, schema
-from ..utilities import build_resources
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
@@ -69,10 +71,9 @@ class BridgedTool:
         input_schema: JSON schema for tool parameters.
         handler: Callable that executes the tool and returns MCP-format result.
 
-    The execution_state provides transactional semantics: a snapshot is taken
-    before execution and restored on failure, ensuring consistent state across
-    failed or aborted tool calls. Session and filesystem are accessed from
-    the execution_state.
+    Transactional semantics: a snapshot is taken before execution and restored
+    on failure, ensuring consistent state across failed or aborted tool calls.
+    Session and resources are accessed via the prompt.
     """
 
     def __init__(
@@ -82,7 +83,7 @@ class BridgedTool:
         description: str,
         input_schema: dict[str, Any],
         tool: Tool[Any, Any],
-        execution_state: ExecutionState,
+        session: SessionProtocol,
         adapter: ProviderAdapter[Any],
         prompt: PromptProtocol[Any],
         rendered_prompt: RenderedPromptProtocol[Any] | None,
@@ -95,7 +96,7 @@ class BridgedTool:
         self.description = description
         self.input_schema = input_schema
         self._tool = tool
-        self._execution_state = execution_state
+        self._session = session
         self._adapter = adapter
         self._prompt = prompt
         self._rendered_prompt = rendered_prompt
@@ -103,11 +104,6 @@ class BridgedTool:
         self._budget_tracker = budget_tracker
         self._adapter_name = adapter_name
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
-
-    @property
-    def _session(self) -> SessionProtocol:
-        """Get session from execution state."""
-        return self._execution_state.session
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -118,8 +114,7 @@ class BridgedTool:
         Returns:
             MCP-format result dict with content and isError fields.
 
-        Uses transactional semantics via execution_state: snapshot before
-        execution, restore on failure.
+        Uses transactional semantics: snapshot before execution, restore on failure.
         """
         handler = self._tool.handler
         if handler is None:
@@ -128,8 +123,10 @@ class BridgedTool:
                 "isError": True,
             }
 
-        with self._execution_state.tool_transaction(
-            tag=f"tool:{self.name}"
+        with tool_transaction(
+            self._session,
+            self._prompt.resources,
+            tag=f"tool:{self.name}",
         ) as snapshot:
             return self._execute_handler(handler, args, snapshot=snapshot)
 
@@ -156,18 +153,14 @@ class BridgedTool:
             else:
                 params = parse(self._tool.params_type, args, extra="forbid")
 
-            filesystem = self._execution_state.resources.get(Filesystem)
-            resources = build_resources(
-                filesystem=filesystem,
-                budget_tracker=self._budget_tracker,
-            )
+            # Resources are accessed through prompt.resources
+            # The prompt context must be entered and resources bound before tool calls
             context = ToolContext(
                 prompt=self._prompt,
                 rendered_prompt=self._rendered_prompt,
                 adapter=self._adapter,
                 session=self._session,
                 deadline=self._deadline,
-                resources=resources,
             )
 
             result = handler(params, context=context)
@@ -215,7 +208,7 @@ class BridgedTool:
             snapshot: CompositeSnapshot to restore.
             reason: Reason for restore (for logging).
         """
-        self._execution_state.restore(snapshot)
+        restore_snapshot(self._session, self._prompt.resources, snapshot)
         logger.debug(
             f"State restored after {reason}.",
             event=f"bridge.{reason}_restore",
@@ -283,7 +276,7 @@ class BridgedTool:
 def create_bridged_tools(
     tools: tuple[Tool[Any, Any], ...],
     *,
-    execution_state: ExecutionState,
+    session: SessionProtocol,
     adapter: ProviderAdapter[Any],
     prompt: PromptProtocol[Any],
     rendered_prompt: RenderedPromptProtocol[Any] | None,
@@ -296,10 +289,9 @@ def create_bridged_tools(
 
     Args:
         tools: Tuple of weakincentives Tool instances.
-        execution_state: ExecutionState for transactional tool execution.
-            Session and filesystem are accessed from this state container.
+        session: Session for tool execution context.
         adapter: Adapter for tool context.
-        prompt: Prompt for tool context.
+        prompt: Prompt for tool context (must be in active context).
         rendered_prompt: Rendered prompt for tool context.
         deadline: Optional deadline for tool context.
         budget_tracker: Optional budget tracker for tool context.
@@ -327,7 +319,7 @@ def create_bridged_tools(
             description=tool.description,
             input_schema=input_schema,
             tool=tool,
-            execution_state=execution_state,
+            session=session,
             adapter=adapter,
             prompt=prompt,
             rendered_prompt=rendered_prompt,

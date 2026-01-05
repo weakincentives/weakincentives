@@ -296,3 +296,109 @@ def test_prompt_missing_key_raises_type_error() -> None:
 
     with pytest.raises(TypeError, match="missing required argument: 'key'"):
         PromptTemplate(ns="my-ns", sections=[section])  # type: ignore[call-arg]
+
+
+class TestPromptResourceLifecycle:
+    """Tests for prompt-bound resource lifecycle."""
+
+    def test_accessing_resources_outside_context_raises_runtime_error(self) -> None:
+        """Accessing resources before entering context manager raises RuntimeError."""
+        from weakincentives.resources import ResourceRegistry
+
+        template = PromptTemplate(ns="tests", key="resource-test")
+        prompt = Prompt(template).bind(resources=ResourceRegistry())
+
+        with pytest.raises(
+            RuntimeError,
+            match="Prompt resources accessed outside context manager",
+        ):
+            _ = prompt.resources
+
+    def test_entering_context_twice_raises_runtime_error(self) -> None:
+        """Entering prompt context twice raises RuntimeError."""
+        template = PromptTemplate(ns="tests", key="resource-test")
+        prompt = Prompt(template)
+
+        with prompt:
+            with pytest.raises(RuntimeError, match="context already entered"):
+                prompt.__enter__()
+
+    def test_binding_resources_multiple_times_merges_them(self) -> None:
+        """Binding resources multiple times should merge the registries."""
+        from weakincentives.resources import ResourceRegistry
+
+        class Resource1:
+            pass
+
+        class Resource2:
+            pass
+
+        res1 = Resource1()
+        res2 = Resource2()
+
+        template = PromptTemplate(ns="tests", key="resource-test")
+        prompt = Prompt(template)
+        prompt = prompt.bind(resources=ResourceRegistry.build({Resource1: res1}))
+        prompt = prompt.bind(resources=ResourceRegistry.build({Resource2: res2}))
+
+        with prompt:
+            assert prompt.resources.get(Resource1) is res1
+            assert prompt.resources.get(Resource2) is res2
+
+    def test_resources_property_available_within_context(self) -> None:
+        """Resources are available within the context manager."""
+        from weakincentives.resources import ResourceRegistry, ScopedResourceContext
+
+        template = PromptTemplate(ns="tests", key="resource-test")
+        prompt = Prompt(template).bind(resources=ResourceRegistry())
+
+        with prompt:
+            assert isinstance(prompt.resources, ScopedResourceContext)
+
+    def test_child_section_resources_collected(self) -> None:
+        """Resources from child sections are collected into prompt resources."""
+        from typing import Self
+
+        from weakincentives.resources import ResourceRegistry
+
+        class ChildResource:
+            pass
+
+        child_res = ChildResource()
+
+        # Create a section that provides resources
+        class SectionWithResources(Section[RootParams]):
+            def render(
+                self,
+                params: RootParams,
+                heading_level: int,
+                visibility: object = None,
+            ) -> str:
+                return "content"
+
+            def resources(self) -> ResourceRegistry:
+                return ResourceRegistry.build({ChildResource: child_res})
+
+            def clone(self, **kwargs: object) -> Self:
+                return cast(Self, self)
+
+        parent_section = MarkdownSection[RootParams](
+            title="Parent",
+            key="parent",
+            template="Parent: ${title}",
+            children=(
+                SectionWithResources(
+                    title="Child",
+                    key="child",
+                ),
+            ),
+        )
+
+        template = PromptTemplate(
+            ns="tests", key="child-resources-test", sections=[parent_section]
+        )
+        prompt = Prompt(template).bind(RootParams(title="test"))
+
+        with prompt:
+            # Child section resources should be accessible
+            assert prompt.resources.get(ChildResource) is child_res

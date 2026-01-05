@@ -4,8 +4,8 @@
 
 The `Prompt` abstraction centralizes every string template that flows to an LLM
 so the codebase has a single, inspectable source for system prompts and per-turn
-instructions. This specification covers prompt construction, section
-composition, structured output, and progressive disclosure.
+instructions. Prompts also own their resource dependencies, providing unified
+lifecycle management for both prompt content and runtime requirements.
 
 ## Guiding Principles
 
@@ -15,6 +15,8 @@ composition, structured output, and progressive disclosure.
   with actionable context.
 - **Composable Markdown Structure**: Hierarchical sections with deterministic
   heading levels keep prompts readable.
+- **Resource Co-location**: Prompts declare the resources they need; lifecycle
+  is managed via context manager.
 - **Minimal Templating Surface**: Limit to `Template.substitute` plus boolean
   selectors to prevent complex control flow.
 - **Declarative over Imperative**: Prompts describe structure, not logic.
@@ -22,9 +24,17 @@ composition, structured output, and progressive disclosure.
 ```mermaid
 flowchart TB
     subgraph Construction["Prompt Construction"]
-        Template["PromptTemplate<br/>(ns, key, sections)"]
+        Template["PromptTemplate<br/>(sections, resources)"]
         Prompt["Prompt(template)"]
         Bind["bind(params)"]
+    end
+
+    subgraph Lifecycle["Resource Lifecycle"]
+        Enter["__enter__()"]
+        Start["resources.start()"]
+        Use["Prompt evaluation"]
+        Exit["__exit__()"]
+        Close["resources.close()"]
     end
 
     subgraph Rendering["Render Pipeline"]
@@ -43,12 +53,14 @@ flowchart TB
     end
 
     Template --> Prompt --> Bind
-    Bind --> CheckEnabled --> CheckVisibility --> Substitute
+    Bind --> Enter --> Start --> Use
+    Use --> CheckEnabled --> CheckVisibility --> Substitute
     Substitute --> ApplyOverrides --> BuildMarkdown
     BuildMarkdown --> RenderedPrompt
     RenderedPrompt --> Text
     RenderedPrompt --> Tools
     RenderedPrompt --> OutputSchema
+    Use --> Exit --> Close
 ```
 
 ## Core Components
@@ -56,7 +68,8 @@ flowchart TB
 ### PromptTemplate and Prompt
 
 `PromptTemplate` is the configuration blueprint that owns a namespace (`ns`), a
-required `key`, an optional `name`, and an ordered tree of `Section` instances:
+required `key`, an optional `name`, an ordered tree of `Section` instances, and
+resource bindings:
 
 ```python
 template = PromptTemplate[OutputType](
@@ -64,17 +77,23 @@ template = PromptTemplate[OutputType](
     key="compose-email",
     name="compose_email",
     sections=[...],
+    resources=ResourceRegistry.of(
+        Binding(HTTPClient, lambda r: HTTPClient(timeout=30)),
+    ),
 )
 ```
 
-`Prompt` is a wrapper that binds parameters to a template for rendering:
+`Prompt` is a context manager that binds parameters and owns the resource
+lifecycle:
 
 ```python
 # Create a Prompt and bind parameters
 prompt = Prompt(template).bind(MyParams(field="value"))
 
-# Render the prompt
-rendered = prompt.render()
+# Use as context manager for resource lifecycle
+with prompt:
+    rendered = prompt.render()
+    # Resources available via prompt.resources
 ```
 
 **Construction Rules:**
@@ -88,8 +107,8 @@ rendered = prompt.render()
 
 ### Section
 
-Abstract base with metadata, `is_enabled`, `render`, child handling, and
-override gating.
+Abstract base with metadata, `is_enabled`, `render`, child handling, override
+gating, and resource contribution:
 
 ```python
 class Section(ABC, Generic[ParamsT]):
@@ -101,6 +120,14 @@ class Section(ABC, Generic[ParamsT]):
     default_params: ParamsT | None = None
     accepts_overrides: bool = True
     visibility: SectionVisibility | Callable[[ParamsT], SectionVisibility] | Callable[[], SectionVisibility] = FULL
+
+    def resources(self) -> ResourceRegistry:
+        """Return resources required by this section.
+
+        Override to contribute resources. Default returns empty registry.
+        Children's resources are collected automatically.
+        """
+        return ResourceRegistry()
 ```
 
 **Key Behaviors:**
@@ -108,6 +135,7 @@ class Section(ABC, Generic[ParamsT]):
 - Sections must be specialized: `MarkdownSection[MyParams]`
 - `accepts_overrides=False` excludes sections from the override system
 - `visibility` controls full vs. summary rendering
+- `resources()` returns resources this section needs; collected by prompt
 
 ### MarkdownSection
 
@@ -121,6 +149,137 @@ tone_section = MarkdownSection[ToneParams](
     summary="Tone guidance available.",  # Optional for progressive disclosure
 )
 ```
+
+### WorkspaceSection
+
+Section that provides filesystem access. Contributes its filesystem to prompt
+resources:
+
+```python
+class WorkspaceSection(Section[WorkspaceParams]):
+    filesystem: Filesystem
+
+    def resources(self) -> ResourceRegistry:
+        return ResourceRegistry.build({Filesystem: self.filesystem})
+```
+
+## Resource Lifecycle
+
+Prompts own their resource lifecycle via the context manager protocol.
+
+### Resource Collection
+
+When a prompt enters its context, it collects resources from:
+
+1. **Template resources** - Declared on `PromptTemplate.resources`
+1. **Section resources** - Collected from all sections via `section.resources()`
+1. **Bind-time resources** - Passed to `bind(resources=...)`
+
+Resources merge in order; later sources override earlier on conflict:
+
+```python
+def _collected_resources(self) -> ResourceRegistry:
+    """Collect resources from template and all sections."""
+    result = self._template.resources
+
+    for section in self._template.sections:
+        result = result.merge(section.resources())
+        for child in section.children:
+            result = result.merge(child.resources())
+
+    if self._bound_resources is not None:
+        result = result.merge(self._bound_resources)
+
+    return result
+```
+
+### Context Manager Protocol
+
+```python
+class Prompt(Generic[OutputT]):
+    _resource_context: ScopedResourceContext | None = None
+
+    def bind(
+        self,
+        *params: object,
+        resources: ResourceRegistry | None = None,
+    ) -> Self:
+        """Bind parameters and optional runtime resources."""
+        # ... parameter binding logic ...
+        self._bound_resources = resources
+        return self
+
+    def __enter__(self) -> Self:
+        """Enter prompt context; initialize resources."""
+        collected = self._collected_resources()
+        self._resource_context = collected.create_context()
+        self._resource_context.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit prompt context; cleanup resources."""
+        if self._resource_context is not None:
+            self._resource_context.close()
+            self._resource_context = None
+
+    @property
+    def resources(self) -> ScopedResourceContext:
+        """Access the active resource context.
+
+        Raises:
+            RuntimeError: If accessed outside context manager.
+        """
+        if self._resource_context is None:
+            raise RuntimeError("Prompt resources accessed outside context manager")
+        return self._resource_context
+```
+
+### Usage Pattern
+
+```python
+prompt = Prompt(template).bind(
+    TaskParams(objective="Review code"),
+    resources=ResourceRegistry.build({Clock: SystemClock()}),
+)
+
+with prompt:
+    # Resources are initialized and available
+    fs = prompt.resources.get(Filesystem)
+    clock = prompt.resources.get(Clock)
+
+    # Render and evaluate
+    response = adapter.evaluate(prompt, session=session)
+
+# Resources are cleaned up
+```
+
+### Transactional Tool Execution
+
+Tool execution uses snapshot/restore for atomicity. The prompt's resource
+context provides snapshot capability for snapshotable resources:
+
+```python
+# Before tool execution
+session_snapshot = session.snapshot()
+resource_snapshot = prompt.resources.snapshot()
+
+try:
+    result = tool.handler(params, context=context)
+    if not result.success:
+        raise ToolFailedError(result)
+except Exception:
+    session.restore(session_snapshot)
+    prompt.resources.restore(resource_snapshot)
+    raise
+```
+
+See `ScopedResourceContext.snapshot()` and `restore()` in the Resource Registry
+specification.
 
 ## Rendering
 
@@ -297,15 +456,16 @@ result = read_section_tool.handler(
 ```python
 prompt = Prompt(template).bind(*params)
 
-while True:
-    try:
-        response = adapter.evaluate(prompt, session=session)
-        break
-    except VisibilityExpansionRequired as e:
-        for path, visibility in e.requested_overrides.items():
-            session[VisibilityOverrides].apply(
-                SetVisibilityOverride(path=path, visibility=visibility)
-            )
+with prompt:
+    while True:
+        try:
+            response = adapter.evaluate(prompt, session=session)
+            break
+        except VisibilityExpansionRequired as e:
+            for path, visibility in e.requested_overrides.items():
+                session[VisibilityOverrides].apply(
+                    SetVisibilityOverride(path=path, visibility=visibility)
+                )
 ```
 
 ### Summary Suffix
@@ -357,12 +517,14 @@ cloned = section.clone(session=new_session, bus=new_bus)
 - Template substitution failure: `PromptRenderError`
 - Wrong container type in output: `OutputParseError`
 - Missing required fields in output: `OutputParseError`
+- Accessing `prompt.resources` outside context: `RuntimeError`
 
 ## Usage Example
 
 ```python
 from dataclasses import dataclass
 from weakincentives.prompt import Prompt, MarkdownSection, parse_structured_output
+from weakincentives.resources import ResourceRegistry, Binding
 
 @dataclass
 class TaskParams:
@@ -383,12 +545,17 @@ template = PromptTemplate[TaskResult](
             template="Plan the following: ${objective}",
         ),
     ],
+    resources=ResourceRegistry.of(
+        Binding(HTTPClient, lambda r: HTTPClient(timeout=30)),
+    ),
 )
 
-rendered = Prompt(template).bind(TaskParams(objective="Refactor auth module")).render()
+prompt = Prompt(template).bind(TaskParams(objective="Refactor auth module"))
 
-# After adapter evaluation...
-result: TaskResult = parse_structured_output(response_text, rendered)
+with prompt:
+    rendered = prompt.render()
+    response = adapter.evaluate(prompt, session=session)
+    result: TaskResult = parse_structured_output(response.output, rendered)
 ```
 
 ## Limitations
@@ -398,3 +565,4 @@ result: TaskResult = parse_structured_output(response_text, rendered)
 - **No nested prompts**: Use `children` for reuse, not prompt embedding
 - **Single-turn expansion**: Progressive disclosure halts the current turn
 - **No partial expansion**: Sections open fully or remain summarized
+- **Context manager required**: Resources only available within `with` block

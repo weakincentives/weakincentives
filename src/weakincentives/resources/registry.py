@@ -194,18 +194,56 @@ class ResourceRegistry:
 
     # === Composition ===
 
-    def merge(self, other: ResourceRegistry) -> ResourceRegistry:
+    def merge(
+        self, other: ResourceRegistry, *, strict: bool = True
+    ) -> ResourceRegistry:
         """Merge registries; other takes precedence on conflicts.
+
+        Args:
+            other: Registry to merge with.
+            strict: If True (default), raise DuplicateBindingError on conflicts.
+                    If False, other's bindings silently override.
+
+        Returns:
+            New registry with merged bindings.
+
+        Raises:
+            DuplicateBindingError: If strict=True (default) and registries
+                share protocols.
 
         Example::
 
             base = ResourceRegistry.build({Filesystem: default_fs})
             override = ResourceRegistry.build({Filesystem: custom_fs})
-            merged = base.merge(override)  # Uses custom_fs
+
+            # Default strict=True detects conflicts
+            base.merge(override)  # Raises DuplicateBindingError
+
+            # Use strict=False for intentional overrides
+            merged = base.merge(override, strict=False)  # Uses custom_fs
         """
+        if strict:
+            conflicts = self.conflicts(other)
+            if conflicts:
+                # Report first conflict for clarity
+                raise DuplicateBindingError(next(iter(conflicts)))
+
         merged_bindings = dict(self._bindings)
         merged_bindings.update(other._bindings)
         return ResourceRegistry(_bindings=MappingProxyType(merged_bindings))
+
+    def conflicts(self, other: ResourceRegistry) -> frozenset[type[object]]:
+        """Return protocols bound in both registries.
+
+        Useful for debugging merge conflicts without enabling strict mode.
+
+        Example::
+
+            conflicts = base.conflicts(override)
+            if conflicts:
+                print(f"Warning: {len(conflicts)} bindings will be overridden")
+        """
+        return frozenset(self._bindings.keys() & other._bindings.keys())
 
     # === Provider-Based Resolution ===
 

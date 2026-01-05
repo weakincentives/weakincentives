@@ -31,7 +31,7 @@ review session. The agent's plan remains consistent, and the model can retry
 or take a different approach without debugging "what state are we actually in?"
 
 No explicit error handling code is required—the framework handles rollback
-automatically. See [Execution State](../specs/EXECUTION_STATE.md) for details.
+automatically. See [Sessions](../specs/SESSIONS.md) for details.
 
 ## Runtime Architecture
 

@@ -285,6 +285,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
             else self._config.resources
         )
 
+        # Bind resources to prompt if provided
+        if effective_resources is not None:
+            prompt = prompt.bind(resources=effective_resources)
+
         budget_tracker = (
             BudgetTracker(budget=effective_budget)
             if effective_budget is not None
@@ -298,7 +302,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     session=session,
                     deadline=effective_deadline,
                     budget_tracker=budget_tracker,
-                    resources=effective_resources,
                 )
             except VisibilityExpansionRequired as e:
                 for path, visibility in e.requested_overrides.items():

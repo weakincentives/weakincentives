@@ -29,7 +29,8 @@ from weakincentives.prompt import (
     PromptTemplate,
 )
 from weakincentives.prompt.protocols import PromptProtocol, ProviderAdapterProtocol
-from weakincentives.prompt.tool import ResourceRegistry, Tool, ToolContext, ToolResult
+from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
@@ -59,18 +60,26 @@ class _DummyAdapter(ProviderAdapter[Any]):
 def build_tool_context(
     session: SessionProtocol, *, filesystem: Filesystem | None = None
 ) -> ToolContext:
+    """Build a ToolContext for testing tool handlers.
+
+    Note: The returned ToolContext has a prompt in active context mode.
+    Resources are accessed via context.resources, which delegates to
+    prompt.resources.
+    """
     prompt = Prompt(PromptTemplate(ns="tests", key="tool-context-helper"))
     adapter = cast(ProviderAdapterProtocol[Any], _DummyAdapter())
-    if filesystem is None:
-        resources = ResourceRegistry()
-    else:
+    if filesystem is not None:
         resources = ResourceRegistry.build({Filesystem: filesystem})
+        prompt = prompt.bind(resources=resources)
+
+    # Enter prompt context for resource access
+    prompt.__enter__()
+
     return ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),
         rendered_prompt=None,
         adapter=adapter,
         session=session,
-        resources=resources,
     )
 
 

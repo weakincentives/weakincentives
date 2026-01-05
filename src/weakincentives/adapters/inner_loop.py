@@ -33,7 +33,6 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..runtime.events import HandlerFailure, PromptExecuted, PromptRendered
-from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import (
     SupportsDataclass,
@@ -119,11 +118,11 @@ class InnerLoopInputs[OutputT]:
 class InnerLoopConfig:
     """Configuration and collaborators required to run the inner loop.
 
-    The execution_state provides unified access to session and resources.
-    Session is accessed via execution_state.session.
+    Provides access to session for transactional tool execution. Prompt
+    resources are accessed via the prompt in InnerLoopInputs.
     """
 
-    execution_state: ExecutionState
+    session: SessionProtocol
     tool_choice: ToolChoice
     response_format: Mapping[str, Any] | None
     require_structured_output_text: bool
@@ -138,11 +137,6 @@ class InnerLoopConfig:
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
-
-    @property
-    def session(self) -> SessionProtocol:
-        """Get session from execution state."""
-        return self.execution_state.session
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> InnerLoopConfig:
         """Fill in optional settings using rendered prompt metadata."""
@@ -365,7 +359,7 @@ class InnerLoop[OutputT]:
             prompt=self.inputs.prompt,
             prompt_name=self.inputs.prompt_name,
             rendered=self._rendered,
-            execution_state=self.config.execution_state,
+            session=self.config.session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=self.config.serialize_tool_message_fn,
             format_dispatch_failures=self.config.format_dispatch_failures,

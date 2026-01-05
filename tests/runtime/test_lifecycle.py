@@ -27,7 +27,7 @@ from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.prompt.tool import ResourceRegistry
+from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime import (
     InMemoryMailbox,
     LoopGroup,

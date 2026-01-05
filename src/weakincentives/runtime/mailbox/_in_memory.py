@@ -29,8 +29,6 @@ from ._types import (
     Message,
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
-    validate_visibility_timeout,
-    validate_wait_time,
 )
 
 if TYPE_CHECKING:
@@ -287,12 +285,7 @@ class InMemoryMailbox[T, R]:
 
         Returns:
             Sequence of messages (may be empty). Returns empty if mailbox closed.
-
-        Raises:
-            InvalidParameterError: visibility_timeout or wait_time_seconds out of range.
         """
-        validate_visibility_timeout(visibility_timeout)
-        validate_wait_time(wait_time_seconds)
         max_messages = min(max(1, max_messages), 10)
         deadline = time.monotonic() + wait_time_seconds
 

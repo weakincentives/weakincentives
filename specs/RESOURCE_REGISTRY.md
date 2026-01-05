@@ -16,12 +16,23 @@ different lifetimes (session-scoped singletons vs. per-tool-call instances).
 - **Cycle detection**: Circular dependencies fail fast with clear errors.
 - **Immutable configuration**: The registry is immutable; only scope caches are
   mutable.
+- **Prompt-owned lifecycle**: Resource contexts are owned by prompts and managed
+  via context manager.
 - **Clean API**: Simple, focused interfaces without legacy cruft.
 
 ```mermaid
 flowchart TB
     subgraph Configuration["Registry Configuration (Immutable)"]
         Bindings["Bindings<br/>(protocol → provider + scope)"]
+    end
+
+    subgraph Prompt["Prompt Lifecycle"]
+        Enter["__enter__()"]
+        Create["create_context()"]
+        Start["start()"]
+        Use["Tool execution"]
+        Close["close()"]
+        Exit["__exit__()"]
     end
 
     subgraph Resolution["Resolution (per request)"]
@@ -40,12 +51,14 @@ flowchart TB
     end
 
     subgraph Scopes["Scope Lifecycles"]
-        Singleton["SINGLETON<br/>Lives for session"]
+        Singleton["SINGLETON<br/>Lives for prompt context"]
         ToolCall["TOOL_CALL<br/>Fresh per invocation"]
         Prototype["PROTOTYPE<br/>Fresh every access"]
     end
 
-    Configuration --> Resolution
+    Configuration --> Prompt
+    Prompt --> Resolution
+    Enter --> Create --> Start --> Use --> Close --> Exit
 ```
 
 ## Module Structure
@@ -55,11 +68,16 @@ weakincentives/resources/
 ├── __init__.py      # Public API exports
 ├── scope.py         # Scope enum
 ├── binding.py       # Binding dataclass, Provider type alias
-├── protocols.py     # ResourceResolver, Closeable, PostConstruct
+├── protocols.py     # ResourceResolver, Closeable, PostConstruct, Snapshotable
 ├── errors.py        # Error hierarchy
 ├── registry.py      # ResourceRegistry (immutable config)
 └── context.py       # ScopedResourceContext (mutable resolution)
 ```
+
+> **Note:** Transactional snapshot/restore is handled by `runtime.transactions`
+> module, which provides `CompositeSnapshot` combining session and resource
+> snapshots. The resource context provides access to snapshotable resources
+> via `singleton_cache` for the transactions module to iterate.
 
 ## Scopes
 
@@ -70,7 +88,7 @@ class Scope(Enum):
     """Determines instance lifetime and caching behavior."""
 
     SINGLETON = "singleton"
-    """One instance per session. Created on first access, reused thereafter."""
+    """One instance per prompt context. Created on first access, reused thereafter."""
 
     TOOL_CALL = "tool_call"
     """Fresh instance per tool invocation. Disposed after tool completes."""
@@ -200,28 +218,22 @@ class ResourceRegistry:
         """Return the binding for a protocol, or None if unbound."""
         ...
 
-    def get[T](self, protocol: type[T], default: T | None = None) -> T | None:
-        """Return the resource for the given protocol, or default if absent.
+    def merge(
+        self, other: ResourceRegistry, *, strict: bool = False
+    ) -> ResourceRegistry:
+        """Merge registries; other takes precedence on conflicts.
 
-        Creates a temporary context, starts it, and resolves the protocol.
+        Args:
+            other: Registry to merge with.
+            strict: If True, raise DuplicateBindingError on conflicts.
+
+        Raises:
+            DuplicateBindingError: If strict=True and registries share protocols.
         """
         ...
 
-    def get_all[T](self, predicate: Callable[[object], bool]) -> Mapping[type[T], T]:
-        """Return all resolved instances matching a predicate.
-
-        Creates a context, starts it (resolving all eager bindings),
-        and returns instances from the singleton cache that match.
-
-        Example:
-            snapshotable = registry.get_all(
-                lambda x: isinstance(x, Snapshotable)
-            )
-        """
-        ...
-
-    def merge(self, other: ResourceRegistry) -> ResourceRegistry:
-        """Merge registries; other takes precedence on conflicts."""
+    def conflicts(self, other: ResourceRegistry) -> frozenset[type[object]]:
+        """Return protocols bound in both registries."""
         ...
 
     def eager_bindings(self) -> Sequence[Binding[object]]:
@@ -284,7 +296,35 @@ class ScopedResourceContext:
         ...
 ```
 
+> **Note:** Snapshot/restore operations are handled by the `runtime.transactions`
+> module via `create_snapshot()` and `restore_snapshot()` functions, which work
+> with `CompositeSnapshot` (combining session and resource state).
+
 ## Lifecycle Protocols
+
+### Snapshotable
+
+Resources that support transactional semantics implement `Snapshotable`:
+
+```python
+class Snapshotable(Protocol[SnapshotT]):
+    """Protocol for state containers that support snapshot and restore."""
+
+    def snapshot(self, *, tag: str | None = None) -> SnapshotT:
+        """Capture current state as an immutable snapshot."""
+        ...
+
+    def restore(self, snapshot: SnapshotT) -> None:
+        """Restore state from a snapshot."""
+        ...
+```
+
+**Implementations:**
+
+| Component | Snapshot Type | Storage Strategy |
+| ------------------- | -------------------- | ------------------------------ |
+| `InMemoryFilesystem` | `FilesystemSnapshot` | Structural sharing of file dicts |
+| `HostFilesystem` | `FilesystemSnapshot` | Git commits |
 
 ### Closeable
 
@@ -346,6 +386,55 @@ class ProviderError(ResourceError):
     cause: BaseException
 ```
 
+## Integration with Prompts
+
+Prompts own their resource lifecycle. The typical pattern:
+
+```python
+# 1. Define template with resources
+template = PromptTemplate[Output](
+    ns="example",
+    key="task",
+    sections=[
+        WorkspaceSection(filesystem=LocalFilesystem("/workspace")),
+        MarkdownSection(title="Task", template="...", key="task"),
+    ],
+    resources=ResourceRegistry.of(
+        Binding(HTTPClient, lambda r: HTTPClient(timeout=30)),
+    ),
+)
+
+# 2. Bind parameters (optionally add runtime resources)
+prompt = Prompt(template).bind(
+    Params(...),
+    resources=ResourceRegistry.build({Clock: SystemClock()}),
+)
+
+# 3. Use as context manager
+with prompt:
+    # Resources initialized via prompt.resources.start()
+    fs = prompt.resources.get(Filesystem)
+    http = prompt.resources.get(HTTPClient)
+
+    # Tool execution with transactional rollback
+    # (handled automatically by adapters via runtime.transactions)
+    result = adapter.evaluate(prompt, session=session)
+
+# Resources cleaned up via prompt.resources.close()
+```
+
+### Resource Collection
+
+Prompts collect resources from multiple sources in precedence order:
+
+1. **Template resources** - `PromptTemplate.resources` (lowest precedence)
+1. **Section resources** - Each section's `resources()` method (depth-first)
+1. **Bind-time resources** - Passed to `prompt.bind(resources=...)` (highest)
+
+Later sources override earlier on conflicts. To detect conflicts during
+development, use `registry.conflicts(other)` to inspect overlaps or
+`registry.merge(other, strict=True)` to raise on duplicates.
+
 ## Usage Examples
 
 ### Basic Usage
@@ -389,21 +478,32 @@ registry = ResourceRegistry.build({
 })
 ```
 
-### Introspecting Resources
+### Snapshot and Restore
+
+Transactional snapshot/restore is handled by the `runtime.transactions` module:
 
 ```python
-from weakincentives.runtime.snapshotable import Snapshotable
+from weakincentives.runtime.transactions import (
+    create_snapshot,
+    restore_snapshot,
+    tool_transaction,
+)
 
-# Find all resources matching a predicate
-registry = ResourceRegistry.build({
-    Filesystem: InMemoryFilesystem(),  # Implements Snapshotable
-    BudgetTracker: tracker,            # Does not implement Snapshotable
-})
+# Using tool_transaction context manager (recommended)
+with prompt:
+    with tool_transaction(session, prompt.resources, tag="my_tool") as snapshot:
+        result = execute_tool(...)
+        if not result.success:
+            restore_snapshot(session, prompt.resources, snapshot)
 
-# get_all() scans resolved singletons
-snapshotable = registry.get_all(lambda x: isinstance(x, Snapshotable))
-assert Filesystem in snapshotable
-assert BudgetTracker not in snapshotable
+# Manual snapshot/restore
+with prompt:
+    snapshot = create_snapshot(session, prompt.resources, tag="before_tool")
+    try:
+        result = execute_tool(...)
+    except Exception:
+        restore_snapshot(session, prompt.resources, snapshot)
+        raise
 ```
 
 ### Tool-Call Scoped Resources
@@ -460,7 +560,19 @@ test_override = ResourceRegistry.of(
     Binding(Config, lambda r: Config(env="test")),
 )
 
+# Default: silently override
 merged = base.merge(test_override)  # test_override wins
+
+# Strict mode: detect conflicts
+try:
+    merged = base.merge(test_override, strict=True)
+except DuplicateBindingError as e:
+    print(f"Conflict on {e.protocol}")
+
+# Inspect conflicts without raising
+conflicts = base.conflicts(test_override)
+if conflicts:
+    print(f"Warning: {len(conflicts)} bindings will be overridden")
 ```
 
 ## Acceptance Criteria
@@ -592,6 +704,31 @@ def test_close_reverse_order():
     assert closed_order == ["B", "A"]  # Reverse instantiation order
 ```
 
+### Snapshot and Restore
+
+```python
+def test_snapshot_restore():
+    from weakincentives.runtime.transactions import (
+        create_snapshot,
+        restore_snapshot,
+    )
+
+    fs = InMemoryFilesystem()
+    registry = ResourceRegistry.build({Filesystem: fs})
+    session = Session(bus=InProcessDispatcher())
+    prompt = Prompt(template).bind(resources=registry)
+
+    with prompt:
+        fs.write("data.txt", "before")
+        snapshot = create_snapshot(session, prompt.resources, tag="test")
+
+        fs.write("data.txt", "after")
+        assert fs.read("data.txt").content == "after"
+
+        restore_snapshot(session, prompt.resources, snapshot)
+        assert fs.read("data.txt").content == "before"
+```
+
 ## Limitations
 
 - **Synchronous only**: Resolution is single-threaded; async providers not
@@ -601,6 +738,8 @@ def test_close_reverse_order():
 - **No interception**: No AOP-style interceptors on resource access.
 - **No named bindings**: Use wrapper types if you need multiple implementations
   of the same protocol.
+- **Snapshot scope**: Only SINGLETON resources are snapshotted; TOOL_CALL and
+  PROTOTYPE resources are not tracked.
 
 ## Future Considerations
 

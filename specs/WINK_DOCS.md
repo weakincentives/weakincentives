@@ -13,7 +13,6 @@ documentation can be piped directly to tools or copied into prompts.
 wink docs --reference   # Print llms.md (API reference)
 wink docs --guide       # Print WINK_GUIDE.md (usage guide)
 wink docs --specs       # Print all specs concatenated
-wink docs --changelog   # Print CHANGELOG.md (release history)
 ```
 
 ## Motivation
@@ -50,7 +49,6 @@ src/weakincentives/
     ├── __init__.py          # Empty, marks as package
     ├── llms.md              # API reference (copy of root llms.md)
     ├── WINK_GUIDE.md        # Usage guide (copy of root WINK_GUIDE.md)
-    ├── CHANGELOG.md         # Release history (copy of root CHANGELOG.md)
     └── specs/
         ├── ADAPTERS.md
         ├── CLAUDE_AGENT_SDK.md
@@ -58,7 +56,6 @@ src/weakincentives/
         ├── DBC.md
         ├── EVALS.md
         ├── EXAMPLES.md
-        ├── EXECUTION_STATE.md
         ├── FILESYSTEM.md
         ├── LANGSMITH.md
         ├── LOGGING.md
@@ -104,7 +101,6 @@ class DocsSyncHook(BuildHookInterface):
         # Copy documentation files
         shutil.copy(root / "llms.md", docs_dir / "llms.md")
         shutil.copy(root / "WINK_GUIDE.md", docs_dir / "WINK_GUIDE.md")
-        shutil.copy(root / "CHANGELOG.md", docs_dir / "CHANGELOG.md")
 
         # Copy all spec files
         for spec_file in (root / "specs").glob("*.md"):
@@ -137,7 +133,6 @@ sync-docs:
 	@mkdir -p src/weakincentives/docs/specs
 	@cp llms.md src/weakincentives/docs/
 	@cp WINK_GUIDE.md src/weakincentives/docs/
-	@cp CHANGELOG.md src/weakincentives/docs/
 	@cp specs/*.md src/weakincentives/docs/specs/
 	@touch src/weakincentives/docs/__init__.py
 ```
@@ -149,7 +144,7 @@ This is useful for testing `wink docs` locally without a full build cycle.
 ### Command Signature
 
 ```
-wink docs [--reference] [--guide] [--specs] [--changelog]
+wink docs [--reference] [--guide] [--specs]
 ```
 
 ### Arguments
@@ -159,7 +154,6 @@ wink docs [--reference] [--guide] [--specs] [--changelog]
 | `--reference` | flag | Print the API reference (`llms.md`) |
 | `--guide` | flag | Print the usage guide (`WINK_GUIDE.md`) |
 | `--specs` | flag | Print all specification files concatenated |
-| `--changelog` | flag | Print the changelog (`CHANGELOG.md`) |
 
 ### Behavior
 
@@ -167,7 +161,7 @@ wink docs [--reference] [--guide] [--specs] [--changelog]
    and exit with code 1.
 
 1. **Multiple flags allowed**: Flags can be combined. Output is printed in
-   order: reference, guide, specs, changelog.
+   order: reference, guide, specs.
 
 1. **Separator between sections**: When multiple flags are used, print a
    separator line between sections:
@@ -200,13 +194,8 @@ $ wink docs --reference
 # WINK (Weak Incentives)
 ...
 
-# Print changelog
-$ wink docs --changelog
-# Changelog
-...
-
 # Print all documentation
-$ wink docs --reference --guide --specs --changelog
+$ wink docs --reference --guide --specs
 # WINK (Weak Incentives)
 ...
 ---
@@ -215,9 +204,6 @@ $ wink docs --reference --guide --specs --changelog
 ---
 <!-- specs/ADAPTERS.md -->
 # Adapters Specification
-...
----
-# Changelog
 ...
 
 # Combine with other tools
@@ -288,19 +274,14 @@ def register_docs_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Print all specification files",
     )
-    docs_parser.add_argument(
-        "--changelog",
-        action="store_true",
-        help="Print changelog (CHANGELOG.md)",
-    )
     docs_parser.set_defaults(func=handle_docs)
 
 
 def handle_docs(args: argparse.Namespace) -> int:
     """Handle the docs subcommand."""
-    if not (args.reference or args.guide or args.specs or args.changelog):
-        print("Error: At least one of --reference, --guide, --specs, or --changelog required")
-        print("Usage: wink docs [--reference] [--guide] [--specs] [--changelog]")
+    if not (args.reference or args.guide or args.specs):
+        print("Error: At least one of --reference, --guide, or --specs required")
+        print("Usage: wink docs [--reference] [--guide] [--specs]")
         return 1
 
     parts: list[str] = []
@@ -312,8 +293,6 @@ def handle_docs(args: argparse.Namespace) -> int:
             parts.append(_read_doc("WINK_GUIDE.md"))
         if args.specs:
             parts.append(_read_specs())
-        if args.changelog:
-            parts.append(_read_doc("CHANGELOG.md"))
     except FileNotFoundError as e:
         print(f"Error: Documentation not found: {e}", file=sys.stderr)
         print("This may indicate a packaging error.", file=sys.stderr)

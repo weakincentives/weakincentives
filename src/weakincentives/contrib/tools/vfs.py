@@ -34,6 +34,7 @@ from typing import Final, Literal, cast, override
 from weakincentives.filesystem import READ_ENTIRE_FILE, Filesystem
 
 from ...dataclasses import FrozenDataclass
+from ...resources import ResourceRegistry
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
@@ -111,23 +112,14 @@ class FilesystemToolHandlers:
     types (VfsPath) for LLM serialization.
     """
 
-    def __init__(
-        self,
-        *,
-        clock: Callable[[], datetime] | None = None,
-        mount_point: str | None = None,
-    ) -> None:
+    def __init__(self, *, clock: Callable[[], datetime] | None = None) -> None:
         """Initialize handlers.
 
         Args:
             clock: Optional callable returning current datetime. Defaults to UTC now.
-            mount_point: Optional virtual mount point prefix to strip from paths.
-                For example, if mount_point="/workspace", then "/workspace/file.txt"
-                becomes "file.txt".
         """
         super().__init__()
         self._clock = clock or get_current_time
-        self._mount_point = mount_point
 
     @staticmethod
     def _get_filesystem(context: ToolContext) -> Filesystem:
@@ -142,7 +134,7 @@ class FilesystemToolHandlers:
         """List directory contents."""
         fs = self._get_filesystem(context)
         path = normalize_string_path(
-            params.path, allow_empty=True, field="path", mount_point=self._mount_point
+            params.path, allow_empty=True, field="path", mount_point=fs.mount_point
         )
         path_str = "/".join(path.segments) if path.segments else "."
 
@@ -184,7 +176,7 @@ class FilesystemToolHandlers:
         """Read file contents with pagination."""
         fs = self._get_filesystem(context)
         path = normalize_string_path(
-            params.file_path, field="file_path", mount_point=self._mount_point
+            params.file_path, field="file_path", mount_point=fs.mount_point
         )
         offset = normalize_offset(params.offset)
         limit = normalize_limit(params.limit)
@@ -225,7 +217,7 @@ class FilesystemToolHandlers:
         """Create a new file (fails if file exists)."""
         fs = self._get_filesystem(context)
         path = normalize_string_path(
-            params.file_path, field="file_path", mount_point=self._mount_point
+            params.file_path, field="file_path", mount_point=fs.mount_point
         )
         content = normalize_content(params.content)
 
@@ -253,7 +245,7 @@ class FilesystemToolHandlers:
         """Edit an existing file using string replacement."""
         fs = self._get_filesystem(context)
         path = normalize_string_path(
-            params.file_path, field="file_path", mount_point=self._mount_point
+            params.file_path, field="file_path", mount_point=fs.mount_point
         )
         path_str = "/".join(path.segments)
 
@@ -310,7 +302,7 @@ class FilesystemToolHandlers:
         """Search for files matching a glob pattern."""
         fs = self._get_filesystem(context)
         base = normalize_string_path(
-            params.path, allow_empty=True, field="path", mount_point=self._mount_point
+            params.path, allow_empty=True, field="path", mount_point=fs.mount_point
         )
         pattern = params.pattern.strip()
         if not pattern:
@@ -355,7 +347,7 @@ class FilesystemToolHandlers:
         base_path: VfsPath | None = None
         if params.path is not None:
             base_path = normalize_string_path(
-                params.path, allow_empty=True, field="path", mount_point=self._mount_point
+                params.path, allow_empty=True, field="path", mount_point=fs.mount_point
             )
         glob_pattern = params.glob.strip() if params.glob is not None else None
         if glob_pattern:
@@ -388,7 +380,7 @@ class FilesystemToolHandlers:
         """Remove files or directories recursively."""
         fs = self._get_filesystem(context)
         path = normalize_string_path(
-            params.path, field="path", mount_point=self._mount_point
+            params.path, field="path", mount_point=fs.mount_point
         )
         if not path.segments:
             raise ToolValidationError("Cannot delete root directory.")
@@ -537,6 +529,14 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
     def filesystem(self) -> Filesystem:
         """Return the filesystem managed by this section."""
         return self._filesystem
+
+    @override
+    def resources(self) -> ResourceRegistry:
+        """Return resources required by this section.
+
+        VfsToolsSection contributes its filesystem to the prompt's resources.
+        """
+        return ResourceRegistry.build({Filesystem: self._filesystem})
 
     @override
     def clone(self, **kwargs: object) -> VfsToolsSection:

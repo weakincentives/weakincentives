@@ -197,7 +197,7 @@ def test_tool_accepts_none_params_type() -> None:
     def handler(
         params: Literal[None], *, context: ToolContext
     ) -> ToolResult[ExampleResult]:
-        return ToolResult.ok(ExampleResult(value="result"), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value="result"))
 
     tool = Tool[None, ExampleResult](
         name="noop",
@@ -210,7 +210,7 @@ def test_tool_accepts_none_params_type() -> None:
 
 def test_tool_accepts_none_result_type() -> None:
     def handler(params: ExampleParams, *, context: ToolContext) -> ToolResult[None]:
-        return ToolResult.ok(None, message="done")
+        return ToolResult(message="done", value=None)
 
     tool = Tool[ExampleParams, None](
         name="no_result",
@@ -323,7 +323,7 @@ def test_tool_wrap_builds_tool_from_handler() -> None:
     ) -> ToolResult[ExampleResult]:
         """Lookup information."""
 
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     tool = Tool.wrap(lookup)
 
@@ -338,7 +338,7 @@ def test_tool_wrap_requires_docstring() -> None:
     def docless(
         params: ExampleParams, *, context: ToolContext
     ) -> ToolResult[ExampleResult]:
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     with pytest.raises(PromptValidationError):
         Tool.wrap(docless)
@@ -347,7 +347,7 @@ def test_tool_wrap_requires_docstring() -> None:
 def test_tool_wrap_rejects_handler_with_wrong_parameter_count() -> None:
     def single_param(params: ExampleParams) -> ToolResult[ExampleResult]:
         """Handler with only one parameter."""
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     with pytest.raises(PromptValidationError, match="one positional argument"):
         Tool.wrap(single_param)
@@ -362,7 +362,7 @@ def test_tool_wrap_handles_type_hint_resolution_errors(
         context: ToolContext,
     ) -> ToolResult[ExampleResult]:
         """Handler with type hint resolution issues."""
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     # Force get_type_hints to fail so _resolve_annotations returns empty dict
     monkeypatch.setattr(
@@ -380,7 +380,7 @@ def test_tool_wrap_enforces_handler_constraints() -> None:
     def invalid_handler(
         params: ExampleParams, context: ToolContext
     ) -> ToolResult[ExampleResult]:
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     with pytest.raises(PromptValidationError):
         Tool.wrap(invalid_handler)
@@ -392,7 +392,7 @@ def test_tool_wrap_requires_parameter_annotation() -> None:
     ) -> ToolResult[ExampleResult]:
         """Missing param annotation."""
 
-        return ToolResult.ok(ExampleResult(value="result"), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value="result"))
 
     missing_annotation.__annotations__.pop("params", None)
 
@@ -406,7 +406,7 @@ def test_tool_wrap_supports_annotated_params() -> None:
     ) -> ToolResult[ExampleResult]:
         """Annotated params."""
 
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     tool = Tool.wrap(annotated_params)
 
@@ -419,7 +419,7 @@ def test_tool_wrap_supports_literal_params() -> None:
     ) -> ToolResult[ExampleResult]:
         """Literal params."""
 
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     literal_params.__annotations__["params"] = Literal[ExampleParams]  # type: ignore[invalid-type-form]
 
@@ -434,7 +434,7 @@ def test_tool_wrap_supports_annotated_return() -> None:
     ) -> Annotated[ToolResult[ExampleResult], "meta"]:
         """Annotated return."""
 
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     tool = Tool.wrap(annotated_return)
 
@@ -447,7 +447,7 @@ def test_tool_wrap_requires_return_annotation() -> None:
     ) -> ToolResult[ExampleResult]:
         """Missing return annotation."""
 
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     missing_return.__annotations__.pop("return", None)
 
@@ -471,7 +471,7 @@ def test_tool_wrap_requires_result_argument() -> None:
     ) -> ToolResult:
         """ToolResult without parameter."""
 
-        return ToolResult.ok(ExampleResult(value=params.query), message="ok")
+        return ToolResult(message="ok", value=ExampleResult(value=params.query))
 
     unparameterized_result.__annotations__["return"] = ToolResult
 
@@ -491,7 +491,7 @@ def test_tool_wrap_handles_empty_toolresult_args(
     ) -> ToolResult[int]:  # pragma: no cover - exercised via wrap
         """Docstring for Tool.wrap coverage."""
 
-        return ToolResult.ok(params.value, message="ok")
+        return ToolResult(message="ok", value=params.value)
 
     handler.__annotations__["return"] = ToolResult[int]
 

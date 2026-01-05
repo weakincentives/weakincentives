@@ -81,7 +81,7 @@ class _DummyPrompt:
 def _publish_tool_event(bus: InProcessDispatcher, index: int) -> None:
     params = ExampleParams(value=index)
     result_payload = ExampleResult(value=index)
-    result = ToolResult.ok(result_payload, message=f"ok-{index}")
+    result = ToolResult(message=f"ok-{index}", value=result_payload)
     rendered_output = result.render()
     event = ToolInvoked(
         prompt_name="test",
@@ -105,7 +105,7 @@ def test_session_attach_to_dispatcher_is_idempotent() -> None:
 
     params = ExampleParams(value=999)
     result_payload = ExampleResult(value=999)
-    tool_result = ToolResult.ok(result_payload, message="ok")
+    tool_result = ToolResult(message="ok", value=result_payload)
     rendered_output = tool_result.render()
     event = ToolInvoked(
         prompt_name="test",

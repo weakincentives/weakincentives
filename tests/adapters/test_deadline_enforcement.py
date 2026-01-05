@@ -55,7 +55,6 @@ from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
-from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.protocols import SessionProtocol
 from weakincentives.types.dataclass import SupportsDataclassOrNone, SupportsToolResult
@@ -90,12 +89,21 @@ def _build_prompt() -> PromptTemplate[BodyResult]:
     return PromptTemplate[BodyResult](ns="tests", key="deadline", sections=(section,))
 
 
+def _make_prompt(prompt: Prompt[BodyResult] | None = None) -> Prompt[BodyResult]:
+    """Create a prompt in active context for testing."""
+    if prompt is None:
+        prompt = Prompt(_build_prompt())
+    # Enter prompt context for resource access
+    prompt.__enter__()
+    return prompt
+
+
 def _tool_context(
     *,
     prompt: Prompt[BodyResult],
     rendered: RenderedPrompt[BodyResult],
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
-    execution_state: ExecutionState,
+    session: SessionProtocol,
     prompt_name: str,
     provider_payload: dict[str, Any] | None = None,
     deadline: Deadline | None = None,
@@ -106,7 +114,7 @@ def _tool_context(
         prompt=prompt,
         rendered_prompt=rendered,
         tool_registry=tool_registry,
-        execution_state=execution_state,
+        session=session,
         prompt_name=prompt_name,
         parse_arguments=parse_tool_arguments,
         format_dispatch_failures=format_dispatch_failures,
@@ -138,7 +146,7 @@ def test_inner_loop_raise_deadline_error() -> None:
     rendered = prompt.render()
     bus = InProcessDispatcher()
     session: SessionProtocol = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
+    prompt = _make_prompt()
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     inputs = InnerLoopInputs[BodyResult](
@@ -151,7 +159,7 @@ def test_inner_loop_raise_deadline_error() -> None:
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        execution_state=execution_state,
+        session=session,
         tool_choice="auto",
         response_format=None,
         require_structured_output_text=False,
@@ -172,7 +180,7 @@ def test_inner_loop_detects_expired_deadline(
     rendered = prompt.render()
     bus = InProcessDispatcher()
     session: SessionProtocol = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
+    prompt = _make_prompt()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
@@ -187,7 +195,7 @@ def test_inner_loop_detects_expired_deadline(
         initial_messages=[{"role": "system", "content": rendered.text}],
     )
     config = InnerLoopConfig(
-        execution_state=execution_state,
+        session=session,
         tool_choice="auto",
         response_format=None,
         require_structured_output_text=False,
@@ -211,11 +219,11 @@ def test_execute_tool_call_raises_when_deadline_expired(
     rendered = prompt.render()
     bus = InProcessDispatcher()
     session: SessionProtocol = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
+    prompt = _make_prompt()
 
     def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
         del context
-        return ToolResult.ok(EchoResult(content=params.content), message="")
+        return ToolResult(message="", value=EchoResult(content=params.content))
 
     tool = Tool[EchoParams, EchoResult](
         name="echo",
@@ -239,7 +247,7 @@ def test_execute_tool_call_raises_when_deadline_expired(
                 prompt=prompt,
                 rendered=rendered,
                 tool_registry=tool_registry,
-                execution_state=execution_state,
+                session=session,
                 prompt_name="deadline",
                 deadline=deadline,
             ),
@@ -255,7 +263,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
     rendered = prompt.render()
     bus = InProcessDispatcher()
     session: SessionProtocol = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
+    prompt = _make_prompt()
 
     events: list[ToolInvoked] = []
 
@@ -267,7 +275,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
 
     def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
         del context
-        return ToolResult.ok(EchoResult(content=params.content), message="done")
+        return ToolResult(message="done", value=EchoResult(content=params.content))
 
     tool = Tool[EchoParams, EchoResult](
         name="echo",
@@ -287,7 +295,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
             prompt=prompt,
             rendered=rendered,
             tool_registry=tool_registry,
-            execution_state=execution_state,
+            session=session,
             prompt_name="publish",
         ),
         tool_call=cast(ProviderToolCall, call),
@@ -305,7 +313,7 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
     rendered = prompt.render()
     bus = InProcessDispatcher()
     session = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
+    prompt = _make_prompt()
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     def call_provider(
@@ -332,7 +340,7 @@ def test_run_inner_loop_replaces_rendered_deadline() -> None:
         return cast(ProviderChoice, response.choices[0])
 
     config = InnerLoopConfig(
-        execution_state=execution_state,
+        session=session,
         tool_choice="auto",
         response_format=None,
         require_structured_output_text=False,

@@ -22,10 +22,8 @@ from typing import Any, Final, Protocol, cast, override
 
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
-from ..filesystem import Filesystem
 from ..prompt.prompt import Prompt
 from ..resources import ResourceRegistry
-from ..runtime.execution_state import ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
 from ._names import LITELLM_ADAPTER_NAME
 from ._provider_protocols import (
@@ -191,6 +189,24 @@ logger: StructuredLogger = get_logger(
 )
 
 
+def _prepare_budget_tracking[T](
+    *,
+    budget: Budget | None,
+    budget_tracker: BudgetTracker | None,
+    prompt: Prompt[T],
+) -> tuple[BudgetTracker | None, Prompt[T]]:
+    """Prepare budget tracking and bind tracker to prompt resources."""
+    effective_tracker = budget_tracker
+    if effective_tracker is None and budget is not None:
+        effective_tracker = BudgetTracker(budget=budget)
+
+    if effective_tracker is not None:
+        budget_resources = ResourceRegistry.build({BudgetTracker: effective_tracker})
+        prompt = prompt.bind(resources=budget_resources)
+
+    return effective_tracker, prompt
+
+
 class LiteLLMAdapter(ProviderAdapter[Any]):
     """Adapter that evaluates prompts via LiteLLM's completion helper.
 
@@ -258,7 +274,6 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[OutputT]:
         render_options = AdapterRenderOptions(
             enable_json_schema=True,
@@ -311,48 +326,38 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 first_choice(response, prompt_name=prompt_name),
             )
 
-        # Create tracker if budget provided but tracker not supplied
-        effective_tracker = budget_tracker
-        if effective_tracker is None and budget is not None:
-            effective_tracker = BudgetTracker(budget=budget)
-
-        # Create ExecutionState for transactional tool execution
-        # Build workspace resources from prompt, then merge with user-provided resources
-        filesystem = prompt.filesystem()
-        workspace_resources = ResourceRegistry.build({Filesystem: filesystem})
-        effective_resources = (
-            workspace_resources.merge(resources)
-            if resources is not None
-            else workspace_resources
-        )
-        execution_state = ExecutionState(session=session, resources=effective_resources)
-
-        config = InnerLoopConfig(
-            execution_state=execution_state,
-            tool_choice=self._tool_choice,
-            response_format=response_format,
-            require_structured_output_text=True,
-            call_provider=_call_provider,
-            select_choice=_select_choice,
-            serialize_tool_message_fn=serialize_tool_message,
-            format_dispatch_failures=format_dispatch_failures,
-            parse_arguments=parse_tool_arguments,
-            logger_override=logger,
-            deadline=deadline,
-            budget_tracker=effective_tracker,
+        effective_tracker, prompt = _prepare_budget_tracking(
+            budget=budget, budget_tracker=budget_tracker, prompt=prompt
         )
 
-        inputs = InnerLoopInputs[OutputT](
-            adapter_name=LITELLM_ADAPTER_NAME,
-            adapter=cast("ProviderAdapter[OutputT]", self),
-            prompt=prompt,
-            prompt_name=prompt_name,
-            rendered=rendered,
-            render_inputs=render_inputs,
-            initial_messages=[{"role": "system", "content": rendered.text}],
-        )
+        # Enter prompt context for resource lifecycle
+        with prompt:
+            config = InnerLoopConfig(
+                session=session,
+                tool_choice=self._tool_choice,
+                response_format=response_format,
+                require_structured_output_text=True,
+                call_provider=_call_provider,
+                select_choice=_select_choice,
+                serialize_tool_message_fn=serialize_tool_message,
+                format_dispatch_failures=format_dispatch_failures,
+                parse_arguments=parse_tool_arguments,
+                logger_override=logger,
+                deadline=deadline,
+                budget_tracker=effective_tracker,
+            )
 
-        return run_inner_loop(inputs=inputs, config=config)
+            inputs = InnerLoopInputs[OutputT](
+                adapter_name=LITELLM_ADAPTER_NAME,
+                adapter=cast("ProviderAdapter[OutputT]", self),
+                prompt=prompt,
+                prompt_name=prompt_name,
+                rendered=rendered,
+                render_inputs=render_inputs,
+                initial_messages=[{"role": "system", "content": rendered.text}],
+            )
+
+            return run_inner_loop(inputs=inputs, config=config)
 
 
 __all__ = [

@@ -96,8 +96,51 @@ class PostConstruct(Protocol):
         ...
 
 
+@runtime_checkable
+class Snapshotable[SnapshotT](Protocol):
+    """Protocol for state containers that support snapshot and restore.
+
+    Resources implementing this protocol can participate in transactional
+    tool execution. The resource context captures their state before tool
+    invocation and restores on failure.
+
+    Example::
+
+        @dataclass
+        class FileSystemSnapshot:
+            files: Mapping[str, bytes]
+
+        class InMemoryFilesystem(Snapshotable[FileSystemSnapshot]):
+            def snapshot(self, *, tag: str | None = None) -> FileSystemSnapshot:
+                return FileSystemSnapshot(files=dict(self._files))
+
+            def restore(self, snapshot: FileSystemSnapshot) -> None:
+                self._files = dict(snapshot.files)
+    """
+
+    def snapshot(self, *, tag: str | None = None) -> SnapshotT:
+        """Capture current state as an immutable snapshot.
+
+        Args:
+            tag: Optional label for debugging/logging.
+
+        Returns:
+            Immutable snapshot of current state.
+        """
+        ...
+
+    def restore(self, snapshot: SnapshotT) -> None:
+        """Restore state from a snapshot.
+
+        Args:
+            snapshot: Previously captured snapshot to restore.
+        """
+        ...
+
+
 __all__ = [
     "Closeable",
     "PostConstruct",
     "ResourceResolver",
+    "Snapshotable",
 ]

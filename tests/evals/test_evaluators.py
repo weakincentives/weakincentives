@@ -14,16 +14,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock
-
 from weakincentives.evals import Score, all_of, any_of, contains, exact_match
-from weakincentives.runtime.session import SessionViewProtocol
-
-
-def _mock_session() -> SessionViewProtocol:
-    """Create a minimal mock session for combinator tests."""
-    return Mock(spec=SessionViewProtocol)
-
 
 # =============================================================================
 # exact_match Tests
@@ -105,7 +96,7 @@ def test_contains_case_sensitive() -> None:
 def test_all_of_all_pass() -> None:
     """all_of passes when all evaluators pass."""
     evaluator = all_of(exact_match, contains)
-    score = evaluator("hello", "hello", _mock_session())
+    score = evaluator("hello", "hello")
     assert score.passed is True
     assert score.value == 1.0  # Mean of 1.0 and 1.0
 
@@ -113,7 +104,7 @@ def test_all_of_all_pass() -> None:
 def test_all_of_one_fails() -> None:
     """all_of fails when any evaluator fails."""
     evaluator = all_of(exact_match, contains)
-    score = evaluator("hello world", "hello", _mock_session())
+    score = evaluator("hello world", "hello")
     # exact_match fails (hello world != hello), contains passes (hello in hello world)
     assert score.passed is False
     assert score.value == 0.5  # Mean of 0.0 and 1.0
@@ -122,7 +113,7 @@ def test_all_of_one_fails() -> None:
 def test_all_of_all_fail() -> None:
     """all_of fails when all evaluators fail."""
     evaluator = all_of(exact_match, contains)
-    score = evaluator("foo", "bar", _mock_session())
+    score = evaluator("foo", "bar")
     assert score.passed is False
     assert score.value == 0.0
 
@@ -130,18 +121,18 @@ def test_all_of_all_fail() -> None:
 def test_all_of_collects_reasons() -> None:
     """all_of collects non-empty reasons."""
 
-    def reason_evaluator(output: object, expected: object) -> Score:
+    def reason_evaluator(output: str, expected: str) -> Score:
         return Score(value=0.5, passed=True, reason="test reason")
 
     evaluator = all_of(reason_evaluator, reason_evaluator)
-    score = evaluator("a", "b", _mock_session())
+    score = evaluator("a", "b")
     assert "test reason" in score.reason
 
 
 def test_all_of_single_evaluator() -> None:
     """all_of works with a single evaluator."""
     evaluator = all_of(exact_match)
-    score = evaluator("hello", "hello", _mock_session())
+    score = evaluator("hello", "hello")
     assert score.passed is True
     assert score.value == 1.0
 
@@ -154,7 +145,7 @@ def test_all_of_single_evaluator() -> None:
 def test_any_of_all_pass() -> None:
     """any_of passes when all evaluators pass."""
     evaluator = any_of(exact_match, contains)
-    score = evaluator("hello", "hello", _mock_session())
+    score = evaluator("hello", "hello")
     assert score.passed is True
     assert score.value == 1.0  # Max of 1.0 and 1.0
 
@@ -162,7 +153,7 @@ def test_any_of_all_pass() -> None:
 def test_any_of_one_passes() -> None:
     """any_of passes when at least one evaluator passes."""
     evaluator = any_of(exact_match, contains)
-    score = evaluator("hello world", "hello", _mock_session())
+    score = evaluator("hello world", "hello")
     # exact_match fails, contains passes
     assert score.passed is True
     assert score.value == 1.0  # Max of 0.0 and 1.0
@@ -171,7 +162,7 @@ def test_any_of_one_passes() -> None:
 def test_any_of_all_fail() -> None:
     """any_of fails when all evaluators fail."""
     evaluator = any_of(exact_match, contains)
-    score = evaluator("foo", "bar", _mock_session())
+    score = evaluator("foo", "bar")
     assert score.passed is False
     assert score.value == 0.0
 
@@ -179,18 +170,18 @@ def test_any_of_all_fail() -> None:
 def test_any_of_collects_reasons() -> None:
     """any_of collects non-empty reasons."""
 
-    def reason_evaluator(output: object, expected: object) -> Score:
+    def reason_evaluator(output: str, expected: str) -> Score:
         return Score(value=0.5, passed=True, reason="test reason")
 
     evaluator = any_of(reason_evaluator, reason_evaluator)
-    score = evaluator("a", "b", _mock_session())
+    score = evaluator("a", "b")
     assert "test reason" in score.reason
 
 
 def test_any_of_single_evaluator() -> None:
     """any_of works with a single evaluator."""
     evaluator = any_of(exact_match)
-    score = evaluator("hello", "hello", _mock_session())
+    score = evaluator("hello", "hello")
     assert score.passed is True
     assert score.value == 1.0
 
@@ -203,20 +194,18 @@ def test_any_of_single_evaluator() -> None:
 def test_nested_combinators() -> None:
     """Combinators can be nested."""
 
-    def always_pass(output: object, expected: object) -> Score:
+    def always_pass(output: str, expected: str) -> Score:
         return Score(value=1.0, passed=True)
 
-    def always_fail(output: object, expected: object) -> Score:
+    def always_fail(output: str, expected: str) -> Score:
         return Score(value=0.0, passed=False)
-
-    _ = always_fail  # unused but defined for symmetry
 
     # (exact_match AND contains) OR always_pass
     inner = all_of(exact_match, contains)
     outer = any_of(inner, always_pass)
 
     # Inner fails (foo != bar, bar not in foo), but always_pass passes
-    score = outer("foo", "bar", _mock_session())
+    score = outer("foo", "bar")
     assert score.passed is True
     assert score.value == 1.0  # Max of 0.0 and 1.0
 
@@ -224,20 +213,18 @@ def test_nested_combinators() -> None:
 def test_combinators_preserve_score_semantics() -> None:
     """Combinators correctly compute mean vs max."""
 
-    def half_score(output: object, expected: object) -> Score:
+    def half_score(output: str, expected: str) -> Score:
         return Score(value=0.5, passed=True)
 
-    def quarter_score(output: object, expected: object) -> Score:
+    def quarter_score(output: str, expected: str) -> Score:
         return Score(value=0.25, passed=True)
-
-    session = _mock_session()
 
     # all_of should return mean
     all_eval = all_of(half_score, quarter_score)
-    all_score = all_eval("a", "b", session)
+    all_score = all_eval("a", "b")
     assert all_score.value == 0.375  # Mean of 0.5 and 0.25
 
     # any_of should return max
     any_eval = any_of(half_score, quarter_score)
-    any_score = any_eval("a", "b", session)
+    any_score = any_eval("a", "b")
     assert any_score.value == 0.5  # Max of 0.5 and 0.25

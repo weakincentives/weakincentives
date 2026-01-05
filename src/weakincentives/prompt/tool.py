@@ -33,7 +33,6 @@ from typing import (
 
 from ..budget import BudgetTracker
 from ..deadlines import Deadline
-from ..resources import ResourceRegistry
 from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
@@ -58,6 +57,7 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
+    from ..resources.context import ScopedResourceContext
     from ..runtime.session.protocols import SessionProtocol
     from .protocols import (
         PromptProtocol,
@@ -92,7 +92,8 @@ class ToolContext:
     ToolContext provides access to prompt metadata, session state, and
     runtime resources during tool execution.
 
-    Resources are available through the typed ``resources`` registry:
+    Resources are available through the ``resources`` context, which
+    delegates to the prompt's resource context:
 
     .. code-block:: python
 
@@ -117,26 +118,34 @@ class ToolContext:
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     deadline: Deadline | None = None
-    resources: ResourceRegistry = field(default_factory=ResourceRegistry)
+
+    @property
+    def resources(self) -> ScopedResourceContext:
+        """Access resources from the prompt's resource context.
+
+        Returns the active resource context from the prompt. The prompt
+        must be within its context manager for resources to be available.
+        """
+        return self.prompt.resources
 
     @property
     def filesystem(self) -> Filesystem | None:
         """Return the filesystem resource, if available.
 
-        This is sugar for ``self.resources.get(Filesystem)``.
+        This is sugar for ``self.resources.get_optional(Filesystem)``.
         """
         # Import here to avoid circular import at module load time
         from ..filesystem import Filesystem
 
-        return self.resources.get(Filesystem)
+        return self.resources.get_optional(Filesystem)
 
     @property
     def budget_tracker(self) -> BudgetTracker | None:
         """Return the budget tracker resource, if available.
 
-        This is sugar for ``self.resources.get(BudgetTracker)``.
+        This is sugar for ``self.resources.get_optional(BudgetTracker)``.
         """
-        return self.resources.get(BudgetTracker)
+        return self.resources.get_optional(BudgetTracker)
 
 
 def _normalize_specialization(item: object) -> tuple[object, object]:

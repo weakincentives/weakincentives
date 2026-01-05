@@ -17,6 +17,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 
 if TYPE_CHECKING:
+    from ..resources import ResourceRegistry
     from ..runtime.session.protocols import SessionProtocol
     from .tool import Tool
 
@@ -283,6 +284,21 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         """Return the summary template text, when available."""
 
         return self.summary
+
+    def resources(self) -> ResourceRegistry:
+        """Return resources required by this section.
+
+        Override to contribute resources. Default returns empty registry.
+        The prompt collects resources from all sections automatically.
+
+        Example::
+
+            def resources(self) -> ResourceRegistry:
+                return ResourceRegistry.build({Filesystem: self.filesystem})
+        """
+        from ..resources import ResourceRegistry
+
+        return ResourceRegistry()
 
     def effective_visibility(
         self,

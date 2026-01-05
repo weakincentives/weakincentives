@@ -53,7 +53,7 @@ class FilesystemValidationSuite:  # noqa: PLR0904
     This suite validates:
     - Read operations (read, exists, stat, list, glob, grep)
     - Write operations (write, delete, mkdir)
-    - Properties (root, read_only)
+    - Properties (root, read_only, mount_point)
     - Error handling (FileNotFoundError, IsADirectoryError, etc.)
     - Path validation (depth, segment length, ASCII)
 
@@ -82,6 +82,11 @@ class FilesystemValidationSuite:  # noqa: PLR0904
     def test_read_only_property_default_false(self, fs: Filesystem) -> None:
         """Default filesystem should not be read-only."""
         assert fs.read_only is False
+
+    def test_mount_point_property_exists(self, fs: Filesystem) -> None:
+        """Filesystem should have a mount_point property."""
+        # mount_point can be None or a string
+        assert fs.mount_point is None or isinstance(fs.mount_point, str)
 
     # -------------------------------------------------------------------------
     # Exists Operation

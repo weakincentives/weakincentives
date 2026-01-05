@@ -23,6 +23,8 @@ from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import Budget, BudgetTracker
+    from ..resources import ResourceRegistry
+    from ..resources.context import ScopedResourceContext
     from ..runtime.session.protocols import SessionProtocol
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
@@ -88,7 +90,12 @@ class PromptTemplateProtocol[TemplateOutputT](Protocol):
 
 
 class PromptProtocol[PromptOutputT](Protocol):
-    """Interface describing the bound prompt wrapper used at runtime."""
+    """Interface describing the bound prompt wrapper used at runtime.
+
+    Prompt is also a context manager that owns the resource lifecycle.
+    Resources are accessible via the `resources` property only within
+    the context manager.
+    """
 
     template: PromptTemplateProtocol[PromptOutputT]
     overrides_store: PromptOverridesStore | None
@@ -109,15 +116,37 @@ class PromptProtocol[PromptOutputT](Protocol):
         self,
     ) -> StructuredOutputConfig[SupportsDataclass] | None: ...
 
-    def bind(self, *params: SupportsDataclass) -> PromptProtocol[PromptOutputT]: ...
+    @property
+    def resources(self) -> ScopedResourceContext:
+        """Access the active resource context.
+
+        Only available within the context manager.
+        """
+        ...
+
+    def bind(
+        self,
+        *params: SupportsDataclass,
+        resources: ResourceRegistry | None = None,
+    ) -> PromptProtocol[PromptOutputT]: ...
 
     def render(self) -> RenderedPromptProtocol[PromptOutputT]: ...
+
+    def __enter__(self) -> PromptProtocol[PromptOutputT]: ...
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> None: ...
 
 
 class ProviderAdapterProtocol[AdapterOutputT](Protocol):
     """Interface describing the subset of adapter behaviour required by tools.
 
-    Telemetry is dispatched via session.dispatcher.
+    Telemetry is dispatched via session.dispatcher. Resources are accessed
+    via the prompt's resource context (prompt.resources).
     """
 
     def evaluate(

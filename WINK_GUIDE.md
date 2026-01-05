@@ -492,10 +492,14 @@ class NowResult:
 def now_handler(params: NowParams, *, context: ToolContext) -> ToolResult[NowResult]:
     del context  # not used here
     if params.tz != "UTC":
-        return ToolResult.error("Only UTC supported in this demo.")
-    return ToolResult.ok(
-        NowResult(iso=datetime.now(UTC).isoformat()),
+        return ToolResult(
+            message="Only UTC supported in this demo.",
+            value=None,
+            success=False,
+        )
+    return ToolResult(
         message="Current time.",
+        value=NowResult(iso=datetime.now(UTC).isoformat()),
     )
 
 now_tool = Tool[NowParams, NowResult](
@@ -561,12 +565,12 @@ class SearchResult:
 def search_handler(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
     # In a real agent, this would call a search API
     del context
-    return ToolResult.ok(
-        SearchResult(snippets=(
+    return ToolResult(
+        message=f"Found results for: {params.query}",
+        value=SearchResult(snippets=(
             f"Result 1 about {params.query}",
             f"Result 2 about {params.query}",
         )),
-        message=f"Found results for: {params.query}",
     )
 
 search_tool = Tool[SearchParams, SearchResult](
@@ -951,7 +955,7 @@ class MyResult:
 
 def handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
     # Do work here (read files, call an API, etc.)
-    return ToolResult.ok(MyResult(answer="42"), message="ok")
+    return ToolResult(message="ok", value=MyResult(answer="42"))
 
 tool = Tool[MyParams, MyResult](
     name="my_tool",
@@ -1035,16 +1039,9 @@ Many contributed tool suites install one automatically (VFS, Podman).
 
 ### 4.3 ToolResult semantics
 
-Tool handlers return `ToolResult`. Use the convenience constructors:
+Tool handlers return `ToolResult`:
 
 ```python
-# Success with typed value (most common)
-ToolResult.ok(MyResult(...), message="Done")
-
-# Failure with no value
-ToolResult.error("Something went wrong")
-
-# Full form (when exclude_value_from_context is needed)
 ToolResult(
     message="Human-readable status",
     value=...,                        # dataclass | mapping | sequence | str | None
@@ -1114,7 +1111,7 @@ tools themselves. The model sees them together.
 
 ### 4.6 Transactional tool execution
 
-_Canonical spec: [specs/EXECUTION_STATE.md](specs/EXECUTION_STATE.md)_
+_Canonical spec: [specs/SESSIONS.md](specs/SESSIONS.md)_
 
 One of the hardest problems in building agents is handling partial failures.
 When a tool call fails halfway through, you're left with corrupted session
@@ -2410,8 +2407,8 @@ Tool handlers must return `ToolResult`, not `None`.
 ```python
 def handler(params, *, context):
     if something_wrong:
-        return ToolResult.error("Failed")
-    return ToolResult.ok(result, message="OK")
+        return ToolResult(message="Failed", value=None, success=False)
+    return ToolResult(message="OK", value=result)
 ```
 
 ### "OutputParseError: missing required field"
@@ -2519,8 +2516,7 @@ Prompt(template, overrides_store=None, overrides_tag="latest")
 
 MarkdownSection(title, key, template, summary=None, visibility=..., tools=...)
 Tool(name, description, handler, examples=...)
-ToolResult.ok(value, message="OK")      # success case
-ToolResult.error(message)               # failure case
+ToolResult(message, value, success=True, exclude_value_from_context=False)
 ```
 
 **Progressive disclosure:**

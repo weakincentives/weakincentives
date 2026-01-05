@@ -356,7 +356,7 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
         del context
         calls.append(params.query)
         payload = ToolPayload(answer=f"Result for {params.query}")
-        return ToolResult.ok(payload, message="completed")
+        return ToolResult(message="completed", value=payload)
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -634,7 +634,10 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
         del context, params
         nonlocal invoked
         invoked = True
-        return ToolResult.ok(ToolPayload(answer="should not run"), message="completed")
+        return ToolResult(
+            message="completed",
+            value=ToolPayload(answer="should not run"),
+        )
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -942,7 +945,7 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
         params: OptionalParams, *, context: ToolContext
     ) -> ToolResult[OptionalPayload]:
         del context
-        return ToolResult.ok(OptionalPayload(value=params.query), message="done")
+        return ToolResult(message="done", value=OptionalPayload(value=params.query))
 
     tool_handler: ToolHandler[OptionalParams, OptionalPayload] = optional_handler
 
@@ -2014,7 +2017,7 @@ def test_openai_adapter_passes_tool_choice_directive_to_request() -> None:
     def fake_handler(
         params: ToolParams, *, context: ToolContext
     ) -> ToolResult[ToolPayload]:
-        return ToolResult.ok(ToolPayload(answer="done"), message="ok")
+        return ToolResult(message="ok", value=ToolPayload(answer="done"))
 
     tool = Tool[ToolParams, ToolPayload](
         name="search_tool",

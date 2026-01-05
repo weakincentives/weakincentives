@@ -57,7 +57,7 @@ from .structured_output import (
     parse_structured_output,
 )
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
-from .tool import ResourceRegistry, Tool, ToolContext, ToolExample, ToolHandler
+from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
@@ -82,7 +82,6 @@ __all__ = [
     "ReadSectionResult",
     "RenderedPrompt",
     "RenderedPromptProtocol",
-    "ResourceRegistry",
     "Section",
     "SectionDescriptor",
     "SectionNode",
