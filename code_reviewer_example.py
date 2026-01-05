@@ -539,19 +539,30 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
 def build_claude_agent_adapter() -> tuple[
     ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection
 ]:
-    """Build the Claude Agent SDK adapter with workspace section and isolation.
+    """Build the Claude Agent SDK adapter with fully hermetic isolation.
 
     Creates a workspace section with the test repository mounted, and configures
-    the adapter to use the SDK's native agentic capabilities with hermetic
-    isolation. The sandbox has network access to Python documentation sites
-    for code quality reference. Skills from demo-skills/ are auto-discovered
-    and mounted for Claude Code to use.
+    the adapter to use the SDK's native agentic capabilities with complete
+    hermetic isolation. The adapter operates from an isolated ephemeral home
+    directory with no access to host configuration or environment variables.
+
+    Hermetic isolation guarantees:
+    - Ephemeral HOME directory (no access to ~/.claude)
+    - Explicit API key passed through IsolationConfig (not inherited from host)
+    - No host environment variables inherited
+    - Sandboxed execution with OS-level enforcement
+    - Network restricted to Python documentation domains only
+    - Skills mounted from demo-skills/ directory
 
     Returns:
         Tuple of (adapter, workspace_section). The workspace section should be
         cloned with the real session before use in prompts.
+
+    Raises:
+        SystemExit: If ANTHROPIC_API_KEY is not set in the environment.
     """
-    if "ANTHROPIC_API_KEY" not in os.environ:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
         raise SystemExit("Set ANTHROPIC_API_KEY before running with --claude-agent.")
 
     _ensure_test_repository_available()
@@ -586,8 +597,14 @@ def build_claude_agent_adapter() -> tuple[
         else ()
     )
 
-    # Configure hermetic isolation with access to Python documentation
+    # Configure fully hermetic isolation:
+    # - Explicit API key (not inherited from host environment)
+    # - No host environment variables inherited
+    # - Sandboxed execution with network restrictions
+    # - Skills mounted in ephemeral home
     isolation = IsolationConfig(
+        api_key=api_key,
+        include_host_env=False,
         network_policy=NetworkPolicy(
             allowed_domains=CODE_REVIEW_ALLOWED_DOMAINS,
         ),
