@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import TYPE_CHECKING, cast
@@ -55,9 +56,9 @@ class ResourceRegistry:
             BudgetTracker: tracker,
         })
 
-        # Access via context
-        ctx = registry.create_context()
-        http = ctx.get(HTTPClient)
+        # Access via context manager (recommended)
+        with registry.open() as ctx:
+            http = ctx.get(HTTPClient)
     """
 
     _bindings: Mapping[type[object], Binding[object]] = field(
@@ -234,6 +235,31 @@ class ResourceRegistry:
             registry=self,
             singleton_cache=singleton_cache if singleton_cache is not None else {},
         )
+
+    @contextmanager
+    def open(self) -> Iterator[ScopedResourceContext]:
+        """Context manager for resource lifecycle.
+
+        Creates a context, starts it, and ensures cleanup on exit.
+        This is the recommended way to use resources.
+
+        Example::
+
+            registry = ResourceRegistry.build({Config: config})
+
+            with registry.open() as ctx:
+                service = ctx.get(MyService)
+            # Resources cleaned up automatically
+
+        Yields:
+            Started ScopedResourceContext for resolving resources.
+        """
+        ctx = self.create_context()
+        ctx.start()
+        try:
+            yield ctx
+        finally:
+            ctx.close()
 
 
 __all__ = ["ResourceRegistry"]

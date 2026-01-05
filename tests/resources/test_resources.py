@@ -999,3 +999,45 @@ class TestIntegration:
             ctx.close()
 
         assert resource.closed is True
+
+    def test_registry_open_context_manager(self) -> None:
+        """Test ResourceRegistry.open() context manager."""
+        registry = ResourceRegistry.of(
+            Binding(CloseableResource, lambda r: CloseableResource())
+        )
+
+        with registry.open() as ctx:
+            resource = ctx.get(CloseableResource)
+            assert resource.closed is False
+
+        assert resource.closed is True
+
+    def test_registry_open_handles_exception(self) -> None:
+        """Test that open() cleans up resources on exception."""
+        registry = ResourceRegistry.of(
+            Binding(CloseableResource, lambda r: CloseableResource())
+        )
+        resources: list[CloseableResource] = []
+
+        with pytest.raises(ValueError, match="test error"):
+            with registry.open() as ctx:
+                resource = ctx.get(CloseableResource)
+                resources.append(resource)
+                raise ValueError("test error")
+
+        assert len(resources) == 1
+        assert resources[0].closed is True
+
+    def test_registry_open_starts_eager_bindings(self) -> None:
+        """Test that open() starts eager bindings."""
+        constructed = []
+
+        def make_config(r: ResourceResolver) -> ConcreteConfig:
+            constructed.append("config")
+            return ConcreteConfig()
+
+        registry = ResourceRegistry.of(Binding(Config, make_config, eager=True))
+
+        assert constructed == []
+        with registry.open():
+            assert constructed == ["config"]

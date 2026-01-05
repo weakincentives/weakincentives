@@ -26,11 +26,8 @@ Quick Start::
         Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
     )
 
-    # Create resolution context
-    ctx = registry.create_context()
-    ctx.start()
-
-    try:
+    # Use context manager for automatic lifecycle management
+    with registry.open() as ctx:
         # Resolve resources (lazily constructed)
         http = ctx.get(HTTPClient)
 
@@ -39,8 +36,7 @@ Quick Start::
             tracer = resolver.get(Tracer)
             # ... execute tool ...
         # Tracer disposed here
-    finally:
-        ctx.close()
+    # All resources cleaned up automatically
 
 Scopes
 ------
