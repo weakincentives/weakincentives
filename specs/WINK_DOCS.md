@@ -57,16 +57,23 @@ src/weakincentives/
         ├── EVALS.md
         ├── EXAMPLES.md
         ├── FILESYSTEM.md
+        ├── FORMAL_VERIFICATION.md
+        ├── HEALTH.md
         ├── LANGSMITH.md
+        ├── LIFECYCLE.md
         ├── LOGGING.md
         ├── MAILBOX.md
+        ├── MAILBOX_RESOLVER.md
         ├── MAIN_LOOP.md
         ├── PROMPT_OPTIMIZATION.md
         ├── PROMPTS.md
+        ├── RESOURCE_REGISTRY.md
         ├── SESSIONS.md
+        ├── SLICES.md
         ├── TESTING.md
         ├── THREAD_SAFETY.md
         ├── TOOLS.md
+        ├── VERIFICATION.md
         ├── WINK_DEBUG.md
         ├── WINK_DOCS.md
         └── WORKSPACE.md
