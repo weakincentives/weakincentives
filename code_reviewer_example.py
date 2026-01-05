@@ -173,11 +173,11 @@ class ReferenceParams:
 
 
 class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
-    """MainLoop implementation for code review with auto-optimization.
+    """MainLoop implementation for code review with optional optimization.
 
     This loop runs as a background worker processing requests from a mailbox.
-    It maintains a persistent session across all requests and automatically
-    runs workspace digest optimization on first use.
+    It maintains a persistent session across all requests and optionally
+    runs workspace digest optimization on first use when enabled.
 
     Example::
 
@@ -202,6 +202,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     _override_tag: str
     _use_podman: bool
     _use_claude_agent: bool
+    _enable_optimization: bool
     _optimization_done: bool
 
     def __init__(  # noqa: PLR0913
@@ -216,6 +217,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         use_podman: bool = False,
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
+        enable_optimization: bool = False,
     ) -> None:
         super().__init__(adapter=adapter, requests=requests)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
@@ -224,6 +226,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         )
         self._use_podman = use_podman
         self._use_claude_agent = use_claude_agent
+        self._enable_optimization = enable_optimization
         self._optimization_done = False
         # Create persistent session at construction time
         self._persistent_session = build_logged_session(tags={"app": "code-reviewer"})
@@ -248,11 +251,11 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     ) -> tuple[Prompt[ReviewResponse], Session]:
         """Prepare prompt and session for the given request.
 
-        Runs workspace optimization on first request if needed, then creates
+        Runs workspace optimization on first request if enabled, then creates
         the review prompt and returns the persistent session.
         """
-        # Run optimization once on first request
-        if not self._optimization_done:
+        # Run optimization once on first request (if enabled)
+        if self._enable_optimization and not self._optimization_done:
             needs_optimization = (
                 self._persistent_session[WorkspaceDigest].latest() is None
             )
@@ -325,6 +328,7 @@ class CodeReviewApp:
     _worker_thread: threading.Thread | None
     _pending_requests: dict[UUID, str]  # request_id -> user prompt for display
     _use_claude_agent: bool
+    _enable_optimization: bool
     _workspace_section: ClaudeAgentWorkspaceSection | None
     _shutdown_requested: bool
 
@@ -337,8 +341,10 @@ class CodeReviewApp:
         use_podman: bool = False,
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
+        enable_optimization: bool = False,
     ) -> None:
         self._use_claude_agent = use_claude_agent
+        self._enable_optimization = enable_optimization
         self._workspace_section = workspace_section
         self._worker_thread = None
         self._pending_requests = {}
@@ -359,6 +365,7 @@ class CodeReviewApp:
             use_podman=use_podman,
             use_claude_agent=use_claude_agent,
             workspace_section=workspace_section,
+            enable_optimization=enable_optimization,
         )
 
     def _run_worker(self) -> None:
@@ -412,6 +419,7 @@ class CodeReviewApp:
                 self._loop.override_tag,
                 use_podman=self._loop.use_podman,
                 use_claude_agent=self._use_claude_agent,
+                enable_optimization=self._enable_optimization,
             )
         )
         print("Type a review prompt to begin. (Type 'exit' to quit.)")
@@ -505,6 +513,11 @@ def parse_args() -> argparse.Namespace:
             "Requires ANTHROPIC_API_KEY. Uses SDK's built-in tools."
         ),
     )
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Enable workspace digest optimization on first request.",
+    )
     return parser.parse_args()
 
 
@@ -520,10 +533,15 @@ def main() -> None:
             use_podman=False,
             use_claude_agent=True,
             workspace_section=workspace_section,
+            enable_optimization=args.optimize,
         )
     else:
         adapter = build_adapter()
-        app = CodeReviewApp(adapter, use_podman=args.podman)
+        app = CodeReviewApp(
+            adapter,
+            use_podman=args.podman,
+            enable_optimization=args.optimize,
+        )
 
     app.run()
 
@@ -880,8 +898,13 @@ def _build_workspace_section(
 
 
 def _build_intro(
-    override_tag: str, *, use_podman: bool, use_claude_agent: bool = False
+    override_tag: str,
+    *,
+    use_podman: bool,
+    use_claude_agent: bool = False,
+    enable_optimization: bool = False,
 ) -> str:
+    optimization_status = "enabled (--optimize)" if enable_optimization else "disabled"
     if use_claude_agent:
         return textwrap.dedent(
             f"""
@@ -890,7 +913,9 @@ def _build_intro(
             - Isolation: Hermetic sandbox with ephemeral home directory
             - Repository: test-repositories/sunfish mounted in workspace
             - Tools: SDK's native Read, Write, Bash + custom MCP tools (planning, open_sections)
+            - Skills: Auto-discovered from demo-skills/ (code-review, python-style, ascii-art)
             - Network: Access to peps.python.org, docs.python.org for code quality reference
+            - Optimization: {optimization_status}
             - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
 
             Note: Custom MCP tools are bridged via streaming mode for full feature parity.
@@ -903,8 +928,8 @@ def _build_intro(
         Launching example code reviewer agent.
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
         - Workspace: {workspace_mode} (use --podman flag to enable Podman sandbox).
+        - Optimization: {optimization_status}
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
-        - Auto-optimization: Workspace digest generated on first request.
 
         Note: Full prompt text and tool calls will be logged to the console for observability.
         """
