@@ -995,13 +995,14 @@ registry = ResourceRegistry.of(
 )
 ```
 
-**Injecting resources at evaluation time:**
+**Binding resources to prompts:**
 
-You can pass custom resources directly to `adapter.evaluate()` or
-`MainLoop.execute()`. This makes tools cleaner, more testable, and portable:
+Resources are bound to `Prompt` via the `bind()` method. The `Prompt` is a
+context manager that owns the resource lifecycle:
 
 ```python
 from weakincentives.resources import Binding, ResourceRegistry, Scope
+from weakincentives.prompt import Prompt
 from myapp.http import HTTPClient, Config
 
 # Simple case: pre-constructed instances
@@ -1015,13 +1016,31 @@ resources = ResourceRegistry.of(
     Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per tool
 )
 
-# Pass to adapter - merged with workspace resources (e.g., filesystem)
-response = adapter.evaluate(prompt, session=session, resources=resources)
+# Bind resources to prompt
+prompt = Prompt(template).bind(params, resources=resources)
 
-# Or at the MainLoop level
+# Use as context manager for lifecycle management
+with prompt:
+    response = adapter.evaluate(prompt, session=session)
+    # Resources are accessible within this block
+```
+
+**Using MainLoop (recommended):**
+
+`MainLoop.execute()` handles resource binding and lifecycle automatically:
+
+```python
+from weakincentives.runtime import MainLoopConfig
+
+# Configure resources at the loop level
 config = MainLoopConfig(resources=resources)
 loop = MyLoop(adapter=adapter, bus=bus, config=config)
+
+# Resources are bound to prompt automatically
 response, session = loop.execute(request)
+
+# Or pass per-request resources
+response, session = loop.execute(request, resources=resources)
 ```
 
 **Scopes control instance lifetime:**
@@ -1081,7 +1100,8 @@ Resources can implement lifecycle protocols for automatic management:
 - Circular dependencies raise `CircularDependencyError`
 - User-provided resources override workspace defaults (e.g., custom filesystem)
 - Tool handlers access resources via `context.resources.get(ResourceType)`
-- All adapters (OpenAI, LiteLLM, Claude Agent SDK) support resource injection
+- Resources are bound to prompts via `prompt.bind(resources=...)` or via
+  `MainLoop.execute(resources=...)`
 
 For workspace agents, the most common resource is a `Filesystem` implementation.
 Many contributed tool suites install one automatically (VFS, Podman).
