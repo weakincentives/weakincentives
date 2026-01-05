@@ -236,7 +236,7 @@ class _Payload:
 
 
 def test_tool_invoked_event_fields() -> None:
-    raw_result = ToolResult.ok(_Payload(value="data"), message="ok")
+    raw_result = ToolResult(message="ok", value=_Payload(value="data"))
     result = cast(ToolResult[object], raw_result)
     rendered_output = raw_result.render()
     event = ToolInvoked(

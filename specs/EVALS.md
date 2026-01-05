@@ -145,22 +145,14 @@ threshold for pass rates.
 
 ### Evaluator
 
-An evaluator is any callable matching one of these signatures:
+An evaluator is any callable matching this signature:
 
 ```python
-# Standard evaluator - scores output against expected
 Evaluator = Callable[[OutputT, ExpectedT], Score]
-
-# Session-aware evaluator - also receives session for behavioral assertions
-SessionEvaluator = Callable[[OutputT, ExpectedT, SessionView], Score]
 ```
 
 Evaluators are pure functions—no side effects, no state. This makes them easy
 to test, compose, and reason about.
-
-Session-aware evaluators receive a `SessionView`—a read-only view of session
-state that provides access to tool invocations, token usage, and custom slices
-without allowing mutations.
 
 ## Built-in Evaluators
 
@@ -234,336 +226,6 @@ def json_subset(output: dict, expected: dict) -> Score:
         if key not in output or output[key] != value:
             return Score(value=0.0, passed=False, reason=f"missing or wrong: {key}")
     return Score(value=1.0, passed=True)
-```
-
-## Session-Aware Evaluators
-
-Session-aware evaluators enable behavioral assertions—checking not just _what_
-the agent produced, but _how_ it got there. This includes verifying tool usage
-patterns, token budgets, and custom state invariants.
-
-### SessionView Protocol
-
-`SessionView` provides read-only access to session state:
-
-```python
-class SessionView(Protocol):
-    """Read-only view of session state for evaluators."""
-
-    @property
-    def session_id(self) -> UUID:
-        """Unique session identifier."""
-        ...
-
-    def __getitem__[T](self, slice_type: type[T]) -> SliceView[T]:
-        """Access a slice by type. Returns read-only view."""
-        ...
-```
-
-The `SliceView` provides the same query API as `SliceAccessor` but without
-mutation methods:
-
-```python
-class SliceView(Protocol[T]):
-    """Read-only slice access."""
-
-    def all(self) -> tuple[T, ...]:
-        """Return all items in the slice."""
-        ...
-
-    def latest(self) -> T | None:
-        """Return the most recent item, or None if empty."""
-        ...
-
-    def where(self, predicate: Callable[[T], bool]) -> tuple[T, ...]:
-        """Return items matching the predicate."""
-        ...
-```
-
-### Built-in Session Evaluators
-
-#### tool_called
-
-Assert that a specific tool was invoked:
-
-```python
-def tool_called(name: str) -> SessionEvaluator[Any, Any]:
-    """Assert that a tool was called at least once.
-
-    Args:
-        name: The tool name to check for.
-
-    Returns:
-        SessionEvaluator that passes if the tool was called.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        calls = session[ToolInvoked].all()
-        matching = [c for c in calls if c.name == name]
-        passed = len(matching) > 0
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"tool '{name}' called {len(matching)} time(s)",
-        )
-    return evaluate
-```
-
-#### tool_not_called
-
-Assert that a tool was NOT invoked:
-
-```python
-def tool_not_called(name: str) -> SessionEvaluator[Any, Any]:
-    """Assert that a tool was never called.
-
-    Args:
-        name: The tool name that should not appear.
-
-    Returns:
-        SessionEvaluator that passes if the tool was not called.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        calls = session[ToolInvoked].all()
-        matching = [c for c in calls if c.name == name]
-        passed = len(matching) == 0
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"tool '{name}' called {len(matching)} time(s)" if not passed else "",
-        )
-    return evaluate
-```
-
-#### tool_call_count
-
-Assert tool was called within count bounds:
-
-```python
-def tool_call_count(
-    name: str,
-    *,
-    min_count: int = 0,
-    max_count: int | None = None,
-) -> SessionEvaluator[Any, Any]:
-    """Assert tool call count is within bounds.
-
-    Args:
-        name: The tool name to count.
-        min_count: Minimum number of calls required (inclusive).
-        max_count: Maximum number of calls allowed (inclusive). None = no limit.
-
-    Returns:
-        SessionEvaluator that passes if count is within bounds.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        calls = session[ToolInvoked].all()
-        count = sum(1 for c in calls if c.name == name)
-        passed = count >= min_count and (max_count is None or count <= max_count)
-
-        if max_count is None:
-            bounds = f">= {min_count}"
-        else:
-            bounds = f"{min_count}-{max_count}"
-
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"tool '{name}' called {count} times (expected {bounds})",
-        )
-    return evaluate
-```
-
-#### all_tools_succeeded
-
-Assert all tool calls returned success:
-
-```python
-def all_tools_succeeded() -> SessionEvaluator[Any, Any]:
-    """Assert all tool invocations succeeded.
-
-    Checks the 'success' field in each ToolInvoked.result dict.
-    Tools without a 'success' field are assumed to have succeeded.
-
-    Returns:
-        SessionEvaluator that passes if no tool failures occurred.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        calls = session[ToolInvoked].all()
-        if not calls:
-            return Score(value=1.0, passed=True)
-
-        failures = []
-        for call in calls:
-            result = call.result
-            if isinstance(result, dict) and result.get("success") is False:
-                failures.append(call.name)
-
-        passed = len(failures) == 0
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"failed tools: {failures}" if failures else "",
-        )
-    return evaluate
-```
-
-#### token_usage_under
-
-Assert total token usage stayed under budget:
-
-```python
-def token_usage_under(max_tokens: int) -> SessionEvaluator[Any, Any]:
-    """Assert total token usage is under budget.
-
-    Sums input_tokens + output_tokens across all PromptExecuted events.
-
-    Args:
-        max_tokens: Maximum total tokens allowed.
-
-    Returns:
-        SessionEvaluator that passes if usage is under budget.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        executions = session[PromptExecuted].all()
-        total = 0
-        for ex in executions:
-            if ex.usage:
-                total += (ex.usage.input_tokens or 0) + (ex.usage.output_tokens or 0)
-
-        passed = total <= max_tokens
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"used {total} tokens (limit: {max_tokens})",
-        )
-    return evaluate
-```
-
-#### slice_contains
-
-Assert a custom slice contains expected values:
-
-```python
-def slice_contains[T](
-    slice_type: type[T],
-    predicate: Callable[[T], bool],
-    *,
-    min_count: int = 1,
-) -> SessionEvaluator[Any, Any]:
-    """Assert slice contains items matching predicate.
-
-    Args:
-        slice_type: The slice type to query.
-        predicate: Function to test each item.
-        min_count: Minimum matching items required.
-
-    Returns:
-        SessionEvaluator that passes if enough items match.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        items = session[slice_type].where(predicate)
-        passed = len(items) >= min_count
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"found {len(items)} matching items (need >= {min_count})",
-        )
-    return evaluate
-```
-
-### Adapting Standard Evaluators
-
-Standard evaluators work with session-aware combinators via the `adapt`
-function:
-
-```python
-def adapt[O, E](evaluator: Evaluator[O, E]) -> SessionEvaluator[O, E]:
-    """Adapt a standard evaluator to session-aware signature.
-
-    The session parameter is ignored, allowing standard evaluators
-    to compose with session-aware evaluators.
-    """
-    def evaluate(output: O, expected: E, session: SessionView) -> Score:
-        return evaluator(output, expected)
-    return evaluate
-```
-
-### Combinators
-
-The `all_of` and `any_of` combinators work with both evaluator types:
-
-```python
-def all_of[O, E](
-    *evaluators: Evaluator[O, E] | SessionEvaluator[O, E],
-) -> SessionEvaluator[O, E]:
-    """All evaluators must pass. Score is the mean.
-
-    Automatically adapts standard evaluators to session-aware signature.
-    """
-    adapted = [
-        e if _is_session_aware(e) else adapt(e)
-        for e in evaluators
-    ]
-
-    def evaluate(output: O, expected: E, session: SessionView) -> Score:
-        scores = [e(output, expected, session) for e in adapted]
-        passed = all(s.passed for s in scores)
-        value = sum(s.value for s in scores) / len(scores)
-        reasons = [s.reason for s in scores if s.reason]
-        return Score(value=value, passed=passed, reason="; ".join(reasons))
-    return evaluate
-
-
-def any_of[O, E](
-    *evaluators: Evaluator[O, E] | SessionEvaluator[O, E],
-) -> SessionEvaluator[O, E]:
-    """At least one evaluator must pass. Score is the max.
-
-    Automatically adapts standard evaluators to session-aware signature.
-    """
-    adapted = [
-        e if _is_session_aware(e) else adapt(e)
-        for e in evaluators
-    ]
-
-    def evaluate(output: O, expected: E, session: SessionView) -> Score:
-        scores = [e(output, expected, session) for e in adapted]
-        passed = any(s.passed for s in scores)
-        value = max(s.value for s in scores)
-        reasons = [s.reason for s in scores if s.reason]
-        return Score(value=value, passed=passed, reason="; ".join(reasons))
-    return evaluate
-
-
-def _is_session_aware(fn: Callable[..., Score]) -> bool:
-    """Check if evaluator accepts session parameter."""
-    import inspect
-    sig = inspect.signature(fn)
-    return len(sig.parameters) >= 3
-```
-
-### Usage Example
-
-```python
-from weakincentives.evals import (
-    all_of, exact_match,
-    tool_called, tool_not_called, all_tools_succeeded, token_usage_under,
-)
-
-# Compose output and behavioral assertions
-evaluator = all_of(
-    exact_match,                        # Output must match expected
-    tool_called("search"),              # Must use search tool
-    tool_not_called("dangerous_tool"),  # Must not use forbidden tool
-    all_tools_succeeded(),              # No tool failures
-    token_usage_under(5000),            # Stay under budget
-)
-
-eval_loop = EvalLoop(
-    loop=main_loop,
-    evaluator=evaluator,
-    requests=requests,
-)
 ```
 
 ## LLM-as-Judge
@@ -777,16 +439,13 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
     Receives EvalRequest messages, executes through MainLoop, scores
     with evaluator, and sends EvalResult to results mailbox. Designed
     to run alongside MainLoop workers in distributed deployments.
-
-    Supports both standard and session-aware evaluators. Session-aware
-    evaluators receive a SessionView for behavioral assertions.
     """
 
     def __init__(
         self,
         *,
         loop: MainLoop[InputT, OutputT],
-        evaluator: Evaluator[OutputT, ExpectedT] | SessionEvaluator[OutputT, ExpectedT],
+        evaluator: Evaluator[OutputT, ExpectedT],
         requests: Mailbox[EvalRequest[InputT, ExpectedT]],
         results: Mailbox[EvalResult],
     ) -> None:
@@ -823,14 +482,9 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
         sample = request.sample
         start = time.monotonic()
 
-        response, session = self._loop.execute(sample.input)
+        response, _ = self._loop.execute(sample.input)
         latency_ms = int((time.monotonic() - start) * 1000)
-
-        # Invoke evaluator with session if session-aware
-        if _is_session_aware(self._evaluator):
-            score = self._evaluator(response.output, sample.expected, session)
-        else:
-            score = self._evaluator(response.output, sample.expected)
+        score = self._evaluator(response.output, sample.expected)
 
         return EvalResult(
             sample_id=sample.id,
@@ -1036,68 +690,6 @@ eval_loop.run(max_iterations=1)
 report = collect_results(results, expected_count=len(dataset))
 ```
 
-### Session-Aware Evaluation
-
-Evaluate both outputs and agent behavior:
-
-```python
-from weakincentives.evals import (
-    EvalLoop, all_of, exact_match,
-    tool_called, tool_not_called, all_tools_succeeded,
-    token_usage_under, slice_contains,
-)
-
-# Compose output and behavioral assertions
-evaluator = all_of(
-    exact_match,                             # Correct answer
-    tool_called("calculator"),               # Must use calculator
-    tool_not_called("web_search"),           # No external lookups for math
-    all_tools_succeeded(),                   # No tool errors
-    token_usage_under(2000),                 # Efficient execution
-)
-
-eval_loop = EvalLoop(
-    loop=math_loop,
-    evaluator=evaluator,
-    requests=requests,
-    results=results,
-)
-
-submit_dataset(math_dataset, requests)
-eval_loop.run(max_iterations=1)
-report = collect_results(results, expected_count=len(math_dataset))
-
-# Report includes behavioral failure reasons
-for result in report.failed_samples():
-    print(f"Failed: {result.sample_id}")
-    print(f"  Reason: {result.score.reason}")
-```
-
-### Custom Slice Assertions
-
-Assert against application-specific state:
-
-```python
-from dataclasses import dataclass
-from weakincentives.evals import slice_contains
-
-@dataclass(slots=True, frozen=True)
-class PlanStep:
-    """Step in the agent's plan."""
-    name: str
-    status: str  # "pending", "completed", "failed"
-
-# Assert plan was fully executed
-evaluator = all_of(
-    exact_match,
-    slice_contains(
-        PlanStep,
-        lambda step: step.status == "completed",
-        min_count=1,  # At least one step completed
-    ),
-)
-```
-
 ## Distributed Deployment
 
 ### Worker Process
@@ -1236,75 +828,6 @@ def test_any_of_requires_one():
     evaluator = any_of(exact_match, contains)
     score = evaluator("hello world", "hello")
     assert score.passed is True  # contains passes
-```
-
-### Testing Session Evaluators
-
-Session evaluators require a mock session with the appropriate slices:
-
-```python
-from unittest.mock import Mock
-from weakincentives.evals import tool_called, all_tools_succeeded, token_usage_under
-from weakincentives.runtime.events import ToolInvoked, PromptExecuted, TokenUsage
-
-
-def make_mock_session(tool_invocations: list[ToolInvoked]) -> Mock:
-    """Create a mock session with ToolInvoked slice."""
-    session = Mock()
-    slice_view = Mock()
-    slice_view.all.return_value = tuple(tool_invocations)
-    session.__getitem__ = Mock(return_value=slice_view)
-    return session
-
-
-def test_tool_called_pass():
-    invocation = ToolInvoked(
-        prompt_name="test",
-        adapter="openai",
-        name="search",
-        params={"query": "test"},
-        result={"success": True},
-        session_id=None,
-        created_at=datetime.now(UTC),
-    )
-    session = make_mock_session([invocation])
-
-    evaluator = tool_called("search")
-    score = evaluator(None, None, session)
-
-    assert score.passed is True
-    assert "called 1 time" in score.reason
-
-
-def test_tool_called_fail():
-    session = make_mock_session([])  # No invocations
-
-    evaluator = tool_called("search")
-    score = evaluator(None, None, session)
-
-    assert score.passed is False
-    assert "called 0 time" in score.reason
-
-
-def test_all_tools_succeeded_with_failure():
-    invocations = [
-        ToolInvoked(
-            prompt_name="test",
-            adapter="openai",
-            name="search",
-            params={},
-            result={"success": False, "error": "not found"},
-            session_id=None,
-            created_at=datetime.now(UTC),
-        ),
-    ]
-    session = make_mock_session(invocations)
-
-    evaluator = all_tools_succeeded()
-    score = evaluator(None, None, session)
-
-    assert score.passed is False
-    assert "search" in score.reason
 ```
 
 ## Limitations

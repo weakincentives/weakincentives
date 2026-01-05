@@ -146,41 +146,6 @@ acknowledge a message that was redelivered to another consumer.
 **Implementation guarantee**: Each `receive()` generates a new UUID suffix stored
 in the `:meta` hash. Handle validation compares against the current suffix.
 
-### INV-8: Pending No Duplicates
-
-The pending queue contains no duplicate message IDs:
-
-```
-∀ i, j ∈ 1..Len(pending):
-    i ≠ j ⟹ pending[i] ≠ pending[j]
-```
-
-**Violation scenario**: A bug in `Nack` or `ReapOne` could accidentally add a
-message ID to pending without first removing it, resulting in duplicate
-deliveries of the same message from distinct queue positions.
-
-**Implementation guarantee**: Lua scripts always remove from one state before
-adding to another. `_LUA_NACK` calls `ZREM` on invisible before `LPUSH` to
-pending. `_LUA_REAP` similarly removes before requeueing.
-
-### INV-9: Data Integrity
-
-Every message in pending or invisible has associated data:
-
-```
-∀ msgId ∈ Messages:
-    (msgId ∈ Pending ∨ msgId ∈ Invisible) ⟹ msgId ∈ DOMAIN data
-```
-
-**Violation scenario**: A partial write could add a message ID to pending
-without storing its body in the data hash, or a corruption could delete data
-while the message is still queued.
-
-**Implementation guarantee**: `_LUA_SEND` atomically stores data with `HSET`
-before adding the message ID to pending with `LPUSH`. Data is only removed
-by `_LUA_ACKNOWLEDGE` after the message is removed from invisible. This
-invariant complements INV-5 (NoMessageLoss) which checks the reverse direction.
-
 ### FIFO Ordering (Structural Property)
 
 Messages are delivered in send order (within visibility constraints). This is a

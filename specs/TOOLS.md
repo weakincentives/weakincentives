@@ -80,20 +80,6 @@ class ToolResult(Generic[PayloadT]):
     exclude_value_from_context: bool = False  # Hide from provider
 ```
 
-**Convenience Constructors:**
-
-Use these for common cases instead of the full constructor:
-
-```python
-# Success with typed value (most common)
-ToolResult.ok(MyResult(...), message="Done")
-
-# Failure with no value
-ToolResult.error("Something went wrong")
-```
-
-The full constructor form is needed when `exclude_value_from_context=True`.
-
 **Result Rendering Protocol:**
 
 ```python
@@ -116,53 +102,48 @@ class ToolContext:
     session: SessionProtocol
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
-    resources: ResourceRegistry = field(default_factory=ResourceRegistry)
 
     @property
-    def filesystem(self) -> Filesystem | None: ...
+    def resources(self) -> ScopedResourceContext:
+        """Access resources from the prompt's resource context."""
+        return self.prompt.resources
+
+    @property
+    def filesystem(self) -> Filesystem | None:
+        """Shortcut for accessing the Filesystem resource."""
+        return self.resources.get_optional(Filesystem)
 ```
 
 Tool handlers that need an event bus should publish via `context.session.dispatcher`.
 
-### ResourceRegistry
+### Resource Access
 
-Typed container for runtime resources:
-
-```python
-@dataclass(slots=True, frozen=True)
-class ResourceRegistry:
-    _entries: Mapping[type[object], object]
-
-    def get(self, resource_type: type[T]) -> T | None: ...
-    def get(self, resource_type: type[T], default: T) -> T: ...
-    def __contains__(self, resource_type: type[object]) -> bool: ...
-
-    @staticmethod
-    def build(mapping: Mapping[type[object], object]) -> ResourceRegistry: ...
-```
-
-Resources are stored by type and retrieved via the `get` method:
+Tools access resources through the prompt's resource context:
 
 ```python
 def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
-    # Access via typed registry
+    # Access via resources property
     fs = context.resources.get(Filesystem)
-    if fs is None:
-        return ToolResult(message="No filesystem", value=None, success=False)
+    http = context.resources.get(HTTPClient)
 
     # Common resources have sugar properties
-    # These are equivalent:
-    fs = context.filesystem
-    fs = context.resources.get(Filesystem)
+    fs = context.filesystem  # Shorthand for context.resources.get_optional(Filesystem)
+
+    if fs is None:
+        return ToolResult(message="No filesystem available", value=None, success=False)
+
+    # Use resources...
+    content = fs.read("config.yaml")
+    return ToolResult(message="Done", value=Result(...), success=True)
 ```
 
-**Design rationale**: The registry pattern allows future resources (HTTPClient,
-KVStore, ArtifactStore, Clock, Tracer) without bloating ToolContext with
-dedicated fields. Resources come from:
+**Design rationale**: Resources are owned by the prompt and accessed via its
+resource context. The `ToolContext.resources` property delegates to
+`context.prompt.resources`. This ensures:
 
-- Workspace sections (protocol-based)
-- Adapter-provided runtime handles
-- Loop-provided services
+- Single ownership (prompt owns lifecycle)
+- Consistent access pattern
+- Automatic cleanup when prompt context exits
 
 ### ToolExample
 
@@ -209,14 +190,16 @@ Adapters drive tool invocation using a shared dispatcher:
 1. **Argument parsing** - Decode via `serde.parse(..., extra="forbid")`
 1. **Deadline check** - Refuse invocation if deadline elapsed
 1. **Context construction** - Build `ToolContext` from active state
+1. **Snapshot** - Capture session and resource state before execution
 1. **Handler execution** - Run with params/context pair
+1. **Restore on failure** - Rollback state if handler fails or raises
 1. **Telemetry** - Publish `ToolInvoked` event to `session.dispatcher`
 1. **Response assembly** - Return result to calling loop
 
 ### Exception Handling
 
 - Unexpected exceptions convert to `ToolResult(success=False, value=None)`
-- Event publication failures trigger session rollback
+- State is restored before returning error result
 - `ToolResult.message` contains error guidance for the LLM
 
 ## Planning Tool Suite
@@ -406,6 +389,8 @@ Exception handling is nuanced by exception type:
 - `DeadlineExceededError` → Convert to `PromptEvaluationError`
 - `TypeError` → Wrap as `ToolResult(success=False)` with descriptive message
 - Other exceptions → Wrap as `ToolResult(success=False)`
+
+All failure paths restore session and resource state before returning.
 
 ### Handler Signature Validation
 

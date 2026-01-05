@@ -85,6 +85,7 @@ class HostFilesystem:
 
     _root: str
     _read_only: bool = False
+    _mount_point: str | None = None
     _git_initialized: bool = False
     _git_dir: str | None = None
 
@@ -97,6 +98,11 @@ class HostFilesystem:
     def read_only(self) -> bool:
         """True if write operations are disabled."""
         return self._read_only
+
+    @property
+    def mount_point(self) -> str | None:
+        """Virtual mount point prefix for path normalization."""
+        return self._mount_point
 
     @staticmethod
     def _git_env() -> dict[str, str]:

@@ -60,16 +60,6 @@ def test_docs_specs_sorted_alphabetically(capsys: pytest.CaptureFixture[str]) ->
     assert adapters_pos < tools_pos < workspace_pos
 
 
-def test_docs_changelog_outputs_changelog(capsys: pytest.CaptureFixture[str]) -> None:
-    """--changelog prints CHANGELOG.md content."""
-    exit_code = wink.main(["docs", "--changelog"])
-
-    assert exit_code == 0
-    captured = capsys.readouterr()
-    assert "# Changelog" in captured.out
-    assert "## Unreleased" in captured.out
-
-
 def test_docs_no_flags_returns_error(capsys: pytest.CaptureFixture[str]) -> None:
     """No flags prints usage and returns error."""
     exit_code = wink.main(["docs"])
@@ -79,7 +69,6 @@ def test_docs_no_flags_returns_error(capsys: pytest.CaptureFixture[str]) -> None
     assert "--reference" in captured.out
     assert "--guide" in captured.out
     assert "--specs" in captured.out
-    assert "--changelog" in captured.out
 
 
 def test_docs_multiple_flags_combines_output(
@@ -94,8 +83,8 @@ def test_docs_multiple_flags_combines_output(
 
 
 def test_docs_all_flags_outputs_in_order(capsys: pytest.CaptureFixture[str]) -> None:
-    """Output is printed in order: reference, guide, specs, changelog."""
-    exit_code = wink.main(["docs", "--reference", "--guide", "--specs", "--changelog"])
+    """Output is printed in order: reference, guide, specs."""
+    exit_code = wink.main(["docs", "--reference", "--guide", "--specs"])
 
     assert exit_code == 0
     captured = capsys.readouterr()
@@ -103,9 +92,8 @@ def test_docs_all_flags_outputs_in_order(capsys: pytest.CaptureFixture[str]) -> 
     # Find positions of key content
     ref_pos = captured.out.find("WINK")
     specs_pos = captured.out.find("<!-- specs/")
-    changelog_pos = captured.out.find("# Changelog")
 
-    assert ref_pos < specs_pos < changelog_pos
+    assert ref_pos < specs_pos
 
 
 def test_docs_missing_file_returns_error(
@@ -135,15 +123,6 @@ def test_read_doc_reads_bundled_file() -> None:
     assert isinstance(content, str)
     assert len(content) > 100
     assert "WINK" in content or "weakincentives" in content.lower()
-
-
-def test_read_doc_reads_changelog() -> None:
-    """_read_doc reads CHANGELOG.md from weakincentives.docs package."""
-    content = wink._read_doc("CHANGELOG.md")
-
-    assert isinstance(content, str)
-    assert len(content) > 100
-    assert "# Changelog" in content
 
 
 def test_read_specs_concatenates_with_headers() -> None:

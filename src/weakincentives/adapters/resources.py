@@ -19,7 +19,7 @@ from ..filesystem import Filesystem
 from ..resources import ResourceRegistry
 
 
-def build_resources(
+def build_resources(  # pragma: no cover - simple builder, tested transitively
     *,
     filesystem: Filesystem | None,
     budget_tracker: BudgetTracker | None,

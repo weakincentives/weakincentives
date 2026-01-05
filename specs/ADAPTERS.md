@@ -12,6 +12,8 @@ handling, and throttling behavior.
 
 - **Provider-agnostic orchestration**: Callers interact with a uniform protocol;
   provider differences stay encapsulated in adapter implementations.
+- **Prompt-owned resources**: Adapters access resources via the prompt's
+  resource context; no separate resource parameter.
 - **Fail predictable**: Errors surface as typed exceptions with enough context
   for callers to retry, degrade, or abort gracefully.
 - **Observable by default**: Adapters emit structured events and logs at each
@@ -34,26 +36,24 @@ class ProviderAdapter(ABC):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[OutputT]: ...
 ```
 
 **Parameters:**
 
-- `prompt` - The prompt template to evaluate
+- `prompt` - The prompt to evaluate (must be within context manager)
 - `session` - Session for state management
 - `deadline` - Optional wall-clock deadline
 - `budget` - Optional token/time budget limits
 - `budget_tracker` - Optional shared tracker for budget consumption
-- `resources` - Optional resources to inject (merged with workspace resources)
 
 **Notes:**
 
 - Telemetry is published via `session.dispatcher`.
 - Visibility overrides are managed via session state (`VisibilityOverrides`),
   not passed to adapters directly.
-- Resources are merged with workspace defaults (e.g., filesystem from prompt);
-  user-provided resources take precedence on conflicts.
+- Resources are accessed via `prompt.resources`; the prompt must be within its
+  context manager.
 
 ### Configuration
 
@@ -77,13 +77,45 @@ fields are included in request payloads.
 
 ### Lifecycle
 
-1. **Render** - Call `Prompt(template).bind(params).render()` to produce a `RenderedPrompt`
-   with markdown text, tools, and structured output metadata.
+1. **Validate context** - Verify prompt is within its context manager
+1. **Render** - Call `prompt.render()` to produce a `RenderedPrompt` with
+   markdown text, tools, and structured output metadata.
 1. **Format** - Convert the rendered prompt into the provider wire format.
 1. **Call** - Issue the provider request with throttle protection and deadline
    checks.
 1. **Parse** - Extract assistant content and dispatch tool calls.
-1. **Emit** - Publish `PromptRendered` and `PromptExecuted` events to `session.dispatcher`.
+1. **Emit** - Publish `PromptRendered` and `PromptExecuted` events to
+   `session.dispatcher`.
+
+## Resource Access
+
+Adapters access resources through the prompt's resource context:
+
+```python
+def evaluate(
+    self,
+    prompt: Prompt[OutputT],
+    *,
+    session: SessionProtocol,
+    deadline: Deadline | None = None,
+    budget_tracker: BudgetTracker | None = None,
+) -> PromptResponse[OutputT]:
+    # Access resources via prompt
+    fs = prompt.resources.get(Filesystem)
+
+    # Build tool context with prompt's resources
+    tool_context = ToolContext(
+        prompt=prompt,
+        rendered_prompt=rendered,
+        adapter=self,
+        session=session,
+        deadline=deadline,
+        budget_tracker=budget_tracker,
+    )
+```
+
+The prompt must be within its context manager when `evaluate()` is called.
+Accessing `prompt.resources` outside the context raises `RuntimeError`.
 
 ## Provider Implementations
 
@@ -127,7 +159,7 @@ adapter = OpenAIAdapter(
 **Constructor Parameters:**
 
 | Parameter | Type | Default | Description |
-| --------------- | ---------------------------- | -------- | ---------------- |
+| --------------- | ---------------------------- | ---------- | ---------------- |
 | `model` | `str` | required | Model identifier |
 | `client_config` | `OpenAIClientConfig \| None` | `None` | Client settings |
 | `model_config` | `OpenAIModelConfig \| None` | `None` | Model parameters |
@@ -163,7 +195,7 @@ adapter = LiteLLMAdapter(
 **Constructor Parameters:**
 
 | Parameter | Type | Default | Description |
-| -------------------- | ----------------------------- | -------- | ------------------------- |
+| -------------------- | ----------------------------- | ---------- | ------------------------- |
 | `model` | `str` | required | Model identifier |
 | `completion_config` | `LiteLLMClientConfig \| None` | `None` | Client settings |
 | `model_config` | `LiteLLMModelConfig \| None` | `None` | Model parameters |
@@ -218,7 +250,7 @@ policy = new_throttle_policy(
 ### Signal Classification
 
 | Signal | Examples | Behavior |
-| -------------------- | -------------------------- | ------------------------- |
+| ------------------ | -------------------------- | ------------------------- |
 | **Rate limit** | HTTP 429, `RateLimitError` | Retry with backoff |
 | **Quota exhaustion** | `insufficient_quota` | Longer backoff, alerting |
 | **Timeout** | Connection/read timeout | Retry if deadline permits |
@@ -293,11 +325,60 @@ flowchart LR
 - Dataclass parsing uses `serde.parse`. Validation errors produce
   `ToolResult(success=False)` rather than raising.
 - `ToolContext` exposes prompt, adapter, session, and deadline. Tool handlers
-  can access `session.dispatcher` when they need to publish telemetry.
+  access resources via `context.prompt.resources`.
 - Handlers run synchronously. Exceptions are logged and converted to failed
   results.
-- Before event emission, the adapter captures a session snapshot. On publish
-  failure, it rolls back and replaces the tool message with error details.
+- Before tool execution, the adapter captures snapshots of both session and
+  prompt resources. On failure, both are restored.
+
+### Transactional Tool Execution
+
+Tool execution is transactional. Failed or aborted tools leave no trace in
+mutable state:
+
+```python
+def _execute_tool(
+    self,
+    tool: Tool,
+    params: dict,
+    *,
+    prompt: Prompt,
+    session: Session,
+) -> ToolResult:
+    # Snapshot both session and resources before execution
+    session_snapshot = session.snapshot()
+    resource_snapshot = prompt.resources.snapshot()
+
+    try:
+        context = ToolContext(
+            prompt=prompt,
+            rendered_prompt=self._rendered,
+            adapter=self,
+            session=session,
+            deadline=self._deadline,
+            budget_tracker=self._budget_tracker,
+        )
+        result = tool.handler(params, context=context)
+
+        if not result.success:
+            # Restore on failure
+            session.restore(session_snapshot)
+            prompt.resources.restore(resource_snapshot)
+
+        return result
+
+    except VisibilityExpansionRequired:
+        # Restore and re-raise for retry
+        session.restore(session_snapshot)
+        prompt.resources.restore(resource_snapshot)
+        raise
+
+    except Exception as e:
+        # Restore on exception
+        session.restore(session_snapshot)
+        prompt.resources.restore(resource_snapshot)
+        return ToolResult(message=str(e), value=None, success=False)
+```
 
 ## Error Handling
 
@@ -335,95 +416,17 @@ budget = Budget(
 
 tracker = BudgetTracker(budget)
 
-response = adapter.evaluate(
-    prompt,
-    session=session,
-    budget=budget,
-    budget_tracker=tracker,
-)
+with prompt:
+    response = adapter.evaluate(
+        prompt,
+        session=session,
+        budget=budget,
+        budget_tracker=tracker,
+    )
 ```
 
 The adapter records token usage after each provider response and checks limits
 at defined checkpoints. Budget tracking is thread-safe for concurrent execution.
-
-## Resource Injection
-
-Adapters support injecting custom resources that are made available to tool
-handlers through `ToolContext.resources`. This enables dependency injection
-for testing and decouples tools from specific implementations.
-
-```python
-from weakincentives.resources import ResourceRegistry
-from myapp.http import HTTPClient
-
-# Create resources registry with custom dependencies
-http_client = HTTPClient(base_url="https://api.example.com")
-resources = ResourceRegistry.build({HTTPClient: http_client})
-
-# Pass to adapter - resources merge with workspace defaults
-response = adapter.evaluate(
-    prompt,
-    session=session,
-    resources=resources,
-)
-```
-
-### Merging Behavior
-
-Resources are merged in layers:
-
-1. **Workspace resources** - Built from prompt (e.g., `Filesystem` from
-   `WorkspaceSection`)
-1. **User resources** - Passed via `resources` parameter
-
-User resources take precedence on conflicts. This allows overriding workspace
-defaults while preserving unspecified resources:
-
-```python
-# Workspace provides InMemoryFilesystem
-workspace = ResourceRegistry.build({Filesystem: InMemoryFilesystem()})
-
-# User provides custom filesystem, keeps other resources
-user = ResourceRegistry.build({Filesystem: HostFilesystem("/tmp")})
-merged = workspace.merge(user)  # user's Filesystem wins
-```
-
-### MainLoop Integration
-
-`MainLoop.execute()` and `MainLoopConfig` also accept resources:
-
-```python
-from weakincentives.runtime import MainLoop, MainLoopConfig
-
-config = MainLoopConfig(resources=default_resources)
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
-
-# Per-request override
-response, session = loop.execute(request, resources=custom_resources)
-```
-
-Request-level resources override config defaults. The same resources are used
-across visibility expansion retries.
-
-### Tool Access
-
-Tools access resources through `ToolContext`:
-
-```python
-def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
-    # Typed lookup with protocol key
-    http = context.resources.get(HTTPClient)
-    if http is None:
-        return ToolResult(message="HTTPClient not available", success=False)
-
-    # Sugar properties for common resources
-    fs = context.filesystem  # shorthand for context.resources.get(Filesystem)
-    budget = context.budget_tracker
-
-    # Use resources...
-    response = http.get("/data")
-    return ToolResult(message="Done", value=Result(...), success=True)
-```
 
 ## Telemetry
 
@@ -450,6 +453,7 @@ Structured logs include:
    inject fakes.
 1. **Render prompt** - Call `prompt.render` once, respecting overrides and
    instruction toggles.
+1. **Access resources** - Use `prompt.resources` to access the resource context.
 1. **Delegate to `run_inner_loop`** - Supply provider-specific `call_provider`
    and `select_choice` functions.
 1. **Wrap SDK failures** - Catch exceptions and re-raise

@@ -550,3 +550,37 @@ class TestClaudeAgentWorkspaceSectionSecurity:
                 session=session,
                 mounts=[HostMount(host_path="/nonexistent/path/12345")],
             )
+
+
+class TestClaudeAgentWorkspaceSectionResources:
+    """Tests for ClaudeAgentWorkspaceSection.resources() method."""
+
+    @pytest.fixture
+    def session(self) -> Session:
+        bus = InProcessDispatcher()
+        return Session(bus=bus)
+
+    def test_resources_returns_filesystem(self, session: Session) -> None:
+        """resources() returns a ResourceRegistry containing the filesystem."""
+        from weakincentives.resources import ResourceRegistry
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            section = ClaudeAgentWorkspaceSection(
+                session=session,
+                mounts=[HostMount(host_path=temp_dir)],
+            )
+
+            try:
+                registry = section.resources()
+                assert isinstance(registry, ResourceRegistry)
+
+                # Create a context to access the filesystem
+                context = registry.create_context()
+                context.start()
+                try:
+                    fs = context.get(Filesystem)
+                    assert fs is section._filesystem
+                finally:
+                    context.close()
+            finally:
+                section.cleanup()

@@ -80,54 +80,6 @@ class MessageFinalizedError(MailboxError):
     """
 
 
-class InvalidParameterError(MailboxError):
-    """Invalid parameter value provided.
-
-    Raised when timeout parameters are out of valid range:
-    - visibility_timeout must be 0-43200 (0 to 12 hours)
-    - wait_time_seconds must be non-negative
-    """
-
-
-# SQS-compatible bounds for visibility timeout (0 to 12 hours in seconds)
-MAX_VISIBILITY_TIMEOUT = 43200
-
-
-def validate_visibility_timeout(
-    value: int, param_name: str = "visibility_timeout"
-) -> None:
-    """Validate visibility_timeout is within valid range [0, 43200].
-
-    Args:
-        value: The visibility timeout value in seconds.
-        param_name: Parameter name for error messages.
-
-    Raises:
-        InvalidParameterError: If value is out of range.
-    """
-    if value < 0:
-        raise InvalidParameterError(f"{param_name} must be non-negative, got {value}")
-    if value > MAX_VISIBILITY_TIMEOUT:
-        raise InvalidParameterError(
-            f"{param_name} must be at most {MAX_VISIBILITY_TIMEOUT} seconds, got {value}"
-        )
-
-
-def validate_wait_time(value: int) -> None:
-    """Validate wait_time_seconds is non-negative.
-
-    Args:
-        value: The wait time value in seconds.
-
-    Raises:
-        InvalidParameterError: If value is negative.
-    """
-    if value < 0:
-        raise InvalidParameterError(
-            f"wait_time_seconds must be non-negative, got {value}"
-        )
-
-
 @dataclass(slots=True)
 class Message[T, R]:
     """A received message with delivery metadata and lifecycle methods.
@@ -231,13 +183,11 @@ class Message[T, R]:
         replies allowed.
 
         Args:
-            visibility_timeout: Seconds before message becomes visible again (0-43200).
+            visibility_timeout: Seconds before message becomes visible again.
 
         Raises:
-            InvalidParameterError: visibility_timeout out of range.
             ReceiptHandleExpiredError: Handle no longer valid.
         """
-        validate_visibility_timeout(visibility_timeout)
         self._nack_fn(visibility_timeout)
         self._finalized = True
 
@@ -248,13 +198,11 @@ class Message[T, R]:
         The new timeout is relative to now, not the original receive time.
 
         Args:
-            timeout: New visibility timeout in seconds from now (0-43200).
+            timeout: New visibility timeout in seconds from now.
 
         Raises:
-            InvalidParameterError: timeout out of range.
             ReceiptHandleExpiredError: Handle no longer valid.
         """
-        validate_visibility_timeout(timeout, "timeout")
         self._extend_fn(timeout)
 
     @property
@@ -361,7 +309,6 @@ class Mailbox[T, R](Protocol):
 
 
 __all__ = [
-    "InvalidParameterError",
     "Mailbox",
     "MailboxConnectionError",
     "MailboxError",

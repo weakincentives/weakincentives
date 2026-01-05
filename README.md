@@ -90,7 +90,7 @@ structure itself.
   to their pre-call state. No more wrestling with partial failures that leave
   your agent's state corrupted or your filesystem in an inconsistent state. This
   happens by default—failed tools simply don't leave traces in mutable state.
-  See [Execution State](specs/EXECUTION_STATE.md).
+  See [Session State](specs/SESSIONS.md).
 
 - **Event-driven state management.** Every state change flows through pure
   functions called "reducers" that process published events. State is immutable;

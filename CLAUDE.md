@@ -144,12 +144,12 @@ Consult these specs before modifying related code:
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, metrics |
-| `specs/EXECUTION_STATE.md` | ExecutionState root, transactional tool execution, snapshot/rollback |
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, MainLoop integration |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
-| `specs/PROMPTS.md` | Prompt system, composition, structured output |
+| `specs/PROMPTS.md` | Prompt system, composition, structured output, resource lifecycle |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
+| `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |

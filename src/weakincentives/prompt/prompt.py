@@ -15,17 +15,20 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, field, is_dataclass
 from functools import cached_property
+from types import TracebackType
 from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
     Literal,
+    Self,
     cast,
     get_args,
     get_origin,
 )
 
 from ..dataclasses import FrozenDataclass
+from ..resources import ResourceRegistry
 from ._overrides_protocols import PromptOverridesStore
 from ._types import SupportsDataclass
 from .errors import PromptValidationError, SectionPath
@@ -37,6 +40,7 @@ from .structured_output import StructuredOutputConfig
 
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
+    from ..resources.context import ScopedResourceContext
     from ..runtime.session.protocols import SessionProtocol
     from .overrides import PromptLike, ToolOverride
     from .registry import RegistrySnapshot
@@ -95,6 +99,9 @@ class PromptTemplate[OutputT]:
 
     Copy helpers ``update()``, ``merge()``, and ``map()`` are available for
     producing modified copies when needed.
+
+    Resources can be declared at the template level and will be combined with
+    resources contributed by individual sections.
     """
 
     ns: str
@@ -106,6 +113,7 @@ class PromptTemplate[OutputT]:
         | tuple[SectionNode[SupportsDataclass], ...]
     ) = ()
     allow_extra_keys: bool = False
+    resources: ResourceRegistry = field(default_factory=ResourceRegistry)
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
     _structured_output: StructuredOutputConfig[SupportsDataclass] | None = field(
         init=False, default=None
@@ -148,6 +156,7 @@ class PromptTemplate[OutputT]:
         | object
         | None = MISSING,
         allow_extra_keys: bool | object = MISSING,
+        resources: ResourceRegistry | object = MISSING,
     ) -> dict[str, Any]:
         """Normalize inputs and derive internal state before construction."""
         # Validate required inputs
@@ -166,6 +175,11 @@ class PromptTemplate[OutputT]:
         )
         allow_extra = (
             cast(bool, allow_extra_keys) if allow_extra_keys is not MISSING else False
+        )
+        resources_val = (
+            cast(ResourceRegistry, resources)
+            if resources is not MISSING
+            else ResourceRegistry()
         )
 
         stripped_ns = ns_str.strip()
@@ -191,6 +205,7 @@ class PromptTemplate[OutputT]:
             "name": name_val,
             "sections": snapshot.sections,
             "allow_extra_keys": allow_extra,
+            "resources": resources_val,
             "_snapshot": snapshot,
             "_structured_output": structured_output,
         }
@@ -253,6 +268,15 @@ class Prompt[OutputT]:
     Prompt is the only way to render a PromptTemplate. It holds the runtime
     configuration (overrides store, tag, params) and performs all rendering
     and override resolution.
+
+    Prompt is also a context manager that owns the resource lifecycle::
+
+        prompt = Prompt(template).bind(params, resources=custom_registry)
+
+        with prompt:  # Resources initialized
+            rendered = prompt.render()
+            fs = prompt.resources.get(Filesystem)
+        # Resources cleaned up
     """
 
     def __init__(
@@ -269,6 +293,8 @@ class Prompt[OutputT]:
         self.overrides_store = overrides_store
         self.overrides_tag = overrides_tag
         self._params: tuple[SupportsDataclass, ...] = ()
+        self._bound_resources: ResourceRegistry | None = None
+        self._resource_context: ScopedResourceContext | None = None
 
     @property
     def params(self) -> tuple[SupportsDataclass, ...]:
@@ -300,36 +326,53 @@ class Prompt[OutputT]:
             structured_output=self.template._structured_output,  # pyright: ignore[reportPrivateUsage]
         )
 
-    def bind(self, *params: SupportsDataclass) -> Prompt[OutputT]:
+    def bind(
+        self,
+        *params: SupportsDataclass,
+        resources: ResourceRegistry | None = None,
+    ) -> Prompt[OutputT]:
         """Mutate this prompt's bound parameters; return self for chaining.
 
         New dataclass instances replace any existing binding of the same
         dataclass type; otherwise they are appended. Passing multiple params
         of the same type in a single bind() call is not allowed - validation
         will raise an error during render().
+
+        Args:
+            *params: Dataclass instances to bind as section parameters.
+            resources: Optional runtime resources to merge with template/section
+                resources. These take precedence over template-level resources.
         """
+        # Handle params binding
+        if params:
+            # All new params are appended, but if there's already a param of the
+            # same type in existing params, we replace it. Duplicates within the
+            # same bind() call are passed through for validation during render().
+            current = list(self._params)
+            for candidate in params:
+                replaced = False
+                for idx, existing in enumerate(current):
+                    # Only replace if the existing param is from a previous bind,
+                    # not from the current params list. Check by comparing with
+                    # original self._params length.
+                    if type(existing) is type(candidate) and idx < len(self._params):
+                        current[idx] = candidate
+                        replaced = True
+                        break
+                if not replaced:
+                    current.append(candidate)
 
-        if not params:
-            return self
+            self._params = tuple(current)
 
-        # All new params are appended, but if there's already a param of the
-        # same type in existing params, we replace it. Duplicates within the
-        # same bind() call are passed through for validation during render().
-        current = list(self._params)
-        for candidate in params:
-            replaced = False
-            for idx, existing in enumerate(current):
-                # Only replace if the existing param is from a previous bind,
-                # not from the current params list. Check by comparing with
-                # original self._params length.
-                if type(existing) is type(candidate) and idx < len(self._params):
-                    current[idx] = candidate
-                    replaced = True
-                    break
-            if not replaced:
-                current.append(candidate)
+        # Handle resources binding
+        if resources is not None:
+            if self._bound_resources is None:
+                self._bound_resources = resources
+            else:
+                self._bound_resources = self._bound_resources.merge(
+                    resources, strict=False
+                )
 
-        self._params = tuple(current)
         return self
 
     def render(
@@ -406,6 +449,77 @@ class Prompt[OutputT]:
             if isinstance(section, WorkspaceSection):
                 return section.filesystem
         return None
+
+    def _collected_resources(self) -> ResourceRegistry:
+        """Collect resources from template and all sections.
+
+        Resources are collected in order:
+        1. Template-level resources
+        2. Section resources (depth-first)
+        3. Bind-time resources
+
+        Later sources override earlier on conflicts.
+        """
+        result = self.template.resources
+
+        # Collect from sections
+        def collect_from_section(section: Section[SupportsDataclass]) -> None:
+            nonlocal result
+            section_resources = section.resources()
+            if len(section_resources) > 0:
+                result = result.merge(section_resources, strict=False)
+            for child in section.children:
+                collect_from_section(child)
+
+        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
+        if snapshot is not None:  # pragma: no branch - tested separately
+            for node in snapshot.sections:
+                collect_from_section(node.section)
+
+        # Merge bind-time resources
+        if self._bound_resources is not None:
+            result = result.merge(self._bound_resources, strict=False)
+
+        return result
+
+    @property
+    def resources(self) -> ScopedResourceContext:
+        """Access the active resource context.
+
+        Returns the resource context for resolving dependencies during
+        prompt evaluation. Only available within the context manager.
+
+        Raises:
+            RuntimeError: If accessed outside the context manager.
+        """
+        if self._resource_context is None:
+            msg = (
+                "Prompt resources accessed outside context manager. "
+                "Use 'with prompt:' to enter the resource lifecycle."
+            )
+            raise RuntimeError(msg)
+        return self._resource_context
+
+    def __enter__(self) -> Self:
+        """Enter prompt context; initialize resources."""
+        if self._resource_context is not None:
+            raise RuntimeError("Prompt context already entered")
+
+        collected = self._collected_resources()
+        self._resource_context = collected.create_context()
+        self._resource_context.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
+        """Exit prompt context; cleanup resources."""
+        if self._resource_context is not None:  # pragma: no branch - always set
+            self._resource_context.close()
+            self._resource_context = None
 
 
 __all__ = ["Prompt", "PromptTemplate", "RenderedPrompt", "SectionNode"]

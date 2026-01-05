@@ -193,7 +193,10 @@ def _tool_message_parts(
 def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del context
-        return ToolResult.ok(ToolPayload(answer=params.query), message="completed")
+        return ToolResult(
+            message="completed",
+            value=ToolPayload(answer=params.query),
+        )
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -245,7 +248,7 @@ def test_adapter_tool_context_receives_deadline(
 
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         captured.append(context.deadline)
-        return ToolResult.ok(ToolPayload(answer=params.query), message="ok")
+        return ToolResult(message="ok", value=ToolPayload(answer=params.query))
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
     tool = Tool[ToolParams, ToolPayload](
@@ -330,7 +333,7 @@ def test_adapter_deadline_preflight_rejection(
 ) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
-        return ToolResult.ok(ToolPayload(answer="policies"), message="ok")
+        return ToolResult(message="ok", value=ToolPayload(answer="policies"))
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
     tool = Tool[ToolParams, ToolPayload](
@@ -433,7 +436,10 @@ def test_adapter_tool_execution_rejects_extra_arguments(
         del context, params
         nonlocal invoked
         invoked = True
-        return ToolResult.ok(ToolPayload(answer="should not run"), message="completed")
+        return ToolResult(
+            message="completed",
+            value=ToolPayload(answer="should not run"),
+        )
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -489,7 +495,10 @@ def test_adapter_tool_execution_rejects_type_errors(
         del context, params
         nonlocal invoked
         invoked = True
-        return ToolResult.ok(ToolPayload(answer="should not run"), message="completed")
+        return ToolResult(
+            message="completed",
+            value=ToolPayload(answer="should not run"),
+        )
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -597,7 +606,10 @@ def test_adapter_tool_execution_rolls_back_session(
 ) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del context
-        return ToolResult.ok(ToolPayload(answer=params.query), message="completed")
+        return ToolResult(
+            message="completed",
+            value=ToolPayload(answer=params.query),
+        )
 
     tool_handler = cast(ToolHandler[ToolParams, ToolPayload], handler)
 
@@ -733,9 +745,9 @@ def test_tool_receives_filesystem_from_workspace_section(
         params: ToolParams, *, context: ToolContext
     ) -> ToolResult[ToolPayload]:
         captured_filesystem.append(context.filesystem)
-        return ToolResult.ok(
-            ToolPayload(url="http://example.com", snippet="Found it"),
+        return ToolResult(
             message=f"Searched for {params.query}",
+            value=ToolPayload(url="http://example.com", snippet="Found it"),
         )
 
     tool = Tool[ToolParams, ToolPayload](
@@ -799,9 +811,9 @@ def test_budget_tracker_passed_to_tool_context_via_resources(
         params: ToolParams, *, context: ToolContext
     ) -> ToolResult[ToolPayload]:
         captured_tracker.append(context.budget_tracker)
-        return ToolResult.ok(
-            ToolPayload(url="http://example.com", snippet="Found it"),
+        return ToolResult(
             message=f"Searched for {params.query}",
+            value=ToolPayload(url="http://example.com", snippet="Found it"),
         )
 
     tool = Tool[ToolParams, ToolPayload](

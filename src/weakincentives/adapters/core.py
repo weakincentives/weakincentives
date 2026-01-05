@@ -22,7 +22,6 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import WinkError
 from ..prompt import Prompt
-from ..resources import ResourceRegistry
 from ..runtime.session.protocols import SessionProtocol
 
 
@@ -51,9 +50,11 @@ class ProviderAdapter(ABC):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response.
+
+        The prompt must be within its context manager for resources to be
+        available. Resources are accessed via ``prompt.resources``.
 
         Visibility overrides are managed exclusively via Session state using the
         VisibilityOverrides state slice. Use session[VisibilityOverrides]
@@ -62,10 +63,6 @@ class ProviderAdapter(ABC):
         When ``budget`` is provided and ``budget_tracker`` is not, a new tracker
         is created. When ``budget_tracker`` is supplied, it is used directly for
         shared limit enforcement.
-
-        When ``resources`` is provided, it is merged with workspace resources
-        (like filesystem from prompt) to create the final resource registry.
-        User-provided resources take precedence over workspace defaults.
         """
 
         ...
@@ -116,5 +113,4 @@ __all__ = [
     "PromptEvaluationPhase",
     "PromptResponse",
     "ProviderAdapter",
-    "ResourceRegistry",
 ]

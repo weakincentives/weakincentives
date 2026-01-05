@@ -51,7 +51,6 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
 
@@ -80,9 +79,10 @@ def _base_context(
 ) -> ToolExecutionContext:
     bus = InProcessDispatcher()
     prompt_template = _build_prompt(tool)
-    prompt = Prompt(prompt_template)
+    prompt: Prompt[ToolPayload] = Prompt(prompt_template)
     effective_session = session or Session(bus=bus)
-    execution_state = ExecutionState(session=effective_session)
+    # Enter prompt context for resource access
+    prompt.__enter__()
     return ToolExecutionContext(
         adapter_name="adapter",
         adapter=cast(Any, object()),
@@ -92,7 +92,7 @@ def _base_context(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)},
         ),
-        execution_state=execution_state,
+        session=effective_session,
         prompt_name=cast(str, prompt.name),
         parse_arguments=parse_tool_arguments,
         format_dispatch_failures=format_dispatch_failures,
@@ -122,7 +122,7 @@ def _tool_call(arguments: object) -> DummyToolCall:
 def test_tool_execution_success_path() -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         assert context.session is not None
-        return ToolResult.ok(ToolPayload(answer=params.query), message="done")
+        return ToolResult(message="done", value=ToolPayload(answer=params.query))
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
     tool_call = _tool_call({"query": "policies"})
@@ -138,7 +138,7 @@ def test_tool_execution_success_path() -> None:
 def test_tool_execution_records_validation_failure() -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
-        return ToolResult.ok(ToolPayload(answer="noop"), message="ok")
+        return ToolResult(message="ok", value=ToolPayload(answer="noop"))
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
     tool_call = _tool_call({"query": "policies", "extra": True})
@@ -156,7 +156,7 @@ def test_tool_execution_raises_on_expired_deadline(
 ) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
-        return ToolResult.ok(ToolPayload(answer="x"), message="should not run")
+        return ToolResult(message="should not run", value=ToolPayload(answer="x"))
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
     anchor = datetime.now(UTC)

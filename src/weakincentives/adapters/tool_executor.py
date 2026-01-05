@@ -25,15 +25,17 @@ from ..budget import BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
-from ..filesystem import Filesystem
 from ..prompt.errors import VisibilityExpansionRequired
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
-from ..resources import ResourceRegistry
 from ..runtime.events import HandlerFailure, ToolInvoked
-from ..runtime.execution_state import CompositeSnapshot, ExecutionState
 from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.transactions import (
+    CompositeSnapshot,
+    restore_snapshot,
+    tool_transaction,
+)
 from ..serde import parse
 from ..types.dataclass import (
     SupportsDataclass,
@@ -97,8 +99,8 @@ class ToolExecutionOutcome:
 class ToolExecutionContext:
     """Inputs and collaborators required to execute a provider tool call.
 
-    The execution_state provides unified access to session and resources.
-    Session is accessed via execution_state.session.
+    Provides unified access to session and prompt resources for transactional
+    tool execution.
     """
 
     adapter_name: AdapterName
@@ -106,7 +108,7 @@ class ToolExecutionContext:
     prompt: Prompt[Any]
     rendered_prompt: RenderedPrompt[Any] | None
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
-    execution_state: ExecutionState
+    session: SessionProtocol
     prompt_name: str
     parse_arguments: ToolArgumentsParser
     format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str]
@@ -114,11 +116,6 @@ class ToolExecutionContext:
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
     budget_tracker: BudgetTracker | None = None
-
-    @property
-    def session(self) -> SessionProtocol:
-        """Get session from execution state."""
-        return self.execution_state.session
 
     def with_provider_payload(
         self, provider_payload: dict[str, Any] | None
@@ -328,28 +325,27 @@ def _handle_unexpected_tool_error(
 
 
 def _restore_snapshot_if_needed(
-    execution_state: ExecutionState,
+    context: ToolExecutionContext,
     snapshot: CompositeSnapshot,
     log: StructuredLogger,
     *,
     reason: str,
 ) -> None:
     """Restore from snapshot."""
-    execution_state.restore(snapshot)
+    restore_snapshot(context.session, context.prompt.resources, snapshot)
     log.debug(
         f"State restored after {reason}.",
         event=f"tool.{reason}_restore",
     )
 
 
-def _execute_tool_handler(  # noqa: PLR0913
+def _execute_tool_handler(
     *,
     context: ToolExecutionContext,
     tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
     handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
     tool_name: str,
     tool_params: SupportsDataclass | None,
-    filesystem: Filesystem | None,
 ) -> ToolResult[SupportsToolResult]:
     """Execute the tool handler and build the tool context."""
     _ensure_deadline_not_expired(
@@ -357,24 +353,13 @@ def _execute_tool_handler(  # noqa: PLR0913
         prompt_name=context.prompt_name,
         tool_name=tool_name,
     )
-    # Get resources from ExecutionState (includes user-injected resources)
-    # and ensure budget_tracker is included if present
-    base_resources = context.execution_state.resources
-    if context.budget_tracker is not None:
-        # Merge budget tracker on top of existing resources
-        budget_resources = ResourceRegistry.build(
-            {BudgetTracker: context.budget_tracker}
-        )
-        resources = base_resources.merge(budget_resources)
-    else:
-        resources = base_resources
+    # Resources are accessed via prompt.resources (through ToolContext.resources property)
     tool_context = ToolContext(
         prompt=cast(PromptProtocol[Any], context.prompt),
         rendered_prompt=context.rendered_prompt,
         adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
         session=context.session,
         deadline=context.deadline,
-        resources=resources,
     )
     return _invoke_tool_handler(
         handler=handler,
@@ -406,9 +391,7 @@ def _handle_tool_exception(  # noqa: PLR0913
             deadline=context.deadline,
         ) from error
     # Restore snapshot for all other exceptions since we're catching and returning
-    _restore_snapshot_if_needed(
-        context.execution_state, snapshot, log, reason="exception"
-    )
+    _restore_snapshot_if_needed(context, snapshot, log, reason="exception")
     # TypeError may indicate signature mismatch or other type issues
     if isinstance(error, TypeError):
         return _handle_type_error(
@@ -433,7 +416,6 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
     arguments_mapping: Mapping[str, Any],
     call_id: str | None,
     log: StructuredLogger,
-    filesystem: Filesystem | None,
     snapshot: CompositeSnapshot,
 ) -> Iterator[ToolExecutionOutcome]:
     """Execute tool with transactional snapshot restore on failure."""
@@ -447,7 +429,6 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
             handler=handler,
             tool_name=tool_name,
             tool_params=tool_params,
-            filesystem=filesystem,
         )
     except (VisibilityExpansionRequired, PromptEvaluationError):
         # Context manager handles restore; just re-raise
@@ -470,14 +451,12 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
     else:
         # Manually restore if tool execution reported failure
         if not tool_result.success:
-            _restore_snapshot_if_needed(
-                context.execution_state, snapshot, log, reason="tool_failure"
-            )
+            _restore_snapshot_if_needed(context, snapshot, log, reason="tool_failure")
         _log_tool_completion(log, tool_result)
 
-    # Note: tool_params may legitimately be None for parameterless tools
-    # (when tool.params_type is type(None)). The ToolExecutionOutcome
-    # dataclass explicitly allows params: SupportsDataclass | None.
+    # Defensive check: None is valid for parameterless tools (params_type is type(None))
+    if tool_params is None and tool.params_type is not type(None):  # pragma: no cover
+        raise RuntimeError("Tool parameters were not parsed.")
 
     yield ToolExecutionOutcome(
         tool=tool,
@@ -497,8 +476,8 @@ def tool_execution(
 ) -> Iterator[ToolExecutionOutcome]:
     """Context manager that executes a tool call and standardizes logging.
 
-    Uses ExecutionState for transactional semantics. This ensures both session
-    state and filesystem are rolled back on tool failure.
+    Uses transactional semantics to ensure both session state and
+    resources are rolled back on tool failure.
     """
     tool, handler = _resolve_tool_and_handler(
         tool_call=tool_call,
@@ -520,11 +499,10 @@ def tool_execution(
         tool_call=tool_call,
     )
 
-    # Get filesystem for ToolContext
-    filesystem = context.prompt.filesystem() if context.prompt else None
-
     # Use transactional execution
-    with context.execution_state.tool_transaction(tag=f"tool:{tool_name}") as snapshot:
+    with tool_transaction(
+        context.session, context.prompt.resources, tag=f"tool:{tool_name}"
+    ) as snapshot:
         yield from _execute_tool_with_snapshot(
             context=context,
             tool=tool,
@@ -533,7 +511,6 @@ def tool_execution(
             arguments_mapping=arguments_mapping,
             call_id=call_id,
             log=log,
-            filesystem=filesystem,
             snapshot=snapshot,
         )
 
@@ -566,10 +543,7 @@ def dispatch_tool_invocation(
         # Restore to pre-tool state if tool succeeded (not already restored)
         if outcome.result.success:
             _restore_snapshot_if_needed(
-                context.execution_state,
-                outcome.snapshot,
-                outcome.log,
-                reason="dispatch_failure",
+                context, outcome.snapshot, outcome.log, reason="dispatch_failure"
             )
         outcome.log.warning(
             "State rollback triggered after dispatch failure.",
@@ -621,8 +595,8 @@ def execute_tool_call(
 class ToolExecutor:
     """Handles execution of tool calls and event dispatching.
 
-    The execution_state provides unified access to session and resources.
-    Session is accessed via execution_state.session.
+    Provides unified access to session and prompt resources for transactional
+    tool execution.
     """
 
     adapter_name: AdapterName
@@ -630,7 +604,7 @@ class ToolExecutor:
     prompt: Prompt[Any]
     prompt_name: str
     rendered: RenderedPrompt[Any]
-    execution_state: ExecutionState
+    session: SessionProtocol
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]]
     serialize_tool_message_fn: ToolMessageSerializer
     format_dispatch_failures: Callable[[Sequence[HandlerFailure]], str]
@@ -655,7 +629,7 @@ class ToolExecutor:
             prompt=self.prompt,
             rendered_prompt=self.rendered,
             tool_registry=self.tool_registry,
-            execution_state=self.execution_state,
+            session=self.session,
             prompt_name=self.prompt_name,
             parse_arguments=self.parse_arguments,
             format_dispatch_failures=self.format_dispatch_failures,

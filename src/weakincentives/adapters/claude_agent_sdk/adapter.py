@@ -24,10 +24,10 @@ from ...deadlines import Deadline
 from ...filesystem import Filesystem
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
+from ...prompt.protocols import PromptProtocol
 from ...resources import ResourceRegistry
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events._types import TokenUsage
-from ...runtime.execution_state import ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol
@@ -210,7 +210,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             )
         )
 
-    async def _evaluate_async(  # noqa: PLR0914
+    async def _evaluate_async(
         self,
         prompt: Prompt[OutputT],
         *,
@@ -256,20 +256,48 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             workspace_root = self._client_config.cwd or str(Path.cwd())
             filesystem = HostFilesystem(_root=workspace_root)
 
-        # Create ExecutionState for transactional tool execution
-        # Build workspace resources from prompt, then merge with user-provided resources
+        # Bind resources to prompt for lifecycle management
         # Both bridged MCP tools and native SDK tools will use this for rollback
         workspace_resources = ResourceRegistry.build({Filesystem: filesystem})
         effective_resources = (
-            workspace_resources.merge(resources)
+            workspace_resources.merge(resources, strict=False)
             if resources is not None
             else workspace_resources
         )
-        execution_state = ExecutionState(session=session, resources=effective_resources)
+        prompt = prompt.bind(resources=effective_resources)
 
-        # Add execution_state to hook context for native tool transactions
+        # Enter prompt context for resource lifecycle
+        with prompt:
+            return await self._run_with_prompt_context(
+                sdk=sdk,
+                prompt=prompt,
+                prompt_name=prompt_name,
+                prompt_text=prompt_text,
+                rendered=rendered,
+                session=session,
+                output_format=output_format,
+                deadline=deadline,
+                budget_tracker=budget_tracker,
+            )
+
+    async def _run_with_prompt_context[OutputT](
+        self,
+        *,
+        sdk: Any,
+        prompt: Prompt[OutputT],
+        prompt_name: str,
+        prompt_text: str,
+        rendered: RenderedPrompt[OutputT],
+        session: SessionProtocol,
+        output_format: dict[str, Any] | None,
+        deadline: Deadline | None,
+        budget_tracker: BudgetTracker | None,
+    ) -> PromptResponse[OutputT]:
+        """Run SDK query within prompt context."""
+        # Create hook context for native tool transactions
         hook_context = HookContext(
-            execution_state=execution_state,
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
             deadline=deadline,
@@ -278,7 +306,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         bridged_tools = create_bridged_tools(
             rendered.tools,
-            execution_state=execution_state,
+            session=session,
             adapter=self,
             prompt=cast(Any, prompt),
             rendered_prompt=rendered,

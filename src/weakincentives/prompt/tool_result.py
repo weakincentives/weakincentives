@@ -37,31 +37,6 @@ class ToolResult[ResultValueT]:
     success: bool = True
     exclude_value_from_context: bool = False
 
-    @classmethod
-    def ok(cls, value: ResultValueT, message: str = "OK") -> ToolResult[ResultValueT]:
-        """Create a successful result with the given value.
-
-        Args:
-            value: The typed payload to include in the result.
-            message: Human-readable message for the LLM (default: "OK").
-
-        Returns:
-            A ToolResult with success=True.
-        """
-        return cls(message=message, value=value, success=True)
-
-    @classmethod
-    def error(cls, message: str) -> ToolResult[None]:
-        """Create a failed result with no value.
-
-        Args:
-            message: Error message describing the failure.
-
-        Returns:
-            A ToolResult with success=False and value=None.
-        """
-        return ToolResult(message=message, value=None, success=False)
-
     def render(self) -> str:
         """Return the canonical textual representation of the payload."""
 

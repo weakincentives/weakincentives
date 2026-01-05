@@ -26,8 +26,6 @@ from ._types import (
     Message,
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
-    validate_visibility_timeout,
-    validate_wait_time,
 )
 
 if TYPE_CHECKING:
@@ -310,8 +308,7 @@ class FakeMailbox[T, R]:
         wait_time_seconds: int = 0,
     ) -> Sequence[Message[T, R]]:
         """Receive messages from the queue."""
-        validate_visibility_timeout(visibility_timeout)
-        validate_wait_time(wait_time_seconds)
+        _ = (visibility_timeout, wait_time_seconds)
         if self._connection_error is not None:
             raise self._connection_error
 

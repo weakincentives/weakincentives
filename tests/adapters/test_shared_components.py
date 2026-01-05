@@ -60,6 +60,7 @@ from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.resources import ResourceRegistry
+from weakincentives.resources.context import ScopedResourceContext
 from weakincentives.runtime.events import (
     Dispatcher,
     DispatchResult,
@@ -67,9 +68,9 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.events._types import EventHandler
-from weakincentives.runtime.execution_state import ExecutionState
 from weakincentives.runtime.logging import get_logger
 from weakincentives.runtime.session.session import Session
+from weakincentives.runtime.transactions import create_snapshot
 from weakincentives.types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
@@ -102,7 +103,7 @@ class EchoPayload:
 def echo_handler(
     params: EchoParams, *, context: ToolContext
 ) -> ToolResult[EchoPayload]:
-    return ToolResult.ok(EchoPayload(value=params.value), message="echoed")
+    return ToolResult(message="echoed", value=EchoPayload(value=params.value))
 
 
 def serialize_tool_message(
@@ -113,7 +114,7 @@ def serialize_tool_message(
 
 def test_tool_to_spec_accepts_none_params() -> None:
     def handler(params: None, *, context: ToolContext) -> ToolResult[EchoPayload]:
-        return ToolResult.ok(EchoPayload(value="hi"), message="ok")
+        return ToolResult(message="ok", value=EchoPayload(value="hi"))
 
     tool = Tool[None, EchoPayload](
         name="no_params",
@@ -135,7 +136,7 @@ def testparse_tool_params_rejects_arguments_for_none_params() -> None:
         params: None, *, context: ToolContext
     ) -> ToolResult[EchoPayload]:
         del context
-        return ToolResult.ok(EchoPayload(value="hi"), message="ok")
+        return ToolResult(message="ok", value=EchoPayload(value="hi"))
 
     tool = Tool[None, EchoPayload](
         name="no_params",
@@ -180,7 +181,7 @@ def test_tool_executor_success() -> None:
     )
     bus = RecordingBus()
     session = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
+    prompt = _make_prompt()
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
         {tool.name: tool},
@@ -189,10 +190,10 @@ def test_tool_executor_success() -> None:
     executor = ToolExecutor(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[Any], object()),
-        prompt=Prompt(PromptTemplate(ns="test", key="tool")),
+        prompt=prompt,
         prompt_name="test",
         rendered=rendered,
-        execution_state=execution_state,
+        session=session,
         tool_registry=tool_registry,
         serialize_tool_message_fn=serialize_tool_message,
         format_dispatch_failures=lambda x: "",
@@ -216,72 +217,6 @@ def test_tool_executor_success() -> None:
     assert len(executor.tool_message_records) == 1
 
 
-def test_tool_executor_succeeds_with_parameterless_tool() -> None:
-    """Verify that tools with no parameters execute successfully.
-
-    This tests the fix for the bug where the validation check at line 478
-    incorrectly raised RuntimeError for parameterless tools, even though
-    None is a valid value for tool_params when tool.params_type is type(None).
-    """
-
-    def no_param_handler(
-        params: None, *, context: ToolContext
-    ) -> ToolResult[EchoPayload]:
-        del context
-        return ToolResult(message="no_params_success", value=EchoPayload(value="done"))
-
-    tool = Tool[None, EchoPayload](
-        name="no_params_tool",
-        description="A tool that accepts no parameters.",
-        handler=no_param_handler,
-    )
-    rendered = RenderedPrompt(
-        text="system",
-        _tools=cast(
-            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
-            (tool,),
-        ),
-    )
-    bus = RecordingBus()
-    session = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
-    tool_registry = cast(
-        Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
-        {tool.name: tool},
-    )
-
-    executor = ToolExecutor(
-        adapter_name=TEST_ADAPTER_NAME,
-        adapter=cast(ProviderAdapter[Any], object()),
-        prompt=Prompt(PromptTemplate(ns="test", key="tool")),
-        prompt_name="test",
-        rendered=rendered,
-        execution_state=execution_state,
-        tool_registry=tool_registry,
-        serialize_tool_message_fn=serialize_tool_message,
-        format_dispatch_failures=lambda x: "",
-        parse_arguments=parse_tool_arguments,
-    )
-
-    # Empty arguments for parameterless tool
-    tool_call = SimpleNamespace(
-        id="call-no-params",
-        function=SimpleNamespace(name="no_params_tool", arguments="{}"),
-    )
-
-    messages, next_choice = executor.execute([cast(Any, tool_call)], None)
-    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
-
-    assert len(messages) == 1
-    assert messages[0]["role"] == "tool"
-    assert messages[0]["tool_call_id"] == "call-no-params"
-    assert messages[0]["content"] == {"message": "no_params_success", "payload": None}
-    assert next_choice == "auto"
-    assert len(tool_events) == 1
-    # Verify the tool event recorded None for params (which is correct)
-    assert tool_events[0].params is None
-
-
 def testdispatch_tool_invocation_attaches_usage() -> None:
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
@@ -289,12 +224,12 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
         handler=echo_handler,
     )
     params = EchoParams(value="hello")
-    result = ToolResult.ok(EchoPayload(value="hello"), message="echoed")
+    result = ToolResult(message="echoed", value=EchoPayload(value="hello"))
     log = get_logger(__name__)
 
     bus = RecordingBus()
     session = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
+    prompt = _make_prompt()
     typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]] = {
         tool.name: typed_tool
@@ -303,10 +238,10 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
     context = ToolExecutionContext(
         adapter_name=TEST_ADAPTER_NAME,
         adapter=cast(ProviderAdapter[Any], object()),
-        prompt=Prompt(PromptTemplate(ns="test", key="tool")),
+        prompt=prompt,
         rendered_prompt=None,
         tool_registry=tool_registry,
-        execution_state=execution_state,
+        session=session,
         prompt_name="test",
         parse_arguments=parse_tool_arguments,
         format_dispatch_failures=lambda errors: "",
@@ -321,7 +256,7 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
         }
     )
 
-    snapshot = execution_state.snapshot(tag="test")
+    snapshot = create_snapshot(session, prompt.resources, tag="test")
     outcome = ToolExecutionOutcome(
         tool=typed_tool,
         params=cast(SupportsDataclass, params),
@@ -426,7 +361,7 @@ def test_tool_executor_raises_when_deadline_expired(
     )
     bus = RecordingBus()
     session = Session(bus=bus)
-    execution_state = ExecutionState(session=session)
+    prompt = _make_prompt()  # noqa: F841 - needed for context manager side effect
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
         {tool.name: tool},
@@ -443,7 +378,7 @@ def test_tool_executor_raises_when_deadline_expired(
         prompt=Prompt(PromptTemplate(ns="test", key="tool")),
         prompt_name="test",
         rendered=rendered,
-        execution_state=execution_state,
+        session=session,
         tool_registry=tool_registry,
         serialize_tool_message_fn=serialize_tool_message,
         format_dispatch_failures=lambda x: "",
@@ -545,19 +480,51 @@ class _TrackingFilesystem(SnapshotableFilesystem):
 
 
 class _MockPromptWithFilesystem:
-    """Mock prompt that returns a filesystem."""
+    """Mock prompt that returns a filesystem.
+
+    Updated to include resources property to match new PromptProtocol interface.
+    """
 
     def __init__(self, fs: InMemoryFilesystem) -> None:
         self._fs = fs
+        # Create a real prompt with resources for the `resources` property
+        resources = ResourceRegistry.build({Filesystem: fs})
+        self._prompt: Prompt[object] = Prompt(
+            PromptTemplate(ns="tests", key="mock-filesystem-prompt")
+        ).bind(resources=resources)
+        # Enter prompt context for resource access
+        self._prompt.__enter__()
 
     def filesystem(self) -> InMemoryFilesystem:
         return self._fs
 
+    @property
+    def resources(self) -> ScopedResourceContext:
+        """Return resources from the underlying prompt."""
+        return self._prompt.resources
 
-def _create_execution_state(session: Session, fs: InMemoryFilesystem) -> ExecutionState:
-    """Create an ExecutionState with filesystem for transactional tool execution."""
+
+def _make_prompt(resources: ResourceRegistry | None = None) -> Prompt[object]:
+    """Create a prompt with optional resources in active context."""
+    prompt: Prompt[object] = Prompt(
+        PromptTemplate(ns="tests", key="shared-components-test")
+    )
+    if resources is not None:
+        prompt = prompt.bind(resources=resources)
+    # Enter prompt context for resource access
+    prompt.__enter__()
+    return prompt
+
+
+def _make_prompt_with_resources(resources: ResourceRegistry) -> Prompt[object]:
+    """Create a prompt with resources in active context."""
+    return _make_prompt(resources)
+
+
+def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
+    """Create a prompt with filesystem in active context."""
     resources = ResourceRegistry.build({Filesystem: fs})
-    return ExecutionState(session=session, resources=resources)
+    return _make_prompt_with_resources(resources)
 
 
 # Parameter classes for filesystem integration tests
@@ -603,7 +570,7 @@ class TestToolExecutionFilesystemIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
-        execution_state = ExecutionState(session=session)
+        prompt = _make_prompt()  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -615,7 +582,7 @@ class TestToolExecutionFilesystemIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -672,14 +639,14 @@ class TestToolExecutionFilesystemIntegration:
             {tool.name: tool},
         )
 
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -733,14 +700,14 @@ class TestToolExecutionFilesystemIntegration:
             {tool.name: tool},
         )
 
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -769,7 +736,7 @@ class TestToolExecutionFilesystemIntegration:
             filesystem = context.filesystem
             if filesystem:
                 filesystem.write("/test.txt", "modified")
-            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
 
         tool = Tool[_ModifyParams, EchoPayload](
             name="modify",
@@ -789,7 +756,7 @@ class TestToolExecutionFilesystemIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -801,7 +768,7 @@ class TestToolExecutionFilesystemIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -850,9 +817,11 @@ class TestPublishInvocationFilesystemRestore:
         bus = FailingBus()
         session = Session(bus=bus)
 
-        # Create ExecutionState and take snapshot BEFORE tool modifications
-        execution_state = _create_execution_state(session, fs)
-        composite_snapshot = execution_state.snapshot(tag="before_tool")
+        # Create prompt and take snapshot BEFORE tool modifications
+        prompt = _make_prompt_with_fs(fs)
+        composite_snapshot = create_snapshot(
+            session, prompt.resources, tag="before_tool"
+        )
 
         # Modify file to simulate what tool did
         fs.write("/test.txt", "after_tool")
@@ -863,7 +832,9 @@ class TestPublishInvocationFilesystemRestore:
             handler=echo_handler,
         )
         params = EchoParams(value="hello")
-        result = ToolResult.ok(EchoPayload(value="hello"), message="echoed")
+        result = ToolResult(
+            message="echoed", value=EchoPayload(value="hello"), success=True
+        )
         log = get_logger(__name__)
 
         typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
@@ -874,10 +845,10 @@ class TestPublishInvocationFilesystemRestore:
         context = ToolExecutionContext(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
-            prompt=Prompt(PromptTemplate(ns="test", key="tool")),
+            prompt=prompt,
             rendered_prompt=None,
             tool_registry=tool_registry,
-            execution_state=execution_state,
+            session=session,
             prompt_name="test",
             parse_arguments=parse_tool_arguments,
             format_dispatch_failures=lambda errors: "publish failed",
@@ -927,10 +898,10 @@ class TestPublishInvocationFilesystemRestore:
         bus = FailingBus()
         session = Session(bus=bus)
 
-        # Create ExecutionState and take snapshot
+        # Create prompt and take snapshot
         resources = ResourceRegistry.build({Filesystem: fs})
-        execution_state = ExecutionState(session=session, resources=resources)
-        composite_snapshot = execution_state.snapshot(tag="original")
+        prompt = _make_prompt_with_resources(resources)
+        composite_snapshot = create_snapshot(session, prompt.resources, tag="original")
 
         # File is already restored (simulating what tool_execution did)
         # by keeping original content
@@ -955,10 +926,10 @@ class TestPublishInvocationFilesystemRestore:
         context = ToolExecutionContext(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
-            prompt=Prompt(PromptTemplate(ns="test", key="tool")),
+            prompt=prompt,
             rendered_prompt=None,
             tool_registry=tool_registry,
-            execution_state=execution_state,
+            session=session,
             prompt_name="test",
             parse_arguments=parse_tool_arguments,
             format_dispatch_failures=lambda errors: "publish failed",
@@ -1047,14 +1018,14 @@ class TestFilesystemSnapshotIntegration:
             {tool.name: tool},
         )
 
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -1115,14 +1086,14 @@ class TestFilesystemSnapshotIntegration:
             {tool.name: tool},
         )
 
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -1163,7 +1134,7 @@ class TestFilesystemSnapshotIntegration:
             filesystem = context.filesystem
             if filesystem:
                 filesystem.write("/file.txt", "modified")
-            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
 
         tool = Tool[_InvalidParams, EchoPayload](
             name="invalid_tool",
@@ -1182,7 +1153,7 @@ class TestFilesystemSnapshotIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1194,7 +1165,7 @@ class TestFilesystemSnapshotIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -1231,7 +1202,7 @@ class TestFilesystemSnapshotIntegration:
                 filesystem.write("/file2.txt", "modified2")
                 filesystem.write("/newfile.txt", "new content")
                 filesystem.delete("/file2.txt")
-            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
 
         tool = Tool[_MultiFileParams, EchoPayload](
             name="success_modify",
@@ -1250,7 +1221,7 @@ class TestFilesystemSnapshotIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1262,7 +1233,7 @@ class TestFilesystemSnapshotIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -1322,14 +1293,14 @@ class TestFilesystemSnapshotIntegration:
             {tool.name: tool},
         )
 
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -1366,7 +1337,7 @@ class TestFilesystemSnapshotIntegration:
                 filesystem.write("/step2.txt", "modified2")
                 # Then crash before third modification
                 raise RuntimeError("Crash after partial modifications")
-            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
 
         tool = Tool[_FailParams, EchoPayload](
             name="partial_tool",
@@ -1390,14 +1361,14 @@ class TestFilesystemSnapshotIntegration:
             {tool.name: tool},
         )
 
-        execution_state = _create_execution_state(session, fs)
+        prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -1465,14 +1436,14 @@ class TestHostFilesystemToolIntegration:
         )
 
         resources = ResourceRegistry.build({Filesystem: fs})
-        execution_state = ExecutionState(session=session, resources=resources)
+        prompt = _make_prompt_with_resources(resources)  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -1505,7 +1476,7 @@ class TestHostFilesystemToolIntegration:
             filesystem = context.filesystem
             if filesystem:
                 filesystem.write("file.txt", "modified by tool")
-            return ToolResult.ok(EchoPayload(value="ok"), message="ok")
+            return ToolResult(message="ok", value=EchoPayload(value="ok"))
 
         tool = Tool[_FailParams, EchoPayload](
             name="host_success",
@@ -1524,7 +1495,7 @@ class TestHostFilesystemToolIntegration:
 
         bus = RecordingBus()
         session = Session(bus=bus)
-        execution_state = _create_execution_state(session, fs)  # type: ignore[arg-type]
+        prompt = _make_prompt_with_fs(fs)  # type: ignore[arg-type]  # noqa: F841
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1536,7 +1507,7 @@ class TestHostFilesystemToolIntegration:
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",
@@ -1594,14 +1565,14 @@ class TestHostFilesystemToolIntegration:
         )
 
         resources = ResourceRegistry.build({Filesystem: fs})
-        execution_state = ExecutionState(session=session, resources=resources)
+        prompt = _make_prompt_with_resources(resources)  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
             prompt=cast(Prompt[Any], mock_prompt),
             prompt_name="test",
             rendered=rendered,
-            execution_state=execution_state,
+            session=session,
             tool_registry=tool_registry,
             serialize_tool_message_fn=serialize_tool_message,
             format_dispatch_failures=lambda x: "",

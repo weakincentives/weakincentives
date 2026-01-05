@@ -93,8 +93,12 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self._budget_trackers: list[BudgetTracker | None] = []
         self._last_deadline: Deadline | None = None
         self._last_session: SessionProtocol | None = None
-        self._last_resources: ResourceRegistry | None = None
-        self._resources_list: list[ResourceRegistry | None] = []
+        # Track prompts to verify resources through prompt.resources
+        self._last_prompt: Prompt[_Output] | None = None
+        self._prompts: list[Prompt[_Output]] = []
+        # Track resources captured during evaluate (while context is active)
+        self._last_custom_resource: _CustomResource | None = None
+        self._custom_resources: list[_CustomResource | None] = []
 
     def evaluate(
         self,
@@ -104,31 +108,41 @@ class _MockAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
     ) -> PromptResponse[_Output]:
-        del prompt, budget
+        del budget
         self._call_count += 1
         self._last_budget_tracker = budget_tracker
         self._budget_trackers.append(budget_tracker)
         self._last_deadline = deadline
         self._last_session = session
-        self._last_resources = resources
-        self._resources_list.append(resources)
+        # Capture prompt to verify resources via prompt.resources
+        self._last_prompt = prompt
+        self._prompts.append(prompt)
 
-        # If there are visibility requests remaining, raise the exception
-        if self._visibility_requests:
-            overrides = self._visibility_requests.pop(0)
-            raise VisibilityExpansionRequired(
-                "Expansion required",
-                requested_overrides=overrides,
-                reason="test",
-                section_keys=tuple(k[0] for k in overrides),
-            )
+        # Enter prompt context (like real adapters do)
+        with prompt:
+            # Capture resource during evaluate while context is active
+            try:
+                self._last_custom_resource = prompt.resources.get(_CustomResource)
+            except Exception:
+                # UnboundResourceError: resource type not registered
+                self._last_custom_resource = None
+            self._custom_resources.append(self._last_custom_resource)
 
-        if self._error is not None:
-            raise self._error
+            # If there are visibility requests remaining, raise the exception
+            if self._visibility_requests:
+                overrides = self._visibility_requests.pop(0)
+                raise VisibilityExpansionRequired(
+                    "Expansion required",
+                    requested_overrides=overrides,
+                    reason="test",
+                    section_keys=tuple(k[0] for k in overrides),
+                )
 
-        return self._response
+            if self._error is not None:
+                raise self._error
+
+            return self._response
 
 
 class _TestLoop(MainLoop[_Request, _Output]):
@@ -675,7 +689,7 @@ def test_request_accepts_resources() -> None:
 
 
 def test_loop_passes_resources_from_config() -> None:
-    """MainLoop passes config resources to adapter."""
+    """MainLoop binds config resources to prompt."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
@@ -697,7 +711,9 @@ def test_loop_passes_resources_from_config() -> None:
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
-        assert adapter._last_resources is resources
+        # Resources are now bound to prompt and accessible via prompt.resources
+        # (captured during evaluate while context is active)
+        assert adapter._last_custom_resource is resource
     finally:
         requests.close()
         results.close()
@@ -733,14 +749,16 @@ def test_loop_request_resources_overrides_config() -> None:
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
-        assert adapter._last_resources is override_resources
+        # Override resources are bound to prompt, overriding config resources
+        # (captured during evaluate while context is active)
+        assert adapter._last_custom_resource is override_resource
     finally:
         requests.close()
         results.close()
 
 
 def test_same_resources_used_across_visibility_retries() -> None:
-    """Same resources are passed across visibility expansion retries."""
+    """Same resources are used across visibility expansion retries."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
@@ -770,16 +788,17 @@ def test_same_resources_used_across_visibility_retries() -> None:
 
         # Called 3 times: 2 visibility expansions + 1 success
         assert adapter._call_count == 3
-        # Same resources should be used for all calls
-        assert len(adapter._resources_list) == 3
-        assert all(r is resources for r in adapter._resources_list)
+        # Same resource should be used for all calls
+        # (captured during evaluate while context is active)
+        assert len(adapter._custom_resources) == 3
+        assert all(r is resource for r in adapter._custom_resources)
     finally:
         requests.close()
         results.close()
 
 
 def test_no_resources_when_not_set() -> None:
-    """No resources are passed when not configured."""
+    """Prompt has empty resource context when no resources configured."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
@@ -798,7 +817,9 @@ def test_no_resources_when_not_set() -> None:
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
-        assert adapter._last_resources is None
+        # When no resources configured, the custom resource is None
+        # (captured during evaluate while context is active)
+        assert adapter._last_custom_resource is None
     finally:
         requests.close()
         results.close()

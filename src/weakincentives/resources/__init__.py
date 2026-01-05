@@ -67,7 +67,7 @@ from .errors import (
     ResourceError,
     UnboundResourceError,
 )
-from .protocols import Closeable, PostConstruct, ResourceResolver
+from .protocols import Closeable, PostConstruct, ResourceResolver, Snapshotable
 from .registry import ResourceRegistry
 from .scope import Scope
 
@@ -84,5 +84,6 @@ __all__ = [
     "ResourceResolver",
     "Scope",
     "ScopedResourceContext",
+    "Snapshotable",
     "UnboundResourceError",
 ]

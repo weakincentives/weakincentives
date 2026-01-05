@@ -159,7 +159,7 @@ class TestBinding:
 # === ResourceRegistry Tests ===
 
 
-class TestResourceRegistry:
+class TestResourceRegistry:  # noqa: PLR0904 - test classes often have many methods
     def test_empty_registry(self) -> None:
         registry = ResourceRegistry.of()
         assert len(registry) == 0
@@ -198,7 +198,7 @@ class TestResourceRegistry:
         override = ResourceRegistry.of(
             Binding(Config, lambda r: ConcreteConfig(value=2))
         )
-        merged = base.merge(override)
+        merged = base.merge(override, strict=False)
 
         ctx = merged.create_context()
         config = ctx.get(Config)
@@ -264,7 +264,7 @@ class TestResourceRegistry:
             Binding(Config, lambda r: ConcreteConfig(value=1))
         )
         instances = ResourceRegistry.build({Config: config})
-        merged = bindings.merge(instances)
+        merged = bindings.merge(instances, strict=False)
         # Iterate and check Config only appears once
         protocols = list(merged)
         assert protocols.count(Config) == 1
@@ -333,6 +333,49 @@ class TestResourceRegistry:
         result = registry.get_all(lambda x: isinstance(x, ConcreteConfig))
         # Lazy bindings aren't in singleton cache after start()
         assert len(result) == 0
+
+    def test_conflicts_returns_shared_protocols(self) -> None:
+        """conflicts() returns protocols bound in both registries."""
+        base = ResourceRegistry.of(
+            Binding(Config, lambda r: ConcreteConfig()),
+            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))),
+        )
+        override = ResourceRegistry.of(
+            Binding(Config, lambda r: ConcreteConfig(value=2)),  # Conflicts
+        )
+        conflicts = base.conflicts(override)
+        assert conflicts == frozenset({Config})
+        assert HTTPClient not in conflicts
+
+    def test_conflicts_returns_empty_when_disjoint(self) -> None:
+        """conflicts() returns empty set when no protocols overlap."""
+        base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
+        other = ResourceRegistry.of(
+            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config)))
+        )
+        conflicts = base.conflicts(other)
+        assert len(conflicts) == 0
+
+    def test_merge_strict_raises_on_conflict(self) -> None:
+        """merge(strict=True) raises DuplicateBindingError on conflict."""
+        base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
+        override = ResourceRegistry.of(
+            Binding(Config, lambda r: ConcreteConfig(value=2))
+        )
+        with pytest.raises(DuplicateBindingError) as exc:
+            base.merge(override, strict=True)
+        assert exc.value.protocol is Config
+
+    def test_merge_strict_allows_disjoint_registries(self) -> None:
+        """merge(strict=True) succeeds when registries are disjoint."""
+        base = ResourceRegistry.of(Binding(Config, lambda r: ConcreteConfig()))
+        other = ResourceRegistry.of(
+            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config)))
+        )
+        # Should not raise
+        merged = base.merge(other, strict=True)
+        assert Config in merged
+        assert HTTPClient in merged
 
 
 # === ScopedResourceContext Tests ===

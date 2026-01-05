@@ -120,7 +120,7 @@ class TestResourceRegistryMerge:
         registry1 = ResourceRegistry.build({MockResource: resource1})
         registry2 = ResourceRegistry.build({MockResource: resource2})
 
-        merged = registry1.merge(registry2)
+        merged = registry1.merge(registry2, strict=False)
 
         # The 'other' registry (registry2) should win
         assert merged.get(MockResource) is resource2

@@ -19,15 +19,19 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
+from ...prompt.protocols import PromptProtocol
 from ...runtime.events._types import ToolInvoked
-from ...runtime.execution_state import ExecutionState
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
+from ...runtime.transactions import PendingToolTracker
 from ._notifications import Notification
+
+if TYPE_CHECKING:
+    from ...resources.context import ScopedResourceContext
 
 __all__ = [
     "AsyncHookCallback",
@@ -109,31 +113,65 @@ AsyncHookCallback = Callable[
 class HookContext:
     """Context passed to hook callbacks for state access.
 
-    The execution_state provides unified access to session and resources.
-    Session is accessed via execution_state.session.
+    Provides unified access to session, prompt resources, and tool transaction
+    tracking for hook-based execution management.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - context objects often need many parameters
         self,
         *,
-        execution_state: ExecutionState,
+        session: SessionProtocol,
+        prompt: PromptProtocol[object],
         adapter_name: str,
         prompt_name: str,
         deadline: Deadline | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> None:
-        self.execution_state = execution_state
+        self._session = session
+        self._prompt = prompt
         self.adapter_name = adapter_name
         self.prompt_name = prompt_name
         self.deadline = deadline
         self.budget_tracker = budget_tracker
         self.stop_reason: str | None = None
         self._tool_count = 0
+        self._tool_tracker: PendingToolTracker | None = None
 
     @property
     def session(self) -> SessionProtocol:
-        """Get session from execution state."""
-        return self.execution_state.session
+        """Get session."""
+        return self._session
+
+    @property
+    def resources(
+        self,
+    ) -> ScopedResourceContext:  # pragma: no cover - tested via integration
+        """Get resources from prompt."""
+        return self._prompt.resources
+
+    @property
+    def _tracker(self) -> PendingToolTracker:
+        """Get or create tool tracker (lazy initialization)."""
+        if self._tool_tracker is None:
+            self._tool_tracker = PendingToolTracker(
+                session=self._session,
+                resources=self._prompt.resources,
+            )
+        return self._tool_tracker
+
+    def begin_tool_execution(self, tool_use_id: str, tool_name: str) -> None:
+        """Take snapshot before native tool execution."""
+        self._tracker.begin_tool_execution(tool_use_id, tool_name)
+
+    def end_tool_execution(self, tool_use_id: str, *, success: bool) -> bool:
+        """Complete tool execution, restoring on failure."""
+        return self._tracker.end_tool_execution(tool_use_id, success=success)
+
+    def abort_tool_execution(
+        self, tool_use_id: str
+    ) -> bool:  # pragma: no cover - tested via integration
+        """Abort tool execution and restore state."""
+        return self._tracker.abort_tool_execution(tool_use_id)
 
 
 def _utcnow() -> datetime:
@@ -199,10 +237,10 @@ def create_pre_tool_use_hook(
 
     The hook checks deadlines and budgets before tool execution, blocking
     tools that would violate constraints. It also takes a state snapshot
-    for transactional rollback if execution_state is configured.
+    for transactional rollback.
 
     Args:
-        hook_context: Context with session, deadline, budget, and execution_state.
+        hook_context: Context with session, deadline, budget, and prompt.
 
     Returns:
         An async hook callback function matching SDK signature.
@@ -263,7 +301,7 @@ def create_pre_tool_use_hook(
         # Take snapshot for transactional rollback on native tools
         # Skip MCP-bridged WINK tools - they handle their own transactions
         if tool_use_id is not None and not tool_name.startswith("mcp__wink__"):
-            hook_context.execution_state.begin_tool_execution(
+            hook_context.begin_tool_execution(
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
             )
@@ -352,11 +390,10 @@ def create_post_tool_use_hook(
     parse the input data into typed dataclasses (PostToolUseInput, ToolResponse)
     for better type safety, falling back to dict access if parsing fails.
 
-    If execution_state is configured and the tool failed, the hook restores
-    state from the pre-execution snapshot.
+    If the tool failed, the hook restores state from the pre-execution snapshot.
 
     Args:
-        hook_context: Context with session, adapter, and execution_state.
+        hook_context: Context with session, adapter, and prompt.
         stop_on_structured_output: If True, return ``continue: false`` after
             the StructuredOutput tool to end the turn immediately.
 
@@ -408,7 +445,7 @@ def create_post_tool_use_hook(
             success = data.tool_error is None and not _is_tool_error_response(
                 data.result_raw
             )
-            restored = hook_context.execution_state.end_tool_execution(
+            restored = hook_context.end_tool_execution(
                 tool_use_id=tool_use_id,
                 success=success,
             )

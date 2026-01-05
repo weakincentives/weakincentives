@@ -214,7 +214,6 @@ sync-docs:
 	@mkdir -p src/weakincentives/docs/specs
 	@cp llms.md src/weakincentives/docs/
 	@cp WINK_GUIDE.md src/weakincentives/docs/
-	@cp CHANGELOG.md src/weakincentives/docs/
 	@cp specs/*.md src/weakincentives/docs/specs/
 	@touch src/weakincentives/docs/__init__.py
 
