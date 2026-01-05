@@ -179,10 +179,19 @@ def redis_standalone(
         _stop_container(runtime, container_id)
 
 
-def _find_free_port_range(count: int) -> int:
-    """Find a range of free consecutive ports."""
-    base = _find_free_port()
-    while True:
+def _find_free_port_range(count: int, max_port: int = 55535) -> int:
+    """Find a range of free consecutive ports.
+
+    Args:
+        count: Number of consecutive ports needed.
+        max_port: Maximum port number allowed. Default is 55535 because Redis
+            Cluster uses ports 10,000 higher for cluster bus communication,
+            so the base port must be <= 55535 to stay under the 65535 limit.
+    """
+    # Start from a low ephemeral port to ensure we stay within limits.
+    # The range 49152-55535 gives us room for cluster bus ports (+10000).
+    base = 49152
+    while base + count <= max_port:
         all_available = True
         for offset in range(count):
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -194,6 +203,9 @@ def _find_free_port_range(count: int) -> int:
         if all_available:
             return base
         base += count
+    raise RuntimeError(
+        f"Could not find {count} consecutive free ports below {max_port}"
+    )
 
 
 def _build_cluster_command(
