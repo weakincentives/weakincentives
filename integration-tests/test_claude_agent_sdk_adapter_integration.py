@@ -62,19 +62,44 @@ def _get_model() -> str:
     return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
 
 
-def _make_config(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig:
-    """Build a ClaudeAgentSDKClientConfig with explicit cwd.
+def _make_isolation(api_key: str | None = None) -> IsolationConfig:
+    """Build an IsolationConfig for hermetic test execution.
 
-    All tests MUST use this helper to ensure cwd points to a temporary
-    directory, preventing snapshot operations from creating commits in
-    the actual repository.
+    This ensures tests don't interact with the user's ~/.claude configuration,
+    which is critical when the host has Claude configured for a different
+    provider (e.g., AWS Bedrock with temporary credentials).
+
+    Args:
+        api_key: Explicit API key. Defaults to ANTHROPIC_API_KEY from environment.
+
+    Returns:
+        IsolationConfig that creates an ephemeral home directory.
+    """
+    return IsolationConfig(
+        network_policy=NetworkPolicy.no_network(),
+        sandbox=SandboxConfig(enabled=True),
+        api_key=api_key or os.environ.get("ANTHROPIC_API_KEY"),
+    )
+
+
+def _make_config(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig:
+    """Build a ClaudeAgentSDKClientConfig with explicit cwd and isolation.
+
+    All tests MUST use this helper to ensure:
+    1. cwd points to a temporary directory (prevents commits in the repo)
+    2. isolation creates an ephemeral home (prevents reading ~/.claude config)
+
+    The isolation is critical for hermetic tests - without it, the SDK subprocess
+    inherits the user's ~/.claude/settings.json which may configure a different
+    provider (e.g., AWS Bedrock), causing auth failures or hangs.
     """
     config_kwargs: dict[str, object] = {
         "permission_mode": "bypassPermissions",
         "cwd": str(tmp_path),
+        "isolation": kwargs.pop("isolation", None) or _make_isolation(),
     }
     config_kwargs.update(kwargs)
-    return ClaudeAgentSDKClientConfig(**config_kwargs)  # type: ignore[arg-type]
+    return ClaudeAgentSDKClientConfig(**config_kwargs)
 
 
 def _make_adapter(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKAdapter:
