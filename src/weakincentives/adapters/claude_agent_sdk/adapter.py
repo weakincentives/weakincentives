@@ -407,7 +407,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         output_format: dict[str, Any] | None,
         hook_context: HookContext,
         bridged_tools: tuple[Any, ...],
-        ephemeral_home: EphemeralHome | None = None,
+        ephemeral_home: EphemeralHome,
         effective_cwd: str | None = None,
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
@@ -443,12 +443,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         if self._disallowed_tools:
             options_kwargs["disallowed_tools"] = list(self._disallowed_tools)
 
-        # Apply isolation configuration if ephemeral home is provided
-        if ephemeral_home:
-            # Set environment variables including redirected HOME
-            options_kwargs["env"] = ephemeral_home.get_env()
-            # Prevent loading any external settings
-            options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
+        # Apply isolation configuration from ephemeral home
+        # Set environment variables including redirected HOME
+        options_kwargs["env"] = ephemeral_home.get_env()
+        # Prevent loading any external settings
+        options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
 
         # Apply model config parameters
         # Note: The Claude Agent SDK does not expose max_tokens or temperature
@@ -501,7 +500,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Use streaming mode (AsyncIterable) to enable hook support.
         # The SDK's query() function only initializes hooks when
         # is_streaming_mode=True, which requires an AsyncIterable prompt.
-        async def stream_prompt() -> Any:
+        async def stream_prompt() -> Any:  # noqa: RUF029 - async generator
             """Yield a single user message in streaming format."""
             yield {
                 "type": "user",
