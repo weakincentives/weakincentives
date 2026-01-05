@@ -320,27 +320,43 @@ async def test_minimal_sdk_query() -> dict[str, Any]:
     work_dir = Path(temp_dir) / "workspace"
     work_dir.mkdir(parents=True)
 
+    # Generate settings with EXPLICIT Bedrock disable via env section
     settings = {
         "sandbox": {
             "enabled": True,
             "autoAllowBashIfSandboxed": True,
             "network": {"allowedDomains": []},
-        }
+        },
+        # Critical: explicitly disable Bedrock in settings.json env section
+        "env": {
+            "CLAUDE_CODE_USE_BEDROCK": "0",
+            "CLAUDE_USE_BEDROCK": "0",
+            "DISABLE_AUTOUPDATER": "1",
+        },
     }
+    print(f"  Generated settings.json with env section to disable Bedrock")
     (claude_dir / "settings.json").write_text(json.dumps(settings, indent=2))
 
-    # Build isolated env
+    # Build isolated env - exclude sensitive prefixes
     sensitive_prefixes = ("HOME", "CLAUDE_", "ANTHROPIC_", "AWS_", "GOOGLE_", "AZURE_", "OPENAI_")
     isolated_env: dict[str, str] = {
         k: v for k, v in os.environ.items() if not any(k.startswith(p) for p in sensitive_prefixes)
     }
     isolated_env["HOME"] = temp_dir
+
+    # Explicitly disable Bedrock in env vars (belt-and-suspenders)
+    isolated_env["CLAUDE_CODE_USE_BEDROCK"] = "0"
+    isolated_env["CLAUDE_USE_BEDROCK"] = "0"
+    isolated_env["DISABLE_AUTOUPDATER"] = "1"
+
+    # Set API key
     if os.environ.get("ANTHROPIC_API_KEY"):
         isolated_env["ANTHROPIC_API_KEY"] = os.environ["ANTHROPIC_API_KEY"]
 
     print(f"  Ephemeral HOME: {temp_dir}")
     print(f"  Work dir: {work_dir}")
     print(f"  API key in env: {'YES' if 'ANTHROPIC_API_KEY' in isolated_env else 'NO'}")
+    print(f"  CLAUDE_CODE_USE_BEDROCK in env: {isolated_env.get('CLAUDE_CODE_USE_BEDROCK')}")
 
     subsection("SDK Options")
     options_kwargs: dict[str, Any] = {

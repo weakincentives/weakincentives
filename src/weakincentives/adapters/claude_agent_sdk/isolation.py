@@ -207,6 +207,17 @@ class EphemeralHome:
             "allowedDomains": list(network.allowed_domains),
         }
 
+        # Explicitly disable Bedrock and other alternative providers via env section.
+        # This is critical for hermetic tests - the host may have Claude configured
+        # for AWS Bedrock, and the SDK's settings.json env section can override
+        # environment variables. We must explicitly disable these to force Anthropic
+        # API usage with the provided ANTHROPIC_API_KEY.
+        settings["env"] = {
+            "CLAUDE_CODE_USE_BEDROCK": "0",
+            "CLAUDE_USE_BEDROCK": "0",
+            "DISABLE_AUTOUPDATER": "1",
+        }
+
         # Write settings
         settings_path = self._claude_dir / "settings.json"
         settings_path.write_text(json.dumps(settings, indent=2))
@@ -233,6 +244,14 @@ class EphemeralHome:
 
         # Override HOME to ephemeral directory
         env["HOME"] = self._temp_dir
+
+        # Explicitly disable Bedrock and other alternative providers.
+        # This is critical for hermetic tests - the host may have Claude
+        # configured for AWS Bedrock, and we must force Anthropic API usage.
+        # Set these BEFORE the API key so they take precedence.
+        env["CLAUDE_CODE_USE_BEDROCK"] = "0"
+        env["CLAUDE_USE_BEDROCK"] = "0"
+        env["DISABLE_AUTOUPDATER"] = "1"
 
         # Set API key
         if self._isolation.api_key:
