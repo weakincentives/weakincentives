@@ -2,339 +2,97 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.18.0 - 2026-01-05
 
-### Breaking: Prompt Resource Lifecycle via `prompt.resources`
+### Breaking Changes
 
-The prompt context manager pattern has changed from `with prompt:` to
-`with prompt.resources:` for clearer API semantics.
-
-**Before:**
+**Prompt resource lifecycle via `prompt.resources`:** The context manager pattern
+changed from `with prompt:` to `with prompt.resources:`. The `Prompt` class no
+longer implements `__enter__`/`__exit__` directly.
 
 ```python
+# Before
 with prompt:
     fs = prompt.resources.get(Filesystem)
-```
 
-**After:**
-
-```python
+# After
 with prompt.resources:
     fs = prompt.resources.get(Filesystem)
 ```
 
-Key changes:
+**Removed `ExecutionState`:** Resources now bind directly to `Prompt` instead of
+a separate `ExecutionState`. Use `with prompt.resources:` to manage lifecycle and
+`adapter.evaluate(prompt, session=session)` for evaluation.
 
-- `Prompt` no longer implements `__enter__`/`__exit__` directly
-- `prompt.resources` returns `PromptResources`, a dual-purpose object that:
-  - Acts as context manager for lifecycle (`with prompt.resources:`)
-  - Acts as proxy to resources (`prompt.resources.get(Protocol)`)
-- For framework code needing `ScopedResourceContext`, use `prompt.resources.context`
+**Removed `mount_point` from Filesystem protocol:** Mount point handling moved to
+`FilesystemToolHandlers`. Remove the property from custom filesystem implementations.
 
-**Migration:**
+### Lifecycle Management
 
-1. Replace `with prompt:` → `with prompt.resources:`
-1. For transaction functions, use `.context`:
-   `create_snapshot(session, prompt.resources.context, tag="test")`
-
-## v0.18.0 - 2026-01-05
-
-### ToolResult Convenience Constructors
-
-New class methods for creating `ToolResult` instances with less boilerplate:
+New `LoopGroup` runs multiple `MainLoop` or `EvalLoop` instances with coordinated
+shutdown, optional health endpoints (`/health/live`, `/health/ready`), and watchdog
+monitoring for production deployments.
 
 ```python
-# Success with typed value
-ToolResult.ok(MyResult(...), message="Done")
+from weakincentives.runtime import LoopGroup
 
-# Failure with no value
-ToolResult.error("Something went wrong")
-```
-
-The full constructor form remains available when `exclude_value_from_context` is
-needed.
-
-### Lifecycle Management for MainLoop and EvalLoop
-
-New primitives for coordinating graceful shutdown across multiple loop instances
-running in the same process, with health endpoints and watchdog monitoring for
-Kubernetes deployments.
-
-```python
-from weakincentives.runtime import LoopGroup, ShutdownCoordinator
-
-# Run multiple loops with coordinated shutdown
-group = LoopGroup(loops=[main_loop, eval_loop])
-group.run()  # Blocks until SIGTERM/SIGINT
-
-# With health endpoints and watchdog monitoring
 group = LoopGroup(
-    loops=[main_loop],
-    health_port=8080,           # Exposes /health/live and /health/ready
-    watchdog_threshold=720.0,   # Terminate if worker stalls for 12 minutes
+    loops=[main_loop, eval_loop],
+    health_port=8080,
+    watchdog_threshold=720.0,
 )
-group.run()
-
-# Or manual coordination
-coordinator = ShutdownCoordinator.install()
-coordinator.register(loop.shutdown)
-loop.run()
+group.run()  # Blocks until SIGTERM/SIGINT
 ```
 
-**New types:**
+### Resource Registry with Dependency Injection
 
-- `Runnable`: Protocol for loops that support graceful shutdown (`run()`,
-  `shutdown()`, `running`, `heartbeat` properties)
-- `ShutdownCoordinator`: Singleton that installs SIGTERM/SIGINT handlers and
-  invokes registered callbacks on shutdown
-- `LoopGroup`: Runs each loop in a dedicated thread with coordinated shutdown,
-  optional health endpoints, and watchdog monitoring
-- `Heartbeat`: Thread-safe timestamp tracker for worker liveness
-- `Watchdog`: Daemon thread that monitors heartbeats and terminates the process
-  via SIGKILL when workers stall
-- `HealthServer`: Minimal HTTP server for Kubernetes liveness (`/health/live`)
-  and readiness (`/health/ready`) probes
-- `wait_until`: Helper for polling predicates with timeout
-
-### Enhanced Resource Registry with Dependency Injection
-
-ResourceRegistry now supports provider-based lazy construction with scope-aware
-lifecycle management.
+`ResourceRegistry` now supports provider-based lazy construction with scoped
+lifecycles (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
 
 ```python
 from weakincentives.resources import Binding, ResourceRegistry, Scope
 
-# Define how to construct resources with dependencies
 registry = ResourceRegistry.of(
     Binding(Config, lambda r: Config.from_env()),
     Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
     Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
 )
-
-# Create resolution context
-ctx = registry.create_context()
-ctx.start()
-
-try:
-    # Resolve resources (lazily constructed)
-    http = ctx.get(HTTPClient)
-
-    # Tool-call scoped resources are fresh per scope
-    with ctx.tool_scope() as resolver:
-        tracer = resolver.get(Tracer)
-finally:
-    ctx.close()
 ```
 
-**New types:**
+### Session Evaluators
 
-- `Binding[T]`: Associates a protocol type with a provider function and scope
-- `Scope`: Enum controlling instance lifetime (`SINGLETON`, `TOOL_CALL`,
-  `PROTOTYPE`)
-- `ScopedResourceContext`: Resolution context with dependency graph walking and
-  cycle detection
-- `Provider[T]`: Type alias for factory functions that accept a resolver
-- `Closeable`: Protocol for resources with `close()` method (auto-cleanup)
-- `PostConstruct`: Protocol for resources with `post_construct()` initialization
-
-**New errors:**
-
-- `CircularDependencyError`: Raised when dependency graph contains cycles
-- `DuplicateBindingError`: Raised when binding for a type already exists
-- `ProviderError`: Raised when provider function fails
-- `UnboundResourceError`: Raised when resolving unbound type
-
-### Prompt-Bound Resource Lifecycle
-
-Resources now share lifecycle with `Prompt` rather than a separate `ExecutionState`.
-This simplifies the API by removing an intermediate abstraction.
+Evaluate agent behavior—not just output—with session-aware evaluators for tool
+usage patterns, token budgets, and state invariants.
 
 ```python
-# Before: ExecutionState as intermediary
-execution_state = ExecutionState(session=session, resources=resources)
-result = adapter.evaluate(prompt, execution_state=execution_state)
+from weakincentives.evals import tool_called, all_tools_succeeded, all_of
 
-# After: Prompt owns resource lifecycle directly
-with prompt:  # Resources initialized
-    result = adapter.evaluate(prompt, session=session)
-# Resources cleaned up
-```
-
-**Breaking changes:**
-
-- Removed `ExecutionState` class entirely
-- Removed `ResourceSnapshot` and `SnapshotMetadata` from resources module
-- Removed `snapshot()` and `restore()` methods from `ScopedResourceContext`
-- Renamed `ExecutionStateError` to `TransactionError`
-- Removed `SnapshotMismatchError` (unused)
-
-**New in `runtime.transactions` module:**
-
-- `CompositeSnapshot`: Combines session + resource snapshots with JSON serialization
-- `create_snapshot()`: Capture session and resource state
-- `restore_snapshot()`: Restore session and resource state
-- `tool_transaction()`: Context manager for automatic rollback on exception
-- `PendingToolTracker`: Thread-safe tracker for hook-based tool execution
-- `SnapshotMetadata`: Context for when/why a snapshot was taken
-
-**New methods on `ResourceRegistry`:**
-
-- `merge(other, strict=True)`: Raise `DuplicateBindingError` on conflicts
-- `conflicts(other)`: Return protocols bound in both registries
-
-### Reply-to Routing in Mailbox Specification
-
-The mailbox specification now supports reply-to routing, enabling workers to
-derive response destinations from incoming messages rather than requiring a
-fixed response mailbox at construction.
-
-**Specification additions:**
-
-- `reply_to` field on `Message` for storing reply destination identifier
-- `reply_mailbox()` method on `Message` for resolving the reply `Mailbox`
-- `send(body, reply_to=...)` parameter for specifying reply destination
-- `MailboxResolver` protocol for backend-specific mailbox resolution
-- `ReplyNotAvailableError` for resolution failures
-
-This enables patterns like eval run collection where all samples specify the
-same `reply_to` and results collect into one mailbox regardless of which worker
-processes each sample.
-
-### Session Evaluators for Evals Framework
-
-The evaluation framework now supports behavioral assertions against session
-data, enabling evaluation of not just what the agent produced, but how it got
-there—including tool usage patterns, token budgets, and custom state invariants.
-
-```python
-from weakincentives.evals import (
-    EvalLoop,
-    tool_called,
-    tool_not_called,
-    all_tools_succeeded,
-    token_usage_under,
-    all_of,
-)
-
-# Combine output evaluation with session assertions
 evaluator = all_of(
-    exact_match,                      # Output matches expected
-    tool_called("search"),            # Agent used search tool
-    tool_not_called("fallback"),      # Didn't use fallback
-    all_tools_succeeded(),            # No tool failures
-    token_usage_under(max_tokens=1000),
+    exact_match,
+    tool_called("search"),
+    all_tools_succeeded(),
 )
-
-loop = EvalLoop(main_loop=my_loop, evaluator=evaluator)
-report = loop.execute(dataset)
 ```
 
-**New types:**
+### TLA+ Specification Embedding
 
-- `SessionEvaluator`: Evaluator that receives `SessionView` for inspection
-- `adapt()`: Converts standard evaluators to session-aware evaluators
+Co-locate formal TLA+ specifications with Python code using the `@formal_spec`
+decorator. Extract and verify with TLC model checker via `weakincentives.formal`.
 
-**Built-in session evaluators:**
+### Mailbox Reply-to Routing
 
-- `tool_called(name)`: Assert a specific tool was invoked
-- `tool_not_called(name)`: Assert a tool was never invoked
-- `tool_call_count(name, min_count, max_count)`: Assert tool call count within bounds
-- `all_tools_succeeded()`: Assert no tool failures occurred
-- `token_usage_under(max_tokens)`: Assert token budget was respected
-- `slice_contains(T, predicate)`: Assert session slice contains matching value
+Messages now support `reply_to` routing, allowing workers to derive response
+destinations dynamically instead of requiring fixed response mailboxes.
 
-### TLA+ Specification Embedding Framework
+### Other Improvements
 
-A new framework for co-locating TLA+ formal specifications with Python
-implementation code using decorators. This reduces drift between specs and code
-by making specifications a first-class part of the development workflow.
-
-```python
-from weakincentives.dbc import formal_spec, StateVar, Action, Invariant
-
-@formal_spec(
-    module="Counter",
-    state_vars=[StateVar("count", "Nat")],
-    actions=[Action("Increment", updates={"count": "count + 1"})],
-    invariants=[Invariant("INV-1", "NonNeg", "count >= 0")],
-)
-class Counter:
-    def increment(self) -> None:
-        self.count += 1
-```
-
-**New types:**
-
-- `@formal_spec`: Decorator for embedding TLA+ metadata in Python classes
-- `StateVar`: Declares a TLA+ state variable with name and type
-- `Action`: Declares a TLA+ action with guard and state updates
-- `Invariant`: Declares a TLA+ invariant with ID, name, and predicate
-- `FormalSpec`: Container for all specification metadata
-
-**Testing utilities (`weakincentives.formal.testing`):**
-
-- `extract_spec(cls)`: Extract TLA+ specification from decorated class
-- `write_spec(spec, output_dir)`: Write TLA+ and config files to disk
-- `model_check(spec)`: Run TLC model checker with 3-minute timeout
-- `extract_and_verify(cls, output_dir)`: Combined extraction and verification
-
-### Added
-
-- **`wink docs --changelog` command.** The `wink docs` CLI now supports a
-  `--changelog` flag that prints the bundled CHANGELOG.md, making release
-  history accessible to users without repository access.
-
-- **ToolResult convenience constructors.** `ToolResult` now provides class
-  methods for common construction patterns: `ToolResult.ok(value, message)`
-  and `ToolResult.error(message)` reduce boilerplate in tool handlers.
-
-- **Parameter validation for mailbox timeouts.** Negative `visibility_timeout`
-  and `wait_time_seconds` values are now rejected at the Python boundary with
-  `InvalidParameterError`. The `visibility_timeout` is also validated against
-  the SQS-compatible maximum of 43200 seconds (12 hours).
-
-### Changed
-
-- **MainLoop.initialize renamed to prepare.** The method name `prepare` better
-  describes its purpose: preparing the prompt and session for evaluation, rather
-  than initialization which suggests constructor-like behavior.
-
-- **Tool handler signature validation now uses fail-fast approach.** Pyright
-  strict mode catches signature mismatches at development time; runtime
-  TypeErrors are caught in `tool_executor.py` and converted to
-  `ToolResult(success=False)`. This removes ~200 lines of upfront validation
-  code while maintaining type safety through static analysis.
-
-### Fixed
-
-- **Parameterless tool execution crash.** Fixed a bug where tools with no
-  parameters would incorrectly raise `RuntimeError` due to the validation check
-  treating `None` as a parsing failure. `None` is now correctly recognized as a
-  valid value for parameterless tools.
-
-- **Reply resolver reaper thread leak.** `RedisMailboxFactory.create()` now
-  creates send-only mailboxes that skip reaper thread creation and auto-resolver
-  setup, preventing unbounded thread creation when using reply routing.
-
-- **Redis decode_responses compatibility.** The `_deserialize` method in
-  `RedisMailbox` now handles both `bytes` and `str` return types, fixing crashes
-  when Redis clients are constructed with `decode_responses=True`.
-
-### Breaking
-
-- **Removed `mount_point` from Filesystem protocol.** The `mount_point` property
-  was defined in the `Filesystem` protocol but never used for path resolution.
-  Mount point handling has moved to `FilesystemToolHandlers`. Update any custom
-  filesystem implementations to remove the `mount_point` property.
-
-### Internal
-
-- Reorganized WINK_GUIDE.md by moving comparison sections to appendixes.
-- Hide warnings for integration tests.
-- Optimized prompt registry with caching and indexing for faster lookups.
-- Decomposed test_session.py and podman tests into focused test modules.
-- Removed completed spec documentation files.
-- Upgraded all dependencies.
+- **`ToolResult.ok()` / `ToolResult.error()`:** Convenience constructors reduce
+  boilerplate in tool handlers.
+- **`wink docs --changelog`:** Access release history without repository access.
+- **Mailbox timeout validation:** Rejects invalid `visibility_timeout` values at
+  the Python boundary.
+- **Fixed:** Parameterless tool execution crash, Redis mailbox thread leak, and
+  `decode_responses=True` compatibility.
 
 ## v0.17.0 - 2025-12-25
 
