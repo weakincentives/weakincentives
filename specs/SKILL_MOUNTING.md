@@ -20,6 +20,121 @@ Claude Code internals.
 - **Fail-fast validation**: Invalid skill paths or malformed skill files
   surface errors before Claude Code spawns.
 
+## Success Criteria
+
+This feature is considered complete when:
+
+1. **Code reviewer example refactored**: `code_reviewer_example.py` automatically
+   mounts skills from `demo-skills/` when running in `--claude-agent` mode. The
+   `build_claude_agent_adapter()` function uses `SkillConfig` to mount all skills
+   from the demo directory.
+
+2. **Two example skills available**: The `demo-skills/` directory contains two
+   working skills that demonstrate the pattern:
+
+   ```
+   demo-skills/
+   ├── code-review/
+   │   └── SKILL.md      # Code review guidance and checklist
+   └── python-style/
+       └── SKILL.md      # Python style conventions (PEP 8, type hints)
+   ```
+
+### Refactored Code Reviewer Example
+
+```python
+# In build_claude_agent_adapter()
+DEMO_SKILLS_ROOT = PROJECT_ROOT / "demo-skills"
+
+def build_claude_agent_adapter() -> tuple[
+    ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection
+]:
+    # ... existing workspace setup ...
+
+    # Auto-discover and mount all skills from demo-skills/
+    skill_mounts = tuple(
+        SkillMount(source=skill_dir)
+        for skill_dir in DEMO_SKILLS_ROOT.iterdir()
+        if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
+    )
+
+    isolation = IsolationConfig(
+        network_policy=NetworkPolicy(allowed_domains=CODE_REVIEW_ALLOWED_DOMAINS),
+        sandbox=SandboxConfig(
+            enabled=True,
+            readable_paths=(str(workspace_section.temp_dir),),
+            bash_auto_allow=True,
+        ),
+        skills=SkillConfig(skills=skill_mounts),
+    )
+    # ...
+```
+
+### Example Skill: code-review
+
+`demo-skills/code-review/SKILL.md`:
+
+```markdown
+# Code Review Skill
+
+You are a thorough code reviewer. When reviewing code:
+
+## Review Checklist
+- [ ] Check for security vulnerabilities (injection, XSS, auth bypass)
+- [ ] Verify error handling covers edge cases
+- [ ] Ensure tests cover new functionality
+- [ ] Look for performance issues (N+1 queries, unnecessary allocations)
+- [ ] Check for proper logging and observability
+
+## Output Format
+Structure your review as:
+1. **Summary**: One-paragraph overview
+2. **Issues**: Concrete problems found (severity: high/medium/low)
+3. **Suggestions**: Improvements that aren't blocking
+4. **Questions**: Clarifications needed from the author
+```
+
+### Example Skill: python-style
+
+`demo-skills/python-style/SKILL.md`:
+
+```markdown
+# Python Style Skill
+
+Apply Python best practices when reviewing or writing code.
+
+## Style Guidelines
+- Follow PEP 8 for formatting
+- Use type annotations for all public functions (PEP 484)
+- Write docstrings for public APIs (PEP 257)
+- Prefer f-strings over .format() or % formatting
+
+## Common Issues to Flag
+- Missing type annotations on public functions
+- Mutable default arguments (def foo(items=[]))
+- Bare except clauses (except: instead of except Exception:)
+- Using assert for validation (stripped in optimized mode)
+
+## References
+- PEP 8: https://peps.python.org/pep-0008/
+- PEP 484: https://peps.python.org/pep-0484/
+- PEP 257: https://peps.python.org/pep-0257/
+```
+
+### Verification
+
+Run the code reviewer with skills mounted:
+
+```bash
+python code_reviewer_example.py --claude-agent
+```
+
+Expected behavior:
+- Skills are copied to `{ephemeral_home}/.claude/skills/`
+- Claude Code discovers both skills natively
+- Review responses incorporate guidance from mounted skills
+- No prompt modifications required in WINK
+
 ## Data Model
 
 ### SkillMount
