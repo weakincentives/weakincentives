@@ -229,7 +229,7 @@ Adapters implement reactive throttling to protect upstream services.
 ### Throttle Policy
 
 ```python
-from weakincentives.adapters.shared import ThrottlePolicy, new_throttle_policy
+from weakincentives.adapters import ThrottlePolicy, new_throttle_policy
 from datetime import timedelta
 
 policy = new_throttle_policy(
