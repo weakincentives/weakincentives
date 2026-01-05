@@ -19,8 +19,8 @@ a goal at any time.
   wiring for model-facing prompts.
 - **Adapters** (`src/weakincentives/adapters/`): Model and tool adapters, plus
   structured-output integration.
-- **Tools** (`src/weakincentives/tools/`): Built-in planning, VFS, and asteval
-  handlers.
+- **Tools** (`src/weakincentives/contrib/tools/`): Built-in planning, VFS,
+  Podman sandbox, asteval, and workspace digest handlers.
 - **Contracts** (`src/weakincentives/dbc/`): Design-by-contract decorators and
   enforcement utilities that gate public APIs.
 - **Serde** (`src/weakincentives/serde/`): Serialization helpers used by tools
