@@ -254,8 +254,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             filesystem = HostFilesystem(_root=workspace_root)
             prompt = prompt.bind(resources={Filesystem: filesystem})
 
-        # Enter prompt context for resource lifecycle
-        with prompt:
+        # Enter resource context for lifecycle management
+        with prompt.resources:
             return await self._run_with_prompt_context(
                 sdk=sdk,
                 prompt=prompt,

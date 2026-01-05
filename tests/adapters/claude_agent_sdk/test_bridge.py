@@ -47,7 +47,7 @@ def _make_prompt_with_resources(
     """Create a prompt with resources bound in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
     prompt = prompt.bind(resources=resources)
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 
@@ -117,7 +117,7 @@ def session() -> Session:
 def prompt() -> Prompt[object]:
     """Create a prompt in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 
@@ -1133,7 +1133,7 @@ class TestBridgedToolTransactionalExecution:
 
         # Create prompt without filesystem in resources
         prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="no-fs-test"))
-        prompt.__enter__()
+        prompt.resources.__enter__()
 
         bridged = BridgedTool(
             name="capture_tool",

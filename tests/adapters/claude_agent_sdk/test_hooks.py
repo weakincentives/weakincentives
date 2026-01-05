@@ -52,7 +52,7 @@ from weakincentives.runtime.session import Session, append_all
 def _make_prompt() -> Prompt[object]:
     """Create a prompt in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 
@@ -60,7 +60,7 @@ def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
     prompt = prompt.bind(resources={Filesystem: fs})
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 

@@ -57,8 +57,8 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
-    from ..resources.context import ScopedResourceContext
     from ..runtime.session.protocols import SessionProtocol
+    from ._prompt_resources import PromptResources
     from .protocols import (
         PromptProtocol,
         ProviderAdapterProtocol,
@@ -120,7 +120,7 @@ class ToolContext:
     deadline: Deadline | None = None
 
     @property
-    def resources(self) -> ScopedResourceContext:
+    def resources(self) -> PromptResources:
         """Access resources from the prompt's resource context.
 
         Returns the active resource context from the prompt. The prompt

@@ -328,8 +328,8 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             budget=budget, budget_tracker=budget_tracker, prompt=prompt
         )
 
-        # Enter prompt context for resource lifecycle
-        with prompt:
+        # Enter resource context for lifecycle management
+        with prompt.resources:
             config = InnerLoopConfig(
                 session=session,
                 tool_choice=self._tool_choice,

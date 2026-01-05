@@ -70,8 +70,8 @@ def build_tool_context(
     if filesystem is not None:
         prompt = prompt.bind(resources={Filesystem: filesystem})
 
-    # Enter prompt context for resource access
-    prompt.__enter__()
+    # Enter resource context for resource access
+    prompt.resources.__enter__()
 
     return ToolContext(
         prompt=cast(PromptProtocol[Any], prompt),

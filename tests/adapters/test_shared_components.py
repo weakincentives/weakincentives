@@ -321,7 +321,7 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
         }
     )
 
-    snapshot = create_snapshot(session, prompt.resources, tag="test")
+    snapshot = create_snapshot(session, prompt.resources.context, tag="test")
     outcome = ToolExecutionOutcome(
         tool=typed_tool,
         params=cast(SupportsDataclass, params),
@@ -557,7 +557,7 @@ class _MockPromptWithFilesystem:
             PromptTemplate(ns="tests", key="mock-filesystem-prompt")
         ).bind(resources={Filesystem: fs})
         # Enter prompt context for resource access
-        self._prompt.__enter__()
+        self._prompt.resources.__enter__()
 
     def filesystem(self) -> InMemoryFilesystem:
         return self._fs
@@ -578,7 +578,7 @@ def _make_prompt(
     if resources is not None:
         prompt = prompt.bind(resources=resources)
     # Enter prompt context for resource access
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 
@@ -880,7 +880,7 @@ class TestPublishInvocationFilesystemRestore:
         # Create prompt and take snapshot BEFORE tool modifications
         prompt = _make_prompt_with_fs(fs)
         composite_snapshot = create_snapshot(
-            session, prompt.resources, tag="before_tool"
+            session, prompt.resources.context, tag="before_tool"
         )
 
         # Modify file to simulate what tool did
@@ -958,7 +958,9 @@ class TestPublishInvocationFilesystemRestore:
 
         # Create prompt and take snapshot
         prompt = _make_prompt({Filesystem: fs})
-        composite_snapshot = create_snapshot(session, prompt.resources, tag="original")
+        composite_snapshot = create_snapshot(
+            session, prompt.resources.context, tag="original"
+        )
 
         # File is already restored (simulating what tool_execution did)
         # by keeping original content

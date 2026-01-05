@@ -332,7 +332,7 @@ def _restore_snapshot_if_needed(
     reason: str,
 ) -> None:
     """Restore from snapshot."""
-    restore_snapshot(context.session, context.prompt.resources, snapshot)
+    restore_snapshot(context.session, context.prompt.resources.context, snapshot)
     log.debug(
         f"State restored after {reason}.",
         event=f"tool.{reason}_restore",
@@ -501,7 +501,7 @@ def tool_execution(
 
     # Use transactional execution
     with tool_transaction(
-        context.session, context.prompt.resources, tag=f"tool:{tool_name}"
+        context.session, context.prompt.resources.context, tag=f"tool:{tool_name}"
     ) as snapshot:
         yield from _execute_tool_with_snapshot(
             context=context,

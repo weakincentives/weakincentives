@@ -617,8 +617,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         if effective_tracker is not None:
             prompt = prompt.bind(resources={BudgetTracker: effective_tracker})
 
-        # Enter prompt context for resource lifecycle
-        with prompt:
+        # Enter resource context for lifecycle management
+        with prompt.resources:
             config = InnerLoopConfig(
                 session=session,
                 tool_choice=self._tool_choice,
