@@ -224,31 +224,51 @@ Agents use `ls` and `read_file` inside the sandbox.
 ### 4. Run and get typed results
 
 Use `MainLoop` for production agents—it manages sessions, handles tool
-invocations, and supports deadlines:
+invocations, and supports deadlines. `MainLoop` is mailbox-driven: requests
+arrive via a `Mailbox` and results are sent via `Message.reply()`.
 
 ```python
-from weakincentives.runtime import MainLoop, Session
-from weakincentives.runtime.events import InProcessDispatcher
+from weakincentives.runtime import (
+    InMemoryMailbox,
+    MainLoop,
+    MainLoopRequest,
+    MainLoopResult,
+    Session,
+)
 from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.prompt import Prompt
 
 class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
-    def __init__(self, adapter, bus):
-        super().__init__(adapter=adapter, bus=bus)
-        self._session = Session(bus=bus)
-        self._template = build_task_prompt(session=self._session)
+    def __init__(
+        self,
+        *,
+        adapter: OpenAIAdapter,
+        requests: InMemoryMailbox[
+            MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+        ],
+    ) -> None:
+        super().__init__(adapter=adapter, requests=requests)
+        self._template = build_task_prompt()
 
-    def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]:
-        return Prompt(self._template).bind(request)
+    def prepare(
+        self, request: ReviewTurnParams
+    ) -> tuple[Prompt[ReviewResponse], Session]:
+        prompt = Prompt(self._template).bind(request)
+        session = Session(tags={"loop": "code-review"})
+        return prompt, session
 
-    def create_session(self) -> Session:
-        return self._session
-
-bus = InProcessDispatcher()
+# Synchronous execution
 adapter = OpenAIAdapter(model="gpt-5.1")
-loop = ReviewLoop(adapter, bus)
+requests = InMemoryMailbox[
+    MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+]()
+loop = ReviewLoop(adapter=adapter, requests=requests)
 
 response, session = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
 review: ReviewResponse = response.output  # typed, validated
+
+# Or run as a worker consuming from the mailbox:
+# loop.run(max_iterations=100, visibility_timeout=300)
 ```
 
 ### 5. Inspect agent state
