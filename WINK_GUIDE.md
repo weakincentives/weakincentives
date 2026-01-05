@@ -1944,7 +1944,8 @@ You are a thorough code reviewer. When reviewing code:
 3. **Suggestions**: Non-blocking improvements
 ```
 
-See `demo-skills/` in the repository for example skills.
+See `demo-skills/` in the repository for example skills. For more information
+about Claude Code skills, see [What are Skills?](https://agentskills.io/what-are-skills).
 
 #### 6.4.6 Tool bridging via MCP
 
