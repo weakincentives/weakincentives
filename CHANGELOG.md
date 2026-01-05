@@ -29,9 +29,9 @@ a separate `ExecutionState`. Use `with prompt.resources:` to manage lifecycle an
 
 ### Lifecycle Management
 
-New `LoopGroup` runs multiple `MainLoop` or `EvalLoop` instances with coordinated
+`LoopGroup` runs multiple `MainLoop` or `EvalLoop` instances with coordinated
 shutdown, optional health endpoints (`/health/live`, `/health/ready`), and watchdog
-monitoring for production deployments.
+monitoring for Kubernetes deployments.
 
 ```python
 from weakincentives.runtime import LoopGroup
@@ -46,8 +46,8 @@ group.run()  # Blocks until SIGTERM/SIGINT
 
 ### Resource Registry with Dependency Injection
 
-`ResourceRegistry` now supports provider-based lazy construction with scoped
-lifecycles (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
+`ResourceRegistry` supports provider-based lazy construction with scoped lifecycles
+(`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`) and cycle detection.
 
 ```python
 from weakincentives.resources import Binding, ResourceRegistry, Scope
@@ -74,6 +74,9 @@ evaluator = all_of(
 )
 ```
 
+Built-in evaluators: `tool_called`, `tool_not_called`, `tool_call_count`,
+`all_tools_succeeded`, `token_usage_under`, `slice_contains`.
+
 ### TLA+ Specification Embedding
 
 Co-locate formal TLA+ specifications with Python code using the `@formal_spec`
@@ -81,16 +84,22 @@ decorator. Extract and verify with TLC model checker via `weakincentives.formal`
 
 ### Mailbox Reply-to Routing
 
-Messages now support `reply_to` routing, allowing workers to derive response
-destinations dynamically instead of requiring fixed response mailboxes.
+Messages support `reply_to` routing, allowing workers to derive response
+destinations from incoming messages instead of requiring fixed response mailboxes.
+
+### Claude Agent SDK
+
+- **Hermetic by default:** The adapter now uses isolated `~/.claude` configuration
+  to prevent interference from host settings.
+- **Skill mounting:** Mount custom skills into the hermetic environment via
+  `SkillConfig` and `SkillMount` in `IsolationConfig`.
 
 ### Other Improvements
 
 - **`ToolResult.ok()` / `ToolResult.error()`:** Convenience constructors reduce
   boilerplate in tool handlers.
 - **`wink docs --changelog`:** Access release history without repository access.
-- **Mailbox timeout validation:** Rejects invalid `visibility_timeout` values at
-  the Python boundary.
+- **Mailbox timeout validation:** Rejects invalid `visibility_timeout` values.
 - **Fixed:** Parameterless tool execution crash, Redis mailbox thread leak, and
   `decode_responses=True` compatibility.
 
