@@ -129,15 +129,6 @@ class PromptProtocol[PromptOutputT](Protocol):
 
     def render(self) -> RenderedPromptProtocol[PromptOutputT]: ...
 
-    def __enter__(self) -> PromptProtocol[PromptOutputT]: ...
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: object | None,
-    ) -> None: ...
-
 
 class ProviderAdapterProtocol[AdapterOutputT](Protocol):
     """Interface describing the subset of adapter behaviour required by tools.
