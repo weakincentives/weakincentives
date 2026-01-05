@@ -26,7 +26,6 @@ from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
-from ..resources import ResourceRegistry
 from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import SupportsDataclass
 from ._names import OPENAI_ADAPTER_NAME
@@ -616,13 +615,10 @@ class OpenAIAdapter(ProviderAdapter[Any]):
 
         # Bind budget tracker to prompt resources if provided
         if effective_tracker is not None:
-            budget_resources = ResourceRegistry.build(
-                {BudgetTracker: effective_tracker}
-            )
-            prompt = prompt.bind(resources=budget_resources)
+            prompt = prompt.bind(resources={BudgetTracker: effective_tracker})
 
-        # Enter prompt context for resource lifecycle
-        with prompt:
+        # Enter resource context for lifecycle management
+        with prompt.resources:
             config = InnerLoopConfig(
                 session=session,
                 tool_choice=self._tool_choice,

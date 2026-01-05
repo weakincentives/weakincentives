@@ -37,16 +37,17 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.prompt.protocols import PromptProtocol
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 
-def _make_prompt_with_resources(resources: ResourceRegistry) -> Prompt[object]:
+def _make_prompt_with_resources(
+    resources: dict[type[object], object],
+) -> Prompt[object]:
     """Create a prompt with resources bound in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
     prompt = prompt.bind(resources=resources)
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 
@@ -116,7 +117,7 @@ def session() -> Session:
 def prompt() -> Prompt[object]:
     """Create a prompt in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="bridge-test"))
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 
@@ -732,7 +733,6 @@ class TestVisibilityExpansionRequiredPropagation:
         """Test that filesystem is accessed via prompt resources."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
 
         captured_filesystem: list[object] = []
 
@@ -751,8 +751,7 @@ class TestVisibilityExpansionRequiredPropagation:
         )
 
         test_filesystem = InMemoryFilesystem()
-        resources = ResourceRegistry.build({Filesystem: test_filesystem})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
 
         bridged = BridgedTool(
             name="capture",
@@ -783,7 +782,6 @@ class TestCreateBridgedToolsWithFilesystem:
         """Test that create_bridged_tools passes filesystem via prompt resources."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
 
         captured_filesystem: list[object] = []
 
@@ -802,8 +800,7 @@ class TestCreateBridgedToolsWithFilesystem:
         )
 
         test_filesystem = InMemoryFilesystem()
-        resources = ResourceRegistry.build({Filesystem: test_filesystem})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
 
         bridged_tools = create_bridged_tools(
             (capture_tool,),
@@ -851,8 +848,7 @@ class TestBudgetTrackerInResourceRegistry:
         test_tracker = BudgetTracker(budget=test_budget)
 
         # Budget tracker must be in prompt resources to be accessible via context
-        resources = ResourceRegistry.build({BudgetTracker: test_tracker})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({BudgetTracker: test_tracker})
 
         bridged = BridgedTool(
             name="capture",
@@ -903,8 +899,7 @@ class TestBudgetTrackerInResourceRegistry:
         test_tracker = BudgetTracker(budget=test_budget)
 
         # Budget tracker must be in prompt resources to be accessible via context
-        resources = ResourceRegistry.build({BudgetTracker: test_tracker})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({BudgetTracker: test_tracker})
 
         bridged_tools = create_bridged_tools(
             (capture_tool,),
@@ -932,13 +927,11 @@ class TestBridgedToolTransactionalExecution:
         """Test that state is restored when tool returns success=False."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
 
         test_fs = InMemoryFilesystem()
         test_fs.write("/test.txt", "initial content")
 
-        resources = ResourceRegistry.build({Filesystem: test_fs})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({Filesystem: test_fs})
 
         def failing_result_handler(
             params: SearchParams, *, context: ToolContext
@@ -986,13 +979,11 @@ class TestBridgedToolTransactionalExecution:
         """Test that state is restored when tool raises exception."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
 
         test_fs = InMemoryFilesystem()
         test_fs.write("/test.txt", "initial content")
 
-        resources = ResourceRegistry.build({Filesystem: test_fs})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({Filesystem: test_fs})
 
         def exception_handler(
             params: SearchParams, *, context: ToolContext
@@ -1036,13 +1027,11 @@ class TestBridgedToolTransactionalExecution:
         """Test that state is restored when validation fails."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
 
         test_fs = InMemoryFilesystem()
         test_fs.write("/test.txt", "initial content")
 
-        resources = ResourceRegistry.build({Filesystem: test_fs})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({Filesystem: test_fs})
 
         bridged = BridgedTool(
             name="search",
@@ -1075,13 +1064,11 @@ class TestBridgedToolTransactionalExecution:
         """Test that state is restored when VisibilityExpansionRequired is raised."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
 
         test_fs = InMemoryFilesystem()
         test_fs.write("/test.txt", "initial content")
 
-        resources = ResourceRegistry.build({Filesystem: test_fs})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({Filesystem: test_fs})
 
         def visibility_handler(
             params: SearchParams, *, context: ToolContext
@@ -1146,7 +1133,7 @@ class TestBridgedToolTransactionalExecution:
 
         # Create prompt without filesystem in resources
         prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="no-fs-test"))
-        prompt.__enter__()
+        prompt.resources.__enter__()
 
         bridged = BridgedTool(
             name="capture_tool",
@@ -1180,13 +1167,11 @@ class TestCreateBridgedToolsWithSession:
         """Test that create_bridged_tools passes session to BridgedTool."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
-        from weakincentives.resources import ResourceRegistry
 
         test_fs = InMemoryFilesystem()
         test_fs.write("/test.txt", "initial content")
 
-        resources = ResourceRegistry.build({Filesystem: test_fs})
-        prompt = _make_prompt_with_resources(resources)
+        prompt = _make_prompt_with_resources({Filesystem: test_fs})
 
         def failing_result_handler(
             params: SearchParams, *, context: ToolContext

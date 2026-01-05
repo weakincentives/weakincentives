@@ -59,7 +59,6 @@ from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
-from weakincentives.resources import ResourceRegistry
 from weakincentives.resources.context import ScopedResourceContext
 from weakincentives.runtime.events import (
     Dispatcher,
@@ -322,7 +321,7 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
         }
     )
 
-    snapshot = create_snapshot(session, prompt.resources, tag="test")
+    snapshot = create_snapshot(session, prompt.resources.context, tag="test")
     outcome = ToolExecutionOutcome(
         tool=typed_tool,
         params=cast(SupportsDataclass, params),
@@ -554,12 +553,11 @@ class _MockPromptWithFilesystem:
     def __init__(self, fs: InMemoryFilesystem) -> None:
         self._fs = fs
         # Create a real prompt with resources for the `resources` property
-        resources = ResourceRegistry.build({Filesystem: fs})
         self._prompt: Prompt[object] = Prompt(
             PromptTemplate(ns="tests", key="mock-filesystem-prompt")
-        ).bind(resources=resources)
+        ).bind(resources={Filesystem: fs})
         # Enter prompt context for resource access
-        self._prompt.__enter__()
+        self._prompt.resources.__enter__()
 
     def filesystem(self) -> InMemoryFilesystem:
         return self._fs
@@ -570,7 +568,9 @@ class _MockPromptWithFilesystem:
         return self._prompt.resources
 
 
-def _make_prompt(resources: ResourceRegistry | None = None) -> Prompt[object]:
+def _make_prompt(
+    resources: dict[type[object], object] | None = None,
+) -> Prompt[object]:
     """Create a prompt with optional resources in active context."""
     prompt: Prompt[object] = Prompt(
         PromptTemplate(ns="tests", key="shared-components-test")
@@ -578,19 +578,13 @@ def _make_prompt(resources: ResourceRegistry | None = None) -> Prompt[object]:
     if resources is not None:
         prompt = prompt.bind(resources=resources)
     # Enter prompt context for resource access
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
-
-
-def _make_prompt_with_resources(resources: ResourceRegistry) -> Prompt[object]:
-    """Create a prompt with resources in active context."""
-    return _make_prompt(resources)
 
 
 def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
     """Create a prompt with filesystem in active context."""
-    resources = ResourceRegistry.build({Filesystem: fs})
-    return _make_prompt_with_resources(resources)
+    return _make_prompt({Filesystem: fs})
 
 
 # Parameter classes for filesystem integration tests
@@ -886,7 +880,7 @@ class TestPublishInvocationFilesystemRestore:
         # Create prompt and take snapshot BEFORE tool modifications
         prompt = _make_prompt_with_fs(fs)
         composite_snapshot = create_snapshot(
-            session, prompt.resources, tag="before_tool"
+            session, prompt.resources.context, tag="before_tool"
         )
 
         # Modify file to simulate what tool did
@@ -963,9 +957,10 @@ class TestPublishInvocationFilesystemRestore:
         session = Session(bus=bus)
 
         # Create prompt and take snapshot
-        resources = ResourceRegistry.build({Filesystem: fs})
-        prompt = _make_prompt_with_resources(resources)
-        composite_snapshot = create_snapshot(session, prompt.resources, tag="original")
+        prompt = _make_prompt({Filesystem: fs})
+        composite_snapshot = create_snapshot(
+            session, prompt.resources.context, tag="original"
+        )
 
         # File is already restored (simulating what tool_execution did)
         # by keeping original content
@@ -1499,8 +1494,7 @@ class TestHostFilesystemToolIntegration:
             {tool.name: tool},
         )
 
-        resources = ResourceRegistry.build({Filesystem: fs})
-        prompt = _make_prompt_with_resources(resources)  # noqa: F841 - context manager side effect
+        prompt = _make_prompt({Filesystem: fs})  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),
@@ -1628,8 +1622,7 @@ class TestHostFilesystemToolIntegration:
             {tool.name: tool},
         )
 
-        resources = ResourceRegistry.build({Filesystem: fs})
-        prompt = _make_prompt_with_resources(resources)  # noqa: F841 - context manager side effect
+        prompt = _make_prompt({Filesystem: fs})  # noqa: F841 - context manager side effect
         executor = ToolExecutor(
             adapter_name=TEST_ADAPTER_NAME,
             adapter=cast(ProviderAdapter[Any], object()),

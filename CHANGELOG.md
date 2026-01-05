@@ -4,6 +4,39 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Breaking: Prompt Resource Lifecycle via `prompt.resources`
+
+The prompt context manager pattern has changed from `with prompt:` to
+`with prompt.resources:` for clearer API semantics.
+
+**Before:**
+
+```python
+with prompt:
+    fs = prompt.resources.get(Filesystem)
+```
+
+**After:**
+
+```python
+with prompt.resources:
+    fs = prompt.resources.get(Filesystem)
+```
+
+Key changes:
+
+- `Prompt` no longer implements `__enter__`/`__exit__` directly
+- `prompt.resources` returns `PromptResources`, a dual-purpose object that:
+  - Acts as context manager for lifecycle (`with prompt.resources:`)
+  - Acts as proxy to resources (`prompt.resources.get(Protocol)`)
+- For framework code needing `ScopedResourceContext`, use `prompt.resources.context`
+
+**Migration:**
+
+1. Replace `with prompt:` → `with prompt.resources:`
+1. For transaction functions, use `.context`:
+   `create_snapshot(session, prompt.resources.context, tag="test")`
+
 ## v0.18.0 - 2026-01-05
 
 ### ToolResult Convenience Constructors

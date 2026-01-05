@@ -31,7 +31,7 @@ from ...runtime.transactions import PendingToolTracker
 from ._notifications import Notification
 
 if TYPE_CHECKING:
-    from ...resources.context import ScopedResourceContext
+    from ...prompt.prompt import PromptResources
 
 __all__ = [
     "AsyncHookCallback",
@@ -145,7 +145,7 @@ class HookContext:
     @property
     def resources(
         self,
-    ) -> ScopedResourceContext:  # pragma: no cover - tested via integration
+    ) -> PromptResources:  # pragma: no cover - tested via integration
         """Get resources from prompt."""
         return self._prompt.resources
 
@@ -155,7 +155,7 @@ class HookContext:
         if self._tool_tracker is None:
             self._tool_tracker = PendingToolTracker(
                 session=self._session,
-                resources=self._prompt.resources,
+                resources=self._prompt.resources.context,
             )
         return self._tool_tracker
 

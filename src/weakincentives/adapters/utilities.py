@@ -19,7 +19,6 @@ This module re-exports utilities from focused submodules for convenient access:
 - ``tool_spec``: Tool specification building and serialization
 - ``deadline_utils``: Deadline handling utilities
 - ``provider_response``: Provider response processing
-- ``resources``: Resource registry building
 """
 
 from __future__ import annotations
@@ -39,7 +38,6 @@ from .rendering import (
     AdapterRenderOptions,
     prepare_adapter_conversation,
 )
-from .resources import build_resources
 from .token_usage import token_usage_from_payload
 from .tool_spec import (
     ToolArgumentsParser,
@@ -71,7 +69,6 @@ __all__ = [
     "AdapterRenderOptions",
     "ToolArgumentsParser",
     "ToolChoice",
-    "build_resources",
     "call_provider_with_normalization",
     "deadline_provider_payload",
     "extract_payload",

@@ -46,6 +46,7 @@ import contextlib
 import logging
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Self
@@ -55,7 +56,6 @@ from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
-from ..resources import ResourceRegistry
 from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError, ReplyNotAvailableError
 from .session import Session
@@ -107,7 +107,7 @@ class MainLoopConfig:
 
     deadline: Deadline | None = None
     budget: Budget | None = None
-    resources: ResourceRegistry | None = None
+    resources: Mapping[type[object], object] | None = None
 
 
 @FrozenDataclass()
@@ -120,7 +120,7 @@ class MainLoopRequest[UserRequestT]:
     request: UserRequestT
     budget: Budget | None = None
     deadline: Deadline | None = None
-    resources: ResourceRegistry | None = None
+    resources: Mapping[type[object], object] | None = None
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -235,7 +235,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         *,
         budget: Budget | None = None,
         deadline: Deadline | None = None,
-        resources: ResourceRegistry | None = None,
+        resources: Mapping[type[object], object] | None = None,
     ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute directly without mailbox routing.
 
@@ -246,7 +246,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             request: The user request to process.
             budget: Optional budget override (takes precedence over config).
             deadline: Optional deadline override (takes precedence over config).
-            resources: Optional resource registry override.
+            resources: Optional resources override (dict mapping types to instances).
 
         Returns:
             Tuple of (PromptResponse, Session) from the evaluation.

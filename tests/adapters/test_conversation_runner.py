@@ -175,7 +175,7 @@ def build_inner_loop(
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template).bind(*(render_inputs or ()))
     # Enter prompt context for resource lifecycle
-    prompt.__enter__()
+    prompt.resources.__enter__()
 
     inputs = InnerLoopInputs[object](
         adapter_name=DUMMY_ADAPTER_NAME,
@@ -435,7 +435,7 @@ def test_run_inner_loop_function() -> None:
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template)
     # Enter prompt context for resource lifecycle
-    prompt.__enter__()
+    prompt.resources.__enter__()
     session: SessionProtocol = Session(bus=bus)
 
     inputs = InnerLoopInputs[object](

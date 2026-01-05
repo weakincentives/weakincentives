@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from ._prompt_resources import PromptResources
 from ._types import ToolRenderableResult
 from .errors import (
     PromptError,
@@ -74,6 +75,7 @@ __all__ = [
     "PromptOverridesStore",
     "PromptProtocol",
     "PromptRenderError",
+    "PromptResources",
     "PromptTemplate",
     "PromptTemplateProtocol",
     "PromptValidationError",

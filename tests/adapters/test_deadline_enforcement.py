@@ -94,7 +94,7 @@ def _make_prompt(prompt: Prompt[BodyResult] | None = None) -> Prompt[BodyResult]
     if prompt is None:
         prompt = Prompt(_build_prompt())
     # Enter prompt context for resource access
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 

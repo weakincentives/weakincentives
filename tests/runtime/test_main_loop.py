@@ -32,7 +32,6 @@ from weakincentives.prompt import (
     SectionVisibility,
     VisibilityExpansionRequired,
 )
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.mailbox import (
     FakeMailbox,
     InMemoryMailbox,
@@ -119,8 +118,8 @@ class _MockAdapter(ProviderAdapter[_Output]):
         self._last_prompt = prompt
         self._prompts.append(prompt)
 
-        # Enter prompt context (like real adapters do)
-        with prompt:
+        # Enter resource context (like real adapters do)
+        with prompt.resources:
             # Capture resource during evaluate while context is active
             try:
                 self._last_custom_resource = prompt.resources.get(_CustomResource)
@@ -672,7 +671,7 @@ class _CustomResource:
 def test_config_accepts_resources() -> None:
     """MainLoopConfig accepts resources parameter."""
     resource = _CustomResource(name="config-resource")
-    resources = ResourceRegistry.build({_CustomResource: resource})
+    resources: dict[type[object], object] = {_CustomResource: resource}
     config = MainLoopConfig(resources=resources)
     assert config.resources is resources
 
@@ -680,7 +679,7 @@ def test_config_accepts_resources() -> None:
 def test_request_accepts_resources() -> None:
     """MainLoopRequest accepts resources parameter."""
     resource = _CustomResource(name="request-resource")
-    resources = ResourceRegistry.build({_CustomResource: resource})
+    resources: dict[type[object], object] = {_CustomResource: resource}
     request = MainLoopRequest(
         request=_Request(message="hello"),
         resources=resources,
@@ -701,8 +700,7 @@ def test_loop_passes_resources_from_config() -> None:
     )
     try:
         resource = _CustomResource(name="config-resource")
-        resources = ResourceRegistry.build({_CustomResource: resource})
-        config = MainLoopConfig(resources=resources)
+        config = MainLoopConfig(resources={_CustomResource: resource})
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
@@ -732,18 +730,14 @@ def test_loop_request_resources_overrides_config() -> None:
     )
     try:
         config_resource = _CustomResource(name="config-resource")
-        config_resources = ResourceRegistry.build({_CustomResource: config_resource})
-        config = MainLoopConfig(resources=config_resources)
+        config = MainLoopConfig(resources={_CustomResource: config_resource})
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         override_resource = _CustomResource(name="override-resource")
-        override_resources = ResourceRegistry.build(
-            {_CustomResource: override_resource}
-        )
         request = MainLoopRequest(
             request=_Request(message="hello"),
-            resources=override_resources,
+            resources={_CustomResource: override_resource},
         )
         requests.send(request, reply_to="results")
 
@@ -770,7 +764,6 @@ def test_same_resources_used_across_visibility_retries() -> None:
     )
     try:
         resource = _CustomResource(name="persistent-resource")
-        resources = ResourceRegistry.build({_CustomResource: resource})
         visibility_requests: list[Mapping[SectionPath, SectionVisibility]] = [
             {("section1",): SectionVisibility.FULL},
             {("section2",): SectionVisibility.FULL},
@@ -780,7 +773,7 @@ def test_same_resources_used_across_visibility_retries() -> None:
 
         request = MainLoopRequest(
             request=_Request(message="hello"),
-            resources=resources,
+            resources={_CustomResource: resource},
         )
         requests.send(request, reply_to="results")
 

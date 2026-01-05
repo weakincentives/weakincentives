@@ -20,17 +20,14 @@ Quick Start::
     from weakincentives.resources import Binding, ResourceRegistry, Scope
 
     # Define how to construct resources
-    registry = ResourceRegistry.of(
-        Binding(Config, lambda r: Config.from_env()),
-        Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-        Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
-    )
+    registry = ResourceRegistry.build({
+        Config: lambda r: Config.from_env(),
+        HTTPClient: lambda r: HTTPClient(r.get(Config).url),
+        Tracer: Binding(lambda r: Tracer(), scope=Scope.TOOL_CALL),
+    })
 
-    # Create resolution context
-    ctx = registry.create_context()
-    ctx.start()
-
-    try:
+    # Use context manager for automatic lifecycle management
+    with registry.open() as ctx:
         # Resolve resources (lazily constructed)
         http = ctx.get(HTTPClient)
 
@@ -39,8 +36,7 @@ Quick Start::
             tracer = resolver.get(Tracer)
             # ... execute tool ...
         # Tracer disposed here
-    finally:
-        ctx.close()
+    # All resources cleaned up automatically
 
 Scopes
 ------

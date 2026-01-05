@@ -23,7 +23,6 @@ from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.errors import RestoreFailedError
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot, SnapshotRestoreError
@@ -39,17 +38,16 @@ from weakincentives.runtime.transactions import (
 
 def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
-    resources = ResourceRegistry.build({Filesystem: fs})
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="transactions-test"))
-    prompt = prompt.bind(resources=resources)
-    prompt.__enter__()
+    prompt = prompt.bind(resources={Filesystem: fs})
+    prompt.resources.__enter__()
     return prompt
 
 
 def _make_prompt() -> Prompt[object]:
     """Create a prompt in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="transactions-test"))
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 
@@ -64,7 +62,7 @@ class TestCompositeSnapshotSerialization:
         fs.write("/test.txt", "content")
         prompt = _make_prompt_with_fs(fs)
 
-        snapshot = create_snapshot(session, prompt.resources, tag="test")
+        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
         json_str = snapshot.to_json()
 
         # Verify it's valid JSON
@@ -82,7 +80,9 @@ class TestCompositeSnapshotSerialization:
         session = Session(bus=bus)
         prompt = _make_prompt()
 
-        snapshot = create_snapshot(session, prompt.resources, tag="no-resources")
+        snapshot = create_snapshot(
+            session, prompt.resources.context, tag="no-resources"
+        )
         json_str = snapshot.to_json()
 
         payload = json.loads(json_str)
@@ -96,7 +96,7 @@ class TestCompositeSnapshotSerialization:
         prompt = _make_prompt()
 
         # Create snapshot without tag to have minimal metadata
-        snapshot = create_snapshot(session, prompt.resources)
+        snapshot = create_snapshot(session, prompt.resources.context)
         json_str = snapshot.to_json()
 
         payload = json.loads(json_str)
@@ -111,7 +111,7 @@ class TestCompositeSnapshotSerialization:
         prompt = _make_prompt_with_fs(fs)
 
         # Create and serialize
-        original = create_snapshot(session, prompt.resources, tag="roundtrip")
+        original = create_snapshot(session, prompt.resources.context, tag="roundtrip")
         json_str = original.to_json()
 
         # Deserialize
@@ -250,7 +250,7 @@ class TestCompositeSnapshotSerialization:
         prompt = _make_prompt_with_fs(fs)
 
         # Create and serialize
-        original = create_snapshot(session, prompt.resources, tag="roundtrip")
+        original = create_snapshot(session, prompt.resources.context, tag="roundtrip")
         json_str = original.to_json()
 
         # Deserialize
@@ -271,7 +271,7 @@ class TestRestoreSnapshotErrors:
         session = Session(bus=bus)
         prompt = _make_prompt()
 
-        snapshot = create_snapshot(session, prompt.resources, tag="test")
+        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
 
         # Create a corrupted session snapshot
         class FailingSession:
@@ -281,7 +281,7 @@ class TestRestoreSnapshotErrors:
         with pytest.raises(RestoreFailedError, match="Failed to restore session"):
             restore_snapshot(
                 FailingSession(),  # type: ignore[arg-type]
-                prompt.resources,
+                prompt.resources.context,
                 snapshot,
             )
 
@@ -294,13 +294,15 @@ class TestRestoreSnapshotErrors:
         prompt_with_fs = _make_prompt_with_fs(fs)
 
         # Create snapshot with filesystem resource
-        snapshot = create_snapshot(session, prompt_with_fs.resources, tag="test")
+        snapshot = create_snapshot(
+            session, prompt_with_fs.resources.context, tag="test"
+        )
 
         # Create a new prompt without filesystem
         prompt_without_fs = _make_prompt()
 
         # Should not raise - silently skips missing resources
-        restore_snapshot(session, prompt_without_fs.resources, snapshot)
+        restore_snapshot(session, prompt_without_fs.resources.context, snapshot)
 
     def test_restore_handles_resource_restore_failure(self) -> None:
         """Test that resource restore failure raises RestoreFailedError."""
@@ -318,17 +320,16 @@ class TestRestoreSnapshotErrors:
         session = Session(bus=bus)
 
         # Create prompt with failing filesystem
-        resources = ResourceRegistry.build({Filesystem: FailingFilesystem()})
         prompt: Prompt[object] = Prompt(
             PromptTemplate(ns="tests", key="failing-fs-test")
         )
-        prompt = prompt.bind(resources=resources)
-        prompt.__enter__()
+        prompt = prompt.bind(resources={Filesystem: FailingFilesystem()})
+        prompt.resources.__enter__()
 
-        snapshot = create_snapshot(session, prompt.resources, tag="test")
+        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
 
         with pytest.raises(RestoreFailedError, match="Failed to restore"):
-            restore_snapshot(session, prompt.resources, snapshot)
+            restore_snapshot(session, prompt.resources.context, snapshot)
 
 
 class TestPendingToolTracker:
@@ -342,7 +343,9 @@ class TestPendingToolTracker:
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
-        tracker = PendingToolTracker(session=session, resources=prompt.resources)
+        tracker = PendingToolTracker(
+            session=session, resources=prompt.resources.context
+        )
 
         # Begin tool execution
         tracker.begin_tool_execution("call-1", "my_tool")
@@ -362,7 +365,9 @@ class TestPendingToolTracker:
         session = Session(bus=bus)
         prompt = _make_prompt()
 
-        tracker = PendingToolTracker(session=session, resources=prompt.resources)
+        tracker = PendingToolTracker(
+            session=session, resources=prompt.resources.context
+        )
 
         result = tracker.abort_tool_execution("unknown-id")
         assert result is False
@@ -373,7 +378,9 @@ class TestPendingToolTracker:
         session = Session(bus=bus)
         prompt = _make_prompt()
 
-        tracker = PendingToolTracker(session=session, resources=prompt.resources)
+        tracker = PendingToolTracker(
+            session=session, resources=prompt.resources.context
+        )
 
         # Initially empty
         assert len(tracker.pending_tool_executions) == 0
@@ -399,7 +406,9 @@ class TestPendingToolTracker:
         session = Session(bus=bus)
         prompt = _make_prompt()
 
-        tracker = PendingToolTracker(session=session, resources=prompt.resources)
+        tracker = PendingToolTracker(
+            session=session, resources=prompt.resources.context
+        )
 
         result = tracker.end_tool_execution("unknown-id", success=True)
         assert result is False
@@ -412,7 +421,9 @@ class TestPendingToolTracker:
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
-        tracker = PendingToolTracker(session=session, resources=prompt.resources)
+        tracker = PendingToolTracker(
+            session=session, resources=prompt.resources.context
+        )
 
         # Begin tool execution
         tracker.begin_tool_execution("call-1", "my_tool")
@@ -433,7 +444,9 @@ class TestPendingToolTracker:
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
-        tracker = PendingToolTracker(session=session, resources=prompt.resources)
+        tracker = PendingToolTracker(
+            session=session, resources=prompt.resources.context
+        )
 
         # Begin tool execution
         tracker.begin_tool_execution("call-1", "my_tool")
@@ -459,7 +472,7 @@ class TestToolTransaction:
         prompt = _make_prompt_with_fs(fs)
 
         with pytest.raises(RuntimeError, match="Tool failed"):
-            with tool_transaction(session, prompt.resources, tag="failing"):
+            with tool_transaction(session, prompt.resources.context, tag="failing"):
                 fs.write("/test.txt", "modified")
                 raise RuntimeError("Tool failed")
 
@@ -473,7 +486,7 @@ class TestToolTransaction:
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
-        with tool_transaction(session, prompt.resources, tag="success"):
+        with tool_transaction(session, prompt.resources.context, tag="success"):
             fs.write("/test.txt", "modified")
 
         assert fs.read("/test.txt").content == "modified"
@@ -486,12 +499,14 @@ class TestToolTransaction:
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
-        with tool_transaction(session, prompt.resources, tag="manual") as snapshot:
+        with tool_transaction(
+            session, prompt.resources.context, tag="manual"
+        ) as snapshot:
             fs.write("/test.txt", "modified")
             assert fs.read("/test.txt").content == "modified"
 
             # Manual restore
-            restore_snapshot(session, prompt.resources, snapshot)
+            restore_snapshot(session, prompt.resources.context, snapshot)
             assert fs.read("/test.txt").content == "original"
 
 
@@ -506,7 +521,7 @@ class TestCompositeSnapshotErrors:
 
         snapshot = create_snapshot(
             session,
-            prompt.resources,
+            prompt.resources.context,
             tag="test-tag",
         )
 
@@ -536,21 +551,20 @@ class TestRestoreSnapshotEdgeCases:
                 self.value = "original"
 
         resource = SimpleResource()
-        resources = ResourceRegistry.build({SimpleResource: resource})
         prompt: Prompt[object] = Prompt(
             PromptTemplate(ns="tests", key="non-snapshotable-test")
         )
-        prompt = prompt.bind(resources=resources)
-        prompt.__enter__()
+        prompt = prompt.bind(resources={SimpleResource: resource})
+        prompt.resources.__enter__()
 
         # Create snapshot (won't include non-snapshotable resource)
-        snapshot = create_snapshot(session, prompt.resources, tag="test")
+        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
 
         # Modify the resource
         resource.value = "modified"
 
         # Restore should not fail (just skip the non-snapshotable resource)
-        restore_snapshot(session, prompt.resources, snapshot)
+        restore_snapshot(session, prompt.resources.context, snapshot)
 
         # Resource should still be modified since it wasn't snapshotable
         assert resource.value == "modified"

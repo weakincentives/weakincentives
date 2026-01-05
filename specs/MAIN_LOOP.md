@@ -90,7 +90,7 @@ flowchart LR
 
 1. Receive `MainLoopRequest` via bus or direct `execute()` call
 1. Initialize prompt and session via `prepare(request)`
-1. Enter prompt context (`with prompt:`) to initialize resources
+1. Enter prompt context (`with prompt.resources:`) to initialize resources
 1. Evaluate with adapter
 1. On `VisibilityExpansionRequired`: write overrides into session state, retry
    step 4
@@ -108,7 +108,7 @@ def execute(self, request: UserRequestT) -> tuple[PromptResponse[OutputT], Sessi
     prompt, session = self.prepare(request)
     budget_tracker = BudgetTracker(budget=self._effective_budget) if self._effective_budget else None
 
-    with prompt:  # Resources initialized here
+    with prompt.resources:  # Resources initialized here
         while True:
             try:
                 response = self._adapter.evaluate(

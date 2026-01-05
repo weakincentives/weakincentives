@@ -125,7 +125,7 @@ class BridgedTool:
 
         with tool_transaction(
             self._session,
-            self._prompt.resources,
+            self._prompt.resources.context,
             tag=f"tool:{self.name}",
         ) as snapshot:
             return self._execute_handler(handler, args, snapshot=snapshot)
@@ -208,7 +208,7 @@ class BridgedTool:
             snapshot: CompositeSnapshot to restore.
             reason: Reason for restore (for logging).
         """
-        restore_snapshot(self._session, self._prompt.resources, snapshot)
+        restore_snapshot(self._session, self._prompt.resources.context, snapshot)
         logger.debug(
             f"State restored after {reason}.",
             event=f"bridge.{reason}_restore",

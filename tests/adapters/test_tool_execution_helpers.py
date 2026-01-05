@@ -82,7 +82,7 @@ def _base_context(
     prompt: Prompt[ToolPayload] = Prompt(prompt_template)
     effective_session = session or Session(bus=bus)
     # Enter prompt context for resource access
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return ToolExecutionContext(
         adapter_name="adapter",
         adapter=cast(Any, object()),

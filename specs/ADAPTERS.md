@@ -347,7 +347,7 @@ def _execute_tool(
 ) -> ToolResult:
     # Snapshot both session and resources before execution
     session_snapshot = session.snapshot()
-    resource_snapshot = prompt.resources.snapshot()
+    resource_snapshot = prompt.resources.context.snapshot()
 
     try:
         context = ToolContext(
@@ -363,20 +363,20 @@ def _execute_tool(
         if not result.success:
             # Restore on failure
             session.restore(session_snapshot)
-            prompt.resources.restore(resource_snapshot)
+            prompt.resources.context.restore(resource_snapshot)
 
         return result
 
     except VisibilityExpansionRequired:
         # Restore and re-raise for retry
         session.restore(session_snapshot)
-        prompt.resources.restore(resource_snapshot)
+        prompt.resources.context.restore(resource_snapshot)
         raise
 
     except Exception as e:
         # Restore on exception
         session.restore(session_snapshot)
-        prompt.resources.restore(resource_snapshot)
+        prompt.resources.context.restore(resource_snapshot)
         return ToolResult(message=str(e), value=None, success=False)
 ```
 
@@ -416,7 +416,7 @@ budget = Budget(
 
 tracker = BudgetTracker(budget)
 
-with prompt:
+with prompt.resources:
     response = adapter.evaluate(
         prompt,
         session=session,

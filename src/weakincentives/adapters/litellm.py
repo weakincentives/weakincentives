@@ -23,7 +23,6 @@ from typing import Any, Final, Protocol, cast, override
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
-from ..resources import ResourceRegistry
 from ..runtime.logging import StructuredLogger, get_logger
 from ._names import LITELLM_ADAPTER_NAME
 from ._provider_protocols import (
@@ -201,8 +200,7 @@ def _prepare_budget_tracking[T](
         effective_tracker = BudgetTracker(budget=budget)
 
     if effective_tracker is not None:
-        budget_resources = ResourceRegistry.build({BudgetTracker: effective_tracker})
-        prompt = prompt.bind(resources=budget_resources)
+        prompt = prompt.bind(resources={BudgetTracker: effective_tracker})
 
     return effective_tracker, prompt
 
@@ -330,8 +328,8 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             budget=budget, budget_tracker=budget_tracker, prompt=prompt
         )
 
-        # Enter prompt context for resource lifecycle
-        with prompt:
+        # Enter resource context for lifecycle management
+        with prompt.resources:
             config = InnerLoopConfig(
                 session=session,
                 tool_choice=self._tool_choice,

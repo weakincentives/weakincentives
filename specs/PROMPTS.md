@@ -91,7 +91,7 @@ lifecycle:
 prompt = Prompt(template).bind(MyParams(field="value"))
 
 # Use as context manager for resource lifecycle
-with prompt:
+with prompt.resources:
     rendered = prompt.render()
     # Resources available via prompt.resources
 ```
@@ -209,34 +209,53 @@ class Prompt(Generic[OutputT]):
         self._bound_resources = resources
         return self
 
+    @property
+    def resources(self) -> PromptResources:
+        """Return resource accessor for lifecycle management and resolution.
+
+        The PromptResources object serves as both a context manager and a
+        proxy to the active resource context:
+
+        - As context manager: ``with prompt.resources:`` manages lifecycle
+        - As proxy: ``prompt.resources.get(Protocol)`` resolves resources
+        """
+        return PromptResources(self)
+
+
+class PromptResources:
+    """Resource accessor: context manager for lifecycle + proxy to active context."""
+
+    def __init__(self, prompt: Prompt[Any]) -> None:
+        self._prompt = prompt
+
     def __enter__(self) -> Self:
-        """Enter prompt context; initialize resources."""
-        collected = self._collected_resources()
-        self._resource_context = collected.create_context()
-        self._resource_context.start()
+        """Enter resource context; initialize resources."""
+        collected = self._prompt._collected_resources()
+        ctx = collected._create_context()
+        ctx.start()
+        self._prompt._resource_context = ctx
         return self
 
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        """Exit prompt context; cleanup resources."""
-        if self._resource_context is not None:
-            self._resource_context.close()
-            self._resource_context = None
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Exit resource context; cleanup resources."""
+        if self._prompt._resource_context is not None:
+            self._prompt._resource_context.close()
+            self._prompt._resource_context = None
 
     @property
-    def resources(self) -> ScopedResourceContext:
-        """Access the active resource context.
+    def context(self) -> ScopedResourceContext:
+        """Return the underlying ScopedResourceContext for framework use."""
+        if self._prompt._resource_context is None:
+            raise RuntimeError("Resources accessed outside context")
+        return self._prompt._resource_context
 
-        Raises:
-            RuntimeError: If accessed outside context manager.
-        """
-        if self._resource_context is None:
-            raise RuntimeError("Prompt resources accessed outside context manager")
-        return self._resource_context
+    def get[T](self, protocol: type[T]) -> T:
+        """Resolve and return resource for protocol."""
+        return self.context.get(protocol)
+
+    def get_optional[T](self, protocol: type[T]) -> T | None:
+        """Resolve if bound, return None otherwise."""
+        return self.context.get_optional(protocol)
 ```
 
 ### Usage Pattern
@@ -247,7 +266,7 @@ prompt = Prompt(template).bind(
     resources=ResourceRegistry.build({Clock: SystemClock()}),
 )
 
-with prompt:
+with prompt.resources:
     # Resources are initialized and available
     fs = prompt.resources.get(Filesystem)
     clock = prompt.resources.get(Clock)
@@ -264,9 +283,9 @@ Tool execution uses snapshot/restore for atomicity. The prompt's resource
 context provides snapshot capability for snapshotable resources:
 
 ```python
-# Before tool execution
+# Before tool execution - use .context for underlying ScopedResourceContext
 session_snapshot = session.snapshot()
-resource_snapshot = prompt.resources.snapshot()
+resource_snapshot = prompt.resources.context.snapshot()
 
 try:
     result = tool.handler(params, context=context)
@@ -274,7 +293,7 @@ try:
         raise ToolFailedError(result)
 except Exception:
     session.restore(session_snapshot)
-    prompt.resources.restore(resource_snapshot)
+    prompt.resources.context.restore(resource_snapshot)
     raise
 ```
 
@@ -456,7 +475,7 @@ result = read_section_tool.handler(
 ```python
 prompt = Prompt(template).bind(*params)
 
-with prompt:
+with prompt.resources:
     while True:
         try:
             response = adapter.evaluate(prompt, session=session)
@@ -552,7 +571,7 @@ template = PromptTemplate[TaskResult](
 
 prompt = Prompt(template).bind(TaskParams(objective="Refactor auth module"))
 
-with prompt:
+with prompt.resources:
     rendered = prompt.render()
     response = adapter.evaluate(prompt, session=session)
     result: TaskResult = parse_structured_output(response.output, rendered)

@@ -411,7 +411,7 @@ prompt = Prompt(template).bind(
 )
 
 # 3. Use as context manager
-with prompt:
+with prompt.resources:
     # Resources initialized via prompt.resources.start()
     fs = prompt.resources.get(Filesystem)
     http = prompt.resources.get(HTTPClient)
@@ -490,19 +490,19 @@ from weakincentives.runtime.transactions import (
 )
 
 # Using tool_transaction context manager (recommended)
-with prompt:
-    with tool_transaction(session, prompt.resources, tag="my_tool") as snapshot:
+with prompt.resources:
+    with tool_transaction(session, prompt.resources.context, tag="my_tool") as snapshot:
         result = execute_tool(...)
         if not result.success:
-            restore_snapshot(session, prompt.resources, snapshot)
+            restore_snapshot(session, prompt.resources.context, snapshot)
 
 # Manual snapshot/restore
-with prompt:
-    snapshot = create_snapshot(session, prompt.resources, tag="before_tool")
+with prompt.resources:
+    snapshot = create_snapshot(session, prompt.resources.context, tag="before_tool")
     try:
         result = execute_tool(...)
     except Exception:
-        restore_snapshot(session, prompt.resources, snapshot)
+        restore_snapshot(session, prompt.resources.context, snapshot)
         raise
 ```
 
@@ -718,14 +718,14 @@ def test_snapshot_restore():
     session = Session(bus=InProcessDispatcher())
     prompt = Prompt(template).bind(resources=registry)
 
-    with prompt:
+    with prompt.resources:
         fs.write("data.txt", "before")
-        snapshot = create_snapshot(session, prompt.resources, tag="test")
+        snapshot = create_snapshot(session, prompt.resources.context, tag="test")
 
         fs.write("data.txt", "after")
         assert fs.read("data.txt").content == "after"
 
-        restore_snapshot(session, prompt.resources, snapshot)
+        restore_snapshot(session, prompt.resources.context, snapshot)
         assert fs.read("data.txt").content == "before"
 ```
 

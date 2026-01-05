@@ -15,13 +15,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import MISSING, field, is_dataclass
 from functools import cached_property
-from types import TracebackType
 from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
     Literal,
-    Self,
     cast,
     get_args,
     get_origin,
@@ -30,6 +28,7 @@ from typing import (
 from ..dataclasses import FrozenDataclass
 from ..resources import ResourceRegistry
 from ._overrides_protocols import PromptOverridesStore
+from ._prompt_resources import PromptResources
 from ._types import SupportsDataclass
 from .errors import PromptValidationError, SectionPath
 from .overrides import PromptDescriptor
@@ -269,13 +268,13 @@ class Prompt[OutputT]:
     configuration (overrides store, tag, params) and performs all rendering
     and override resolution.
 
-    Prompt is also a context manager that owns the resource lifecycle::
+    Resource lifecycle is managed via ``prompt.resources``::
 
-        prompt = Prompt(template).bind(params, resources=custom_registry)
+        prompt = Prompt(template).bind(params, resources={Filesystem: fs})
 
-        with prompt:  # Resources initialized
+        with prompt.resources:  # Resources initialized
             rendered = prompt.render()
-            fs = prompt.resources.get(Filesystem)
+            filesystem = prompt.resources.get(Filesystem)
         # Resources cleaned up
     """
 
@@ -329,7 +328,7 @@ class Prompt[OutputT]:
     def bind(
         self,
         *params: SupportsDataclass,
-        resources: ResourceRegistry | None = None,
+        resources: Mapping[type[object], object] | None = None,
     ) -> Prompt[OutputT]:
         """Mutate this prompt's bound parameters; return self for chaining.
 
@@ -341,7 +340,15 @@ class Prompt[OutputT]:
         Args:
             *params: Dataclass instances to bind as section parameters.
             resources: Optional runtime resources to merge with template/section
-                resources. These take precedence over template-level resources.
+                resources. Pass a dict mapping protocol types to instances.
+                These take precedence over template-level resources.
+
+        Example::
+
+            prompt.bind(
+                MyParams(value=42),
+                resources={Filesystem: fs, BudgetTracker: tracker},
+            )
         """
         # Handle params binding
         if params:
@@ -366,11 +373,12 @@ class Prompt[OutputT]:
 
         # Handle resources binding
         if resources is not None:
+            new_registry = ResourceRegistry.build(resources)
             if self._bound_resources is None:
-                self._bound_resources = resources
+                self._bound_resources = new_registry
             else:
                 self._bound_resources = self._bound_resources.merge(
-                    resources, strict=False
+                    new_registry, strict=False
                 )
 
         return self
@@ -483,43 +491,30 @@ class Prompt[OutputT]:
         return result
 
     @property
-    def resources(self) -> ScopedResourceContext:
-        """Access the active resource context.
+    def resources(self) -> PromptResources:
+        """Resource accessor for lifecycle management and dependency resolution.
 
-        Returns the resource context for resolving dependencies during
-        prompt evaluation. Only available within the context manager.
+        Returns a dual-purpose object that:
 
-        Raises:
-            RuntimeError: If accessed outside the context manager.
+        1. Acts as a context manager for resource lifecycle::
+
+            with prompt.resources:
+                service = prompt.resources.get(MyService)
+
+        2. Provides direct access to resources within the context::
+
+            with prompt.resources as ctx:
+                service = ctx.get(MyService)
+
+        Accessing resources outside the context raises RuntimeError.
         """
-        if self._resource_context is None:
-            msg = (
-                "Prompt resources accessed outside context manager. "
-                "Use 'with prompt:' to enter the resource lifecycle."
-            )
-            raise RuntimeError(msg)
-        return self._resource_context
-
-    def __enter__(self) -> Self:
-        """Enter prompt context; initialize resources."""
-        if self._resource_context is not None:
-            raise RuntimeError("Prompt context already entered")
-
-        collected = self._collected_resources()
-        self._resource_context = collected.create_context()
-        self._resource_context.start()
-        return self
-
-    def __exit__(
-        self,
-        exc_type: type[BaseException] | None,
-        exc_val: BaseException | None,
-        exc_tb: TracebackType | None,
-    ) -> None:
-        """Exit prompt context; cleanup resources."""
-        if self._resource_context is not None:  # pragma: no branch - always set
-            self._resource_context.close()
-            self._resource_context = None
+        return PromptResources(self)
 
 
-__all__ = ["Prompt", "PromptTemplate", "RenderedPrompt", "SectionNode"]
+__all__ = [
+    "Prompt",
+    "PromptResources",
+    "PromptTemplate",
+    "RenderedPrompt",
+    "SectionNode",
+]

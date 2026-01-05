@@ -302,30 +302,32 @@ class TestPromptResourceLifecycle:
     """Tests for prompt-bound resource lifecycle."""
 
     def test_accessing_resources_outside_context_raises_runtime_error(self) -> None:
-        """Accessing resources before entering context manager raises RuntimeError."""
-        from weakincentives.resources import ResourceRegistry
-
+        """Calling get() outside context manager raises RuntimeError."""
         template = PromptTemplate(ns="tests", key="resource-test")
-        prompt = Prompt(template).bind(resources=ResourceRegistry())
+        prompt = Prompt(template).bind(resources={})
 
+        # Accessing prompt.resources is fine - it returns PromptResources
+        resources = prompt.resources
+        assert resources is not None
+
+        # But calling get() outside context raises
         with pytest.raises(
             RuntimeError,
-            match="Prompt resources accessed outside context manager",
+            match="Resources accessed outside context",
         ):
-            _ = prompt.resources
+            resources.get(object)
 
     def test_entering_context_twice_raises_runtime_error(self) -> None:
-        """Entering prompt context twice raises RuntimeError."""
+        """Entering resource context twice raises RuntimeError."""
         template = PromptTemplate(ns="tests", key="resource-test")
         prompt = Prompt(template)
 
-        with prompt:
+        with prompt.resources:
             with pytest.raises(RuntimeError, match="context already entered"):
-                prompt.__enter__()
+                prompt.resources.__enter__()
 
     def test_binding_resources_multiple_times_merges_them(self) -> None:
         """Binding resources multiple times should merge the registries."""
-        from weakincentives.resources import ResourceRegistry
 
         class Resource1:
             pass
@@ -338,22 +340,27 @@ class TestPromptResourceLifecycle:
 
         template = PromptTemplate(ns="tests", key="resource-test")
         prompt = Prompt(template)
-        prompt = prompt.bind(resources=ResourceRegistry.build({Resource1: res1}))
-        prompt = prompt.bind(resources=ResourceRegistry.build({Resource2: res2}))
+        prompt = prompt.bind(resources={Resource1: res1})
+        prompt = prompt.bind(resources={Resource2: res2})
 
-        with prompt:
+        with prompt.resources:
             assert prompt.resources.get(Resource1) is res1
             assert prompt.resources.get(Resource2) is res2
 
     def test_resources_property_available_within_context(self) -> None:
         """Resources are available within the context manager."""
-        from weakincentives.resources import ResourceRegistry, ScopedResourceContext
+        from weakincentives.prompt import PromptResources
 
         template = PromptTemplate(ns="tests", key="resource-test")
-        prompt = Prompt(template).bind(resources=ResourceRegistry())
+        prompt = Prompt(template).bind(resources={})
 
-        with prompt:
-            assert isinstance(prompt.resources, ScopedResourceContext)
+        # prompt.resources returns PromptResources
+        assert isinstance(prompt.resources, PromptResources)
+
+        # get() works inside context
+        with prompt.resources:
+            # Should not raise - context is active
+            prompt.resources.get_optional(object)
 
     def test_child_section_resources_collected(self) -> None:
         """Resources from child sections are collected into prompt resources."""
@@ -399,6 +406,29 @@ class TestPromptResourceLifecycle:
         )
         prompt = Prompt(template).bind(RootParams(title="test"))
 
-        with prompt:
+        with prompt.resources:
             # Child section resources should be accessible
             assert prompt.resources.get(ChildResource) is child_res
+
+    def test_exit_before_enter_is_safe(self) -> None:
+        """Calling __exit__ without __enter__ is a no-op."""
+        template = PromptTemplate(ns="tests", key="resource-test")
+        prompt = Prompt(template)
+
+        # Calling __exit__ without entering should be safe (no-op)
+        prompt.resources.__exit__(None, None, None)
+
+    def test_tool_scope_provides_resolver(self) -> None:
+        """tool_scope() provides a ResourceResolver within context."""
+
+        class ToolScopedResource:
+            pass
+
+        instance = ToolScopedResource()
+        template = PromptTemplate(ns="tests", key="resource-test")
+        prompt = Prompt(template).bind(resources={ToolScopedResource: instance})
+
+        with prompt.resources:
+            with prompt.resources.tool_scope() as resolver:
+                # Should be able to resolve resources within tool scope
+                assert resolver.get(ToolScopedResource) is instance

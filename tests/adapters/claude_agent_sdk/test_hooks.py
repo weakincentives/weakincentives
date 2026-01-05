@@ -44,7 +44,6 @@ from weakincentives.deadlines import Deadline
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.protocols import PromptProtocol
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.events._types import TokenUsage, ToolInvoked
 from weakincentives.runtime.session import Session, append_all
@@ -53,16 +52,15 @@ from weakincentives.runtime.session import Session, append_all
 def _make_prompt() -> Prompt[object]:
     """Create a prompt in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
-    prompt.__enter__()
+    prompt.resources.__enter__()
     return prompt
 
 
 def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
-    resources = ResourceRegistry.build({Filesystem: fs})
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
-    prompt = prompt.bind(resources=resources)
-    prompt.__enter__()
+    prompt = prompt.bind(resources={Filesystem: fs})
+    prompt.resources.__enter__()
     return prompt
 
 
