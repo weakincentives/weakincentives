@@ -996,3 +996,67 @@ class TestIsolationConfig:
         assert usage is not None
         assert usage.input_tokens is None
         assert usage.output_tokens is None
+
+    def test_creates_temp_folder_when_no_workspace_or_cwd(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """When no workspace and no cwd, creates a temp folder as cwd."""
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        # No cwd configured - should create a temp folder
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            _ = adapter.evaluate(simple_prompt, session=session)
+
+        # Verify cwd was passed to SDK (should be a temp folder)
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+        assert hasattr(options, "cwd")
+        assert options.cwd is not None
+        # Temp folder should have wink-sdk- prefix
+        assert "wink-sdk-" in options.cwd
+
+    def test_temp_folder_cleaned_up_after_evaluate(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Temp folder is cleaned up after evaluate completes."""
+        from pathlib import Path
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            _ = adapter.evaluate(simple_prompt, session=session)
+
+        # Get the cwd that was used
+        assert len(MockSDKQuery.captured_options) == 1
+        temp_cwd = MockSDKQuery.captured_options[0].cwd
+
+        # Temp folder should be cleaned up
+        assert not Path(temp_cwd).exists()
+
+    def test_temp_folder_cleaned_up_on_error(
+        self, session: Session, simple_prompt: Prompt[SimpleOutput]
+    ) -> None:
+        """Temp folder is cleaned up even when SDK raises an error."""
+        from pathlib import Path
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_error(RuntimeError("SDK error"))
+
+        adapter = ClaudeAgentSDKAdapter()
+
+        with sdk_patches():
+            with pytest.raises(Exception):  # noqa: B017
+                adapter.evaluate(simple_prompt, session=session)
+
+        # Get the cwd that was used
+        assert len(MockSDKQuery.captured_options) == 1
+        temp_cwd = MockSDKQuery.captured_options[0].cwd
+
+        # Temp folder should still be cleaned up
+        assert not Path(temp_cwd).exists()

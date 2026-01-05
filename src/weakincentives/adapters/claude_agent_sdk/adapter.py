@@ -14,8 +14,9 @@
 
 from __future__ import annotations
 
+import shutil
+import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any, cast, override
 
 from ...budget import Budget, BudgetTracker
@@ -246,27 +247,39 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Register Notification reducer if not already registered
         session[Notification].register(Notification, append_all)
 
-        # Get filesystem from workspace section if present. WorkspaceSection
-        # contributes the filesystem via its resources() method, so we only need
-        # to create and bind a fallback when no workspace section exists.
+        # Determine effective cwd: explicit config, or create a temp folder
+        # when no workspace section is present. This ensures agents start in
+        # an empty directory rather than inheriting the host's cwd.
+        temp_workspace_dir: str | None = None
+        effective_cwd: str | None = self._client_config.cwd
+
         if prompt.filesystem() is None:
-            workspace_root = self._client_config.cwd or str(Path.cwd())
-            filesystem = HostFilesystem(_root=workspace_root)
+            if effective_cwd is None:
+                # Create an empty temp folder as the default workspace
+                temp_workspace_dir = tempfile.mkdtemp(prefix="wink-sdk-")
+                effective_cwd = temp_workspace_dir
+            filesystem = HostFilesystem(_root=effective_cwd)
             prompt = prompt.bind(resources={Filesystem: filesystem})
 
-        # Enter resource context for lifecycle management
-        with prompt.resources:
-            return await self._run_with_prompt_context(
-                sdk=sdk,
-                prompt=prompt,
-                prompt_name=prompt_name,
-                prompt_text=prompt_text,
-                rendered=rendered,
-                session=session,
-                output_format=output_format,
-                deadline=deadline,
-                budget_tracker=budget_tracker,
-            )
+        try:
+            # Enter resource context for lifecycle management
+            with prompt.resources:
+                return await self._run_with_prompt_context(
+                    sdk=sdk,
+                    prompt=prompt,
+                    prompt_name=prompt_name,
+                    prompt_text=prompt_text,
+                    rendered=rendered,
+                    session=session,
+                    output_format=output_format,
+                    deadline=deadline,
+                    budget_tracker=budget_tracker,
+                    effective_cwd=effective_cwd,
+                )
+        finally:
+            # Clean up temp workspace if we created one
+            if temp_workspace_dir:
+                shutil.rmtree(temp_workspace_dir, ignore_errors=True)
 
     async def _run_with_prompt_context[OutputT](
         self,
@@ -280,6 +293,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         output_format: dict[str, Any] | None,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
+        effective_cwd: str | None,
     ) -> PromptResponse[OutputT]:
         """Run SDK query within prompt context."""
         # Create hook context for native tool transactions
@@ -323,7 +337,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         if self._client_config.isolation:
             ephemeral_home = EphemeralHome(
                 self._client_config.isolation,
-                workspace_path=self._client_config.cwd,
+                workspace_path=effective_cwd,
             )
 
         try:
@@ -334,6 +348,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 hook_context=hook_context,
                 bridged_tools=bridged_tools,
                 ephemeral_home=ephemeral_home,
+                effective_cwd=effective_cwd,
             )
         except VisibilityExpansionRequired:
             # Progressive disclosure: let this propagate to the caller
@@ -392,6 +407,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         hook_context: HookContext,
         bridged_tools: tuple[Any, ...],
         ephemeral_home: EphemeralHome | None = None,
+        effective_cwd: str | None = None,
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
         # Import the SDK's types
@@ -402,8 +418,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             "model": self._model,
         }
 
-        if self._client_config.cwd:
-            options_kwargs["cwd"] = self._client_config.cwd
+        if effective_cwd:
+            options_kwargs["cwd"] = effective_cwd
 
         if self._client_config.permission_mode:
             options_kwargs["permission_mode"] = self._client_config.permission_mode
