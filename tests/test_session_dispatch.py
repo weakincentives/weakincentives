@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
+import pytest
+
 from tests.helpers.adapters import GENERIC_ADAPTER_NAME
 from tests.helpers.session import (
     DEFAULT_SESSION_ID,
@@ -49,6 +51,8 @@ from weakincentives.runtime.session import (
 
 if TYPE_CHECKING:
     from tests.conftest import SessionFactory
+
+pytestmark = pytest.mark.core
 
 
 def test_tool_invoked_appends_payload_every_time(

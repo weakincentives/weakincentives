@@ -195,6 +195,7 @@ indent-style = "space"
 [tool.pytest.ini_options]
 addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=100"
 markers = [
+    "core: marks fast, high-value tests that always run in CI.",
     "integration: marks tests that exercise live provider integrations.",
     "timeout(timeout): set per-test timeout in seconds via pytest-timeout.",
     "threadstress: repeat tests under randomized thread-pool conditions.",

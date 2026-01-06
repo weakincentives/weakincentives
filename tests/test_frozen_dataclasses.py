@@ -22,6 +22,8 @@ import pytest
 
 from weakincentives.dataclasses import FrozenDataclass
 
+pytestmark = pytest.mark.core
+
 
 class HasFrozenOps(Protocol):
     calls: ClassVar[list[str]]

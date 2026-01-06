@@ -43,6 +43,8 @@ from weakincentives.runtime.session.session import (
     _session_id_is_well_formed,
 )
 
+pytestmark = pytest.mark.core
+
 
 @pytest.fixture(autouse=True)
 def reset_dbc_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:

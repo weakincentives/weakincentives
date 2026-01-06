@@ -124,10 +124,8 @@ jobs:
           EOF
           fi
 
-  # Consolidated static analysis job - runs all fast checks in one VM
+  # Static analysis - always runs (fast and high value)
   static-analysis:
-    needs: detect-changes
-    if: needs.detect-changes.outputs.run_all == 'true' || needs.detect-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -148,7 +146,7 @@ jobs:
       - name: Run pyright
         run: make pyright
 
-  # Smart test job - runs targeted tests based on changed files
+  # Test job - always runs core tests, full suite based on change detection
   test:
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true'
@@ -164,46 +162,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
-      # Run all tests on main push or when core/CI files change
-      - name: Run all tests
+      # Always run core tests (fast, high-value smoke tests)
+      - name: Run core tests
+        run: uv run --all-extras pytest -m core --strict-config --strict-markers -q --no-header --no-cov
+
+      # Run full test suite when changes warrant it
+      - name: Run full test suite
         if: |
           needs.detect-changes.outputs.run_all == 'true' ||
           needs.detect-changes.outputs.core == 'true' ||
           needs.detect-changes.outputs.ci == 'true'
         run: make test
-
-      # Run targeted tests for isolated module changes (PRs only)
-      - name: Run targeted tests
-        if: |
-          needs.detect-changes.outputs.run_all != 'true' &&
-          needs.detect-changes.outputs.core != 'true' &&
-          needs.detect-changes.outputs.ci != 'true'
-        env:
-          ADAPTERS: ${{ needs.detect-changes.outputs.adapters }}
-          RUNTIME: ${{ needs.detect-changes.outputs.runtime }}
-          PROMPT: ${{ needs.detect-changes.outputs.prompt }}
-          CONTRIB: ${{ needs.detect-changes.outputs.contrib }}
-          EVALS: ${{ needs.detect-changes.outputs.evals }}
-          SERDE: ${{ needs.detect-changes.outputs.serde }}
-          CLI: ${{ needs.detect-changes.outputs.cli }}
-        run: |
-          # Build test path list based on changed modules
-          TEST_PATHS=""
-          [ "$ADAPTERS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/adapters"
-          [ "$RUNTIME" = "true" ] && TEST_PATHS="$TEST_PATHS tests/runtime"
-          [ "$PROMPT" = "true" ] && TEST_PATHS="$TEST_PATHS tests/prompt tests/prompts"
-          [ "$CONTRIB" = "true" ] && TEST_PATHS="$TEST_PATHS tests/contrib tests/tools"
-          [ "$EVALS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/evals"
-          [ "$SERDE" = "true" ] && TEST_PATHS="$TEST_PATHS tests/serde"
-          [ "$CLI" = "true" ] && TEST_PATHS="$TEST_PATHS tests/cli"
-
-          if [ -z "$TEST_PATHS" ]; then
-            echo "No specific test paths detected, running all tests"
-            make test
-          else
-            echo "Running targeted tests: $TEST_PATHS"
-            uv run --all-extras pytest --strict-config --strict-markers --maxfail=1 -q --no-header $TEST_PATHS
-          fi
 
   mutation:
     needs: [detect-changes, test]

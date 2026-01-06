@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+"""Tests for dataclass serialization (core tests always run in CI)."""
+
 from __future__ import annotations
 
 import importlib
@@ -42,6 +44,8 @@ from weakincentives.serde.parse import (
 from weakincentives.types import JSONValue
 
 parse_module = importlib.import_module("weakincentives.serde.parse")
+
+pytestmark = pytest.mark.core
 
 
 def test_module_exports_align_with_public_api() -> None:
