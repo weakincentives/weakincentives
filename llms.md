@@ -548,11 +548,21 @@ except PromptEvaluationError as exc:
 ### PromptTemplate and Prompt
 
 ```python
-from weakincentives.prompt import PromptTemplate
+from dataclasses import dataclass
+from typing import Any
+from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
 
-template = PromptTemplate[OutputType](
-    ns="myapp/agents", key="my-agent", name="my-agent",
-    sections=[...],
+
+@dataclass(frozen=True)
+class MyParams:
+    value: str
+
+
+template: PromptTemplate[Any] = PromptTemplate(
+    ns="myapp/agents",
+    key="my-agent",
+    name="my-agent",
+    sections=[MarkdownSection(title="Task", key="task", template="${value}")],
 )
 prompt = Prompt(template).bind(MyParams(value="..."))  # Bind returns self
 ```
@@ -940,24 +950,36 @@ loop = CodeReviewLoop(adapter=adapter, bus=bus)
 response, session = loop.execute(ReviewRequest(...))
 ```
 
-### Bus-driven execution
+### Mailbox-driven execution
 
 ```python
-from weakincentives.runtime import MainLoopRequest, MainLoopCompleted, MainLoopFailed
+from weakincentives.runtime import InMemoryMailbox, MainLoopRequest, MainLoopResult
 
-# MainLoop auto-subscribes to MainLoopRequest in __init__.
+# Create request/response mailboxes
+requests: InMemoryMailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
+    name="requests"
+)
+responses: InMemoryMailbox[MainLoopResult, None] = InMemoryMailbox(name="responses")
 
-# Handle results
-bus.subscribe(MainLoopCompleted, lambda e: print(f"Done: {e.response}"))
-bus.subscribe(MainLoopFailed, lambda e: print(f"Failed: {e.error}"))
+# Send request with reply routing
+requests.send(
+    MainLoopRequest(
+        request=ReviewRequest(...),
+        budget=Budget(max_total_tokens=10000),  # Overrides config default
+        deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
+    ),
+    reply_to="responses",
+)
 
-# Submit request with optional per-request constraints
-bus.dispatch(MainLoopRequest(
-    request=ReviewRequest(...),
-    budget=Budget(max_total_tokens=10000),  # Overrides config default
-    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
-    resources=resources,                     # Custom resources for this request
-))
+# MainLoop processes from requests mailbox and replies via msg.reply()
+# Results arrive in responses mailbox
+for msg in responses.receive():
+    result = msg.body
+    if result.error:
+        print(f"Failed: {result.error}")
+    else:
+        print(f"Done: {result.output}")
+    msg.acknowledge()
 ```
 
 ### Visibility expansion handling
@@ -969,18 +991,38 @@ accumulating visibility overrides and retrying evaluation. A shared
 ## Event Subscription
 
 ```python
-from weakincentives.runtime import PromptRendered, PromptExecuted, ToolInvoked, TokenUsage
+from weakincentives.runtime import (
+    PromptRendered,
+    PromptExecuted,
+    ToolInvoked,
+    Session,
+)
 
 session = Session()
 
+
+# Define typed handlers
+def on_tool_invoked(event: object) -> None:
+    if isinstance(event, ToolInvoked):
+        print(event.name)
+
+
+def on_prompt_executed(event: object) -> None:
+    if isinstance(event, PromptExecuted):
+        print(event.usage)
+
+
+def on_prompt_rendered(event: object) -> None:
+    print(event)
+
+
 # Subscribe to events
-session.dispatcher.subscribe(ToolInvoked, lambda e: print(e.name))
-session.dispatcher.subscribe(PromptExecuted, lambda e: print(e.usage))
+session.dispatcher.subscribe(ToolInvoked, on_tool_invoked)
+session.dispatcher.subscribe(PromptExecuted, on_prompt_executed)
 
 # Unsubscribe handler (returns True if found and removed)
-handler = lambda e: print(e)
-session.dispatcher.subscribe(PromptRendered, handler)
-session.dispatcher.unsubscribe(PromptRendered, handler)
+session.dispatcher.subscribe(PromptRendered, on_prompt_rendered)
+session.dispatcher.unsubscribe(PromptRendered, on_prompt_rendered)
 ```
 
 ## Session Snapshots
@@ -1051,7 +1093,7 @@ for msg in messages:
 Workers can send results to dynamic destinations derived from incoming messages:
 
 ```python
-from weakincentives.runtime import InMemoryMailbox, RegistryResolver
+from weakincentives.runtime.mailbox import InMemoryMailbox, RegistryResolver
 
 # Setup resolver mapping identifiers to mailboxes
 responses = InMemoryMailbox(name="client-responses")
@@ -1103,7 +1145,9 @@ tool = Tool[P, R](name="search", description="...", handler=h, examples=(
 
 ```python
 from weakincentives.dbc import require, ensure
-@require(lambda p: p.query, "Query required")
+
+@require(lambda params: params.query)  # Predicate validates params.query is truthy
+@ensure(lambda result: result is not None)
 def handler(params, *, context): ...
 ```
 

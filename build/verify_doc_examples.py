@@ -154,6 +154,12 @@ API_DEFAULTS_SIGNATURE = re.compile(
     r"^\s*\w+(?:\[[\w,\s]+\])?\s*\([^)]*=(?:None|\.\.\.)[^)]*\)\s*$"
 )
 
+# Pattern for API cheatsheet entries - standalone constructor/call documentation
+# Matches: "Class(param1, param2)" or "Class[T, U](param)" without assignment
+API_CHEATSHEET_ENTRY = re.compile(
+    r"^\s*[A-Z]\w*(?:\[[\w,\s\[\]]+\])?\s*\([^)]*\)\s*$"
+)
+
 
 def _is_api_reference_block(code: str) -> bool:
     """Check if a code block is API reference documentation, not runnable code.
@@ -163,41 +169,69 @@ def _is_api_reference_block(code: str) -> bool:
     - Constructor patterns with defaults: Class(param=None, other=...)
     - Method chains: .attr / .method()
     - No actual executable statements (no = assignments on left side)
+
+    Bare constructor calls like "Class(a, b)" are NOT considered documentation
+    since they could be executable code.
     """
     lines = [ln.strip() for ln in code.strip().split("\n") if ln.strip()]
     if not lines:
         return False
 
-    # Count lines that look like API signatures
-    signature_lines = 0
+    # Check for import statements - if present, it's likely runnable code
+    has_imports = any(
+        ln.startswith(("import ", "from ")) for ln in lines if not ln.startswith("#")
+    )
+
+    # Count lines that are strong API reference indicators (return types, defaults)
+    strong_signature_lines = 0
+    # Count lines that are weak indicators (could be executable code)
+    weak_signature_lines = 0
+
     for line in lines:
         # Skip comments
         if line.startswith("#"):
             continue
 
-        # Check for signature with return type
+        # Strong indicator: signature with return type
         if API_RETURN_SIGNATURE.match(line):
-            signature_lines += 1
+            strong_signature_lines += 1
             continue
 
-        # Check for signature with default values (Class(param=None, ...))
+        # Strong indicator: signature with default values (Class(param=None, ...))
         if API_DEFAULTS_SIGNATURE.match(line):
-            signature_lines += 1
+            strong_signature_lines += 1
             continue
 
-        # Check for method chain documentation like ".attr / .method()"
+        # Strong indicator: method chain documentation like ".attr / .method()"
         if line.startswith(".") and "/" in line:
-            signature_lines += 1
+            strong_signature_lines += 1
             continue
 
-        # Check for indented continuation of previous signature (like .method docs)
+        # Strong indicator: bare .attr or .method() (method documentation)
         if line.startswith("."):
-            signature_lines += 1
+            strong_signature_lines += 1
             continue
 
-    # If most non-comment lines are signatures, it's a reference block
+        # Weak indicator: cheatsheet entries (Class[T](args) without =)
+        # Only count these if there are also strong indicators
+        if API_CHEATSHEET_ENTRY.match(line) and "=" not in line.split("(")[0]:
+            weak_signature_lines += 1
+            continue
+
+    # If most non-comment lines are signatures and no imports, it's a reference block
     non_comment_lines = [ln for ln in lines if not ln.startswith("#")]
-    return bool(non_comment_lines and signature_lines >= len(non_comment_lines) * 0.7)
+
+    # Only count weak signatures if there's at least one strong signature
+    total_signatures = strong_signature_lines
+    if strong_signature_lines > 0:
+        total_signatures += weak_signature_lines
+
+    is_mostly_signatures = bool(
+        non_comment_lines and total_signatures >= len(non_comment_lines) * 0.7
+    )
+
+    # Reference blocks without imports are cheatsheets
+    return is_mostly_signatures and not has_imports
 
 
 @dataclass(slots=True, frozen=True)
