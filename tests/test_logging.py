@@ -351,3 +351,136 @@ def test_json_formatter_handles_missing_event_and_context() -> None:
     assert payload["message"] == "bare message"
     assert "event" not in payload
     assert "context" not in payload
+
+
+def test_text_formatter_handles_missing_event_and_context() -> None:
+    """Cover branches where third-party loggers lack event/context fields."""
+    configure_logging(json_mode=False, force=True)
+
+    root = logging.getLogger()
+    handler = root.handlers[0]
+
+    # Create record without event or context attributes (simulating third-party library)
+    record = root.makeRecord(
+        name="claude_agent_sdk._internal.transport",
+        level=logging.INFO,
+        fn="subprocess_cli.py",
+        lno=113,
+        msg="Using bundled Claude Code CLI: /opt/venv/lib/python3.12/site-packages/claude_agent_sdk/_bundled/claude",
+        args=(),
+        exc_info=None,
+        func=None,
+        extra={},
+    )
+
+    # This should NOT raise KeyError: 'event'
+    rendered = handler.format(record)
+
+    # Verify the output contains the expected fields
+    assert "INFO" in rendered
+    assert "claude_agent_sdk._internal.transport" in rendered
+    assert "Using bundled Claude Code CLI" in rendered
+
+
+def test_text_formatter_includes_event_and_context_when_present() -> None:
+    """Verify text formatter includes structured fields when provided."""
+    configure_logging(json_mode=False, force=True)
+
+    root = logging.getLogger()
+    handler = root.handlers[0]
+
+    record = root.makeRecord(
+        name="weakincentives.adapters.claude_agent_sdk.adapter",
+        level=logging.INFO,
+        fn="adapter.py",
+        lno=320,
+        msg="claude_agent_sdk.evaluate.start",
+        args=(),
+        exc_info=None,
+        func=None,
+        extra={
+            "event": "sdk.evaluate.start",
+            "context": {"component": "claude_agent_sdk", "model": "claude-sonnet-4-5"},
+        },
+    )
+
+    rendered = handler.format(record)
+
+    assert "INFO" in rendered
+    assert "sdk.evaluate.start" in rendered
+    assert "claude_agent_sdk.evaluate.start" in rendered
+    assert "component" in rendered
+    assert "claude-sonnet-4-5" in rendered
+
+
+def test_text_formatter_handles_exception_info() -> None:
+    """Verify text formatter includes exception traceback."""
+    configure_logging(json_mode=False, force=True)
+
+    root = logging.getLogger()
+    handler = root.handlers[0]
+
+    exc_info: tuple[type[BaseException], BaseException, TracebackType] | None = None
+    try:
+        _raise_runtime_error()
+    except RuntimeError as error:
+        traceback = error.__traceback__
+        assert traceback is not None
+        exc_info = (error.__class__, error, traceback)
+    assert exc_info is not None
+
+    record = root.makeRecord(
+        name="tests.exception",
+        level=logging.ERROR,
+        fn="tests/test_logging.py",
+        lno=0,
+        msg="something failed",
+        args=(),
+        exc_info=exc_info,
+        func=None,
+        extra={"event": "tests.error", "context": {}},
+    )
+
+    rendered = handler.format(record)
+
+    assert "ERROR" in rendered
+    assert "something failed" in rendered
+    assert "RuntimeError" in rendered
+    assert "boom" in rendered
+
+
+def test_text_formatter_handles_stack_info() -> None:
+    """Verify text formatter includes stack info when present."""
+    configure_logging(json_mode=False, force=True)
+
+    root = logging.getLogger()
+    handler = root.handlers[0]
+
+    record = root.makeRecord(
+        name="tests.stack",
+        level=logging.WARNING,
+        fn="tests/test_logging.py",
+        lno=0,
+        msg="stack trace follows",
+        args=(),
+        exc_info=None,
+        func=None,
+        extra={},
+        sinfo="Stack (most recent call last):\n  File test.py, line 1",
+    )
+
+    rendered = handler.format(record)
+
+    assert "WARNING" in rendered
+    assert "stack trace follows" in rendered
+    assert "Stack (most recent call last)" in rendered
+
+
+def test_configure_logging_defaults_to_text_formatter_class() -> None:
+    """Verify text formatter class is used by default."""
+    configure_logging(force=True)
+
+    root = logging.getLogger()
+    assert len(root.handlers) == 1
+    handler = root.handlers[0]
+    assert handler.formatter.__class__.__name__ == "_TextFormatter"
