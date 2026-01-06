@@ -145,3 +145,66 @@ class TestNormalizeSDKError:
         assert isinstance(result, PromptEvaluationError)
         assert "Claude Code process failed" in result.message
         assert result.provider_payload is None
+
+    def test_process_error_with_captured_stderr(self) -> None:
+        """ProcessError with stderr_output captures stderr in payload."""
+        error = MockProcessError("Process failed", exit_code=1, stderr="Error output")
+        result = normalize_sdk_error(
+            error, "test_prompt", stderr_output="Captured stderr from process"
+        )
+
+        assert isinstance(result, PromptEvaluationError)
+        assert result.provider_payload is not None
+        assert result.provider_payload["exit_code"] == 1
+        # Original stderr from error attribute
+        assert result.provider_payload["stderr"] == "Error output"
+        # Captured stderr is also included
+        assert (
+            result.provider_payload["stderr_captured"] == "Captured stderr from process"
+        )
+
+    def test_process_error_with_captured_stderr_no_error_stderr(self) -> None:
+        """ProcessError with captured stderr but no error.stderr attribute."""
+
+        class MockProcessErrorNoStderr(Exception):
+            def __init__(self, message: str, exit_code: int) -> None:
+                super().__init__(message)
+                self.exit_code = exit_code
+
+        MockProcessErrorNoStderr.__name__ = "ProcessError"
+        error = MockProcessErrorNoStderr("Process failed", exit_code=1)
+        result = normalize_sdk_error(
+            error, "test_prompt", stderr_output="Captured stderr from process"
+        )
+
+        assert isinstance(result, PromptEvaluationError)
+        assert result.provider_payload is not None
+        assert result.provider_payload["exit_code"] == 1
+        # Captured stderr becomes the primary stderr
+        assert result.provider_payload["stderr"] == "Captured stderr from process"
+        assert (
+            result.provider_payload["stderr_captured"] == "Captured stderr from process"
+        )
+
+    def test_json_decode_error_with_stderr(self) -> None:
+        """JSONDecodeError with stderr_output includes stderr in payload."""
+        error = MockCLIJSONDecodeError("Invalid JSON")
+        result = normalize_sdk_error(
+            error, "test_prompt", stderr_output="CLI output before crash"
+        )
+
+        assert isinstance(result, PromptEvaluationError)
+        assert "Failed to parse SDK response" in result.message
+        assert result.provider_payload is not None
+        assert result.provider_payload["stderr"] == "CLI output before crash"
+
+    def test_unknown_error_with_stderr(self) -> None:
+        """Unknown error with stderr_output includes stderr in payload."""
+        error = RuntimeError("Something went wrong")
+        result = normalize_sdk_error(
+            error, "test_prompt", stderr_output="Unexpected stderr output"
+        )
+
+        assert isinstance(result, PromptEvaluationError)
+        assert result.provider_payload is not None
+        assert result.provider_payload["stderr"] == "Unexpected stderr output"

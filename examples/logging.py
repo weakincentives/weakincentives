@@ -18,7 +18,7 @@ import json
 import logging
 import sys
 from collections.abc import Mapping, Sequence
-from typing import Any, cast
+from typing import Any, cast, override
 
 from weakincentives.runtime import (
     Dispatcher,
@@ -38,15 +38,90 @@ __all__ = [
 _LOG_STRING_LIMIT = 256
 
 
-def configure_logging() -> None:
-    """Initialize root logging for interactive demos."""
+class _StructuredFormatter(logging.Formatter):
+    """Formatter that renders structured log records with event and context fields.
+
+    Handles log records from StructuredLogger that include ``event`` and ``context``
+    fields in the extra dict. Context is rendered as compact JSON for readability.
+    """
+
+    _FMT = "%(asctime)s %(levelname)s %(name)s"
+    _DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+    def __init__(self) -> None:
+        super().__init__(fmt=self._FMT, datefmt=self._DATEFMT)
+
+    @override
+    def format(self, record: logging.LogRecord) -> str:
+        # Prepare record for formatting (sets record.message and record.asctime)
+        record.message = record.getMessage()
+        record.asctime = self.formatTime(record, self.datefmt)
+
+        # Format base fields (timestamp, level, logger name)
+        base = self.formatMessage(record)
+
+        # Extract structured fields if present
+        event = getattr(record, "event", None)
+        context = getattr(record, "context", None)
+
+        # Build output parts
+        parts = [base]
+        if event is not None:
+            parts.append(str(event))
+        if record.message:
+            parts.append(record.message)
+        if context:
+            # Render context as compact JSON for readability
+            try:
+                context_str = json.dumps(context, separators=(",", ":"))
+            except (TypeError, ValueError):
+                context_str = str(context)
+            parts.append(context_str)
+
+        result = " ".join(parts)
+
+        # Append exception info if present
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            result = f"{result}\n{record.exc_text}"
+        if record.stack_info:
+            result = f"{result}\n{self.formatStack(record.stack_info)}"
+
+        return result
+
+
+def configure_logging(*, log_file: str | None = "demo.log") -> None:
+    """Initialize root logging for interactive demos.
+
+    Args:
+        log_file: Path to write DEBUG-level logs. File is reset (not appended) on
+            each run. Pass None to disable file logging.
+    """
+    structured_formatter = _StructuredFormatter()
+    console_formatter = logging.Formatter(
+        "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
+
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(console_formatter)
+    handlers: list[logging.Handler] = [console_handler]
+
+    # Add file handler for DEBUG-level logging with structured formatter
+    if log_file is not None:
+        file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(structured_formatter)
+        handlers.append(file_handler)
 
     logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        level=logging.DEBUG,  # Root logger at DEBUG to allow file handler to capture
+        handlers=handlers,
         force=True,
     )
+
+    # Keep console output at INFO level for cleaner interactive experience
+    console_handler.setLevel(logging.INFO)
 
 
 def attach_logging_subscribers(bus: Dispatcher) -> None:

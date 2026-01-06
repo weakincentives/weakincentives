@@ -938,7 +938,13 @@ class TestIsolationConfig:
     def test_suppress_stderr_false(
         self, session: Session, simple_prompt: Prompt[None]
     ) -> None:
-        """When suppress_stderr is False, stderr callback is not added."""
+        """When suppress_stderr is False, stderr is still captured for debug logging.
+
+        NOTE: As of the debug logging enhancement, stderr is always captured
+        for debug logging purposes regardless of suppress_stderr setting.
+        The captured stderr is logged at DEBUG level and included in error
+        payloads when process failures occur.
+        """
         config = ClaudeAgentSDKClientConfig(suppress_stderr=False)
         adapter = ClaudeAgentSDKAdapter(client_config=config)
 
@@ -948,10 +954,36 @@ class TestIsolationConfig:
         with sdk_patches():
             _ = adapter.evaluate(simple_prompt, session=session)
 
-        # Check captured options do not include stderr callback
+        # stderr handler is always present for debug logging
         assert len(MockSDKQuery.captured_options) == 1
         options = MockSDKQuery.captured_options[0]
-        assert not hasattr(options, "stderr") or options.stderr is None
+        assert hasattr(options, "stderr") and options.stderr is not None
+
+    def test_stderr_handler_buffers_output(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
+        """Stderr handler buffers output for debug logging and error payloads."""
+        adapter = ClaudeAgentSDKAdapter()
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        with sdk_patches():
+            _ = adapter.evaluate(simple_prompt, session=session)
+
+        # Get the stderr handler and invoke it
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+        stderr_handler = options.stderr
+
+        # Invoke the handler with some test output
+        stderr_handler("Test stderr line 1\n")
+        stderr_handler("Test stderr line 2\n")
+
+        # Verify the buffer captured the output
+        assert len(adapter._stderr_buffer) == 2
+        assert adapter._stderr_buffer[0] == "Test stderr line 1\n"
+        assert adapter._stderr_buffer[1] == "Test stderr line 2\n"
 
     def test_message_without_result(
         self, session: Session, simple_prompt: Prompt[None]
@@ -1060,3 +1092,243 @@ class TestIsolationConfig:
 
         # Temp folder should still be cleaned up
         assert not Path(temp_cwd).exists()
+
+
+class TestMessageContentExtraction:
+    """Tests for the message content extraction helper functions."""
+
+    def test_extract_content_block_tool_use(self) -> None:
+        """Tool use blocks include name, id, and input."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block,
+        )
+
+        block = {
+            "type": "tool_use",
+            "name": "my_tool",
+            "id": "toolu_123",
+            "input": {"path": "/foo"},
+        }
+        result = _extract_content_block(block)
+        assert result["type"] == "tool_use"
+        assert result["name"] == "my_tool"
+        assert result["id"] == "toolu_123"
+        assert result["input"] == {"path": "/foo"}
+
+    def test_extract_content_block_text(self) -> None:
+        """Text blocks include full text content."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block,
+        )
+
+        block = {"type": "text", "text": "Hello world, this is a long message"}
+        result = _extract_content_block(block)
+        assert result["type"] == "text"
+        assert result["text"] == "Hello world, this is a long message"
+
+    def test_extract_content_block_tool_result(self) -> None:
+        """Tool result blocks include tool_use_id and full content."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block,
+        )
+
+        block = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_123",
+            "content": "Full result content here",
+            "is_error": False,
+        }
+        result = _extract_content_block(block)
+        assert result["type"] == "tool_result"
+        assert result["tool_use_id"] == "toolu_123"
+        assert result["content"] == "Full result content here"
+        assert result["is_error"] is False
+
+    def test_extract_content_block_tool_result_no_is_error(self) -> None:
+        """Tool result blocks without is_error field work correctly."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block,
+        )
+
+        block = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_456",
+            "content": "Some content",
+        }
+        result = _extract_content_block(block)
+        assert result["type"] == "tool_result"
+        assert result["tool_use_id"] == "toolu_456"
+        assert result["content"] == "Some content"
+        assert "is_error" not in result
+
+    def test_extract_content_block_unknown_type(self) -> None:
+        """Unknown block types include all fields."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block,
+        )
+
+        block = {"type": "image", "data": "base64...", "media_type": "image/png"}
+        result = _extract_content_block(block)
+        assert result["type"] == "image"
+        assert result["data"] == "base64..."
+        assert result["media_type"] == "image/png"
+
+    def test_extract_list_content_mixed(self) -> None:
+        """List content extracts all blocks with full content."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_list_content,
+        )
+
+        content = [
+            {"type": "text", "text": "Hello"},
+            {
+                "type": "tool_use",
+                "name": "read_file",
+                "id": "t1",
+                "input": {"path": "/x"},
+            },
+            {"type": "text", "text": "World"},
+        ]
+        result = _extract_list_content(content)
+        assert len(result) == 3
+        assert result[0] == {"type": "text", "text": "Hello"}
+        assert result[1]["name"] == "read_file"
+        assert result[1]["input"] == {"path": "/x"}
+        assert result[2] == {"type": "text", "text": "World"}
+
+    def test_extract_list_content_skips_non_dict(self) -> None:
+        """Non-dict blocks are skipped."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_list_content,
+        )
+
+        content = [
+            {"type": "text", "text": "Hello"},
+            "not a dict",
+            None,
+        ]
+        result = _extract_list_content(content)
+        assert len(result) == 1
+        assert result[0]["text"] == "Hello"
+
+    def test_extract_inner_message_content_string(self) -> None:
+        """String content is extracted fully."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_content,
+        )
+
+        inner_msg = {"role": "assistant", "content": "Full message content here"}
+        result = _extract_inner_message_content(inner_msg)
+        assert result == {"role": "assistant", "content": "Full message content here"}
+
+    def test_extract_inner_message_content_list(self) -> None:
+        """List content is extracted as content_blocks."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_content,
+        )
+
+        inner_msg = {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Thinking..."},
+                {"type": "tool_use", "name": "bash", "id": "t1"},
+            ],
+        }
+        result = _extract_inner_message_content(inner_msg)
+        assert result["role"] == "assistant"
+        assert len(result["content_blocks"]) == 2
+        assert result["content_blocks"][0]["text"] == "Thinking..."
+        assert result["content_blocks"][1]["name"] == "bash"
+
+    def test_extract_inner_message_content_no_role(self) -> None:
+        """Inner message without role skips role field."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_content,
+        )
+
+        inner_msg = {"content": "Hello"}
+        result = _extract_inner_message_content(inner_msg)
+        assert "role" not in result
+        assert result["content"] == "Hello"
+
+    def test_extract_inner_message_content_non_str_non_list(self) -> None:
+        """Non-string/non-list content returns only role."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_content,
+        )
+
+        inner_msg = {"role": "user", "content": 12345}
+        result = _extract_inner_message_content(inner_msg)
+        assert result == {"role": "user"}
+
+    def test_extract_message_content_with_inner_message(self) -> None:
+        """Message with inner message dict extracts full content."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_content,
+        )
+
+        message = MagicMock()
+        message.message = {"role": "user", "content": "Full user message"}
+        message.result = None
+        message.structured_output = None
+        message.usage = None
+
+        result = _extract_message_content(message)
+        assert result["role"] == "user"
+        assert result["content"] == "Full user message"
+
+    def test_extract_message_content_with_result(self) -> None:
+        """ResultMessage with result field extracts full result."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_content,
+        )
+
+        message = MagicMock()
+        message.message = None
+        message.result = "Final answer with full content"
+        message.structured_output = None
+        message.usage = None
+
+        result = _extract_message_content(message)
+        assert result["result"] == "Final answer with full content"
+
+    def test_extract_message_content_with_structured_output(self) -> None:
+        """Message with structured_output includes full structured output."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_content,
+        )
+
+        message = MagicMock()
+        message.message = None
+        message.result = None
+        message.structured_output = {"summary": "test", "issues": ["a", "b"]}
+        message.usage = None
+
+        result = _extract_message_content(message)
+        assert result["structured_output"] == {"summary": "test", "issues": ["a", "b"]}
+
+    def test_extract_message_content_with_usage(self) -> None:
+        """Message with usage includes usage data."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_content,
+        )
+
+        message = MagicMock()
+        message.message = None
+        message.result = None
+        message.structured_output = None
+        message.usage = {"input_tokens": 100, "output_tokens": 50}
+
+        result = _extract_message_content(message)
+        assert result["usage"] == {"input_tokens": 100, "output_tokens": 50}
+
+    def test_extract_message_content_no_attrs(self) -> None:
+        """Message without expected attributes returns empty dict."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_content,
+        )
+
+        message = MagicMock(spec=[])
+
+        result = _extract_message_content(message)
+        assert result == {}

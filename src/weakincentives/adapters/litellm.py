@@ -153,6 +153,18 @@ def _normalize_litellm_throttle(
     class_name = error.__class__.__name__.lower()
     kind: ThrottleKind | None = None
 
+    logger.debug(
+        "litellm.throttle.analyzing",
+        event="throttle.analyzing",
+        context={
+            "prompt_name": prompt_name,
+            "error_type": error.__class__.__name__,
+            "error_message": message[:500],
+            "status_code": status_code,
+            "code": code,
+        },
+    )
+
     if "insufficient_quota" in lower or code == "insufficient_quota":
         kind = "quota_exhausted"
     elif (
@@ -169,7 +181,28 @@ def _normalize_litellm_throttle(
         kind = "timeout"
 
     if kind is None:
+        logger.debug(
+            "litellm.throttle.not_throttle",
+            event="throttle.not_throttle",
+            context={
+                "prompt_name": prompt_name,
+                "error_type": error.__class__.__name__,
+            },
+        )
         return None
+
+    retry_after = _retry_after_from_error(error)
+    logger.debug(
+        "litellm.throttle.detected",
+        event="throttle.detected",
+        context={
+            "prompt_name": prompt_name,
+            "throttle_kind": kind,
+            "retry_after_seconds": (
+                retry_after.total_seconds() if retry_after else None
+            ),
+        },
+    )
 
     return ThrottleError(
         message,
@@ -177,7 +210,7 @@ def _normalize_litellm_throttle(
         phase=PROMPT_EVALUATION_PHASE_REQUEST,
         details=throttle_details(
             kind=kind,
-            retry_after=_retry_after_from_error(error),
+            retry_after=retry_after,
             provider_payload=_error_payload(error),
         ),
     )
@@ -236,6 +269,8 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         completion_config: LiteLLMClientConfig | None = None,
     ) -> None:
         super().__init__()
+        # Capture this before completion may be reassigned
+        used_explicit_completion = completion is not None
         if completion is not None:
             if completion_factory is not None or completion_kwargs is not None:
                 raise ValueError(
@@ -263,6 +298,21 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         self._model_config = model_config
         self._tool_choice: ToolChoice = tool_choice
 
+        logger.debug(
+            "litellm.adapter.init",
+            event="adapter.init",
+            context={
+                "model": model,
+                "tool_choice": tool_choice,
+                "has_model_config": model_config is not None,
+                "has_completion_config": completion_config is not None,
+                "used_explicit_completion": used_explicit_completion,
+                "used_completion_factory": completion_factory is not None,
+                "temperature": model_config.temperature if model_config else None,
+                "max_tokens": model_config.max_tokens if model_config else None,
+            },
+        )
+
     @override
     def evaluate[OutputT](
         self,
@@ -273,6 +323,22 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
+        prompt_name_for_log = prompt.name or prompt.template.__class__.__name__
+
+        logger.debug(
+            "litellm.evaluate.entry",
+            event="evaluate.entry",
+            context={
+                "prompt_name": prompt_name_for_log,
+                "has_deadline": deadline is not None,
+                "deadline_remaining_seconds": (
+                    deadline.remaining().total_seconds() if deadline else None
+                ),
+                "has_budget": budget is not None,
+                "has_budget_tracker": budget_tracker is not None,
+            },
+        )
+
         render_options = AdapterRenderOptions(
             enable_json_schema=True,
             deadline=deadline,
@@ -288,6 +354,17 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         rendered = render_context.rendered
         response_format = render_context.response_format
         render_inputs = render_context.render_inputs
+
+        logger.debug(
+            "litellm.evaluate.setup_complete",
+            event="evaluate.setup_complete",
+            context={
+                "prompt_name": prompt_name,
+                "has_response_format": response_format is not None,
+                "tool_count": len(rendered.tools),
+                "tool_names": [t.name for t in rendered.tools],
+            },
+        )
 
         def _call_provider(
             messages: list[dict[str, Any]],
@@ -308,8 +385,40 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
             if response_format_payload is not None:
                 request_payload["response_format"] = response_format_payload
 
+            logger.debug(
+                "litellm.provider.request",
+                event="provider.request",
+                context={
+                    "prompt_name": prompt_name,
+                    "model": self._model,
+                    "message_count": len(messages),
+                    "tool_count": len(tool_specs) if tool_specs else 0,
+                    "tool_names": [
+                        spec.get("function", {}).get("name") for spec in tool_specs
+                    ]
+                    if tool_specs
+                    else [],
+                    "tool_choice": tool_choice_directive,
+                    "has_response_format": response_format_payload is not None,
+                },
+            )
+
+            def _execute_completion() -> object:
+                response = self._completion(**request_payload)
+                logger.debug(
+                    "litellm.provider.response",
+                    event="provider.response",
+                    context={
+                        "prompt_name": prompt_name,
+                        "response_type": type(response).__name__,
+                        "has_choices": hasattr(response, "choices"),
+                        "has_usage": hasattr(response, "usage"),
+                    },
+                )
+                return response
+
             return call_provider_with_normalization(
-                lambda: self._completion(**request_payload),
+                _execute_completion,
                 prompt_name=prompt_name,
                 normalize_throttle=lambda error: _normalize_litellm_throttle(
                     error, prompt_name=prompt_name

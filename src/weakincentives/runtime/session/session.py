@@ -459,7 +459,16 @@ class Session(SessionProtocol):
             result = session.dispatch(AddStep(step="implement feature"))
 
         """
-        self._dispatch_data_event(type(event), event)
+        event_type = type(event)
+        logger.debug(
+            "session.dispatch",
+            event="session.dispatch",
+            context={
+                "session_id": str(self.session_id),
+                "event_type": event_type.__qualname__,
+            },
+        )
+        self._dispatch_data_event(event_type, event)
         return self._bus.dispatch(event)
 
     # ──────────────────────────────────────────────────────────────────────
@@ -483,6 +492,15 @@ class Session(SessionProtocol):
         for registrations in self._reducers.values():
             for registration in registrations:
                 slice_types.add(registration.slice_type)
+        logger.debug(
+            "session.reset",
+            event="session.reset",
+            context={
+                "session_id": str(self.session_id),
+                "slice_count": len(slice_types),
+                "slice_types": [st.__qualname__ for st in slice_types],
+            },
+        )
         for slice_type in slice_types:
             slice_instance = self._get_or_create_slice(slice_type)
             slice_instance.clear()
@@ -520,6 +538,17 @@ class Session(SessionProtocol):
             msg = f"Slice types not registered: {missing_names}"
             raise SnapshotRestoreError(msg)
 
+        logger.debug(
+            "session.restore",
+            event="session.restore",
+            context={
+                "session_id": str(self.session_id),
+                "preserve_logs": preserve_logs,
+                "snapshot_slice_count": len(snapshot.slices),
+                "registered_slice_count": len(registered_slices),
+            },
+        )
+
         with self.locked():
             for slice_type in registered_slices:
                 policy = snapshot.policies.get(
@@ -548,6 +577,18 @@ class Session(SessionProtocol):
         """Register a reducer for the provided data type."""
         target_slice_type: SessionSliceType = (
             data_type if slice_type is None else slice_type
+        )
+        reducer_name = getattr(reducer, "__qualname__", repr(reducer))
+        logger.debug(
+            "session.register_reducer",
+            event="session.register_reducer",
+            context={
+                "session_id": str(self.session_id),
+                "data_type": data_type.__qualname__,
+                "slice_type": target_slice_type.__qualname__,
+                "reducer": reducer_name,
+                "policy": policy.name if policy is not None else None,
+            },
         )
         registration = _ReducerRegistration(
             reducer=cast(TypedReducer[Any], reducer),
@@ -583,6 +624,15 @@ class Session(SessionProtocol):
             init_event = cast("InitializeSlice[Any]", event)
             slice_type: SessionSliceType = init_event.slice_type
             values: SessionSlice = init_event.values
+            logger.debug(
+                "session.initialize_slice",
+                event="session.initialize_slice",
+                context={
+                    "session_id": str(self.session_id),
+                    "slice_type": slice_type.__qualname__,
+                    "value_count": len(values),
+                },
+            )
             with self.locked():
                 slice_instance = self._get_or_create_slice(slice_type)
                 slice_instance.replace(values)
@@ -593,6 +643,15 @@ class Session(SessionProtocol):
             clear_event = cast("ClearSlice[Any]", event)
             slice_type = clear_event.slice_type
             predicate: Callable[[Any], bool] | None = clear_event.predicate
+            logger.debug(
+                "session.clear_slice",
+                event="session.clear_slice",
+                context={
+                    "session_id": str(self.session_id),
+                    "slice_type": slice_type.__qualname__,
+                    "has_predicate": predicate is not None,
+                },
+            )
             with self.locked():
                 slice_instance = self._get_or_create_slice(slice_type)
                 slice_instance.clear(predicate)
@@ -796,23 +855,44 @@ class Session(SessionProtocol):
                     )
                 ]
 
+        logger.debug(
+            "session.dispatch_data_event",
+            event="session.dispatch_data_event",
+            context={
+                "session_id": str(self.session_id),
+                "data_type": data_type.__qualname__,
+                "reducer_count": len(registrations),
+            },
+        )
+
         view = SessionView(self)
         context = build_reducer_context(session=view)
 
         for registration in registrations:
             slice_type = registration.slice_type
+            reducer_name = getattr(
+                registration.reducer, "__qualname__", repr(registration.reducer)
+            )
             with self.locked():
                 slice_instance = self._get_or_create_slice(slice_type)
                 view = slice_instance.view()
             try:
                 op = registration.reducer(view, event, context=context)
+                op_type = type(op).__name__
+                logger.debug(
+                    "session.reducer_applied",
+                    event="session.reducer_applied",
+                    context={
+                        "session_id": str(self.session_id),
+                        "reducer": reducer_name,
+                        "slice_type": slice_type.__qualname__,
+                        "operation": op_type,
+                    },
+                )
                 # Apply the slice operation
                 with self.locked():
                     self._apply_slice_op(op, slice_instance)
             except Exception:  # log and continue
-                reducer_name = getattr(
-                    registration.reducer, "__qualname__", repr(registration.reducer)
-                )
                 logger.exception(
                     "Reducer application failed.",
                     event="session_reducer_failed",

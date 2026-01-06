@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any, cast, override
 
@@ -79,6 +80,79 @@ def _import_sdk() -> Any:  # pragma: no cover
             "claude-agent-sdk is not installed. Install it with: "
             "pip install 'weakincentives[claude-agent-sdk]'"
         ) from error
+
+
+def _extract_content_block(block: dict[str, Any]) -> dict[str, Any]:
+    """Extract full content from a single content block for logging."""
+    block_type = block.get("type")
+    result: dict[str, Any] = {"type": block_type}
+
+    if block_type == "tool_use":
+        result["name"] = block.get("name", "unknown")
+        result["id"] = block.get("id", "")
+        # Include full input for complete tracing
+        if "input" in block:
+            result["input"] = block["input"]
+    elif block_type == "text":
+        result["text"] = block.get("text", "")
+    elif block_type == "tool_result":
+        result["tool_use_id"] = block.get("tool_use_id", "")
+        result["content"] = block.get("content", "")
+        if "is_error" in block:
+            result["is_error"] = block["is_error"]
+    else:
+        # For other types, include the whole block
+        result.update(block)
+
+    return result
+
+
+def _extract_list_content(content: list[Any]) -> list[dict[str, Any]]:
+    """Extract full content from content block list."""
+    return [
+        _extract_content_block(block) for block in content if isinstance(block, dict)
+    ]
+
+
+def _extract_inner_message_content(inner_msg: dict[str, Any]) -> dict[str, Any]:
+    """Extract full content from the inner message dict."""
+    result: dict[str, Any] = {}
+    role = inner_msg.get("role")
+    if role:
+        result["role"] = role
+    content = inner_msg.get("content")
+    if isinstance(content, str):
+        result["content"] = content
+    elif isinstance(content, list):
+        result["content_blocks"] = _extract_list_content(content)
+    return result
+
+
+def _extract_message_content(message: Any) -> dict[str, Any]:
+    """Extract full content from an SDK message for debug logging."""
+    result: dict[str, Any] = {}
+
+    # Try to get the inner message dict (common pattern in SDK messages)
+    inner_msg = getattr(message, "message", None)
+    if isinstance(inner_msg, dict):
+        result.update(_extract_inner_message_content(inner_msg))
+
+    # ResultMessage specific: extract the full result field
+    sdk_result = getattr(message, "result", None)
+    if sdk_result and isinstance(sdk_result, str):
+        result["result"] = sdk_result
+
+    # Structured output - include full content
+    structured_output = getattr(message, "structured_output", None)
+    if structured_output:
+        result["structured_output"] = structured_output
+
+    # Include usage if present
+    usage = getattr(message, "usage", None)
+    if usage:
+        result["usage"] = usage if isinstance(usage, dict) else str(usage)
+
+    return result
 
 
 class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
@@ -154,6 +228,26 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         self._model_config = model_config or ClaudeAgentSDKModelConfig(model=model)
         self._allowed_tools = allowed_tools
         self._disallowed_tools = disallowed_tools
+        # Buffer for capturing stderr output for debug logging
+        self._stderr_buffer: list[str] = []
+
+        logger.debug(
+            "claude_agent_sdk.adapter.init",
+            event="adapter.init",
+            context={
+                "model": model,
+                "permission_mode": self._client_config.permission_mode,
+                "cwd": self._client_config.cwd,
+                "max_turns": self._client_config.max_turns,
+                "max_budget_usd": self._client_config.max_budget_usd,
+                "suppress_stderr": self._client_config.suppress_stderr,
+                "stop_on_structured_output": self._client_config.stop_on_structured_output,
+                "has_isolation_config": self._client_config.isolation is not None,
+                "allowed_tools": allowed_tools,
+                "disallowed_tools": disallowed_tools,
+                "max_thinking_tokens": self._model_config.max_thinking_tokens,
+            },
+        )
 
     @override
     def evaluate(
@@ -193,10 +287,35 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         effective_deadline = deadline or (budget.deadline if budget else None)
 
+        prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
+
+        logger.debug(
+            "claude_agent_sdk.evaluate.entry",
+            event="evaluate.entry",
+            context={
+                "prompt_name": prompt_name,
+                "prompt_ns": prompt.ns,
+                "prompt_key": prompt.key,
+                "has_deadline": effective_deadline is not None,
+                "deadline_remaining_seconds": (
+                    effective_deadline.remaining().total_seconds()
+                    if effective_deadline
+                    else None
+                ),
+                "has_budget": budget is not None,
+                "has_budget_tracker": budget_tracker is not None,
+            },
+        )
+
         if effective_deadline and effective_deadline.remaining().total_seconds() <= 0:
+            logger.debug(
+                "claude_agent_sdk.evaluate.deadline_expired",
+                event="evaluate.deadline_expired",
+                context={"prompt_name": prompt_name},
+            )
             raise PromptEvaluationError(
                 message="Deadline expired before SDK invocation",
-                prompt_name=prompt.name or f"{prompt.ns}:{prompt.key}",
+                prompt_name=prompt_name,
                 phase="request",
             )
 
@@ -220,10 +339,30 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         """Async implementation of evaluate."""
         sdk = _import_sdk()
 
+        # Clear stderr buffer for this evaluation
+        self._stderr_buffer.clear()
+
         rendered = prompt.render(
             session=session,
         )
         prompt_text = rendered.text
+
+        logger.debug(
+            "claude_agent_sdk.evaluate.rendered",
+            event="evaluate.rendered",
+            context={
+                "prompt_text_length": len(prompt_text),
+                "tool_count": len(rendered.tools),
+                "tool_names": [t.name for t in rendered.tools],
+                "has_output_type": rendered.output_type is not None,
+                "output_type": (
+                    rendered.output_type.__name__
+                    if rendered.output_type
+                    and hasattr(rendered.output_type, "__name__")
+                    else str(rendered.output_type)
+                ),
+            },
+        )
 
         session.dispatcher.dispatch(
             PromptRendered(
@@ -257,8 +396,18 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 # Create an empty temp folder as the default workspace
                 temp_workspace_dir = tempfile.mkdtemp(prefix="wink-sdk-")
                 effective_cwd = temp_workspace_dir
+                logger.debug(
+                    "claude_agent_sdk.evaluate.temp_workspace_created",
+                    event="evaluate.temp_workspace_created",
+                    context={"temp_workspace_dir": temp_workspace_dir},
+                )
             filesystem = HostFilesystem(_root=effective_cwd)
             prompt = prompt.bind(resources={Filesystem: filesystem})
+            logger.debug(
+                "claude_agent_sdk.evaluate.filesystem_bound",
+                event="evaluate.filesystem_bound",
+                context={"effective_cwd": effective_cwd},
+            )
 
         try:
             # Enter resource context for lifecycle management
@@ -295,6 +444,16 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         effective_cwd: str | None,
     ) -> PromptResponse[OutputT]:
         """Run SDK query within prompt context."""
+        logger.debug(
+            "claude_agent_sdk.run_context.entry",
+            event="run_context.entry",
+            context={
+                "prompt_name": prompt_name,
+                "effective_cwd": effective_cwd,
+                "has_output_format": output_format is not None,
+            },
+        )
+
         # Create hook context for native tool transactions
         hook_context = HookContext(
             session=session,
@@ -315,6 +474,17 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             budget_tracker=budget_tracker,
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
+        )
+
+        logger.debug(
+            "claude_agent_sdk.run_context.bridged_tools",
+            event="run_context.bridged_tools",
+            context={
+                "bridged_tool_count": len(bridged_tools),
+                "bridged_tool_names": [
+                    getattr(t, "name", str(t)) for t in bridged_tools
+                ],
+            },
         )
 
         logger.info(
@@ -341,6 +511,30 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             workspace_path=effective_cwd,
         )
 
+        # Build network policy representation for logging
+        network_policy_repr: str | None = None
+        if isolation.network_policy:
+            network_policy_repr = str(isolation.network_policy)
+
+        # Count skills if provided (SkillConfig | None)
+        skill_count = 1 if isolation.skills else 0
+
+        logger.debug(
+            "claude_agent_sdk.run_context.isolation",
+            event="run_context.isolation",
+            context={
+                "ephemeral_home_path": str(ephemeral_home.home_path),
+                "workspace_path": effective_cwd,
+                "network_policy": network_policy_repr,
+                "sandbox_enabled": (
+                    isolation.sandbox.enabled if isolation.sandbox else True
+                ),
+                "has_api_key_override": isolation.api_key is not None,
+                "include_host_env": isolation.include_host_env,
+                "skill_count": skill_count,
+            },
+        )
+
         try:
             messages = await self._run_sdk_query(
                 sdk=sdk,
@@ -353,9 +547,31 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             )
         except VisibilityExpansionRequired:
             # Progressive disclosure: let this propagate to the caller
+            logger.debug(
+                "claude_agent_sdk.run_context.visibility_expansion_required",
+                event="run_context.visibility_expansion_required",
+                context={"prompt_name": prompt_name},
+            )
             raise
         except Exception as error:
-            raise normalize_sdk_error(error, prompt_name) from error
+            # Capture stderr for debugging when SDK fails
+            captured_stderr = (
+                "\n".join(self._stderr_buffer) if self._stderr_buffer else None
+            )
+            logger.debug(
+                "claude_agent_sdk.run_context.sdk_error",
+                event="run_context.sdk_error",
+                context={
+                    "prompt_name": prompt_name,
+                    "error_type": type(error).__name__,
+                    "error_message": str(error),
+                    "stderr_output": captured_stderr,
+                    "exit_code": getattr(error, "exit_code", None),
+                },
+            )
+            raise normalize_sdk_error(
+                error, prompt_name, stderr_output=captured_stderr
+            ) from error
         finally:
             # Always clean up ephemeral home
             ephemeral_home.cleanup()
@@ -398,7 +614,26 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return response
 
-    async def _run_sdk_query(  # noqa: C901
+    def _create_stderr_handler(self) -> Callable[[str], None]:
+        """Create a stderr handler that buffers output for debug logging.
+
+        Even when stderr is suppressed from display, we capture it for
+        debugging purposes when errors occur.
+        """
+
+        def stderr_handler(line: str) -> None:
+            # Always buffer stderr for debug logging on errors
+            self._stderr_buffer.append(line)
+            # Log individual stderr lines at DEBUG level
+            logger.debug(
+                "claude_agent_sdk.sdk_query.stderr",
+                event="sdk_query.stderr",
+                context={"line": line.rstrip()},
+            )
+
+        return stderr_handler
+
+    async def _run_sdk_query(  # noqa: C901, PLR0915 - complexity needed for debug logging
         self,
         *,
         sdk: Any,
@@ -412,6 +647,16 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         """Execute the SDK query and return message list."""
         # Import the SDK's types
         from claude_agent_sdk.types import ClaudeAgentOptions, HookMatcher
+
+        logger.debug(
+            "claude_agent_sdk.sdk_query.entry",
+            event="sdk_query.entry",
+            context={
+                "prompt_text_preview": prompt_text[:500] if prompt_text else "",
+                "has_output_format": output_format is not None,
+                "bridged_tool_count": len(bridged_tools),
+            },
+        )
 
         # Build options dict then convert to ClaudeAgentOptions
         options_kwargs: dict[str, Any] = {
@@ -444,9 +689,22 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         # Apply isolation configuration from ephemeral home
         # Set environment variables including redirected HOME
-        options_kwargs["env"] = ephemeral_home.get_env()
+        env_vars = ephemeral_home.get_env()
+        options_kwargs["env"] = env_vars
         # Prevent loading any external settings
         options_kwargs["setting_sources"] = ephemeral_home.get_setting_sources()
+
+        logger.debug(
+            "claude_agent_sdk.sdk_query.env_configured",
+            event="sdk_query.env_configured",
+            context={
+                "home_override": env_vars.get("HOME"),
+                "has_api_key": "ANTHROPIC_API_KEY" in env_vars,
+                "env_var_count": len(env_vars),
+                # Log non-sensitive env vars for debugging
+                "env_keys": [k for k in env_vars if "KEY" not in k.upper()],
+            },
+        )
 
         # Apply model config parameters
         # Note: The Claude Agent SDK does not expose max_tokens or temperature
@@ -463,10 +721,16 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             options_kwargs["mcp_servers"] = {
                 "wink": mcp_server_config,
             }
+            logger.debug(
+                "claude_agent_sdk.sdk_query.mcp_server_configured",
+                event="sdk_query.mcp_server_configured",
+                context={"mcp_server_name": "wink"},
+            )
 
-        # Suppress stderr if configured (hides bun errors and CLI noise)
-        if self._client_config.suppress_stderr:
-            options_kwargs["stderr"] = lambda _: None
+        # Always capture stderr for debug logging, but suppress display if configured
+        # This allows us to capture stderr output for error debugging even when
+        # suppress_stderr is True
+        options_kwargs["stderr"] = self._create_stderr_handler()
 
         # Create async hook callbacks
         pre_hook = create_pre_tool_use_hook(hook_context)
@@ -483,6 +747,16 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         # Build hooks dict with HookMatcher wrappers
         # matcher=None matches all tools
+        hook_types = [
+            "PreToolUse",
+            "PostToolUse",
+            "Stop",
+            "UserPromptSubmit",
+            "SubagentStart",
+            "SubagentStop",
+            "PreCompact",
+            "Notification",
+        ]
         options_kwargs["hooks"] = {
             "PreToolUse": [HookMatcher(matcher=None, hooks=[pre_hook])],
             "PostToolUse": [HookMatcher(matcher=None, hooks=[post_hook])],
@@ -493,6 +767,31 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             "PreCompact": [HookMatcher(matcher=None, hooks=[pre_compact_hook])],
             "Notification": [HookMatcher(matcher=None, hooks=[notification_hook])],
         }
+
+        logger.debug(
+            "claude_agent_sdk.sdk_query.hooks_registered",
+            event="sdk_query.hooks_registered",
+            context={"hook_types": hook_types},
+        )
+
+        # Log SDK options (excluding sensitive data)
+        logger.debug(
+            "claude_agent_sdk.sdk_query.options",
+            event="sdk_query.options",
+            context={
+                "model": options_kwargs.get("model"),
+                "cwd": options_kwargs.get("cwd"),
+                "permission_mode": options_kwargs.get("permission_mode"),
+                "max_turns": options_kwargs.get("max_turns"),
+                "max_budget_usd": options_kwargs.get("max_budget_usd"),
+                "max_thinking_tokens": options_kwargs.get("max_thinking_tokens"),
+                "has_output_format": "output_format" in options_kwargs,
+                "allowed_tools": options_kwargs.get("allowed_tools"),
+                "disallowed_tools": options_kwargs.get("disallowed_tools"),
+                "has_mcp_servers": "mcp_servers" in options_kwargs,
+                "betas": options_kwargs.get("betas"),
+            },
+        )
 
         options = ClaudeAgentOptions(**options_kwargs)
 
@@ -508,10 +807,36 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "session_id": hook_context.prompt_name,
             }
 
-        return [
-            message
-            async for message in sdk.query(prompt=stream_prompt(), options=options)
-        ]
+        logger.debug(
+            "claude_agent_sdk.sdk_query.executing",
+            event="sdk_query.executing",
+            context={"prompt_name": hook_context.prompt_name},
+        )
+
+        messages: list[Any] = []
+        async for message in sdk.query(prompt=stream_prompt(), options=options):
+            messages.append(message)
+            # Log each message at DEBUG level for troubleshooting
+            logger.debug(
+                "claude_agent_sdk.sdk_query.message_received",
+                event="sdk_query.message_received",
+                context={
+                    "message_type": type(message).__name__,
+                    "message_index": len(messages) - 1,
+                    **_extract_message_content(message),
+                },
+            )
+
+        logger.debug(
+            "claude_agent_sdk.sdk_query.complete",
+            event="sdk_query.complete",
+            context={
+                "message_count": len(messages),
+                "stderr_line_count": len(self._stderr_buffer),
+            },
+        )
+
+        return messages
 
     def _build_output_format(
         self,
