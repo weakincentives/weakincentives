@@ -57,6 +57,7 @@ src/weakincentives/
 ├── filesystem/      # Filesystem protocol and types (core abstraction)
 ├── formal/          # TLA+ formal specification support
 ├── optimizers/      # Optimizer framework and protocols
+├── skills/          # Skill types, validation (Agent Skills spec support)
 ├── prompt/          # Section/Prompt composition, overrides, tools
 ├── resources/       # Dependency injection with scoped lifecycles
 ├── runtime/         # Session, events, lifecycle, mailbox, transactions
@@ -68,7 +69,7 @@ The library is organized as "core primitives" + "batteries for specific agent
 styles":
 
 - **Core** (`weakincentives.*`): Prompt composition, sessions, adapters, serde,
-  dbc, filesystem protocols, resource registry
+  dbc, filesystem protocols, skills, resource registry
 - **Contrib** (`weakincentives.contrib.*`): Planning tools, VFS, Podman,
   asteval, workspace optimizers, Redis mailbox
 

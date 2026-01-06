@@ -27,34 +27,22 @@ from pathlib import Path
 from typing import Any
 
 from ...dataclasses import FrozenDataclass
-from ...errors import WinkError
+from ...skills import (
+    MAX_SKILL_TOTAL_BYTES,
+    SkillConfig,
+    SkillMountError,
+    SkillNotFoundError,
+    resolve_skill_name,
+    validate_skill,
+    validate_skill_name,
+)
 
 __all__ = [
     "EphemeralHome",
     "IsolationConfig",
     "NetworkPolicy",
     "SandboxConfig",
-    "SkillConfig",
-    "SkillMount",
-    "SkillMountError",
-    "SkillNotFoundError",
-    "SkillValidationError",
 ]
-
-
-# Skill error classes
-
-
-class SkillValidationError(WinkError):
-    """Raised when skill validation fails."""
-
-
-class SkillNotFoundError(WinkError):
-    """Raised when a skill source path does not exist."""
-
-
-class SkillMountError(WinkError):
-    """Raised when skill mounting fails."""
 
 
 @FrozenDataclass()
@@ -116,40 +104,6 @@ class SandboxConfig:
 
 
 @FrozenDataclass()
-class SkillMount:
-    """Mount a skill into the hermetic environment.
-
-    Attributes:
-        source: Path to a skill file (SKILL.md) or skill directory on the
-            host filesystem. Relative paths are resolved against the current
-            working directory.
-        name: Optional skill name override. If None, derived from the source
-            path (directory name or filename without extension).
-        enabled: Whether the skill is active. Disabled skills are not copied.
-            Defaults to True.
-    """
-
-    source: Path
-    name: str | None = None
-    enabled: bool = True
-
-
-@FrozenDataclass()
-class SkillConfig:
-    """Skills to install in the hermetic environment.
-
-    Attributes:
-        skills: Tuple of skill mounts to copy into the workspace.
-        validate_on_mount: If True, validate skill structure before copying.
-            Validation checks for required SKILL.md file in directories.
-            Defaults to True.
-    """
-
-    skills: tuple[SkillMount, ...] = ()
-    validate_on_mount: bool = True
-
-
-@FrozenDataclass()
 class IsolationConfig:
     """Configuration for hermetic SDK isolation.
 
@@ -190,78 +144,13 @@ _SENSITIVE_ENV_PREFIXES: tuple[str, ...] = (
     "OPENAI_",
 )
 
-# Skill constants
-_MAX_SKILL_FILE_BYTES: int = 1024 * 1024  # 1 MiB per file
-_MAX_SKILL_TOTAL_BYTES: int = 10 * 1024 * 1024  # 10 MiB per skill
-
-
-def resolve_skill_name(mount: SkillMount) -> str:
-    """Resolve the effective skill name from a mount.
-
-    Args:
-        mount: The skill mount to resolve a name for.
-
-    Returns:
-        The skill name to use for the destination directory.
-    """
-    if mount.name is not None:
-        return mount.name
-    if mount.source.is_dir():
-        return mount.source.name
-    # File: strip .md extension
-    return mount.source.stem
-
-
-def _validate_skill_name(name: str) -> None:
-    """Validate that a skill name is safe for filesystem use.
-
-    Args:
-        name: The skill name to validate.
-
-    Raises:
-        SkillMountError: If the name contains path traversal characters.
-    """
-    if "/" in name or "\\" in name or ".." in name:
-        msg = f"Skill name contains invalid characters: {name}"
-        raise SkillMountError(msg)
-    if not name or name in {".", ".."}:
-        msg = f"Invalid skill name: {name}"
-        raise SkillMountError(msg)
-
-
-def _validate_skill(source: Path) -> None:
-    """Validate skill structure before copying.
-
-    Args:
-        source: Path to the skill file or directory.
-
-    Raises:
-        SkillValidationError: If the skill structure is invalid.
-    """
-    if source.is_dir():
-        # Directory skill must contain SKILL.md
-        skill_file = source / "SKILL.md"
-        if not skill_file.is_file():
-            msg = f"Skill directory missing SKILL.md: {source}"
-            raise SkillValidationError(msg)
-    else:
-        # File skill must be markdown
-        if source.suffix.lower() != ".md":
-            msg = f"Skill file must be markdown (.md): {source}"
-            raise SkillValidationError(msg)
-        # Check file size
-        size = source.stat().st_size
-        if size > _MAX_SKILL_FILE_BYTES:
-            msg = f"Skill file exceeds size limit ({size} > {_MAX_SKILL_FILE_BYTES}): {source}"
-            raise SkillValidationError(msg)
-
 
 def _copy_skill(
     source: Path,
     dest_dir: Path,
     *,
     follow_symlinks: bool = False,
-    max_total_bytes: int = _MAX_SKILL_TOTAL_BYTES,
+    max_total_bytes: int = MAX_SKILL_TOTAL_BYTES,
 ) -> int:
     """Copy a skill to the destination directory.
 
@@ -418,7 +307,7 @@ class EphemeralHome:
                 continue
 
             name = resolve_skill_name(mount)
-            _validate_skill_name(name)
+            validate_skill_name(name)
 
             if name in seen_names:
                 msg = f"Duplicate skill name: {name}"
@@ -431,7 +320,7 @@ class EphemeralHome:
                 raise SkillNotFoundError(msg)
 
             if skills_config.validate_on_mount:
-                _validate_skill(source)
+                validate_skill(source)
 
             dest = skills_dir / name
             _copy_skill(source, dest)

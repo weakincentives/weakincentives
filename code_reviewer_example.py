@@ -40,8 +40,6 @@ from weakincentives.adapters.claude_agent_sdk import (
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
-    SkillConfig,
-    SkillMount,
 )
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
@@ -82,6 +80,7 @@ from weakincentives.runtime import (
     ShutdownCoordinator,
 )
 from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
+from weakincentives.skills import SkillConfig, SkillMount
 from weakincentives.types import SupportsDataclass
 
 PROJECT_ROOT = Path(__file__).resolve().parent

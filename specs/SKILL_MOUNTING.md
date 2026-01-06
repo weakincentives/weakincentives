@@ -9,6 +9,34 @@ knowledge, or workflows. By mounting skills at isolation setup time, WINK
 enables declarative skill composition without modifying prompts or requiring
 Claude Code internals.
 
+Skills follow the open Agent Skills specification (https://agentskills.io),
+originally developed by Anthropic and released as an open standard. The SKILL.md
+file format is the core specification that agents use to discover and interpret
+skill definitions.
+
+## Architecture
+
+Skills in WINK are organized into two layers:
+
+### Core Library (`weakincentives.skills`)
+
+The core library defines provider-agnostic skill primitives:
+
+- **`Skill`**: Core representation of a skill with name, source path, and content
+- **`SkillMount`**: Configuration for mounting a skill (source, name, enabled)
+- **`SkillConfig`**: Collection of skill mounts with validation settings
+- **Error types**: `SkillError`, `SkillValidationError`, `SkillNotFoundError`, `SkillMountError`
+- **Validation**: `validate_skill()`, `validate_skill_name()`, `resolve_skill_name()`
+- **Constants**: `MAX_SKILL_FILE_BYTES` (1 MiB), `MAX_SKILL_TOTAL_BYTES` (10 MiB)
+
+### Adapter Implementation (`weakincentives.adapters.claude_agent_sdk`)
+
+The Claude Agent SDK adapter implements skill mounting for Claude Code:
+
+- **`EphemeralHome._mount_skills()`**: Copies skills into the ephemeral home's `.claude/skills/`
+- **`_copy_skill()`**: Handles file system operations for skill mounting
+- **`IsolationConfig.skills`**: Integration point for skill configuration (accepts `SkillConfig`)
+
 ## Guiding Principles
 
 - **Passthrough over abstraction**: Mount skills for native Claude Code
@@ -144,12 +172,41 @@ Expected behavior:
 
 ## Data Model
 
+All core skill types are defined in `weakincentives.skills` and can be imported
+directly or via the Claude Agent SDK adapter (for backward compatibility).
+
+### Skill
+
+```python
+from weakincentives.skills import Skill
+
+@FrozenDataclass()
+class Skill:
+    """Represents a skill definition.
+
+    A skill is a collection of instructions, scripts, and resources that
+    agents can discover and use. Skills follow the Agent Skills specification
+    (https://agentskills.io) and use SKILL.md as the core format standard.
+
+    Attributes:
+        name: The skill's identifier. Used for discovery and deduplication.
+        source: Path to the skill file or directory on the host filesystem.
+        content: The content of the SKILL.md file (if loaded).
+    """
+
+    name: str
+    source: Path
+    content: str | None = None
+```
+
 ### SkillMount
 
 ```python
+from weakincentives.skills import SkillMount
+
 @FrozenDataclass()
 class SkillMount:
-    """Mount a skill into the hermetic environment.
+    """Configuration for mounting a skill into an agent environment.
 
     Attributes:
         source: Path to a skill file (SKILL.md) or skill directory on the
@@ -169,9 +226,11 @@ class SkillMount:
 ### SkillConfig
 
 ```python
+from weakincentives.skills import SkillConfig
+
 @FrozenDataclass()
 class SkillConfig:
-    """Skills to install in the hermetic environment.
+    """Collection of skills to install in an agent environment.
 
     Attributes:
         skills: Tuple of skill mounts to copy into the workspace.
@@ -184,7 +243,7 @@ class SkillConfig:
     validate_on_mount: bool = True
 ```
 
-### Integration with IsolationConfig
+### Integration with IsolationConfig (Claude Agent SDK)
 
 ```python
 @FrozenDataclass()
@@ -269,16 +328,29 @@ A single-file skill must:
 
 ### Validation Errors
 
+All skill errors are defined in `weakincentives.skills` and inherit from `SkillError`:
+
 ```python
-class SkillValidationError(WinkError):
+from weakincentives.skills import (
+    SkillError,
+    SkillValidationError,
+    SkillNotFoundError,
+    SkillMountError,
+)
+
+class SkillError(WinkError):
+    """Base class for all skill-related exceptions."""
+    pass
+
+class SkillValidationError(SkillError):
     """Raised when skill validation fails."""
     pass
 
-class SkillNotFoundError(WinkError):
+class SkillNotFoundError(SkillError):
     """Raised when a skill source path does not exist."""
     pass
 
-class SkillMountError(WinkError):
+class SkillMountError(SkillError):
     """Raised when skill mounting fails."""
     pass
 ```
@@ -298,11 +370,19 @@ Validation errors include:
 
 ### Name Resolution
 
-The skill name determines its destination directory:
+The skill name determines its destination directory. Use `resolve_skill_name()`
+from the core library:
 
 ```python
+from weakincentives.skills import resolve_skill_name
+
 def resolve_skill_name(mount: SkillMount) -> str:
-    """Resolve the effective skill name from a mount."""
+    """Resolve the effective skill name from a mount.
+
+    1. Explicit name from mount.name if provided
+    2. Directory name if source is a directory
+    3. File stem (without .md extension) if source is a file
+    """
     if mount.name is not None:
         return mount.name
     if mount.source.is_dir():
@@ -356,13 +436,12 @@ def _copy_skill(
 
 ```python
 from pathlib import Path
+from weakincentives.skills import SkillConfig, SkillMount
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     IsolationConfig,
     NetworkPolicy,
-    SkillConfig,
-    SkillMount,
 )
 
 adapter = ClaudeAgentSDKAdapter(
@@ -574,3 +653,37 @@ def skill_file(tmp_path: Path) -> Path:
 - [CLAUDE_AGENT_SDK.md](CLAUDE_AGENT_SDK.md): Parent adapter specification
 - [WORKSPACE.md](WORKSPACE.md): Workspace and mount patterns
 - [PROMPTS.md](PROMPTS.md): Prompt composition (alternative to skills)
+
+## Module Reference
+
+### Core Library (`weakincentives.skills`)
+
+```python
+# Types
+Skill              # Core skill representation
+SkillMount         # Mounting configuration
+SkillConfig        # Collection of mounts
+
+# Errors (inherit from SkillError)
+SkillError         # Base error class
+SkillValidationError
+SkillNotFoundError
+SkillMountError
+
+# Validation
+resolve_skill_name(mount: SkillMount) -> str
+validate_skill(source: Path) -> None
+validate_skill_name(name: str) -> None
+
+# Constants
+MAX_SKILL_FILE_BYTES   # 1 MiB
+MAX_SKILL_TOTAL_BYTES  # 10 MiB
+```
+
+### Adapter (`weakincentives.adapters.claude_agent_sdk`)
+
+```python
+# Adapter-specific
+IsolationConfig.skills  # Skill configuration field (accepts SkillConfig)
+EphemeralHome           # Mounts skills during creation
+```

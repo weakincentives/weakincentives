@@ -26,15 +26,17 @@ from weakincentives.adapters.claude_agent_sdk.isolation import (
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    _copy_skill,
+)
+from weakincentives.skills import (
     SkillConfig,
     SkillMount,
     SkillMountError,
     SkillNotFoundError,
     SkillValidationError,
-    _copy_skill,
-    _validate_skill,
-    _validate_skill_name,
     resolve_skill_name,
+    validate_skill,
+    validate_skill_name,
 )
 
 
@@ -454,29 +456,29 @@ class TestResolveSkillName:
 
 class TestValidateSkillName:
     def test_valid_name(self) -> None:
-        _validate_skill_name("my-skill")
-        _validate_skill_name("skill_v2")
-        _validate_skill_name("123-test")
+        validate_skill_name("my-skill")
+        validate_skill_name("skill_v2")
+        validate_skill_name("123-test")
 
     def test_rejects_forward_slash(self) -> None:
         with pytest.raises(SkillMountError, match="invalid characters"):
-            _validate_skill_name("path/traversal")
+            validate_skill_name("path/traversal")
 
     def test_rejects_backslash(self) -> None:
         with pytest.raises(SkillMountError, match="invalid characters"):
-            _validate_skill_name("path\\traversal")
+            validate_skill_name("path\\traversal")
 
     def test_rejects_double_dot(self) -> None:
         with pytest.raises(SkillMountError, match="invalid characters"):
-            _validate_skill_name("..evil")
+            validate_skill_name("..evil")
 
     def test_rejects_empty_name(self) -> None:
         with pytest.raises(SkillMountError, match="Invalid skill name"):
-            _validate_skill_name("")
+            validate_skill_name("")
 
     def test_rejects_dot(self) -> None:
         with pytest.raises(SkillMountError, match="Invalid skill name"):
-            _validate_skill_name(".")
+            validate_skill_name(".")
 
 
 class TestValidateSkill:
@@ -484,31 +486,31 @@ class TestValidateSkill:
         skill_dir = tmp_path / "test-skill"
         skill_dir.mkdir()
         (skill_dir / "SKILL.md").write_text("# Test Skill\n\nContent")
-        _validate_skill(skill_dir)  # Should not raise
+        validate_skill(skill_dir)  # Should not raise
 
     def test_directory_missing_skill_md(self, tmp_path: Path) -> None:
         skill_dir = tmp_path / "test-skill"
         skill_dir.mkdir()
         with pytest.raises(SkillValidationError, match=r"missing SKILL\.md"):
-            _validate_skill(skill_dir)
+            validate_skill(skill_dir)
 
     def test_valid_file_skill(self, tmp_path: Path) -> None:
         skill_file = tmp_path / "test-skill.md"
         skill_file.write_text("# Test Skill\n\nContent")
-        _validate_skill(skill_file)  # Should not raise
+        validate_skill(skill_file)  # Should not raise
 
     def test_file_wrong_extension(self, tmp_path: Path) -> None:
         skill_file = tmp_path / "test-skill.txt"
         skill_file.write_text("# Test Skill\n\nContent")
         with pytest.raises(SkillValidationError, match="must be markdown"):
-            _validate_skill(skill_file)
+            validate_skill(skill_file)
 
     def test_file_too_large(self, tmp_path: Path) -> None:
         skill_file = tmp_path / "huge-skill.md"
         # Create a file larger than 1 MiB
         skill_file.write_text("x" * (1024 * 1024 + 1))
         with pytest.raises(SkillValidationError, match="exceeds size limit"):
-            _validate_skill(skill_file)
+            validate_skill(skill_file)
 
 
 class TestCopySkill:

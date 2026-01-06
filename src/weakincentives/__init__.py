@@ -29,6 +29,15 @@ from .prompt import (
     parse_structured_output,
 )
 from .runtime import StructuredLogger, configure_logging, get_logger
+from .skills import (
+    Skill,
+    SkillConfig,
+    SkillError,
+    SkillMount,
+    SkillMountError,
+    SkillNotFoundError,
+    SkillValidationError,
+)
 from .types import JSONValue, SupportsDataclass
 
 __all__ = [
@@ -42,6 +51,13 @@ __all__ = [
     "MarkdownSection",
     "Prompt",
     "PromptResponse",
+    "Skill",
+    "SkillConfig",
+    "SkillError",
+    "SkillMount",
+    "SkillMountError",
+    "SkillNotFoundError",
+    "SkillValidationError",
     "StructuredLogger",
     "SupportsDataclass",
     "Tool",
