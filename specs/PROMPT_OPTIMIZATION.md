@@ -48,27 +48,30 @@ flowchart TB
 
 All overridable content falls into these categories:
 
-| Target | Identifier | Hash Basis | Override Type |
-|--------|------------|------------|---------------|
-| Section body | `(path,)` | Template text | `SectionOverride` |
-| Tool description | `tool_name` | Contract (desc + schema) | `ToolOverride` |
-| Tool param description | `tool_name.param` | Contract hash | `ToolOverride.param_descriptions` |
-| Tool example | `tool_name#index` | Example content hash | `ToolExampleOverride` |
-| Task example | `path#index` | Example content hash | `TaskExampleOverride` |
+| Target                 | Identifier        | Hash Basis               | Override Type                     |
+| ---------------------- | ----------------- | ------------------------ | --------------------------------- |
+| Section body           | `(path,)`         | Template text            | `SectionOverride`                 |
+| Tool description       | `tool_name`       | Contract (desc + schema) | `ToolOverride`                    |
+| Tool param description | `tool_name.param` | Contract hash            | `ToolOverride.param_descriptions` |
+| Tool example           | `tool_name#index` | Example content hash     | `ToolExampleOverride`             |
+| Task example           | `path#index`      | Example content hash     | `TaskExampleOverride`             |
 
 ### What's Overridable
 
 **Section Content:**
+
 - Template text in `MarkdownSection` and other template-based sections
 - Section summaries
 - Any section implementing `render_override()`
 
 **Tool Metadata:**
+
 - Tool descriptions (1-200 ASCII chars)
 - Parameter descriptions (per-field metadata)
 - Tool examples: description, input, output (add/modify/remove)
 
 **Task Examples:**
+
 - Objective text
 - Outcome text/structure
 - Step descriptions and tool invocations (add/modify/remove)
@@ -123,11 +126,13 @@ class PromptDescriptor:
 ### Hash Computation
 
 **Section hash:**
+
 ```python
 hash_text(section.original_body_template())
 ```
 
 **Tool contract hash:**
+
 ```python
 hash_text("::".join([
     hash_text(tool.description),
@@ -137,6 +142,7 @@ hash_text("::".join([
 ```
 
 **Tool example hash:**
+
 ```python
 hash_json({
     "description": example.description,
@@ -146,6 +152,7 @@ hash_json({
 ```
 
 **Task example hash:**
+
 ```python
 hash_json({
     "objective": example.objective,
@@ -687,17 +694,6 @@ class OverrideSeeded:
     task_examples_count: int
     timestamp: datetime
 ```
-
-## Migration from v1
-
-Override files with `"version": 1` are automatically migrated:
-
-1. Tool overrides without `example_overrides` get empty tuple
-2. No `task_example_overrides` field added (empty by default)
-3. Version bumped to 2 on next write
-
-No breaking changes to existing v1 files; they continue to work but won't
-have example override capabilities until re-seeded or manually updated.
 
 ## Limitations
 
