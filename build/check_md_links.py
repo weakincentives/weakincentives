@@ -76,9 +76,7 @@ def _is_local_link(target: str) -> bool:
     if target.startswith(("http://", "https://", "mailto:")):
         return False
     # Skip pure anchors
-    if target.startswith("#"):
-        return False
-    return True
+    return not target.startswith("#")
 
 
 def _extract_file_path(target: str) -> str:
@@ -89,9 +87,7 @@ def _extract_file_path(target: str) -> str:
     return target
 
 
-def _check_file_links(
-    md_file: Path, root: Path
-) -> list[tuple[int, str, str]]:
+def _check_file_links(md_file: Path, root: Path) -> list[tuple[int, str, str]]:  # noqa: C901
     """Check all local links in a Markdown file.
 
     Returns a list of (line_number, link_text, target) for broken links.

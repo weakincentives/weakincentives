@@ -17,6 +17,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import pytest
+
 from tests.helpers.session import ExampleOutput, make_prompt_event
 from weakincentives.dbc import dbc_enabled
 from weakincentives.runtime.session import (
@@ -27,7 +29,7 @@ from weakincentives.runtime.session import (
 if TYPE_CHECKING:
     from tests.conftest import SessionFactory
 
-import pytest
+pytestmark = pytest.mark.core
 
 
 def test_indexing_returns_slice_accessor(session_factory: SessionFactory) -> None:

@@ -30,6 +30,8 @@ from weakincentives.runtime.session import (
 if TYPE_CHECKING:
     from tests.conftest import SessionFactory
 
+pytestmark = pytest.mark.core
+
 
 def test_session_requires_timezone_aware_created_at() -> None:
     bus = InProcessDispatcher()

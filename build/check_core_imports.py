@@ -20,7 +20,6 @@ Contrib is "batteries included" that builds on core, not the other way around.
 from __future__ import annotations
 
 import ast
-import sys
 from pathlib import Path
 
 

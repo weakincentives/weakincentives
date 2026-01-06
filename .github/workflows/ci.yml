@@ -12,192 +12,319 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Detect which parts of the codebase changed for intelligent test selection
+  # Single change detection step - short-circuits on main push to run all checks
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      src: ${{ steps.filter.outputs.src }}
-      tests: ${{ steps.filter.outputs.tests }}
-      docs-only: ${{ steps.filter.outputs.docs-only }}
-      adapters: ${{ steps.filter.outputs.adapters }}
-      runtime: ${{ steps.filter.outputs.runtime }}
-      prompt: ${{ steps.filter.outputs.prompt }}
-      contrib: ${{ steps.filter.outputs.contrib }}
-      evals: ${{ steps.filter.outputs.evals }}
-      serde: ${{ steps.filter.outputs.serde }}
-      cli: ${{ steps.filter.outputs.cli }}
-      core: ${{ steps.filter.outputs.core }}
-      ci: ${{ steps.filter.outputs.ci }}
+      run_all: ${{ steps.detect.outputs.run_all }}
+      docs_only: ${{ steps.detect.outputs.docs_only }}
+      adapters: ${{ steps.detect.outputs.adapters }}
+      runtime: ${{ steps.detect.outputs.runtime }}
+      prompt: ${{ steps.detect.outputs.prompt }}
+      contrib: ${{ steps.detect.outputs.contrib }}
+      evals: ${{ steps.detect.outputs.evals }}
+      serde: ${{ steps.detect.outputs.serde }}
+      cli: ${{ steps.detect.outputs.cli }}
+      core: ${{ steps.detect.outputs.core }}
+      ci: ${{ steps.detect.outputs.ci }}
+      formal: ${{ steps.detect.outputs.formal }}
+      mailbox: ${{ steps.detect.outputs.mailbox }}
     steps:
-    - uses: actions/checkout@v5
-    - uses: dorny/paths-filter@v3
-      id: filter
-      with:
-        filters: |
-          src:
-            - 'src/**'
-          tests:
-            - 'tests/**'
-          docs-only:
-            - '**/*.md'
-            - 'docs/**'
-            - '!src/**'
-            - '!tests/**'
-            - '!.github/**'
-          adapters:
-            - 'src/weakincentives/adapters/**'
-            - 'tests/adapters/**'
-          runtime:
-            - 'src/weakincentives/runtime/**'
-            - 'tests/runtime/**'
-          prompt:
-            - 'src/weakincentives/prompt/**'
-            - 'tests/prompt/**'
-            - 'tests/prompts/**'
-          contrib:
-            - 'src/weakincentives/contrib/**'
-            - 'tests/contrib/**'
-          evals:
-            - 'src/weakincentives/evals/**'
-            - 'tests/evals/**'
-          serde:
-            - 'src/weakincentives/serde/**'
-            - 'tests/serde/**'
-          cli:
-            - 'src/weakincentives/cli/**'
-            - 'tests/cli/**'
-          core:
-            - 'src/weakincentives/dbc/**'
-            - 'src/weakincentives/types/**'
-            - 'src/weakincentives/dataclasses/**'
-            - 'src/weakincentives/resources/**'
-            - 'src/weakincentives/filesystem/**'
-            - 'pyproject.toml'
-            - 'uv.lock'
-          ci:
-            - '.github/workflows/**'
-            - 'Makefile'
+      - uses: actions/checkout@v5
+        if: github.event_name != 'push'
 
-  # Consolidated static analysis job - runs all fast checks in one VM
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name != 'push'
+        with:
+          filters: |
+            docs_only:
+              - '**/*.md'
+              - 'docs/**'
+              - '!src/**'
+              - '!tests/**'
+              - '!.github/**'
+            adapters:
+              - 'src/weakincentives/adapters/**'
+              - 'tests/adapters/**'
+            runtime:
+              - 'src/weakincentives/runtime/**'
+              - 'tests/runtime/**'
+            prompt:
+              - 'src/weakincentives/prompt/**'
+              - 'tests/prompt/**'
+              - 'tests/prompts/**'
+            contrib:
+              - 'src/weakincentives/contrib/**'
+              - 'tests/contrib/**'
+            evals:
+              - 'src/weakincentives/evals/**'
+              - 'tests/evals/**'
+            serde:
+              - 'src/weakincentives/serde/**'
+              - 'tests/serde/**'
+            cli:
+              - 'src/weakincentives/cli/**'
+              - 'tests/cli/**'
+            core:
+              - 'src/weakincentives/dbc/**'
+              - 'src/weakincentives/types/**'
+              - 'src/weakincentives/dataclasses/**'
+              - 'src/weakincentives/resources/**'
+              - 'src/weakincentives/filesystem/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+            ci:
+              - '.github/workflows/**'
+              - 'Makefile'
+            formal:
+              - 'src/weakincentives/formal/**'
+              - 'formal-tests/**'
+              - 'specs/tla/**'
+            mailbox:
+              - 'src/weakincentives/contrib/mailbox/**'
+              - 'tests/contrib/mailbox/**'
+
+      - name: Set outputs
+        id: detect
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Main branch push: run all checks
+            cat >> $GITHUB_OUTPUT << 'EOF'
+          run_all=true
+          docs_only=false
+          adapters=true
+          runtime=true
+          prompt=true
+          contrib=true
+          evals=true
+          serde=true
+          cli=true
+          core=true
+          ci=true
+          formal=true
+          mailbox=true
+          EOF
+          else
+            # PR: use change detection results
+            cat >> $GITHUB_OUTPUT << EOF
+          run_all=false
+          docs_only=${{ steps.filter.outputs.docs_only }}
+          adapters=${{ steps.filter.outputs.adapters }}
+          runtime=${{ steps.filter.outputs.runtime }}
+          prompt=${{ steps.filter.outputs.prompt }}
+          contrib=${{ steps.filter.outputs.contrib }}
+          evals=${{ steps.filter.outputs.evals }}
+          serde=${{ steps.filter.outputs.serde }}
+          cli=${{ steps.filter.outputs.cli }}
+          core=${{ steps.filter.outputs.core }}
+          ci=${{ steps.filter.outputs.ci }}
+          formal=${{ steps.filter.outputs.formal }}
+          mailbox=${{ steps.filter.outputs.mailbox }}
+          EOF
+          fi
+
+  # Static analysis - always runs (fast and high value)
   static-analysis:
-    needs: detect-changes
-    if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && needs.detect-changes.outputs.docs-only != 'true')
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-    - name: Set up Python
-      run: uv python install 3.14
-    - name: Install dependencies
-      run: uv sync --all-extras
-    - name: Run format check
-      run: make format-check
-    - name: Run linter
-      run: make lint
-    - name: Run ty
-      run: make ty
-    - name: Run pyright
-      run: make pyright
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.14
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Run format check
+        run: make format-check
+      - name: Run linter
+        run: make lint
+      - name: Run ty
+        run: make ty
+      - name: Run pyright
+        run: make pyright
 
-  # Smart test job - runs targeted tests based on changed files
+  # Test job - always runs core tests, then targeted or full suite based on changes
   test:
     needs: detect-changes
-    if: needs.detect-changes.outputs.docs-only != 'true'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-    - name: Set up Python
-      run: uv python install 3.14
-    - name: Install dependencies
-      run: uv sync --all-extras
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.14
+      - name: Install dependencies
+        run: uv sync --all-extras
 
-    # Run all tests if core files, CI config, or multiple modules changed
-    - name: Run all tests
-      if: |
-        needs.detect-changes.outputs.core == 'true' ||
-        needs.detect-changes.outputs.ci == 'true' ||
-        github.event_name == 'push'
-      run: make test
+      # Always run core tests (fast, high-value smoke tests)
+      - name: Run core tests
+        run: uv run --all-extras pytest -m core --strict-config --strict-markers -q --no-header --no-cov
 
-    # Run targeted tests for isolated module changes
-    - name: Run targeted tests
-      if: |
-        needs.detect-changes.outputs.core != 'true' &&
-        needs.detect-changes.outputs.ci != 'true' &&
-        github.event_name == 'pull_request'
-      env:
-        ADAPTERS: ${{ needs.detect-changes.outputs.adapters }}
-        RUNTIME: ${{ needs.detect-changes.outputs.runtime }}
-        PROMPT: ${{ needs.detect-changes.outputs.prompt }}
-        CONTRIB: ${{ needs.detect-changes.outputs.contrib }}
-        EVALS: ${{ needs.detect-changes.outputs.evals }}
-        SERDE: ${{ needs.detect-changes.outputs.serde }}
-        CLI: ${{ needs.detect-changes.outputs.cli }}
-      run: |
-        # Build test path list based on changed modules
-        TEST_PATHS=""
-        [ "$ADAPTERS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/adapters"
-        [ "$RUNTIME" = "true" ] && TEST_PATHS="$TEST_PATHS tests/runtime"
-        [ "$PROMPT" = "true" ] && TEST_PATHS="$TEST_PATHS tests/prompt tests/prompts"
-        [ "$CONTRIB" = "true" ] && TEST_PATHS="$TEST_PATHS tests/contrib tests/tools"
-        [ "$EVALS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/evals"
-        [ "$SERDE" = "true" ] && TEST_PATHS="$TEST_PATHS tests/serde"
-        [ "$CLI" = "true" ] && TEST_PATHS="$TEST_PATHS tests/cli"
+      # Run full test suite when core infrastructure changes
+      - name: Run full test suite
+        if: |
+          needs.detect-changes.outputs.run_all == 'true' ||
+          needs.detect-changes.outputs.core == 'true' ||
+          needs.detect-changes.outputs.ci == 'true'
+        run: make test
 
-        if [ -z "$TEST_PATHS" ]; then
-          echo "No specific test paths detected, running all tests"
-          make test
-        else
-          echo "Running targeted tests: $TEST_PATHS"
-          uv run --all-extras pytest --strict-config --strict-markers --maxfail=1 -q --no-header $TEST_PATHS
-        fi
+      # Run targeted tests for isolated module changes
+      - name: Run targeted tests
+        if: |
+          needs.detect-changes.outputs.run_all != 'true' &&
+          needs.detect-changes.outputs.core != 'true' &&
+          needs.detect-changes.outputs.ci != 'true'
+        env:
+          ADAPTERS: ${{ needs.detect-changes.outputs.adapters }}
+          RUNTIME: ${{ needs.detect-changes.outputs.runtime }}
+          PROMPT: ${{ needs.detect-changes.outputs.prompt }}
+          CONTRIB: ${{ needs.detect-changes.outputs.contrib }}
+          EVALS: ${{ needs.detect-changes.outputs.evals }}
+          SERDE: ${{ needs.detect-changes.outputs.serde }}
+          CLI: ${{ needs.detect-changes.outputs.cli }}
+        run: |
+          TEST_PATHS=""
+          [ "$ADAPTERS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/adapters"
+          [ "$RUNTIME" = "true" ] && TEST_PATHS="$TEST_PATHS tests/runtime"
+          [ "$PROMPT" = "true" ] && TEST_PATHS="$TEST_PATHS tests/prompt tests/prompts"
+          [ "$CONTRIB" = "true" ] && TEST_PATHS="$TEST_PATHS tests/contrib tests/tools"
+          [ "$EVALS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/evals"
+          [ "$SERDE" = "true" ] && TEST_PATHS="$TEST_PATHS tests/serde"
+          [ "$CLI" = "true" ] && TEST_PATHS="$TEST_PATHS tests/cli"
+
+          if [ -n "$TEST_PATHS" ]; then
+            echo "Running targeted tests: $TEST_PATHS"
+            uv run --all-extras pytest --strict-config --strict-markers -q --no-header --no-cov $TEST_PATHS
+          fi
 
   mutation:
     needs: [detect-changes, test]
     if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' &&
-       needs.detect-changes.outputs.docs-only != 'true' &&
-       (needs.detect-changes.outputs.runtime == 'true' || needs.detect-changes.outputs.serde == 'true'))
+      needs.detect-changes.outputs.run_all == 'true' ||
+      (needs.detect-changes.outputs.runtime == 'true' || needs.detect-changes.outputs.serde == 'true')
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-    - name: Set up Python
-      run: uv python install 3.14
-    - name: Install dependencies
-      run: uv sync --all-extras
-    - name: Enforce mutation score gate
-      run: make mutation-check
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.14
+      - name: Install dependencies
+        run: uv sync --all-extras
+      - name: Enforce mutation score gate
+        run: make mutation-check
 
   # Fast feedback for docs-only PRs
   docs-check:
     needs: detect-changes
-    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.docs-only == 'true'
+    if: needs.detect-changes.outputs.run_all != 'true' && needs.detect-changes.outputs.docs_only == 'true'
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v5
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-    - name: Set up Python
-      run: uv python install 3.14
-    - name: Install dependencies
-      run: uv sync
-    - name: Validate Markdown
-      run: make markdown-check
-    - name: Verify doc examples
-      run: make verify-doc-examples
+      - uses: actions/checkout@v5
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - name: Set up Python
+        run: uv python install 3.14
+      - name: Install dependencies
+        run: uv sync
+      - name: Validate Markdown
+        run: make markdown-check
+      - name: Verify doc examples
+        run: make verify-doc-examples
+
+  # TLA+ formal verification
+  formal-verification:
+    name: TLA+ Model Checking
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.run_all == 'true' ||
+      needs.detect-changes.outputs.formal == 'true' ||
+      needs.detect-changes.outputs.mailbox == 'true' ||
+      needs.detect-changes.outputs.runtime == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Java (for TLC)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Cache TLA+ Tools
+        id: cache-tlaplus
+        uses: actions/cache@v4
+        with:
+          path: |
+            /usr/local/bin/tlc
+            /usr/local/lib/tla2tools.jar
+          key: tlaplus-v1.8.0
+
+      - name: Install TLA+ Tools
+        if: steps.cache-tlaplus.outputs.cache-hit != 'true'
+        run: make setup-tlaplus
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run formal verification (TLC model checking)
+        run: make verify-formal
+
+      - name: Upload extracted specs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extracted-tla-specs
+          path: specs/tla/extracted/
+          if-no-files-found: ignore
+
+  # Hypothesis property-based tests and stress tests
+  property-tests:
+    name: Property-Based Tests
+    needs: detect-changes
+    if: |
+      needs.detect-changes.outputs.run_all == 'true' ||
+      needs.detect-changes.outputs.mailbox == 'true' ||
+      needs.detect-changes.outputs.runtime == 'true'
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
+      - name: Run Hypothesis property tests
+        run: make property-tests
+
+      - name: Run concurrent stress tests
+        run: make stress-tests
