@@ -165,6 +165,7 @@ hash_json({
 @dataclass(slots=True, frozen=True)
 class SectionOverride:
     """Override payload for a prompt section validated by hash."""
+    path: tuple[str, ...]
     expected_hash: HexDigest
     body: str
 ```
@@ -253,6 +254,7 @@ class PromptOverride:
   "tag": "latest",
   "sections": {
     "system": {
+      "path": ["system"],
       "expected_hash": "abc123...",
       "body": "You are a code review assistant..."
     }
@@ -356,38 +358,20 @@ class PromptOverridesStore(Protocol):
         """
         ...
 
-    def set_section_override(
+    def apply(
         self,
         prompt: PromptLike,
+        override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
-        path: tuple[str, ...],
-        body: str,
     ) -> PromptOverride:
-        """Convenience method to update a single section."""
-        ...
+        """Apply a single override, dispatching by type.
 
-    def set_tool_override(
-        self,
-        prompt: PromptLike,
-        *,
-        tag: str = "latest",
-        tool_name: str,
-        description: str | None = None,
-        param_descriptions: dict[str, str] | None = None,
-        example_overrides: tuple[ToolExampleOverride, ...] | None = None,
-    ) -> PromptOverride:
-        """Convenience method to update a single tool."""
-        ...
-
-    def set_task_example_override(
-        self,
-        prompt: PromptLike,
-        *,
-        tag: str = "latest",
-        override: TaskExampleOverride,
-    ) -> PromptOverride:
-        """Convenience method to update a single task example."""
+        Each override type is self-describing with its identifier:
+        - SectionOverride: path
+        - ToolOverride: name
+        - TaskExampleOverride: path + index
+        """
         ...
 
     def copy_tag(
@@ -518,36 +502,35 @@ response = adapter.evaluate(prompt, session=session)
 ### Seeding and Iterating
 
 ```python
+from weakincentives.prompt.overrides import SectionOverride, ToolOverride
+
 # Bootstrap override file from current prompt
 override = store.seed(prompt, tag="latest")
 
 # Iterate on a specific section
-store.set_section_override(
-    prompt,
-    tag="latest",
+store.apply(prompt, SectionOverride(
     path=("system",),
+    expected_hash=descriptor.sections[0].content_hash,
     body="You are a helpful code review assistant. Focus on clarity and correctness.",
-)
+))
 
 # Update a tool description
-store.set_tool_override(
-    prompt,
-    tag="latest",
-    tool_name="suggest_fix",
+store.apply(prompt, ToolOverride(
+    name="suggest_fix",
+    expected_contract_hash=descriptor.tools[0].contract_hash,
     description="Suggest a targeted code fix for the identified issue.",
-)
+))
 ```
 
 ### Adding Tool Examples
 
 ```python
-from weakincentives.prompt.overrides import ToolExampleOverride
+from weakincentives.prompt.overrides import ToolOverride, ToolExampleOverride
 
 # Add a new tool example
-store.set_tool_override(
-    prompt,
-    tag="latest",
-    tool_name="suggest_fix",
+store.apply(prompt, ToolOverride(
+    name="suggest_fix",
+    expected_contract_hash=contract_hash,
     example_overrides=(
         ToolExampleOverride(
             index=-1,
@@ -558,13 +541,12 @@ store.set_tool_override(
             output_json='{"suggestion": "Add docstring describing function purpose"}',
         ),
     ),
-)
+))
 
 # Modify an existing example
-store.set_tool_override(
-    prompt,
-    tag="latest",
-    tool_name="suggest_fix",
+store.apply(prompt, ToolOverride(
+    name="suggest_fix",
+    expected_contract_hash=contract_hash,
     example_overrides=(
         ToolExampleOverride(
             index=0,
@@ -573,13 +555,12 @@ store.set_tool_override(
             description="Fix unused import (improved)",
         ),
     ),
-)
+))
 
 # Remove an example
-store.set_tool_override(
-    prompt,
-    tag="latest",
-    tool_name="suggest_fix",
+store.apply(prompt, ToolOverride(
+    name="suggest_fix",
+    expected_contract_hash=contract_hash,
     example_overrides=(
         ToolExampleOverride(
             index=1,
@@ -587,7 +568,7 @@ store.set_tool_override(
             action="remove",
         ),
     ),
-)
+))
 ```
 
 ### Modifying Task Examples
@@ -596,46 +577,38 @@ store.set_tool_override(
 from weakincentives.prompt.overrides import TaskExampleOverride, TaskStepOverride
 
 # Modify a task example's objective and a step
-store.set_task_example_override(
-    prompt,
-    tag="latest",
-    override=TaskExampleOverride(
-        path=("task-examples", "fix-lint-errors"),
-        index=0,
-        expected_hash=existing_hash,
-        action="modify",
-        objective="Fix all lint errors in the utils module using ruff",
-        step_overrides=(
-            TaskStepOverride(
-                index=0,
-                description="Run ruff check to identify all lint errors",
-            ),
+store.apply(prompt, TaskExampleOverride(
+    path=("task-examples", "fix-lint-errors"),
+    index=0,
+    expected_hash=existing_hash,
+    action="modify",
+    objective="Fix all lint errors in the utils module using ruff",
+    step_overrides=(
+        TaskStepOverride(
+            index=0,
+            description="Run ruff check to identify all lint errors",
         ),
     ),
-)
+))
 
 # Add a new task example
-store.set_task_example_override(
-    prompt,
-    tag="latest",
-    override=TaskExampleOverride(
-        path=("task-examples",),
-        index=-1,
-        expected_hash=None,
-        action="append",
-        objective="Add type annotations to untyped functions",
-        outcome="All functions have complete type annotations",
-        steps_to_append=(
-            TaskStepOverride(
-                index=0,
-                tool_name="analyze_types",
-                description="Identify functions missing type annotations",
-                input_json='{"scope": "module"}',
-                output_json='{"untyped_functions": ["foo", "bar"]}',
-            ),
+store.apply(prompt, TaskExampleOverride(
+    path=("task-examples",),
+    index=-1,
+    expected_hash=None,
+    action="append",
+    objective="Add type annotations to untyped functions",
+    outcome="All functions have complete type annotations",
+    steps_to_append=(
+        TaskStepOverride(
+            index=0,
+            tool_name="analyze_types",
+            description="Identify functions missing type annotations",
+            input_json='{"scope": "module"}',
+            output_json='{"untyped_functions": ["foo", "bar"]}',
         ),
     ),
-)
+))
 ```
 
 ### Tag Management
