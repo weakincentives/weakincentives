@@ -1,7 +1,7 @@
 # Formal Verification Workflow
 #
 # Runs TLA+ model checking (via embedded @formal_spec) and property-based
-# tests on all pull requests to ensure correctness.
+# tests on pull requests when relevant files change.
 
 name: Formal Verification
 
@@ -11,18 +11,47 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-progress runs when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Detect which parts of the codebase changed
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      formal: ${{ steps.filter.outputs.formal }}
+      mailbox: ${{ steps.filter.outputs.mailbox }}
+      runtime: ${{ steps.filter.outputs.runtime }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            formal:
+              - 'src/weakincentives/formal/**'
+              - 'formal-tests/**'
+              - 'specs/tla/**'
+            mailbox:
+              - 'src/weakincentives/contrib/mailbox/**'
+              - 'tests/contrib/mailbox/**'
+            runtime:
+              - 'src/weakincentives/runtime/**'
+
   formal-verification:
     name: TLA+ Model Checking
+    needs: detect-changes
+    if: |
+      github.event_name == 'push' ||
+      needs.detect-changes.outputs.formal == 'true' ||
+      needs.detect-changes.outputs.mailbox == 'true' ||
+      needs.detect-changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - uses: actions/checkout@v5
 
       - name: Set up Java (for TLC)
         uses: actions/setup-java@v4
@@ -44,7 +73,12 @@ jobs:
         run: make setup-tlaplus
 
       - name: Install uv
-        run: pip install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
 
       - name: Install dependencies
         run: uv sync --all-extras
@@ -62,6 +96,11 @@ jobs:
 
   property-tests:
     name: Property-Based Tests
+    needs: detect-changes
+    if: |
+      github.event_name == 'push' ||
+      needs.detect-changes.outputs.mailbox == 'true' ||
+      needs.detect-changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
 
     services:
@@ -71,15 +110,15 @@ jobs:
           - 6379:6379
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - uses: actions/checkout@v5
 
       - name: Install uv
-        run: pip install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
 
       - name: Install dependencies
         run: uv sync --all-extras
