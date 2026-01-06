@@ -36,6 +36,29 @@ Example usage::
 
 from __future__ import annotations
 
-from . import mailbox, optimizers, tools
+import importlib
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import ModuleType
+
+    from . import mailbox, optimizers, tools
 
 __all__ = ["mailbox", "optimizers", "tools"]
+
+
+def __dir__() -> list[str]:
+    return sorted({*globals().keys(), *__all__})
+
+
+def __getattr__(name: str) -> ModuleType:
+    """Lazy import submodules to avoid circular dependency issues.
+
+    The optimizers submodule imports from tools, so eager import would fail
+    if done in the wrong order. Lazy loading sidesteps this entirely.
+    """
+    if name in __all__:
+        module = importlib.import_module(f".{name}", __name__)
+        globals()[name] = module
+        return module
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
