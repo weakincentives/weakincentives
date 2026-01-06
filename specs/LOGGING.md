@@ -109,8 +109,8 @@ subprocess-based execution model.
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.hooks_registered` | `hook_types` |
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.options` | `model`, `cwd`, `permission_mode`, `max_turns`, `max_budget_usd`, `max_thinking_tokens`, `has_output_format`, `allowed_tools`, `disallowed_tools`, `has_mcp_servers`, `betas` |
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.executing` | `prompt_name` |
-| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.message_received` | `message_type`, `message_index`, `role`, `content`, `content_blocks`, `result`, `structured_output`, `usage` |
-| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.complete` | `message_count`, `stderr_line_count` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.message_received` | `message_type`, `message_index`, `role`, `content`, `content_blocks`, `result`, `structured_output`, `usage`, `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens`, `has_thinking`, `thinking_preview`, `thinking_length`, `cumulative_input_tokens`, `cumulative_output_tokens` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.complete` | `message_count`, `stderr_line_count`, `stats_tool_count`, `stats_turn_count`, `stats_subagent_count`, `stats_compact_count`, `stats_input_tokens`, `stats_output_tokens`, `stats_hook_errors` |
 | `adapters/claude_agent_sdk/_errors.py` | `error.normalizing` | `error_type`, `error_module`, `error_message`, `has_stderr_output`, `stderr_preview` |
 | `adapters/claude_agent_sdk/_errors.py` | `error.cli_not_found` | `prompt_name` |
 | `adapters/claude_agent_sdk/_errors.py` | `error.cli_connection_error` | `prompt_name`, `stderr_output` |
@@ -142,21 +142,27 @@ visibility into the conversation flow for debugging without content truncation.
 
 #### SDK Hooks
 
+The SDK hooks provide extensive DEBUG logging for tracking execution flow,
+constraints, and cumulative statistics throughout Claude Code execution.
+
 | Module | Event | Context Fields |
 | ----------------------------------------- | --------------------------------- | ----------------------------------------------------------------- |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.pre_tool_use` | `tool_name`, `tool_use_id`, `input_data` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.deadline_exceeded` | `tool_name` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.budget_exhausted` | `tool_name` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.snapshot_taken` | `tool_name`, `tool_use_id` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.tool_invoked` | `tool_name`, `success`, `call_id`, `tool_input`, `tool_response`, `output_text` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.state_restored` | `tool_name`, `tool_use_id`, `reason` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.structured_output_stop` | `tool_name` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.stop` | `stop_reason` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.subagent_start` | `payload` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.subagent_stop` | `payload` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.pre_compact` | `payload` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.notification` | `payload` |
-| `adapters/claude_agent_sdk/_hooks.py` | `hook.error` | `error`, `error_type` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.pre_tool_use` | `tool_name`, `tool_use_id`, `input_data`, `elapsed_ms`, `tool_count`, `deadline_remaining_ms`, `budget_consumed_input`, `budget_consumed_output`, `budget_consumed_total`, `budget_max_total`, `budget_remaining` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.deadline_exceeded` | `tool_name`, `elapsed_ms`, `tool_count` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.budget_exhausted` | `tool_name`, `consumed_total`, `max_total`, `elapsed_ms` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.snapshot_taken` | `tool_name`, `tool_use_id`, `hook_duration_ms` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.tool_invoked` | `tool_name`, `success`, `call_id`, `tool_input`, `tool_response`, `output_text`, `elapsed_ms`, `tool_count`, `turn_count` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.state_restored` | `tool_name`, `tool_use_id`, `reason`, `hook_duration_ms`, `elapsed_ms` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.structured_output_stop` | `tool_name`, `elapsed_ms`, `tool_count` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.turn_start` | `turn_number`, `session_id`, `prompt_preview`, `prompt_length`, `elapsed_ms`, `tool_count`, `cumulative_input_tokens`, `cumulative_output_tokens` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.stop` | `stop_reason`, `sdk_num_turns`, `sdk_duration_ms`, `result_preview`, `elapsed_ms`, `stats_tool_count`, `stats_turn_count`, `stats_subagent_count`, `stats_compact_count`, `stats_input_tokens`, `stats_output_tokens`, `stats_thinking_tokens`, `stats_hook_errors` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.subagent_start` | `subagent_number`, `subagent_type`, `subagent_id`, `description`, `elapsed_ms`, `tool_count`, `payload` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.subagent_stop` | `subagent_id`, `result_preview`, `subagent_duration_ms`, `subagent_tool_count`, `transcript_entries`, `elapsed_ms`, `parent_tool_count`, `subagent_count`, `payload` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.pre_compact` | `compact_number`, `context_tokens`, `max_context_tokens`, `utilization_pct`, `message_count`, `compaction_reason`, `elapsed_ms`, `tool_count`, `turn_count`, `payload` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.notification` | `notification_type`, `notification_level`, `message_preview`, `elapsed_ms`, `tool_count`, `payload` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.deadline_error_caught` | `error_type`, `hook_errors`, `elapsed_ms` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.budget_error_caught` | `error_type`, `hook_errors`, `elapsed_ms` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.error` | `error`, `error_type`, `hook_errors`, `elapsed_ms`, `tool_count` |
 
 #### OpenAI Adapter
 
