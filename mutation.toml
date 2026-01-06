@@ -28,7 +28,6 @@ use_coverage = true
 minimum_score = 80.0
 debug = false
 
-# Parallel execution settings
-parallel = true
-workers = "auto"
-timeout = 60
+# Parallel execution: run multiple mutants concurrently
+# Uses all available CPU cores on the CI runner
+max_children = 4

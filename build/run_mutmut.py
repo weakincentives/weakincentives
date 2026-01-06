@@ -35,9 +35,7 @@ class MutationConfig:
     runner: str
     use_coverage: bool
     minimum_score: float
-    parallel: bool
-    workers: str | int
-    timeout: int | None
+    max_children: int | None
 
 
 def main() -> int:
@@ -83,10 +81,8 @@ def _load_config() -> MutationConfig:
         raise FileNotFoundError(message)
 
     data = tomllib.loads(CONFIG_PATH.read_text()).get("mutation", {})
-    workers_raw = data.get("workers", "auto")
-    workers: str | int = int(workers_raw) if isinstance(workers_raw, int) else workers_raw
-    timeout_raw = data.get("timeout")
-    timeout: int | None = int(timeout_raw) if timeout_raw is not None else None
+    max_children_raw = data.get("max_children")
+    max_children: int | None = int(max_children_raw) if max_children_raw is not None else None
     return MutationConfig(
         paths_to_mutate=list(data.get("paths_to_mutate", [])),
         tests_dir=str(data.get("tests_dir", "tests")),
@@ -95,22 +91,15 @@ def _load_config() -> MutationConfig:
         runner=str(data.get("runner", "python -m pytest -q")),
         use_coverage=bool(data.get("use_coverage", True)),
         minimum_score=float(data.get("minimum_score", 0.0)),
-        parallel=bool(data.get("parallel", False)),
-        workers=workers,
-        timeout=timeout,
+        max_children=max_children,
     )
 
 
 def _run_mutmut(config: MutationConfig, extra_args: list[str]) -> int:
     command = ["mutmut", "run"]
 
-    if config.parallel:
-        command.append("--parallel")
-        if config.workers != "auto":
-            command.extend(["--workers", str(config.workers)])
-
-    if config.timeout is not None:
-        command.extend(["--timeout", str(config.timeout)])
+    if config.max_children is not None:
+        command.extend(["--max-children", str(config.max_children)])
 
     command.extend(extra_args)
 
