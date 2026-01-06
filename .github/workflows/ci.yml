@@ -12,78 +12,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Detect which parts of the codebase changed for intelligent test selection
+  # Use consolidated change detection (short-circuits on main branch push)
   detect-changes:
-    runs-on: ubuntu-latest
-    outputs:
-      src: ${{ steps.filter.outputs.src }}
-      tests: ${{ steps.filter.outputs.tests }}
-      docs-only: ${{ steps.filter.outputs.docs-only }}
-      adapters: ${{ steps.filter.outputs.adapters }}
-      runtime: ${{ steps.filter.outputs.runtime }}
-      prompt: ${{ steps.filter.outputs.prompt }}
-      contrib: ${{ steps.filter.outputs.contrib }}
-      evals: ${{ steps.filter.outputs.evals }}
-      serde: ${{ steps.filter.outputs.serde }}
-      cli: ${{ steps.filter.outputs.cli }}
-      core: ${{ steps.filter.outputs.core }}
-      ci: ${{ steps.filter.outputs.ci }}
-    steps:
-    - uses: actions/checkout@v5
-    - uses: dorny/paths-filter@v3
-      id: filter
-      with:
-        filters: |
-          src:
-            - 'src/**'
-          tests:
-            - 'tests/**'
-          docs-only:
-            - '**/*.md'
-            - 'docs/**'
-            - '!src/**'
-            - '!tests/**'
-            - '!.github/**'
-          adapters:
-            - 'src/weakincentives/adapters/**'
-            - 'tests/adapters/**'
-          runtime:
-            - 'src/weakincentives/runtime/**'
-            - 'tests/runtime/**'
-          prompt:
-            - 'src/weakincentives/prompt/**'
-            - 'tests/prompt/**'
-            - 'tests/prompts/**'
-          contrib:
-            - 'src/weakincentives/contrib/**'
-            - 'tests/contrib/**'
-          evals:
-            - 'src/weakincentives/evals/**'
-            - 'tests/evals/**'
-          serde:
-            - 'src/weakincentives/serde/**'
-            - 'tests/serde/**'
-          cli:
-            - 'src/weakincentives/cli/**'
-            - 'tests/cli/**'
-          core:
-            - 'src/weakincentives/dbc/**'
-            - 'src/weakincentives/types/**'
-            - 'src/weakincentives/dataclasses/**'
-            - 'src/weakincentives/resources/**'
-            - 'src/weakincentives/filesystem/**'
-            - 'pyproject.toml'
-            - 'uv.lock'
-          ci:
-            - '.github/workflows/**'
-            - 'Makefile'
+    uses: ./.github/workflows/detect-changes.yml
 
   # Consolidated static analysis job - runs all fast checks in one VM
   static-analysis:
     needs: detect-changes
-    if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' && needs.detect-changes.outputs.docs-only != 'true')
+    # Run on main push (run_all=true) or PRs with code changes
+    if: needs.detect-changes.outputs.run_all == 'true' || needs.detect-changes.outputs.docs-only != 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
@@ -120,20 +57,20 @@ jobs:
     - name: Install dependencies
       run: uv sync --all-extras
 
-    # Run all tests if core files, CI config, or multiple modules changed
+    # Run all tests on main push or when core/CI files change
     - name: Run all tests
       if: |
+        needs.detect-changes.outputs.run_all == 'true' ||
         needs.detect-changes.outputs.core == 'true' ||
-        needs.detect-changes.outputs.ci == 'true' ||
-        github.event_name == 'push'
+        needs.detect-changes.outputs.ci == 'true'
       run: make test
 
-    # Run targeted tests for isolated module changes
+    # Run targeted tests for isolated module changes (PRs only)
     - name: Run targeted tests
       if: |
+        needs.detect-changes.outputs.run_all != 'true' &&
         needs.detect-changes.outputs.core != 'true' &&
-        needs.detect-changes.outputs.ci != 'true' &&
-        github.event_name == 'pull_request'
+        needs.detect-changes.outputs.ci != 'true'
       env:
         ADAPTERS: ${{ needs.detect-changes.outputs.adapters }}
         RUNTIME: ${{ needs.detect-changes.outputs.runtime }}
@@ -163,10 +100,10 @@ jobs:
 
   mutation:
     needs: [detect-changes, test]
+    # Run on main push or when runtime/serde modules change
     if: |
-      github.event_name == 'push' ||
-      (github.event_name == 'pull_request' &&
-       needs.detect-changes.outputs.docs-only != 'true' &&
+      needs.detect-changes.outputs.run_all == 'true' ||
+      (needs.detect-changes.outputs.docs-only != 'true' &&
        (needs.detect-changes.outputs.runtime == 'true' || needs.detect-changes.outputs.serde == 'true'))
     runs-on: ubuntu-latest
     steps:
@@ -185,7 +122,8 @@ jobs:
   # Fast feedback for docs-only PRs
   docs-check:
     needs: detect-changes
-    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.docs-only == 'true'
+    # Only run for docs-only PRs (not on main push where run_all=true)
+    if: needs.detect-changes.outputs.run_all != 'true' && needs.detect-changes.outputs.docs-only == 'true'
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5

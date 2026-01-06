@@ -17,34 +17,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Detect which parts of the codebase changed
+  # Use consolidated change detection (short-circuits on main branch push)
   detect-changes:
-    runs-on: ubuntu-latest
-    outputs:
-      formal: ${{ steps.filter.outputs.formal }}
-      mailbox: ${{ steps.filter.outputs.mailbox }}
-      runtime: ${{ steps.filter.outputs.runtime }}
-    steps:
-      - uses: actions/checkout@v5
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            formal:
-              - 'src/weakincentives/formal/**'
-              - 'formal-tests/**'
-              - 'specs/tla/**'
-            mailbox:
-              - 'src/weakincentives/contrib/mailbox/**'
-              - 'tests/contrib/mailbox/**'
-            runtime:
-              - 'src/weakincentives/runtime/**'
+    uses: ./.github/workflows/detect-changes.yml
 
   formal-verification:
     name: TLA+ Model Checking
     needs: detect-changes
+    # Run on main push (run_all=true) or when formal/mailbox/runtime files change
     if: |
-      github.event_name == 'push' ||
+      needs.detect-changes.outputs.run_all == 'true' ||
       needs.detect-changes.outputs.formal == 'true' ||
       needs.detect-changes.outputs.mailbox == 'true' ||
       needs.detect-changes.outputs.runtime == 'true'
@@ -97,8 +79,9 @@ jobs:
   property-tests:
     name: Property-Based Tests
     needs: detect-changes
+    # Run on main push (run_all=true) or when mailbox/runtime files change
     if: |
-      github.event_name == 'push' ||
+      needs.detect-changes.outputs.run_all == 'true' ||
       needs.detect-changes.outputs.mailbox == 'true' ||
       needs.detect-changes.outputs.runtime == 'true'
     runs-on: ubuntu-latest
