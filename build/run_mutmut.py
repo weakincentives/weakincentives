@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import argparse
-import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -27,6 +27,9 @@ import tomllib
 ROOT = Path(__file__).parent.parent
 CONFIG_PATH = ROOT / "mutation.toml"
 
+# Default to using most CPUs, leaving one free for system responsiveness
+DEFAULT_MAX_CHILDREN = max(1, (os.cpu_count() or 1) - 1)
+
 
 @dataclass(frozen=True)
 class MutationConfig:
@@ -37,6 +40,7 @@ class MutationConfig:
     runner: str
     use_coverage: bool
     minimum_score: float
+    max_children: int
 
 
 def main() -> int:
@@ -51,12 +55,21 @@ def main() -> int:
         type=float,
         help="Override the configured minimum mutation score gate.",
     )
+    parser.add_argument(
+        "-n",
+        "--max-children",
+        type=int,
+        help=f"Number of parallel mutation workers (default: {DEFAULT_MAX_CHILDREN}).",
+    )
     args, unknown_args = parser.parse_known_args()
 
     config = _load_config()
     threshold = args.threshold if args.threshold is not None else config.minimum_score
+    max_children = (
+        args.max_children if args.max_children is not None else config.max_children
+    )
 
-    run_code = _run_mutmut(config, unknown_args)
+    run_code = _run_mutmut(config, unknown_args, max_children=max_children)
     if run_code != 0:
         return run_code
 
@@ -90,11 +103,14 @@ def _load_config() -> MutationConfig:
         runner=str(data.get("runner", "python -m pytest -q")),
         use_coverage=bool(data.get("use_coverage", True)),
         minimum_score=float(data.get("minimum_score", 0.0)),
+        max_children=int(data.get("max_children", 0)) or DEFAULT_MAX_CHILDREN,
     )
 
 
-def _run_mutmut(config: MutationConfig, extra_args: list[str]) -> int:
-    command = ["mutmut", "run"]
+def _run_mutmut(
+    config: MutationConfig, extra_args: list[str], *, max_children: int
+) -> int:
+    command = ["mutmut", "run", "--max-children", str(max_children)]
     command.extend(extra_args)
 
     result = subprocess.run(command, check=False)

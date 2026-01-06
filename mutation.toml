@@ -26,4 +26,6 @@ also_copy = [
 runner = "python -m pytest --strict-config --strict-markers --no-cov --maxfail=1 -q --ignore=tests/test_code_reviewer_example.py"
 use_coverage = true
 minimum_score = 80.0
+# Run mutation tests in parallel (uses cpu_count - 1 by default)
+max_children = 0
 debug = false

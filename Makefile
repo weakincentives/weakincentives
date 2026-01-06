@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check check-all test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean _check-all-check _check-all-mutation
 
 # Format code with ruff
 format:
@@ -64,13 +64,14 @@ type-coverage:
 test:
 	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= tests
 
-# Run mutation tests with mutmut
+# Run mutation tests with mutmut (parallel by default)
+# Override workers: make mutation-test MUTMUT_ARGS="-n 4"
 mutation-test:
-	@uv run --all-extras python build/run_mutmut.py
+	@uv run --all-extras python build/run_mutmut.py $(MUTMUT_ARGS)
 
 # Enforce the configured mutation score gate (for CI)
 mutation-check:
-	@uv run --all-extras python build/run_mutmut.py --check
+	@uv run --all-extras python build/run_mutmut.py --check $(MUTMUT_ARGS)
 
 # Run OpenAI integration tests
 integration-tests:
@@ -212,6 +213,17 @@ demo-claude-agent:
 
 # Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, pip-audit, markdown, doc-examples, validate-integration-tests, test)
 check: format-check lint typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples validate-integration-tests test
+
+# Run all checks including mutation testing in parallel
+# Usage: make check-all (runs check and mutation-test concurrently)
+check-all:
+	@$(MAKE) -j2 --output-sync=target _check-all-check _check-all-mutation
+
+_check-all-check:
+	@$(MAKE) check
+
+_check-all-mutation:
+	@$(MAKE) mutation-check
 
 # Synchronize documentation files into package
 sync-docs:

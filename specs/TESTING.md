@@ -72,6 +72,20 @@ paths_to_mutate = [
 ]
 ```
 
+#### Parallel Execution
+
+Mutation testing runs in parallel by default using `--max-children` (cpu_count - 1).
+Override via CLI or `mutation.toml`:
+
+```bash
+# Override parallelism on CLI
+make mutation-test MUTMUT_ARGS="-n 4"
+
+# Or in mutation.toml
+[mutation]
+max_children = 8  # 0 = auto (cpu_count - 1)
+```
+
 ## Regression Test Policy
 
 Every bug fix requires a regression test:
@@ -121,9 +135,13 @@ def test_snapshot_roundtrip_integrity(session_factory):
 # Fast checks (pre-commit, local dev)
 check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test
 
-# Slow checks (CI only)
+# All checks including mutation testing (runs in parallel)
+check-all:
+	make -j2 check mutation-check
+
+# Slow checks (CI only) - runs with parallel workers
 mutation-check:
-	uv run python build/run_mutmut.py --enforce-gates
+	uv run python build/run_mutmut.py --check
 ```
 
 ### `make check` Sequence
