@@ -20,6 +20,7 @@ from ...dataclasses import FrozenDataclass
 from ..config import LLMConfig
 
 if TYPE_CHECKING:
+    from ._task_completion import TaskCompletionChecker
     from .isolation import IsolationConfig
 
 __all__ = [
@@ -52,12 +53,14 @@ class ClaudeAgentSDKClientConfig:
         stop_on_structured_output: If True, stop execution immediately after
             the StructuredOutput tool is called. This ensures the turn ends
             cleanly after structured output is produced.
-        enforce_plan_completion: If True, the agent is prevented from stopping
-            until all tasks in the session Plan are marked as completed. This
-            requires the PlanningToolsSection to be included in the prompt.
-            When enabled, both the stop hook and StructuredOutput handling
-            check Plan state and signal the SDK to continue if incomplete
-            tasks remain.
+        task_completion_checker: Optional checker for verifying task completion
+            before allowing the agent to stop. When provided, both the stop
+            hook and StructuredOutput handling use this checker to determine
+            if tasks are complete. Supports various implementations:
+            - ``PlanBasedChecker``: Checks session Plan state
+            - ``LLMJudgeChecker``: Uses LLM-as-judge verification
+            - ``CompositeChecker``: Combines multiple checkers
+            When None (default), no completion checking is performed.
         isolation: Hermetic isolation configuration. When provided, creates
             an ephemeral home directory and prevents access to the host's
             ~/.claude configuration. See :class:`IsolationConfig` for details.
@@ -71,7 +74,7 @@ class ClaudeAgentSDKClientConfig:
     max_budget_usd: float | None = None
     suppress_stderr: bool = True
     stop_on_structured_output: bool = True
-    enforce_plan_completion: bool = False
+    task_completion_checker: TaskCompletionChecker | None = None
     isolation: IsolationConfig | None = None
     betas: tuple[str, ...] | None = None
 

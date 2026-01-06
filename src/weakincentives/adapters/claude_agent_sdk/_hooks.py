@@ -30,6 +30,10 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ._notifications import Notification
+from ._task_completion import (
+    TaskCompletionChecker,
+    TaskCompletionContext,
+)
 
 if TYPE_CHECKING:
     from ...prompt.prompt import PromptResources
@@ -476,68 +480,11 @@ def _parse_tool_data(input_data: Any) -> _ParsedToolData:  # noqa: ANN401
     )
 
 
-def _check_plan_incomplete(
-    hook_context: HookContext,
-    plan_type: type | None = None,
-) -> tuple[bool, str | None]:
-    """Check if the session plan has incomplete tasks.
-
-    Args:
-        hook_context: Context with session for Plan state access.
-        plan_type: The Plan dataclass type to check. If None, attempts to
-            import from weakincentives.contrib.tools.planning.
-
-    Returns:
-        A tuple of (has_incomplete_tasks, reminder_message).
-        If has_incomplete_tasks is False, reminder_message is None.
-    """
-    resolved_plan_type = plan_type
-    if resolved_plan_type is None:
-        try:
-            from ...contrib.tools.planning import Plan
-
-            resolved_plan_type = Plan
-        except ImportError:
-            return (False, None)
-
-    try:
-        plan = hook_context.session[resolved_plan_type].latest()
-    except (KeyError, AttributeError):
-        return (False, None)
-
-    if plan is None:
-        return (False, None)
-
-    steps = getattr(plan, "steps", ())
-    incomplete_steps = [
-        step for step in steps if getattr(step, "status", "done") != "done"
-    ]
-
-    if not incomplete_steps:
-        return (False, None)
-
-    incomplete_count = len(incomplete_steps)
-    total_count = len(steps)
-    incomplete_titles = [
-        getattr(step, "title", f"Step {i}") for i, step in enumerate(incomplete_steps)
-    ]
-
-    max_titles_in_message = 3
-    reminder_message = (
-        f"You have {incomplete_count} incomplete task(s) out of {total_count}. "
-        f"Please complete the remaining tasks before stopping: "
-        f"{', '.join(incomplete_titles[:max_titles_in_message])}"
-        + ("..." if len(incomplete_titles) > max_titles_in_message else "")
-    )
-
-    return (True, reminder_message)
-
-
 def create_post_tool_use_hook(
     hook_context: HookContext,
     *,
     stop_on_structured_output: bool = True,
-    enforce_plan_completion: bool = False,
+    task_completion_checker: TaskCompletionChecker | None = None,
 ) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording and state rollback.
 
@@ -551,9 +498,9 @@ def create_post_tool_use_hook(
         hook_context: Context with session, adapter, and prompt.
         stop_on_structured_output: If True, return ``continue: false`` after
             the StructuredOutput tool to end the turn immediately.
-        enforce_plan_completion: If True, check that all plan tasks are complete
-            before stopping on StructuredOutput. If tasks are incomplete, the
-            hook continues execution instead of stopping.
+        task_completion_checker: Optional checker for verifying task completion
+            before stopping on StructuredOutput. When provided and tasks are
+            incomplete, the hook continues execution instead of stopping.
 
     Returns:
         An async hook callback function matching SDK signature.
@@ -633,16 +580,21 @@ def create_post_tool_use_hook(
 
         # Stop execution after StructuredOutput tool to end turn cleanly
         if stop_on_structured_output and data.tool_name == "StructuredOutput":
-            # If enforce_plan_completion is enabled, check for incomplete tasks
-            if enforce_plan_completion:
-                has_incomplete, reminder = _check_plan_incomplete(hook_context)
-                if has_incomplete:
+            # If task_completion_checker is configured, verify completion
+            if task_completion_checker is not None:
+                context = TaskCompletionContext(
+                    session=hook_context.session,
+                    tentative_output=data.tool_input.get("output"),
+                    stop_reason="structured_output",
+                )
+                result = task_completion_checker.check(context)
+                if not result.complete:
                     logger.info(
-                        "claude_agent_sdk.hook.structured_output_plan_incomplete",
-                        event="hook.structured_output_plan_incomplete",
+                        "claude_agent_sdk.hook.structured_output_incomplete",
+                        event="hook.structured_output_incomplete",
                         context={
                             "tool_name": data.tool_name,
-                            "reminder": reminder,
+                            "feedback": result.feedback,
                         },
                     )
                     # Don't stop - let agent continue to complete tasks
@@ -815,18 +767,17 @@ def create_stop_hook(
 def create_task_completion_stop_hook(
     hook_context: HookContext,
     *,
-    plan_type: type | None = None,
+    checker: TaskCompletionChecker,
 ) -> AsyncHookCallback:
     """Create a Stop hook that checks task completion before allowing stop.
 
-    This hook examines the session's Plan state and prevents the agent from
-    stopping if there are incomplete tasks. When tasks are incomplete, it
-    returns a signal to continue execution with a reminder message.
+    This hook uses the provided TaskCompletionChecker to verify that all tasks
+    are complete before allowing the agent to stop. When tasks are incomplete,
+    it returns a signal to continue execution with feedback.
 
     Args:
-        hook_context: Context with session for Plan state access.
-        plan_type: The Plan dataclass type to check. If None, attempts to
-            import from weakincentives.contrib.tools.planning.
+        hook_context: Context with session for state access.
+        checker: Task completion checker for verifying completion status.
 
     Returns:
         An async hook callback that enforces task completion.
@@ -834,10 +785,11 @@ def create_task_completion_stop_hook(
     Example:
         >>> from weakincentives.adapters.claude_agent_sdk import (
         ...     create_task_completion_stop_hook,
+        ...     PlanBasedChecker,
         ... )
-        >>> from weakincentives.contrib.tools import Plan
         >>>
-        >>> hook = create_task_completion_stop_hook(hook_context, plan_type=Plan)
+        >>> checker = PlanBasedChecker()
+        >>> hook = create_task_completion_stop_hook(hook_context, checker=checker)
     """
 
     async def task_completion_stop_hook(  # noqa: RUF029
@@ -855,15 +807,23 @@ def create_task_completion_stop_hook(
         )
         hook_context.stop_reason = stop_reason
 
-        # Check if plan has incomplete tasks using helper
-        has_incomplete, reminder = _check_plan_incomplete(hook_context, plan_type)
+        # Check task completion using the checker
+        context = TaskCompletionContext(
+            session=hook_context.session,
+            tentative_output=None,
+            stop_reason=stop_reason,
+        )
+        result = checker.check(context)
 
-        if not has_incomplete:
-            # All tasks complete or no plan - allow stop
+        if result.complete:
+            # All tasks complete - allow stop
             logger.debug(
                 "claude_agent_sdk.hook.task_completion_stop.allow",
                 event="hook.task_completion_stop.allow",
-                context={"stop_reason": stop_reason},
+                context={
+                    "stop_reason": stop_reason,
+                    "feedback": result.feedback,
+                },
             )
             return {}
 
@@ -873,14 +833,14 @@ def create_task_completion_stop_hook(
             event="hook.task_completion_stop.incomplete",
             context={
                 "stop_reason": stop_reason,
-                "reminder": reminder,
+                "feedback": result.feedback,
             },
         )
 
         return {
             "needsMoreTurns": True,
             "decision": "continue",
-            "reason": reminder,
+            "reason": result.feedback,
         }
 
     return task_completion_stop_hook

@@ -39,6 +39,7 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     safe_hook_wrapper,
 )
 from weakincentives.adapters.claude_agent_sdk._notifications import Notification
+from weakincentives.adapters.claude_agent_sdk._task_completion import PlanBasedChecker
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.contrib.tools.planning import Plan, PlanningToolsSection, PlanStep
@@ -384,7 +385,9 @@ class TestPostToolUseHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
-        hook = create_post_tool_use_hook(context, enforce_plan_completion=True)
+        hook = create_post_tool_use_hook(
+            context, task_completion_checker=PlanBasedChecker()
+        )
         input_data = {
             "tool_name": "StructuredOutput",
             "tool_input": {"output": {"key": "value"}},
@@ -418,7 +421,9 @@ class TestPostToolUseHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
-        hook = create_post_tool_use_hook(context, enforce_plan_completion=True)
+        hook = create_post_tool_use_hook(
+            context, task_completion_checker=PlanBasedChecker()
+        )
         input_data = {
             "tool_name": "StructuredOutput",
             "tool_input": {"output": {"key": "value"}},
@@ -442,7 +447,9 @@ class TestPostToolUseHook:
             adapter_name="test_adapter",
             prompt_name="test_prompt",
         )
-        hook = create_post_tool_use_hook(context, enforce_plan_completion=True)
+        hook = create_post_tool_use_hook(
+            context, task_completion_checker=PlanBasedChecker()
+        )
         input_data = {
             "tool_name": "StructuredOutput",
             "tool_input": {"output": {"key": "value"}},
@@ -1470,7 +1477,9 @@ class TestTaskCompletionStopHook:
 
     def test_allows_stop_when_no_plan_slice(self, hook_context: HookContext) -> None:
         """Stop is allowed when Plan slice is not installed in session."""
-        hook = create_task_completion_stop_hook(hook_context, plan_type=Plan)
+        hook = create_task_completion_stop_hook(
+            hook_context, checker=PlanBasedChecker()
+        )
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1490,7 +1499,7 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1520,7 +1529,7 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1551,7 +1560,7 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1573,7 +1582,7 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
         input_data = {"stopReason": "max_turns_reached"}
 
         assert context.stop_reason is None
@@ -1591,7 +1600,7 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
 
         asyncio.run(hook({}, None, None))
 
@@ -1616,7 +1625,7 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1645,7 +1654,7 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1660,8 +1669,8 @@ class TestTaskCompletionStopHook:
         # Should not list all tasks
         assert "Task 9" not in reason
 
-    def test_lazy_plan_type_resolution(self, session: Session) -> None:
-        """Hook resolves Plan type lazily when not provided."""
+    def test_checker_protocol_with_plan_based_checker(self, session: Session) -> None:
+        """Hook accepts any TaskCompletionChecker implementation."""
         PlanningToolsSection._initialize_session(session)
 
         context = HookContext(
@@ -1671,11 +1680,12 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        # Create hook without explicit plan_type
-        hook = create_task_completion_stop_hook(context)
+        # Create hook with PlanBasedChecker - verifies protocol compatibility
+        checker = PlanBasedChecker()
+        hook = create_task_completion_stop_hook(context, checker=checker)
         input_data = {"stopReason": "end_turn"}
 
-        # Should work and resolve Plan type lazily
+        # Should work with checker protocol
         result = asyncio.run(hook(input_data, None, None))
 
         # No plan initialized, so stop is allowed

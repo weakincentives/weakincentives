@@ -752,14 +752,18 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         # Create async hook callbacks
         pre_hook = create_pre_tool_use_hook(hook_context)
+        checker = self._client_config.task_completion_checker
         post_hook = create_post_tool_use_hook(
             hook_context,
             stop_on_structured_output=self._client_config.stop_on_structured_output,
-            enforce_plan_completion=self._client_config.enforce_plan_completion,
+            task_completion_checker=checker,
         )
-        # Use task completion stop hook if enforce_plan_completion is enabled
-        if self._client_config.enforce_plan_completion:
-            stop_hook_fn = create_task_completion_stop_hook(hook_context)
+        # Use task completion stop hook if checker is configured
+        if checker is not None:
+            stop_hook_fn = create_task_completion_stop_hook(
+                hook_context,
+                checker=checker,
+            )
         else:
             stop_hook_fn = create_stop_hook(hook_context)
         prompt_hook = create_user_prompt_submit_hook(hook_context)
