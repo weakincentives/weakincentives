@@ -6,8 +6,14 @@ on:
   pull_request:
     branches: [main]
 
+# Cancel in-progress runs when a new commit is pushed
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  format-check:
+  # Consolidated static analysis job - runs all fast checks in one VM
+  static-analysis:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
@@ -19,55 +25,13 @@ jobs:
     - name: Set up Python
       run: uv python install 3.14
     - name: Install dependencies
-      run: uv sync
+      run: uv sync --all-extras
     - name: Run format check
       run: make format-check
-
-  lint:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v5
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-    - name: Set up Python
-      run: uv python install 3.14
-    - name: Install dependencies
-      run: uv sync
     - name: Run linter
       run: make lint
-
-  ty:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v5
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-    - name: Set up Python
-      run: uv python install 3.14
-    - name: Install dependencies
-      run: uv sync --all-extras
     - name: Run ty
       run: make ty
-
-  pyright:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v5
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-    - name: Set up Python
-      run: uv python install 3.14
-    - name: Install dependencies
-      run: uv sync --all-extras
     - name: Run pyright
       run: make pyright
 
