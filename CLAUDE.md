@@ -168,6 +168,7 @@ Consult these specs before modifying related code:
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
 | `specs/SKILLS.md` | Agent Skills specification and WINK skill mounting |
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
+| `specs/TASK_COMPLETION.md` | Task completion checking, PlanBasedChecker, LLMJudgeChecker, composite verification |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
