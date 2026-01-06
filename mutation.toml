@@ -27,3 +27,8 @@ runner = "python -m pytest --strict-config --strict-markers --no-cov --maxfail=1
 use_coverage = true
 minimum_score = 80.0
 debug = false
+
+# Parallel execution settings
+parallel = true
+workers = "auto"
+timeout = 60

@@ -89,7 +89,6 @@ jobs:
   mutation:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    needs: test
     steps:
     - uses: actions/checkout@v5
     - name: Install uv

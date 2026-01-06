@@ -15,14 +15,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-import tomllib
 
 ROOT = Path(__file__).parent.parent
 CONFIG_PATH = ROOT / "mutation.toml"
@@ -37,6 +35,9 @@ class MutationConfig:
     runner: str
     use_coverage: bool
     minimum_score: float
+    parallel: bool
+    workers: str | int
+    timeout: int | None
 
 
 def main() -> int:
@@ -82,6 +83,10 @@ def _load_config() -> MutationConfig:
         raise FileNotFoundError(message)
 
     data = tomllib.loads(CONFIG_PATH.read_text()).get("mutation", {})
+    workers_raw = data.get("workers", "auto")
+    workers: str | int = int(workers_raw) if isinstance(workers_raw, int) else workers_raw
+    timeout_raw = data.get("timeout")
+    timeout: int | None = int(timeout_raw) if timeout_raw is not None else None
     return MutationConfig(
         paths_to_mutate=list(data.get("paths_to_mutate", [])),
         tests_dir=str(data.get("tests_dir", "tests")),
@@ -90,11 +95,23 @@ def _load_config() -> MutationConfig:
         runner=str(data.get("runner", "python -m pytest -q")),
         use_coverage=bool(data.get("use_coverage", True)),
         minimum_score=float(data.get("minimum_score", 0.0)),
+        parallel=bool(data.get("parallel", False)),
+        workers=workers,
+        timeout=timeout,
     )
 
 
 def _run_mutmut(config: MutationConfig, extra_args: list[str]) -> int:
     command = ["mutmut", "run"]
+
+    if config.parallel:
+        command.append("--parallel")
+        if config.workers != "auto":
+            command.extend(["--workers", str(config.workers)])
+
+    if config.timeout is not None:
+        command.extend(["--timeout", str(config.timeout)])
+
     command.extend(extra_args)
 
     result = subprocess.run(command, check=False)
