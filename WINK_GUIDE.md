@@ -1030,7 +1030,7 @@ resources = ResourceRegistry.of(
 prompt = Prompt(template).bind(params, resources=resources)
 
 # Use as context manager for lifecycle management
-with prompt:
+with prompt.resources:
     response = adapter.evaluate(prompt, session=session)
     # Resources are accessible within this block
 ```
@@ -1079,18 +1079,15 @@ resources = ResourceRegistry.of(
 )
 
 # Create resolution context with lifecycle management
-ctx = resources.create_context()
-ctx.start()  # Resolves eager bindings
-
-try:
+# open() handles start() and close() automatically
+with resources.open() as ctx:
     # Lazy resolution with dependency graph walking
     http = ctx.get(HTTPClient)  # Also resolves Config
 
     # Tool-call scoped resources
     with ctx.tool_scope() as resolver:
         tracer = resolver.get(Tracer)  # Fresh instance
-finally:
-    ctx.close()  # Cleanup Closeable resources
+# Resources cleaned up automatically on exit
 ```
 
 **Lifecycle protocols:**
@@ -3545,7 +3542,7 @@ PromptEvaluationError
 - `ResourceRegistry.of(*bindings)` - build registry from bindings
 - `ResourceRegistry.merge(base, override)` - combine registries (override wins)
 - `ResourceRegistry.conflicts(other)` - return protocols bound in both
-- `ResourceRegistry.create_context()` - create resolution context
+- `ResourceRegistry.open()` - context manager for resource lifecycle
 - `ScopedResourceContext` - resolution context with lifecycle management
 - `Closeable`, `PostConstruct` - lifecycle protocols
 - `CircularDependencyError`, `DuplicateBindingError`, `ProviderError`,
