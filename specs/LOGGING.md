@@ -109,7 +109,7 @@ subprocess-based execution model.
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.hooks_registered` | `hook_types` |
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.options` | `model`, `cwd`, `permission_mode`, `max_turns`, `max_budget_usd`, `max_thinking_tokens`, `has_output_format`, `allowed_tools`, `disallowed_tools`, `has_mcp_servers`, `betas` |
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.executing` | `prompt_name` |
-| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.message_received` | `message_type`, `message_index`, `has_usage` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.message_received` | `message_type`, `message_index`, `has_usage`, `role`, `content_preview`, `tool_uses`, `result_preview`, `has_structured_output` |
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.complete` | `message_count`, `stderr_line_count` |
 | `adapters/claude_agent_sdk/_errors.py` | `error.normalizing` | `error_type`, `error_module`, `error_message`, `has_stderr_output`, `stderr_preview` |
 | `adapters/claude_agent_sdk/_errors.py` | `error.cli_not_found` | `prompt_name` |
