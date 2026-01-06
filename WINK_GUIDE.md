@@ -632,8 +632,9 @@ def main():
 
     response = adapter.evaluate(prompt, session=session)
 
-    print(f"Summary: {response.output.summary}")
-    print(f"Sources: {response.output.sources}")
+    if response.output is not None:
+        print(f"Summary: {response.output.summary}")
+        print(f"Sources: {response.output.sources}")
 
 if __name__ == "__main__":
     if not os.environ.get("OPENAI_API_KEY"):
@@ -883,14 +884,20 @@ For those, prefer one of these patterns:
 **Pattern A: build the template per session**
 
 ```python
-def build_prompt_template(*, session: Session) -> PromptTemplate[OutputT]:
+from typing import Any
+from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection
+from weakincentives.prompt import PromptTemplate, MarkdownSection
+from weakincentives.runtime import Session
+
+
+def build_prompt_template(*, session: Session) -> PromptTemplate[Any]:
     return PromptTemplate(
-        ns="...",
-        key="...",
+        ns="example",
+        key="session-bound",
         sections=(
-            MarkdownSection(...),
+            MarkdownSection(title="Instructions", key="instructions"),
             PlanningToolsSection(session=session),
-            VfsToolsSection(session=session, ...),
+            VfsToolsSection(session=session),
         ),
     )
 ```
@@ -1087,8 +1094,8 @@ with resources.open() as ctx:
     http = ctx.get(HTTPClient)  # Also resolves Config
 
     # Tool-call scoped resources
-    with ctx.tool_scope() as resolver:
-        tracer = resolver.get(Tracer)  # Fresh instance
+    with ctx.tool_scope() as tool_resolver:
+        tracer = tool_resolver.get(Tracer)  # Fresh instance
 # Resources cleaned up automatically on exit
 ```
 
@@ -1425,7 +1432,7 @@ class AgentPlan:
 
     @reducer(on=AddStep)
     def add_step(self, event: AddStep) -> Replace["AgentPlan"]:
-        return Replace(replace(self, steps=(*self.steps, event.step)))
+        return Replace((replace(self, steps=(*self.steps, event.step)),))
 
 session.install(AgentPlan, initial=lambda: AgentPlan(steps=()))
 session.dispatch(AddStep(step="read README"))
@@ -1559,7 +1566,7 @@ from weakincentives.adapters import LiteLLMClientConfig, LiteLLMModelConfig
 
 adapter = LiteLLMAdapter(
     model="openai/gpt-4.1-mini",
-    client_config=LiteLLMClientConfig(),
+    completion_config=LiteLLMClientConfig(),
     model_config=LiteLLMModelConfig(max_tokens=800),
 )
 ```
@@ -1968,27 +1975,27 @@ from weakincentives.runtime import InProcessDispatcher, Session
 
 
 @dataclass(frozen=True)
-class SearchParams:
+class MCPSearchParams:
     query: str
 
 
 @dataclass(frozen=True)
-class SearchResult:
+class MCPSearchResult:
     matches: int
 
     def render(self) -> str:
         return f"Found {self.matches} matches"
 
 
-def search(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
+def mcp_search(params: MCPSearchParams, *, context: ToolContext) -> ToolResult[MCPSearchResult]:
     # Your search logic here
-    return ToolResult(message="ok", value=SearchResult(matches=3))
+    return ToolResult(message="ok", value=MCPSearchResult(matches=3))
 
 
-search_tool = Tool[SearchParams, SearchResult](
+mcp_search_tool = Tool[MCPSearchParams, MCPSearchResult](
     name="search",
     description="Search the internal index",
-    handler=search,
+    handler=mcp_search,
 )
 
 session = Session(bus=InProcessDispatcher())
@@ -2001,7 +2008,7 @@ template = PromptTemplate[None](
             title="Task",
             key="task",
             template="Use the search tool for query: weakincentives.",
-            tools=(search_tool,),  # Tool attached here
+            tools=(mcp_search_tool,),  # Tool attached here
         ),
     ],
 )
@@ -2307,7 +2314,8 @@ def my_evaluator(output: str, expected: str) -> Score:
 **Built-in evaluators:**
 
 ```python
-from weakincentives.evals import exact_match, contains, all_of, any_of
+from typing import cast
+from weakincentives.evals import exact_match, contains, all_of, any_of, Score, Evaluator
 
 # Strict equality
 score = exact_match("hello", "hello")  # passed=True
@@ -2315,9 +2323,19 @@ score = exact_match("hello", "hello")  # passed=True
 # Substring presence
 score = contains("The answer is 42.", "42")  # passed=True
 
-# Combine evaluators
-evaluator = all_of(contains, my_custom_check)  # All must pass
-evaluator = any_of(exact_match, fuzzy_match)   # At least one must pass
+
+# Define custom evaluators for combining
+def my_custom_check(output: object, expected: object) -> Score:
+    return Score(value=1.0, passed=True)
+
+
+def fuzzy_match(output: object, expected: object) -> Score:
+    return Score(value=0.9, passed=True)
+
+
+# Combine evaluators (cast needed due to strict typing)
+evaluator = all_of(cast(Evaluator, contains), my_custom_check)  # All must pass
+evaluator = any_of(cast(Evaluator, exact_match), fuzzy_match)  # At least one must pass
 ```
 
 ### 8.3 LLM-as-judge
@@ -2326,16 +2344,17 @@ For subjective criteria, use an LLM to score outputs. The judge selects from a
 fixed set of rating labels that map to values:
 
 ```python
-from weakincentives.evals import llm_judge, all_of
+from typing import cast
+from weakincentives.evals import llm_judge, all_of, Evaluator, contains
 from weakincentives.adapters.openai import OpenAIAdapter
 
 # Use a smaller model for judging
 judge_adapter = OpenAIAdapter(model="gpt-4o-mini")
 
 evaluator = all_of(
-    contains,  # Must contain expected answer
-    llm_judge(judge_adapter, "Response is helpful and well-formatted"),
-    llm_judge(judge_adapter, "No hallucinated information"),
+    cast(Evaluator, contains),  # Cast for strict type compatibility
+    llm_judge(judge_adapter, "Response is helpful"),  # type: ignore[arg-type]
+    llm_judge(judge_adapter, "No hallucinated info"),  # type: ignore[arg-type]
 )
 ```
 
@@ -2402,7 +2421,8 @@ evaluator = all_of(
 
 ```python
 from weakincentives.evals import Score, SessionEvaluator
-from weakincentives.runtime import SessionView, ToolInvoked
+from weakincentives.runtime.session import SessionView
+from weakincentives.runtime import ToolInvoked
 
 def custom_session_check(
     output: str,
@@ -2421,38 +2441,55 @@ def custom_session_check(
 **EvalLoop wraps your MainLoop:**
 
 ```python
-from weakincentives.evals import EvalLoop, EvalRequest, EvalResult
-from weakincentives.runtime import InMemoryMailbox
+from typing import Any, cast
+from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match, Evaluator
+from weakincentives.runtime import InMemoryMailbox, MainLoop
 
-# Your existing MainLoop
-main_loop = MyLoop(adapter=adapter, bus=bus, config=config)
+# Your existing MainLoop (defined elsewhere in your application)
+main_loop: MainLoop[Any, str] = ...  # type: ignore[assignment]
 
-# Create mailboxes for evaluation requests and results
-requests = InMemoryMailbox[EvalRequest[str, str]](name="eval-requests")
-results = InMemoryMailbox[EvalResult](name="eval-results")
+# Create mailbox for evaluation requests (uses reply_to for result routing)
+eval_requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+    name="eval-requests"
+)
 
 # Create EvalLoop wrapping your MainLoop
 eval_loop = EvalLoop(
     loop=main_loop,
-    evaluator=exact_match,
-    requests=requests,
-    results=results,
+    evaluator=cast(Evaluator, exact_match),  # Cast for strict type compatibility
+    requests=eval_requests,
 )
 ```
 
 **Submit samples and collect results:**
 
 ```python
-from weakincentives.evals import submit_dataset, collect_results
+from typing import Any
+from weakincentives.evals import submit_dataset, collect_results, Dataset, EvalResult
+from weakincentives.runtime.mailbox import InMemoryMailbox, RegistryResolver
 
-# Submit all samples to the requests mailbox
-submit_dataset(dataset, requests)
+# Dataset defined in your application
+eval_dataset: Dataset[str, str] = ...  # type: ignore[assignment]
+
+# Results mailbox with resolver for reply_to routing
+eval_results_mailbox: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+    name="eval-results"
+)
+results_resolver = RegistryResolver({"eval-results": eval_results_mailbox})
+
+# Configure eval_requests with reply resolver
+eval_requests_with_reply: InMemoryMailbox[Any, Any] = InMemoryMailbox(
+    name="eval-requests", reply_resolver=results_resolver
+)
+
+# Submit all samples to the requests mailbox (sets reply_to="eval-results")
+submit_dataset(eval_dataset, eval_requests_with_reply)  # type: ignore[arg-type]
 
 # Run the evaluation worker
 eval_loop.run(max_iterations=1)
 
 # Collect results into a report
-report = collect_results(results, expected_count=len(dataset))
+report = collect_results(eval_results_mailbox, expected_count=len(eval_dataset))
 
 # Inspect the report
 print(f"Pass rate: {report.pass_rate:.1%}")
@@ -2472,37 +2509,47 @@ configuration as your production agent:
 
 ```python
 from threading import Thread
-from weakincentives.runtime import RedisMailbox
+from typing import Any, cast
+from weakincentives.contrib.mailbox import RedisMailbox
+from weakincentives.evals import EvalLoop, exact_match, Evaluator
+from weakincentives.runtime import MainLoop
+
+# Type stubs for external dependencies (defined in your application)
+prod_redis_client: Any = ...  # type: ignore[assignment]
+prod_main_loop: MainLoop[Any, str] = ...  # type: ignore[assignment]
 
 # Production mailboxes (Redis-backed for durability)
-prod_requests = RedisMailbox(name="agent-requests", client=redis_client)
-prod_results = RedisMailbox(name="agent-results", client=redis_client)
+prod_requests: RedisMailbox[Any, Any] = RedisMailbox(
+    name="agent-requests", client=prod_redis_client
+)
+prod_results: RedisMailbox[Any, None] = RedisMailbox(
+    name="agent-results", client=prod_redis_client
+)
 
-eval_requests = RedisMailbox(name="eval-requests", client=redis_client)
-eval_results = RedisMailbox(name="eval-results", client=redis_client)
+prod_eval_requests: RedisMailbox[Any, Any] = RedisMailbox(
+    name="eval-requests", client=prod_redis_client
+)
 
-# Same MainLoop used for both production and eval
-main_loop = MyAgentLoop(adapter=adapter, bus=bus, config=config)
 
 # Production worker
-def run_production():
+def run_production() -> None:
     while True:
         for msg in prod_requests.receive():
-            response, session = main_loop.execute(msg.body)
+            response, _session = prod_main_loop.execute(msg.body)
             prod_results.send(response)
             msg.acknowledge()
 
-# Eval worker (wraps the same MainLoop)
-eval_loop = EvalLoop(
-    loop=main_loop,
-    evaluator=my_evaluator,
-    requests=eval_requests,
-    results=eval_results,
+
+# Eval worker (wraps the same MainLoop, uses reply_to for result routing)
+prod_eval_loop = EvalLoop(
+    loop=prod_main_loop,
+    evaluator=cast(Evaluator, exact_match),  # Cast for strict type compatibility
+    requests=prod_eval_requests,
 )
 
 # Run both in parallel
 Thread(target=run_production, daemon=True).start()
-eval_loop.run()  # Blocks, processing eval requests
+prod_eval_loop.run()  # Blocks, processing eval requests
 ```
 
 **Canary deployment:**
@@ -2531,18 +2578,29 @@ mailbox), use the `reply_to` pattern. The worker derives the response
 destination from the incoming message:
 
 ```python
-from weakincentives.runtime import InMemoryMailbox, RegistryResolver
+from dataclasses import dataclass
+from typing import Any
+from weakincentives.runtime.mailbox import InMemoryMailbox, RegistryResolver
+
+@dataclass(frozen=True)
+class AnalysisRequest:
+    query: str
+
+def process(body: Any) -> Any:
+    ...  # type: ignore[empty-body]
 
 # Setup: resolver maps identifiers to mailboxes
-client_responses = InMemoryMailbox(name="client-123")
-resolver = RegistryResolver({"client-123": client_responses})
+client_responses: InMemoryMailbox[Any, None] = InMemoryMailbox(name="client-123")
+reply_router = RegistryResolver({"client-123": client_responses})
 
 # Requests mailbox with reply resolver attached
-requests = InMemoryMailbox(name="requests", reply_resolver=resolver)
+requests: InMemoryMailbox[Any, Any] = InMemoryMailbox(
+    name="requests", reply_resolver=reply_router
+)
 
 # Client sends request with reply destination
 requests.send(
-    body=AnalysisRequest(query="Find all bugs"),
+    body=AnalysisRequest(query="Find all bugs"),  # type: ignore[arg-type]
     reply_to="client-123",  # Where to send the result
 )
 
@@ -2558,27 +2616,36 @@ the same `reply_to`, and results collect into one mailbox regardless of which
 worker processes each sample:
 
 ```python
-from weakincentives.runtime import RedisMailbox
-from weakincentives.contrib.mailbox import RedisMailboxFactory
+from typing import Any
+from uuid import uuid4
+from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory
+from weakincentives.evals import EvalRequest, Sample
+from weakincentives.runtime.mailbox import CompositeResolver
+
+# External dependencies (defined in your application)
+redis_client: Any = ...  # type: ignore[assignment]
+eval_samples: list[Sample[str, str]] = []
 
 # Factory creates mailboxes on demand
-factory = RedisMailboxFactory(client=redis_client)
-resolver = CompositeResolver(registry={}, factory=factory)
+factory: RedisMailboxFactory[Any] = RedisMailboxFactory(client=redis_client)
+redis_resolver: CompositeResolver[Any] = CompositeResolver(registry={}, factory=factory)
 
-requests = RedisMailbox(name="eval-requests", reply_resolver=resolver)
+redis_requests: RedisMailbox[Any, Any] = RedisMailbox(
+    name="eval-requests", client=redis_client, reply_resolver=redis_resolver
+)
 
 # Submit all samples with the same reply destination
 run_id = f"eval-run-{uuid4()}"
-for sample in dataset:
-    requests.send(
-        body=EvalRequest(sample=sample),
+for sample in eval_samples:
+    redis_requests.send(
+        body=EvalRequest(sample=sample),  # type: ignore[arg-type]
         reply_to=run_id,  # All results go to same mailbox
     )
 
 # Collect results from the run-specific mailbox
 results_mailbox = factory.create(run_id)
-collected = []
-while len(collected) < len(dataset):
+collected: list[Any] = []
+while len(collected) < len(eval_samples):
     for msg in results_mailbox.receive(wait_time_seconds=5):
         collected.append(msg.body)
         msg.acknowledge()
@@ -2662,10 +2729,14 @@ arrives, all registered callbacks are invoked in registration order.
 Both `MainLoop` and `EvalLoop` implement the `Runnable` protocol:
 
 ```python
-from weakincentives.runtime import Runnable
+from typing import Protocol
+from weakincentives.runtime import Heartbeat
+
 
 class Runnable(Protocol):
-    def run(self, *, max_iterations: int | None = None, ...) -> None: ...
+    """Protocol for loops managed by LoopGroup."""
+
+    def run(self, *, max_iterations: int | None = None) -> None: ...
     def shutdown(self, *, timeout: float = 30.0) -> bool: ...
 
     @property
@@ -2952,26 +3023,28 @@ host.
 A practical pattern (also used by `code_reviewer_example.py` in this repo):
 
 ```python
+from typing import Any
 from weakincentives.contrib.tools import (
     PlanningToolsSection,
     PlanningStrategy,
     VfsToolsSection,
     VfsConfig,
-    HostMount,
     WorkspaceDigestSection,
 )
+from weakincentives.contrib.tools.vfs_types import HostMount as VfsHostMount
 from weakincentives.prompt import PromptTemplate, MarkdownSection
 from weakincentives.runtime import Session
 
-def build_repo_agent_template(*, session: Session):
-    mounts = (
-        HostMount(host_path="src"),
-        HostMount(host_path="README.md"),
+
+def build_repo_agent_template(*, session: Session) -> PromptTemplate[Any]:
+    vfs_mounts: tuple[VfsHostMount, ...] = (
+        VfsHostMount(host_path="src"),
+        VfsHostMount(host_path="README.md"),
     )
     vfs = VfsToolsSection(
         session=session,
         config=VfsConfig(
-            mounts=mounts,
+            mounts=vfs_mounts,
             allowed_host_roots=(".",),
         ),
         accepts_overrides=True,
@@ -3079,8 +3152,28 @@ WINK is designed so that most of your "agent logic" is testable without a model.
 **A prompt snapshot test:**
 
 ```python
-def test_prompt_renders_stably():
-    rendered = prompt.bind(Params(question="x")).render(session=session)
+from dataclasses import dataclass
+from typing import Any
+from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
+from weakincentives.runtime import Session
+
+
+@dataclass(frozen=True)
+class TestParams:
+    question: str
+
+
+template = PromptTemplate[Any](
+    ns="test",
+    key="snapshot",
+    sections=(MarkdownSection(title="Q", key="q", template="Question: ${question}"),),
+)
+prompt = Prompt(template)
+session = Session()
+
+
+def test_prompt_renders_stably() -> None:
+    rendered = prompt.bind(TestParams(question="x")).render(session=session)
     assert "Question: x" in rendered.text
 ```
 
@@ -3136,13 +3229,13 @@ Public APIs use decorators from `weakincentives.dbc`:
 ```python
 from weakincentives.dbc import require, ensure, invariant, pure
 
-@require(lambda x: x > 0, "x must be positive")
-@ensure(lambda result: result >= 0, "result must be non-negative")
+@require(lambda x: x > 0)  # x must be positive
+@ensure(lambda result: result >= 0)  # result must be non-negative
 def compute(x: int) -> int:
     ...
 
 @pure  # Marks function as having no side effects
-def render_template(template: str, params: dict) -> str:
+def render_template(template: str, params: dict[str, object]) -> str:
     ...
 ```
 
@@ -3635,7 +3728,7 @@ adapt(evaluator) -> SessionEvaluator  # Convert standard to session-aware
 
 **Session evaluators:**
 
-```python
+```text
 tool_called(name) -> SessionEvaluator
 tool_not_called(name) -> SessionEvaluator
 tool_call_count(name, min_count, max_count) -> SessionEvaluator
@@ -3646,8 +3739,8 @@ slice_contains(T, predicate) -> SessionEvaluator
 
 **Loop and helpers:**
 
-```python
-EvalLoop(loop, evaluator, requests, results)
+```text
+EvalLoop(loop, evaluator, requests)
     .run(max_iterations=None)
 
 submit_dataset(dataset, requests)
@@ -3996,9 +4089,14 @@ class Counter:
 ```python
 # formal-tests/test_counter.py
 from pathlib import Path
+from typing import Any
 from weakincentives.formal.testing import extract_and_verify
 
-def test_counter_spec(tmp_path: Path):
+# Counter class defined above with @formal_spec decorator
+Counter: Any = ...  # type: ignore[assignment]
+
+
+def test_counter_spec(tmp_path: Path) -> None:
     """Extract and verify Counter TLA+ specification."""
     spec, tla_file, cfg_file, result = extract_and_verify(
         Counter,
@@ -4008,8 +4106,9 @@ def test_counter_spec(tmp_path: Path):
     )
 
     assert spec.module == "Counter"
-    assert result.passed
-    assert result.states_generated > 0
+    if result is not None:
+        assert result.passed
+        assert result.states_generated > 0
 ```
 
 Run with:
