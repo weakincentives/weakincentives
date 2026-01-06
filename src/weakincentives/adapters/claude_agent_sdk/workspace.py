@@ -24,10 +24,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, override
 
-from ...contrib.tools.filesystem_host import HostFilesystem
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
-from ...filesystem import Filesystem
+from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import MarkdownSection
 from ...resources import ResourceRegistry
 from ...runtime.session import Session

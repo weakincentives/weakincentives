@@ -30,7 +30,6 @@ from tests.helpers.filesystem import (
     ReadOnlyFilesystemValidationSuite,
     SnapshotableFilesystemValidationSuite,
 )
-from weakincentives.contrib.tools.filesystem_host import HostFilesystem
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.errors import SnapshotError, SnapshotRestoreError
 from weakincentives.filesystem import (
@@ -39,6 +38,7 @@ from weakincentives.filesystem import (
     FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
+    HostFilesystem,
     ReadResult,
     WriteResult,
 )

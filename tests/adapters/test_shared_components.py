@@ -46,14 +46,14 @@ from weakincentives.adapters.utilities import (
     parse_tool_arguments,
     tool_to_spec,
 )
-from weakincentives.contrib.tools import (
-    Filesystem,
-    HostFilesystem,
-    InMemoryFilesystem,
-    SnapshotableFilesystem,
-)
+from weakincentives.contrib.tools import InMemoryFilesystem
 from weakincentives.deadlines import Deadline
 from weakincentives.errors import SnapshotRestoreError
+from weakincentives.filesystem import (
+    Filesystem,
+    HostFilesystem,
+    SnapshotableFilesystem,
+)
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig

@@ -20,10 +20,13 @@ storage implementation.
 The protocol uses simple `str` paths throughout - tool handlers convert these
 to structured result types for serialization to the LLM.
 
-Implementations are in `weakincentives.contrib.tools`:
+Core implementation:
+
+- `weakincentives.filesystem.HostFilesystem`: Sandboxed host directory access
+
+Additional implementations in `weakincentives.contrib.tools`:
 
 - `filesystem_memory.InMemoryFilesystem`: Session-scoped in-memory storage
-- `filesystem_host.HostFilesystem`: Sandboxed host directory access
 """
 
 from __future__ import annotations

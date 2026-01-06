@@ -22,8 +22,8 @@ from typing import IO, Any, cast
 
 import pytest
 
-import weakincentives.contrib.tools.filesystem_host as filesystem_host_module
 import weakincentives.contrib.tools.podman as podman_module
+import weakincentives.filesystem._host as filesystem_host_module
 import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool
 from tests.tools.podman_test_helpers import (
