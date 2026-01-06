@@ -8,6 +8,7 @@ exclude = [
     "snapshots",
     "tests/snapshots",
     "tests/test_code_reviewer_example.py",
+    "tests/build",
     "test-repositories",
     "integration-tests",
     "build",
