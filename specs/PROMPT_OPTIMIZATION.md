@@ -358,14 +358,14 @@ class PromptOverridesStore(Protocol):
         """
         ...
 
-    def apply(
+    def store(
         self,
         prompt: PromptLike,
         override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
     ) -> PromptOverride:
-        """Apply a single override, dispatching by type.
+        """Store a single override, dispatching by type.
 
         Each override type is self-describing with its identifier:
         - SectionOverride: path
@@ -508,14 +508,14 @@ from weakincentives.prompt.overrides import SectionOverride, ToolOverride
 override = store.seed(prompt, tag="latest")
 
 # Iterate on a specific section
-store.apply(prompt, SectionOverride(
+store.store(prompt, SectionOverride(
     path=("system",),
     expected_hash=descriptor.sections[0].content_hash,
     body="You are a helpful code review assistant. Focus on clarity and correctness.",
 ))
 
 # Update a tool description
-store.apply(prompt, ToolOverride(
+store.store(prompt, ToolOverride(
     name="suggest_fix",
     expected_contract_hash=descriptor.tools[0].contract_hash,
     description="Suggest a targeted code fix for the identified issue.",
@@ -528,7 +528,7 @@ store.apply(prompt, ToolOverride(
 from weakincentives.prompt.overrides import ToolOverride, ToolExampleOverride
 
 # Add a new tool example
-store.apply(prompt, ToolOverride(
+store.store(prompt, ToolOverride(
     name="suggest_fix",
     expected_contract_hash=contract_hash,
     example_overrides=(
@@ -544,7 +544,7 @@ store.apply(prompt, ToolOverride(
 ))
 
 # Modify an existing example
-store.apply(prompt, ToolOverride(
+store.store(prompt, ToolOverride(
     name="suggest_fix",
     expected_contract_hash=contract_hash,
     example_overrides=(
@@ -558,7 +558,7 @@ store.apply(prompt, ToolOverride(
 ))
 
 # Remove an example
-store.apply(prompt, ToolOverride(
+store.store(prompt, ToolOverride(
     name="suggest_fix",
     expected_contract_hash=contract_hash,
     example_overrides=(
@@ -577,7 +577,7 @@ store.apply(prompt, ToolOverride(
 from weakincentives.prompt.overrides import TaskExampleOverride, TaskStepOverride
 
 # Modify a task example's objective and a step
-store.apply(prompt, TaskExampleOverride(
+store.store(prompt, TaskExampleOverride(
     path=("task-examples", "fix-lint-errors"),
     index=0,
     expected_hash=existing_hash,
@@ -592,7 +592,7 @@ store.apply(prompt, TaskExampleOverride(
 ))
 
 # Add a new task example
-store.apply(prompt, TaskExampleOverride(
+store.store(prompt, TaskExampleOverride(
     path=("task-examples",),
     index=-1,
     expected_hash=None,
