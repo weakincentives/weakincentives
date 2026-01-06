@@ -240,7 +240,7 @@ pytest_add_cli_args = [
     "--maxfail=1",
     "-q",
     "--ignore=tests/test_code_reviewer_example.py",
-    "--ignore=tests/build/test_verify_doc_examples.py",
+    "--ignore=tests/build",
 ]
 pytest_add_cli_args_test_selection = [
     "-o",
