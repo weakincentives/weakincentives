@@ -238,7 +238,9 @@ def _invoke_tool_handler(
 
 
 def _log_tool_completion(
-    log: StructuredLogger, tool_result: ToolResult[SupportsToolResult]
+    log: StructuredLogger,
+    tool_result: ToolResult[SupportsToolResult],
+    tool_name: str,
 ) -> None:
     log.info(
         "Tool handler completed.",
@@ -246,6 +248,22 @@ def _log_tool_completion(
         context={
             "success": tool_result.success,
             "has_value": tool_result.value is not None,
+        },
+    )
+    # Log full result details at DEBUG level
+    logger.debug(
+        "tool.execution.complete",
+        event="tool.execution.complete",
+        context={
+            "tool_name": tool_name,
+            "success": tool_result.success,
+            "message": tool_result.message,
+            "value": str(tool_result.value) if tool_result.value is not None else None,
+            "value_type": (
+                type(tool_result.value).__qualname__
+                if tool_result.value is not None
+                else None
+            ),
         },
     )
 
@@ -452,7 +470,7 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
         # Manually restore if tool execution reported failure
         if not tool_result.success:
             _restore_snapshot_if_needed(context, snapshot, log, reason="tool_failure")
-        _log_tool_completion(log, tool_result)
+        _log_tool_completion(log, tool_result, tool_name)
 
     # Defensive check: None is valid for parameterless tools (params_type is type(None))
     if tool_params is None and tool.params_type is not type(None):  # pragma: no cover
@@ -497,6 +515,18 @@ def tool_execution(
         context=context,
         tool_name=tool_name,
         tool_call=tool_call,
+    )
+
+    # Log tool execution start with full arguments
+    logger.debug(
+        "tool.execution.start",
+        event="tool.execution.start",
+        context={
+            "tool_name": tool_name,
+            "call_id": call_id,
+            "prompt_name": context.prompt_name,
+            "arguments": dict(arguments_mapping),
+        },
     )
 
     # Use transactional execution

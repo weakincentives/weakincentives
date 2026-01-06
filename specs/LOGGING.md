@@ -109,7 +109,7 @@ subprocess-based execution model.
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.hooks_registered` | `hook_types` |
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.options` | `model`, `cwd`, `permission_mode`, `max_turns`, `max_budget_usd`, `max_thinking_tokens`, `has_output_format`, `allowed_tools`, `disallowed_tools`, `has_mcp_servers`, `betas` |
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.executing` | `prompt_name` |
-| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.message_received` | `message_type`, `message_index`, `has_usage`, `role`, `content_preview`, `tool_uses`, `result_preview`, `has_structured_output` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.message_received` | `message_type`, `message_index`, `role`, `content`, `content_blocks`, `result`, `structured_output`, `usage` |
 | `adapters/claude_agent_sdk/adapter.py` | `sdk_query.complete` | `message_count`, `stderr_line_count` |
 | `adapters/claude_agent_sdk/_errors.py` | `error.normalizing` | `error_type`, `error_module`, `error_message`, `has_stderr_output`, `stderr_preview` |
 | `adapters/claude_agent_sdk/_errors.py` | `error.cli_not_found` | `prompt_name` |
@@ -123,6 +123,40 @@ subprocess-based execution model.
 underlying Claude Code process, even when `suppress_stderr=True`. This captured output
 is logged at DEBUG level via the `sdk_query.stderr` event and included in error payloads
 when process failures occur. This is particularly useful for debugging CLI issues.
+
+**Full Content Logging**: The `sdk_query.message_received` event logs full message content
+including text, tool uses, tool results, and structured output. This provides complete
+visibility into the conversation flow for debugging without content truncation.
+
+#### MCP Bridge
+
+| Module | Event | Context Fields |
+| ----------------------------------------- | --------------------------------- | ----------------------------------------------------------------- |
+| `adapters/claude_agent_sdk/_bridge.py` | `bridge.create_bridged_tools` | `tool_count`, `tool_names`, `prompt_name` |
+| `adapters/claude_agent_sdk/_bridge.py` | `bridge.tool_call.start` | `tool_name`, `prompt_name`, `arguments` |
+| `adapters/claude_agent_sdk/_bridge.py` | `bridge.tool_call.complete` | `tool_name`, `success`, `message`, `value_type`, `output_text` |
+| `adapters/claude_agent_sdk/_bridge.py` | `bridge.validation_error` | `tool_name`, `error` |
+| `adapters/claude_agent_sdk/_bridge.py` | `bridge.handler_error` | `tool_name`, `error` |
+| `adapters/claude_agent_sdk/_bridge.py` | `bridge.tool_registered` | `tool_name` |
+| `adapters/claude_agent_sdk/_bridge.py` | `bridge.mcp_server_created` | `server_name`, `tool_count` |
+
+#### SDK Hooks
+
+| Module | Event | Context Fields |
+| ----------------------------------------- | --------------------------------- | ----------------------------------------------------------------- |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.pre_tool_use` | `tool_name`, `tool_use_id`, `input_data` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.deadline_exceeded` | `tool_name` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.budget_exhausted` | `tool_name` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.snapshot_taken` | `tool_name`, `tool_use_id` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.tool_invoked` | `tool_name`, `success`, `call_id`, `tool_input`, `tool_response`, `output_text` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.state_restored` | `tool_name`, `tool_use_id`, `reason` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.structured_output_stop` | `tool_name` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.stop` | `stop_reason` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.subagent_start` | `payload` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.subagent_stop` | `payload` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.pre_compact` | `payload` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.notification` | `payload` |
+| `adapters/claude_agent_sdk/_hooks.py` | `hook.error` | `error`, `error_type` |
 
 #### OpenAI Adapter
 
@@ -148,6 +182,72 @@ when process failures occur. This is particularly useful for debugging CLI issue
 | `adapters/litellm.py` | `throttle.analyzing` | `prompt_name`, `error_type`, `error_message`, `status_code`, `code` |
 | `adapters/litellm.py` | `throttle.not_throttle` | `prompt_name`, `error_type` |
 | `adapters/litellm.py` | `throttle.detected` | `prompt_name`, `throttle_kind`, `retry_after_seconds` |
+
+### Session Dispatch
+
+The session module provides DEBUG-level logging for all state mutations and
+reducer executions.
+
+| Module | Event | Context Fields |
+| --------------------------------- | ------------------------------ | ----------------------------------------------------------------- |
+| `runtime/session/session.py` | `session.dispatch` | `session_id`, `event_type` |
+| `runtime/session/session.py` | `session.dispatch_data_event` | `session_id`, `data_type`, `reducer_count` |
+| `runtime/session/session.py` | `session.reducer_applied` | `session_id`, `reducer`, `slice_type`, `operation` |
+| `runtime/session/session.py` | `session.register_reducer` | `session_id`, `data_type`, `slice_type`, `reducer`, `policy` |
+| `runtime/session/session.py` | `session.initialize_slice` | `session_id`, `slice_type`, `value_count` |
+| `runtime/session/session.py` | `session.clear_slice` | `session_id`, `slice_type`, `has_predicate` |
+| `runtime/session/session.py` | `session.reset` | `session_id`, `slice_count`, `slice_types` |
+| `runtime/session/session.py` | `session.restore` | `session_id`, `preserve_logs`, `snapshot_slice_count`, `registered_slice_count` |
+
+### Prompt Rendering
+
+The prompt rendering pipeline provides DEBUG-level logging for section rendering
+and tool collection.
+
+| Module | Event | Context Fields |
+| -------------------------- | -------------------------- | ----------------------------------------------------------------- |
+| `prompt/rendering.py` | `prompt.render.start` | `descriptor`, `param_types`, `override_count`, `tool_override_count` |
+| `prompt/rendering.py` | `prompt.render.section` | `section_path`, `section_type`, `visibility`, `has_override`, `depth` |
+| `prompt/rendering.py` | `prompt.render.complete` | `descriptor`, `section_count`, `tool_count`, `text_length`, `has_structured_output` |
+
+### Tool Execution
+
+The tool executor provides DEBUG-level logging for all tool invocations including
+full argument and result capture.
+
+| Module | Event | Context Fields |
+| --------------------------- | ---------------------------- | ----------------------------------------------------------------- |
+| `adapters/tool_executor.py` | `tool.execution.start` | `tool_name`, `call_id`, `prompt_name`, `arguments` |
+| `adapters/tool_executor.py` | `tool.execution.complete` | `tool_name`, `success`, `message`, `value`, `value_type` |
+| `adapters/tool_executor.py` | `tool_handler_completed` | `success`, `has_value` |
+| `adapters/tool_executor.py` | `tool_event_dispatched` | `handler_count` |
+| `adapters/tool_executor.py` | `tool_event_dispatch_failed` | `failure_count`, `failed_handlers` |
+
+### Resource Lifecycle
+
+The resource context provides DEBUG-level logging for resource construction,
+cleanup, and scoping.
+
+| Module | Event | Context Fields |
+| ----------------------- | ------------------------------------ | ----------------------------------------------------------------- |
+| `resources/context.py` | `resource.construct.start` | `protocol`, `scope` |
+| `resources/context.py` | `resource.construct.complete` | `protocol`, `scope`, `instance_type` |
+| `resources/context.py` | `resource.close` | `protocol`, `scope` |
+| `resources/context.py` | `resource.context.close.start` | `resource_count` |
+| `resources/context.py` | `resource.context.close.complete` | (none) |
+| `resources/context.py` | `resource.tool_scope.enter` | (none) |
+| `resources/context.py` | `resource.tool_scope.exit` | `closed_count` |
+
+### Mailbox Operations
+
+The mailbox module provides DEBUG-level logging for message send, receive, and
+acknowledgment operations.
+
+| Module | Event | Context Fields |
+| ------------------------------ | ---------------------- | ----------------------------------------------------------------- |
+| `runtime/mailbox/_in_memory.py` | `mailbox.send` | `mailbox`, `message_id`, `reply_to`, `body_type` |
+| `runtime/mailbox/_in_memory.py` | `mailbox.receive` | `mailbox`, `message_count`, `message_ids` |
+| `runtime/mailbox/_in_memory.py` | `mailbox.acknowledge` | `mailbox`, `message_id`, `receipt_handle` |
 
 ### Module Notes and Caveats
 

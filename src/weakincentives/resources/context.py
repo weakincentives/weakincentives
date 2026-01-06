@@ -16,12 +16,12 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from ..runtime.logging import StructuredLogger, get_logger
 from .binding import Binding
 from .errors import CircularDependencyError, ProviderError, UnboundResourceError
 from .protocols import Closeable, PostConstruct, ResourceResolver
@@ -30,7 +30,7 @@ from .scope import Scope
 if TYPE_CHECKING:
     from .registry import ResourceRegistry
 
-log: logging.Logger = logging.getLogger(__name__)
+logger: StructuredLogger = get_logger(__name__, context={"component": "resources"})
 
 
 @dataclass(slots=True)
@@ -129,6 +129,14 @@ class ScopedResourceContext:
 
     def _construct[T](self, binding: Binding[T]) -> T:
         """Construct instance via provider, handling lifecycle hooks."""
+        logger.debug(
+            "resource.construct.start",
+            event="resource.construct.start",
+            context={
+                "protocol": binding.protocol.__qualname__,
+                "scope": binding.scope.name,
+            },
+        )
         try:
             instance = binding.provider(self)
         except (CircularDependencyError, UnboundResourceError, ProviderError):
@@ -147,13 +155,22 @@ class ScopedResourceContext:
                     try:
                         instance.close()
                     except Exception:
-                        log.warning(
-                            "Error closing %s after post_construct failure",
-                            binding.protocol.__name__,
-                            exc_info=True,
+                        logger.warning(
+                            "Error closing resource after post_construct failure",
+                            event="resource.post_construct_cleanup_error",
+                            context={"protocol": binding.protocol.__qualname__},
                         )
                 raise ProviderError(binding.protocol, e) from e
 
+        logger.debug(
+            "resource.construct.complete",
+            event="resource.construct.complete",
+            context={
+                "protocol": binding.protocol.__qualname__,
+                "scope": binding.scope.name,
+                "instance_type": type(instance).__qualname__,
+            },
+        )
         return instance
 
     def _cache_for_scope(self, scope: Scope) -> dict[type[object], object] | None:
@@ -179,6 +196,11 @@ class ScopedResourceContext:
         Only SINGLETON and TOOL_CALL scoped resources are tracked and closed;
         PROTOTYPE resources are not cached and thus not tracked.
         """
+        logger.debug(
+            "resource.context.close.start",
+            event="resource.context.close.start",
+            context={"resource_count": len(self._instantiation_order)},
+        )
         for scope, protocol in reversed(self._instantiation_order):
             # Only SINGLETON and TOOL_CALL are ever in _instantiation_order
             cache = (
@@ -189,16 +211,28 @@ class ScopedResourceContext:
             instance = cache.get(protocol)
             if instance is not None and isinstance(instance, Closeable):
                 try:
+                    logger.debug(
+                        "resource.close",
+                        event="resource.close",
+                        context={
+                            "protocol": protocol.__qualname__,
+                            "scope": scope.name,
+                        },
+                    )
                     instance.close()
                 except Exception:
-                    log.warning(
-                        "Error closing %s",
-                        protocol.__name__,
-                        exc_info=True,
+                    logger.warning(
+                        "Error closing resource",
+                        event="resource.close_error",
+                        context={"protocol": protocol.__qualname__},
                     )
         self._instantiation_order.clear()
         self.singleton_cache.clear()
         self._tool_call_cache.clear()
+        logger.debug(
+            "resource.context.close.complete",
+            event="resource.context.close.complete",
+        )
 
     @contextmanager
     def tool_scope(self) -> Iterator[ResourceResolver]:
@@ -214,6 +248,10 @@ class ScopedResourceContext:
                 # ... use tracer ...
             # tracer.close() called automatically
         """
+        logger.debug(
+            "resource.tool_scope.enter",
+            event="resource.tool_scope.enter",
+        )
         # Save and clear tool-call cache
         previous_cache = self._tool_call_cache
         previous_order = [
@@ -238,10 +276,10 @@ class ScopedResourceContext:
                     try:
                         instance.close()
                     except Exception:
-                        log.warning(
-                            "Error closing tool-scoped %s",
-                            protocol.__name__,
-                            exc_info=True,
+                        logger.warning(
+                            "Error closing tool-scoped resource",
+                            event="resource.tool_scope_close_error",
+                            context={"protocol": protocol.__qualname__},
                         )
 
             # Restore previous state
@@ -251,6 +289,11 @@ class ScopedResourceContext:
                 (s, p) for s, p in self._instantiation_order if s != Scope.TOOL_CALL
             ]
             self._instantiation_order.extend(previous_order)
+            logger.debug(
+                "resource.tool_scope.exit",
+                event="resource.tool_scope.exit",
+                context={"closed_count": len(tool_call_order)},
+            )
 
 
 __all__ = ["ScopedResourceContext"]

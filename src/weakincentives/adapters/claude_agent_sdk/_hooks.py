@@ -256,6 +256,15 @@ def create_pre_tool_use_hook(
         tool_name = (
             input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
         )
+        logger.debug(
+            "claude_agent_sdk.hook.pre_tool_use",
+            event="hook.pre_tool_use",
+            context={
+                "tool_name": tool_name,
+                "tool_use_id": tool_use_id,
+                "input_data": input_data if isinstance(input_data, dict) else {},
+            },
+        )
 
         if (
             hook_context.deadline
@@ -437,6 +446,9 @@ def create_post_tool_use_hook(
                 "tool_name": data.tool_name,
                 "success": data.tool_error is None,
                 "call_id": tool_use_id,
+                "tool_input": data.tool_input,
+                "tool_response": data.result_raw,
+                "output_text": data.output_text,
             },
         )
 

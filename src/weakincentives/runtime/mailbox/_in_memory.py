@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+from ..logging import StructuredLogger, get_logger
 from ._resolver import CompositeResolver, MailboxResolutionError
 from ._types import (
     MailboxFullError,
@@ -36,6 +37,8 @@ from ._types import (
 if TYPE_CHECKING:
     from ._resolver import MailboxResolver
     from ._types import Mailbox
+
+logger: StructuredLogger = get_logger(__name__, context={"component": "mailbox"})
 
 
 @dataclass
@@ -269,6 +272,16 @@ class InMemoryMailbox[T, R]:
             self._pending.append(in_flight)
             self._condition.notify_all()
 
+        logger.debug(
+            "mailbox.send",
+            event="mailbox.send",
+            context={
+                "mailbox": self.name,
+                "message_id": msg_id,
+                "reply_to": reply_to,
+                "body_type": type(body).__qualname__,
+            },
+        )
         return msg_id
 
     def receive(
@@ -348,6 +361,16 @@ class InMemoryMailbox[T, R]:
                     # Wait for messages, close signal, or timeout
                     _ = self._condition.wait(timeout=remaining)
 
+        if messages:
+            logger.debug(
+                "mailbox.receive",
+                event="mailbox.receive",
+                context={
+                    "mailbox": self.name,
+                    "message_count": len(messages),
+                    "message_ids": [m.id for m in messages],
+                },
+            )
         return messages
 
     def _reply(self, reply_to: str | None, body: R) -> str:
@@ -374,6 +397,15 @@ class InMemoryMailbox[T, R]:
             msg = self._invisible.pop(receipt_handle)
             # Clean up delivery count tracking
             _ = self._delivery_counts.pop(msg.id, None)
+        logger.debug(
+            "mailbox.acknowledge",
+            event="mailbox.acknowledge",
+            context={
+                "mailbox": self.name,
+                "message_id": msg.id,
+                "receipt_handle": receipt_handle,
+            },
+        )
 
     def _nack(self, receipt_handle: str, visibility_timeout: int) -> None:
         """Return message to queue."""

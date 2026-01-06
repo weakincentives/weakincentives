@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast, override
 
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
+from ..runtime.logging import StructuredLogger, get_logger
 from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
@@ -42,6 +43,8 @@ from .tool import Tool
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..runtime.session.protocols import SessionProtocol
     from .overrides import PromptDescriptor, ToolOverride
+
+logger: StructuredLogger = get_logger(__name__, context={"component": "prompt"})
 
 
 _EMPTY_TOOL_PARAM_DESCRIPTIONS: Mapping[str, Mapping[str, str]] = MappingProxyType({})
@@ -166,6 +169,16 @@ class PromptRenderer[OutputT]:
         descriptor: PromptDescriptor | None = None,
         session: SessionProtocol | None = None,
     ) -> RenderedPrompt[OutputT]:
+        logger.debug(
+            "prompt.render.start",
+            event="prompt.render.start",
+            context={
+                "descriptor": str(descriptor) if descriptor is not None else None,
+                "param_types": [t.__qualname__ for t in param_lookup],
+                "override_count": len(overrides) if overrides else 0,
+                "tool_override_count": len(tool_overrides) if tool_overrides else 0,
+            },
+        )
         rendered_sections: list[str] = []
         collected_tools: list[Tool[SupportsDataclassOrNone, SupportsToolResult]] = []
         override_lookup = dict(overrides or {})
@@ -273,6 +286,18 @@ class PromptRenderer[OutputT]:
 
         text = "\n\n".join(rendered_sections)
 
+        logger.debug(
+            "prompt.render.complete",
+            event="prompt.render.complete",
+            context={
+                "descriptor": str(descriptor) if descriptor is not None else None,
+                "section_count": len(rendered_sections),
+                "tool_count": len(collected_tools),
+                "text_length": len(text),
+                "has_structured_output": self._structured_output is not None,
+            },
+        )
+
         return RenderedPrompt[OutputT](
             text=text,
             structured_output=self._structured_output,
@@ -368,6 +393,18 @@ class PromptRenderer[OutputT]:
         effective_visibility: SectionVisibility,
     ) -> str:
         params_type = node.section.params_type
+        section_path = ".".join(node.path) if node.path else "(root)"
+        logger.debug(
+            "prompt.render.section",
+            event="prompt.render.section",
+            context={
+                "section_path": section_path,
+                "section_type": type(node.section).__qualname__,
+                "visibility": effective_visibility.name,
+                "has_override": override_body is not None,
+                "depth": node.depth,
+            },
+        )
         try:
             if override_body is not None:
                 rendered = node.section.render_override(

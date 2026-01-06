@@ -82,94 +82,77 @@ def _import_sdk() -> Any:  # pragma: no cover
         ) from error
 
 
-_MESSAGE_PREVIEW_LIMIT = 500
-_BLOCK_PREVIEW_LIMIT = 200
-
-
-def _truncate(text: str, limit: int) -> str:
-    """Truncate text to limit, adding ellipsis if needed."""
-    return text[:limit] + "..." if len(text) > limit else text
-
-
-def _extract_content_block_preview(
-    block: dict[str, Any],
-) -> tuple[str | None, str | None]:
-    """Extract preview from a single content block.
-
-    Returns (tool_name, text_preview) tuple. Either can be None.
-    """
+def _extract_content_block(block: dict[str, Any]) -> dict[str, Any]:
+    """Extract full content from a single content block for logging."""
     block_type = block.get("type")
+    result: dict[str, Any] = {"type": block_type}
+
     if block_type == "tool_use":
-        return block.get("name", "unknown"), None
-    if block_type == "text":
-        text = block.get("text", "")
-        return None, _truncate(text, _BLOCK_PREVIEW_LIMIT) if text else None
-    if block_type == "tool_result":
-        tool_id = block.get("tool_use_id", "")[:20]
-        result_content = block.get("content", "")
-        if isinstance(result_content, str) and result_content:
-            preview = _truncate(result_content, _BLOCK_PREVIEW_LIMIT)
-            return None, f"[tool_result:{tool_id}] {preview}"
-    return None, None
+        result["name"] = block.get("name", "unknown")
+        result["id"] = block.get("id", "")
+        # Include full input for complete tracing
+        if "input" in block:
+            result["input"] = block["input"]
+    elif block_type == "text":
+        result["text"] = block.get("text", "")
+    elif block_type == "tool_result":
+        result["tool_use_id"] = block.get("tool_use_id", "")
+        result["content"] = block.get("content", "")
+        if "is_error" in block:
+            result["is_error"] = block["is_error"]
+    else:
+        # For other types, include the whole block
+        result.update(block)
+
+    return result
 
 
-def _extract_list_content_preview(
-    content: list[Any],
-) -> tuple[list[str], str | None]:
-    """Extract tool names and text preview from content block list."""
-    tool_uses: list[str] = []
-    text_previews: list[str] = []
-    for block in content:
-        if not isinstance(block, dict):
-            continue
-        tool_name, text_preview = _extract_content_block_preview(block)
-        if tool_name:
-            tool_uses.append(tool_name)
-        if text_preview:
-            text_previews.append(text_preview)
-    combined = (
-        " | ".join(text_previews)[:_MESSAGE_PREVIEW_LIMIT] if text_previews else None
-    )
-    return tool_uses, combined
+def _extract_list_content(content: list[Any]) -> list[dict[str, Any]]:
+    """Extract full content from content block list."""
+    return [
+        _extract_content_block(block) for block in content if isinstance(block, dict)
+    ]
 
 
-def _extract_inner_message_preview(inner_msg: dict[str, Any]) -> dict[str, Any]:
-    """Extract preview from the inner message dict."""
-    preview: dict[str, Any] = {}
+def _extract_inner_message_content(inner_msg: dict[str, Any]) -> dict[str, Any]:
+    """Extract full content from the inner message dict."""
+    result: dict[str, Any] = {}
     role = inner_msg.get("role")
     if role:
-        preview["role"] = role
+        result["role"] = role
     content = inner_msg.get("content")
     if isinstance(content, str):
-        preview["content_preview"] = _truncate(content, _MESSAGE_PREVIEW_LIMIT)
+        result["content"] = content
     elif isinstance(content, list):
-        tool_uses, text_preview = _extract_list_content_preview(content)
-        if tool_uses:
-            preview["tool_uses"] = tool_uses
-        if text_preview:
-            preview["content_preview"] = text_preview
-    return preview
+        result["content_blocks"] = _extract_list_content(content)
+    return result
 
 
-def _extract_message_preview(message: Any) -> dict[str, Any]:
-    """Extract a content preview from an SDK message for debug logging."""
-    preview: dict[str, Any] = {}
+def _extract_message_content(message: Any) -> dict[str, Any]:
+    """Extract full content from an SDK message for debug logging."""
+    result: dict[str, Any] = {}
 
     # Try to get the inner message dict (common pattern in SDK messages)
     inner_msg = getattr(message, "message", None)
     if isinstance(inner_msg, dict):
-        preview.update(_extract_inner_message_preview(inner_msg))
+        result.update(_extract_inner_message_content(inner_msg))
 
-    # ResultMessage specific: extract the result field
-    result = getattr(message, "result", None)
-    if result and isinstance(result, str):
-        preview["result_preview"] = _truncate(result, _MESSAGE_PREVIEW_LIMIT)
+    # ResultMessage specific: extract the full result field
+    sdk_result = getattr(message, "result", None)
+    if sdk_result and isinstance(sdk_result, str):
+        result["result"] = sdk_result
 
-    # Structured output if present
-    if getattr(message, "structured_output", None):
-        preview["has_structured_output"] = True
+    # Structured output - include full content
+    structured_output = getattr(message, "structured_output", None)
+    if structured_output:
+        result["structured_output"] = structured_output
 
-    return preview
+    # Include usage if present
+    usage = getattr(message, "usage", None)
+    if usage:
+        result["usage"] = usage if isinstance(usage, dict) else str(usage)
+
+    return result
 
 
 class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
@@ -840,9 +823,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 context={
                     "message_type": type(message).__name__,
                     "message_index": len(messages) - 1,
-                    "has_usage": hasattr(message, "usage")
-                    and message.usage is not None,
-                    **_extract_message_preview(message),
+                    **_extract_message_content(message),
                 },
             )
 

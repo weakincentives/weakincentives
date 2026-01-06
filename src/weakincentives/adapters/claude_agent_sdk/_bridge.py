@@ -116,6 +116,15 @@ class BridgedTool:
 
         Uses transactional semantics: snapshot before execution, restore on failure.
         """
+        logger.debug(
+            "claude_agent_sdk.bridge.tool_call.start",
+            event="bridge.tool_call.start",
+            context={
+                "tool_name": self.name,
+                "prompt_name": self._prompt_name,
+                "arguments": args,
+            },
+        )
         handler = self._tool.handler
         if handler is None:
             return {
@@ -243,6 +252,22 @@ class BridgedTool:
         # This enables session reducers to dispatch based on the value type
         self._dispatch_tool_invoked(args, result, output_text)
 
+        logger.debug(
+            "claude_agent_sdk.bridge.tool_call.complete",
+            event="bridge.tool_call.complete",
+            context={
+                "tool_name": self.name,
+                "success": result.success,
+                "message": result.message,
+                "value_type": (
+                    type(result.value).__qualname__
+                    if result.value is not None
+                    else None
+                ),
+                "output_text": output_text,
+            },
+        )
+
         return {
             "content": [{"type": "text", "text": output_text}],
             "isError": not result.success,
@@ -301,6 +326,15 @@ def create_bridged_tools(
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
     """
+    logger.debug(
+        "claude_agent_sdk.bridge.create_bridged_tools",
+        event="bridge.create_bridged_tools",
+        context={
+            "tool_count": len(tools),
+            "tool_names": [t.name for t in tools],
+            "prompt_name": prompt_name or prompt.name or f"{prompt.ns}:{prompt.key}",
+        },
+    )
     bridged: list[BridgedTool] = []
     resolved_prompt_name = prompt_name or prompt.name or f"{prompt.ns}:{prompt.key}"
 
