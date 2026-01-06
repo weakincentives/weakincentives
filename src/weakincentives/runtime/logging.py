@@ -213,8 +213,7 @@ def configure_logging(
             "disable_existing_loggers": False,
             "formatters": {
                 "text": {
-                    "format": "%(asctime)s %(levelname)s %(name)s %(event)s %(message)s %(context)s",
-                    "datefmt": "%Y-%m-%d %H:%M:%S",
+                    "()": "weakincentives.runtime.logging._TextFormatter",
                 },
                 "json": {
                     "()": "weakincentives.runtime.logging._JsonFormatter",
@@ -237,6 +236,53 @@ def configure_logging(
 
 class _SupportsNestedLogger(Protocol):
     logger: logging.Logger | logging.LoggerAdapter[logging.Logger]
+
+
+class _TextFormatter(logging.Formatter):
+    """Formatter that renders structured records as human-readable text.
+
+    Handles log records from third-party libraries that lack the ``event``
+    and ``context`` fields expected by the structured logging schema.
+    """
+
+    _FMT = "%(asctime)s %(levelname)s %(name)s"
+    _DATEFMT = "%Y-%m-%d %H:%M:%S"
+
+    def __init__(self) -> None:
+        super().__init__(fmt=self._FMT, datefmt=self._DATEFMT)
+
+    @override
+    def format(self, record: logging.LogRecord) -> str:
+        # Prepare record for formatting (sets record.message and record.asctime)
+        record.message = record.getMessage()
+        record.asctime = self.formatTime(record, self.datefmt)
+
+        # Format base fields only (timestamp, level, logger name) - no exception
+        base = self.formatMessage(record)
+
+        # Extract structured fields if present
+        event = getattr(record, "event", None)
+        context = getattr(record, "context", None)
+
+        # Build output parts
+        parts = [base]
+        if event is not None:
+            parts.append(str(event))
+        parts.append(record.message)
+        if context:
+            parts.append(str(context))
+
+        result = " ".join(parts)
+
+        # Append exception info if present (cache to avoid repeated formatting)
+        if record.exc_info and not record.exc_text:
+            record.exc_text = self.formatException(record.exc_info)
+        if record.exc_text:
+            result = f"{result}\n{record.exc_text}"
+        if record.stack_info:
+            result = f"{result}\n{self.formatStack(record.stack_info)}"
+
+        return result
 
 
 class _JsonFormatter(logging.Formatter):
@@ -267,6 +313,7 @@ def _json_default(value: object) -> JSONValue:
     return repr(value)
 
 
+_TEXT_FORMATTER_CLASS = _TextFormatter
 _JSON_FORMATTER_CLASS = _JsonFormatter
 
 
