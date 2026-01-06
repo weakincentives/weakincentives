@@ -43,13 +43,13 @@ from ._hooks import (
     create_post_tool_use_hook,
     create_pre_compact_hook,
     create_pre_tool_use_hook,
-    create_stop_hook,
     create_subagent_start_hook,
     create_subagent_stop_hook,
     create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
 )
 from ._notifications import Notification
+from ._task_completion import PlanBasedChecker
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
 
@@ -651,7 +651,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return stderr_handler
 
-    async def _run_sdk_query(  # noqa: C901, PLR0912, PLR0915 - complexity needed for debug logging
+    async def _run_sdk_query(  # noqa: C901, PLR0915 - complexity needed for debug logging
         self,
         *,
         sdk: Any,
@@ -752,20 +752,20 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         # Create async hook callbacks
         pre_hook = create_pre_tool_use_hook(hook_context)
+        # Default to PlanBasedChecker if no checker is configured
         checker = self._client_config.task_completion_checker
+        if checker is None:
+            checker = PlanBasedChecker()
         post_hook = create_post_tool_use_hook(
             hook_context,
             stop_on_structured_output=self._client_config.stop_on_structured_output,
             task_completion_checker=checker,
         )
-        # Use task completion stop hook if checker is configured
-        if checker is not None:
-            stop_hook_fn = create_task_completion_stop_hook(
-                hook_context,
-                checker=checker,
-            )
-        else:
-            stop_hook_fn = create_stop_hook(hook_context)
+        # Use task completion stop hook with checker
+        stop_hook_fn = create_task_completion_stop_hook(
+            hook_context,
+            checker=checker,
+        )
         prompt_hook = create_user_prompt_submit_hook(hook_context)
         subagent_start_hook = create_subagent_start_hook(hook_context)
         subagent_stop_hook = create_subagent_stop_hook(hook_context)
@@ -825,7 +825,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Use streaming mode (AsyncIterable) to enable hook support.
         # The SDK's query() function only initializes hooks when
         # is_streaming_mode=True, which requires an AsyncIterable prompt.
-        async def stream_prompt() -> Any:  # noqa: RUF029 - async generator
+        async def stream_prompt() -> Any:
             """Yield a single user message in streaming format."""
             yield {
                 "type": "user",

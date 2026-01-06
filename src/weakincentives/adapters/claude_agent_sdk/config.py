@@ -53,14 +53,15 @@ class ClaudeAgentSDKClientConfig:
         stop_on_structured_output: If True, stop execution immediately after
             the StructuredOutput tool is called. This ensures the turn ends
             cleanly after structured output is produced.
-        task_completion_checker: Optional checker for verifying task completion
-            before allowing the agent to stop. When provided, both the stop
-            hook and StructuredOutput handling use this checker to determine
-            if tasks are complete. Supports various implementations:
-            - ``PlanBasedChecker``: Checks session Plan state
+        task_completion_checker: Checker for verifying task completion before
+            allowing the agent to stop. Both the stop hook and StructuredOutput
+            handling use this checker to determine if tasks are complete.
+            Supports various implementations:
+            - ``PlanBasedChecker``: Checks session Plan state (default)
             - ``LLMJudgeChecker``: Uses LLM-as-judge verification
             - ``CompositeChecker``: Combines multiple checkers
-            When None (default), no completion checking is performed.
+            When None, defaults to ``PlanBasedChecker()`` to ensure agents
+            complete all planned tasks before stopping.
         isolation: Hermetic isolation configuration. When provided, creates
             an ephemeral home directory and prevents access to the host's
             ~/.claude configuration. See :class:`IsolationConfig` for details.

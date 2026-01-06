@@ -129,11 +129,13 @@ Behavior:
 - Returns `ok()` if all plan steps have `status == "done"`
 - Returns `incomplete()` with feedback listing incomplete tasks otherwise
 
-The feedback includes the count of incomplete tasks and up to 3 task titles:
+The feedback includes the count of incomplete tasks and up to 3 task titles,
+with guidance on how to proceed:
 
 ```
-You have 2 incomplete task(s) out of 5. Please complete the remaining tasks
-before stopping: Implement feature, Write tests...
+You have 2 incomplete task(s) out of 5. Please either complete all remaining
+tasks or update the plan to remove tasks that are no longer needed before
+producing output: Implement feature, Write tests...
 ```
 
 ### LLMJudgeChecker
@@ -189,20 +191,38 @@ Behavior with `all_must_pass=False`:
 
 ## Integration with Claude Agent SDK
 
-### Configuration
+### Default Behavior
 
-Enable task completion checking via `ClaudeAgentSDKClientConfig`:
+Task completion checking is **enabled by default** using `PlanBasedChecker`.
+This ensures agents complete all planned tasks before stopping or producing
+final output. No configuration is required for this default behavior:
+
+```python
+from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+
+# PlanBasedChecker is used automatically
+adapter = ClaudeAgentSDKAdapter()
+```
+
+### Custom Configuration
+
+Override the default checker via `ClaudeAgentSDKClientConfig`:
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
+    CompositeChecker,
+    LLMJudgeChecker,
     PlanBasedChecker,
 )
 
+# Use a composite checker with multiple strategies
 adapter = ClaudeAgentSDKAdapter(
     client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(),
+        task_completion_checker=CompositeChecker(
+            checkers=(PlanBasedChecker(), LLMJudgeChecker()),
+        ),
     ),
 )
 ```
