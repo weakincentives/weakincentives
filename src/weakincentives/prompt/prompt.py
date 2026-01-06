@@ -445,8 +445,7 @@ class Prompt[OutputT]:
 
         Returns None if no workspace section exists in the template.
         """
-        # Import here to avoid circular imports; the protocol is runtime_checkable
-        from ..contrib.tools.workspace import WorkspaceSection
+        from .protocols import WorkspaceSection
 
         snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
         if snapshot is None:  # pragma: no cover

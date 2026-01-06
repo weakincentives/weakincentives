@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports all clean
 
 # Format code with ruff
 format:
@@ -27,6 +27,10 @@ vulture:
 # Check for unused or missing dependencies with deptry
 deptry:
 	@uv run python build/run_deptry.py
+
+# Check that core modules don't import from contrib
+check-core-imports:
+	@uv run python build/check_core_imports.py
 
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
@@ -210,8 +214,8 @@ demo-claude-agent:
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
-# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, pip-audit, markdown, doc-examples, validate-integration-tests, test)
-check: format-check lint typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples validate-integration-tests test
+# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, check-core-imports, pip-audit, markdown, doc-examples, validate-integration-tests, test)
+check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports pip-audit markdown-check verify-doc-examples validate-integration-tests test
 
 # Synchronize documentation files into package
 sync-docs:

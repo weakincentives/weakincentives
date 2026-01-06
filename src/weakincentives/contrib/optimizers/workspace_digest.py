@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, cast, override
 
 from weakincentives.filesystem import Filesystem
+from weakincentives.prompt.protocols import WorkspaceSection
 
 from ...adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
@@ -42,7 +43,6 @@ from ..tools.digests import (
     set_workspace_digest,
 )
 from ..tools.planning import PlanningStrategy, PlanningToolsSection
-from ..tools.workspace import WorkspaceSection
 
 
 @dataclass(slots=True, frozen=True)

@@ -101,7 +101,7 @@ from .vfs import (
     WriteFile,
     WriteFileParams,
 )
-from .workspace import ToolSuiteSection, WorkspaceSection
+from weakincentives.prompt.protocols import ToolSuiteSection, WorkspaceSection
 
 PodmanSandboxConfig: Any
 PodmanSandboxSection: Any
