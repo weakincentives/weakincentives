@@ -38,15 +38,37 @@ __all__ = [
 _LOG_STRING_LIMIT = 256
 
 
-def configure_logging() -> None:
-    """Initialize root logging for interactive demos."""
+def configure_logging(*, log_file: str | None = "demo.log") -> None:
+    """Initialize root logging for interactive demos.
+
+    Args:
+        log_file: Path to write DEBUG-level logs. File is reset (not appended) on
+            each run. Pass None to disable file logging.
+    """
+    handlers: list[logging.Handler] = [logging.StreamHandler(sys.stdout)]
+
+    # Add file handler for DEBUG-level logging
+    if log_file is not None:
+        file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
+        )
+        handlers.append(file_handler)
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,  # Root logger at DEBUG to allow file handler to capture
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(sys.stdout)],
+        handlers=handlers,
         force=True,
     )
+
+    # Keep console output at INFO level for cleaner interactive experience
+    for handler in handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, logging.FileHandler
+        ):
+            handler.setLevel(logging.INFO)
 
 
 def attach_logging_subscribers(bus: Dispatcher) -> None:
