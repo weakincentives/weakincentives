@@ -361,6 +361,99 @@ class TestPostToolUseHook:
 
         assert result == {}
 
+    def test_stops_on_structured_output_when_all_tasks_complete(
+        self, session: Session
+    ) -> None:
+        """StructuredOutput stops when enforce_plan_completion is True and all done."""
+        PlanningToolsSection._initialize_session(session)
+
+        # Create a plan with all steps done
+        completed_plan = Plan(
+            objective="Test objective",
+            status="completed",
+            steps=(
+                PlanStep(step_id=1, title="Task 1", status="done"),
+                PlanStep(step_id=2, title="Task 2", status="done"),
+            ),
+        )
+        session.dispatch(completed_plan)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context, enforce_plan_completion=True)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        assert result == {"continue": False}
+
+    def test_does_not_stop_on_structured_output_when_tasks_incomplete(
+        self, session: Session
+    ) -> None:
+        """StructuredOutput does not stop when enforce_plan_completion and tasks incomplete."""
+        PlanningToolsSection._initialize_session(session)
+
+        # Create a plan with incomplete steps
+        incomplete_plan = Plan(
+            objective="Test objective",
+            status="active",
+            steps=(
+                PlanStep(step_id=1, title="Done task", status="done"),
+                PlanStep(step_id=2, title="Pending task", status="pending"),
+            ),
+        )
+        session.dispatch(incomplete_plan)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context, enforce_plan_completion=True)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should not stop - continue execution to complete tasks
+        assert result == {}
+
+    def test_stops_on_structured_output_without_plan(
+        self, session: Session
+    ) -> None:
+        """StructuredOutput stops when no plan exists (nothing to enforce)."""
+        # Don't initialize Plan slice
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context, enforce_plan_completion=True)
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop - no plan means nothing to enforce
+        assert result == {"continue": False}
+
     def test_skips_mcp_wink_tools(self, session: Session) -> None:
         """MCP-bridged WINK tools should not publish events (they do it themselves)."""
         events: list[ToolInvoked] = []
