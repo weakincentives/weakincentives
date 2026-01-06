@@ -31,7 +31,7 @@ Example:
 
 from __future__ import annotations
 
-from abc import ABC
+import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -132,12 +132,12 @@ class TaskCompletionChecker(Protocol):
         ...
 
 
-class PlanBasedChecker(ABC, TaskCompletionChecker):
-    """Base class for plan-based task completion checking.
+class PlanBasedChecker(TaskCompletionChecker):
+    """Plan-based task completion checker.
 
     This checker examines the session's Plan state to determine if all
-    tasks are complete. Subclasses can customize behavior by overriding
-    the plan type or step status logic.
+    tasks are complete. It checks for steps with status != "done" and
+    returns incomplete feedback if any are found.
     """
 
     def __init__(self, plan_type: type | None = None) -> None:
@@ -243,11 +243,21 @@ class PlanBasedChecker(ABC, TaskCompletionChecker):
 
 
 class LLMJudgeChecker(TaskCompletionChecker):
-    """Task completion checker using LLM-as-judge verification.
+    """Placeholder for LLM-as-judge task completion verification.
 
-    This checker uses an LLM to evaluate whether the agent has completed
-    its tasks based on the session state, tentative output, and any
-    custom criteria provided in the prompt.
+    .. warning::
+        This is a placeholder implementation that does NOT perform actual
+        LLM verification. It always returns ``ok()`` when an adapter is
+        available. A full implementation would use the adapter to evaluate
+        completion criteria via an LLM call.
+
+    This checker is intended to use an LLM to evaluate whether the agent
+    has completed its tasks based on the session state, tentative output,
+    and custom criteria. The full implementation would:
+
+    1. Build a verification prompt from the context and criteria
+    2. Call the adapter to evaluate completion
+    3. Parse the LLM response to determine pass/fail
 
     Requires an adapter to be provided in the context for LLM calls.
     """
@@ -260,12 +270,21 @@ class LLMJudgeChecker(TaskCompletionChecker):
     ) -> None:
         """Initialize the LLM judge checker.
 
+        .. warning::
+            This is a placeholder. See class docstring for details.
+
         Args:
             criteria: Custom criteria for the LLM to evaluate. If None,
                 uses a default prompt asking if tasks appear complete.
             require_adapter: If True, returns incomplete when no adapter
                 is available. If False, returns ok when no adapter.
         """
+        warnings.warn(
+            "LLMJudgeChecker is a placeholder implementation that does not "
+            "perform actual LLM verification. It will always return ok() "
+            "when an adapter is available.",
+            stacklevel=2,
+        )
         self._criteria = criteria or (
             "Based on the session state and output, determine if the agent "
             "has successfully completed all requested tasks. Consider whether "

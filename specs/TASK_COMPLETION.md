@@ -138,28 +138,32 @@ tasks or update the plan to remove tasks that are no longer needed before
 producing output: Implement feature, Write tests...
 ```
 
-### LLMJudgeChecker
+### LLMJudgeChecker (Placeholder)
 
-Uses LLM-as-judge verification (placeholder implementation):
+> **Warning**: `LLMJudgeChecker` is a placeholder implementation that does NOT
+> perform actual LLM verification. It always returns `ok()` when an adapter is
+> available. Instantiating it emits a `UserWarning`.
+
+Intended for LLM-as-judge verification:
 
 ```python
-# Requires adapter in context
-checker = LLMJudgeChecker()
+import warnings
 
-# With custom criteria
-checker = LLMJudgeChecker(
-    criteria="Verify all tests pass and documentation is updated."
-)
-
-# Allow completion when adapter unavailable
-checker = LLMJudgeChecker(require_adapter=False)
+# Suppress warning if using intentionally
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore")
+    checker = LLMJudgeChecker(
+        criteria="Verify all tests pass and documentation is updated."
+    )
 ```
 
-Behavior:
+Current behavior:
 
+- Emits `UserWarning` on instantiation about placeholder status
 - Returns `incomplete()` if adapter required but not provided in context
 - Returns `ok()` if adapter not required and not provided
-- Builds verification prompt and calls LLM (currently placeholder)
+- Returns `ok("LLM verification passed (implementation pending).")` when
+  adapter is available (does NOT actually call the LLM)
 
 ### CompositeChecker
 
@@ -387,12 +391,17 @@ adapter = ClaudeAgentSDKAdapter(
 
 - **Stop Hook Response**: When tasks are incomplete, the stop hook returns
   `needsMoreTurns: True` which signals the SDK to continue execution
+- **Budget/Deadline Bypass**: Task completion checking is skipped when the
+  budget is exhausted or deadline has expired. In these cases, the agent is
+  allowed to stop since it cannot do more work anyway.
 - **Feedback Truncation**: `PlanBasedChecker` truncates task lists to 3 items
   with ellipsis to keep feedback concise
 - **Lazy Plan Resolution**: `PlanBasedChecker` imports the `Plan` type lazily,
   allowing use in environments where planning tools aren't installed
 - **Protocol Compliance**: Any object with a `check(context) -> result` method
   satisfies `TaskCompletionChecker` due to `@runtime_checkable`
+- **Placeholder Warning**: `LLMJudgeChecker` emits a `UserWarning` on
+  instantiation to indicate it's a placeholder implementation
 
 ## Implementation Notes
 

@@ -292,7 +292,7 @@ def create_pre_tool_use_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_tool_use_hook(  # noqa: RUF029
+    async def pre_tool_use_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -480,7 +480,7 @@ def _parse_tool_data(input_data: Any) -> _ParsedToolData:  # noqa: ANN401
     )
 
 
-def create_post_tool_use_hook(
+def create_post_tool_use_hook(  # noqa: C901 - complexity needed for budget/deadline checks
     hook_context: HookContext,
     *,
     stop_on_structured_output: bool = True,
@@ -506,7 +506,7 @@ def create_post_tool_use_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def post_tool_use_hook(  # noqa: RUF029
+    async def post_tool_use_hook(  # noqa: C901 - complexity needed for budget/deadline checks
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -581,7 +581,27 @@ def create_post_tool_use_hook(
         # Stop execution after StructuredOutput tool to end turn cleanly
         if stop_on_structured_output and data.tool_name == "StructuredOutput":
             # If task_completion_checker is configured, verify completion
-            if task_completion_checker is not None:
+            # Skip check if deadline exceeded or budget exhausted
+            should_check = task_completion_checker is not None
+            if (
+                should_check
+                and hook_context.deadline
+                and hook_context.deadline.remaining().total_seconds() <= 0
+            ):
+                should_check = False
+            if should_check and hook_context.budget_tracker is not None:
+                bt = hook_context.budget_tracker
+                if isinstance(bt, BudgetTracker):
+                    consumed_total = (bt.consumed.input_tokens or 0) + (
+                        bt.consumed.output_tokens or 0
+                    )
+                    if (
+                        bt.budget.max_total_tokens is not None
+                        and consumed_total >= bt.budget.max_total_tokens
+                    ):
+                        should_check = False
+
+            if should_check and task_completion_checker is not None:
                 context = TaskCompletionContext(
                     session=hook_context.session,
                     tentative_output=data.tool_input.get("output"),
@@ -659,7 +679,7 @@ def create_user_prompt_submit_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def user_prompt_submit_hook(  # noqa: RUF029
+    async def user_prompt_submit_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -721,7 +741,7 @@ def create_stop_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def stop_hook(  # noqa: RUF029
+    async def stop_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -792,7 +812,7 @@ def create_task_completion_stop_hook(
         >>> hook = create_task_completion_stop_hook(hook_context, checker=checker)
     """
 
-    async def task_completion_stop_hook(  # noqa: RUF029
+    async def task_completion_stop_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -806,6 +826,37 @@ def create_task_completion_stop_hook(
             else "end_turn"
         )
         hook_context.stop_reason = stop_reason
+
+        # Skip task completion check if deadline exceeded - can't do more work
+        if (
+            hook_context.deadline
+            and hook_context.deadline.remaining().total_seconds() <= 0
+        ):
+            logger.debug(
+                "claude_agent_sdk.hook.task_completion_stop.deadline_exceeded",
+                event="hook.task_completion_stop.deadline_exceeded",
+                context={"stop_reason": stop_reason},
+            )
+            return {}
+
+        # Skip task completion check if budget exhausted - can't do more work
+        budget_tracker = hook_context.budget_tracker
+        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
+            budget = budget_tracker.budget
+            consumed = budget_tracker.consumed
+            consumed_total = (consumed.input_tokens or 0) + (
+                consumed.output_tokens or 0
+            )
+            if (
+                budget.max_total_tokens is not None
+                and consumed_total >= budget.max_total_tokens
+            ):
+                logger.debug(
+                    "claude_agent_sdk.hook.task_completion_stop.budget_exhausted",
+                    event="hook.task_completion_stop.budget_exhausted",
+                    context={"stop_reason": stop_reason},
+                )
+                return {}
 
         # Check task completion using the checker
         context = TaskCompletionContext(
@@ -861,7 +912,7 @@ def create_subagent_start_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def subagent_start_hook(  # noqa: RUF029
+    async def subagent_start_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -922,7 +973,7 @@ def create_subagent_stop_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def subagent_stop_hook(  # noqa: RUF029
+    async def subagent_stop_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -993,7 +1044,7 @@ def create_pre_compact_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_compact_hook(  # noqa: RUF029
+    async def pre_compact_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -1062,7 +1113,7 @@ def create_notification_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def notification_hook(  # noqa: RUF029
+    async def notification_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401

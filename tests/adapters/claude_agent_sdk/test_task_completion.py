@@ -245,11 +245,17 @@ class TestPlanBasedChecker:
 
 
 class TestLLMJudgeChecker:
+    def test_emits_placeholder_warning(self, session: Session) -> None:
+        """LLMJudgeChecker emits a warning about being a placeholder."""
+        with pytest.warns(UserWarning, match="placeholder implementation"):
+            LLMJudgeChecker()
+
     def test_incomplete_without_adapter_when_required(
         self, session: Session
     ) -> None:
         """Checker returns incomplete when adapter required but missing."""
-        checker = LLMJudgeChecker(require_adapter=True)
+        with pytest.warns(UserWarning):
+            checker = LLMJudgeChecker(require_adapter=True)
         context = TaskCompletionContext(session=session)
 
         result = checker.check(context)
@@ -261,7 +267,8 @@ class TestLLMJudgeChecker:
         self, session: Session
     ) -> None:
         """Checker returns complete when adapter not required and missing."""
-        checker = LLMJudgeChecker(require_adapter=False)
+        with pytest.warns(UserWarning):
+            checker = LLMJudgeChecker(require_adapter=False)
         context = TaskCompletionContext(session=session)
 
         result = checker.check(context)
@@ -271,7 +278,8 @@ class TestLLMJudgeChecker:
     def test_with_adapter_returns_placeholder(self, session: Session) -> None:
         """Checker with adapter returns placeholder response."""
         mock_adapter = cast(ProviderAdapter, object())
-        checker = LLMJudgeChecker()
+        with pytest.warns(UserWarning):
+            checker = LLMJudgeChecker()
         context = TaskCompletionContext(session=session, adapter=mock_adapter)
 
         result = checker.check(context)
@@ -282,9 +290,10 @@ class TestLLMJudgeChecker:
 
     def test_custom_criteria(self, session: Session) -> None:
         """Checker accepts custom evaluation criteria."""
-        checker = LLMJudgeChecker(
-            criteria="Verify all tests pass and coverage is 100%."
-        )
+        with pytest.warns(UserWarning):
+            checker = LLMJudgeChecker(
+                criteria="Verify all tests pass and coverage is 100%."
+            )
         context = TaskCompletionContext(session=session)
 
         # Without adapter, it should just return incomplete
@@ -296,7 +305,8 @@ class TestLLMJudgeChecker:
         self, session: Session
     ) -> None:
         """Verification prompt includes tentative output."""
-        checker = LLMJudgeChecker()
+        with pytest.warns(UserWarning):
+            checker = LLMJudgeChecker()
         context = TaskCompletionContext(
             session=session,
             tentative_output={"summary": "All done"},
@@ -446,7 +456,8 @@ class TestTaskCompletionCheckerProtocol:
 
     def test_llm_judge_checker_satisfies_protocol(self) -> None:
         """LLMJudgeChecker is a TaskCompletionChecker."""
-        checker = LLMJudgeChecker()
+        with pytest.warns(UserWarning):
+            checker = LLMJudgeChecker()
         assert isinstance(checker, TaskCompletionChecker)
 
     def test_composite_checker_satisfies_protocol(self) -> None:
