@@ -149,7 +149,6 @@ jobs:
   # Test job - always runs core tests, full suite based on change detection
   test:
     needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -178,8 +177,7 @@ jobs:
     needs: [detect-changes, test]
     if: |
       needs.detect-changes.outputs.run_all == 'true' ||
-      (needs.detect-changes.outputs.docs_only != 'true' &&
-       (needs.detect-changes.outputs.runtime == 'true' || needs.detect-changes.outputs.serde == 'true'))
+      (needs.detect-changes.outputs.runtime == 'true' || needs.detect-changes.outputs.serde == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
