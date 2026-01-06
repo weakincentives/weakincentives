@@ -76,3 +76,33 @@ class TestContribLazyImports:
         from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
 
         assert WorkspaceDigestOptimizer is not None
+
+    def test_getattr_lazy_load_after_clearing_cache(self) -> None:
+        """Verify __getattr__ lazy loading works when module not in globals.
+
+        This test ensures the lazy import path (lines 61-63) is covered even
+        when other tests have already imported the submodules. We clear the
+        cached references from globals() to force __getattr__ to be called.
+        """
+        from weakincentives import contrib
+
+        # Get the module's globals dict
+        contrib_globals = vars(contrib)
+
+        # Save and remove cached modules to force __getattr__ path
+        saved = {}
+        for name in ("mailbox", "optimizers", "tools"):
+            if name in contrib_globals:
+                saved[name] = contrib_globals.pop(name)
+
+        try:
+            # Now accessing these will trigger __getattr__
+            # which exercises lines 61-63
+            mailbox_mod = contrib.mailbox
+            assert mailbox_mod is not None
+
+            # Verify it was cached back into globals
+            assert "mailbox" in contrib_globals
+        finally:
+            # Restore any modules we removed (for other tests)
+            contrib_globals.update(saved)
