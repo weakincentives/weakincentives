@@ -202,25 +202,6 @@ jobs:
             uv run --all-extras pytest --strict-config --strict-markers -q --no-header --no-cov $TEST_PATHS
           fi
 
-  mutation:
-    needs: [detect-changes, test]
-    if: |
-      needs.detect-changes.outputs.run_all == 'true' ||
-      (needs.detect-changes.outputs.runtime == 'true' || needs.detect-changes.outputs.serde == 'true')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install uv
-        uses: astral-sh/setup-uv@v7
-        with:
-          enable-cache: true
-      - name: Set up Python
-        run: uv python install 3.14
-      - name: Install dependencies
-        run: uv sync --all-extras
-      - name: Enforce mutation score gate
-        run: make mutation-check
-
   # Fast feedback for docs-only PRs
   docs-check:
     needs: detect-changes

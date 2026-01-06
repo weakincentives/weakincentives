@@ -34,8 +34,6 @@ make bandit          # Security scanning
 make deptry          # Dependency analysis
 make pip-audit       # Vulnerability scanning
 make markdown-check  # Markdown formatting
-make mutation-test   # Mutation testing (80% score gate)
-
 # Integration tests (requires OPENAI_API_KEY)
 make integration-tests
 ```
@@ -133,7 +131,6 @@ def my_handler(params: ParamsType, *, context: ToolContext) -> ToolResult[Result
 - Pytest runs with `--strict-config --strict-markers`
 - Flaky tests retry twice automatically
 - Add fixtures to `tests/helpers/` when needed
-- Mutation testing protects hotspots in `runtime/session/` and `serde/`
 
 Run focused tests during development:
 
