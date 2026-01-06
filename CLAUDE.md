@@ -281,13 +281,14 @@ with prompt.resources:
 Reducers receive `SliceView[S]` and return `SliceOp[S]` operations:
 
 ```python
-from weakincentives.runtime.session import SliceView, Append, Replace
+from dataclasses import dataclass, replace
+from weakincentives.runtime.session import SliceView, Append, Replace, reducer
 
-# Append a single item
+# Append a single item (Append takes one item)
 def add_step_reducer(state: SliceView[Plan], event: AddStep) -> Append[Plan]:
     return Append(Plan(steps=(event.step,)))
 
-# Replace entire slice
+# Replace entire slice (Replace takes a tuple of items)
 def reset_plan_reducer(state: SliceView[Plan], event: ResetPlan) -> Replace[Plan]:
     return Replace((Plan(steps=()),))
 
@@ -298,7 +299,7 @@ class AgentPlan:
 
     @reducer(on=AddStep)
     def add_step(self, event: AddStep) -> Replace["AgentPlan"]:
-        return Replace(replace(self, steps=(*self.steps, event.step)))
+        return Replace((replace(self, steps=(*self.steps, event.step)),))
 ```
 
 ### Resource Registry
