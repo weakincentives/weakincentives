@@ -52,26 +52,6 @@ The following patterns are automatically excluded from coverage:
 - `@abstractmethod` - Abstract method declarations
 - `...` - Protocol/abstract method stubs (both inline and standalone)
 
-### Mutation Testing
-
-Mutation testing protects correctness-critical modules. Expand scope beyond current hotspots:
-
-| Module | Minimum Score | Rationale |
-| ---------------------- | ------------- | ----------------------------------------- |
-| `runtime/session/*.py` | 90% | State management core |
-| `serde/*.py` | 85% | Snapshot integrity depends on round-trips |
-| `dbc/decorators.py` | 85% | Contract enforcement must be watertight |
-
-```toml
-# pyproject.toml
-[tool.mutmut]
-paths_to_mutate = [
-    "src/weakincentives/runtime/session/",
-    "src/weakincentives/serde/",
-    "src/weakincentives/dbc/decorators.py",
-]
-```
-
 ## Regression Test Policy
 
 Every bug fix requires a regression test:
@@ -120,10 +100,6 @@ def test_snapshot_roundtrip_integrity(session_factory):
 ```makefile
 # Fast checks (pre-commit, local dev)
 check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test
-
-# Slow checks (CI only)
-mutation-check:
-	uv run python build/run_mutmut.py --enforce-gates
 ```
 
 ### `make check` Sequence

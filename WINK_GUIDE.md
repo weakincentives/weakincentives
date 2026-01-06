@@ -163,7 +163,7 @@ ______________________________________________________________________
 1. [Approach to code quality](#15-approach-to-code-quality)
    1. [Strict type checking](#151-strict-type-checking)
    1. [Design-by-contract](#152-design-by-contract)
-   1. [Coverage and mutation testing](#153-coverage-and-mutation-testing)
+   1. [Coverage](#153-coverage)
    1. [Security scanning](#154-security-scanning)
    1. [Quality gates in practice](#155-quality-gates-in-practice)
 1. [Recipes](#16-recipes)
@@ -3193,8 +3193,8 @@ consequences.
 The gates aren't bureaucracy—they're aligned with the "weak incentives"
 philosophy. Just as we design prompts to make correct model behavior natural, we
 design the codebase to make correct code natural. Strict types catch errors at
-construction time. Contracts document and enforce invariants. Coverage and
-mutation testing ensure tests actually verify behavior.
+construction time. Contracts document and enforce invariants. Coverage ensures
+tests exercise all code paths.
 
 ### 15.1 Strict type checking
 
@@ -3268,31 +3268,15 @@ supports **formal verification** with embedded TLA+ specifications. See
 [Appendix C: Formal Verification](#appendix-c-formal-verification-with-tla) for
 details.
 
-### 15.3 Coverage and mutation testing
+### 15.3 Coverage
 
-WINK requires 100% line coverage for `src/weakincentives/`. But coverage alone
-is insufficient—a test can execute a line without verifying its behavior.
-
-Mutation testing fills this gap. Mutmut modifies source code (e.g., changes `>`
-to `>=`, removes lines) and checks if tests catch the mutation. A high mutation
-score means tests actually verify behavior, not just execute it.
-
-**Requirements:**
-
-- 100% line coverage (enforced by pytest-cov)
-- 80% mutation score for hotspots (`runtime/session/`, `serde/`)
-
-**Hotspot rationale:**
-
-Session state and serialization are correctness-critical. A bug in session
-snapshot/restore can corrupt agent state. A bug in serde can cause silent data
-loss. These modules get extra scrutiny.
+WINK requires 100% line coverage for `src/weakincentives/`. This ensures every
+code path is exercised by tests.
 
 **Running the tests:**
 
 ```bash
 make test           # Coverage-gated unit tests
-make mutation-test  # Mutation testing (slower, run before PRs)
 ```
 
 ### 15.4 Security scanning

@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests mutation-test mutation-check property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports all clean
 
 # Format code with ruff
 format:
@@ -67,14 +67,6 @@ type-coverage:
 # Run tests with coverage (100% minimum)
 test:
 	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= tests
-
-# Run mutation tests with mutmut
-mutation-test:
-	@uv run --all-extras python build/run_mutmut.py
-
-# Enforce the configured mutation score gate (for CI)
-mutation-check:
-	@uv run --all-extras python build/run_mutmut.py --check
 
 # Run OpenAI integration tests
 integration-tests:

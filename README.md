@@ -385,7 +385,6 @@ Key targets:
 
 - `make format` / `make lint` / `make typecheck`
 - `make test` (100% coverage enforced)
-- `make mutation-test` (mutmut, 80% score gate)
 - `make check` (all of the above plus Bandit, Deptry, pip-audit)
 
 ### Approach to code quality
@@ -397,7 +396,6 @@ WINK applies strict quality gates to keep the codebase predictable and safe:
 - **Design-by-contract.** Public APIs use `@require`, `@ensure`, and `@invariant`
   decorators from `weakincentives.dbc`.
 - **100% test coverage.** Every line in `src/weakincentives/` must be covered.
-- **Mutation testing.** Hotspots (session, serde) require 80% mutation score.
 - **Security scanning.** Bandit, Deptry, and pip-audit run on every CI build.
 
 Run `make check` before committing to verify all gates pass.
