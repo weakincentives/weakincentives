@@ -79,6 +79,76 @@ surface area and should be kept in sync with code changes.
 | `prompt/overrides/local_store.py` | `_LOGGER` | `debug` | `prompt_override_delete_missing` | `ns`, `prompt_key`, `tag` |
 | `contrib/tools/asteval.py` | `_LOGGER` | `debug` | `asteval_run` | `stdout_len`, `stderr_len`, `write_count`, `code_preview` |
 
+### Adapter DEBUG Logging
+
+All adapters provide extensive DEBUG-level logging for troubleshooting. These
+events are suppressed by default and enabled via `WEAKINCENTIVES_LOG_LEVEL=DEBUG`.
+
+#### Claude Agent SDK Adapter
+
+The Claude Agent SDK adapter provides the most extensive debug logging due to its
+subprocess-based execution model.
+
+| Module | Event | Context Fields |
+| ------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `adapters/claude_agent_sdk/adapter.py` | `adapter.init` | `model`, `permission_mode`, `cwd`, `max_turns`, `max_budget_usd`, `suppress_stderr`, `stop_on_structured_output`, `has_isolation_config`, `allowed_tools`, `disallowed_tools`, `max_thinking_tokens` |
+| `adapters/claude_agent_sdk/adapter.py` | `evaluate.entry` | `prompt_name`, `prompt_ns`, `prompt_key`, `has_deadline`, `deadline_remaining_seconds`, `has_budget`, `has_budget_tracker` |
+| `adapters/claude_agent_sdk/adapter.py` | `evaluate.deadline_expired` | `prompt_name` |
+| `adapters/claude_agent_sdk/adapter.py` | `evaluate.rendered` | `prompt_text_length`, `tool_count`, `tool_names`, `has_output_type`, `output_type` |
+| `adapters/claude_agent_sdk/adapter.py` | `evaluate.temp_workspace_created` | `temp_workspace_dir` |
+| `adapters/claude_agent_sdk/adapter.py` | `evaluate.filesystem_bound` | `effective_cwd` |
+| `adapters/claude_agent_sdk/adapter.py` | `run_context.entry` | `prompt_name`, `effective_cwd`, `has_output_format` |
+| `adapters/claude_agent_sdk/adapter.py` | `run_context.bridged_tools` | `bridged_tool_count`, `bridged_tool_names` |
+| `adapters/claude_agent_sdk/adapter.py` | `run_context.isolation` | `ephemeral_home_path`, `workspace_path`, `network_policy`, `sandbox_enabled`, `has_api_key_override`, `include_host_env`, `skill_count` |
+| `adapters/claude_agent_sdk/adapter.py` | `run_context.visibility_expansion_required` | `prompt_name` |
+| `adapters/claude_agent_sdk/adapter.py` | `run_context.sdk_error` | `prompt_name`, `error_type`, `error_message`, `stderr_output`, `exit_code` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.entry` | `prompt_text_preview`, `has_output_format`, `bridged_tool_count` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.env_configured` | `home_override`, `has_api_key`, `env_var_count`, `env_keys` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.mcp_server_configured` | `mcp_server_name` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.stderr` | `line` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.hooks_registered` | `hook_types` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.options` | `model`, `cwd`, `permission_mode`, `max_turns`, `max_budget_usd`, `max_thinking_tokens`, `has_output_format`, `allowed_tools`, `disallowed_tools`, `has_mcp_servers`, `betas` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.executing` | `prompt_name` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.message_received` | `message_type`, `message_index`, `has_usage` |
+| `adapters/claude_agent_sdk/adapter.py` | `sdk_query.complete` | `message_count`, `stderr_line_count` |
+| `adapters/claude_agent_sdk/_errors.py` | `error.normalizing` | `error_type`, `error_module`, `error_message`, `has_stderr_output`, `stderr_preview` |
+| `adapters/claude_agent_sdk/_errors.py` | `error.cli_not_found` | `prompt_name` |
+| `adapters/claude_agent_sdk/_errors.py` | `error.cli_connection_error` | `prompt_name`, `stderr_output` |
+| `adapters/claude_agent_sdk/_errors.py` | `error.process_error` | `prompt_name`, `exit_code`, `stderr`, `stderr_captured` |
+| `adapters/claude_agent_sdk/_errors.py` | `error.json_decode_error` | `prompt_name`, `stderr_output` |
+| `adapters/claude_agent_sdk/_errors.py` | `error.max_turns_exceeded` | `prompt_name` |
+| `adapters/claude_agent_sdk/_errors.py` | `error.unknown` | `prompt_name`, `is_sdk_error`, `error_type`, `stderr_output` |
+
+**Stderr Capture**: The Claude Agent SDK adapter captures all stderr output from the
+underlying Claude Code process, even when `suppress_stderr=True`. This captured output
+is logged at DEBUG level via the `sdk_query.stderr` event and included in error payloads
+when process failures occur. This is particularly useful for debugging CLI issues.
+
+#### OpenAI Adapter
+
+| Module | Event | Context Fields |
+| -------------------- | --------------------------- | ------------------------------------------------------------------------------------------------- |
+| `adapters/openai.py` | `adapter.init` | `model`, `tool_choice`, `has_model_config`, `has_client_config`, `used_explicit_client`, `temperature`, `max_tokens` |
+| `adapters/openai.py` | `evaluate.entry` | `prompt_name`, `has_deadline`, `deadline_remaining_seconds`, `has_budget`, `has_budget_tracker` |
+| `adapters/openai.py` | `evaluate.setup_complete` | `prompt_name`, `has_response_format`, `tool_count`, `tool_names` |
+| `adapters/openai.py` | `provider.request` | `prompt_name`, `model`, `message_count`, `tool_count`, `tool_names`, `tool_choice`, `has_response_format` |
+| `adapters/openai.py` | `provider.response` | `prompt_name`, `response_type`, `has_output`, `has_usage` |
+| `adapters/openai.py` | `provider.error` | `prompt_name`, `error_type`, `error_message`, `status_code`, `code` |
+| `adapters/openai.py` | `provider.throttle_detected` | `prompt_name`, `throttle_kind`, `retry_after_seconds` |
+
+#### LiteLLM Adapter
+
+| Module | Event | Context Fields |
+| --------------------- | ----------------------- | -------------------------------------------------------------------------------------------------------- |
+| `adapters/litellm.py` | `adapter.init` | `model`, `tool_choice`, `has_model_config`, `has_completion_config`, `used_explicit_completion`, `used_completion_factory`, `temperature`, `max_tokens` |
+| `adapters/litellm.py` | `evaluate.entry` | `prompt_name`, `has_deadline`, `deadline_remaining_seconds`, `has_budget`, `has_budget_tracker` |
+| `adapters/litellm.py` | `evaluate.setup_complete` | `prompt_name`, `has_response_format`, `tool_count`, `tool_names` |
+| `adapters/litellm.py` | `provider.request` | `prompt_name`, `model`, `message_count`, `tool_count`, `tool_names`, `tool_choice`, `has_response_format` |
+| `adapters/litellm.py` | `provider.response` | `prompt_name`, `response_type`, `has_choices`, `has_usage` |
+| `adapters/litellm.py` | `throttle.analyzing` | `prompt_name`, `error_type`, `error_message`, `status_code`, `code` |
+| `adapters/litellm.py` | `throttle.not_throttle` | `prompt_name`, `error_type` |
+| `adapters/litellm.py` | `throttle.detected` | `prompt_name`, `throttle_kind`, `retry_after_seconds` |
+
 ### Module Notes and Caveats
 
 - **events.py**: Exceptions from subscriber handlers are logged at ERROR and the

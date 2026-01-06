@@ -938,7 +938,13 @@ class TestIsolationConfig:
     def test_suppress_stderr_false(
         self, session: Session, simple_prompt: Prompt[None]
     ) -> None:
-        """When suppress_stderr is False, stderr callback is not added."""
+        """When suppress_stderr is False, stderr is still captured for debug logging.
+
+        NOTE: As of the debug logging enhancement, stderr is always captured
+        for debug logging purposes regardless of suppress_stderr setting.
+        The captured stderr is logged at DEBUG level and included in error
+        payloads when process failures occur.
+        """
         config = ClaudeAgentSDKClientConfig(suppress_stderr=False)
         adapter = ClaudeAgentSDKAdapter(client_config=config)
 
@@ -948,10 +954,36 @@ class TestIsolationConfig:
         with sdk_patches():
             _ = adapter.evaluate(simple_prompt, session=session)
 
-        # Check captured options do not include stderr callback
+        # stderr handler is always present for debug logging
         assert len(MockSDKQuery.captured_options) == 1
         options = MockSDKQuery.captured_options[0]
-        assert not hasattr(options, "stderr") or options.stderr is None
+        assert hasattr(options, "stderr") and options.stderr is not None
+
+    def test_stderr_handler_buffers_output(
+        self, session: Session, simple_prompt: Prompt[None]
+    ) -> None:
+        """Stderr handler buffers output for debug logging and error payloads."""
+        adapter = ClaudeAgentSDKAdapter()
+
+        MockSDKQuery.reset()
+        MockSDKQuery.set_results([MockResultMessage(result="Done")])
+
+        with sdk_patches():
+            _ = adapter.evaluate(simple_prompt, session=session)
+
+        # Get the stderr handler and invoke it
+        assert len(MockSDKQuery.captured_options) == 1
+        options = MockSDKQuery.captured_options[0]
+        stderr_handler = options.stderr
+
+        # Invoke the handler with some test output
+        stderr_handler("Test stderr line 1\n")
+        stderr_handler("Test stderr line 2\n")
+
+        # Verify the buffer captured the output
+        assert len(adapter._stderr_buffer) == 2
+        assert adapter._stderr_buffer[0] == "Test stderr line 1\n"
+        assert adapter._stderr_buffer[1] == "Test stderr line 2\n"
 
     def test_message_without_result(
         self, session: Session, simple_prompt: Prompt[None]

@@ -578,6 +578,8 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         client_config: OpenAIClientConfig | None = None,
     ) -> None:
         super().__init__()
+        # Capture this before client may be reassigned
+        used_explicit_client = client is not None
         if client is not None:
             if client_config is not None:
                 raise ValueError(
@@ -592,6 +594,20 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         self._model_config = model_config
         self._tool_choice: ToolChoice = tool_choice
 
+        logger.debug(
+            "openai.adapter.init",
+            event="adapter.init",
+            context={
+                "model": model,
+                "tool_choice": tool_choice,
+                "has_model_config": model_config is not None,
+                "has_client_config": client_config is not None,
+                "used_explicit_client": used_explicit_client,
+                "temperature": model_config.temperature if model_config else None,
+                "max_tokens": model_config.max_tokens if model_config else None,
+            },
+        )
+
     @override
     def evaluate[OutputT](
         self,
@@ -602,10 +618,37 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
     ) -> PromptResponse[OutputT]:
+        prompt_name = prompt.name or prompt.template.__class__.__name__
+
+        logger.debug(
+            "openai.evaluate.entry",
+            event="evaluate.entry",
+            context={
+                "prompt_name": prompt_name,
+                "has_deadline": deadline is not None,
+                "deadline_remaining_seconds": (
+                    deadline.remaining().total_seconds() if deadline else None
+                ),
+                "has_budget": budget is not None,
+                "has_budget_tracker": budget_tracker is not None,
+            },
+        )
+
         context = self._setup_evaluation(
             prompt,
             deadline=deadline,
             session=session,
+        )
+
+        logger.debug(
+            "openai.evaluate.setup_complete",
+            event="evaluate.setup_complete",
+            context={
+                "prompt_name": context.prompt_name,
+                "has_response_format": context.response_format is not None,
+                "tool_count": len(context.rendered.tools),
+                "tool_names": [t.name for t in context.rendered.tools],
+            },
         )
 
         # Create tracker if budget provided but tracker not supplied
@@ -722,7 +765,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             return {"format": text_format}
         return None
 
-    def _build_provider_invoker(self, prompt_name: str) -> ProviderInvoker:
+    def _build_provider_invoker(self, prompt_name: str) -> ProviderInvoker:  # noqa: C901 - complexity for debug logging
         def _call_provider(
             messages: list[dict[str, Any]],
             tool_specs: Sequence[Mapping[str, Any]],
@@ -747,13 +790,55 @@ class OpenAIAdapter(ProviderAdapter[Any]):
             if response_format_payload is not None:
                 request_payload["text"] = response_format_payload
 
+            logger.debug(
+                "openai.provider.request",
+                event="provider.request",
+                context={
+                    "prompt_name": prompt_name,
+                    "model": self._model,
+                    "message_count": len(messages),
+                    "tool_count": len(tool_specs) if tool_specs else 0,
+                    "tool_names": [
+                        spec.get("function", {}).get("name") for spec in tool_specs
+                    ]
+                    if tool_specs
+                    else [],
+                    "tool_choice": tool_choice_directive,
+                    "has_response_format": response_format_payload is not None,
+                },
+            )
+
             try:
-                return self._client.responses.create(**request_payload)
+                response = self._client.responses.create(**request_payload)
             except Exception as error:  # pragma: no cover - network/SDK failure
+                logger.debug(
+                    "openai.provider.error",
+                    event="provider.error",
+                    context={
+                        "prompt_name": prompt_name,
+                        "error_type": type(error).__name__,
+                        "error_message": str(error),
+                        "status_code": getattr(error, "status_code", None),
+                        "code": getattr(error, "code", None),
+                    },
+                )
                 throttle_error = _normalize_openai_throttle(
                     error, prompt_name=prompt_name
                 )
                 if throttle_error is not None:
+                    logger.debug(
+                        "openai.provider.throttle_detected",
+                        event="provider.throttle_detected",
+                        context={
+                            "prompt_name": prompt_name,
+                            "throttle_kind": throttle_error.kind,
+                            "retry_after_seconds": (
+                                throttle_error.retry_after.total_seconds()
+                                if throttle_error.retry_after
+                                else None
+                            ),
+                        },
+                    )
                     raise throttle_error from error
                 raise PromptEvaluationError(
                     "OpenAI request failed.",
@@ -761,6 +846,18 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
                     provider_payload=_error_payload(error),
                 ) from error
+            else:
+                logger.debug(
+                    "openai.provider.response",
+                    event="provider.response",
+                    context={
+                        "prompt_name": prompt_name,
+                        "response_type": type(response).__name__,
+                        "has_output": hasattr(response, "output"),
+                        "has_usage": hasattr(response, "usage"),
+                    },
+                )
+                return response
 
         return _call_provider
 
