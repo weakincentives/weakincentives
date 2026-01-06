@@ -73,6 +73,7 @@ Example:
 
 from __future__ import annotations
 
+from ._hooks import create_task_completion_stop_hook
 from ._notifications import Notification, NotificationSource
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
@@ -111,4 +112,5 @@ __all__ = [
     "SandboxConfig",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
+    "create_task_completion_stop_hook",
 ]

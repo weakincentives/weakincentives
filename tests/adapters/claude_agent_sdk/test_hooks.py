@@ -34,12 +34,14 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     create_stop_hook,
     create_subagent_start_hook,
     create_subagent_stop_hook,
+    create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
     safe_hook_wrapper,
 )
 from weakincentives.adapters.claude_agent_sdk._notifications import Notification
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.contrib.tools.planning import Plan, PlanningToolsSection, PlanStep
 from weakincentives.deadlines import Deadline
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
@@ -1368,3 +1370,221 @@ class TestIsToolErrorResponse:
         assert _is_tool_error_response({"content": [{"text": None}]}) is False
         # Text field is a list instead of string
         assert _is_tool_error_response({"content": [{"text": ["error"]}]}) is False
+
+
+class TestTaskCompletionStopHook:
+    """Tests for task completion stop hook functionality."""
+
+    def test_allows_stop_when_no_plan_slice(self, hook_context: HookContext) -> None:
+        """Stop is allowed when Plan slice is not installed in session."""
+        hook = create_task_completion_stop_hook(hook_context, plan_type=Plan)
+        input_data = {"stopReason": "end_turn"}
+
+        result = asyncio.run(hook(input_data, None, None))
+
+        assert result == {}
+        assert hook_context.stop_reason == "end_turn"
+
+    def test_allows_stop_when_no_plan_initialized(self, session: Session) -> None:
+        """Stop is allowed when Plan slice exists but no plan is initialized."""
+        # Install Plan slice but don't initialize a plan
+        PlanningToolsSection._initialize_session(session)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        input_data = {"stopReason": "end_turn"}
+
+        result = asyncio.run(hook(input_data, None, None))
+
+        assert result == {}
+        assert context.stop_reason == "end_turn"
+
+    def test_allows_stop_when_all_tasks_complete(self, session: Session) -> None:
+        """Stop is allowed when all plan tasks are marked as done."""
+        PlanningToolsSection._initialize_session(session)
+
+        # Create a plan with all steps done
+        completed_plan = Plan(
+            objective="Test objective",
+            status="completed",
+            steps=(
+                PlanStep(step_id=1, title="Task 1", status="done"),
+                PlanStep(step_id=2, title="Task 2", status="done"),
+            ),
+        )
+        session.dispatch(completed_plan)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        input_data = {"stopReason": "end_turn"}
+
+        result = asyncio.run(hook(input_data, None, None))
+
+        assert result == {}
+        assert context.stop_reason == "end_turn"
+
+    def test_signals_continue_when_tasks_incomplete(self, session: Session) -> None:
+        """Stop hook signals continuation when tasks are incomplete."""
+        PlanningToolsSection._initialize_session(session)
+
+        # Create a plan with incomplete steps
+        incomplete_plan = Plan(
+            objective="Test objective",
+            status="active",
+            steps=(
+                PlanStep(step_id=1, title="Done task", status="done"),
+                PlanStep(step_id=2, title="Pending task", status="pending"),
+                PlanStep(step_id=3, title="In progress task", status="in_progress"),
+            ),
+        )
+        session.dispatch(incomplete_plan)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        input_data = {"stopReason": "end_turn"}
+
+        result = asyncio.run(hook(input_data, None, None))
+
+        assert result.get("needsMoreTurns") is True
+        assert result.get("decision") == "continue"
+        assert "2 incomplete task(s)" in result.get("reason", "")
+        assert "Pending task" in result.get("reason", "")
+        assert context.stop_reason == "end_turn"
+
+    def test_records_stop_reason(self, session: Session) -> None:
+        """Stop hook records the stop reason regardless of task state."""
+        PlanningToolsSection._initialize_session(session)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        input_data = {"stopReason": "max_turns_reached"}
+
+        assert context.stop_reason is None
+        asyncio.run(hook(input_data, None, None))
+        assert context.stop_reason == "max_turns_reached"
+
+    def test_defaults_stop_reason_to_end_turn(self, session: Session) -> None:
+        """Stop hook defaults stopReason to end_turn when not provided."""
+        PlanningToolsSection._initialize_session(session)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+
+        asyncio.run(hook({}, None, None))
+
+        assert context.stop_reason == "end_turn"
+
+    def test_handles_empty_steps(self, session: Session) -> None:
+        """Stop is allowed when plan has no steps."""
+        PlanningToolsSection._initialize_session(session)
+
+        # Create a plan with no steps
+        empty_plan = Plan(
+            objective="Test objective",
+            status="active",
+            steps=(),
+        )
+        session.dispatch(empty_plan)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        input_data = {"stopReason": "end_turn"}
+
+        result = asyncio.run(hook(input_data, None, None))
+
+        assert result == {}
+
+    def test_reminder_message_truncates_long_task_list(self, session: Session) -> None:
+        """Reminder message truncates task titles when there are many incomplete."""
+        PlanningToolsSection._initialize_session(session)
+
+        # Create a plan with many incomplete steps
+        many_steps_plan = Plan(
+            objective="Test objective",
+            status="active",
+            steps=tuple(
+                PlanStep(step_id=i, title=f"Task {i}", status="pending")
+                for i in range(1, 10)
+            ),
+        )
+        session.dispatch(many_steps_plan)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        hook = create_task_completion_stop_hook(context, plan_type=Plan)
+        input_data = {"stopReason": "end_turn"}
+
+        result = asyncio.run(hook(input_data, None, None))
+
+        assert result.get("needsMoreTurns") is True
+        reason = result.get("reason", "")
+        # Should contain first 3 tasks and ellipsis
+        assert "Task 1" in reason
+        assert "Task 2" in reason
+        assert "Task 3" in reason
+        assert "..." in reason
+        # Should not list all tasks
+        assert "Task 9" not in reason
+
+    def test_lazy_plan_type_resolution(self, session: Session) -> None:
+        """Hook resolves Plan type lazily when not provided."""
+        PlanningToolsSection._initialize_session(session)
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+
+        # Create hook without explicit plan_type
+        hook = create_task_completion_stop_hook(context)
+        input_data = {"stopReason": "end_turn"}
+
+        # Should work and resolve Plan type lazily
+        result = asyncio.run(hook(input_data, None, None))
+
+        # No plan initialized, so stop is allowed
+        assert result == {}
+        assert context.stop_reason == "end_turn"

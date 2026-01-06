@@ -47,6 +47,7 @@ __all__ = [
     "create_stop_hook",
     "create_subagent_start_hook",
     "create_subagent_stop_hook",
+    "create_task_completion_stop_hook",
     "create_user_prompt_submit_hook",
     "safe_hook_wrapper",
 ]
@@ -733,6 +734,144 @@ def create_stop_hook(
         return {}
 
     return stop_hook
+
+
+def create_task_completion_stop_hook(
+    hook_context: HookContext,
+    *,
+    plan_type: type | None = None,
+) -> AsyncHookCallback:
+    """Create a Stop hook that checks task completion before allowing stop.
+
+    This hook examines the session's Plan state and prevents the agent from
+    stopping if there are incomplete tasks. When tasks are incomplete, it
+    returns a signal to continue execution with a reminder message.
+
+    Args:
+        hook_context: Context with session for Plan state access.
+        plan_type: The Plan dataclass type to check. If None, attempts to
+            import from weakincentives.contrib.tools.planning.
+
+    Returns:
+        An async hook callback that enforces task completion.
+
+    Example:
+        >>> from weakincentives.adapters.claude_agent_sdk import (
+        ...     create_task_completion_stop_hook,
+        ... )
+        >>> from weakincentives.contrib.tools import Plan
+        >>>
+        >>> hook = create_task_completion_stop_hook(hook_context, plan_type=Plan)
+    """
+    # Resolve Plan type lazily to avoid import cycles
+    resolved_plan_type: type | None = plan_type
+
+    async def task_completion_stop_hook(  # noqa: RUF029
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        nonlocal resolved_plan_type
+        _ = tool_use_id
+        _ = sdk_context
+
+        stop_reason = (
+            input_data.get("stopReason", "end_turn")
+            if isinstance(input_data, dict)
+            else "end_turn"
+        )
+        hook_context.stop_reason = stop_reason
+
+        # Lazily import Plan type if not provided
+        if resolved_plan_type is None:
+            try:
+                from ...contrib.tools.planning import Plan
+
+                resolved_plan_type = Plan
+            except ImportError:
+                # Planning tools not available - allow stop
+                logger.debug(
+                    "claude_agent_sdk.hook.task_completion_stop.no_plan_type",
+                    event="hook.task_completion_stop.no_plan_type",
+                    context={"stop_reason": stop_reason},
+                )
+                return {}
+
+        # Check if Plan exists in session and has incomplete tasks
+        try:
+            plan = hook_context.session[resolved_plan_type].latest()
+        except (KeyError, AttributeError):
+            # Plan slice not installed - allow stop
+            logger.debug(
+                "claude_agent_sdk.hook.task_completion_stop.no_plan_slice",
+                event="hook.task_completion_stop.no_plan_slice",
+                context={"stop_reason": stop_reason},
+            )
+            return {}
+
+        if plan is None:
+            # No plan initialized - allow stop
+            logger.debug(
+                "claude_agent_sdk.hook.task_completion_stop.no_plan",
+                event="hook.task_completion_stop.no_plan",
+                context={"stop_reason": stop_reason},
+            )
+            return {}
+
+        # Check if plan has incomplete steps
+        steps = getattr(plan, "steps", ())
+        incomplete_steps = [
+            step for step in steps if getattr(step, "status", "done") != "done"
+        ]
+
+        if not incomplete_steps:
+            # All tasks complete - allow stop
+            logger.debug(
+                "claude_agent_sdk.hook.task_completion_stop.all_complete",
+                event="hook.task_completion_stop.all_complete",
+                context={
+                    "stop_reason": stop_reason,
+                    "step_count": len(steps),
+                },
+            )
+            return {}
+
+        # Tasks incomplete - signal to continue
+        incomplete_count = len(incomplete_steps)
+        total_count = len(steps)
+        incomplete_titles = [
+            getattr(step, "title", f"Step {i}")
+            for i, step in enumerate(incomplete_steps)
+        ]
+
+        logger.info(
+            "claude_agent_sdk.hook.task_completion_stop.incomplete",
+            event="hook.task_completion_stop.incomplete",
+            context={
+                "stop_reason": stop_reason,
+                "incomplete_count": incomplete_count,
+                "total_count": total_count,
+                "incomplete_titles": incomplete_titles[:5],  # Limit for logging
+            },
+        )
+
+        # Return hook output that signals continuation is needed
+        # The SDK will inject a reminder message and continue execution
+        max_titles_in_message = 3
+        reminder_message = (
+            f"You have {incomplete_count} incomplete task(s) out of {total_count}. "
+            f"Please complete the remaining tasks before stopping: "
+            f"{', '.join(incomplete_titles[:max_titles_in_message])}"
+            + ("..." if len(incomplete_titles) > max_titles_in_message else "")
+        )
+
+        return {
+            "needsMoreTurns": True,
+            "decision": "continue",
+            "reason": reminder_message,
+        }
+
+    return task_completion_stop_hook
 
 
 def create_subagent_start_hook(

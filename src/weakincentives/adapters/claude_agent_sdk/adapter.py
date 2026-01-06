@@ -46,6 +46,7 @@ from ._hooks import (
     create_stop_hook,
     create_subagent_start_hook,
     create_subagent_stop_hook,
+    create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
 )
 from ._notifications import Notification
@@ -755,7 +756,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             hook_context,
             stop_on_structured_output=self._client_config.stop_on_structured_output,
         )
-        stop_hook_fn = create_stop_hook(hook_context)
+        # Use task completion stop hook if enforce_task_completion is enabled
+        if self._client_config.enforce_task_completion:
+            stop_hook_fn = create_task_completion_stop_hook(hook_context)
+        else:
+            stop_hook_fn = create_stop_hook(hook_context)
         prompt_hook = create_user_prompt_submit_hook(hook_context)
         subagent_start_hook = create_subagent_start_hook(hook_context)
         subagent_stop_hook = create_subagent_stop_hook(hook_context)
