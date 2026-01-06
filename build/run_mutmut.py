@@ -15,14 +15,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
-import tomllib
 
 ROOT = Path(__file__).parent.parent
 CONFIG_PATH = ROOT / "mutation.toml"

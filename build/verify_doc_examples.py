@@ -156,12 +156,10 @@ API_DEFAULTS_SIGNATURE = re.compile(
 
 # Pattern for API cheatsheet entries - standalone constructor/call documentation
 # Matches: "Class(param1, param2)" or "Class[T, U](param)" without assignment
-API_CHEATSHEET_ENTRY = re.compile(
-    r"^\s*[A-Z]\w*(?:\[[\w,\s\[\]]+\])?\s*\([^)]*\)\s*$"
-)
+API_CHEATSHEET_ENTRY = re.compile(r"^\s*[A-Z]\w*(?:\[[\w,\s\[\]]+\])?\s*\([^)]*\)\s*$")
 
 
-def _is_api_reference_block(code: str) -> bool:
+def _is_api_reference_block(code: str) -> bool:  # noqa: C901
     """Check if a code block is API reference documentation, not runnable code.
 
     API reference blocks typically contain:
@@ -267,7 +265,7 @@ def extract_python_blocks(file: Path) -> list[CodeBlock]:
         code = match.group("code")
 
         # Only process Python blocks
-        if lang not in ("python", "py"):
+        if lang not in {"python", "py"}:
             continue
 
         # Skip blocks with skip markers
@@ -540,7 +538,7 @@ def _filter_diagnostics(
     """Filter diagnostics to remove expected doc noise and map to source."""
     errors: list[tuple[Path, int, str]] = []
     for diag in diagnostics:
-        if diag.severity not in ("error", "warning"):
+        if diag.severity not in {"error", "warning"}:
             continue
         if _is_doc_noise(diag.message):
             continue
