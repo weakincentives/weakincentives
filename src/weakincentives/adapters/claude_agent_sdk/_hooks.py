@@ -835,7 +835,9 @@ def create_subagent_stop_hook(
         # Extract subagent completion details for logging
         subagent_id = payload.get("subagent_id", "")
         subagent_result = payload.get("result", "")
-        result_preview = subagent_result[:200] if isinstance(subagent_result, str) else ""
+        result_preview = (
+            subagent_result[:200] if isinstance(subagent_result, str) else ""
+        )
         subagent_duration_ms = payload.get("duration_ms")
         subagent_tool_count = payload.get("tool_count")
         transcript_entries = (
@@ -973,9 +975,7 @@ def create_notification_hook(
         notification_type = payload.get("type", "")
         notification_message = payload.get("message", "")
         message_preview = (
-            notification_message[:200]
-            if isinstance(notification_message, str)
-            else ""
+            notification_message[:200] if isinstance(notification_message, str) else ""
         )
         notification_level = payload.get("level", "info")
 
