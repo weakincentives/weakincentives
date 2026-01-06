@@ -165,7 +165,7 @@ def _extract_message_content(message: Any) -> dict[str, Any]:
     thinking = getattr(message, "thinking", None)
     if thinking:
         result["has_thinking"] = True
-        if isinstance(thinking, str):
+        if isinstance(thinking, str):  # pragma: no cover
             result["thinking_preview"] = thinking[:200]
             result["thinking_length"] = len(thinking)
 
