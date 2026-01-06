@@ -15,8 +15,8 @@
 Extracts Python code blocks from Markdown documentation and runs them through
 pyright type checking to catch broken imports, undefined names, and type errors.
 
-Target files: README.md, WINK_GUIDE.md, llms.md, CHANGELOG.md
-Excluded: specs/ directory (internal design docs)
+Target files: README.md, WINK_GUIDE.md, llms.md
+Excluded: specs/ directory (internal design docs), CHANGELOG.md (release notes)
 """
 
 from __future__ import annotations
@@ -33,11 +33,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Documentation files to verify (relative to project root)
+# CHANGELOG.md is excluded as it contains historical examples that may reference
+# removed APIs intentionally (to document breaking changes)
 DOC_FILES = [
     "README.md",
     "WINK_GUIDE.md",
     "llms.md",
-    "CHANGELOG.md",
 ]
 
 # Builtins that don't need to be defined
@@ -143,9 +144,15 @@ FENCE_PATTERN = re.compile(
 # Markers that indicate a block should be skipped
 SKIP_MARKERS = {"nocheck", "skip", "output", "result", "shell", "cli", "console"}
 
-# Pattern for API reference lines (signatures, not runnable code)
-# Matches: "func(args) -> Type" or "func(args)" at start of line
-API_SIGNATURE_PATTERN = re.compile(r"^\s*\w+(?:\[[\w,\s]+\])?\s*\([^)]*\)\s*(?:->.*)?$")
+# Pattern for API reference lines with return type annotation
+# Matches: "func(args) -> Type"
+API_RETURN_SIGNATURE = re.compile(r"^\s*\w+(?:\[[\w,\s]+\])?\s*\([^)]*\)\s*->.*$")
+
+# Pattern for API reference lines with default values documentation
+# Matches: "func(arg=None, other=...)" or "Class[T](param=value)"
+API_DEFAULTS_SIGNATURE = re.compile(
+    r"^\s*\w+(?:\[[\w,\s]+\])?\s*\([^)]*=(?:None|\.\.\.)[^)]*\)\s*$"
+)
 
 
 def _is_api_reference_block(code: str) -> bool:
@@ -153,9 +160,9 @@ def _is_api_reference_block(code: str) -> bool:
 
     API reference blocks typically contain:
     - Function signatures: func(args) -> ReturnType
-    - Class instantiation patterns: Class(args)
+    - Constructor patterns with defaults: Class(param=None, other=...)
     - Method chains: .attr / .method()
-    - No actual executable statements
+    - No actual executable statements (no = assignments on left side)
     """
     lines = [ln.strip() for ln in code.strip().split("\n") if ln.strip()]
     if not lines:
@@ -168,8 +175,13 @@ def _is_api_reference_block(code: str) -> bool:
         if line.startswith("#"):
             continue
 
-        # Check for signature patterns
-        if API_SIGNATURE_PATTERN.match(line):
+        # Check for signature with return type
+        if API_RETURN_SIGNATURE.match(line):
+            signature_lines += 1
+            continue
+
+        # Check for signature with default values (Class(param=None, ...))
+        if API_DEFAULTS_SIGNATURE.match(line):
             signature_lines += 1
             continue
 
@@ -282,27 +294,46 @@ def find_undefined_names(code: str) -> set[str]:  # noqa: C901
         def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
             defined.add(node.name)
             self.scope_stack[-1].add(node.name)
-            # Add arguments to scope
+            # Add arguments to defined set (they're defined within function scope)
             self.scope_stack.append(set())
             for arg in node.args.args:
                 self.scope_stack[-1].add(arg.arg)
+                defined.add(arg.arg)
             for arg in node.args.posonlyargs:
                 self.scope_stack[-1].add(arg.arg)
+                defined.add(arg.arg)
             for arg in node.args.kwonlyargs:
                 self.scope_stack[-1].add(arg.arg)
+                defined.add(arg.arg)
             if node.args.vararg:
                 self.scope_stack[-1].add(node.args.vararg.arg)
+                defined.add(node.args.vararg.arg)
             if node.args.kwarg:
                 self.scope_stack[-1].add(node.args.kwarg.arg)
+                defined.add(node.args.kwarg.arg)
             self.generic_visit(node)
             self.scope_stack.pop()
 
         def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
             defined.add(node.name)
             self.scope_stack[-1].add(node.name)
+            # Add arguments to defined set (they're defined within function scope)
             self.scope_stack.append(set())
             for arg in node.args.args:
                 self.scope_stack[-1].add(arg.arg)
+                defined.add(arg.arg)
+            for arg in node.args.posonlyargs:
+                self.scope_stack[-1].add(arg.arg)
+                defined.add(arg.arg)
+            for arg in node.args.kwonlyargs:
+                self.scope_stack[-1].add(arg.arg)
+                defined.add(arg.arg)
+            if node.args.vararg:
+                self.scope_stack[-1].add(node.args.vararg.arg)
+                defined.add(node.args.vararg.arg)
+            if node.args.kwarg:
+                self.scope_stack[-1].add(node.args.kwarg.arg)
+                defined.add(node.args.kwarg.arg)
             self.generic_visit(node)
             self.scope_stack.pop()
 
