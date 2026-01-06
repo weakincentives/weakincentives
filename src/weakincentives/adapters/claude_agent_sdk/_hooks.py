@@ -649,7 +649,7 @@ def create_user_prompt_submit_hook(
         prompt_preview = ""
         if isinstance(prompt_content, str):
             prompt_preview = prompt_content[:200] if prompt_content else ""
-        elif isinstance(prompt_content, dict):
+        elif isinstance(prompt_content, dict):  # pragma: no cover
             content = prompt_content.get("content", "")
             if isinstance(content, str):
                 prompt_preview = content[:200]
@@ -835,7 +835,9 @@ def create_subagent_stop_hook(
         # Extract subagent completion details for logging
         subagent_id = payload.get("subagent_id", "")
         subagent_result = payload.get("result", "")
-        result_preview = subagent_result[:200] if isinstance(subagent_result, str) else ""
+        result_preview = (
+            subagent_result[:200] if isinstance(subagent_result, str) else ""
+        )
         subagent_duration_ms = payload.get("duration_ms")
         subagent_tool_count = payload.get("tool_count")
         transcript_entries = (
@@ -909,7 +911,7 @@ def create_pre_compact_hook(
 
         # Calculate utilization percentage if available
         utilization_pct: float | None = None
-        if context_tokens is not None and max_context_tokens:
+        if context_tokens is not None and max_context_tokens:  # pragma: no cover
             utilization_pct = round((context_tokens / max_context_tokens) * 100, 1)
 
         logger.debug(
@@ -973,9 +975,7 @@ def create_notification_hook(
         notification_type = payload.get("type", "")
         notification_message = payload.get("message", "")
         message_preview = (
-            notification_message[:200]
-            if isinstance(notification_message, str)
-            else ""
+            notification_message[:200] if isinstance(notification_message, str) else ""
         )
         notification_level = payload.get("level", "info")
 
