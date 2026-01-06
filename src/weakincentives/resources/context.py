@@ -42,24 +42,22 @@ class ScopedResourceContext:
 
     Example::
 
-        ctx = registry.create_context()
-        ctx.start()
+        # Use registry.open() context manager (handles start/close automatically)
+        with registry.open() as ctx:
+            # Singleton resources are cached
+            http1 = ctx.get(HTTPClient)
+            http2 = ctx.get(HTTPClient)
+            assert http1 is http2
 
-        # Singleton resources are cached
-        http1 = ctx.get(HTTPClient)
-        http2 = ctx.get(HTTPClient)
-        assert http1 is http2
+            # Tool-call scoped resources are fresh per scope
+            with ctx.tool_scope() as resolver:
+                tracer1 = resolver.get(Tracer)
 
-        # Tool-call scoped resources are fresh per scope
-        with ctx.tool_scope() as resolver:
-            tracer1 = resolver.get(Tracer)
+            with ctx.tool_scope() as resolver:
+                tracer2 = resolver.get(Tracer)
 
-        with ctx.tool_scope() as resolver:
-            tracer2 = resolver.get(Tracer)
-
-        assert tracer1 is not tracer2
-
-        ctx.close()  # Cleanup all instantiated resources
+            assert tracer1 is not tracer2
+        # Cleanup all instantiated resources on exit
     """
 
     registry: ResourceRegistry

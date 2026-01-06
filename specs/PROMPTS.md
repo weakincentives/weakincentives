@@ -263,7 +263,7 @@ class PromptResources:
 ```python
 prompt = Prompt(template).bind(
     TaskParams(objective="Review code"),
-    resources=ResourceRegistry.build({Clock: SystemClock()}),
+    resources={Clock: SystemClock()},  # Pass a mapping, not ResourceRegistry
 )
 
 with prompt.resources:
@@ -279,26 +279,36 @@ with prompt.resources:
 
 ### Transactional Tool Execution
 
-Tool execution uses snapshot/restore for atomicity. The prompt's resource
-context provides snapshot capability for snapshotable resources:
+Tool execution uses snapshot/restore for atomicity. Use the `tool_transaction`
+context manager from `runtime.transactions` which handles both session and
+resource snapshots:
 
 ```python
-# Before tool execution - use .context for underlying ScopedResourceContext
-session_snapshot = session.snapshot()
-resource_snapshot = prompt.resources.context.snapshot()
+from weakincentives.runtime.transactions import (
+    tool_transaction,
+    create_snapshot,
+    restore_snapshot,
+)
 
-try:
-    result = tool.handler(params, context=context)
-    if not result.success:
-        raise ToolFailedError(result)
-except Exception:
-    session.restore(session_snapshot)
-    prompt.resources.context.restore(resource_snapshot)
-    raise
+# Recommended: use tool_transaction context manager
+with prompt.resources:
+    with tool_transaction(session, prompt.resources.context, tag="my_tool") as snapshot:
+        result = tool.handler(params, context=context)
+        if not result.success:
+            # Explicit rollback on failure
+            restore_snapshot(session, prompt.resources.context, snapshot)
+
+# Manual approach (for custom handling)
+with prompt.resources:
+    snapshot = create_snapshot(session, prompt.resources.context, tag="my_tool")
+    try:
+        result = tool.handler(params, context=context)
+    except Exception:
+        restore_snapshot(session, prompt.resources.context, snapshot)
+        raise
 ```
 
-See `ScopedResourceContext.snapshot()` and `restore()` in the Resource Registry
-specification.
+See `runtime.transactions` for the full transactional API.
 
 ## Rendering
 

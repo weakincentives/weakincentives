@@ -395,6 +395,39 @@ class TestResourceRegistry:
         assert HTTPClient in merged
 
 
+# === ResourceRegistry.of() Tests ===
+
+
+class TestResourceRegistryOf:
+    def test_of_creates_registry_from_bindings(self) -> None:
+        """ResourceRegistry.of() creates registry from explicit bindings."""
+        registry = ResourceRegistry.of(
+            Binding(Config, lambda r: ConcreteConfig(value=42)),
+            Binding(HTTPClient, lambda r: ConcreteHTTPClient(r.get(Config))),
+        )
+        assert len(registry) == 2
+        assert Config in registry
+        assert HTTPClient in registry
+
+        with registry.open() as ctx:
+            http = ctx.get(HTTPClient)
+            assert http.config.value == 42
+
+    def test_of_empty(self) -> None:
+        """ResourceRegistry.of() with no bindings creates empty registry."""
+        registry = ResourceRegistry.of()
+        assert len(registry) == 0
+
+    def test_of_raises_on_duplicate(self) -> None:
+        """ResourceRegistry.of() raises DuplicateBindingError on duplicate protocol."""
+        with pytest.raises(DuplicateBindingError) as exc:
+            ResourceRegistry.of(
+                Binding(Config, lambda r: ConcreteConfig(value=1)),
+                Binding(Config, lambda r: ConcreteConfig(value=2)),
+            )
+        assert exc.value.protocol is Config
+
+
 # === ScopedResourceContext Tests ===
 
 

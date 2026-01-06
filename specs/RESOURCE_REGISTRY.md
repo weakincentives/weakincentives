@@ -404,10 +404,10 @@ template = PromptTemplate[Output](
     ),
 )
 
-# 2. Bind parameters (optionally add runtime resources)
+# 2. Bind parameters (optionally add runtime resources as a mapping)
 prompt = Prompt(template).bind(
     Params(...),
-    resources=ResourceRegistry.build({Clock: SystemClock()}),
+    resources={Clock: SystemClock()},  # Pass mapping, not ResourceRegistry
 )
 
 # 3. Use as context manager
@@ -448,14 +448,9 @@ registry = ResourceRegistry.of(
     Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
 )
 
-# Create resolution context
-ctx = registry.create_context()
-ctx.start()
-
-try:
+# Create resolution context (open() manages start/close automatically)
+with registry.open() as ctx:
     http = ctx.get(HTTPClient)  # Lazily constructs Config, then HTTPClient
-finally:
-    ctx.close()
 ```
 
 ### Pre-Constructed Instances
@@ -518,19 +513,15 @@ registry = ResourceRegistry.of(
     ),
 )
 
-ctx = registry.create_context()
-ctx.start()
-
 # Each tool scope gets fresh TOOL_CALL resources
-with ctx.tool_scope() as resolver:
-    tracer1 = resolver.get(RequestTracer)
+with registry.open() as ctx:
+    with ctx.tool_scope() as resolver:
+        tracer1 = resolver.get(RequestTracer)
 
-with ctx.tool_scope() as resolver:
-    tracer2 = resolver.get(RequestTracer)
+    with ctx.tool_scope() as resolver:
+        tracer2 = resolver.get(RequestTracer)
 
-assert tracer1 is not tracer2  # Fresh instances
-
-ctx.close()
+    assert tracer1 is not tracer2  # Fresh instances
 ```
 
 ### Eager Initialization
@@ -545,8 +536,9 @@ registry = ResourceRegistry.of(
     ),
 )
 
-ctx = registry.create_context()
-ctx.start()  # Raises here if config invalid, not on first use
+# open() calls start() automatically - raises here if config invalid
+with registry.open() as ctx:
+    pass  # Config already validated
 ```
 
 ### Registry Composition
@@ -591,8 +583,8 @@ def test_lazy_construction():
 
     assert constructed == []
 
-    ctx = registry.create_context()
-    _ = ctx.get(Service)
+    with registry.open() as ctx:
+        _ = ctx.get(Service)
 
     assert constructed == ["service"]
 ```
@@ -606,9 +598,9 @@ def test_dependency_resolution():
         Binding(Service, lambda r: Service(config=r.get(Config))),
     )
 
-    ctx = registry.create_context()
-    service = ctx.get(Service)
-    assert service.config.value == 42
+    with registry.open() as ctx:
+        service = ctx.get(Service)
+        assert service.config.value == 42
 ```
 
 ### Cycle Detection
@@ -620,11 +612,11 @@ def test_circular_dependency_detected():
         Binding(B, lambda r: B(a=r.get(A))),
     )
 
-    ctx = registry.create_context()
-    with pytest.raises(CircularDependencyError) as exc:
-        ctx.get(A)
-    assert A in exc.value.cycle
-    assert B in exc.value.cycle
+    with registry.open() as ctx:
+        with pytest.raises(CircularDependencyError) as exc:
+            ctx.get(A)
+        assert A in exc.value.cycle
+        assert B in exc.value.cycle
 ```
 
 ### Singleton Caching
@@ -639,13 +631,13 @@ def test_singleton_cached():
         return Service()
 
     registry = ResourceRegistry.of(Binding(Service, make_service))
-    ctx = registry.create_context()
 
-    s1 = ctx.get(Service)
-    s2 = ctx.get(Service)
+    with registry.open() as ctx:
+        s1 = ctx.get(Service)
+        s2 = ctx.get(Service)
 
-    assert s1 is s2
-    assert call_count == 1
+        assert s1 is s2
+        assert call_count == 1
 ```
 
 ### Tool-Call Scope Isolation
@@ -658,16 +650,15 @@ def test_tool_call_fresh_per_scope():
         Binding(Tracer, lambda r: Tracer(id=next(counter)), scope=Scope.TOOL_CALL)
     )
 
-    ctx = registry.create_context()
+    with registry.open() as ctx:
+        with ctx.tool_scope() as r1:
+            t1 = r1.get(Tracer)
 
-    with ctx.tool_scope() as r1:
-        t1 = r1.get(Tracer)
+        with ctx.tool_scope() as r2:
+            t2 = r2.get(Tracer)
 
-    with ctx.tool_scope() as r2:
-        t2 = r2.get(Tracer)
-
-    assert t1.id == 0
-    assert t2.id == 1
+        assert t1.id == 0
+        assert t2.id == 1
 ```
 
 ### Resource Cleanup
@@ -678,11 +669,10 @@ def test_closeable_disposed():
         Binding(CloseableResource, lambda r: CloseableResource())
     )
 
-    ctx = registry.create_context()
-    resource = ctx.get(CloseableResource)
-    assert resource.closed is False
-
-    ctx.close()
+    with registry.open() as ctx:
+        resource = ctx.get(CloseableResource)
+        assert resource.closed is False
+    # Context manager calls close() on exit
     assert resource.closed is True
 ```
 
@@ -697,11 +687,10 @@ def test_close_reverse_order():
         Binding(ResourceB, lambda r: ResourceB(a=r.get(ResourceA), on_close=lambda: closed_order.append("B"))),
     )
 
-    ctx = registry.create_context()
-    _ = ctx.get(ResourceB)  # Constructs A, then B
-    ctx.close()
-
-    assert closed_order == ["B", "A"]  # Reverse instantiation order
+    with registry.open() as ctx:
+        _ = ctx.get(ResourceB)  # Constructs A, then B
+    # Context manager calls close() in reverse instantiation order
+    assert closed_order == ["B", "A"]
 ```
 
 ### Snapshot and Restore

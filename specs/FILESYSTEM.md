@@ -570,10 +570,9 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         for mount in self._resolved_mounts:
             self._copy_mount_into_overlay(overlay=self._overlay_path, mount=mount)
 
-        # Use HostFilesystem rooted at overlay with /workspace mount point
+        # Use HostFilesystem rooted at overlay
         self._filesystem = HostFilesystem(
             _root=str(self._overlay_path),
-            _mount_point="/workspace",
         )
         ...
 

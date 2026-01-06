@@ -20,11 +20,11 @@ Quick Start::
     from weakincentives.resources import Binding, ResourceRegistry, Scope
 
     # Define how to construct resources
-    registry = ResourceRegistry.build({
-        Config: lambda r: Config.from_env(),
-        HTTPClient: lambda r: HTTPClient(r.get(Config).url),
-        Tracer: Binding(lambda r: Tracer(), scope=Scope.TOOL_CALL),
-    })
+    registry = ResourceRegistry.of(
+        Binding(Config, lambda r: Config.from_env()),
+        Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+        Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+    )
 
     # Use context manager for automatic lifecycle management
     with registry.open() as ctx:

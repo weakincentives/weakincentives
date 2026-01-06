@@ -31,8 +31,8 @@ if TYPE_CHECKING:
 class ResourceRegistry:
     """Immutable configuration of resource bindings.
 
-    Resources are registered via ``build()``, which accepts a mapping of
-    protocol types to either instances or Binding objects.
+    Resources are registered via ``of()`` (for explicit bindings) or
+    ``build()`` (for a type-to-instance mapping).
 
     Example::
 
@@ -44,16 +44,16 @@ class ResourceRegistry:
             BudgetTracker: tracker,
         })
 
-        # Lazy construction with dependencies
-        registry = ResourceRegistry.build({
-            Config: Binding(lambda r: Config.from_env()),
-            HTTPClient: Binding(lambda r: HTTPClient(r.get(Config).url)),
-        })
+        # Lazy construction with dependencies (use .of() with explicit bindings)
+        registry = ResourceRegistry.of(
+            Binding(Config, lambda r: Config.from_env()),
+            Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+        )
 
         # Tool-call scoped resources (fresh per tool invocation)
-        registry = ResourceRegistry.build({
-            Tracer: Binding(lambda r: Tracer(), scope=Scope.TOOL_CALL),
-        })
+        registry = ResourceRegistry.of(
+            Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+        )
 
         # Access via context manager
         with registry.open() as ctx:
@@ -66,6 +66,46 @@ class ResourceRegistry:
     """Provider bindings for lazy construction."""
 
     # === Factory Methods ===
+
+    @staticmethod
+    def of(*bindings: Binding[object]) -> ResourceRegistry:
+        """Create a registry from explicit bindings.
+
+        Each binding specifies its own protocol, so the caller doesn't repeat
+        the type in a mapping key. This is the preferred API when constructing
+        bindings with custom scopes or dependencies.
+
+        Args:
+            *bindings: Binding objects with explicit protocols.
+
+        Returns:
+            New registry with the provided bindings.
+
+        Raises:
+            DuplicateBindingError: Same protocol bound twice.
+
+        Example::
+
+            from weakincentives.resources import Binding, ResourceRegistry, Scope
+
+            registry = ResourceRegistry.of(
+                Binding(Config, lambda r: Config.from_env()),
+                Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+                Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+            )
+
+            # Pre-constructed instances use Binding.instance()
+            registry = ResourceRegistry.of(
+                Binding.instance(Config, config),
+                Binding.instance(Filesystem, filesystem),
+            )
+        """
+        mapping: dict[type[object], Binding[object]] = {}
+        for binding in bindings:
+            if binding.protocol in mapping:
+                raise DuplicateBindingError(binding.protocol)
+            mapping[binding.protocol] = binding
+        return ResourceRegistry(_bindings=MappingProxyType(mapping))
 
     @staticmethod
     def build(
@@ -94,12 +134,19 @@ class ResourceRegistry:
                 BudgetTracker: tracker,
             })
 
-            # Mixed instances and bindings
+            # Mixed instances and bindings (protocol required in Binding)
             registry = ResourceRegistry.build({
                 Config: config,  # Instance
-                HTTPClient: Binding(lambda r: HTTPClient(r.get(Config).url)),
-                Tracer: Binding(lambda r: Tracer(), scope=Scope.TOOL_CALL),
+                HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+                Tracer: Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
             })
+
+            # For bindings, prefer ResourceRegistry.of() to avoid repeating types
+            registry = ResourceRegistry.of(
+                Binding.instance(Config, config),
+                Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+                Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+            )
         """
         entries: dict[type[object], Binding[object]] = {}
         for protocol, value in mapping.items():
