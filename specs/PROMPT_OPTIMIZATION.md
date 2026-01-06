@@ -48,13 +48,13 @@ flowchart TB
 
 All overridable content falls into these categories:
 
-| Target                 | Identifier        | Hash Basis               | Override Type                     |
+| Target | Identifier | Hash Basis | Override Type |
 | ---------------------- | ----------------- | ------------------------ | --------------------------------- |
-| Section body           | `(path,)`         | Template text            | `SectionOverride`                 |
-| Tool description       | `tool_name`       | Contract (desc + schema) | `ToolOverride`                    |
-| Tool param description | `tool_name.param` | Contract hash            | `ToolOverride.param_descriptions` |
-| Tool example           | `tool_name#index` | Example content hash     | `ToolExampleOverride`             |
-| Task example           | `path#index`      | Example content hash     | `TaskExampleOverride`             |
+| Section body | `(path,)` | Template text | `SectionOverride` |
+| Tool description | `tool_name` | Contract (desc + schema) | `ToolOverride` |
+| Tool param description | `tool_name.param` | Contract hash | `ToolOverride.param_descriptions` |
+| Tool example | `tool_name#index` | Example content hash | `ToolExampleOverride` |
+| Task example | `path#index` | Example content hash | `TaskExampleOverride` |
 
 ### What's Overridable
 
@@ -409,11 +409,11 @@ class PromptOverridesStore(Protocol):
 ### Override Application Order
 
 1. Load `PromptOverride` from store for descriptor and tag
-2. Filter stale entries (hash mismatches)
-3. Apply section overrides to `render_override()` calls
-4. Apply tool description/param overrides during tool rendering
-5. Apply tool example overrides during example rendering
-6. Apply task example overrides during TaskExample rendering
+1. Filter stale entries (hash mismatches)
+1. Apply section overrides to `render_override()` calls
+1. Apply tool description/param overrides during tool rendering
+1. Apply tool example overrides during example rendering
+1. Apply task example overrides during TaskExample rendering
 
 ### Section Override Rendering
 

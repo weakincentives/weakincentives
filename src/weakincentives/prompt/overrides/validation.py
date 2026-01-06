@@ -15,7 +15,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from ...runtime.logging import StructuredLogger, get_logger
 from ...types import JSONValue
@@ -564,10 +564,10 @@ def _parse_task_example_hash(
 
 def _parse_task_example_action(
     item_map: Mapping[str, JSONValue],
-) -> str:
+) -> Literal["modify", "remove", "append"]:
     """Parse and validate the action field from a task example override."""
     action = item_map.get("action")
-    if action not in ("modify", "remove", "append"):
+    if action not in {"modify", "remove", "append"}:
         raise PromptOverridesError(
             f"Task example override action must be 'modify', 'remove', or 'append', got {action!r}."
         )
@@ -690,7 +690,9 @@ def serialize_task_example_overrides(
         entry: dict[str, JSONValue] = {
             "path": list(override.path),
             "index": override.index,
-            "expected_hash": str(override.expected_hash) if override.expected_hash else None,
+            "expected_hash": str(override.expected_hash)
+            if override.expected_hash
+            else None,
             "action": override.action,
         }
         if override.objective is not None:
@@ -702,7 +704,9 @@ def serialize_task_example_overrides(
         if override.steps_to_remove:
             entry["steps_to_remove"] = list(override.steps_to_remove)
         if override.steps_to_append:
-            entry["steps_to_append"] = _serialize_step_overrides(override.steps_to_append)
+            entry["steps_to_append"] = _serialize_step_overrides(
+                override.steps_to_append
+            )
         serialized.append(entry)
     return serialized
 

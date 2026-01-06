@@ -31,7 +31,14 @@ from ...optimizers._base import BasePromptOptimizer, OptimizerConfig
 from ...optimizers._context import OptimizationContext
 from ...optimizers._results import PersistenceScope, WorkspaceDigestResult
 from ...prompt import MarkdownSection, Prompt, PromptTemplate
-from ...prompt.overrides import PromptLike, PromptOverridesError
+from ...prompt.overrides import (
+    HexDigest,
+    PromptDescriptor,
+    PromptLike,
+    PromptOverridesError,
+    SectionOverride,
+    descriptor_for_prompt,
+)
 from ...prompt.section import Section
 from ...runtime.session import Session
 from ...runtime.session.protocols import SessionProtocol
@@ -208,12 +215,14 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 )
             section_path = self._find_section_path(prompt, digest_section.key)
-            _ = global_store.set_section_override(
-                cast(PromptLike, prompt),
-                tag=global_tag,
+            descriptor = descriptor_for_prompt(cast(PromptLike, prompt))
+            section_hash = self._find_section_hash(descriptor, section_path)
+            override = SectionOverride(
                 path=section_path,
+                expected_hash=section_hash,
                 body=digest,
             )
+            _ = global_store.store(cast(PromptLike, prompt), override, tag=global_tag)
             clear_workspace_digest(outer_session, digest_section.key)
 
         return WorkspaceDigestResult(
@@ -284,6 +293,15 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             prompt_name=prompt.name or prompt.key,
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
         )
+
+    def _find_section_hash(  # noqa: PLR6301
+        self, descriptor: PromptDescriptor, path: tuple[str, ...]
+    ) -> HexDigest:
+        for section in descriptor.sections:
+            if section.path == path:
+                return section.content_hash
+        msg = f"Section hash not found for path: {path}"
+        raise PromptOverridesError(msg)
 
     def _extract_summary_and_digest(  # noqa: PLR6301
         self, *, response: PromptResponse[Any], prompt_name: str

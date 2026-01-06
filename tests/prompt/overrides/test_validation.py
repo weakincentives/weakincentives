@@ -247,7 +247,11 @@ def test_validate_sections_for_write_rejects_unknown_path() -> None:
         ],
         tools=[],
     )
-    overrides = {("unknown",): SectionOverride(expected_hash=VALID_DIGEST, body="Body")}
+    overrides = {
+        ("unknown",): SectionOverride(
+            path=("unknown",), expected_hash=VALID_DIGEST, body="Body"
+        )
+    }
 
     with pytest.raises(PromptOverridesError):
         validate_sections_for_write(overrides, descriptor)
@@ -278,7 +282,11 @@ def test_validate_tools_for_write_rejects_unknown_tool() -> None:
 
 
 def test_serialization_round_trip_for_sections() -> None:
-    overrides = {("intro",): SectionOverride(expected_hash=VALID_DIGEST, body="Body")}
+    overrides = {
+        ("intro",): SectionOverride(
+            path=("intro",), expected_hash=VALID_DIGEST, body="Body"
+        )
+    }
 
     payload = serialize_sections(overrides)
     restored = load_sections(

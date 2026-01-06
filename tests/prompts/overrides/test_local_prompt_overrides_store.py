@@ -29,6 +29,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
     SectionDescriptor,
     SectionOverride,
+    TaskExampleOverride,
     ToolOverride,
 )
 from weakincentives.prompt.overrides._fs import OverrideFilesystem
@@ -445,8 +446,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                path=section.path,
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -465,8 +465,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                path=section.path,
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -485,8 +484,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                path=section.path,
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -506,8 +504,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                path=section.path,
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -527,8 +524,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                path=section.path,
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -917,3 +913,107 @@ def test_collect_param_descriptions_with_partial_metadata(tmp_path: Path) -> Non
 
     # Only the field with a non-empty description should be included
     assert overrides[tool.name].param_descriptions == {"with_desc": "Has a description"}
+
+
+def test_store_section_override_hash_mismatch(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    wrong_hash = HexDigest("b" * 64)
+    override = SectionOverride(
+        path=section.path,
+        expected_hash=wrong_hash,
+        body="Modified body",
+    )
+
+    with pytest.raises(PromptOverridesError, match="Hash mismatch for section"):
+        store.store(prompt, override)
+
+
+def test_store_tool_override_hash_mismatch(tmp_path: Path) -> None:
+    prompt = _build_prompt_with_tool()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    tool = descriptor.tools[0]
+    wrong_hash = HexDigest("c" * 64)
+    override = ToolOverride(
+        name=tool.name,
+        expected_contract_hash=wrong_hash,
+        description="Modified description",
+        param_descriptions={},
+    )
+
+    with pytest.raises(PromptOverridesError, match="Hash mismatch for tool"):
+        store.store(prompt, override)
+
+
+def test_store_task_example_override(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    task_override = TaskExampleOverride(
+        path=("section", "example"),
+        index=0,
+        expected_hash=None,
+        action="append",
+        objective="New objective",
+    )
+
+    result = store.store(prompt, task_override, tag="latest")
+    assert len(result.task_example_overrides) == 1
+    assert result.task_example_overrides[0] == task_override
+
+
+def test_store_task_example_override_updates_existing(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    task_override1 = TaskExampleOverride(
+        path=("section", "example"),
+        index=0,
+        expected_hash=None,
+        action="append",
+        objective="First objective",
+    )
+    task_override2 = TaskExampleOverride(
+        path=("section", "example"),
+        index=0,
+        expected_hash=None,
+        action="modify",
+        objective="Updated objective",
+    )
+
+    store.store(prompt, task_override1, tag="latest")
+    result = store.store(prompt, task_override2, tag="latest")
+
+    # Should replace the existing override with same path+index
+    assert len(result.task_example_overrides) == 1
+    assert result.task_example_overrides[0].action == "modify"
+    assert result.task_example_overrides[0].objective == "Updated objective"
+
+
+def test_store_task_example_override_appends_different_index(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    task_override1 = TaskExampleOverride(
+        path=("section", "example"),
+        index=0,
+        expected_hash=None,
+        action="append",
+    )
+    task_override2 = TaskExampleOverride(
+        path=("section", "example"),
+        index=1,
+        expected_hash=None,
+        action="append",
+    )
+
+    store.store(prompt, task_override1, tag="latest")
+    result = store.store(prompt, task_override2, tag="latest")
+
+    # Should have both overrides since they have different indices
+    assert len(result.task_example_overrides) == 2

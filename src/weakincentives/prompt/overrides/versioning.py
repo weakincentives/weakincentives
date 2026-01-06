@@ -45,6 +45,10 @@ def _task_example_overrides_factory() -> tuple[TaskExampleOverride, ...]:
     return ()
 
 
+def _task_example_descriptors_factory() -> list[TaskExampleDescriptor]:
+    return []
+
+
 class ToolContractProtocol(Protocol):
     name: str
     description: str
@@ -153,7 +157,9 @@ class PromptDescriptor:
     key: str
     sections: list[SectionDescriptor]
     tools: list[ToolDescriptor]
-    task_examples: list[TaskExampleDescriptor] = field(default_factory=list)
+    task_examples: list[TaskExampleDescriptor] = field(
+        default_factory=_task_example_descriptors_factory
+    )
 
     @classmethod
     def from_prompt(cls, prompt: PromptLike) -> PromptDescriptor:
@@ -448,11 +454,11 @@ def _task_example_descriptors(node: SectionNodeLike) -> list[TaskExampleDescript
             continue
 
         # Compute content hash for the task example
-        step_data = []
+        step_data: list[dict[str, str]] = []
         for step in steps:
-            tool_name = getattr(step, "tool_name", "")
+            tool_name: str = getattr(step, "tool_name", "")
             example = getattr(step, "example", None)
-            description = getattr(example, "description", "") if example else ""
+            description: str = getattr(example, "description", "") if example else ""
             step_data.append({"tool": tool_name, "description": description})
 
         example_data: dict[str, JSONValue] = {
@@ -467,7 +473,9 @@ def _task_example_descriptors(node: SectionNodeLike) -> list[TaskExampleDescript
         child_key = getattr(child, "key", f"example-{idx}")
         example_path = (*node.path, child_key)
         descriptors.append(
-            TaskExampleDescriptor(path=example_path, index=idx, content_hash=content_hash)
+            TaskExampleDescriptor(
+                path=example_path, index=idx, content_hash=content_hash
+            )
         )
 
     return descriptors

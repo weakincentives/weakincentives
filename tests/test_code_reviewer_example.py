@@ -42,7 +42,11 @@ from weakincentives.contrib.tools.digests import (
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt
-from weakincentives.prompt.overrides import LocalPromptOverridesStore
+from weakincentives.prompt.overrides import (
+    LocalPromptOverridesStore,
+    SectionOverride,
+    descriptor_for_prompt,
+)
 from weakincentives.runtime import (
     InMemoryMailbox,
     MainLoopRequest,
@@ -195,17 +199,16 @@ def test_workspace_digest_override_applied_when_no_session_digest(
     session = Session(bus=bus)
     template = build_task_prompt(session=session)
 
-    digest_node = next(
-        node
-        for node in template.sections
-        if node.section.key == "workspace-digest"  # type: ignore[union-attr]
+    descriptor = descriptor_for_prompt(template)
+    digest_section = next(
+        s for s in descriptor.sections if s.path == ("workspace-digest",)
     )
-    overrides_store.set_section_override(
-        template,
-        tag="seed",
-        path=digest_node.path,
+    override = SectionOverride(
+        path=digest_section.path,
+        expected_hash=digest_section.content_hash,
         body="- Override digest",
     )
+    overrides_store.store(template, override, tag="seed")
 
     rendered = (
         Prompt(
@@ -225,18 +228,16 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     session = Session()
     template = build_task_prompt(session=session)
-    digest_node = next(
-        node
-        for node in template.sections
-        if node.section.key == "workspace-digest"  # type: ignore[union-attr]
+    descriptor = descriptor_for_prompt(template)
+    digest_section = next(
+        s for s in descriptor.sections if s.path == ("workspace-digest",)
     )
-
-    overrides_store.set_section_override(
-        template,
-        tag="seed",
-        path=digest_node.path,
+    override = SectionOverride(
+        path=digest_section.path,
+        expected_hash=digest_section.content_hash,
         body="- Override digest",
     )
+    overrides_store.store(template, override, tag="seed")
     # When a digest exists, visibility is SUMMARY by default, so we provide
     # an explicit summary to verify it's used instead of the override body.
     set_workspace_digest(
