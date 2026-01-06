@@ -37,7 +37,6 @@ _LOGGER: StructuredLogger = get_logger(
     __name__, context={"component": "prompt_overrides"}
 )
 FORMAT_VERSION = 2
-SUPPORTED_VERSIONS = (1, 2)  # Support both v1 and v2 for backward compatibility
 
 
 def validate_header(
@@ -47,7 +46,7 @@ def validate_header(
     file_path: Path,
 ) -> None:
     version = payload.get("version")
-    if version not in SUPPORTED_VERSIONS:
+    if version != FORMAT_VERSION:
         raise PromptOverridesError(
             f"Unsupported override file version {version!r} in {file_path}."
         )

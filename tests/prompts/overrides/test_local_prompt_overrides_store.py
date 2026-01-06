@@ -211,7 +211,7 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
     override_path = _override_path(tmp_path, descriptor)
     override_path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, JSONValue] = {
-        "version": 1,
+        "version": 2,
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
         "tag": "latest",
@@ -278,7 +278,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
     assert load_tools(empty_tools, descriptor) == {}
 
     base_payload = {
-        "version": 1,
+        "version": 2,
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
         "tag": "latest",
@@ -667,7 +667,7 @@ def test_seed_errors_on_stale_override(tmp_path: Path) -> None:
     override_path.parent.mkdir(parents=True, exist_ok=True)
     section = descriptor.sections[0]
     payload = {
-        "version": 1,
+        "version": 2,
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
         "tag": "latest",
