@@ -23,10 +23,12 @@ from .validation import (
     FORMAT_VERSION,
     filter_override_for_descriptor,
     load_sections,
+    load_task_example_overrides,
     load_tools,
     seed_sections,
     seed_tools,
     serialize_sections,
+    serialize_task_example_overrides,
     serialize_tools,
     validate_header,
     validate_sections_for_write,
@@ -108,9 +110,9 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         sections = load_sections(sections_payload, descriptor)
         tools_payload = payload.get("tools")
         tools = load_tools(tools_payload, descriptor)
-
-        # Load task example overrides (for now, empty - to be implemented)
-        task_example_overrides: tuple[TaskExampleOverride, ...] = ()
+        task_example_overrides = load_task_example_overrides(
+            payload.get("task_example_overrides")
+        )
 
         raw_override = PromptOverride(
             ns=descriptor.ns,
@@ -193,6 +195,9 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             "tag": normalized_tag,
             "sections": serialize_sections(validated_sections),
             "tools": serialize_tools(validated_tools),
+            "task_example_overrides": serialize_task_example_overrides(
+                override.task_example_overrides
+            ),
         }
 
         with self._filesystem.locked_override_path(file_path):
@@ -252,7 +257,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
     def store(
         self,
         prompt: PromptLike,
-        override_item: SectionOverride | ToolOverride | TaskExampleOverride,
+        override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
     ) -> PromptOverride:
@@ -267,35 +272,38 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             list(existing_override.task_example_overrides) if existing_override else []
         )
 
-        if isinstance(override_item, SectionOverride):
+        if isinstance(override, SectionOverride):
             # Validate the hash matches
-            expected_hash = _lookup_section_hash(descriptor, override_item.path)
-            if override_item.expected_hash != expected_hash:
-                raise PromptOverridesError(
-                    f"Hash mismatch for section {override_item.path!r}."
+            expected_hash = _lookup_section_hash(descriptor, override.path)
+            if override.expected_hash != expected_hash:
+                msg = (
+                    f"Hash mismatch for section {override.path!r}: expected "
+                    f"{expected_hash}, got {override.expected_hash}."
                 )
-            sections[override_item.path] = override_item
-        elif isinstance(override_item, ToolOverride):
+                raise PromptOverridesError(msg)
+            sections[override.path] = override
+        elif isinstance(override, ToolOverride):
             # Validate the tool exists and hash matches
-            expected_hash = _lookup_tool_hash(descriptor, override_item.name)
-            if override_item.expected_contract_hash != expected_hash:
-                raise PromptOverridesError(
-                    f"Hash mismatch for tool {override_item.name!r}."
+            expected_hash = _lookup_tool_hash(descriptor, override.name)
+            if override.expected_contract_hash != expected_hash:
+                msg = (
+                    f"Hash mismatch for tool {override.name!r}: expected "
+                    f"{expected_hash}, got {override.expected_contract_hash}."
                 )
-            tools[override_item.name] = override_item
-        elif isinstance(override_item, TaskExampleOverride):
+                raise PromptOverridesError(msg)
+            tools[override.name] = override
+        else:
+            # TaskExampleOverride case
             # Add or update task example override
             # Find existing override with same path+index and replace, or append
             found = False
             for i, existing in enumerate(task_examples):
-                if existing.path == override_item.path and existing.index == override_item.index:
-                    task_examples[i] = override_item
+                if existing.path == override.path and existing.index == override.index:
+                    task_examples[i] = override
                     found = True
                     break
             if not found:
-                task_examples.append(override_item)
-        else:
-            raise PromptOverridesError(f"Unknown override type: {type(override_item)}")
+                task_examples.append(override)
 
         prompt_override = PromptOverride(
             ns=descriptor.ns,

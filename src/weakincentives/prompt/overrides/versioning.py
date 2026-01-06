@@ -397,8 +397,10 @@ def _tool_example_hashes(tool: ToolContractProtocol) -> tuple[HexDigest, ...]:
     examples = getattr(tool, "examples", ())
     hashes: list[HexDigest] = []
     for example in examples:
+        # Use None for missing values to distinguish from empty strings
+        description = getattr(example, "description", None)
         example_data = {
-            "description": getattr(example, "description", ""),
+            "description": description,
             "input": _serialize_example_value(getattr(example, "input", None)),
             "output": _serialize_example_value(getattr(example, "output", None)),
         }
@@ -416,7 +418,15 @@ def _serialize_example_value(value: object) -> JSONValue:
     try:
         return dump(value, exclude_none=True)
     except Exception:
-        # Fallback for non-dataclass values
+        # Fallback for non-dataclass values - log for debugging
+        from ...runtime.logging import get_logger
+
+        logger = get_logger(__name__, context={"component": "prompt_overrides"})
+        logger.debug(
+            "Falling back to str() for example value serialization.",
+            event="example_value_fallback",
+            context={"value_type": type(value).__name__},
+        )
         return str(value)
 
 
