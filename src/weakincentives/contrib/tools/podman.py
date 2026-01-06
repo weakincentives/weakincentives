@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
-from weakincentives.filesystem import Filesystem
+from weakincentives.filesystem import Filesystem, HostFilesystem
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
@@ -45,7 +45,6 @@ from .asteval import (
     EvalParams,
     EvalResult,
 )
-from .filesystem_host import HostFilesystem
 from .podman_connection import (
     resolve_connection_settings,
     resolve_podman_connection,

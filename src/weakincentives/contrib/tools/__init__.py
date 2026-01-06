@@ -64,7 +64,6 @@ from .digests import (
     latest_workspace_digest,
     set_workspace_digest,
 )
-from .filesystem_host import HostFilesystem
 from .filesystem_memory import InMemoryFilesystem
 from .planning import (
     AddStep,
@@ -133,7 +132,6 @@ __all__ = [
     "GlobParams",
     "GrepMatch",
     "GrepParams",
-    "HostFilesystem",
     "HostMount",
     "InMemoryFilesystem",
     "ListDirectory",

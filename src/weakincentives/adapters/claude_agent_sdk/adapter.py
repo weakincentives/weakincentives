@@ -20,9 +20,8 @@ from datetime import UTC, datetime
 from typing import Any, cast, override
 
 from ...budget import Budget, BudgetTracker
-from ...contrib.tools.filesystem_host import HostFilesystem
 from ...deadlines import Deadline
-from ...filesystem import Filesystem
+from ...filesystem import Filesystem, HostFilesystem
 from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.protocols import PromptProtocol

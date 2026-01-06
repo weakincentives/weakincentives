@@ -17,7 +17,7 @@ with path restrictions to prevent escaping the sandbox root.
 
 Example usage::
 
-    from weakincentives.contrib.tools.filesystem_host import HostFilesystem
+    from weakincentives.filesystem import HostFilesystem
 
     # Create a host filesystem with sandbox root
     fs = HostFilesystem(_root="/path/to/workspace")
@@ -43,7 +43,8 @@ from typing import Literal
 from uuid import uuid4
 
 from weakincentives.errors import SnapshotError, SnapshotRestoreError
-from weakincentives.filesystem import (
+
+from ._types import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
     MAX_WRITE_LENGTH,

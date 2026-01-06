@@ -18,19 +18,26 @@ can perform file operations without coupling to a specific storage implementatio
 
 Example usage::
 
-    from weakincentives.filesystem import Filesystem, ReadResult
+    from weakincentives.filesystem import Filesystem, ReadResult, HostFilesystem
 
     def read_file(fs: Filesystem, path: str) -> ReadResult:
         return fs.read(path)
 
-Implementations are provided in ``weakincentives.contrib.tools``:
+    # Create a host filesystem with sandbox root
+    fs = HostFilesystem(_root="/path/to/workspace")
+
+Core implementations:
+
+- ``HostFilesystem``: Sandboxed host directory access (this module)
+
+Additional implementations in ``weakincentives.contrib.tools``:
 
 - ``InMemoryFilesystem``: Session-scoped in-memory storage
-- ``HostFilesystem``: Sandboxed host directory access
 """
 
 from __future__ import annotations
 
+from ._host import HostFilesystem
 from ._protocol import Filesystem, SnapshotableFilesystem
 from ._types import (
     ASCII,
@@ -71,6 +78,7 @@ __all__ = [
     "FilesystemSnapshot",
     "GlobMatch",
     "GrepMatch",
+    "HostFilesystem",
     "ReadResult",
     "SnapshotableFilesystem",
     "WriteMode",

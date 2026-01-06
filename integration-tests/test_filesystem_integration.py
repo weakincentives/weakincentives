@@ -38,7 +38,6 @@ from weakincentives.contrib.tools import (
     GlobParams,
     GrepMatch,
     GrepParams,
-    HostFilesystem,
     HostMount,
     InMemoryFilesystem,
     ListDirectoryParams,
@@ -53,7 +52,7 @@ from weakincentives.contrib.tools import (
     WriteFileParams,
 )
 from weakincentives.contrib.tools.vfs import FilesystemToolHandlers
-from weakincentives.filesystem import Filesystem
+from weakincentives.filesystem import Filesystem, HostFilesystem
 from weakincentives.prompt.tool import ToolContext
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
