@@ -206,8 +206,9 @@ Guides cover quickstarts, patterns, recipes, and best practices. Design specs
 
 ```python
 from weakincentives import Prompt, MarkdownSection, Tool
+from weakincentives.prompt import PromptTemplate
 
-prompt = Prompt[OutputType](
+template = PromptTemplate[OutputType](
     ns="my-namespace",
     key="my-prompt",
     name="my_prompt",
@@ -220,6 +221,7 @@ prompt = Prompt[OutputType](
         ),
     ],
 )
+prompt = Prompt(template)  # Bind params with prompt.bind(MyParams(...))
 ```
 
 ### Session State
