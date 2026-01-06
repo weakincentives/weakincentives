@@ -29,6 +29,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesStore,
     SectionDescriptor,
     SectionOverride,
+    TaskExampleOverride,
     ToolDescriptor,
     ToolOverride,
     filter_override_for_descriptor,
@@ -179,7 +180,10 @@ def test_prompt_descriptor_collects_tools() -> None:
 
     assert descriptor.tools == [
         ToolDescriptor(
-            path=("greeting",), name="greeter", contract_hash=expected_contract
+            path=("greeting",),
+            name="greeter",
+            contract_hash=expected_contract,
+            example_hashes=(),
         )
     ]
 
@@ -207,6 +211,7 @@ def test_prompt_descriptor_collects_sequence_tools() -> None:
             path=("greeting",),
             name="greeter_sequence",
             contract_hash=expected_contract,
+            example_hashes=(),
         )
     ]
 
@@ -269,6 +274,15 @@ class _RecordingOverridesStore(PromptOverridesStore):
     ) -> PromptOverride:
         raise NotImplementedError
 
+    def store(
+        self,
+        prompt: PromptTemplate[Any],
+        override: SectionOverride | ToolOverride | TaskExampleOverride,
+        *,
+        tag: str = "latest",
+    ) -> PromptOverride:
+        raise NotImplementedError
+
 
 def test_prompt_render_applies_matching_sections() -> None:
     prompt = _build_prompt()
@@ -282,6 +296,7 @@ def test_prompt_render_applies_matching_sections() -> None:
         tag="experiment",
         sections={
             path: SectionOverride(
+                path=path,
                 expected_hash=section.content_hash,
                 body="Cheer loudly for ${subject}.",
             )
@@ -316,6 +331,7 @@ def test_prompt_render_respects_section_acceptance() -> None:
         tag="experiment",
         sections={
             path: SectionOverride(
+                path=path,
                 expected_hash=section.content_hash,
                 body="Cheer loudly for ${subject}.",
             )
@@ -347,6 +363,7 @@ def test_prompt_render_ignores_non_matching_override() -> None:
         tag="latest",
         sections={
             ("other",): SectionOverride(
+                path=("other",),
                 expected_hash=hash_text("deadbeef"),
                 body="Ignore this.",
             )

@@ -117,6 +117,7 @@ def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body="Cheer loudly for ${subject}.",
             )
@@ -129,7 +130,7 @@ def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
     override_path = _override_path(tmp_path, descriptor)
     assert override_path.is_file()
     payload = json.loads(override_path.read_text(encoding="utf-8"))
-    assert payload["version"] == 1
+    assert payload["version"] == 2
     assert payload["sections"]["greeting"]["body"] == "Cheer loudly for ${subject}."
 
     resolved = store.resolve(descriptor)
@@ -375,6 +376,7 @@ def test_upsert_rejects_mismatched_metadata(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body="Text",
             )
@@ -398,6 +400,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             ("unknown",): SectionOverride(
+                path=("unknown",),
                 expected_hash=section.content_hash,
                 body="Body",
             )
@@ -412,6 +415,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=OTHER_DIGEST,
                 body="Body",
             )
@@ -426,6 +430,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body=123,  # type: ignore[arg-type]
             )
@@ -440,6 +445,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash, body="Body"
             )
         },
@@ -459,6 +465,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash, body="Body"
             )
         },
@@ -478,6 +485,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash, body="Body"
             )
         },
@@ -498,6 +506,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash, body="Body"
             )
         },
@@ -518,6 +527,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash, body="Body"
             )
         },
@@ -545,6 +555,7 @@ def test_upsert_rejects_non_string_section_hash(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=cast(Any, 123),
                 body="Body",
             )
@@ -569,6 +580,7 @@ def test_upsert_rejects_non_string_tool_hash(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body="Body",
             )
@@ -599,6 +611,7 @@ def test_upsert_allows_none_tool_description(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body="Body",
             )
@@ -763,7 +776,7 @@ def test_resolve_header_validation_errors(tmp_path: Path) -> None:
     override_path = _override_path(tmp_path, descriptor)
     override_path.parent.mkdir(parents=True, exist_ok=True)
     bad_version = {
-        "version": 2,
+        "version": 99,  # Unsupported version
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
         "tag": "latest",
@@ -780,7 +793,7 @@ def test_resolve_header_validation_errors(tmp_path: Path) -> None:
         store.resolve(descriptor)
 
     bad_metadata = dict(bad_version)
-    bad_metadata["version"] = 1
+    bad_metadata["version"] = 2
     bad_metadata["ns"] = "other"
     override_path.write_text(json.dumps(bad_metadata), encoding="utf-8")
     with pytest.raises(PromptOverridesError):

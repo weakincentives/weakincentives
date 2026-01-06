@@ -36,7 +36,8 @@ from .versioning import (
 _LOGGER: StructuredLogger = get_logger(
     __name__, context={"component": "prompt_overrides"}
 )
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+SUPPORTED_VERSIONS = (1, 2)  # Support both v1 and v2 for backward compatibility
 
 
 def validate_header(
@@ -46,7 +47,7 @@ def validate_header(
     file_path: Path,
 ) -> None:
     version = payload.get("version")
-    if version != FORMAT_VERSION:
+    if version not in SUPPORTED_VERSIONS:
         raise PromptOverridesError(
             f"Unsupported override file version {version!r} in {file_path}."
         )
@@ -139,6 +140,7 @@ def _normalize_section_override(
     if not isinstance(body, str):
         raise PromptOverridesError(config.body_error_message)
     return SectionOverride(
+        path=path,
         expected_hash=expected_digest,
         body=body,
     )
@@ -500,11 +502,12 @@ def validate_tools_for_write(
 
 def serialize_sections(
     sections: Mapping[tuple[str, ...], SectionOverride],
-) -> dict[str, dict[str, str]]:
-    serialized: dict[str, dict[str, str]] = {}
+) -> dict[str, dict[str, object]]:
+    serialized: dict[str, dict[str, object]] = {}
     for path, section_override in sections.items():
         key = "/".join(path)
         serialized[key] = {
+            "path": list(path),
             "expected_hash": str(section_override.expected_hash),
             "body": section_override.body,
         }
@@ -542,6 +545,7 @@ def seed_sections(
                 "Cannot seed override for section without template."
             )
         seeded[section.path] = SectionOverride(
+            path=section.path,
             expected_hash=section.content_hash,
             body=template,
         )

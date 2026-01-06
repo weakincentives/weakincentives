@@ -40,6 +40,8 @@ from .versioning import (
     PromptOverridesError,
     PromptOverridesStore,
     SectionOverride,
+    TaskExampleOverride,
+    ToolOverride,
     descriptor_for_prompt,
 )
 
@@ -107,19 +109,23 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         tools_payload = payload.get("tools")
         tools = load_tools(tools_payload, descriptor)
 
+        # Load task example overrides (for now, empty - to be implemented)
+        task_example_overrides: tuple[TaskExampleOverride, ...] = ()
+
         raw_override = PromptOverride(
             ns=descriptor.ns,
             prompt_key=descriptor.key,
             tag=tag,
             sections=sections,
             tool_overrides=tools,
+            task_example_overrides=task_example_overrides,
         )
 
         filtered_sections, filtered_tools = filter_override_for_descriptor(
             descriptor, raw_override
         )
 
-        if not filtered_sections and not filtered_tools:
+        if not filtered_sections and not filtered_tools and not task_example_overrides:
             _LOGGER.debug(
                 "No applicable overrides remain after validation.",
                 event="prompt_override_empty",
@@ -137,6 +143,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             tag=tag,
             sections=filtered_sections,
             tool_overrides=filtered_tools,
+            task_example_overrides=task_example_overrides,
         )
         _LOGGER.info(
             "Resolved prompt override.",
@@ -147,6 +154,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "tag": normalized_tag,
                 "section_count": len(filtered_sections),
                 "tool_count": len(filtered_tools),
+                "task_example_count": len(task_example_overrides),
             },
         )
         return override
@@ -196,6 +204,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             tag=normalized_tag,
             sections=validated_sections,
             tool_overrides=validated_tools,
+            task_example_overrides=override.task_example_overrides,
         )
         _LOGGER.info(
             "Persisted prompt override.",
@@ -206,6 +215,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "tag": normalized_tag,
                 "section_count": len(validated_sections),
                 "tool_count": len(validated_tools),
+                "task_example_count": len(override.task_example_overrides),
             },
         )
         return persisted
@@ -239,31 +249,63 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 )
 
     @override
-    def set_section_override(
+    def store(
         self,
         prompt: PromptLike,
+        override_item: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
-        path: tuple[str, ...],
-        body: str,
     ) -> PromptOverride:
+        """Store a single override, dispatching by type."""
         descriptor = descriptor_for_prompt(prompt)
         normalized_tag = self._filesystem.validate_identifier(tag, "tag")
         existing_override = self.resolve(descriptor=descriptor, tag=normalized_tag)
+
         sections = dict(existing_override.sections) if existing_override else {}
         tools = dict(existing_override.tool_overrides) if existing_override else {}
+        task_examples = (
+            list(existing_override.task_example_overrides) if existing_override else []
+        )
 
-        expected_hash = _lookup_section_hash(descriptor, path)
-        sections[path] = SectionOverride(expected_hash=expected_hash, body=body)
+        if isinstance(override_item, SectionOverride):
+            # Validate the hash matches
+            expected_hash = _lookup_section_hash(descriptor, override_item.path)
+            if override_item.expected_hash != expected_hash:
+                raise PromptOverridesError(
+                    f"Hash mismatch for section {override_item.path!r}."
+                )
+            sections[override_item.path] = override_item
+        elif isinstance(override_item, ToolOverride):
+            # Validate the tool exists and hash matches
+            expected_hash = _lookup_tool_hash(descriptor, override_item.name)
+            if override_item.expected_contract_hash != expected_hash:
+                raise PromptOverridesError(
+                    f"Hash mismatch for tool {override_item.name!r}."
+                )
+            tools[override_item.name] = override_item
+        elif isinstance(override_item, TaskExampleOverride):
+            # Add or update task example override
+            # Find existing override with same path+index and replace, or append
+            found = False
+            for i, existing in enumerate(task_examples):
+                if existing.path == override_item.path and existing.index == override_item.index:
+                    task_examples[i] = override_item
+                    found = True
+                    break
+            if not found:
+                task_examples.append(override_item)
+        else:
+            raise PromptOverridesError(f"Unknown override type: {type(override_item)}")
 
-        override = PromptOverride(
+        prompt_override = PromptOverride(
             ns=descriptor.ns,
             prompt_key=descriptor.key,
             tag=normalized_tag,
             sections=sections,
             tool_overrides=tools,
+            task_example_overrides=tuple(task_examples),
         )
-        return self.upsert(descriptor, override)
+        return self.upsert(descriptor, prompt_override)
 
     @override
     def seed(
@@ -298,6 +340,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 tag=normalized_tag,
                 sections=sections,
                 tool_overrides=tools,
+                task_example_overrides=(),  # Task examples not seeded by default
             )
             return self.upsert(descriptor, seed_override)
 
@@ -310,6 +353,15 @@ def _lookup_section_hash(
             return candidate.content_hash
     raise PromptOverridesError(
         f"Section {path!r} not registered in prompt descriptor; cannot override."
+    )
+
+
+def _lookup_tool_hash(descriptor: PromptDescriptor, name: str) -> HexDigest:
+    for candidate in descriptor.tools:
+        if candidate.name == name:
+            return candidate.contract_hash
+    raise PromptOverridesError(
+        f"Tool {name!r} not registered in prompt descriptor; cannot override."
     )
 
 
