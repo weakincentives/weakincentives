@@ -254,3 +254,17 @@ def test_serialize_task_example_overrides_minimal() -> None:
             "action": "append",
         }
     ]
+
+
+def test_serialize_task_example_overrides_step_with_only_index() -> None:
+    """Test serialization of step override with only index field (all others None)."""
+    override = TaskExampleOverride(
+        path=("section",),
+        index=0,
+        expected_hash=None,
+        action="modify",
+        step_overrides=(TaskStepOverride(index=0),),  # Only index, all others None
+    )
+    serialized = serialize_task_example_overrides((override,))
+    assert len(serialized) == 1
+    assert serialized[0]["step_overrides"] == [{"index": 0}]

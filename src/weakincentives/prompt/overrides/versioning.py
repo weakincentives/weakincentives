@@ -202,11 +202,21 @@ def descriptor_for_prompt(prompt: PromptLike) -> PromptDescriptor:
 
 @FrozenDataclass()
 class SectionOverride:
-    """Override payload for a prompt section validated by hash."""
+    """Override payload for a prompt section validated by hash.
+
+    Attributes:
+        path: Section path tuple identifying the section.
+        expected_hash: Hash of the original section content for staleness detection.
+        body: Override text for the section body (FULL visibility).
+        summary: Optional override text for summary (SUMMARY visibility).
+        visibility: Optional default visibility override (FULL or SUMMARY).
+    """
 
     path: tuple[str, ...]
     expected_hash: HexDigest
     body: str
+    summary: str | None = None
+    visibility: Literal["full", "summary"] | None = None
 
 
 @FrozenDataclass()

@@ -516,3 +516,12 @@ def test_prompt_override_tool_default_factory_is_isolated() -> None:
     )
 
     assert "example" not in baseline.tool_overrides
+
+
+def test_tool_example_hash_handles_missing_input_attribute() -> None:
+    """Test that tool example hashing handles examples without input attribute."""
+    from weakincentives.prompt.overrides.versioning import _serialize_example_value
+
+    # Test with None value (covering line 430)
+    result = _serialize_example_value(None)
+    assert result is None

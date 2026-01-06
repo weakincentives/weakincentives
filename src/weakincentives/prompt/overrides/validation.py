@@ -106,6 +106,8 @@ def _normalize_section_override(
     descriptor_section: SectionDescriptor | None,
     expected_hash: JSONValue,
     body: JSONValue,
+    summary: str | None,
+    visibility: Literal["full", "summary"] | None,
     config: SectionValidationConfig,
 ) -> SectionOverride | None:
     if descriptor_section is None:
@@ -146,6 +148,8 @@ def _normalize_section_override(
         path=path,
         expected_hash=expected_digest,
         body=body,
+        summary=summary,
+        visibility=visibility,
     )
 
 
@@ -278,6 +282,30 @@ def _normalize_tool_override(
     )
 
 
+def _parse_section_summary(
+    section_payload: Mapping[str, JSONValue],
+) -> str | None:
+    """Parse and validate the summary field from a section override payload."""
+    summary = section_payload.get("summary")
+    if summary is not None and not isinstance(summary, str):
+        raise PromptOverridesError("Section summary must be a string.")
+    return summary
+
+
+def _parse_section_visibility(
+    section_payload: Mapping[str, JSONValue],
+) -> Literal["full", "summary"] | None:
+    """Parse and validate the visibility field from a section override payload."""
+    visibility = section_payload.get("visibility")
+    if visibility is None:
+        return None
+    if visibility not in {"full", "summary"}:
+        raise PromptOverridesError(
+            f"Section visibility must be 'full' or 'summary', got {visibility!r}."
+        )
+    return visibility  # type: ignore[return-value]
+
+
 def _load_section_override_entry(
     *,
     path_key_raw: object,
@@ -293,6 +321,8 @@ def _load_section_override_entry(
     section_payload = cast(Mapping[str, JSONValue], section_payload_raw)
     expected_hash = section_payload.get("expected_hash")
     body = section_payload.get("body")
+    summary = _parse_section_summary(section_payload)
+    visibility = _parse_section_visibility(section_payload)
     config = SectionValidationConfig(
         strict=False,
         path_display=path_key,
@@ -303,6 +333,8 @@ def _load_section_override_entry(
         descriptor_section=descriptor_index.get(path),
         expected_hash=expected_hash,
         body=body,
+        summary=summary,
+        visibility=visibility,
         config=config,
     )
     if section_override is None:
@@ -395,6 +427,8 @@ def filter_override_for_descriptor(
             descriptor_section=descriptor_sections.get(path),
             expected_hash=section_override.expected_hash,
             body=section_override.body,
+            summary=section_override.summary,
+            visibility=section_override.visibility,
             config=section_config,
         )
         if normalized_section is not None:
@@ -468,6 +502,8 @@ def validate_sections_for_write(
             descriptor_section=descriptor_index.get(path),
             expected_hash=section_override.expected_hash,
             body=section_override.body,
+            summary=section_override.summary,
+            visibility=section_override.visibility,
             config=section_config,
         )
         validated[path] = cast(SectionOverride, normalized_section)
@@ -513,11 +549,16 @@ def serialize_sections(
     serialized: dict[str, dict[str, object]] = {}
     for path, section_override in sections.items():
         key = "/".join(path)
-        serialized[key] = {
+        entry: dict[str, object] = {
             "path": list(path),
             "expected_hash": str(section_override.expected_hash),
             "body": section_override.body,
         }
+        if section_override.summary is not None:
+            entry["summary"] = section_override.summary
+        if section_override.visibility is not None:
+            entry["visibility"] = section_override.visibility
+        serialized[key] = entry
     return serialized
 
 

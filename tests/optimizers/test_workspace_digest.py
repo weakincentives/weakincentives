@@ -542,3 +542,14 @@ def test_latest_workspace_digest_handles_section_key_mismatch() -> None:
     # Should return None when no match
     result = latest_workspace_digest(session, "non-existent")
     assert result is None
+
+
+def test_find_section_hash_raises_for_missing_path() -> None:
+    """Test that _find_section_hash raises for unknown paths."""
+    adapter = _RecordingAdapter(mode="dataclass")
+    optimizer = _create_optimizer(adapter)
+    prompt = Prompt(_build_prompt())
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    with pytest.raises(PromptOverridesError, match="Section hash not found"):
+        optimizer._find_section_hash(descriptor, ("nonexistent", "path"))

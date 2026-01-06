@@ -1017,3 +1017,178 @@ def test_store_task_example_override_appends_different_index(tmp_path: Path) -> 
 
     # Should have both overrides since they have different indices
     assert len(result.task_example_overrides) == 2
+
+
+def test_upsert_and_resolve_section_with_summary_and_visibility(tmp_path: Path) -> None:
+    """Test that summary and visibility fields are persisted and resolved."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                path=section.path,
+                expected_hash=section.content_hash,
+                body="Full body content for ${subject}.",
+                summary="Brief summary for ${subject}.",
+                visibility="summary",
+            )
+        },
+    )
+
+    persisted = store.upsert(descriptor, override)
+    assert persisted.sections[section.path].body == "Full body content for ${subject}."
+    assert persisted.sections[section.path].summary == "Brief summary for ${subject}."
+    assert persisted.sections[section.path].visibility == "summary"
+
+    # Check the JSON file contains the new fields
+    override_path = _override_path(tmp_path, descriptor)
+    payload = json.loads(override_path.read_text(encoding="utf-8"))
+    section_data = payload["sections"]["greeting"]
+    assert section_data["body"] == "Full body content for ${subject}."
+    assert section_data["summary"] == "Brief summary for ${subject}."
+    assert section_data["visibility"] == "summary"
+
+    # Resolve and verify
+    resolved = store.resolve(descriptor)
+    assert resolved is not None
+    assert resolved.sections[section.path].body == "Full body content for ${subject}."
+    assert resolved.sections[section.path].summary == "Brief summary for ${subject}."
+    assert resolved.sections[section.path].visibility == "summary"
+
+
+def test_resolve_section_without_summary_and_visibility(tmp_path: Path) -> None:
+    """Test that sections without summary/visibility default to None."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                path=section.path,
+                expected_hash=section.content_hash,
+                body="Body without summary.",
+            )
+        },
+    )
+
+    persisted = store.upsert(descriptor, override)
+    assert persisted.sections[section.path].summary is None
+    assert persisted.sections[section.path].visibility is None
+
+    resolved = store.resolve(descriptor)
+    assert resolved is not None
+    assert resolved.sections[section.path].summary is None
+    assert resolved.sections[section.path].visibility is None
+
+
+def test_load_sections_invalid_summary_raises(tmp_path: Path) -> None:
+    """Test that non-string summary values raise an error."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    section = descriptor.sections[0]
+    section_key = "/".join(section.path)
+
+    with pytest.raises(PromptOverridesError, match="summary must be a string"):
+        load_sections(
+            {
+                section_key: {
+                    "expected_hash": section.content_hash,
+                    "body": "Body",
+                    "summary": 123,
+                }
+            },
+            descriptor,
+        )
+
+
+def test_load_sections_invalid_visibility_raises(tmp_path: Path) -> None:
+    """Test that invalid visibility values raise an error."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    section = descriptor.sections[0]
+    section_key = "/".join(section.path)
+
+    with pytest.raises(
+        PromptOverridesError, match="visibility must be 'full' or 'summary'"
+    ):
+        load_sections(
+            {
+                section_key: {
+                    "expected_hash": section.content_hash,
+                    "body": "Body",
+                    "visibility": "invalid",
+                }
+            },
+            descriptor,
+        )
+
+
+def test_store_section_with_summary_and_visibility(tmp_path: Path) -> None:
+    """Test that store() preserves summary and visibility fields."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    override = SectionOverride(
+        path=section.path,
+        expected_hash=section.content_hash,
+        body="Full content.",
+        summary="Short summary.",
+        visibility="full",
+    )
+
+    result = store.store(prompt, override)
+    stored_section = result.sections[section.path]
+    assert stored_section.body == "Full content."
+    assert stored_section.summary == "Short summary."
+    assert stored_section.visibility == "full"
+
+
+def test_store_tool_override_success(tmp_path: Path) -> None:
+    """Test successful tool override storage via store()."""
+    prompt = _build_prompt_with_tool()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    tool = descriptor.tools[0]
+    override = ToolOverride(
+        name=tool.name,
+        expected_contract_hash=tool.contract_hash,
+        description="New description",
+        param_descriptions={"query": "Updated param description"},
+    )
+
+    result = store.store(prompt, override)
+    stored_tool = result.tool_overrides[tool.name]
+    assert stored_tool.description == "New description"
+    assert stored_tool.param_descriptions == {"query": "Updated param description"}
+
+
+def test_store_tool_override_unknown_tool(tmp_path: Path) -> None:
+    """Test that store() raises error for unknown tool names."""
+    prompt = _build_prompt_with_tool()  # Has tools, but we'll look for a different one
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    override = ToolOverride(
+        name="unknown_tool",
+        expected_contract_hash=VALID_DIGEST,
+        description="Some description",
+        param_descriptions={},
+    )
+
+    with pytest.raises(
+        PromptOverridesError, match="not registered in prompt descriptor"
+    ):
+        store.store(prompt, override)
