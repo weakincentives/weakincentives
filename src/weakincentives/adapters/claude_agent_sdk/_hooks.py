@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -37,6 +38,7 @@ __all__ = [
     "AsyncHookCallback",
     "HookCallback",
     "HookContext",
+    "HookStats",
     "PostToolUseInput",
     "create_notification_hook",
     "create_post_tool_use_hook",
@@ -110,6 +112,38 @@ AsyncHookCallback = Callable[
 """Type alias for async hook callbacks matching SDK signature."""
 
 
+@dataclass(slots=True)
+class HookStats:
+    """Cumulative statistics tracked during hook execution.
+
+    These metrics provide visibility into the execution flow for debugging.
+    """
+
+    tool_count: int = 0
+    """Number of tools invoked during this execution."""
+
+    turn_count: int = 0
+    """Number of user prompt submissions (turns) during this execution."""
+
+    subagent_count: int = 0
+    """Number of subagents spawned during this execution."""
+
+    compact_count: int = 0
+    """Number of context compaction events during this execution."""
+
+    total_input_tokens: int = 0
+    """Cumulative input tokens from all messages."""
+
+    total_output_tokens: int = 0
+    """Cumulative output tokens from all messages."""
+
+    total_thinking_tokens: int = 0
+    """Cumulative thinking tokens from extended thinking."""
+
+    hook_errors: int = 0
+    """Number of hook execution errors encountered."""
+
+
 class HookContext:
     """Context passed to hook callbacks for state access.
 
@@ -136,6 +170,8 @@ class HookContext:
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
+        self.stats = HookStats()
+        self._start_time = time.monotonic()
 
     @property
     def session(self) -> SessionProtocol:
@@ -172,6 +208,11 @@ class HookContext:
     ) -> bool:  # pragma: no cover - tested via integration
         """Abort tool execution and restore state."""
         return self._tracker.abort_tool_execution(tool_use_id)
+
+    @property
+    def elapsed_ms(self) -> int:
+        """Return elapsed time in milliseconds since context creation."""
+        return int((time.monotonic() - self._start_time) * 1000)
 
 
 def _utcnow() -> datetime:
@@ -252,10 +293,39 @@ def create_pre_tool_use_hook(
         sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         _ = sdk_context
+        hook_start = time.monotonic()
 
         tool_name = (
             input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
         )
+
+        # Compute constraint status for logging
+        deadline_remaining_ms: int | None = None
+        if hook_context.deadline:
+            deadline_remaining_ms = int(
+                hook_context.deadline.remaining().total_seconds() * 1000
+            )
+
+        budget_info: dict[str, Any] = {}
+        budget_tracker = hook_context.budget_tracker
+        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
+            budget = budget_tracker.budget
+            consumed = budget_tracker.consumed
+            consumed_total = (consumed.input_tokens or 0) + (
+                consumed.output_tokens or 0
+            )
+            budget_info = {
+                "budget_consumed_input": consumed.input_tokens,
+                "budget_consumed_output": consumed.output_tokens,
+                "budget_consumed_total": consumed_total,
+                "budget_max_total": budget.max_total_tokens,
+                "budget_remaining": (
+                    budget.max_total_tokens - consumed_total
+                    if budget.max_total_tokens
+                    else None
+                ),
+            }
+
         logger.debug(
             "claude_agent_sdk.hook.pre_tool_use",
             event="hook.pre_tool_use",
@@ -263,6 +333,10 @@ def create_pre_tool_use_hook(
                 "tool_name": tool_name,
                 "tool_use_id": tool_use_id,
                 "input_data": input_data if isinstance(input_data, dict) else {},
+                "elapsed_ms": hook_context.elapsed_ms,
+                "tool_count": hook_context.stats.tool_count,
+                "deadline_remaining_ms": deadline_remaining_ms,
+                **budget_info,
             },
         )
 
@@ -273,7 +347,11 @@ def create_pre_tool_use_hook(
             logger.warning(
                 "claude_agent_sdk.hook.deadline_exceeded",
                 event="hook.deadline_exceeded",
-                context={"tool_name": tool_name},
+                context={
+                    "tool_name": tool_name,
+                    "elapsed_ms": hook_context.elapsed_ms,
+                    "tool_count": hook_context.stats.tool_count,
+                },
             )
             return {
                 "hookSpecificOutput": {
@@ -283,7 +361,6 @@ def create_pre_tool_use_hook(
                 }
             }
 
-        budget_tracker = hook_context.budget_tracker
         if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
             budget = budget_tracker.budget
             consumed = budget_tracker.consumed
@@ -297,7 +374,12 @@ def create_pre_tool_use_hook(
                 logger.warning(
                     "claude_agent_sdk.hook.budget_exhausted",
                     event="hook.budget_exhausted",
-                    context={"tool_name": tool_name},
+                    context={
+                        "tool_name": tool_name,
+                        "consumed_total": consumed_total,
+                        "max_total": budget.max_total_tokens,
+                        "elapsed_ms": hook_context.elapsed_ms,
+                    },
                 )
                 return {
                     "hookSpecificOutput": {
@@ -314,10 +396,15 @@ def create_pre_tool_use_hook(
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
             )
+            hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
             logger.debug(
                 "claude_agent_sdk.hook.snapshot_taken",
                 event="hook.snapshot_taken",
-                context={"tool_name": tool_name, "tool_use_id": tool_use_id},
+                context={
+                    "tool_name": tool_name,
+                    "tool_use_id": tool_use_id,
+                    "hook_duration_ms": hook_duration_ms,
+                },
             )
 
         return {}
@@ -416,6 +503,7 @@ def create_post_tool_use_hook(
         sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         _ = sdk_context
+        hook_start = time.monotonic()
         data = _parse_tool_data(input_data)
 
         # Skip logging for MCP-bridged WINK tools - they dispatch their own
@@ -424,6 +512,7 @@ def create_post_tool_use_hook(
             return {}
 
         hook_context._tool_count += 1
+        hook_context.stats.tool_count += 1
 
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
@@ -439,29 +528,35 @@ def create_post_tool_use_hook(
         )
         hook_context.session.dispatcher.dispatch(event)
 
+        # Determine success status
+        success = data.tool_error is None and not _is_tool_error_response(
+            data.result_raw
+        )
+
         logger.debug(
             "claude_agent_sdk.hook.tool_invoked",
             event="hook.tool_invoked",
             context={
                 "tool_name": data.tool_name,
-                "success": data.tool_error is None,
+                "success": success,
                 "call_id": tool_use_id,
                 "tool_input": data.tool_input,
                 "tool_response": data.result_raw,
                 "output_text": data.output_text,
+                "elapsed_ms": hook_context.elapsed_ms,
+                "tool_count": hook_context.stats.tool_count,
+                "turn_count": hook_context.stats.turn_count,
             },
         )
 
         # Complete tool transaction - restore state on failure
         if tool_use_id is not None:
-            success = data.tool_error is None and not _is_tool_error_response(
-                data.result_raw
-            )
             restored = hook_context.end_tool_execution(
                 tool_use_id=tool_use_id,
                 success=success,
             )
             if restored:
+                hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
                 logger.info(
                     "claude_agent_sdk.hook.state_restored",
                     event="hook.state_restored",
@@ -469,6 +564,8 @@ def create_post_tool_use_hook(
                         "tool_name": data.tool_name,
                         "tool_use_id": tool_use_id,
                         "reason": "tool_failure",
+                        "hook_duration_ms": hook_duration_ms,
+                        "elapsed_ms": hook_context.elapsed_ms,
                     },
                 )
 
@@ -477,7 +574,11 @@ def create_post_tool_use_hook(
             logger.debug(
                 "claude_agent_sdk.hook.structured_output_stop",
                 event="hook.structured_output_stop",
-                context={"tool_name": data.tool_name},
+                context={
+                    "tool_name": data.tool_name,
+                    "elapsed_ms": hook_context.elapsed_ms,
+                    "tool_count": hook_context.stats.tool_count,
+                },
             )
             return {"continue": False}
 
@@ -517,9 +618,10 @@ def _is_tool_error_response(response: Any) -> bool:  # noqa: ANN401
 def create_user_prompt_submit_hook(
     hook_context: HookContext,
 ) -> AsyncHookCallback:
-    """Create a UserPromptSubmit hook for context injection.
+    """Create a UserPromptSubmit hook for turn boundary tracking.
 
-    Currently a no-op placeholder for future session context injection.
+    Logs turn start events and tracks turn count for debugging multi-turn
+    conversations. Each prompt submission represents the start of a new turn.
 
     Args:
         hook_context: Context with session references.
@@ -533,10 +635,44 @@ def create_user_prompt_submit_hook(
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
-        _ = input_data
         _ = tool_use_id
         _ = sdk_context
-        _ = hook_context
+
+        hook_context.stats.turn_count += 1
+
+        # Extract prompt info from input
+        payload = input_data if isinstance(input_data, dict) else {}
+        prompt_content = payload.get("prompt", "")
+        session_id = payload.get("session_id", "")
+
+        # Calculate prompt preview (truncate for logging)
+        prompt_preview = ""
+        if isinstance(prompt_content, str):
+            prompt_preview = prompt_content[:200] if prompt_content else ""
+        elif isinstance(prompt_content, dict):
+            content = prompt_content.get("content", "")
+            if isinstance(content, str):
+                prompt_preview = content[:200]
+
+        logger.debug(
+            "claude_agent_sdk.hook.turn_start",
+            event="hook.turn_start",
+            context={
+                "turn_number": hook_context.stats.turn_count,
+                "session_id": session_id,
+                "prompt_preview": prompt_preview,
+                "prompt_length": (
+                    len(prompt_content)
+                    if isinstance(prompt_content, str)
+                    else len(str(prompt_content))
+                ),
+                "elapsed_ms": hook_context.elapsed_ms,
+                "tool_count": hook_context.stats.tool_count,
+                "cumulative_input_tokens": hook_context.stats.total_input_tokens,
+                "cumulative_output_tokens": hook_context.stats.total_output_tokens,
+            },
+        )
+
         return {}
 
     return user_prompt_submit_hook
@@ -547,7 +683,7 @@ def create_stop_hook(
 ) -> AsyncHookCallback:
     """Create a Stop hook for execution finalization.
 
-    Records the stop reason for later use in result construction.
+    Records the stop reason and logs final execution statistics for debugging.
 
     Args:
         hook_context: Context to record stop reason.
@@ -564,17 +700,34 @@ def create_stop_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        stop_reason = (
-            input_data.get("stopReason", "end_turn")
-            if isinstance(input_data, dict)
-            else "end_turn"
-        )
+        payload = input_data if isinstance(input_data, dict) else {}
+        stop_reason = payload.get("stopReason", "end_turn")
         hook_context.stop_reason = stop_reason
+
+        # Extract additional stop context if available
+        num_turns = payload.get("numTurns")
+        duration_ms = payload.get("durationMs")
+        final_result = payload.get("result", "")
+        result_preview = final_result[:200] if isinstance(final_result, str) else ""
 
         logger.debug(
             "claude_agent_sdk.hook.stop",
             event="hook.stop",
-            context={"stop_reason": stop_reason},
+            context={
+                "stop_reason": stop_reason,
+                "sdk_num_turns": num_turns,
+                "sdk_duration_ms": duration_ms,
+                "result_preview": result_preview,
+                "elapsed_ms": hook_context.elapsed_ms,
+                "stats_tool_count": hook_context.stats.tool_count,
+                "stats_turn_count": hook_context.stats.turn_count,
+                "stats_subagent_count": hook_context.stats.subagent_count,
+                "stats_compact_count": hook_context.stats.compact_count,
+                "stats_input_tokens": hook_context.stats.total_input_tokens,
+                "stats_output_tokens": hook_context.stats.total_output_tokens,
+                "stats_thinking_tokens": hook_context.stats.total_thinking_tokens,
+                "stats_hook_errors": hook_context.stats.hook_errors,
+            },
         )
 
         return {}
@@ -587,7 +740,8 @@ def create_subagent_start_hook(
 ) -> AsyncHookCallback:
     """Create a SubagentStart hook to capture subagent launch events.
 
-    Records Notification events when subagents are spawned during execution.
+    Records Notification events when subagents are spawned during execution
+    and tracks subagent statistics for debugging.
 
     Args:
         hook_context: Context with session references.
@@ -604,6 +758,7 @@ def create_subagent_start_hook(
         _ = tool_use_id
         _ = sdk_context
 
+        hook_context.stats.subagent_count += 1
         payload = input_data if isinstance(input_data, dict) else {}
 
         notification = Notification(
@@ -616,10 +771,23 @@ def create_subagent_start_hook(
 
         hook_context.session.dispatch(notification)
 
+        # Extract subagent details for logging
+        subagent_type = payload.get("subagent_type", "")
+        subagent_description = payload.get("description", "")
+        subagent_id = payload.get("subagent_id", "")
+
         logger.debug(
             "claude_agent_sdk.hook.subagent_start",
             event="hook.subagent_start",
-            context={"payload": payload},
+            context={
+                "subagent_number": hook_context.stats.subagent_count,
+                "subagent_type": subagent_type,
+                "subagent_id": subagent_id,
+                "description": subagent_description,
+                "elapsed_ms": hook_context.elapsed_ms,
+                "tool_count": hook_context.stats.tool_count,
+                "payload": payload,
+            },
         )
 
         return {}
@@ -664,10 +832,32 @@ def create_subagent_stop_hook(
 
         hook_context.session.dispatch(notification)
 
+        # Extract subagent completion details for logging
+        subagent_id = payload.get("subagent_id", "")
+        subagent_result = payload.get("result", "")
+        result_preview = subagent_result[:200] if isinstance(subagent_result, str) else ""
+        subagent_duration_ms = payload.get("duration_ms")
+        subagent_tool_count = payload.get("tool_count")
+        transcript_entries = (
+            len(payload.get("transcript_path", []))
+            if isinstance(payload.get("transcript_path"), list)
+            else 0
+        )
+
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
             event="hook.subagent_stop",
-            context={"payload": payload},
+            context={
+                "subagent_id": subagent_id,
+                "result_preview": result_preview,
+                "subagent_duration_ms": subagent_duration_ms,
+                "subagent_tool_count": subagent_tool_count,
+                "transcript_entries": transcript_entries,
+                "elapsed_ms": hook_context.elapsed_ms,
+                "parent_tool_count": hook_context.stats.tool_count,
+                "subagent_count": hook_context.stats.subagent_count,
+                "payload": payload,
+            },
         )
 
         return {}
@@ -681,6 +871,7 @@ def create_pre_compact_hook(
     """Create a PreCompact hook to capture context compaction events.
 
     Records Notification events before the SDK compacts conversation context.
+    Tracks context window utilization for debugging memory-constrained scenarios.
 
     Args:
         hook_context: Context with session references.
@@ -697,6 +888,7 @@ def create_pre_compact_hook(
         _ = tool_use_id
         _ = sdk_context
 
+        hook_context.stats.compact_count += 1
         payload = input_data if isinstance(input_data, dict) else {}
 
         notification = Notification(
@@ -709,10 +901,32 @@ def create_pre_compact_hook(
 
         hook_context.session.dispatch(notification)
 
+        # Extract context window details for logging
+        context_tokens = payload.get("context_tokens")
+        max_context_tokens = payload.get("max_context_tokens")
+        message_count = payload.get("message_count")
+        compaction_reason = payload.get("reason", "")
+
+        # Calculate utilization percentage if available
+        utilization_pct: float | None = None
+        if context_tokens is not None and max_context_tokens:
+            utilization_pct = round((context_tokens / max_context_tokens) * 100, 1)
+
         logger.debug(
             "claude_agent_sdk.hook.pre_compact",
             event="hook.pre_compact",
-            context={"payload": payload},
+            context={
+                "compact_number": hook_context.stats.compact_count,
+                "context_tokens": context_tokens,
+                "max_context_tokens": max_context_tokens,
+                "utilization_pct": utilization_pct,
+                "message_count": message_count,
+                "compaction_reason": compaction_reason,
+                "elapsed_ms": hook_context.elapsed_ms,
+                "tool_count": hook_context.stats.tool_count,
+                "turn_count": hook_context.stats.turn_count,
+                "payload": payload,
+            },
         )
 
         return {}
@@ -726,6 +940,7 @@ def create_notification_hook(
     """Create a Notification hook to capture user-facing notifications.
 
     Records Notification events from the SDK's notification system.
+    Extracts notification type and content for structured logging.
 
     Args:
         hook_context: Context with session references.
@@ -754,10 +969,27 @@ def create_notification_hook(
 
         hook_context.session.dispatch(notification)
 
+        # Extract notification details for logging
+        notification_type = payload.get("type", "")
+        notification_message = payload.get("message", "")
+        message_preview = (
+            notification_message[:200]
+            if isinstance(notification_message, str)
+            else ""
+        )
+        notification_level = payload.get("level", "info")
+
         logger.debug(
             "claude_agent_sdk.hook.notification",
             event="hook.notification",
-            context={"payload": payload},
+            context={
+                "notification_type": notification_type,
+                "notification_level": notification_level,
+                "message_preview": message_preview,
+                "elapsed_ms": hook_context.elapsed_ms,
+                "tool_count": hook_context.stats.tool_count,
+                "payload": payload,
+            },
         )
 
         return {}
@@ -775,7 +1007,7 @@ def safe_hook_wrapper(
 
     Prevents hook errors from crashing the SDK execution by catching
     exceptions and returning appropriate denial responses for constraint
-    violations.
+    violations. Tracks error statistics for debugging.
 
     Args:
         hook_fn: The hook function to wrap.
@@ -790,8 +1022,18 @@ def safe_hook_wrapper(
         return hook_fn(input_data, tool_use_id, context)
     except Exception as error:
         error_name = type(error).__name__
+        context.stats.hook_errors += 1
 
         if error_name in {"DeadlineExceededError", "DeadlineExpired"}:
+            logger.debug(
+                "claude_agent_sdk.hook.deadline_error_caught",
+                event="hook.deadline_error_caught",
+                context={
+                    "error_type": error_name,
+                    "hook_errors": context.stats.hook_errors,
+                    "elapsed_ms": context.elapsed_ms,
+                },
+            )
             return {
                 "hookSpecificOutput": {
                     "hookEventName": input_data.get("hookEventName", "PreToolUse"),
@@ -801,6 +1043,15 @@ def safe_hook_wrapper(
             }
 
         if error_name in {"BudgetExhaustedError", "BudgetExceeded"}:
+            logger.debug(
+                "claude_agent_sdk.hook.budget_error_caught",
+                event="hook.budget_error_caught",
+                context={
+                    "error_type": error_name,
+                    "hook_errors": context.stats.hook_errors,
+                    "elapsed_ms": context.elapsed_ms,
+                },
+            )
             return {
                 "hookSpecificOutput": {
                     "hookEventName": input_data.get("hookEventName", "PreToolUse"),
@@ -812,7 +1063,13 @@ def safe_hook_wrapper(
         logger.exception(
             "claude_agent_sdk.hook.error",
             event="hook.error",
-            context={"error": str(error), "error_type": error_name},
+            context={
+                "error": str(error),
+                "error_type": error_name,
+                "hook_errors": context.stats.hook_errors,
+                "elapsed_ms": context.elapsed_ms,
+                "tool_count": context.stats.tool_count,
+            },
         )
 
         return {}

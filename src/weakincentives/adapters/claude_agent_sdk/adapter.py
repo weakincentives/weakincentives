@@ -151,6 +151,23 @@ def _extract_message_content(message: Any) -> dict[str, Any]:
     usage = getattr(message, "usage", None)
     if usage:
         result["usage"] = usage if isinstance(usage, dict) else str(usage)
+        # Extract thinking tokens for extended thinking mode
+        if isinstance(usage, dict):
+            result["input_tokens"] = usage.get("input_tokens")
+            result["output_tokens"] = usage.get("output_tokens")
+            # Check for cache-related fields
+            result["cache_read_input_tokens"] = usage.get("cache_read_input_tokens")
+            result["cache_creation_input_tokens"] = usage.get(
+                "cache_creation_input_tokens"
+            )
+
+    # Extract thinking content if present (extended thinking mode)
+    thinking = getattr(message, "thinking", None)
+    if thinking:
+        result["has_thinking"] = True
+        if isinstance(thinking, str):
+            result["thinking_preview"] = thinking[:200]
+            result["thinking_length"] = len(thinking)
 
     return result
 
@@ -633,7 +650,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return stderr_handler
 
-    async def _run_sdk_query(  # noqa: C901, PLR0915 - complexity needed for debug logging
+    async def _run_sdk_query(  # noqa: C901, PLR0912, PLR0915 - complexity needed for debug logging
         self,
         *,
         sdk: Any,
@@ -816,6 +833,16 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         messages: list[Any] = []
         async for message in sdk.query(prompt=stream_prompt(), options=options):
             messages.append(message)
+
+            # Extract message content for logging
+            content = _extract_message_content(message)
+
+            # Update cumulative token stats in hook context
+            if content.get("input_tokens"):
+                hook_context.stats.total_input_tokens += content["input_tokens"]
+            if content.get("output_tokens"):
+                hook_context.stats.total_output_tokens += content["output_tokens"]
+
             # Log each message at DEBUG level for troubleshooting
             logger.debug(
                 "claude_agent_sdk.sdk_query.message_received",
@@ -823,7 +850,9 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 context={
                     "message_type": type(message).__name__,
                     "message_index": len(messages) - 1,
-                    **_extract_message_content(message),
+                    "cumulative_input_tokens": hook_context.stats.total_input_tokens,
+                    "cumulative_output_tokens": hook_context.stats.total_output_tokens,
+                    **content,
                 },
             )
 
@@ -833,6 +862,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             context={
                 "message_count": len(messages),
                 "stderr_line_count": len(self._stderr_buffer),
+                "stats_tool_count": hook_context.stats.tool_count,
+                "stats_turn_count": hook_context.stats.turn_count,
+                "stats_subagent_count": hook_context.stats.subagent_count,
+                "stats_compact_count": hook_context.stats.compact_count,
+                "stats_input_tokens": hook_context.stats.total_input_tokens,
+                "stats_output_tokens": hook_context.stats.total_output_tokens,
+                "stats_hook_errors": hook_context.stats.hook_errors,
             },
         )
 
