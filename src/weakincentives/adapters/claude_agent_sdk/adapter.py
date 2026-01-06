@@ -82,6 +82,96 @@ def _import_sdk() -> Any:  # pragma: no cover
         ) from error
 
 
+_MESSAGE_PREVIEW_LIMIT = 500
+_BLOCK_PREVIEW_LIMIT = 200
+
+
+def _truncate(text: str, limit: int) -> str:
+    """Truncate text to limit, adding ellipsis if needed."""
+    return text[:limit] + "..." if len(text) > limit else text
+
+
+def _extract_content_block_preview(
+    block: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    """Extract preview from a single content block.
+
+    Returns (tool_name, text_preview) tuple. Either can be None.
+    """
+    block_type = block.get("type")
+    if block_type == "tool_use":
+        return block.get("name", "unknown"), None
+    if block_type == "text":
+        text = block.get("text", "")
+        return None, _truncate(text, _BLOCK_PREVIEW_LIMIT) if text else None
+    if block_type == "tool_result":
+        tool_id = block.get("tool_use_id", "")[:20]
+        result_content = block.get("content", "")
+        if isinstance(result_content, str) and result_content:
+            preview = _truncate(result_content, _BLOCK_PREVIEW_LIMIT)
+            return None, f"[tool_result:{tool_id}] {preview}"
+    return None, None
+
+
+def _extract_list_content_preview(
+    content: list[Any],
+) -> tuple[list[str], str | None]:
+    """Extract tool names and text preview from content block list."""
+    tool_uses: list[str] = []
+    text_previews: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        tool_name, text_preview = _extract_content_block_preview(block)
+        if tool_name:
+            tool_uses.append(tool_name)
+        if text_preview:
+            text_previews.append(text_preview)
+    combined = (
+        " | ".join(text_previews)[:_MESSAGE_PREVIEW_LIMIT] if text_previews else None
+    )
+    return tool_uses, combined
+
+
+def _extract_inner_message_preview(inner_msg: dict[str, Any]) -> dict[str, Any]:
+    """Extract preview from the inner message dict."""
+    preview: dict[str, Any] = {}
+    role = inner_msg.get("role")
+    if role:
+        preview["role"] = role
+    content = inner_msg.get("content")
+    if isinstance(content, str):
+        preview["content_preview"] = _truncate(content, _MESSAGE_PREVIEW_LIMIT)
+    elif isinstance(content, list):
+        tool_uses, text_preview = _extract_list_content_preview(content)
+        if tool_uses:
+            preview["tool_uses"] = tool_uses
+        if text_preview:
+            preview["content_preview"] = text_preview
+    return preview
+
+
+def _extract_message_preview(message: Any) -> dict[str, Any]:
+    """Extract a content preview from an SDK message for debug logging."""
+    preview: dict[str, Any] = {}
+
+    # Try to get the inner message dict (common pattern in SDK messages)
+    inner_msg = getattr(message, "message", None)
+    if isinstance(inner_msg, dict):
+        preview.update(_extract_inner_message_preview(inner_msg))
+
+    # ResultMessage specific: extract the result field
+    result = getattr(message, "result", None)
+    if result and isinstance(result, str):
+        preview["result_preview"] = _truncate(result, _MESSAGE_PREVIEW_LIMIT)
+
+    # Structured output if present
+    if getattr(message, "structured_output", None):
+        preview["has_structured_output"] = True
+
+    return preview
+
+
 class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
     """Adapter using Claude Agent SDK with hook-based state synchronization.
 
@@ -752,6 +842,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     "message_index": len(messages) - 1,
                     "has_usage": hasattr(message, "usage")
                     and message.usage is not None,
+                    **_extract_message_preview(message),
                 },
             )
 

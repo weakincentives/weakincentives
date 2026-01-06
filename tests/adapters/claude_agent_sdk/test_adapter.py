@@ -1092,3 +1092,256 @@ class TestIsolationConfig:
 
         # Temp folder should still be cleaned up
         assert not Path(temp_cwd).exists()
+
+
+class TestMessagePreviewExtraction:
+    """Tests for the message preview extraction helper functions."""
+
+    def test_truncate_short_text(self) -> None:
+        """Short text is not truncated."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import _truncate
+
+        result = _truncate("hello", 10)
+        assert result == "hello"
+
+    def test_truncate_long_text(self) -> None:
+        """Long text is truncated with ellipsis."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import _truncate
+
+        result = _truncate("hello world", 5)
+        assert result == "hello..."
+
+    def test_extract_content_block_tool_use(self) -> None:
+        """Tool use blocks return the tool name."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block_preview,
+        )
+
+        block = {"type": "tool_use", "name": "my_tool"}
+        tool_name, text = _extract_content_block_preview(block)
+        assert tool_name == "my_tool"
+        assert text is None
+
+    def test_extract_content_block_text(self) -> None:
+        """Text blocks return the text preview."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block_preview,
+        )
+
+        block = {"type": "text", "text": "Hello world"}
+        tool_name, text = _extract_content_block_preview(block)
+        assert tool_name is None
+        assert text == "Hello world"
+
+    def test_extract_content_block_text_empty(self) -> None:
+        """Empty text blocks return None."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block_preview,
+        )
+
+        block = {"type": "text", "text": ""}
+        tool_name, text = _extract_content_block_preview(block)
+        assert tool_name is None
+        assert text is None
+
+    def test_extract_content_block_tool_result(self) -> None:
+        """Tool result blocks include tool_use_id prefix."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block_preview,
+        )
+
+        block = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_123",
+            "content": "Result content",
+        }
+        tool_name, text = _extract_content_block_preview(block)
+        assert tool_name is None
+        assert text == "[tool_result:toolu_123] Result content"
+
+    def test_extract_content_block_tool_result_non_string_content(self) -> None:
+        """Tool result with non-string content returns None."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block_preview,
+        )
+
+        block = {
+            "type": "tool_result",
+            "tool_use_id": "toolu_123",
+            "content": {"key": "value"},
+        }
+        tool_name, text = _extract_content_block_preview(block)
+        assert tool_name is None
+        assert text is None
+
+    def test_extract_content_block_unknown_type(self) -> None:
+        """Unknown block types return None for both."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_content_block_preview,
+        )
+
+        block = {"type": "image", "data": "..."}
+        tool_name, text = _extract_content_block_preview(block)
+        assert tool_name is None
+        assert text is None
+
+    def test_extract_list_content_preview_mixed(self) -> None:
+        """List content with mixed blocks extracts tools and text."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_list_content_preview,
+        )
+
+        content = [
+            {"type": "text", "text": "Hello"},
+            {"type": "tool_use", "name": "read_file"},
+            {"type": "text", "text": "World"},
+        ]
+        tool_uses, text = _extract_list_content_preview(content)
+        assert tool_uses == ["read_file"]
+        assert text == "Hello | World"
+
+    def test_extract_list_content_preview_non_dict_blocks(self) -> None:
+        """Non-dict blocks are skipped."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_list_content_preview,
+        )
+
+        content = [
+            {"type": "text", "text": "Hello"},
+            "not a dict",
+            None,
+        ]
+        tool_uses, text = _extract_list_content_preview(content)
+        assert tool_uses == []
+        assert text == "Hello"
+
+    def test_extract_inner_message_preview_string_content(self) -> None:
+        """String content is extracted as preview."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_preview,
+        )
+
+        inner_msg = {"role": "assistant", "content": "Hello world"}
+        preview = _extract_inner_message_preview(inner_msg)
+        assert preview == {"role": "assistant", "content_preview": "Hello world"}
+
+    def test_extract_inner_message_preview_list_content(self) -> None:
+        """List content extracts tool uses and text."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_preview,
+        )
+
+        inner_msg = {
+            "role": "assistant",
+            "content": [
+                {"type": "text", "text": "Thinking..."},
+                {"type": "tool_use", "name": "bash"},
+            ],
+        }
+        preview = _extract_inner_message_preview(inner_msg)
+        assert preview["role"] == "assistant"
+        assert preview["tool_uses"] == ["bash"]
+        assert preview["content_preview"] == "Thinking..."
+
+    def test_extract_message_preview_with_inner_message(self) -> None:
+        """Message with inner message dict extracts preview."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_preview,
+        )
+
+        message = MagicMock()
+        message.message = {"role": "user", "content": "Hello"}
+        message.result = None
+        message.structured_output = None
+
+        preview = _extract_message_preview(message)
+        assert preview["role"] == "user"
+        assert preview["content_preview"] == "Hello"
+
+    def test_extract_message_preview_with_result(self) -> None:
+        """ResultMessage with result field extracts result_preview."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_preview,
+        )
+
+        message = MagicMock()
+        message.message = None
+        message.result = "Final answer here"
+        message.structured_output = None
+
+        preview = _extract_message_preview(message)
+        assert preview["result_preview"] == "Final answer here"
+
+    def test_extract_message_preview_with_structured_output(self) -> None:
+        """Message with structured_output sets has_structured_output flag."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_preview,
+        )
+
+        message = MagicMock()
+        message.message = None
+        message.result = None
+        message.structured_output = {"summary": "test"}
+
+        preview = _extract_message_preview(message)
+        assert preview["has_structured_output"] is True
+
+    def test_extract_message_preview_no_message_attr(self) -> None:
+        """Message without message attribute returns minimal preview."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_message_preview,
+        )
+
+        message = MagicMock(spec=[])  # No attributes
+
+        preview = _extract_message_preview(message)
+        assert preview == {}
+
+    def test_extract_inner_message_preview_no_role(self) -> None:
+        """Inner message without role field skips role."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_preview,
+        )
+
+        inner_msg = {"content": "Hello"}  # No role field
+        preview = _extract_inner_message_preview(inner_msg)
+        assert "role" not in preview
+        assert preview["content_preview"] == "Hello"
+
+    def test_extract_inner_message_preview_non_str_non_list_content(self) -> None:
+        """Inner message with non-string/non-list content returns only role."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_preview,
+        )
+
+        inner_msg = {"role": "user", "content": 12345}  # Integer content
+        preview = _extract_inner_message_preview(inner_msg)
+        assert preview == {"role": "user"}  # No content_preview
+
+    def test_extract_inner_message_preview_empty_tool_uses(self) -> None:
+        """List content with only text returns no tool_uses key."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_preview,
+        )
+
+        inner_msg = {
+            "role": "assistant",
+            "content": [{"type": "text", "text": "Just text"}],
+        }
+        preview = _extract_inner_message_preview(inner_msg)
+        assert "tool_uses" not in preview
+        assert preview["content_preview"] == "Just text"
+
+    def test_extract_inner_message_preview_empty_text_preview(self) -> None:
+        """List content with only tool_use returns no content_preview."""
+        from weakincentives.adapters.claude_agent_sdk.adapter import (
+            _extract_inner_message_preview,
+        )
+
+        inner_msg = {
+            "role": "assistant",
+            "content": [{"type": "tool_use", "name": "bash"}],
+        }
+        preview = _extract_inner_message_preview(inner_msg)
+        assert preview["tool_uses"] == ["bash"]
+        assert "content_preview" not in preview
