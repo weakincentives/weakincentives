@@ -19,6 +19,7 @@ from hashlib import sha256
 from typing import Literal, Protocol, Self, cast, overload
 
 from ...dataclasses import FrozenDataclass
+from ...dbc import require
 from ...errors import WinkError
 from ...serde.schema import schema
 from ...types import JSONValue
@@ -106,6 +107,11 @@ def ensure_hex_digest(value: HexDigest, *, field_name: str) -> HexDigest: ...
 def ensure_hex_digest(value: str, *, field_name: str) -> HexDigest: ...
 
 
+def _require_field_name(value: object, field_name: str) -> tuple[bool, str]:
+    return (bool(field_name), "field_name must be non-empty")
+
+
+@require(_require_field_name)
 def ensure_hex_digest(value: object, *, field_name: str) -> HexDigest:
     """Normalize an object to a :class:`HexDigest` with helpful errors."""
 
@@ -191,6 +197,19 @@ class PromptDescriptor:
         return cls(prompt.ns, prompt.key, sections, tools, task_examples)
 
 
+def _require_prompt_ns_key(prompt: object) -> tuple[bool, str]:
+    return (
+        hasattr(prompt, "ns") and hasattr(prompt, "key"),
+        "prompt must have ns and key attributes",
+    )
+
+
+def _require_prompt_sections(prompt: object) -> tuple[bool, str]:
+    return (hasattr(prompt, "sections"), "prompt must have sections attribute")
+
+
+@require(_require_prompt_ns_key)
+@require(_require_prompt_sections)
 def descriptor_for_prompt(prompt: PromptLike) -> PromptDescriptor:
     """Return a cached prompt descriptor when available."""
 
@@ -368,7 +387,13 @@ def _tool_contract_hash(tool: ToolContractProtocol) -> HexDigest:
     )
 
 
+def _require_str_value(value: object) -> tuple[bool, str]:
+    return (isinstance(value, str), "value must be a string")
+
+
+@require(_require_str_value)
 def hash_text(value: str) -> HexDigest:
+    """Compute SHA-256 hash of text content."""
     return HexDigest(sha256(value.encode("utf-8")).hexdigest())
 
 
@@ -433,13 +458,13 @@ def _serialize_example_value(value: object) -> JSONValue:
 
     try:
         return dump(value, exclude_none=True)
-    except Exception:
-        # Fallback for non-dataclass values - log for debugging
+    except TypeError:
+        # Non-dataclass values fall back to str() - expected for primitives
         from ...runtime.logging import get_logger
 
         logger = get_logger(__name__, context={"component": "prompt_overrides"})
-        logger.debug(
-            "Falling back to str() for example value serialization.",
+        logger.warning(
+            "Falling back to str() for non-dataclass example value.",
             event="example_value_fallback",
             context={"value_type": type(value).__name__},
         )

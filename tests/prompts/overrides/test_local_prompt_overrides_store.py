@@ -1192,3 +1192,63 @@ def test_store_tool_override_unknown_tool(tmp_path: Path) -> None:
         PromptOverridesError, match="not registered in prompt descriptor"
     ):
         store.store(prompt, override)
+
+
+def test_store_with_malformed_existing_json(tmp_path: Path) -> None:
+    """Test store() raises error when existing file contains malformed JSON."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    # Create malformed JSON file
+    override_path = _override_path(tmp_path, descriptor)
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text("{ invalid json }", encoding="utf-8")
+
+    section = descriptor.sections[0]
+    override = SectionOverride(
+        path=section.path,
+        expected_hash=section.content_hash,
+        body="New content",
+    )
+
+    with pytest.raises(PromptOverridesError, match="Failed to parse prompt override"):
+        store.store(prompt, override)
+
+
+def test_store_when_existing_overrides_are_stale(tmp_path: Path) -> None:
+    """Test store() handles case where existing overrides are all stale."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    # Create a file with a stale section override (wrong hash)
+    override_path = _override_path(tmp_path, descriptor)
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_payload = {
+        "version": 2,
+        "ns": descriptor.ns,
+        "prompt_key": descriptor.key,
+        "tag": "latest",
+        "sections": {
+            "greeting": {
+                "path": ["greeting"],
+                "expected_hash": "0" * 64,  # Wrong hash
+                "body": "Stale content",
+            }
+        },
+        "tools": {},
+        "task_example_overrides": [],
+    }
+    override_path.write_text(json.dumps(stale_payload), encoding="utf-8")
+
+    # Store a new section override - should work even though existing is stale
+    section = descriptor.sections[0]
+    new_override = SectionOverride(
+        path=section.path,
+        expected_hash=section.content_hash,
+        body="Fresh content",
+    )
+
+    result = store.store(prompt, new_override)
+    assert result.sections[section.path].body == "Fresh content"
