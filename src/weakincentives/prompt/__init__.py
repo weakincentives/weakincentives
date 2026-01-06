@@ -49,6 +49,8 @@ from .protocols import (
     PromptTemplateProtocol,
     ProviderAdapterProtocol,
     RenderedPromptProtocol,
+    ToolSuiteSection,
+    WorkspaceSection,
 )
 from .rendering import RenderedPrompt
 from .section import Section, SectionVisibility
@@ -102,7 +104,9 @@ __all__ = [
     "ToolOverride",
     "ToolRenderableResult",
     "ToolResult",
+    "ToolSuiteSection",
     "VisibilityExpansionRequired",
+    "WorkspaceSection",
     "hash_json",
     "hash_text",
     "parse_structured_output",

@@ -10,12 +10,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Structural typing primitives shared across prompt tooling."""
+"""Structural typing primitives shared across prompt tooling.
+
+This module provides protocols for prompt-related types:
+
+- **PromptProtocol**: Interface for bound prompts
+- **PromptTemplateProtocol**: Interface for prompt templates
+- **ProviderAdapterProtocol**: Interface for adapters
+- **RenderedPromptProtocol**: Interface for rendered prompt snapshots
+- **ToolSuiteSection**: Protocol for sections exposing tool suites
+- **WorkspaceSection**: Protocol for workspace sections managing a filesystem
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol, override, runtime_checkable
 
 from ..deadlines import Deadline
 from ._overrides_protocols import PromptOverridesStore
@@ -23,7 +33,9 @@ from ._types import SupportsDataclass
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from ..budget import Budget, BudgetTracker
+    from ..filesystem import Filesystem
     from ..resources import ResourceRegistry
+    from ..runtime.session import Session
     from ..runtime.session.protocols import SessionProtocol
     from ._prompt_resources import PromptResources
     from ._structured_output_config import StructuredOutputConfig
@@ -148,10 +160,82 @@ class ProviderAdapterProtocol[AdapterOutputT](Protocol):
     ) -> PromptResponseProtocol[AdapterOutputT]: ...
 
 
+@runtime_checkable
+class ToolSuiteSection(Protocol):
+    """Protocol for sections that expose tool suites.
+
+    All tool suite sections (VfsToolsSection, AstevalSection,
+    PlanningToolsSection, PodmanSandboxSection, WorkspaceDigestSection)
+    should implement this protocol. This enables consistent handling
+    of session binding and cloning across all capability sections.
+
+    The protocol requires:
+
+    - **session**: Property returning the associated Session
+    - **accepts_overrides**: Property indicating if overrides are accepted
+    - **clone()**: Method for creating copies with a new session
+
+    Example::
+
+        from weakincentives.contrib.tools import VfsToolsSection, VfsConfig
+
+        vfs = VfsToolsSection(session=session)
+        assert vfs.accepts_overrides is False  # Default
+    """
+
+    @property
+    def session(self) -> Session:
+        """Return the session associated with this tool suite section."""
+        ...
+
+    @property
+    def accepts_overrides(self) -> bool:
+        """Return True if this section accepts parameter overrides."""
+        ...
+
+    def clone(self, **kwargs: object) -> ToolSuiteSection:
+        """Clone the section with new session.
+
+        Args:
+            **kwargs: Must include ``session`` with the new Session instance.
+
+        Returns:
+            A new section instance bound to the provided session.
+        """
+        ...
+
+
+@runtime_checkable
+class WorkspaceSection(ToolSuiteSection, Protocol):
+    """Protocol for workspace sections that manage a filesystem.
+
+    Extends ToolSuiteSection with a filesystem property. All workspace
+    sections (VfsToolsSection, PodmanSandboxSection, ClaudeAgentWorkspaceSection)
+    should implement this protocol. This enables the WorkspaceDigestOptimizer
+    to identify valid workspace sections without importing adapter-specific code.
+
+    Additional requirement beyond ToolSuiteSection:
+
+    - **filesystem**: Property returning the Filesystem managed by this section
+    """
+
+    @property
+    def filesystem(self) -> Filesystem:
+        """Return the filesystem managed by this workspace section."""
+        ...
+
+    @override
+    def clone(self, **kwargs: object) -> WorkspaceSection:
+        """Clone the section with new session/bus."""
+        ...
+
+
 __all__ = [
     "PromptProtocol",
     "PromptResponseProtocol",
     "PromptTemplateProtocol",
     "ProviderAdapterProtocol",
     "RenderedPromptProtocol",
+    "ToolSuiteSection",
+    "WorkspaceSection",
 ]
