@@ -53,8 +53,8 @@ class ProviderAdapter(ABC):
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response.
 
-        The prompt must be within its context manager for resources to be
-        available. Resources are accessed via ``prompt.resources``.
+        The prompt must be within ``with prompt.resources:`` for resources to be
+        available. Resources are accessed via ``prompt.resources.get()``.
 
         Visibility overrides are managed exclusively via Session state using the
         VisibilityOverrides state slice. Use session[VisibilityOverrides]

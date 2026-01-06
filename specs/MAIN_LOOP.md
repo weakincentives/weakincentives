@@ -195,12 +195,10 @@ Resources are declared on the template or bound at runtime:
 ```python
 def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
     # Template already has default resources
-    # Add request-specific resources at bind time
+    # Add request-specific resources at bind time (pass mapping, not ResourceRegistry)
     prompt = Prompt(self._template).bind(
         ReviewParams.from_request(request),
-        resources=ResourceRegistry.build({
-            GitClient: GitClient(repo=request.repo_path),
-        }),
+        resources={GitClient: GitClient(repo=request.repo_path)},
     )
     session = Session(bus=self._bus)
     return prompt, session

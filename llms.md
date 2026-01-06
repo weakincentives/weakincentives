@@ -407,7 +407,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - `Binding[T]`: Associates protocol type with provider function and scope.
   - `Scope`: Enum for instance lifetime (`SINGLETON`, `TOOL_CALL`, `PROTOTYPE`).
   - `ScopedResourceContext`: Resolution context with dependency graph walking.
-  - `ResourceRegistry`: Container for bindings with `of()` and `create_context()`.
+  - `ResourceRegistry`: Container for bindings with `of()`, `build()`, and `open()`.
   - `ResourceResolver`: Protocol for dependency resolution in providers.
   - `Provider[T]`: Type alias for factory functions accepting a resolver.
   - `Closeable`: Protocol for resources with `close()` method (auto-cleanup).
@@ -1140,29 +1140,33 @@ result = optimizer.optimize(prompt, session=session)
 
 ### Resource injection
 
-Pass custom runtime resources to adapters and MainLoop for cleaner, more
+Pass custom runtime resources to prompts and MainLoop for cleaner, more
 testable tool handlers:
 
 ```python
-from weakincentives.resources import Binding, ResourceRegistry, Scope
+from weakincentives.resources import Binding, Scope
 from myapp.http import HTTPClient, Config
 
-# Simple case: pre-constructed instances
+# Simple case: pre-constructed instances (pass a mapping)
 http_client = HTTPClient(base_url="https://api.example.com")
-resources = ResourceRegistry.of(Binding.instance(HTTPClient, http_client))
+prompt = Prompt(template).bind(params, resources={HTTPClient: http_client})
 
-# Advanced: lazy construction with dependencies
-resources = ResourceRegistry.of(
-    Binding(Config, lambda r: Config.from_env()),
-    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-    Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per tool
-)
+# Advanced: lazy construction with dependencies (Binding objects in mapping)
+prompt = Prompt(template).bind(params, resources={
+    Config: Binding(Config, lambda r: Config.from_env()),
+    HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+    Tracer: Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+})
 
-# Pass to adapter - merged with workspace resources (e.g., filesystem)
-response = adapter.evaluate(prompt, session=session, resources=resources)
+# Use prompt.resources context manager for lifecycle
+with prompt.resources:
+    response = adapter.evaluate(prompt, session=session)
 
-# Or configure at MainLoop level for all requests
-config = MainLoopConfig(resources=resources)
+# Or configure at MainLoop level (also a mapping)
+config = MainLoopConfig(resources={
+    Config: Binding(Config, lambda r: Config.from_env()),
+    HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+})
 loop = MyLoop(adapter=adapter, requests=requests, config=config)
 ```
 

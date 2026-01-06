@@ -18,13 +18,14 @@ atomic rollback on tool failure.
 
 Example usage::
 
-    from weakincentives.runtime.transactions import tool_transaction
+    from weakincentives.runtime.transactions import tool_transaction, restore_snapshot
 
     # Use as context manager for automatic rollback on exception
-    with tool_transaction(session, prompt.resources, tag="my_tool") as snapshot:
+    # Note: pass prompt.resources.context (the ScopedResourceContext)
+    with tool_transaction(session, prompt.resources.context, tag="my_tool") as snapshot:
         result = execute_tool(...)
         if not result.success:
-            restore_snapshot(session, prompt.resources, snapshot)
+            restore_snapshot(session, prompt.resources.context, snapshot)
         return result
 
 For hook-based native tool execution, use the PendingToolTracker class to
@@ -436,10 +437,11 @@ def tool_transaction(
 
     Example usage::
 
-        with tool_transaction(session, prompt.resources, tag="my_tool") as snapshot:
+        # Pass prompt.resources.context (the ScopedResourceContext)
+        with tool_transaction(session, prompt.resources.context, tag="my_tool") as snapshot:
             result = execute_tool(...)
             if not result.success:
-                restore_snapshot(session, prompt.resources, snapshot)
+                restore_snapshot(session, prompt.resources.context, snapshot)
             return result
 
     Args:

@@ -404,10 +404,10 @@ template = PromptTemplate[Output](
     ),
 )
 
-# 2. Bind parameters (optionally add runtime resources)
+# 2. Bind parameters (optionally add runtime resources as a mapping)
 prompt = Prompt(template).bind(
     Params(...),
-    resources=ResourceRegistry.build({Clock: SystemClock()}),
+    resources={Clock: SystemClock()},  # Pass mapping, not ResourceRegistry
 )
 
 # 3. Use as context manager

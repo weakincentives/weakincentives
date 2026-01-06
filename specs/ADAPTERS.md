@@ -334,9 +334,16 @@ flowchart LR
 ### Transactional Tool Execution
 
 Tool execution is transactional. Failed or aborted tools leave no trace in
-mutable state:
+mutable state. The `runtime.transactions` module provides the snapshot/restore
+primitives:
 
 ```python
+from weakincentives.runtime.transactions import (
+    create_snapshot,
+    restore_snapshot,
+    tool_transaction,
+)
+
 def _execute_tool(
     self,
     tool: Tool,
@@ -346,8 +353,7 @@ def _execute_tool(
     session: Session,
 ) -> ToolResult:
     # Snapshot both session and resources before execution
-    session_snapshot = session.snapshot()
-    resource_snapshot = prompt.resources.context.snapshot()
+    snapshot = create_snapshot(session, prompt.resources.context, tag=tool.name)
 
     try:
         context = ToolContext(
@@ -362,22 +368,28 @@ def _execute_tool(
 
         if not result.success:
             # Restore on failure
-            session.restore(session_snapshot)
-            prompt.resources.context.restore(resource_snapshot)
+            restore_snapshot(session, prompt.resources.context, snapshot)
 
         return result
 
     except VisibilityExpansionRequired:
         # Restore and re-raise for retry
-        session.restore(session_snapshot)
-        prompt.resources.context.restore(resource_snapshot)
+        restore_snapshot(session, prompt.resources.context, snapshot)
         raise
 
     except Exception as e:
         # Restore on exception
-        session.restore(session_snapshot)
-        prompt.resources.context.restore(resource_snapshot)
+        restore_snapshot(session, prompt.resources.context, snapshot)
         return ToolResult(message=str(e), value=None, success=False)
+```
+
+Alternatively, use the `tool_transaction` context manager for simpler cases:
+
+```python
+with tool_transaction(session, prompt.resources.context, tag=tool.name) as snapshot:
+    result = tool.handler(params, context=context)
+    if not result.success:
+        restore_snapshot(session, prompt.resources.context, snapshot)
 ```
 
 ## Error Handling

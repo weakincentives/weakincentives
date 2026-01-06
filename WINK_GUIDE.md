@@ -1007,29 +1007,27 @@ registry = ResourceRegistry.of(
 
 **Binding resources to prompts:**
 
-Resources are bound to `Prompt` via the `bind()` method. The `Prompt` is a
-context manager that owns the resource lifecycle:
+Resources are bound to `Prompt` via the `bind()` method. Pass a mapping of
+protocol types to instances or Binding objects:
 
 ```python
-from weakincentives.resources import Binding, ResourceRegistry, Scope
+from weakincentives.resources import Binding, Scope
 from weakincentives.prompt import Prompt
 from myapp.http import HTTPClient, Config
 
-# Simple case: pre-constructed instances
+# Simple case: pre-constructed instances (pass a dict)
 http_client = HTTPClient(base_url="https://api.example.com")
-resources = ResourceRegistry.of(Binding.instance(HTTPClient, http_client))
+prompt = Prompt(template).bind(params, resources={HTTPClient: http_client})
 
 # Advanced: lazy construction with dependencies and scopes
-resources = ResourceRegistry.of(
-    Binding(Config, lambda r: Config.from_env()),
-    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-    Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per tool
-)
+# Pass Binding objects in the mapping for custom providers/scopes
+prompt = Prompt(template).bind(params, resources={
+    Config: Binding(Config, lambda r: Config.from_env()),
+    HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+    Tracer: Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+})
 
-# Bind resources to prompt
-prompt = Prompt(template).bind(params, resources=resources)
-
-# Use as context manager for lifecycle management
+# Use prompt.resources context manager for lifecycle management
 with prompt.resources:
     response = adapter.evaluate(prompt, session=session)
     # Resources are accessible within this block
@@ -1040,17 +1038,21 @@ with prompt.resources:
 `MainLoop.execute()` handles resource binding and lifecycle automatically:
 
 ```python
+from weakincentives.resources import Binding, Scope
 from weakincentives.runtime import MainLoopConfig
 
-# Configure resources at the loop level
-config = MainLoopConfig(resources=resources)
+# Configure resources at the loop level (pass a mapping, not a ResourceRegistry)
+config = MainLoopConfig(resources={
+    Config: Binding(Config, lambda r: Config.from_env()),
+    HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+})
 loop = MyLoop(adapter=adapter, bus=bus, config=config)
 
 # Resources are bound to prompt automatically
 response, session = loop.execute(request)
 
-# Or pass per-request resources
-response, session = loop.execute(request, resources=resources)
+# Or pass per-request resources (also a mapping)
+response, session = loop.execute(request, resources={Tracer: tracer})
 ```
 
 **Scopes control instance lifetime:**
@@ -3524,7 +3526,7 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 ### 18.4 weakincentives.adapters
 
 ```python
-ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=..., resources=...)
+ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=..., budget_tracker=...)
 PromptResponse(prompt_name, text, output)
 PromptEvaluationError
 ```
