@@ -256,6 +256,10 @@ pytest_add_cli_args_test_selection = [
 mutate_only_covered_lines = true
 debug = false
 
+# Score gate for mutation testing (enforced by build/run_mutmut.py --check)
+[tool.mutation-check]
+minimum_score = 80.0
+
 [tool.coverage.run]
 branch = true
 source = ["src/weakincentives"]

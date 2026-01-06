@@ -10,7 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Mutation test runner with a configurable score gate."""
+"""Mutation test runner with a configurable score gate.
+
+Mutmut reads its configuration from [tool.mutmut] in pyproject.toml.
+This wrapper adds a score gate via [tool.mutation-check].minimum_score.
+"""
 
 from __future__ import annotations
 
@@ -18,23 +22,14 @@ import argparse
 import subprocess
 import sys
 import tomllib
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).parent.parent
-CONFIG_PATH = ROOT / "mutation.toml"
+PYPROJECT_PATH = ROOT / "pyproject.toml"
 
-
-@dataclass(frozen=True)
-class MutationConfig:
-    paths_to_mutate: list[str]
-    tests_dir: str
-    exclude: list[str]
-    also_copy: list[str]
-    runner: str
-    use_coverage: bool
-    minimum_score: float
+# Default threshold if not configured
+DEFAULT_MINIMUM_SCORE = 80.0
 
 
 def main() -> int:
@@ -51,10 +46,9 @@ def main() -> int:
     )
     args, unknown_args = parser.parse_known_args()
 
-    config = _load_config()
-    threshold = args.threshold if args.threshold is not None else config.minimum_score
+    threshold = args.threshold if args.threshold is not None else _load_minimum_score()
 
-    run_code = _run_mutmut(config, unknown_args)
+    run_code = _run_mutmut(unknown_args)
     if run_code != 0:
         return run_code
 
@@ -74,24 +68,20 @@ def main() -> int:
     return 0
 
 
-def _load_config() -> MutationConfig:
-    if not CONFIG_PATH.exists():
-        message = f"Missing configuration file at {CONFIG_PATH}"
-        raise FileNotFoundError(message)
+def _load_minimum_score() -> float:
+    """Load minimum_score from [tool.mutation-check] in pyproject.toml."""
+    if not PYPROJECT_PATH.exists():
+        return DEFAULT_MINIMUM_SCORE
 
-    data = tomllib.loads(CONFIG_PATH.read_text()).get("mutation", {})
-    return MutationConfig(
-        paths_to_mutate=list(data.get("paths_to_mutate", [])),
-        tests_dir=str(data.get("tests_dir", "tests")),
-        exclude=list(data.get("exclude", [])),
-        also_copy=list(data.get("also_copy", [])),
-        runner=str(data.get("runner", "python -m pytest -q")),
-        use_coverage=bool(data.get("use_coverage", True)),
-        minimum_score=float(data.get("minimum_score", 0.0)),
+    data = tomllib.loads(PYPROJECT_PATH.read_text())
+    return float(
+        data.get("tool", {})
+        .get("mutation-check", {})
+        .get("minimum_score", DEFAULT_MINIMUM_SCORE)
     )
 
 
-def _run_mutmut(config: MutationConfig, extra_args: list[str]) -> int:
+def _run_mutmut(extra_args: list[str]) -> int:
     command = ["mutmut", "run"]
     command.extend(extra_args)
 
