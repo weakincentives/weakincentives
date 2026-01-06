@@ -23,7 +23,7 @@ also_copy = [
     "test-repositories",
     "src/weakincentives",
 ]
-runner = "python -m pytest --strict-config --strict-markers --no-cov --maxfail=1 -q --ignore=tests/test_code_reviewer_example.py"
+runner = "python -m pytest --strict-config --strict-markers --no-cov --maxfail=1 -q --ignore=tests/test_code_reviewer_example.py --ignore=tests/build"
 use_coverage = true
 minimum_score = 80.0
 debug = false

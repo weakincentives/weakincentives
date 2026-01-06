@@ -146,7 +146,7 @@ jobs:
       - name: Run pyright
         run: make pyright
 
-  # Test job - always runs core tests, full suite based on change detection
+  # Test job - always runs core tests, then targeted or full suite based on changes
   test:
     needs: detect-changes
     runs-on: ubuntu-latest
@@ -165,13 +165,42 @@ jobs:
       - name: Run core tests
         run: uv run --all-extras pytest -m core --strict-config --strict-markers -q --no-header --no-cov
 
-      # Run full test suite when changes warrant it
+      # Run full test suite when core infrastructure changes
       - name: Run full test suite
         if: |
           needs.detect-changes.outputs.run_all == 'true' ||
           needs.detect-changes.outputs.core == 'true' ||
           needs.detect-changes.outputs.ci == 'true'
         run: make test
+
+      # Run targeted tests for isolated module changes
+      - name: Run targeted tests
+        if: |
+          needs.detect-changes.outputs.run_all != 'true' &&
+          needs.detect-changes.outputs.core != 'true' &&
+          needs.detect-changes.outputs.ci != 'true'
+        env:
+          ADAPTERS: ${{ needs.detect-changes.outputs.adapters }}
+          RUNTIME: ${{ needs.detect-changes.outputs.runtime }}
+          PROMPT: ${{ needs.detect-changes.outputs.prompt }}
+          CONTRIB: ${{ needs.detect-changes.outputs.contrib }}
+          EVALS: ${{ needs.detect-changes.outputs.evals }}
+          SERDE: ${{ needs.detect-changes.outputs.serde }}
+          CLI: ${{ needs.detect-changes.outputs.cli }}
+        run: |
+          TEST_PATHS=""
+          [ "$ADAPTERS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/adapters"
+          [ "$RUNTIME" = "true" ] && TEST_PATHS="$TEST_PATHS tests/runtime"
+          [ "$PROMPT" = "true" ] && TEST_PATHS="$TEST_PATHS tests/prompt tests/prompts"
+          [ "$CONTRIB" = "true" ] && TEST_PATHS="$TEST_PATHS tests/contrib tests/tools"
+          [ "$EVALS" = "true" ] && TEST_PATHS="$TEST_PATHS tests/evals"
+          [ "$SERDE" = "true" ] && TEST_PATHS="$TEST_PATHS tests/serde"
+          [ "$CLI" = "true" ] && TEST_PATHS="$TEST_PATHS tests/cli"
+
+          if [ -n "$TEST_PATHS" ]; then
+            echo "Running targeted tests: $TEST_PATHS"
+            uv run --all-extras pytest --strict-config --strict-markers -q --no-header --no-cov $TEST_PATHS
+          fi
 
   mutation:
     needs: [detect-changes, test]
