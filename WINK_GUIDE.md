@@ -1845,9 +1845,8 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     IsolationConfig,
-    SkillConfig,
-    SkillMount,
 )
+from weakincentives.skills import SkillConfig, SkillMount
 
 # Mount a single skill from a file
 isolation = IsolationConfig(
@@ -1913,6 +1912,9 @@ A skill can be either:
 
 ```python
 from pathlib import Path
+
+from weakincentives.adapters.claude_agent_sdk import IsolationConfig
+from weakincentives.skills import SkillConfig, SkillMount
 
 SKILLS_ROOT = Path("demo-skills")
 

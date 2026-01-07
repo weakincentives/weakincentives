@@ -85,11 +85,6 @@ from .isolation import (
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
-    SkillConfig,
-    SkillMount,
-    SkillMountError,
-    SkillNotFoundError,
-    SkillValidationError,
 )
 from .workspace import (
     ClaudeAgentWorkspaceSection,
@@ -114,11 +109,6 @@ __all__ = [
     "NotificationSource",
     "PermissionMode",
     "SandboxConfig",
-    "SkillConfig",
-    "SkillMount",
-    "SkillMountError",
-    "SkillNotFoundError",
-    "SkillValidationError",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
 ]
