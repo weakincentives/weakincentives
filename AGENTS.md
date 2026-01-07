@@ -84,6 +84,9 @@ a goal at any time.
   evaluators, or metrics aggregation.
 - **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
   ToolContext integration—when adding or modifying filesystem operations.
+- **LINEAR_AFFINE_TYPES.md**: Linear and affine types for resource linearity,
+  ownership transfer, and scope-bounded resources—when implementing resource
+  management patterns or tracking resource lifecycle.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.
