@@ -336,7 +336,8 @@ class KeyedDependencyPolicy:
 ### ReadBeforeWritePolicy
 
 A specialized `KeyedDependencyPolicy` for filesystem tools, using the file
-path as the key:
+path as the key. **Crucially**, this policy only enforces read-before-write
+for files that already exist—creating new files is always allowed.
 
 ```python
 def _extract_path(params: SupportsDataclass | None) -> str | None:
@@ -354,8 +355,10 @@ def _extract_path(params: SupportsDataclass | None) -> str | None:
 class ReadBeforeWritePolicy:
     """Enforce read-before-write semantics on filesystem tools.
 
-    Built on KeyedDependencyPolicy with path as the key. A file must be
-    read before it can be written or edited.
+    A file must be read before it can be overwritten or edited. However,
+    creating new files (paths that don't exist) is always allowed.
+
+    Uses context.filesystem to check file existence.
     """
 
     read_tools: frozenset[str] = frozenset({"read_file", "vfs_read_file"})
@@ -386,9 +389,15 @@ class ReadBeforeWritePolicy:
         if path is None:
             return PolicyDecision.allow()
 
+        # Allow creating new files without reading first
+        fs = context.filesystem
+        if fs is not None and not fs.exists(path):
+            return PolicyDecision.allow()
+
+        # Existing file: must have been read
         if path not in self._read_paths:
             return PolicyDecision.deny(
-                f"File '{path}' must be read before writing. "
+                f"File '{path}' exists and must be read before overwriting. "
                 f"Use one of: {', '.join(sorted(self.read_tools))} first.",
                 path=path,
             )
@@ -413,10 +422,13 @@ class ReadBeforeWritePolicy:
 ```python
 policy = ReadBeforeWritePolicy()
 
-# This sequence is allowed:
-# read_file(path="config.yaml")  → OK, records path
-# write_file(path="config.yaml") → OK, path was read
-# write_file(path="other.yaml")  → DENIED, other.yaml not read
+# Creating new files is allowed:
+# write_file(path="new_file.txt")    → OK, file doesn't exist
+
+# Overwriting existing files requires reading first:
+# write_file(path="config.yaml")     → DENIED, exists but not read
+# read_file(path="config.yaml")      → OK, records path
+# write_file(path="config.yaml")     → OK, path was read
 
 # Custom tool names:
 policy = ReadBeforeWritePolicy(
@@ -425,6 +437,10 @@ policy = ReadBeforeWritePolicy(
 )
 ```
 
+**Filesystem access**: The policy accesses `context.filesystem` to check
+file existence. If no filesystem is available in the context, the policy
+falls back to requiring reads for all paths (fail-closed).
+
 ### Relationship Between Policies
 
 ```
@@ -432,22 +448,28 @@ SequentialDependencyPolicy (unconditional)
     │
     └── KeyedDependencyPolicy (parameter-keyed)
             │
-            └── ReadBeforeWritePolicy (path-keyed filesystem specialization)
+            └── ReadBeforeWritePolicy (path-keyed + filesystem-aware)
 ```
 
-`ReadBeforeWritePolicy` can be seen as syntactic sugar over
-`KeyedDependencyPolicy`:
+`ReadBeforeWritePolicy` builds on the keyed dependency concept but adds
+**filesystem awareness**: it checks whether the file exists before enforcing
+the constraint. This makes it more than simple syntactic sugar—it requires
+access to the `context.filesystem` resource.
+
+A pure `KeyedDependencyPolicy` equivalent would block all writes regardless
+of whether the file exists:
 
 ```python
-# These are equivalent:
-rbw = ReadBeforeWritePolicy()
-
+# KeyedDependencyPolicy: blocks ALL writes without prior read
 keyed = KeyedDependencyPolicy(
     dependencies={
         "write_file": (frozenset({"read_file"}), _extract_path),
         "edit_file": (frozenset({"read_file"}), _extract_path),
     }
 )
+
+# ReadBeforeWritePolicy: allows new file creation, only blocks overwrites
+rbw = ReadBeforeWritePolicy()
 ```
 
 ## Session Integration
