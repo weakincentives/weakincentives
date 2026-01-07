@@ -170,7 +170,7 @@ Consult these specs before modifying related code:
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
-| `specs/TOOL_POLICIES.md` | Stateful tool constraints, read-before-write, rate limiting |
+| `specs/TOOL_POLICIES.md` | Sequential dependencies, read-before-write, keyed constraints |
 | `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |
 | `specs/WINK_DEBUG.md` | Debug web UI, snapshot explorer, session inspection |
 | `specs/WINK_DOCS.md` | CLI docs command, bundled documentation access |

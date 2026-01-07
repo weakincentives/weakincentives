@@ -3,10 +3,10 @@
 ## Purpose
 
 Tool policies provide a mechanism to enforce stateful constraints on tool
-invocations. Examples include requiring a file to be read before it can be
-written, rate limiting tool calls, or enforcing sequential dependencies between
-tools. Policies are bound to a session and can track invocation history to make
-allow/deny decisions.
+invocations. The core abstraction is sequential dependencies: requiring certain
+tools to be invoked before others. This can be unconditional ("run tests before
+deploy") or parameter-keyed ("read file X before writing file X"). Policies are
+bound to a session and track invocation history to make allow/deny decisions.
 
 ## Guiding Principles
 
@@ -156,123 +156,42 @@ class PolicyRegistry:
         ...
 ```
 
+## Sequential Dependency Model
+
+The core abstraction is **sequential dependencies**: tool B requires tool A to
+have been successfully invoked first. This comes in two forms:
+
+1. **Unconditional**: "tool A must be called before tool B" (e.g., `test` before
+   `deploy`)
+2. **Parameter-keyed**: "tool A with key X must be called before tool B with
+   key X" (e.g., `read_file(path=X)` before `write_file(path=X)`)
+
+```mermaid
+flowchart LR
+    subgraph Unconditional["Unconditional Dependency"]
+        test["test"] --> deploy["deploy"]
+    end
+
+    subgraph Keyed["Parameter-Keyed Dependency"]
+        read1["read_file(path=X)"] --> write1["write_file(path=X)"]
+        read2["read_file(path=Y)"] --> write2["write_file(path=Y)"]
+    end
+```
+
 ## Built-in Policies
-
-### ReadBeforeWritePolicy
-
-Requires files to be read before they can be written or edited:
-
-```python
-@dataclass
-class ReadBeforeWritePolicy:
-    """Enforce read-before-write semantics on filesystem tools."""
-
-    read_tools: frozenset[str] = frozenset({"read_file", "vfs_read_file"})
-    write_tools: frozenset[str] = frozenset({
-        "write_file", "edit_file", "vfs_write_file", "vfs_edit_file"
-    })
-    _read_paths: set[str] = field(default_factory=set)
-
-    @property
-    def name(self) -> str:
-        return "read_before_write"
-
-    @property
-    def tools(self) -> frozenset[str]:
-        return self.read_tools | self.write_tools
-
-    def check(
-        self,
-        tool: Tool[Any, Any],
-        params: SupportsDataclass | None,
-        *,
-        context: ToolContext,
-    ) -> PolicyDecision:
-        if tool.name in self.write_tools:
-            path = _extract_path(params)
-            if path and path not in self._read_paths:
-                return PolicyDecision.deny(
-                    f"File '{path}' must be read before writing. "
-                    f"Use read_file first.",
-                    path=path,
-                )
-        return PolicyDecision.allow()
-
-    def on_result(
-        self,
-        tool: Tool[Any, Any],
-        params: SupportsDataclass | None,
-        result: ToolResult[Any],
-        *,
-        context: ToolContext,
-    ) -> None:
-        if tool.name in self.read_tools and result.success:
-            path = _extract_path(params)
-            if path:
-                self._read_paths.add(path)
-```
-
-### RateLimitPolicy
-
-Limits the number of times a tool can be invoked per session:
-
-```python
-@dataclass
-class RateLimitPolicy:
-    """Limit invocations per tool per session."""
-
-    limits: Mapping[str, int]  # tool_name -> max_calls
-    _counts: dict[str, int] = field(default_factory=dict)
-
-    @property
-    def name(self) -> str:
-        return "rate_limit"
-
-    @property
-    def tools(self) -> frozenset[str]:
-        return frozenset(self.limits.keys())
-
-    def check(
-        self,
-        tool: Tool[Any, Any],
-        params: SupportsDataclass | None,
-        *,
-        context: ToolContext,
-    ) -> PolicyDecision:
-        limit = self.limits.get(tool.name)
-        if limit is None:
-            return PolicyDecision.allow()
-
-        count = self._counts.get(tool.name, 0)
-        if count >= limit:
-            return PolicyDecision.deny(
-                f"Tool '{tool.name}' has reached its limit of {limit} calls.",
-                tool=tool.name,
-                limit=limit,
-                count=count,
-            )
-        return PolicyDecision.allow()
-
-    def on_result(
-        self,
-        tool: Tool[Any, Any],
-        params: SupportsDataclass | None,
-        result: ToolResult[Any],
-        *,
-        context: ToolContext,
-    ) -> None:
-        if result.success:
-            self._counts[tool.name] = self._counts.get(tool.name, 0) + 1
-```
 
 ### SequentialDependencyPolicy
 
-Enforces that certain tools must be called before others:
+The foundation policy that enforces unconditional tool ordering:
 
 ```python
 @dataclass
 class SequentialDependencyPolicy:
-    """Enforce tool invocation order."""
+    """Enforce tool invocation order.
+
+    Tracks which tools have been successfully invoked and blocks tools
+    whose prerequisites have not been satisfied.
+    """
 
     dependencies: Mapping[str, frozenset[str]]  # tool -> required predecessors
     _invoked: set[str] = field(default_factory=set)
@@ -318,26 +237,53 @@ class SequentialDependencyPolicy:
             self._invoked.add(tool.name)
 ```
 
-### ConfirmationPolicy
-
-Requires explicit confirmation before destructive operations:
+**Example usage:**
 
 ```python
-@dataclass
-class ConfirmationPolicy:
-    """Require confirmation tokens for destructive tools."""
+# Deploy requires both test and build to have succeeded
+policy = SequentialDependencyPolicy(
+    dependencies={
+        "deploy": frozenset({"test", "build"}),
+        "build": frozenset({"lint"}),
+    }
+)
 
-    destructive_tools: frozenset[str]
-    confirmation_param: str = "confirm"
-    confirmation_value: str = "yes_i_am_sure"
+# Invocation order must be: lint → build → test → deploy
+# (test and build can be in either order after lint)
+```
+
+### KeyedDependencyPolicy
+
+Extends sequential dependencies with parameter-based tracking. A tool with
+key X only requires the prerequisite with the same key X:
+
+```python
+KeyExtractor = Callable[[SupportsDataclass | None], str | None]
+
+@dataclass
+class KeyedDependencyPolicy:
+    """Enforce tool ordering keyed by a parameter value.
+
+    Unlike SequentialDependencyPolicy which tracks tool names globally,
+    this policy tracks (tool_name, key) pairs. A dependent tool is only
+    blocked if its specific key hasn't been enabled by a prerequisite.
+    """
+
+    # tool_name -> (prerequisite_tools, key_extractor)
+    dependencies: Mapping[str, tuple[frozenset[str], KeyExtractor]]
+    # (tool_name, key) pairs that have been satisfied
+    _satisfied: set[tuple[str, str]] = field(default_factory=set)
 
     @property
     def name(self) -> str:
-        return "confirmation"
+        return "keyed_dependency"
 
     @property
     def tools(self) -> frozenset[str]:
-        return self.destructive_tools
+        all_tools: set[str] = set(self.dependencies.keys())
+        for prereqs, _ in self.dependencies.values():
+            all_tools.update(prereqs)
+        return frozenset(all_tools)
 
     def check(
         self,
@@ -346,18 +292,105 @@ class ConfirmationPolicy:
         *,
         context: ToolContext,
     ) -> PolicyDecision:
-        if params is None:
-            return PolicyDecision.deny(
-                f"Tool '{tool.name}' requires confirmation parameter."
-            )
+        dep = self.dependencies.get(tool.name)
+        if dep is None:
+            return PolicyDecision.allow()
 
-        confirm = getattr(params, self.confirmation_param, None)
-        if confirm != self.confirmation_value:
+        prereqs, key_fn = dep
+        key = key_fn(params)
+        if key is None:
+            return PolicyDecision.allow()  # No key = no constraint
+
+        # Check if any prerequisite has been satisfied for this key
+        for prereq in prereqs:
+            if (prereq, key) in self._satisfied:
+                return PolicyDecision.allow()
+
+        return PolicyDecision.deny(
+            f"Tool '{tool.name}' with key '{key}' requires prior invocation "
+            f"of one of: {', '.join(sorted(prereqs))} with the same key.",
+            tool=tool.name,
+            key=key,
+            prerequisites=tuple(sorted(prereqs)),
+        )
+
+    def on_result(
+        self,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        result: ToolResult[Any],
+        *,
+        context: ToolContext,
+    ) -> None:
+        if not result.success:
+            return
+
+        # Check if this tool is a prerequisite for anything
+        for dep_tool, (prereqs, key_fn) in self.dependencies.items():
+            if tool.name in prereqs:
+                key = key_fn(params)
+                if key is not None:
+                    self._satisfied.add((tool.name, key))
+```
+
+### ReadBeforeWritePolicy
+
+A specialized `KeyedDependencyPolicy` for filesystem tools, using the file
+path as the key:
+
+```python
+def _extract_path(params: SupportsDataclass | None) -> str | None:
+    """Extract path from common filesystem tool parameter patterns."""
+    if params is None:
+        return None
+    # Try common field names
+    for field in ("path", "file_path", "filepath"):
+        if hasattr(params, field):
+            return getattr(params, field)
+    return None
+
+
+@dataclass
+class ReadBeforeWritePolicy:
+    """Enforce read-before-write semantics on filesystem tools.
+
+    Built on KeyedDependencyPolicy with path as the key. A file must be
+    read before it can be written or edited.
+    """
+
+    read_tools: frozenset[str] = frozenset({"read_file", "vfs_read_file"})
+    write_tools: frozenset[str] = frozenset({
+        "write_file", "edit_file", "vfs_write_file", "vfs_edit_file"
+    })
+    _read_paths: set[str] = field(default_factory=set)
+
+    @property
+    def name(self) -> str:
+        return "read_before_write"
+
+    @property
+    def tools(self) -> frozenset[str]:
+        return self.read_tools | self.write_tools
+
+    def check(
+        self,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        *,
+        context: ToolContext,
+    ) -> PolicyDecision:
+        if tool.name not in self.write_tools:
+            return PolicyDecision.allow()
+
+        path = _extract_path(params)
+        if path is None:
+            return PolicyDecision.allow()
+
+        if path not in self._read_paths:
             return PolicyDecision.deny(
-                f"Tool '{tool.name}' is destructive. "
-                f"Set {self.confirmation_param}='{self.confirmation_value}' "
-                f"to confirm execution.",
-                tool=tool.name,
+                f"File '{path}' must be read before writing. "
+                f"Use one of: {', '.join(sorted(self.read_tools))} first.",
+                path=path,
             )
         return PolicyDecision.allow()
 
@@ -369,7 +402,52 @@ class ConfirmationPolicy:
         *,
         context: ToolContext,
     ) -> None:
-        pass  # No state to track
+        if tool.name in self.read_tools and result.success:
+            path = _extract_path(params)
+            if path is not None:
+                self._read_paths.add(path)
+```
+
+**Example usage:**
+
+```python
+policy = ReadBeforeWritePolicy()
+
+# This sequence is allowed:
+# read_file(path="config.yaml")  → OK, records path
+# write_file(path="config.yaml") → OK, path was read
+# write_file(path="other.yaml")  → DENIED, other.yaml not read
+
+# Custom tool names:
+policy = ReadBeforeWritePolicy(
+    read_tools=frozenset({"fetch_document"}),
+    write_tools=frozenset({"update_document", "delete_document"}),
+)
+```
+
+### Relationship Between Policies
+
+```
+SequentialDependencyPolicy (unconditional)
+    │
+    └── KeyedDependencyPolicy (parameter-keyed)
+            │
+            └── ReadBeforeWritePolicy (path-keyed filesystem specialization)
+```
+
+`ReadBeforeWritePolicy` can be seen as syntactic sugar over
+`KeyedDependencyPolicy`:
+
+```python
+# These are equivalent:
+rbw = ReadBeforeWritePolicy()
+
+keyed = KeyedDependencyPolicy(
+    dependencies={
+        "write_file": (frozenset({"read_file"}), _extract_path),
+        "edit_file": (frozenset({"read_file"}), _extract_path),
+    }
+)
 ```
 
 ## Session Integration
@@ -383,7 +461,7 @@ from weakincentives.runtime import Session
 from weakincentives.policies import (
     PolicyRegistry,
     ReadBeforeWritePolicy,
-    RateLimitPolicy,
+    SequentialDependencyPolicy,
 )
 
 session = Session(bus=bus)
@@ -391,7 +469,9 @@ session = Session(bus=bus)
 # Create and register policies
 policies = PolicyRegistry(session=session)
 policies.register(ReadBeforeWritePolicy())
-policies.register(RateLimitPolicy(limits={"web_search": 10}))
+policies.register(SequentialDependencyPolicy(
+    dependencies={"deploy": frozenset({"test", "build"})}
+))
 
 # Bind to tool execution context
 response = adapter.evaluate(
@@ -493,32 +573,38 @@ class ToolContext:
     policy_registry: PolicyRegistry | None = None
 ```
 
-This allows handlers to query policy state if needed (e.g., checking remaining
-rate limit quota).
+This allows handlers to query policy state if needed (e.g., checking which
+files have been read).
 
 ## Custom Policies
 
 ### Implementing a Custom Policy
+
+Example: A policy requiring code review approval before merge, keyed by PR:
 
 ```python
 from dataclasses import dataclass, field
 from weakincentives.policies import ToolPolicy, PolicyDecision
 
 @dataclass
-class CooldownPolicy:
-    """Enforce minimum time between tool invocations."""
+class ReviewBeforeMergePolicy:
+    """Require review approval before merging a PR.
 
-    cooldown_seconds: float
-    affected_tools: frozenset[str]
-    _last_invocation: dict[str, datetime] = field(default_factory=dict)
+    Tracks which PRs have been approved via the review tool and blocks
+    merge attempts for PRs without approval.
+    """
+
+    review_tool: str = "approve_pr"
+    merge_tool: str = "merge_pr"
+    _approved_prs: set[str] = field(default_factory=set)
 
     @property
     def name(self) -> str:
-        return "cooldown"
+        return "review_before_merge"
 
     @property
     def tools(self) -> frozenset[str]:
-        return self.affected_tools
+        return frozenset({self.review_tool, self.merge_tool})
 
     def check(
         self,
@@ -527,16 +613,19 @@ class CooldownPolicy:
         *,
         context: ToolContext,
     ) -> PolicyDecision:
-        last = self._last_invocation.get(tool.name)
-        if last is not None:
-            elapsed = (datetime.now(UTC) - last).total_seconds()
-            if elapsed < self.cooldown_seconds:
-                remaining = self.cooldown_seconds - elapsed
-                return PolicyDecision.deny(
-                    f"Tool '{tool.name}' is on cooldown. "
-                    f"Wait {remaining:.1f}s before next call.",
-                    remaining_seconds=remaining,
-                )
+        if tool.name != self.merge_tool:
+            return PolicyDecision.allow()
+
+        pr_id = getattr(params, "pr_id", None) if params else None
+        if pr_id is None:
+            return PolicyDecision.allow()
+
+        if pr_id not in self._approved_prs:
+            return PolicyDecision.deny(
+                f"PR '{pr_id}' must be approved before merging. "
+                f"Use {self.review_tool} first.",
+                pr_id=pr_id,
+            )
         return PolicyDecision.allow()
 
     def on_result(
@@ -547,8 +636,10 @@ class CooldownPolicy:
         *,
         context: ToolContext,
     ) -> None:
-        if result.success:
-            self._last_invocation[tool.name] = datetime.now(UTC)
+        if tool.name == self.review_tool and result.success:
+            pr_id = getattr(params, "pr_id", None) if params else None
+            if pr_id is not None:
+                self._approved_prs.add(pr_id)
 ```
 
 ### Pattern-Based Tool Matching
@@ -612,13 +703,17 @@ def check_all(
 ```python
 # Multiple policies on overlapping tool sets
 policies.register(ReadBeforeWritePolicy())
-policies.register(RateLimitPolicy(limits={"write_file": 50}))
 policies.register(SequentialDependencyPolicy(
     dependencies={"deploy": frozenset({"test", "build"})}
 ))
+policies.register(KeyedDependencyPolicy(
+    dependencies={
+        "commit": (frozenset({"lint", "test"}), lambda p: getattr(p, "repo", None)),
+    }
+))
 
 # All applicable policies must allow for execution to proceed
-# Order: read_before_write → rate_limit → sequential_dependency
+# Evaluation order follows registration order
 ```
 
 ### Conditional Policies
@@ -743,15 +838,15 @@ or immutable state patterns.
 
 ### Policy DSL
 
-A declarative DSL for common policy patterns:
+A declarative DSL for common dependency patterns:
 
 ```python
 policy = Policy.define(
-    name="file_safety",
+    name="safe_deployment",
     rules=[
         Rule.require_before("write_file", reads="read_file", key="path"),
-        Rule.limit("web_search", max_calls=10),
-        Rule.cooldown("deploy", seconds=60),
+        Rule.require_before("deploy", requires=["test", "build"]),
+        Rule.require_before("merge", requires="review", key="pr_id"),
     ],
 )
 ```
