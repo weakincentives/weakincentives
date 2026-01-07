@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
 from types import MappingProxyType
-from typing import Any, Concatenate, Final, cast, override
+from typing import Any, Concatenate, Final, assert_never, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
@@ -919,6 +919,8 @@ class Session(SessionProtocol):
                 slice_instance.replace(items)
             case Clear(predicate=pred):
                 slice_instance.clear(pred)
+            case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
+                assert_never(unreachable)  # pyright: ignore[reportUnreachable]
 
     def _attach_to_dispatcher(self, bus: TelemetryDispatcher) -> None:
         with self.locked():
