@@ -276,23 +276,28 @@ def _expand_transcript_paths(payload: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
-def create_pre_tool_use_hook(
+def create_pre_tool_use_hook(  # noqa: C901 - complexity needed for constraint and task completion checks
     hook_context: HookContext,
+    *,
+    task_completion_checker: TaskCompletionChecker | None = None,
 ) -> AsyncHookCallback:
     """Create a PreToolUse hook for constraint enforcement and state snapshots.
 
     The hook checks deadlines and budgets before tool execution, blocking
-    tools that would violate constraints. It also takes a state snapshot
-    for transactional rollback.
+    tools that would violate constraints. For StructuredOutput tools, it
+    also verifies task completion before allowing the tool to run.
 
     Args:
         hook_context: Context with session, deadline, budget, and prompt.
+        task_completion_checker: Optional checker for verifying task completion
+            before allowing StructuredOutput. When provided and tasks are
+            incomplete, the tool is denied with feedback.
 
     Returns:
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_tool_use_hook(  # noqa: RUF029 - SDK requires async signature
+    async def pre_tool_use_hook(  # noqa: C901, RUF029 - complexity for constraint checks; SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -394,6 +399,39 @@ def create_pre_tool_use_hook(
                     }
                 }
 
+        # Check task completion before allowing StructuredOutput
+        if tool_name == "StructuredOutput" and task_completion_checker is not None:
+            tool_input = (
+                input_data.get("tool_input", {}) if isinstance(input_data, dict) else {}
+            )
+            context = TaskCompletionContext(
+                session=hook_context.session,
+                tentative_output=tool_input.get("output"),
+                stop_reason="structured_output",
+            )
+            result = task_completion_checker.check(context)
+            if not result.complete:
+                logger.info(
+                    "claude_agent_sdk.hook.structured_output_denied",
+                    event="hook.structured_output_denied",
+                    context={
+                        "tool_name": tool_name,
+                        "feedback": result.feedback,
+                    },
+                )
+                deny_reason = (
+                    f"Task completion check failed: {result.feedback}\n\n"
+                    "Please complete the remaining tasks before calling "
+                    "StructuredOutput."
+                )
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": deny_reason,
+                    }
+                }
+
         # Take snapshot for transactional rollback on native tools
         # Skip MCP-bridged WINK tools - they handle their own transactions
         if tool_use_id is not None and not tool_name.startswith("mcp__wink__"):
@@ -480,11 +518,10 @@ def _parse_tool_data(input_data: Any) -> _ParsedToolData:  # noqa: ANN401
     )
 
 
-def create_post_tool_use_hook(  # noqa: C901 - complexity needed for budget/deadline checks
+def create_post_tool_use_hook(
     hook_context: HookContext,
     *,
     stop_on_structured_output: bool = True,
-    task_completion_checker: TaskCompletionChecker | None = None,
 ) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording and state rollback.
 
@@ -498,15 +535,12 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for budget/dead
         hook_context: Context with session, adapter, and prompt.
         stop_on_structured_output: If True, return ``continue: false`` after
             the StructuredOutput tool to end the turn immediately.
-        task_completion_checker: Optional checker for verifying task completion
-            before stopping on StructuredOutput. When provided and tasks are
-            incomplete, the hook continues execution instead of stopping.
 
     Returns:
         An async hook callback function matching SDK signature.
     """
 
-    async def post_tool_use_hook(  # noqa: C901, RUF029 - complexity needed for budget/deadline checks; SDK requires async signature
+    async def post_tool_use_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -579,57 +613,10 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for budget/dead
                 )
 
         # Stop execution after StructuredOutput tool to end turn cleanly
+        # Note: Task completion is checked in PreToolUse to deny the tool if
+        # tasks are incomplete. If we reach here, tasks are complete (or no
+        # checker is configured).
         if stop_on_structured_output and data.tool_name == "StructuredOutput":
-            # If task_completion_checker is configured, verify completion
-            # Skip check if deadline exceeded or budget exhausted
-            should_check = task_completion_checker is not None
-            if (
-                should_check
-                and hook_context.deadline
-                and hook_context.deadline.remaining().total_seconds() <= 0
-            ):
-                should_check = False
-            if should_check and hook_context.budget_tracker is not None:
-                bt = hook_context.budget_tracker
-                if isinstance(bt, BudgetTracker):  # pragma: no branch
-                    consumed_total = (bt.consumed.input_tokens or 0) + (
-                        bt.consumed.output_tokens or 0
-                    )
-                    if (  # pragma: no branch
-                        bt.budget.max_total_tokens is not None
-                        and consumed_total >= bt.budget.max_total_tokens
-                    ):
-                        should_check = False
-
-            if should_check and task_completion_checker is not None:
-                context = TaskCompletionContext(
-                    session=hook_context.session,
-                    tentative_output=data.tool_input.get("output"),
-                    stop_reason="structured_output",
-                )
-                result = task_completion_checker.check(context)
-                if not result.complete:
-                    logger.info(
-                        "claude_agent_sdk.hook.structured_output_incomplete",
-                        event="hook.structured_output_incomplete",
-                        context={
-                            "tool_name": data.tool_name,
-                            "feedback": result.feedback,
-                        },
-                    )
-                    # Report as tool failure - agent must complete tasks and retry
-                    error_message = (
-                        f"Task completion check failed: {result.feedback}\n\n"
-                        "Please complete the remaining tasks before calling "
-                        "StructuredOutput again."
-                    )
-                    return {
-                        "toolResultModification": {
-                            "replaceContent": error_message,
-                            "isError": True,
-                        },
-                    }
-
             logger.debug(
                 "claude_agent_sdk.hook.structured_output_stop",
                 event="hook.structured_output_stop",

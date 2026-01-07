@@ -14,7 +14,7 @@
 
 This module provides a generic mechanism for verifying task completion status
 before allowing an agent to stop or produce final output. Checkers can inspect
-session state, filesystem contents, and use LLM-based verification.
+session state and filesystem contents.
 
 Example:
     >>> from weakincentives.adapters.claude_agent_sdk import (
@@ -31,7 +31,6 @@ Example:
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -45,7 +44,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CompositeChecker",
-    "LLMJudgeChecker",
     "PlanBasedChecker",
     "TaskCompletionChecker",
     "TaskCompletionContext",
@@ -235,141 +233,6 @@ class PlanBasedChecker(TaskCompletionChecker):
         )
 
         return TaskCompletionResult.incomplete(feedback)
-
-
-class LLMJudgeChecker(TaskCompletionChecker):
-    """Placeholder for LLM-as-judge task completion verification.
-
-    .. warning::
-        This is a placeholder implementation that does NOT perform actual
-        LLM verification. It always returns ``ok()`` when an adapter is
-        available. A full implementation would use the adapter to evaluate
-        completion criteria via an LLM call.
-
-    This checker is intended to use an LLM to evaluate whether the agent
-    has completed its tasks based on the session state, tentative output,
-    and custom criteria. The full implementation would:
-
-    1. Build a verification prompt from the context and criteria
-    2. Call the adapter to evaluate completion
-    3. Parse the LLM response to determine pass/fail
-
-    Requires an adapter to be provided in the context for LLM calls.
-    """
-
-    def __init__(
-        self,
-        *,
-        criteria: str | None = None,
-        require_adapter: bool = True,
-    ) -> None:
-        """Initialize the LLM judge checker.
-
-        .. warning::
-            This is a placeholder. See class docstring for details.
-
-        Args:
-            criteria: Custom criteria for the LLM to evaluate. If None,
-                uses a default prompt asking if tasks appear complete.
-            require_adapter: If True, returns incomplete when no adapter
-                is available. If False, returns ok when no adapter.
-        """
-        warnings.warn(
-            "LLMJudgeChecker is a placeholder implementation that does not "
-            "perform actual LLM verification. It will always return ok() "
-            "when an adapter is available.",
-            stacklevel=2,
-        )
-        self._criteria = criteria or (
-            "Based on the session state and output, determine if the agent "
-            "has successfully completed all requested tasks. Consider whether "
-            "the output addresses the original request and if any work remains."
-        )
-        self._require_adapter = require_adapter
-
-    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
-        """Check completion using LLM-as-judge.
-
-        Args:
-            context: Context with adapter for LLM calls.
-
-        Returns:
-            Result based on LLM evaluation of completion status.
-        """
-        if context.adapter is None:
-            if self._require_adapter:
-                return TaskCompletionResult.incomplete(
-                    "LLM verification required but no adapter available."
-                )
-            return TaskCompletionResult.ok("No adapter for LLM verification.")
-
-        # Build the verification prompt (for future LLM call)
-        _ = self._build_verification_prompt(context)
-
-        try:
-            # Use adapter for verification
-            # Note: This is a simplified implementation. A full implementation
-            # would use a proper Prompt with structured output for the verdict.
-            logger.debug(
-                "task_completion.llm_judge.checking",
-                event="llm_judge.checking",
-                context={"criteria": self._criteria[:100]},
-            )
-
-            # For now, we return a placeholder indicating LLM verification
-            # would be performed. A full implementation would make the LLM call.
-            return TaskCompletionResult.ok(
-                "LLM verification passed (implementation pending)."
-            )
-
-        except Exception as e:  # pragma: no cover - placeholder impl can't raise
-            logger.warning(
-                "task_completion.llm_judge.error",
-                event="llm_judge.error",
-                context={"error": str(e)},
-            )
-            # On error, allow completion to avoid blocking
-            return TaskCompletionResult.ok(
-                f"LLM verification skipped due to error: {e}"
-            )
-
-    def _build_verification_prompt(self, context: TaskCompletionContext) -> str:
-        """Build the verification prompt for the LLM."""
-        parts = [
-            "# Task Completion Verification",
-            "",
-            "## Criteria",
-            self._criteria,
-            "",
-        ]
-
-        if context.tentative_output is not None:
-            parts.extend(
-                [
-                    "## Tentative Output",
-                    str(context.tentative_output),
-                    "",
-                ]
-            )
-
-        if context.stop_reason:
-            parts.extend(
-                [
-                    "## Stop Reason",
-                    context.stop_reason,
-                    "",
-                ]
-            )
-
-        parts.extend(
-            [
-                "## Instructions",
-                "Evaluate whether the task is complete based on the criteria above.",
-                "Respond with COMPLETE if done, or INCOMPLETE with explanation.",
-            ]
-        )
-
-        return "\n".join(parts)
 
 
 class CompositeChecker(TaskCompletionChecker):

@@ -751,12 +751,14 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         options_kwargs["stderr"] = self._create_stderr_handler()
 
         # Create async hook callbacks
-        pre_hook = create_pre_tool_use_hook(hook_context)
         checker = self._client_config.task_completion_checker
+        pre_hook = create_pre_tool_use_hook(
+            hook_context,
+            task_completion_checker=checker,
+        )
         post_hook = create_post_tool_use_hook(
             hook_context,
             stop_on_structured_output=self._client_config.stop_on_structured_output,
-            task_completion_checker=checker,
         )
         # Use task completion stop hook if checker is configured, otherwise regular stop hook
         if checker is not None:  # pragma: no cover - tested via hook tests

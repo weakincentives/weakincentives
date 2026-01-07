@@ -57,11 +57,10 @@ class ClaudeAgentSDKClientConfig:
             allowing the agent to stop. Both the stop hook and StructuredOutput
             handling use this checker to determine if tasks are complete.
             Supports various implementations:
-            - ``PlanBasedChecker``: Checks session Plan state (default)
-            - ``LLMJudgeChecker``: Uses LLM-as-judge verification
+            - ``PlanBasedChecker``: Checks session Plan state
             - ``CompositeChecker``: Combines multiple checkers
-            When None, defaults to ``PlanBasedChecker()`` to ensure agents
-            complete all planned tasks before stopping.
+            When None, no task completion checking is performed and the agent
+            can stop freely.
         isolation: Hermetic isolation configuration. When provided, creates
             an ephemeral home directory and prevents access to the host's
             ~/.claude configuration. See :class:`IsolationConfig` for details.

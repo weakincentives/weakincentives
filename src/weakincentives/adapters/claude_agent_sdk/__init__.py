@@ -77,7 +77,6 @@ from ._hooks import create_task_completion_stop_hook
 from ._notifications import Notification, NotificationSource
 from ._task_completion import (
     CompositeChecker,
-    LLMJudgeChecker,
     PlanBasedChecker,
     TaskCompletionChecker,
     TaskCompletionContext,
@@ -114,7 +113,6 @@ __all__ = [
     "HostMount",
     "HostMountPreview",
     "IsolationConfig",
-    "LLMJudgeChecker",
     "NetworkPolicy",
     "Notification",
     "NotificationSource",

@@ -10,7 +10,6 @@ work remains incomplete.
 The abstraction supports:
 
 - Plan-based verification (checking session `Plan` state)
-- LLM-as-judge verification (using an LLM to evaluate completion)
 - Composite verification (combining multiple strategies)
 - Custom verification logic via the protocol
 
@@ -38,7 +37,6 @@ flowchart TB
 
     subgraph Checkers["TaskCompletionChecker Implementations"]
         Plan["PlanBasedChecker"]
-        LLM["LLMJudgeChecker"]
         Composite["CompositeChecker"]
         Custom["Custom Checker"]
     end
@@ -145,33 +143,6 @@ tasks or update the plan to remove tasks that are no longer needed before
 producing output: Implement feature, Write tests...
 ```
 
-### LLMJudgeChecker (Placeholder)
-
-> **Warning**: `LLMJudgeChecker` is a placeholder implementation that does NOT
-> perform actual LLM verification. It always returns `ok()` when an adapter is
-> available. Instantiating it emits a `UserWarning`.
-
-Intended for LLM-as-judge verification:
-
-```python
-import warnings
-
-# Suppress warning if using intentionally
-with warnings.catch_warnings():
-    warnings.simplefilter("ignore")
-    checker = LLMJudgeChecker(
-        criteria="Verify all tests pass and documentation is updated."
-    )
-```
-
-Current behavior:
-
-- Emits `UserWarning` on instantiation about placeholder status
-- Returns `incomplete()` if adapter required but not provided in context
-- Returns `ok()` if adapter not required and not provided
-- Returns `ok("LLM verification passed (implementation pending).")` when
-  adapter is available (does NOT actually call the LLM)
-
 ### CompositeChecker
 
 Combines multiple checkers with configurable logic:
@@ -179,13 +150,13 @@ Combines multiple checkers with configurable logic:
 ```python
 # All must pass (default)
 checker = CompositeChecker(
-    checkers=(PlanBasedChecker(), LLMJudgeChecker()),
+    checkers=(PlanBasedChecker(plan_type=Plan), TestPassingChecker()),
     all_must_pass=True,
 )
 
 # Any can pass
 checker = CompositeChecker(
-    checkers=(PlanBasedChecker(), LLMJudgeChecker()),
+    checkers=(PlanBasedChecker(plan_type=Plan), FileExistsChecker(("output.txt",))),
     all_must_pass=False,
 )
 ```
@@ -232,15 +203,15 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
     CompositeChecker,
-    LLMJudgeChecker,
     PlanBasedChecker,
 )
+from weakincentives.contrib.tools.planning import Plan
 
 # Use a composite checker with multiple strategies
 adapter = ClaudeAgentSDKAdapter(
     client_config=ClaudeAgentSDKClientConfig(
         task_completion_checker=CompositeChecker(
-            checkers=(PlanBasedChecker(), LLMJudgeChecker()),
+            checkers=(PlanBasedChecker(plan_type=Plan), TestPassingChecker()),
         ),
     ),
 )
@@ -366,41 +337,32 @@ adapter = ClaudeAgentSDKAdapter(
 )
 ```
 
-### Story 4: LLM Verification with Custom Criteria
+## Future Extensions
 
-As a developer, I want LLM-based verification of task completion:
+### LLM-as-Judge Verification
+
+A future `LLMJudgeChecker` could use an LLM to evaluate task completion based
+on custom criteria. This would:
+
+1. Build a verification prompt from the context and criteria
+1. Call an adapter to evaluate completion
+1. Parse the LLM response to determine pass/fail
+
+Example usage (not yet implemented):
 
 ```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    CompositeChecker,
-    LLMJudgeChecker,
-    PlanBasedChecker,
-)
-
-# Combine plan-based checking with LLM verification
-checker = CompositeChecker(
-    checkers=(
-        PlanBasedChecker(),
-        LLMJudgeChecker(
-            criteria=(
-                "Verify the implementation is complete:\n"
-                "1. All requested features are implemented\n"
-                "2. Code follows the existing patterns\n"
-                "3. No TODOs or placeholder comments remain"
-            ),
-        ),
-    ),
-    all_must_pass=True,
-)
-
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=checker,
+# Future API - not currently available
+checker = LLMJudgeChecker(
+    criteria=(
+        "Verify the implementation is complete:\n"
+        "1. All requested features are implemented\n"
+        "2. Code follows the existing patterns\n"
+        "3. No TODOs or placeholder comments remain"
     ),
 )
 ```
+
+This is deferred to avoid adding complexity before the use case is validated.
 
 ## Operational Notes
 
@@ -415,8 +377,6 @@ adapter = ClaudeAgentSDKAdapter(
   allowing use in environments where planning tools aren't installed
 - **Protocol Compliance**: Any object with a `check(context) -> result` method
   satisfies `TaskCompletionChecker` due to `@runtime_checkable`
-- **Placeholder Warning**: `LLMJudgeChecker` emits a `UserWarning` on
-  instantiation to indicate it's a placeholder implementation
 
 ## Implementation Notes
 

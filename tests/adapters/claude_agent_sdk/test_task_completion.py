@@ -14,19 +14,15 @@
 
 from __future__ import annotations
 
-from typing import cast
-
 import pytest
 
 from weakincentives.adapters.claude_agent_sdk._task_completion import (
     CompositeChecker,
-    LLMJudgeChecker,
     PlanBasedChecker,
     TaskCompletionChecker,
     TaskCompletionContext,
     TaskCompletionResult,
 )
-from weakincentives.adapters.core import ProviderAdapter
 from weakincentives.contrib.tools.planning import Plan, PlanningToolsSection, PlanStep
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
@@ -75,13 +71,13 @@ class TestTaskCompletionContext:
         assert context.stop_reason is None
 
     def test_with_all_fields(self, session: Session) -> None:
-        mock_adapter = cast(ProviderAdapter, object())
+        mock_adapter = object()  # Placeholder adapter
 
         context = TaskCompletionContext(
             session=session,
             tentative_output={"key": "value"},
             filesystem=None,
-            adapter=mock_adapter,
+            adapter=mock_adapter,  # type: ignore[arg-type]
             stop_reason="end_turn",
         )
 
@@ -255,77 +251,6 @@ class TestPlanBasedChecker:
         assert result.complete is True
 
 
-class TestLLMJudgeChecker:
-    def test_emits_placeholder_warning(self, session: Session) -> None:
-        """LLMJudgeChecker emits a warning about being a placeholder."""
-        with pytest.warns(UserWarning, match="placeholder implementation"):
-            LLMJudgeChecker()
-
-    def test_incomplete_without_adapter_when_required(self, session: Session) -> None:
-        """Checker returns incomplete when adapter required but missing."""
-        with pytest.warns(UserWarning):
-            checker = LLMJudgeChecker(require_adapter=True)
-        context = TaskCompletionContext(session=session)
-
-        result = checker.check(context)
-
-        assert result.complete is False
-        assert "no adapter available" in str(result.feedback).lower()
-
-    def test_complete_without_adapter_when_not_required(self, session: Session) -> None:
-        """Checker returns complete when adapter not required and missing."""
-        with pytest.warns(UserWarning):
-            checker = LLMJudgeChecker(require_adapter=False)
-        context = TaskCompletionContext(session=session)
-
-        result = checker.check(context)
-
-        assert result.complete is True
-
-    def test_with_adapter_returns_placeholder(self, session: Session) -> None:
-        """Checker with adapter returns placeholder response."""
-        mock_adapter = cast(ProviderAdapter, object())
-        with pytest.warns(UserWarning):
-            checker = LLMJudgeChecker()
-        context = TaskCompletionContext(session=session, adapter=mock_adapter)
-
-        result = checker.check(context)
-
-        # Current implementation returns a placeholder
-        assert result.complete is True
-        assert "implementation pending" in str(result.feedback).lower()
-
-    def test_custom_criteria(self, session: Session) -> None:
-        """Checker accepts custom evaluation criteria."""
-        with pytest.warns(UserWarning):
-            checker = LLMJudgeChecker(
-                criteria="Verify all tests pass and coverage is 100%."
-            )
-        context = TaskCompletionContext(session=session)
-
-        # Without adapter, it should just return incomplete
-        result = checker.check(context)
-
-        assert result.complete is False
-
-    def test_build_verification_prompt_includes_output(self, session: Session) -> None:
-        """Verification prompt includes tentative output."""
-        with pytest.warns(UserWarning):
-            checker = LLMJudgeChecker()
-        context = TaskCompletionContext(
-            session=session,
-            tentative_output={"summary": "All done"},
-            stop_reason="end_turn",
-        )
-
-        prompt = checker._build_verification_prompt(context)
-
-        assert "Tentative Output" in prompt
-        assert "All done" in prompt
-        assert "Stop Reason" in prompt
-        assert "end_turn" in prompt
-
-
 class TestCompositeChecker:
     def test_empty_checkers_returns_complete(self, session: Session) -> None:
         """Empty composite returns complete."""
@@ -453,12 +378,6 @@ class TestTaskCompletionCheckerProtocol:
     def test_plan_based_checker_satisfies_protocol(self) -> None:
         """PlanBasedChecker is a TaskCompletionChecker."""
         checker = PlanBasedChecker(plan_type=Plan)
-        assert isinstance(checker, TaskCompletionChecker)
-
-    def test_llm_judge_checker_satisfies_protocol(self) -> None:
-        """LLMJudgeChecker is a TaskCompletionChecker."""
-        with pytest.warns(UserWarning):
-            checker = LLMJudgeChecker()
         assert isinstance(checker, TaskCompletionChecker)
 
     def test_composite_checker_satisfies_protocol(self) -> None:
