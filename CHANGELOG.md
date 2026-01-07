@@ -2,141 +2,184 @@
 
 Release highlights for weakincentives.
 
-## Unreleased
+## v0.19.0 - 2026-01-07
+
+### Tool Policies: Declarative Constraints for Safe Tool Invocation
+
+A new **Tool Policy** system enables declarative constraints on tool invocation
+sequences, preventing unsafe operations without hardcoding logic into handlers.
+Policies are declared at prompt and section levels, track state in session
+slices, and survive snapshot/restore cycles.
+
+```python
+from weakincentives.prompt import SequentialDependencyPolicy, ReadBeforeWritePolicy
+
+# Enforce deployment pipeline: lint → build → test → deploy
+policy = SequentialDependencyPolicy(
+    dependencies={"deploy": frozenset({"test", "build"})}
+)
+
+# Prevent file overwrites without reading first
+read_first = ReadBeforeWritePolicy(mount_point="/workspace")
+```
+
+**Built-in policies:**
+
+- `SequentialDependencyPolicy`: Enforce unconditional tool ordering (e.g.,
+  CI/CD pipelines)
+- `ReadBeforeWritePolicy`: Prevent overwriting files without reading them first;
+  new files can be created freely
+
+**Integration:** `VFSToolsSection` and `PodmanSandboxSection` now have
+`ReadBeforeWritePolicy` enabled by default. See `specs/TOOL_POLICIES.md`.
+
+### Exhaustiveness Checking for Union Types
+
+Match statements on union types now include exhaustiveness sentinels that
+pyright validates at type-check time. When a new variant is added to a union,
+missing handlers are caught immediately—no runtime surprises.
+
+```python
+from typing import assert_never
+
+match op:
+    case Append(item=item):
+        slice_instance.append(item)
+    case Extend(items=items):
+        slice_instance.extend(items)
+    case _ as unreachable:
+        assert_never(unreachable)  # pyright catches missing cases
+```
+
+Applied to `SliceOp` handling throughout the session runtime. See
+`specs/EXHAUSTIVENESS.md`.
+
+### Skill Validation at Mount Time
+
+Skills now undergo comprehensive validation when mounted, catching configuration
+errors early rather than at runtime:
+
+- **Directory skills**: Validates SKILL.md exists with correct frontmatter
+- **File skills**: Enforces `.md` extension and 1 MiB size limit
+- **Frontmatter validation**: Checks required fields (`name`, `description`)
+  and optional fields against the Agent Skills specification
+- **Lazy YAML loading**: pyyaml imported only when validation runs, keeping
+  the base package lightweight
+
+**Validation functions:** `validate_skill()`, `validate_skill_name()`,
+`resolve_skill_name()`.
+
+**Constants:** `MAX_SKILL_FILE_BYTES` (1 MiB), `MAX_SKILL_TOTAL_BYTES` (10 MiB).
+
+### Comprehensive Prompt Override System
+
+The prompt overrides system now supports **all text literals** affecting agent
+performance—not just section bodies:
+
+**New override types:**
+
+- `TaskExampleOverride`: Override entire task examples (objective, outcome, steps)
+- `TaskStepOverride`: Modify individual steps within examples
+- `ToolExampleOverride`: Override tool example descriptions, inputs, and outputs
+
+**Enhanced `SectionOverride`:** Now includes optional `summary` and `visibility`
+fields for fine-grained prompt optimization.
+
+**Performance improvements:**
+
+- TOCTOU-safe atomic operations via internal `_resolve_unlocked()` /
+  `_upsert_unlocked()` helpers
+- Efficient hash-based staleness detection
+- Conditional field serialization to minimize file sizes
 
 ### Binary Read/Write Support for Filesystem
 
-The `Filesystem` protocol now supports binary file operations alongside text
-operations. This enables proper handling of binary files (images, compiled
-binaries, archives) and exact-copy file operations without encoding overhead.
+The `Filesystem` protocol now supports binary file operations alongside text,
+enabling proper handling of images, compiled binaries, archives, and exact-copy
+operations without encoding overhead.
 
 **New methods:**
 
-- `read_bytes(path, *, offset=0, limit=None)` → `ReadBytesResult`: Read file
-  content as raw bytes with optional byte-offset pagination
+- `read_bytes(path, *, offset=0, limit=None)` → `ReadBytesResult`
 - `write_bytes(path, content, *, mode="overwrite", create_parents=True)` →
-  `WriteResult`: Write raw bytes to a file
-
-**New types:**
-
-- `ReadBytesResult`: Result dataclass for binary reads with `content: bytes`,
-  `size_bytes`, `offset`, `limit`, `truncated`
-- `MAX_WRITE_BYTES`: Size limit constant for binary writes (48KB)
+  `WriteResult`
 
 **Behavior changes:**
 
-- `InMemoryFilesystem` now stores files as bytes internally, with text
-  operations encoding/decoding UTF-8 as needed
-- `read()` raises `ValueError` with actionable message when file contains
-  binary content: "Use read_bytes() for binary files"
-- `grep()` silently skips files that cannot be UTF-8 decoded
-- Path validation no longer requires ASCII-only segments (UTF-8 paths allowed)
-
-**Recommendation:** For file copying operations, prefer `read_bytes()` /
-`write_bytes()` as they preserve content exactly without encoding overhead.
+- `InMemoryFilesystem` now stores files as bytes internally
+- `read()` raises `ValueError` with actionable message for binary content
+- `grep()` silently skips non-UTF-8 files
+- UTF-8 paths now allowed (ASCII-only restriction removed)
 
 ### Skills as Core Library Concept
 
-Skills are now a first-class concept in the core library. The skill types have
-been promoted from the Claude Agent SDK adapter to a new `weakincentives.skills`
-module, following the [Agent Skills specification](https://agentskills.io).
+Skills promoted from Claude Agent SDK adapter to `weakincentives.skills` module,
+following the [Agent Skills specification](https://agentskills.io):
 
 ```python
 from weakincentives.skills import Skill, SkillMount, SkillConfig
 
-# Define skill configuration
 config = SkillConfig(
-    mounts=(
-        SkillMount(name="code-review", path="/path/to/skill"),
-    ),
+    mounts=(SkillMount(name="code-review", path="/path/to/skill"),),
+    validate_on_mount=True,
 )
 ```
 
-**New types:**
+**Error hierarchy:** `SkillError` → `SkillValidationError`, `SkillNotFoundError`,
+`SkillMountError`.
 
-- `Skill`: Core representation of a skill definition
-- `SkillMount`: Configuration for mounting a skill
-- `SkillConfig`: Collection of skill mounts
+### Enhanced Debug Logging for Claude Agent SDK
 
-**Error hierarchy:**
+Comprehensive DEBUG-level logging coverage for better observability:
 
-- `SkillError`: Base class for skill-related errors
-- `SkillValidationError`: Invalid skill configuration
-- `SkillNotFoundError`: Skill not found at specified path
-- `SkillMountError`: Failed to mount skill
+- **`HookStats` dataclass**: Tracks cumulative execution metrics (tool count,
+  turn count, subagent count, context compactions, token usage including
+  thinking tokens)
+- **Timing metrics**: `elapsed_ms` and `hook_duration_ms` in all hook events
+- **Constraint tracking**: Budget consumption and deadline remaining in
+  pre-tool-use events
+- **Lifecycle events**: Turn boundaries, subagent start/stop, context window
+  compaction with utilization percentage
+- **Error logging**: Comprehensive error classification with stderr capture
 
-**Validation utilities:** `validate_skill()`, `validate_skill_name()`,
-`resolve_skill_name()`.
+### Architecture Improvements
 
-The Claude Agent SDK adapter continues to re-export these types for backward
-compatibility.
-
-### Workspace Protocols Promoted to Core
-
-`ToolSuiteSection` and `WorkspaceSection` protocols have been promoted from
-`contrib.tools.workspace` to `prompt.protocols`. These are foundational
-contracts used by core code (`Prompt.filesystem()`, adapters), so they belong
-in core rather than contrib.
-
-A new static check (`make check-core-imports`) validates that core modules
-never import from contrib, enforcing the architectural constraint.
-
-### HostFilesystem Moved to Core
-
-`HostFilesystem` has been moved from `contrib.tools` to `weakincentives.filesystem`
-where the `Filesystem` protocol lives. This reflects its status as a core
-abstraction needed by adapters.
-
-```python
-# New location (preferred)
-from weakincentives.filesystem import HostFilesystem
-
-# Backward-compatible re-export still works
-from weakincentives.contrib.tools import HostFilesystem
-```
-
-### Enhanced Debug Logging
-
-Comprehensive DEBUG logging coverage for better observability during task
-execution:
-
-- **HookStats dataclass:** Tracks cumulative execution statistics (tool count,
-  turn count, subagent count, compact count, token usage)
-- **Turn boundary tracking:** UserPromptSubmit hook enhanced with turn tracking
-- **Timing metrics:** `elapsed_ms` and `hook_duration_ms` in hook events
-- **Budget/deadline status:** Pre-tool-use logging includes remaining budget
-- **Token usage tracking:** Cumulative usage in message logging with thinking
-  support
-- **Context window logging:** Includes utilization percentage
-- **Subagent tracking:** Detailed start/stop metrics
-- **Stop hook:** Final execution statistics summary
+- **HostFilesystem moved to core**: Now in `weakincentives.filesystem` alongside
+  the protocol. Backward-compatible re-export from `contrib.tools` retained.
+- **Workspace protocols promoted**: `ToolSuiteSection` and `WorkspaceSection`
+  moved from contrib to `prompt.protocols`. New `make check-core-imports`
+  validates core never imports from contrib.
 
 ### Fixed
 
-- **Logging formatter KeyError:** The text formatter now gracefully handles
-  missing `event` and `context` fields, fixing crashes when external libraries
-  (like claude_agent_sdk) log directly without structured fields.
+- **Logging formatter KeyError**: Text formatter now gracefully handles missing
+  `event` and `context` fields from external libraries
+- **Circular import in contrib**: Replaced eager imports with lazy `__getattr__`
+  loading
 
-- **Circular import in contrib:** Replaced eager imports with lazy loading via
-  `__getattr__`, eliminating ModuleNotFoundError when import order wasn't
-  correct (e.g., optimizers.workspace_digest importing from tools.asteval).
+### Breaking Changes
+
+**Prompt overrides API:**
+
+```python
+# Before
+store.set_section_override(prompt, tag="latest", path=("section",), body="...")
+
+# After
+from weakincentives.prompt import SectionOverride
+store.store(prompt, SectionOverride(path=("section",), expected_hash="...", body="..."), tag="latest")
+```
+
+**Override file format upgraded from v1 to v2.** Existing override files in
+`.weakincentives/overrides/` should be regenerated with `store.seed(prompt)`.
 
 ### Internal
 
-- **Removed mutation testing:** Deleted mutmut-based mutation testing
-  infrastructure (runner script, Makefile targets, CI job, dependencies).
-
-- **CI/CD optimizations:**
-
-  - Consolidated 4 static analysis jobs into 1
-  - Added concurrency control to cancel in-progress runs on new commits
-  - Standardized on actions/checkout@v5 across all workflows
-  - Created single detect-changes.yml reusable workflow for both CI and
-    Formal Verification
-  - Upgraded Python 3.12 → 3.14 in verify.yml
-
-- **Dependency upgrades:** aiohttp, anyio, certifi, filelock, huggingface-hub,
-  hypothesis, sse-starlette, textual (6.x → 7.x), tokenizers, typer-slim.
+- Removed mutation testing infrastructure (mutmut)
+- CI/CD: Consolidated 4 static analysis jobs → 1, added concurrency control,
+  standardized on actions/checkout@v5, Python 3.12 → 3.14 in verify.yml
+- Dependency upgrades: aiohttp, anyio, certifi, filelock, huggingface-hub,
+  hypothesis, sse-starlette, textual (6.x → 7.x), tokenizers, typer-slim
 
 ## v0.18.0 - 2026-01-05
 
