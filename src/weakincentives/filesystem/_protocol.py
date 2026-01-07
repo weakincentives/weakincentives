@@ -40,6 +40,7 @@ from ._types import (
     FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
+    ReadBytesResult,
     ReadResult,
     WriteResult,
 )
@@ -62,7 +63,7 @@ class Filesystem(Protocol):
         limit: int | None = None,
         encoding: str = "utf-8",
     ) -> ReadResult:
-        """Read file content with optional pagination.
+        """Read file content as text with optional pagination.
 
         Args:
             path: Relative path from workspace root.
@@ -70,6 +71,30 @@ class Filesystem(Protocol):
             limit: Maximum lines to return. None means backend default (2000).
                 Use READ_ENTIRE_FILE (-1) to read entire file without truncation.
             encoding: Text encoding. Only "utf-8" is guaranteed.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            IsADirectoryError: Path is a directory.
+            PermissionError: Read access denied.
+        """
+        ...
+
+    def read_bytes(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> ReadBytesResult:
+        """Read file content as raw bytes with optional pagination.
+
+        This is the recommended method for copying files, as it preserves
+        binary content exactly without encoding/decoding overhead.
+
+        Args:
+            path: Relative path from workspace root.
+            offset: Byte offset to start reading (0-indexed).
+            limit: Maximum bytes to return. None means read entire file.
 
         Raises:
             FileNotFoundError: Path does not exist.
@@ -150,11 +175,41 @@ class Filesystem(Protocol):
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
     ) -> WriteResult:
-        """Write content to a file.
+        """Write text content to a file.
 
         Args:
             path: Relative path from workspace root.
             content: UTF-8 text content.
+            mode: Write behavior.
+                - "create": Fail if file exists.
+                - "overwrite": Replace existing content.
+                - "append": Add to end of file.
+            create_parents: Create parent directories if missing.
+
+        Raises:
+            FileExistsError: mode="create" and file exists.
+            FileNotFoundError: Parent directory missing and create_parents=False.
+            PermissionError: Write access denied.
+            ValueError: Content exceeds backend limits.
+        """
+        ...
+
+    def write_bytes(
+        self,
+        path: str,
+        content: bytes,
+        *,
+        mode: Literal["create", "overwrite", "append"] = "overwrite",
+        create_parents: bool = True,
+    ) -> WriteResult:
+        """Write raw bytes to a file.
+
+        This is the recommended method for copying files, as it preserves
+        binary content exactly without encoding/decoding overhead.
+
+        Args:
+            path: Relative path from workspace root.
+            content: Raw byte content.
             mode: Write behavior.
                 - "create": Fail if file exists.
                 - "overwrite": Replace existing content.

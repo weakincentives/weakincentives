@@ -132,7 +132,7 @@ class GrepMatch(Protocol):
 
 
 class ReadResult(Protocol):
-    """Content returned from read operations."""
+    """Content returned from text read operations."""
 
     @property
     def content(self) -> str: ...
@@ -142,6 +142,28 @@ class ReadResult(Protocol):
 
     @property
     def total_lines(self) -> int: ...
+
+    @property
+    def offset(self) -> int: ...
+
+    @property
+    def limit(self) -> int: ...
+
+    @property
+    def truncated(self) -> bool: ...
+
+
+class ReadBytesResult(Protocol):
+    """Content returned from binary read operations."""
+
+    @property
+    def content(self) -> bytes: ...
+
+    @property
+    def path(self) -> str: ...
+
+    @property
+    def size_bytes(self) -> int: ...
 
     @property
     def offset(self) -> int: ...
@@ -179,13 +201,37 @@ class Filesystem(Protocol):
         limit: int | None = None,
         encoding: str = "utf-8",
     ) -> ReadResult:
-        """Read file content with optional pagination.
+        """Read file content as text with optional pagination.
 
         Args:
             path: Relative path from workspace root.
             offset: Line number to start reading (0-indexed).
             limit: Maximum lines to return. None means backend default.
             encoding: Text encoding. Only "utf-8" is guaranteed.
+
+        Raises:
+            FileNotFoundError: Path does not exist.
+            IsADirectoryError: Path is a directory.
+            PermissionError: Read access denied.
+        """
+        ...
+
+    def read_bytes(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> ReadBytesResult:
+        """Read file content as raw bytes with optional pagination.
+
+        This is the recommended method for copying files, as it preserves
+        binary content exactly without encoding/decoding overhead.
+
+        Args:
+            path: Relative path from workspace root.
+            offset: Byte offset to start reading (0-indexed).
+            limit: Maximum bytes to return. None means read entire file.
 
         Raises:
             FileNotFoundError: Path does not exist.
@@ -266,11 +312,41 @@ class Filesystem(Protocol):
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
     ) -> WriteResult:
-        """Write content to a file.
+        """Write text content to a file.
 
         Args:
             path: Relative path from workspace root.
             content: UTF-8 text content.
+            mode: Write behavior.
+                - "create": Fail if file exists.
+                - "overwrite": Replace existing content.
+                - "append": Add to end of file.
+            create_parents: Create parent directories if missing.
+
+        Raises:
+            FileExistsError: mode="create" and file exists.
+            FileNotFoundError: Parent directory missing and create_parents=False.
+            PermissionError: Write access denied.
+            ValueError: Content exceeds backend limits.
+        """
+        ...
+
+    def write_bytes(
+        self,
+        path: str,
+        content: bytes,
+        *,
+        mode: Literal["create", "overwrite", "append"] = "overwrite",
+        create_parents: bool = True,
+    ) -> WriteResult:
+        """Write raw bytes to a file.
+
+        This is the recommended method for copying files, as it preserves
+        binary content exactly without encoding/decoding overhead.
+
+        Args:
+            path: Relative path from workspace root.
+            content: Raw byte content.
             mode: Write behavior.
                 - "create": Fail if file exists.
                 - "overwrite": Replace existing content.
@@ -1154,18 +1230,27 @@ assert fs.exists("tests.py")
 ### Limitations
 
 - **Git dependency**: Disk-backed snapshots require git to be installed
-- **Text files only**: Git works best with UTF-8 text (binary files work but
-  don't benefit from delta compression)
 - **No partial restore**: Restore is all-or-nothing for the entire workspace
 - **Tool-level granularity**: Sub-operation changes within a tool invocation
   are not tracked
 
 ## Limitations
 
-- **UTF-8 only**: Binary files are not supported.
 - **No symlinks**: Symbolic links are not followed by default.
 - **No permissions model**: Beyond read-only flag, no Unix-style permissions.
 - **Single-threaded**: Backends are not thread-safe; use one per session.
 - **No streaming**: Large files are loaded entirely into memory.
 - **Path normalization**: Backends normalize paths; original casing may not be
   preserved.
+
+## Binary File Support
+
+The filesystem protocol supports both text and binary operations:
+
+- **`read()` / `write()`**: Text operations using UTF-8 encoding. Use for
+  source code, configuration files, and other text content.
+- **`read_bytes()` / `write_bytes()`**: Binary operations without encoding.
+  Use for copying files, images, compiled binaries, and other binary content.
+
+For file copying, always prefer `read_bytes()` / `write_bytes()` as they
+preserve content exactly without encoding overhead or potential data loss.

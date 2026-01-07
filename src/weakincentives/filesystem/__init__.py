@@ -40,11 +40,11 @@ from __future__ import annotations
 from ._host import HostFilesystem
 from ._protocol import Filesystem, SnapshotableFilesystem
 from ._types import (
-    ASCII,
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
     MAX_PATH_DEPTH,
     MAX_SEGMENT_LENGTH,
+    MAX_WRITE_BYTES,
     MAX_WRITE_LENGTH,
     READ_ENTIRE_FILE,
     FileEncoding,
@@ -53,6 +53,7 @@ from ._types import (
     FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
+    ReadBytesResult,
     ReadResult,
     WriteMode,
     WriteResult,
@@ -64,11 +65,11 @@ from ._types import (
 )
 
 __all__ = [
-    "ASCII",
     "DEFAULT_READ_LIMIT",
     "MAX_GREP_MATCHES",
     "MAX_PATH_DEPTH",
     "MAX_SEGMENT_LENGTH",
+    "MAX_WRITE_BYTES",
     "MAX_WRITE_LENGTH",
     "READ_ENTIRE_FILE",
     "FileEncoding",
@@ -79,6 +80,7 @@ __all__ = [
     "GlobMatch",
     "GrepMatch",
     "HostFilesystem",
+    "ReadBytesResult",
     "ReadResult",
     "SnapshotableFilesystem",
     "WriteMode",

@@ -26,10 +26,10 @@ from uuid import UUID
 
 DEFAULT_READ_LIMIT: Final[int] = 2_000
 MAX_WRITE_LENGTH: Final[int] = 48_000
+MAX_WRITE_BYTES: Final[int] = 48_000
 MAX_PATH_DEPTH: Final[int] = 16
 MAX_SEGMENT_LENGTH: Final[int] = 80
 MAX_GREP_MATCHES: Final[int] = 1_000
-ASCII: Final[str] = "ascii"
 
 #: Pass as `limit` to `Filesystem.read()` to read the entire file without truncation.
 READ_ENTIRE_FILE: Final[int] = -1
@@ -86,11 +86,23 @@ class GrepMatch:
 
 @dataclass(slots=True, frozen=True)
 class ReadResult:
-    """Content returned from read operations."""
+    """Content returned from text read operations."""
 
     content: str
     path: str
     total_lines: int
+    offset: int
+    limit: int
+    truncated: bool
+
+
+@dataclass(slots=True, frozen=True)
+class ReadBytesResult:
+    """Content returned from binary read operations."""
+
+    content: bytes
+    path: str
+    size_bytes: int
     offset: int
     limit: int
     truncated: bool
@@ -162,11 +174,6 @@ def validate_path(path: str) -> None:
         if len(segment) > MAX_SEGMENT_LENGTH:
             msg = f"Path segment exceeds limit of {MAX_SEGMENT_LENGTH} characters."
             raise ValueError(msg)
-        try:
-            _ = segment.encode(ASCII)
-        except UnicodeEncodeError as err:
-            msg = "Path segments must be ASCII."
-            raise ValueError(msg) from err
 
 
 def now() -> datetime:
@@ -195,11 +202,11 @@ def glob_match(path: str, pattern: str, base: str) -> bool:
 
 
 __all__ = [
-    "ASCII",
     "DEFAULT_READ_LIMIT",
     "MAX_GREP_MATCHES",
     "MAX_PATH_DEPTH",
     "MAX_SEGMENT_LENGTH",
+    "MAX_WRITE_BYTES",
     "MAX_WRITE_LENGTH",
     "READ_ENTIRE_FILE",
     "FileEncoding",
@@ -208,6 +215,7 @@ __all__ = [
     "FilesystemSnapshot",
     "GlobMatch",
     "GrepMatch",
+    "ReadBytesResult",
     "ReadResult",
     "WriteMode",
     "WriteResult",

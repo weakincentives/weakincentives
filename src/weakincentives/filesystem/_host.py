@@ -47,6 +47,7 @@ from weakincentives.errors import SnapshotError, SnapshotRestoreError
 from ._types import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
+    MAX_WRITE_BYTES,
     MAX_WRITE_LENGTH,
     READ_ENTIRE_FILE,
     FileEntry,
@@ -54,6 +55,7 @@ from ._types import (
     FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
+    ReadBytesResult,
     ReadResult,
     WriteResult,
     glob_match,
@@ -218,6 +220,46 @@ class HostFilesystem:
             offset=start,
             limit=end - start,
             truncated=end < total_lines,
+        )
+
+    def read_bytes(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> ReadBytesResult:
+        """Read file content as raw bytes with optional pagination."""
+        resolved = self._resolve_path(path)
+
+        if not resolved.exists():
+            raise FileNotFoundError(path)
+
+        if resolved.is_dir():
+            msg = f"Is a directory: {path}"
+            raise IsADirectoryError(msg)
+
+        file_size = resolved.stat().st_size
+
+        with resolved.open("rb") as f:
+            if offset > 0:
+                _ = f.seek(offset)
+            data = f.read(limit) if limit is not None else f.read()
+
+        # Calculate actual positions after read
+        actual_offset = min(offset, file_size)
+        bytes_read = len(data)
+        truncated = actual_offset + bytes_read < file_size
+
+        rel_path = normalize_path(path) or "/"
+
+        return ReadBytesResult(
+            content=data,
+            path=rel_path,
+            size_bytes=file_size,
+            offset=actual_offset,
+            limit=bytes_read,
+            truncated=truncated,
         )
 
     def exists(self, path: str) -> bool:
@@ -422,6 +464,60 @@ class HostFilesystem:
         file_mode = "a" if mode == "append" else "w"
 
         with resolved.open(file_mode, encoding="utf-8") as f:
+            _ = f.write(content)
+
+        # Calculate bytes written
+        bytes_written = resolved.stat().st_size
+
+        return WriteResult(
+            path=normalized,
+            bytes_written=bytes_written,
+            mode=mode,
+        )
+
+    def write_bytes(
+        self,
+        path: str,
+        content: bytes,
+        *,
+        mode: Literal["create", "overwrite", "append"] = "overwrite",
+        create_parents: bool = True,
+    ) -> WriteResult:
+        """Write raw bytes to a file."""
+        if self._read_only:
+            msg = "Filesystem is read-only"
+            raise PermissionError(msg)
+
+        normalized = normalize_path(path)
+        if not normalized:
+            msg = "Cannot write to root directory"
+            raise ValueError(msg)
+
+        validate_path(normalized)
+
+        if len(content) > MAX_WRITE_BYTES:
+            msg = f"Content exceeds maximum size of {MAX_WRITE_BYTES} bytes."
+            raise ValueError(msg)
+
+        resolved = self._resolve_path(path)
+        parent_dir = resolved.parent
+
+        # Check parent directory
+        if not parent_dir.exists():
+            if not create_parents:
+                raise FileNotFoundError(
+                    f"Parent directory does not exist: {parent_dir}"
+                )
+            parent_dir.mkdir(parents=True, exist_ok=True)
+
+        exists = resolved.exists()
+
+        if mode == "create" and exists:
+            raise FileExistsError(f"File already exists: {path}")
+
+        file_mode = "ab" if mode == "append" else "wb"
+
+        with resolved.open(file_mode) as f:
             _ = f.write(content)
 
         # Calculate bytes written
