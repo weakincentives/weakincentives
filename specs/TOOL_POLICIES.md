@@ -291,7 +291,7 @@ policy = ReadBeforeWritePolicy()
 
 ## Prompt Integration
 
-Policies are declared on prompts via sections:
+Policies can be declared at both section and prompt levels:
 
 ```python
 template = PromptTemplate(
@@ -299,32 +299,56 @@ template = PromptTemplate(
     key="main",
     sections=[
         MarkdownSection(
-            title="Tools",
-            key="tools",
-            template="Use these tools.",
-            tools=[read_file, write_file, deploy],
+            title="Filesystem",
+            key="filesystem",
+            template="Read and write files.",
+            tools=[read_file, write_file, edit_file],
+            policies=[ReadBeforeWritePolicy()],  # Section-level
+        ),
+        MarkdownSection(
+            title="Deployment",
+            key="deployment",
+            template="Build and deploy.",
+            tools=[lint, test, build, deploy],
+            policies=[
+                SequentialDependencyPolicy(
+                    dependencies={
+                        "build": frozenset({"lint"}),
+                        "deploy": frozenset({"test", "build"}),
+                    }
+                ),
+            ],
         ),
     ],
-    policies=[
-        ReadBeforeWritePolicy(),
+    policies=[  # Prompt-level (applies to all tools)
         SequentialDependencyPolicy(
-            dependencies={"deploy": frozenset({"test"})}
+            dependencies={"deploy": frozenset({"review"})}
         ),
     ],
 )
 ```
 
+**Policy collection**: At execution time, policies are collected from:
+1. The section containing the invoked tool
+2. The prompt itself
+
+All collected policies must allow for execution to proceed.
+
 ## Execution Flow
 
-The tool executor checks all prompt policies before handler invocation:
+The tool executor checks section and prompt policies before handler invocation:
 
 ```python
 def execute_tool(call: ToolCall, *, context: ToolContext) -> ToolResult:
     tool = resolve_tool(call)
     params = parse_params(call, tool)
+    section = find_section_for_tool(tool, context.prompt)
+
+    # Collect policies from section and prompt
+    policies = [*section.policies, *context.prompt.policies]
 
     # Check all policies
-    for policy in context.prompt.policies:
+    for policy in policies:
         decision = policy.check(tool, params, context=context)
         if not decision.allowed:
             return ToolResult.error(decision.reason or "Policy denied")
@@ -334,7 +358,7 @@ def execute_tool(call: ToolCall, *, context: ToolContext) -> ToolResult:
 
     # Record successful invocations
     if result.success:
-        for policy in context.prompt.policies:
+        for policy in policies:
             policy.on_result(tool, params, result, context=context)
 
     return result
