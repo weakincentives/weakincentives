@@ -192,7 +192,10 @@ class HostFilesystem:
             with resolved.open(encoding=encoding) as f:
                 lines = f.readlines()
         except UnicodeDecodeError as err:
-            msg = f"Cannot decode file as {encoding}: {err}"
+            msg = (
+                f"Cannot read '{path}' as text: file contains binary content that "
+                f"cannot be decoded as {encoding}. Use read_bytes() for binary files."
+            )
             raise ValueError(msg) from err
 
         total_lines = len(lines)

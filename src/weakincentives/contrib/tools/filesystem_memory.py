@@ -161,7 +161,10 @@ class InMemoryFilesystem:
         try:
             text_content = file.content.decode("utf-8")
         except UnicodeDecodeError as err:
-            msg = f"Cannot decode file as utf-8: {err}"
+            msg = (
+                f"Cannot read '{path}' as text: file contains binary content that "
+                "cannot be decoded as utf-8. Use read_bytes() for binary files."
+            )
             raise ValueError(msg) from err
 
         lines = text_content.splitlines(keepends=True)

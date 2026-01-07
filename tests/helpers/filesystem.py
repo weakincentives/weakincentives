@@ -210,7 +210,7 @@ class FilesystemValidationSuite:  # noqa: PLR0904
         """read() should fail when file contains binary content that can't be decoded."""
         binary_data = b"\xff\xfe\x00\x01\x80\x81"  # Invalid UTF-8
         fs.write_bytes("binary.bin", binary_data)
-        with pytest.raises(ValueError, match=r"[Cc]annot decode|decode"):
+        with pytest.raises(ValueError, match=r"binary content.*read_bytes"):
             fs.read("binary.bin")
 
     # -------------------------------------------------------------------------
