@@ -4,6 +4,24 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Refined Types Specification
+
+Added `specs/REFINED_TYPES.md` defining the design for refined/dependent types
+that encode value constraints directly in the type system. Refined types make
+invalid states unrepresentable by validating values at construction boundaries
+rather than scattering defensive checks throughout code.
+
+Key concepts:
+
+- **Numeric refinements**: `Positive[int]`, `NonNegative[int]`, `ClosedRange[float, 0.0, 1.0]`
+- **Collection refinements**: `NonEmpty[list[T]]`, `MaxLength[list[T], 10]`
+- **String refinements**: `NonBlank[str]`, `Pattern[str, r"..."]`, `TrimmedStr`
+- **Membership refinements**: `OneOf[str, "a", "b", "c"]`
+
+The spec covers integration with dataclasses, the validation pipeline, error
+handling via `RefinementError`, runtime control, and how refined types
+complement DbC decorators.
+
 ### Skills as Core Library Concept
 
 Skills are now a first-class concept in the core library. The skill types have
