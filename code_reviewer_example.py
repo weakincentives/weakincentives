@@ -81,7 +81,11 @@ from weakincentives.runtime import (
     Session,
     ShutdownCoordinator,
 )
-from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
+from weakincentives.runtime.mailbox import (
+    MailboxResolver,
+    RegistryResolver,
+    ReplyRoutes,
+)
 from weakincentives.skills import SkillConfig, SkillMount
 from weakincentives.types import SupportsDataclass
 
@@ -458,7 +462,10 @@ class CodeReviewApp:
                     deadline=_default_deadline(),
                 )
                 self._pending_requests[request_event.request_id] = user_prompt
-                self._requests.send(request_event, reply_to="code-review-responses")
+                self._requests.send(
+                    request_event,
+                    reply_routes=ReplyRoutes.single("code-review-responses"),
+                )
                 print("Processing request...")
 
                 # Wait for response

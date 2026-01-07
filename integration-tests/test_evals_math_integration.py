@@ -37,7 +37,7 @@ from weakincentives.evals import (
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
-from weakincentives.runtime.mailbox import RegistryResolver
+from weakincentives.runtime.mailbox import RegistryResolver, ReplyRoutes
 from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
 
 if TYPE_CHECKING:
@@ -301,7 +301,9 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
             input=MathProblem(question="What is 2 + 2?"),
             expected="4",
         )
-        _ = requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        _ = requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         eval_loop.run(max_iterations=1)
 
@@ -346,7 +348,10 @@ def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
         # Create and submit the full dataset with reply_to
         dataset = _create_math_dataset()
         for sample in dataset:
-            _ = requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+            _ = requests.send(
+                EvalRequest(sample=sample),
+                reply_routes=ReplyRoutes.single("eval-results"),
+            )
 
         # Run evaluations (10 samples, give some headroom for iterations)
         eval_loop.run(max_iterations=15)

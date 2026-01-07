@@ -40,6 +40,7 @@ from weakincentives.runtime.mailbox import (
     MailboxResolver,
     ReceiptHandleExpiredError,
     RegistryResolver,
+    ReplyRoutes,
 )
 from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
 from weakincentives.runtime.session import SessionProtocol
@@ -170,7 +171,9 @@ def test_eval_loop_processes_sample() -> None:
 
         # Submit a sample with reply_to
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         # Run single iteration
         eval_loop.run(max_iterations=1)
@@ -207,7 +210,9 @@ def test_eval_loop_handles_failure() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         eval_loop.run(max_iterations=1)
 
@@ -242,7 +247,10 @@ def test_eval_loop_respects_max_iterations() -> None:
         # Submit multiple samples
         for i in range(5):
             sample = Sample(id=str(i), input=f"input-{i}", expected="success")
-            requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+            requests.send(
+                EvalRequest(sample=sample),
+                reply_routes=ReplyRoutes.single("eval-results"),
+            )
 
         # Run only 2 iterations
         eval_loop.run(max_iterations=2)
@@ -271,7 +279,9 @@ def test_eval_loop_failing_score() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         eval_loop.run(max_iterations=1)
 
@@ -430,7 +440,10 @@ def test_end_to_end_evaluation() -> None:
 
         # Submit with reply_to and evaluate
         for sample in dataset:
-            requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+            requests.send(
+                EvalRequest(sample=sample),
+                reply_routes=ReplyRoutes.single("eval-results"),
+            )
         eval_loop.run(max_iterations=5)
 
         # Collect results
@@ -522,7 +535,9 @@ def test_eval_loop_none_output() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         eval_loop.run(max_iterations=1)
 
@@ -600,7 +615,9 @@ def test_eval_loop_nacks_on_send_failure() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         # Run - evaluation succeeds, but send fails, should nack
         eval_loop.run(max_iterations=1)
@@ -633,7 +650,9 @@ def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         # Run - evaluation fails, send also fails, should nack
         eval_loop.run(max_iterations=1)
@@ -684,7 +703,9 @@ def test_eval_loop_handles_expired_receipt_on_send() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         # Run - should handle ReceiptHandleExpiredError gracefully (pass, not raise)
         eval_loop.run(max_iterations=1)
@@ -730,8 +751,8 @@ class _NackExpiresMessage:
         return self._inner.id  # type: ignore[attr-defined, no-any-return]
 
     @property
-    def reply_to(self) -> str | None:
-        return self._inner.reply_to  # type: ignore[attr-defined, no-any-return]
+    def reply_routes(self) -> ReplyRoutes | None:
+        return self._inner.reply_routes  # type: ignore[attr-defined, no-any-return]
 
     @property
     def delivery_count(self) -> int:
@@ -764,7 +785,9 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         # Run - send fails, nack raises ReceiptHandleExpiredError, should handle gracefully
         eval_loop.run(max_iterations=1)
@@ -875,7 +898,9 @@ def test_eval_loop_with_session_aware_evaluator() -> None:
 
         # Submit a sample with reply_to
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        requests.send(
+            EvalRequest(sample=sample), reply_routes=ReplyRoutes.single("eval-results")
+        )
 
         # Run single iteration
         eval_loop.run(max_iterations=1)

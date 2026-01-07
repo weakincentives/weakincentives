@@ -31,16 +31,16 @@ delivers messages to one consumer at a time with at-least-once delivery.
 
 Example::
 
-    from weakincentives.runtime.mailbox import InMemoryMailbox
+    from weakincentives.runtime.mailbox import InMemoryMailbox, ReplyRoutes
 
     # Create request mailbox - response mailboxes auto-created on send
     requests = InMemoryMailbox(name="requests")
 
-    # Client: send request with reply_to (auto-creates response mailbox)
-    requests.send("process this", reply_to="my-responses")
+    # Client: send request with reply_routes (auto-creates response mailbox)
+    requests.send("process this", reply_routes=ReplyRoutes.single("my-responses"))
     responses = requests.resolver.resolve("my-responses")
 
-    # Worker: process and reply (routes automatically)
+    # Worker: process and reply (routes automatically based on reply type)
     for msg in requests.receive(visibility_timeout=60):
         try:
             result = do_work(msg.body)
@@ -76,8 +76,10 @@ from ._types import (
     MailboxFullError,
     Message,
     MessageFinalizedError,
+    NoRouteError,
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
+    ReplyRoutes,
     SerializationError,
 )
 
@@ -97,10 +99,12 @@ __all__ = [
     "MailboxResolver",
     "Message",
     "MessageFinalizedError",
+    "NoRouteError",
     "NullMailbox",
     "ReceiptHandleExpiredError",
     "RegistryResolver",
     "ReplyNotAvailableError",
+    "ReplyRoutes",
     "SerializationError",
 ]
 

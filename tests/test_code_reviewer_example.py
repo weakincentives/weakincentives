@@ -53,7 +53,11 @@ from weakincentives.runtime import (
     MainLoopResult,
 )
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
-from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
+from weakincentives.runtime.mailbox import (
+    MailboxResolver,
+    RegistryResolver,
+    ReplyRoutes,
+)
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
 
@@ -289,7 +293,7 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
         request_event = MainLoopRequest(
             request=ReviewTurnParams(request="test request")
         )
-        requests.send(request_event, reply_to="responses")
+        requests.send(request_event, reply_routes=ReplyRoutes.single("responses"))
 
         # Process one iteration
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -339,7 +343,7 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
                 request=ReviewTurnParams(request="first"),
                 deadline=first_deadline,
             ),
-            reply_to="responses",
+            reply_routes=ReplyRoutes.single("responses"),
         )
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -348,7 +352,7 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
                 request=ReviewTurnParams(request="second"),
                 deadline=second_deadline,
             ),
-            reply_to="responses",
+            reply_routes=ReplyRoutes.single("responses"),
         )
         loop.run(max_iterations=1, wait_time_seconds=0)
 

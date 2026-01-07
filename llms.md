@@ -1001,13 +1001,15 @@ requests: InMemoryMailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
 responses: InMemoryMailbox[MainLoopResult, None] = InMemoryMailbox(name="responses")
 
 # Send request with reply routing
+from weakincentives.runtime.mailbox import ReplyRoutes
+
 requests.send(
     MainLoopRequest(
         request=ReviewRequest(...),
         budget=Budget(max_total_tokens=10000),  # Overrides config default
         deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
     ),
-    reply_to="responses",
+    reply_routes=ReplyRoutes.single("responses"),
 )
 
 # MainLoop processes from requests mailbox and replies via msg.reply()
@@ -1132,7 +1134,7 @@ for msg in messages:
 Workers can send results to dynamic destinations derived from incoming messages:
 
 ```python
-from weakincentives.runtime.mailbox import InMemoryMailbox, RegistryResolver
+from weakincentives.runtime.mailbox import InMemoryMailbox, RegistryResolver, ReplyRoutes
 
 # Setup resolver mapping identifiers to mailboxes
 responses = InMemoryMailbox(name="client-responses")
@@ -1141,7 +1143,7 @@ resolver = RegistryResolver({"client-123": responses})
 requests = InMemoryMailbox(name="requests", reply_resolver=resolver)
 
 # Client sends with reply destination
-requests.send(body=Request(...), reply_to="client-123")
+requests.send(body=Request(...), reply_routes=ReplyRoutes.single("client-123"))
 
 # Worker replies - resolver routes to correct mailbox
 for msg in requests.receive():

@@ -28,8 +28,9 @@ Example::
         client=client,
     )
 
-    # reply_to automatically resolves to queues on the same Redis server
-    mailbox.send(MyEvent(data="hello"), reply_to="responses")
+    # reply_routes automatically resolves to queues on the same Redis server
+    from weakincentives.runtime.mailbox import ReplyRoutes
+    mailbox.send(MyEvent(data="hello"), reply_routes=ReplyRoutes.single("responses"))
 """
 
 from __future__ import annotations

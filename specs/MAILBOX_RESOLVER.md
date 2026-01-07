@@ -26,7 +26,7 @@ When `Message.reply(body)` is called, two steps occur:
 
 1. **Route selection**: `ReplyRoutes.route_for(body)` determines the mailbox
    identifier based on the body's type
-2. **Mailbox resolution**: `MailboxResolver.resolve(identifier)` returns the
+1. **Mailbox resolution**: `MailboxResolver.resolve(identifier)` returns the
    target mailbox
 
 ```
@@ -50,13 +50,13 @@ This separation allows:
 
 ## Comparison with ResourceResolver
 
-| Aspect        | ResourceResolver             | MailboxResolver               |
+| Aspect | ResourceResolver | MailboxResolver |
 | ------------- | ---------------------------- | ----------------------------- |
-| Key type      | `type[T]`                    | `str`                         |
-| Purpose       | DI container                 | Service discovery             |
-| Resolution    | Static bindings              | Dynamic lookup + factory      |
-| Caching       | Scope-aware (singleton/tool) | Optional, leak-prevention     |
-| Configuration | `Binding` objects            | `MailboxFactory` + registry   |
+| Key type | `type[T]` | `str` |
+| Purpose | DI container | Service discovery |
+| Resolution | Static bindings | Dynamic lookup + factory |
+| Caching | Scope-aware (singleton/tool) | Optional, leak-prevention |
+| Configuration | `Binding` objects | `MailboxFactory` + registry |
 
 The mailbox resolver is a **factory + registry pattern**, not a DI container.
 It does not participate in dependency graphs or lifecycle scoping.
