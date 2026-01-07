@@ -26,6 +26,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
+from ..prompt.policy import PolicyDecision, ToolPolicy
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
@@ -228,6 +229,45 @@ def _ensure_deadline_not_expired(
         )
 
 
+def _check_policies(
+    *,
+    policies: tuple[ToolPolicy, ...],
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool_params: SupportsDataclass | None,
+    context: ToolContext,
+    log: StructuredLogger,
+) -> PolicyDecision:
+    """Check all policies and return the first denial or allow."""
+    for policy in policies:
+        decision = policy.check(tool, tool_params, context=context)
+        if not decision.allowed:
+            log.info(
+                "Policy denied tool execution.",
+                event="policy_denied",
+                context={
+                    "policy": policy.name,
+                    "reason": decision.reason,
+                },
+            )
+            return decision
+    return PolicyDecision.allow()
+
+
+def _notify_policies_of_result(
+    *,
+    policies: tuple[ToolPolicy, ...],
+    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
+    tool_params: SupportsDataclass | None,
+    result: ToolResult[SupportsToolResult],
+    context: ToolContext,
+) -> None:
+    """Notify all policies of a successful tool execution."""
+    if not result.success:
+        return
+    for policy in policies:
+        policy.on_result(tool, tool_params, result, context=context)
+
+
 def _invoke_tool_handler(
     *,
     handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
@@ -357,35 +397,6 @@ def _restore_snapshot_if_needed(
     )
 
 
-def _execute_tool_handler(
-    *,
-    context: ToolExecutionContext,
-    tool: Tool[SupportsDataclassOrNone, SupportsToolResult],
-    handler: ToolHandler[SupportsDataclassOrNone, SupportsToolResult],
-    tool_name: str,
-    tool_params: SupportsDataclass | None,
-) -> ToolResult[SupportsToolResult]:
-    """Execute the tool handler and build the tool context."""
-    _ensure_deadline_not_expired(
-        deadline=context.deadline,
-        prompt_name=context.prompt_name,
-        tool_name=tool_name,
-    )
-    # Resources are accessed via prompt.resources (through ToolContext.resources property)
-    tool_context = ToolContext(
-        prompt=cast(PromptProtocol[Any], context.prompt),
-        rendered_prompt=context.rendered_prompt,
-        adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
-        session=context.session,
-        deadline=context.deadline,
-    )
-    return _invoke_tool_handler(
-        handler=handler,
-        tool_params=tool_params,
-        context=tool_context,
-    )
-
-
 def _handle_tool_exception(  # noqa: PLR0913
     error: Exception,
     *,
@@ -425,6 +436,17 @@ def _handle_tool_exception(  # noqa: PLR0913
     )
 
 
+def _build_policy_denied_result(
+    decision: PolicyDecision,
+) -> ToolResult[SupportsToolResult]:
+    """Build a tool result for a policy-denied invocation."""
+    return ToolResult(
+        message=decision.reason or "Policy denied",
+        value=None,
+        success=False,
+    )
+
+
 def _execute_tool_with_snapshot(  # noqa: PLR0913
     *,
     context: ToolExecutionContext,
@@ -439,14 +461,55 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
     """Execute tool with transactional snapshot restore on failure."""
     tool_params: SupportsDataclass | None = None
     tool_result: ToolResult[SupportsToolResult]
+
+    # Build ToolContext once for policy checking and handler execution
+    tool_context = ToolContext(
+        prompt=cast(PromptProtocol[Any], context.prompt),
+        rendered_prompt=context.rendered_prompt,
+        adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
+        session=context.session,
+        deadline=context.deadline,
+    )
+
+    # Get policies for this tool
+    policies = context.prompt.policies_for_tool(tool_name)
+
     try:
         tool_params = parse_tool_params(tool=tool, arguments_mapping=arguments_mapping)
-        tool_result = _execute_tool_handler(
-            context=context,
+
+        # Check policies before executing handler
+        decision = _check_policies(
+            policies=policies,
             tool=tool,
-            handler=handler,
-            tool_name=tool_name,
             tool_params=tool_params,
+            context=tool_context,
+            log=log,
+        )
+        if (
+            not decision.allowed
+        ):  # pragma: no cover - integration path tested via helpers
+            tool_result = _build_policy_denied_result(decision)
+            _restore_snapshot_if_needed(context, snapshot, log, reason="policy_denied")
+            yield ToolExecutionOutcome(
+                tool=tool,
+                params=tool_params,
+                result=tool_result,
+                call_id=call_id,
+                log=log,
+                snapshot=snapshot,
+            )
+            return
+
+        # Execute handler
+        _ensure_deadline_not_expired(
+            deadline=context.deadline,
+            prompt_name=context.prompt_name,
+            tool_name=tool_name,
+        )
+        tool_result = _invoke_tool_handler(
+            handler=handler,
+            tool_params=tool_params,
+            context=tool_context,
         )
     except (VisibilityExpansionRequired, PromptEvaluationError):
         # Context manager handles restore; just re-raise
@@ -470,6 +533,15 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
         # Manually restore if tool execution reported failure
         if not tool_result.success:
             _restore_snapshot_if_needed(context, snapshot, log, reason="tool_failure")
+        else:
+            # Notify policies of successful execution
+            _notify_policies_of_result(
+                policies=policies,
+                tool=tool,
+                tool_params=tool_params,
+                result=tool_result,
+                context=tool_context,
+            )
         _log_tool_completion(log, tool_result, tool_name)
 
     # Defensive check: None is valid for parameterless tools (params_type is type(None))

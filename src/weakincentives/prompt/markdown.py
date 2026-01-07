@@ -16,7 +16,7 @@ import textwrap
 from collections.abc import Callable, Sequence
 from dataclasses import fields, is_dataclass
 from string import Template
-from typing import Any, Self, TypeVar, cast, override
+from typing import TYPE_CHECKING, Any, Self, TypeVar, cast, override
 
 from ..serde import clone as clone_dataclass
 from ..types.dataclass import (
@@ -24,6 +24,9 @@ from ..types.dataclass import (
 )
 from .errors import PromptRenderError
 from .section import Section, SectionVisibility, VisibilitySelector
+
+if TYPE_CHECKING:
+    from .policy import ToolPolicy
 
 MarkdownParamsT = TypeVar("MarkdownParamsT", bound=SupportsDataclass, covariant=True)
 
@@ -41,6 +44,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
         children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: Callable[[SupportsDataclass], bool] | None = None,
         tools: Sequence[object] | None = None,
+        policies: Sequence[ToolPolicy] | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
         visibility: VisibilitySelector = SectionVisibility.FULL,
@@ -53,6 +57,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
             children=children,
             enabled=enabled,
             tools=tools,
+            policies=policies,
             accepts_overrides=accepts_overrides,
             summary=summary,
             visibility=visibility,
@@ -187,6 +192,7 @@ class MarkdownSection(Section[MarkdownParamsT]):
             children=cloned_children,
             enabled=self._enabled,  # ty: ignore[invalid-argument-type]  # callback arity
             tools=self.tools(),
+            policies=self.policies(),
             accepts_overrides=self.accepts_overrides,
             summary=self.summary,
             visibility=self.visibility,

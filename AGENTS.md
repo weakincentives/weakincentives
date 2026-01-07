@@ -97,6 +97,8 @@ a goal at any time.
   helpers or shared state.
 - **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
   modifying tools.
+- **TOOL_POLICIES.md**: Sequential tool dependencies (read-before-write, keyed
+  constraints)—when adding policy enforcement to tools.
 - **FORMAL_VERIFICATION.md**: Embedding TLA+ specifications in Python using
   `@formal_spec` decorator, running TLC model checker, and verification
   testing—when adding formal specs or modifying verified code.
