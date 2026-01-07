@@ -457,23 +457,23 @@ class TestResolveSkillName:
 class TestValidateSkillName:
     def test_valid_name(self) -> None:
         validate_skill_name("my-skill")
-        validate_skill_name("skill_v2")
+        validate_skill_name("skill2")
         validate_skill_name("123-test")
 
     def test_rejects_forward_slash(self) -> None:
-        with pytest.raises(SkillMountError, match="invalid characters"):
+        with pytest.raises(SkillMountError, match="Invalid skill name"):
             validate_skill_name("path/traversal")
 
     def test_rejects_backslash(self) -> None:
-        with pytest.raises(SkillMountError, match="invalid characters"):
+        with pytest.raises(SkillMountError, match="Invalid skill name"):
             validate_skill_name("path\\traversal")
 
     def test_rejects_double_dot(self) -> None:
-        with pytest.raises(SkillMountError, match="invalid characters"):
+        with pytest.raises(SkillMountError, match="Invalid skill name"):
             validate_skill_name("..evil")
 
     def test_rejects_empty_name(self) -> None:
-        with pytest.raises(SkillMountError, match="Invalid skill name"):
+        with pytest.raises(SkillMountError, match="cannot be empty"):
             validate_skill_name("")
 
     def test_rejects_dot(self) -> None:
@@ -485,7 +485,14 @@ class TestValidateSkill:
     def test_valid_directory_skill(self, tmp_path: Path) -> None:
         skill_dir = tmp_path / "test-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("# Test Skill\n\nContent")
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: test-skill\n"
+            "description: A test skill for validation\n"
+            "---\n"
+            "\n"
+            "# Test Skill\n\nContent"
+        )
         validate_skill(skill_dir)  # Should not raise
 
     def test_directory_missing_skill_md(self, tmp_path: Path) -> None:
@@ -496,7 +503,14 @@ class TestValidateSkill:
 
     def test_valid_file_skill(self, tmp_path: Path) -> None:
         skill_file = tmp_path / "test-skill.md"
-        skill_file.write_text("# Test Skill\n\nContent")
+        skill_file.write_text(
+            "---\n"
+            "name: test-skill\n"
+            "description: A test skill for validation\n"
+            "---\n"
+            "\n"
+            "# Test Skill\n\nContent"
+        )
         validate_skill(skill_file)  # Should not raise
 
     def test_file_wrong_extension(self, tmp_path: Path) -> None:
@@ -518,7 +532,15 @@ class TestCopySkill:
         # Create source skill directory
         source = tmp_path / "source-skill"
         source.mkdir()
-        (source / "SKILL.md").write_text("# Test Skill")
+        skill_content = (
+            "---\n"
+            "name: source-skill\n"
+            "description: A test skill for copying\n"
+            "---\n"
+            "\n"
+            "# Test Skill"
+        )
+        (source / "SKILL.md").write_text(skill_content)
         (source / "examples").mkdir()
         (source / "examples" / "example.py").write_text("print('hello')")
 
@@ -526,27 +548,42 @@ class TestCopySkill:
         bytes_copied = _copy_skill(source, dest)
 
         assert dest.is_dir()
-        assert (dest / "SKILL.md").read_text() == "# Test Skill"
+        assert (dest / "SKILL.md").read_text() == skill_content
         assert (dest / "examples" / "example.py").read_text() == "print('hello')"
         assert bytes_copied > 0
 
     def test_copy_file_skill_wraps_in_directory(self, tmp_path: Path) -> None:
         # Create source skill file
         source = tmp_path / "skill.md"
-        source.write_text("# Single File Skill")
+        skill_content = (
+            "---\n"
+            "name: skill\n"
+            "description: A single file test skill\n"
+            "---\n"
+            "\n"
+            "# Single File Skill"
+        )
+        source.write_text(skill_content)
 
         dest = tmp_path / "dest-skill"
         bytes_copied = _copy_skill(source, dest)
 
         assert dest.is_dir()
-        assert (dest / "SKILL.md").read_text() == "# Single File Skill"
+        assert (dest / "SKILL.md").read_text() == skill_content
         assert bytes_copied > 0
 
     def test_copy_directory_exceeds_size_limit(self, tmp_path: Path) -> None:
         # Create large skill directory
         source = tmp_path / "large-skill"
         source.mkdir()
-        (source / "SKILL.md").write_text("# Large Skill")
+        (source / "SKILL.md").write_text(
+            "---\n"
+            "name: large-skill\n"
+            "description: A large test skill\n"
+            "---\n"
+            "\n"
+            "# Large Skill"
+        )
         (source / "big_file.txt").write_text("x" * 100)
 
         dest = tmp_path / "dest-skill"
@@ -557,7 +594,14 @@ class TestCopySkill:
     def test_copy_file_exceeds_size_limit(self, tmp_path: Path) -> None:
         # Create large single-file skill
         source = tmp_path / "large-skill.md"
-        source.write_text("# Large Skill\n" + "x" * 100)
+        source.write_text(
+            "---\n"
+            "name: large-skill\n"
+            "description: A large single file skill\n"
+            "---\n"
+            "\n"
+            "# Large Skill\n" + "x" * 100
+        )
 
         dest = tmp_path / "dest-skill"
         # Use a very small limit to trigger the error
@@ -568,7 +612,14 @@ class TestCopySkill:
         # Create source skill directory with symlink
         source = tmp_path / "source-skill"
         source.mkdir()
-        (source / "SKILL.md").write_text("# Test Skill")
+        (source / "SKILL.md").write_text(
+            "---\n"
+            "name: source-skill\n"
+            "description: A test skill with symlinks\n"
+            "---\n"
+            "\n"
+            "# Test Skill"
+        )
         external_file = tmp_path / "external.txt"
         external_file.write_text("external content")
         (source / "link.txt").symlink_to(external_file)
@@ -583,7 +634,14 @@ class TestCopySkill:
     def test_copy_raises_on_io_error(self, tmp_path: Path) -> None:
         # Create a source file
         source = tmp_path / "skill.md"
-        source.write_text("# Test Skill")
+        source.write_text(
+            "---\n"
+            "name: skill\n"
+            "description: A test skill for error handling\n"
+            "---\n"
+            "\n"
+            "# Test Skill"
+        )
 
         dest = tmp_path / "dest-skill"
 
@@ -597,7 +655,14 @@ class TestEphemeralHomeSkillMounting:
     def test_mounts_directory_skill(self, tmp_path: Path) -> None:
         skill_dir = tmp_path / "my-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("# My Skill")
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: my-skill\n"
+            "description: A test skill for mounting\n"
+            "---\n"
+            "\n"
+            "# My Skill\n"
+        )
 
         config = IsolationConfig(
             skills=SkillConfig(skills=(SkillMount(source=skill_dir),))
@@ -606,11 +671,19 @@ class TestEphemeralHomeSkillMounting:
             assert home.skills_dir.is_dir()
             skill_dest = home.skills_dir / "my-skill"
             assert skill_dest.is_dir()
-            assert (skill_dest / "SKILL.md").read_text() == "# My Skill"
+            content = (skill_dest / "SKILL.md").read_text()
+            assert "# My Skill" in content
 
     def test_mounts_file_skill(self, tmp_path: Path) -> None:
         skill_file = tmp_path / "my-skill.md"
-        skill_file.write_text("# File Skill")
+        skill_file.write_text(
+            "---\n"
+            "name: my-skill\n"
+            "description: A file-based test skill\n"
+            "---\n"
+            "\n"
+            "# File Skill\n"
+        )
 
         config = IsolationConfig(
             skills=SkillConfig(skills=(SkillMount(source=skill_file),))
@@ -618,12 +691,20 @@ class TestEphemeralHomeSkillMounting:
         with EphemeralHome(config) as home:
             skill_dest = home.skills_dir / "my-skill"
             assert skill_dest.is_dir()
-            assert (skill_dest / "SKILL.md").read_text() == "# File Skill"
+            content = (skill_dest / "SKILL.md").read_text()
+            assert "# File Skill" in content
 
     def test_mounts_skill_with_custom_name(self, tmp_path: Path) -> None:
         skill_dir = tmp_path / "original-name"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("# Custom Named")
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: original-name\n"
+            "description: A skill with a custom mount name\n"
+            "---\n"
+            "\n"
+            "# Custom Named\n"
+        )
 
         config = IsolationConfig(
             skills=SkillConfig(
@@ -637,7 +718,14 @@ class TestEphemeralHomeSkillMounting:
     def test_skips_disabled_skills(self, tmp_path: Path) -> None:
         skill_dir = tmp_path / "disabled-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("# Disabled")
+        (skill_dir / "SKILL.md").write_text(
+            "---\n"
+            "name: disabled-skill\n"
+            "description: A disabled test skill\n"
+            "---\n"
+            "\n"
+            "# Disabled\n"
+        )
 
         config = IsolationConfig(
             skills=SkillConfig(skills=(SkillMount(source=skill_dir, enabled=False),))
@@ -649,11 +737,15 @@ class TestEphemeralHomeSkillMounting:
         # Create two skills
         skill1 = tmp_path / "skill-one"
         skill1.mkdir()
-        (skill1 / "SKILL.md").write_text("# Skill One")
+        (skill1 / "SKILL.md").write_text(
+            "---\nname: skill-one\ndescription: First test skill\n---\n\n# Skill One\n"
+        )
 
         skill2 = tmp_path / "skill-two"
         skill2.mkdir()
-        (skill2 / "SKILL.md").write_text("# Skill Two")
+        (skill2 / "SKILL.md").write_text(
+            "---\nname: skill-two\ndescription: Second test skill\n---\n\n# Skill Two\n"
+        )
 
         config = IsolationConfig(
             skills=SkillConfig(
@@ -670,11 +762,15 @@ class TestEphemeralHomeSkillMounting:
     def test_rejects_duplicate_skill_names(self, tmp_path: Path) -> None:
         skill1 = tmp_path / "skill-a"
         skill1.mkdir()
-        (skill1 / "SKILL.md").write_text("# Skill A")
+        (skill1 / "SKILL.md").write_text(
+            "---\nname: skill-a\ndescription: First skill\n---\n\n# Skill A\n"
+        )
 
         skill2 = tmp_path / "skill-b"
         skill2.mkdir()
-        (skill2 / "SKILL.md").write_text("# Skill B")
+        (skill2 / "SKILL.md").write_text(
+            "---\nname: skill-b\ndescription: Second skill\n---\n\n# Skill B\n"
+        )
 
         config = IsolationConfig(
             skills=SkillConfig(
@@ -736,7 +832,9 @@ class TestEphemeralHomeSkillMounting:
     def test_skills_dir_property(self, tmp_path: Path) -> None:
         skill_dir = tmp_path / "test-skill"
         skill_dir.mkdir()
-        (skill_dir / "SKILL.md").write_text("# Test")
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: test-skill\ndescription: A test skill\n---\n\n# Test"
+        )
 
         config = IsolationConfig(
             skills=SkillConfig(skills=(SkillMount(source=skill_dir),))
@@ -750,7 +848,9 @@ class TestIsolationConfigWithSkills:
     def test_isolation_config_accepts_skills(self, tmp_path: Path) -> None:
         source = tmp_path / "skill"
         source.mkdir()
-        (source / "SKILL.md").write_text("# Test")
+        (source / "SKILL.md").write_text(
+            "---\nname: skill\ndescription: A test skill\n---\n\n# Test"
+        )
 
         skills = SkillConfig(skills=(SkillMount(source=source),))
         config = IsolationConfig(skills=skills)

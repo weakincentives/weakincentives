@@ -2425,6 +2425,9 @@ wheels = [
 [[package]]
 name = "weakincentives"
 source = { editable = "." }
+dependencies = [
+    { name = "pyyaml" },
+]
 
 [package.optional-dependencies]
 asteval = [
@@ -2478,6 +2481,7 @@ requires-dist = [
     { name = "markdown-it-py", extras = ["linkify"], marker = "extra == 'wink'", specifier = ">=4.0.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.8.0" },
     { name = "podman", marker = "extra == 'podman'", specifier = ">=5.6.0" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.0" },
     { name = "uvicorn", marker = "extra == 'wink'", specifier = ">=0.30.0" },
 ]
