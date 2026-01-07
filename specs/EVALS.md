@@ -1199,8 +1199,6 @@ Scale horizontally by running multiple EvalLoop workers:
 Visibility timeout ensures each sample is processed by exactly one worker.
 Failed evaluations retry automatically with exponential backoff.
 
-With LangSmith enabled, MainLoop executions are automatically traced.
-
 ## Testing Evaluators
 
 Evaluators are pure functions—test them directly:

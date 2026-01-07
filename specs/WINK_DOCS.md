@@ -59,7 +59,6 @@ src/weakincentives/
         ├── EVALS.md
         ├── EXAMPLES.md
         ├── FILESYSTEM.md
-        ├── LANGSMITH.md
         ├── LOGGING.md
         ├── MAILBOX.md
         ├── MAIN_LOOP.md
