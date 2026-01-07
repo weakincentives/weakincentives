@@ -84,8 +84,6 @@ a goal at any time.
   evaluators, or metrics aggregation.
 - **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
   ToolContext integration—when adding or modifying filesystem operations.
-- **LANGSMITH.md**: LangSmith integration—when implementing telemetry, prompt
-  hub, or evaluation features.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.

@@ -156,7 +156,6 @@ Consult these specs before modifying related code:
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/FORMAL_VERIFICATION.md` | Embedding TLA+ in Python, `@formal_spec` decorator, TLC verification |
 | `specs/HEALTH.md` | Health endpoints, watchdog, stuck worker detection, process termination |
-| `specs/LANGSMITH.md` | LangSmith telemetry, prompt hub, evaluation integration |
 | `specs/LIFECYCLE.md` | LoopGroup, ShutdownCoordinator, graceful shutdown patterns |
 | `specs/LOGGING.md` | Logging surfaces |
 | `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, MainLoop integration |
