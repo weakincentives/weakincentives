@@ -389,9 +389,13 @@ class ReadBeforeWritePolicy:
         if path is None:
             return PolicyDecision.allow()
 
-        # Allow creating new files without reading first
+        # No filesystem available: allow (other safety checks apply)
         fs = context.filesystem
-        if fs is not None and not fs.exists(path):
+        if fs is None:
+            return PolicyDecision.allow()
+
+        # Allow creating new files without reading first
+        if not fs.exists(path):
             return PolicyDecision.allow()
 
         # Existing file: must have been read
@@ -438,8 +442,8 @@ policy = ReadBeforeWritePolicy(
 ```
 
 **Filesystem access**: The policy accesses `context.filesystem` to check
-file existence. If no filesystem is available in the context, the policy
-falls back to requiring reads for all paths (fail-closed).
+file existence. If no filesystem is available in the context, all writes
+are allowed (other safety mechanisms are expected to be in place).
 
 ### Relationship Between Policies
 
