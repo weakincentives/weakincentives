@@ -617,13 +617,16 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for budget/dead
                             "feedback": result.feedback,
                         },
                     )
-                    # Don't stop - let agent continue to complete tasks
-                    # Return feedback to agent via tool result modification
+                    # Report as tool failure - agent must complete tasks and retry
+                    error_message = (
+                        f"Task completion check failed: {result.feedback}\n\n"
+                        "Please complete the remaining tasks before calling "
+                        "StructuredOutput again."
+                    )
                     return {
                         "toolResultModification": {
-                            "appendContent": (
-                                f"\n\n[Task Completion Check] {result.feedback}"
-                            ),
+                            "replaceContent": error_message,
+                            "isError": True,
                         },
                     }
 
