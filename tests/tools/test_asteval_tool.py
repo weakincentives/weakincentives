@@ -98,7 +98,7 @@ def _get_files_dict(section: VfsToolsSection) -> dict[tuple[str, ...], str]:
     result: dict[tuple[str, ...], str] = {}
     for path, file in fs._files.items():
         segments = tuple(path.split("/")) if path else ()
-        result[segments] = file.content
+        result[segments] = file.content.decode("utf-8")
     return result
 
 

@@ -51,11 +51,11 @@ class FilesystemValidationSuite:  # noqa: PLR0904
     instance to test. The filesystem should be empty at the start of each test.
 
     This suite validates:
-    - Read operations (read, exists, stat, list, glob, grep)
-    - Write operations (write, delete, mkdir)
+    - Read operations (read, read_bytes, exists, stat, list, glob, grep)
+    - Write operations (write, write_bytes, delete, mkdir)
     - Properties (root, read_only)
     - Error handling (FileNotFoundError, IsADirectoryError, etc.)
-    - Path validation (depth, segment length, ASCII)
+    - Path validation (depth, segment length)
 
     Implementation-specific tests (e.g., HostFilesystem path escape detection)
     should remain in their own test modules.
@@ -162,6 +162,70 @@ class FilesystemValidationSuite:  # noqa: PLR0904
             fs.read("mydir")
 
     # -------------------------------------------------------------------------
+    # Read Bytes Operation
+    # -------------------------------------------------------------------------
+
+    def test_read_bytes_file_content(self, fs: Filesystem) -> None:
+        """read_bytes() should return raw file content."""
+        fs.write_bytes("file.bin", b"\x00\x01\x02\x03")
+        result = fs.read_bytes("file.bin")
+        assert result.content == b"\x00\x01\x02\x03"
+        assert result.path == "file.bin"
+        assert result.size_bytes == 4
+
+    def test_read_bytes_with_offset(self, fs: Filesystem) -> None:
+        """read_bytes() should support offset parameter."""
+        fs.write_bytes("file.bin", b"hello world")
+        result = fs.read_bytes("file.bin", offset=6)
+        assert result.content == b"world"
+        assert result.offset == 6
+
+    def test_read_bytes_with_limit(self, fs: Filesystem) -> None:
+        """read_bytes() should support limit parameter."""
+        fs.write_bytes("file.bin", b"hello world")
+        result = fs.read_bytes("file.bin", limit=5)
+        assert result.content == b"hello"
+        assert result.limit == 5
+        assert result.truncated is True
+
+    def test_read_bytes_missing_file_raises(self, fs: Filesystem) -> None:
+        """read_bytes() should raise FileNotFoundError for missing files."""
+        with pytest.raises(FileNotFoundError):
+            fs.read_bytes("missing.bin")
+
+    def test_read_bytes_directory_raises(self, fs: Filesystem) -> None:
+        """read_bytes() should raise IsADirectoryError for directories."""
+        fs.mkdir("mydir")
+        with pytest.raises(IsADirectoryError):
+            fs.read_bytes("mydir")
+
+    def test_read_bytes_binary_content(self, fs: Filesystem) -> None:
+        """read_bytes() should handle binary content that can't be decoded as UTF-8."""
+        binary_data = b"\xff\xfe\x00\x01\x80\x81"  # Invalid UTF-8
+        fs.write_bytes("binary.bin", binary_data)
+        result = fs.read_bytes("binary.bin")
+        assert result.content == binary_data
+
+    def test_read_text_fails_on_binary_content(self, fs: Filesystem) -> None:
+        """read() should fail when file contains binary content that can't be decoded."""
+        binary_data = b"\xff\xfe\x00\x01\x80\x81"  # Invalid UTF-8
+        fs.write_bytes("binary.bin", binary_data)
+        with pytest.raises(ValueError, match=r"binary content.*read_bytes"):
+            fs.read("binary.bin")
+
+    def test_read_bytes_negative_offset_raises(self, fs: Filesystem) -> None:
+        """read_bytes() should raise ValueError for negative offset."""
+        fs.write_bytes("file.bin", b"content")
+        with pytest.raises(ValueError, match=r"offset must be non-negative"):
+            fs.read_bytes("file.bin", offset=-1)
+
+    def test_read_bytes_negative_limit_raises(self, fs: Filesystem) -> None:
+        """read_bytes() should raise ValueError for negative limit."""
+        fs.write_bytes("file.bin", b"content")
+        with pytest.raises(ValueError, match=r"limit must be non-negative"):
+            fs.read_bytes("file.bin", limit=-1)
+
+    # -------------------------------------------------------------------------
     # Write Operation
     # -------------------------------------------------------------------------
 
@@ -198,6 +262,13 @@ class FilesystemValidationSuite:  # noqa: PLR0904
         result = fs.read("missing.txt")
         assert result.content == "content"
 
+    def test_write_append_bytes_written(self, fs: Filesystem) -> None:
+        """write() with mode='append' should report bytes written, not total size."""
+        fs.write("file.txt", "hello")  # 5 bytes
+        result = fs.write("file.txt", " world", mode="append")  # 6 bytes
+        # bytes_written should be 6 (what we just wrote), not 11 (total size)
+        assert result.bytes_written == len(b" world")
+
     def test_write_creates_parents(self, fs: Filesystem) -> None:
         """write() should create parent directories by default."""
         fs.write("dir1/dir2/file.txt", "content")
@@ -230,10 +301,70 @@ class FilesystemValidationSuite:  # noqa: PLR0904
         with pytest.raises(ValueError, match=r"[Pp]ath segment exceeds"):
             fs.write(long_segment, "content")
 
-    def test_write_validates_path_ascii(self, fs: Filesystem) -> None:
-        """write() should validate path contains only ASCII."""
-        with pytest.raises(ValueError, match="ASCII"):
-            fs.write("ファイル.txt", "content")
+    # -------------------------------------------------------------------------
+    # Write Bytes Operation
+    # -------------------------------------------------------------------------
+
+    def test_write_bytes_creates_file(self, fs: Filesystem) -> None:
+        """write_bytes() should create a new file."""
+        result = fs.write_bytes("file.bin", b"\x00\x01\x02", mode="create")
+        assert result.path == "file.bin"
+        assert result.bytes_written == 3
+        assert fs.exists("file.bin")
+
+    def test_write_bytes_create_mode_fails_if_exists(self, fs: Filesystem) -> None:
+        """write_bytes() with mode='create' should fail if file exists."""
+        fs.write_bytes("file.bin", b"original")
+        with pytest.raises(FileExistsError):
+            fs.write_bytes("file.bin", b"new", mode="create")
+
+    def test_write_bytes_overwrite_mode(self, fs: Filesystem) -> None:
+        """write_bytes() with mode='overwrite' should replace content."""
+        fs.write_bytes("file.bin", b"original")
+        fs.write_bytes("file.bin", b"updated", mode="overwrite")
+        result = fs.read_bytes("file.bin")
+        assert result.content == b"updated"
+
+    def test_write_bytes_append_mode(self, fs: Filesystem) -> None:
+        """write_bytes() with mode='append' should append content."""
+        fs.write_bytes("file.bin", b"hello")
+        fs.write_bytes("file.bin", b" world", mode="append")
+        result = fs.read_bytes("file.bin")
+        assert result.content == b"hello world"
+
+    def test_write_bytes_append_bytes_written(self, fs: Filesystem) -> None:
+        """write_bytes() with mode='append' should report bytes written, not total size."""
+        fs.write_bytes("file.bin", b"hello")  # 5 bytes
+        result = fs.write_bytes("file.bin", b" world", mode="append")  # 6 bytes
+        # bytes_written should be 6 (what we just wrote), not 11 (total size)
+        assert result.bytes_written == 6
+
+    def test_write_bytes_creates_parents(self, fs: Filesystem) -> None:
+        """write_bytes() should create parent directories by default."""
+        fs.write_bytes("dir1/dir2/file.bin", b"content")
+        assert fs.exists("dir1/dir2/file.bin")
+
+    def test_write_bytes_binary_content(self, fs: Filesystem) -> None:
+        """write_bytes() should handle binary content that can't be decoded as UTF-8."""
+        binary_data = b"\xff\xfe\x00\x01\x80\x81"  # Invalid UTF-8
+        fs.write_bytes("binary.bin", binary_data)
+        result = fs.read_bytes("binary.bin")
+        assert result.content == binary_data
+
+    def test_write_bytes_content_too_long_fails(self, fs: Filesystem) -> None:
+        """write_bytes() should fail if content exceeds max size."""
+        with pytest.raises(ValueError, match=r"[Cc]ontent exceeds maximum"):
+            fs.write_bytes("file.bin", b"x" * 100000)
+
+    def test_write_bytes_to_root_fails(self, fs: Filesystem) -> None:
+        """write_bytes() to root directory should fail."""
+        with pytest.raises(ValueError, match=r"[Cc]annot write to root"):
+            fs.write_bytes(".", b"content")
+
+    def test_write_bytes_without_parents_fails(self, fs: Filesystem) -> None:
+        """write_bytes() with create_parents=False should fail if parent missing."""
+        with pytest.raises(FileNotFoundError):
+            fs.write_bytes("dir1/dir2/file.bin", b"content", create_parents=False)
 
     # -------------------------------------------------------------------------
     # Stat Operation
@@ -380,6 +511,16 @@ class FilesystemValidationSuite:  # noqa: PLR0904
             next_ = (matches[i + 1].path, matches[i + 1].line_number)
             assert curr <= next_
 
+    def test_grep_skips_binary_files(self, fs: Filesystem) -> None:
+        """grep() should skip files that can't be decoded as UTF-8."""
+        binary_data = b"\xff\xfe\x00\x01\x80\x81"  # Invalid UTF-8
+        fs.write_bytes("binary.bin", binary_data)
+        fs.write("text.txt", "match")
+        matches = fs.grep(".*")
+        # Should only match text.txt
+        assert len(matches) == 1
+        assert matches[0].path == "text.txt"
+
     # -------------------------------------------------------------------------
     # Delete Operation
     # -------------------------------------------------------------------------
@@ -481,6 +622,14 @@ class FilesystemValidationSuite:  # noqa: PLR0904
         result = fs.read("a/b/../b/c/file.txt")
         assert result.content == "content"
 
+    def test_utf8_path_handling(self, fs: Filesystem) -> None:
+        """Filesystem should handle UTF-8 characters in paths."""
+        # Test various UTF-8 characters: accented, emoji, CJK
+        fs.write("café/日本語/файл.txt", "content with émojis 🎉")
+        assert fs.exists("café/日本語/файл.txt")
+        result = fs.read("café/日本語/файл.txt")
+        assert result.content == "content with émojis 🎉"
+
 
 class ReadOnlyFilesystemValidationSuite:
     """Test suite for read-only Filesystem behavior.
@@ -513,6 +662,11 @@ class ReadOnlyFilesystemValidationSuite:
         """mkdir() should raise PermissionError on read-only filesystem."""
         with pytest.raises(PermissionError):
             fs_readonly.mkdir("mydir")
+
+    def test_write_bytes_fails_on_readonly(self, fs_readonly: Filesystem) -> None:
+        """write_bytes() should raise PermissionError on read-only filesystem."""
+        with pytest.raises(PermissionError):
+            fs_readonly.write_bytes("file.bin", b"content")
 
 
 class SnapshotableFilesystemValidationSuite:

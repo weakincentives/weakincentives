@@ -43,6 +43,7 @@ from weakincentives.errors import SnapshotRestoreError
 from weakincentives.filesystem import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
+    MAX_WRITE_BYTES,
     MAX_WRITE_LENGTH,
     READ_ENTIRE_FILE,
     FileEntry,
@@ -50,6 +51,7 @@ from weakincentives.filesystem import (
     FilesystemSnapshot,
     GlobMatch,
     GrepMatch,
+    ReadBytesResult,
     ReadResult,
     WriteResult,
     glob_match,
@@ -70,9 +72,13 @@ __all__ = ["InMemoryFilesystem"]
 
 @dataclass(slots=True)
 class _InMemoryFile:
-    """Internal representation of a file in memory."""
+    """Internal representation of a file in memory.
 
-    content: str
+    Files are stored as raw bytes internally. Text operations encode/decode
+    using UTF-8, while byte operations work directly with the stored content.
+    """
+
+    content: bytes
     created_at: datetime
     modified_at: datetime
 
@@ -139,7 +145,7 @@ class InMemoryFilesystem:
         limit: int | None = None,
         encoding: str = "utf-8",
     ) -> ReadResult:
-        """Read file content with optional pagination."""
+        """Read file content as text with optional pagination."""
         del encoding  # Only UTF-8 is supported
         normalized = normalize_path(path)
         validate_path(normalized)
@@ -152,7 +158,16 @@ class InMemoryFilesystem:
             raise FileNotFoundError(path)
 
         file = self._files[normalized]
-        lines = file.content.splitlines(keepends=True)
+        try:
+            text_content = file.content.decode("utf-8")
+        except UnicodeDecodeError as err:
+            msg = (
+                f"Cannot read '{path}' as text: file contains binary content that "
+                "cannot be decoded as utf-8. Use read_bytes() for binary files."
+            )
+            raise ValueError(msg) from err
+
+        lines = text_content.splitlines(keepends=True)
         total_lines = len(lines)
 
         # READ_ENTIRE_FILE (-1) reads all lines; None uses default window
@@ -175,6 +190,54 @@ class InMemoryFilesystem:
             offset=start,
             limit=end - start,
             truncated=end < total_lines,
+        )
+
+    def read_bytes(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> ReadBytesResult:
+        """Read file content as raw bytes with optional pagination."""
+        if offset < 0:
+            msg = f"offset must be non-negative, got {offset}"
+            raise ValueError(msg)
+        if limit is not None and limit < 0:
+            msg = f"limit must be non-negative, got {limit}"
+            raise ValueError(msg)
+
+        normalized = normalize_path(path)
+        validate_path(normalized)
+
+        if normalized in self._directories:
+            msg = f"Is a directory: {path}"
+            raise IsADirectoryError(msg)
+
+        if normalized not in self._files:
+            raise FileNotFoundError(path)
+
+        file = self._files[normalized]
+        file_size = len(file.content)
+
+        # Calculate actual positions
+        actual_offset = min(offset, file_size)
+        if limit is not None:
+            end = min(actual_offset + limit, file_size)
+        else:
+            end = file_size
+
+        data = file.content[actual_offset:end]
+        bytes_read = len(data)
+        truncated = actual_offset + bytes_read < file_size
+
+        return ReadBytesResult(
+            content=data,
+            path=normalized or "/",
+            size_bytes=file_size,
+            offset=actual_offset,
+            limit=bytes_read,
+            truncated=truncated,
         )
 
     def exists(self, path: str) -> bool:
@@ -201,12 +264,11 @@ class InMemoryFilesystem:
             raise FileNotFoundError(path)
 
         file = self._files[normalized]
-        size = len(file.content.encode("utf-8"))
         return FileStat(
             path=normalized,
             is_file=True,
             is_directory=False,
-            size_bytes=size,
+            size_bytes=len(file.content),
             created_at=file.created_at,
             modified_at=file.modified_at,
         )
@@ -323,7 +385,13 @@ class InMemoryFilesystem:
             if glob is not None and not glob_match(file_path, glob, normalized_base):
                 continue
 
-            for line_num, line in enumerate(file.content.splitlines(), start=1):
+            # Skip binary files that can't be decoded
+            try:
+                text_content = file.content.decode("utf-8")
+            except UnicodeDecodeError:
+                continue
+
+            for line_num, line in enumerate(text_content.splitlines(), start=1):
                 match = regex.search(line)
                 if match:
                     matches.append(
@@ -340,14 +408,14 @@ class InMemoryFilesystem:
 
         return matches
 
-    def _resolve_write_content(
+    def _resolve_write_bytes_content(
         self,
         normalized: str,
-        content: str,
+        content: bytes,
         mode: Literal["create", "overwrite", "append"],
         timestamp: datetime,
-    ) -> tuple[str, datetime]:
-        """Resolve final content and created_at timestamp for a write."""
+    ) -> tuple[bytes, datetime]:
+        """Resolve final content and created_at timestamp for a byte write."""
         exists = normalized in self._files
         if mode == "append" and exists:
             existing = self._files[normalized]
@@ -365,7 +433,7 @@ class InMemoryFilesystem:
         mode: Literal["create", "overwrite", "append"] = "overwrite",
         create_parents: bool = True,
     ) -> WriteResult:
-        """Write content to a file."""
+        """Write text content to a file."""
         if self._read_only:
             msg = "Filesystem is read-only"
             raise PermissionError(msg)
@@ -390,8 +458,61 @@ class InMemoryFilesystem:
         if mode == "create" and normalized in self._files:
             raise FileExistsError(f"File already exists: {path}")
 
+        # Encode text content to bytes for storage
+        content_bytes = content.encode("utf-8")
+
         timestamp = now()
-        final_content, created_at = self._resolve_write_content(
+        final_content, created_at = self._resolve_write_bytes_content(
+            normalized, content_bytes, mode, timestamp
+        )
+
+        self._files[normalized] = _InMemoryFile(
+            content=final_content,
+            created_at=created_at,
+            modified_at=timestamp,
+        )
+
+        return WriteResult(
+            path=normalized,
+            bytes_written=len(content_bytes),
+            mode=mode,
+        )
+
+    def write_bytes(
+        self,
+        path: str,
+        content: bytes,
+        *,
+        mode: Literal["create", "overwrite", "append"] = "overwrite",
+        create_parents: bool = True,
+    ) -> WriteResult:
+        """Write raw bytes to a file."""
+        if self._read_only:
+            msg = "Filesystem is read-only"
+            raise PermissionError(msg)
+
+        normalized = normalize_path(path)
+        if not normalized:
+            msg = "Cannot write to root directory"
+            raise ValueError(msg)
+
+        validate_path(normalized)
+
+        if len(content) > MAX_WRITE_BYTES:
+            msg = f"Content exceeds maximum size of {MAX_WRITE_BYTES} bytes."
+            raise ValueError(msg)
+
+        parent = "/".join(normalized.split("/")[:-1])
+        if parent and parent not in self._directories:
+            if not create_parents:
+                raise FileNotFoundError(f"Parent directory does not exist: {parent}")
+            self._ensure_parents(parent)
+
+        if mode == "create" and normalized in self._files:
+            raise FileExistsError(f"File already exists: {path}")
+
+        timestamp = now()
+        final_content, created_at = self._resolve_write_bytes_content(
             normalized, content, mode, timestamp
         )
 
@@ -403,7 +524,7 @@ class InMemoryFilesystem:
 
         return WriteResult(
             path=normalized,
-            bytes_written=len(final_content.encode("utf-8")),
+            bytes_written=len(content),
             mode=mode,
         )
 
