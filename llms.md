@@ -158,7 +158,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - Factory: `new_throttle_policy`: Factory for creating throttle policies.
   - Claude Agent SDK Isolation (`weakincentives.adapters.claude_agent_sdk`):
     - `IsolationConfig`: Hermetic isolation configuration (network_policy,
-      sandbox, env, api_key).
+      sandbox, env, api_key, skills).
     - `NetworkPolicy`: Network access constraints (allowed_domains). Use
       `NetworkPolicy.no_network()` for API-only.
     - `SandboxConfig`: OS-level sandboxing (enabled, writable_paths,
@@ -231,6 +231,18 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `PromptValidationError`: Raised when prompt validation fails.
     - `VisibilityExpansionRequired`: Raised when model requests expansion of
       summarized sections.
+  - Tool Policies (declarative constraints for safe tool invocation):
+    - `ToolPolicy`: Protocol for tool invocation constraints.
+    - `SequentialDependencyPolicy`: Enforce unconditional tool ordering (e.g.,
+      `deploy` requires `test` and `build` to have run first).
+    - `ReadBeforeWritePolicy`: Prevent file overwrites without reading first;
+      new files can be created freely.
+  - Enhanced override types:
+    - `TaskExampleOverride`: Override entire task examples (objective, outcome,
+      steps).
+    - `TaskStepOverride`: Modify individual steps within task examples.
+    - `ToolExampleOverride`: Override tool example descriptions, inputs, and
+      outputs.
 - `weakincentives.runtime`: Session, event, and orchestration primitives.
   - Logging:
     - `StructuredLogger`: Logger adapter enforcing a minimal structured event
@@ -414,6 +426,33 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - `PostConstruct`: Protocol for resources with `post_construct()` hook.
   - Errors: `CircularDependencyError`, `DuplicateBindingError`, `ProviderError`,
     `UnboundResourceError`, `ResourceError`.
+- `weakincentives.skills`: Agent Skills specification support.
+  - `Skill`: Skill metadata container with name, description, and content.
+  - `SkillMount`: Configuration for mounting a skill (source path, name override,
+    enabled flag).
+  - `SkillConfig`: Configuration for skill mounting (mounts tuple,
+    validate_on_mount flag).
+  - Validation functions:
+    - `validate_skill(path)`: Comprehensive skill validation (structure,
+      frontmatter, size limits).
+    - `validate_skill_name(name)`: Validate skill name format.
+    - `resolve_skill_name(path, override)`: Derive skill name from path or
+      override.
+  - Constants: `MAX_SKILL_FILE_BYTES` (1 MiB), `MAX_SKILL_TOTAL_BYTES` (10 MiB).
+  - Errors: `SkillError` (base), `SkillValidationError`, `SkillNotFoundError`,
+    `SkillMountError`.
+- `weakincentives.filesystem`: Filesystem protocol and implementations.
+  - `Filesystem`: Protocol for file operations (read, write, list, glob, grep).
+  - `SnapshotableFilesystem`: Extended protocol with snapshot/restore support.
+  - `HostFilesystem`: Host filesystem implementation with git-based snapshots.
+  - Note: `InMemoryFilesystem` is in `weakincentives.contrib.tools`.
+  - Binary operations:
+    - `read_bytes(path, *, offset=0, limit=None)`: Read file as bytes.
+    - `write_bytes(path, content, *, mode="overwrite", create_parents=True)`:
+      Write bytes to file.
+  - Result types: `ReadResult`, `ReadBytesResult`, `WriteResult`, `ListResult`,
+    `GlobResult`, `GrepResult`, `GrepMatch`.
+  - `SnapshotError`: Raised when snapshot/restore operations fail.
 - `weakincentives.serde`: Dataclass serialization helpers.
   - `clone`: Clone a dataclass.
   - `dump`: Dump a dataclass to JSON-compatible types.

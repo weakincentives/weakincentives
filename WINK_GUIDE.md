@@ -100,6 +100,7 @@ ______________________________________________________________________
    1. [Tool examples](#44-tool-examples)
    1. [Tool suites as sections](#45-tool-suites-as-sections)
    1. [Transactional tool execution](#46-transactional-tool-execution)
+   1. [Tool policies](#47-tool-policies)
 1. [Sessions](#5-sessions)
    1. [Session as deterministic memory](#51-session-as-deterministic-memory)
    1. [Queries](#52-queries)
@@ -181,7 +182,9 @@ ______________________________________________________________________
    1. [weakincentives.optimizers](#186-weakincentivesoptimizers)
    1. [weakincentives.serde](#187-weakincentivesserde)
    1. [weakincentives.evals](#188-weakincentivesevals)
-   1. [CLI](#189-cli)
+   1. [weakincentives.skills](#189-weakincentivesskills)
+   1. [weakincentives.filesystem](#1810-weakincentivesfilesystem)
+   1. [CLI](#1811-cli)
 1. [Appendix A: Coming from LangGraph or LangChain?](#appendix-a-coming-from-langgraph-or-langchain)
 1. [Appendix B: Coming from DSPy?](#appendix-b-coming-from-dspy)
 1. [Appendix C: Formal Verification with TLA+](#appendix-c-formal-verification-with-tla)
@@ -1311,6 +1314,83 @@ tracker.begin_tool_execution(tool_use_id="abc", tool_name="write_file")
 # ... native tool executes ...
 tracker.end_tool_execution(tool_use_id="abc", success=False)  # Auto-rollback
 ```
+
+### 4.7 Tool policies
+
+_Canonical spec: [specs/TOOL_POLICIES.md](specs/TOOL_POLICIES.md)_
+
+Tool policies provide declarative constraints that govern when tools can be
+invoked. Rather than embedding validation logic in each tool handler, policies
+express cross-cutting concerns as composable constraints.
+
+**Why policies exist:**
+
+Without constraints, models can call tools in problematic orders—deploying code
+that was never tested, overwriting files they haven't read, or skipping required
+validation steps. Policies catch these issues before the tool executes.
+
+**Built-in policies:**
+
+```python
+from weakincentives.prompt import (
+    SequentialDependencyPolicy,
+    ReadBeforeWritePolicy,
+)
+
+# Require 'test' and 'build' before 'deploy'
+deploy_policy = SequentialDependencyPolicy(
+    dependencies={
+        "deploy": frozenset({"test", "build"}),
+    }
+)
+
+# Require reading a file before overwriting it (new files allowed)
+read_first = ReadBeforeWritePolicy()
+```
+
+**Attaching policies to tools:**
+
+Policies are attached at the section level:
+
+```python
+from weakincentives.prompt import MarkdownSection, Tool
+
+section = MarkdownSection(
+    title="Deployment",
+    key="deployment",
+    template="Deploy the application after testing.",
+    tools=(deploy_tool, test_tool, build_tool),
+    policies=(deploy_policy,),
+)
+```
+
+**Enforcement:**
+
+When a tool call violates a policy, WINK returns a `ToolResult.error()` without
+executing the handler. The error message explains which policy was violated and
+what the model should do instead.
+
+**Default policies on contrib sections:**
+
+`VfsToolsSection` and `PodmanSandboxSection` apply `ReadBeforeWritePolicy` by
+default. This prevents accidental overwrites without reading the existing
+content first.
+
+```python
+from weakincentives.contrib.tools import VfsToolsSection
+
+# ReadBeforeWritePolicy is applied automatically
+vfs = VfsToolsSection(session=session, config=vfs_config)
+```
+
+**Key behaviors:**
+
+- Policies are evaluated in order; first violation stops execution
+- `SequentialDependencyPolicy` checks session `ToolInvoked` events for required
+  tool completions
+- `ReadBeforeWritePolicy` tracks `read_file` calls and allows writes only to
+  paths that were read (or new files)
+- Custom policies can implement the `ToolPolicy` protocol
 
 ______________________________________________________________________
 
@@ -3539,11 +3619,17 @@ Prompt(template, overrides_store=None, overrides_tag="latest")
     .render(session=None)
     .find_section(SectionType)
 
-MarkdownSection(title, key, template, summary=None, visibility=..., tools=...)
+MarkdownSection(title, key, template, summary=None, visibility=..., tools=..., policies=...)
 Tool(name, description, handler, examples=...)
 ToolResult.ok(value, message="OK")      # success case
 ToolResult.error(message)               # failure case
 ```
+
+**Tool policies:**
+
+- `ToolPolicy`: Protocol for tool invocation constraints
+- `SequentialDependencyPolicy(dependencies)`: Enforce tool ordering
+- `ReadBeforeWritePolicy()`: Prevent overwrites without reading first
 
 **Progressive disclosure:**
 
@@ -3733,7 +3819,76 @@ submit_dataset(dataset, requests)
 collect_results(results, expected_count, timeout_seconds=300)
 ```
 
-### 18.9 CLI
+### 18.9 weakincentives.skills
+
+Agent Skills specification support (following https://agentskills.io):
+
+```python
+from weakincentives.skills import (
+    Skill,
+    SkillMount,
+    SkillConfig,
+    validate_skill,
+    validate_skill_name,
+    resolve_skill_name,
+    MAX_SKILL_FILE_BYTES,      # 1 MiB
+    MAX_SKILL_TOTAL_BYTES,     # 10 MiB
+)
+
+# Mount skills for Claude Agent SDK isolation
+config = SkillConfig(
+    skills=(
+        SkillMount(source=Path("./skills/code-review")),
+        SkillMount(source=Path("./skills/testing"), enabled=False),
+    ),
+    validate_on_mount=True,  # Default: validate before copying
+)
+
+# Validation functions
+validate_skill(Path("./skills/my-skill"))  # Raises SkillValidationError
+name = resolve_skill_name(mount)           # Derive name from path
+```
+
+**Errors:**
+
+- `SkillError` (base), `SkillValidationError`, `SkillNotFoundError`,
+  `SkillMountError`
+
+### 18.10 weakincentives.filesystem
+
+Filesystem protocol and implementations:
+
+```python
+from weakincentives.filesystem import (
+    Filesystem,                # Protocol for file operations
+    SnapshotableFilesystem,    # Extended protocol with snapshot/restore
+    HostFilesystem,            # Host filesystem with git-based snapshots
+)
+# InMemoryFilesystem is in contrib:
+# from weakincentives.contrib.tools import InMemoryFilesystem
+
+# Binary operations (new in v0.19.0)
+content = fs.read_bytes("image.png", offset=0, limit=1024)
+fs.write_bytes("output.bin", b"\x00\x01\x02", mode="overwrite")
+
+# Text operations
+result = fs.read("config.json")
+fs.write("output.txt", "content", mode="overwrite")
+
+# Search operations
+matches = fs.glob("**/*.py")
+grep_result = fs.grep("TODO", path="src/", glob="*.py")
+```
+
+**Key behaviors:**
+
+- `read_bytes()` supports offset and limit for partial reads
+- `write_bytes()` supports "overwrite" and "append" modes
+- `read()` raises `ValueError` with actionable message for binary content
+- `grep()` silently skips non-UTF-8 files
+- UTF-8 paths are now allowed (ASCII-only restriction removed)
+
+### 18.11 CLI
 
 Installed via the `wink` extra:
 
@@ -3776,14 +3931,18 @@ ______________________________________________________________________
 
 - **Prompts**: [specs/PROMPTS.md](specs/PROMPTS.md)
 - **Tools**: [specs/TOOLS.md](specs/TOOLS.md)
+- **Tool Policies**: [specs/TOOL_POLICIES.md](specs/TOOL_POLICIES.md)
 - **Sessions**: [specs/SESSIONS.md](specs/SESSIONS.md)
 - **MainLoop**: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)
 - **Evals**: [specs/EVALS.md](specs/EVALS.md)
 - **Health & Lifecycle**: [specs/HEALTH.md](specs/HEALTH.md)
 - **Resources**: [specs/RESOURCE_REGISTRY.md](specs/RESOURCE_REGISTRY.md)
+- **Skills**: [specs/SKILLS.md](specs/SKILLS.md)
+- **Filesystem**: [specs/FILESYSTEM.md](specs/FILESYSTEM.md)
 - **Workspace**: [specs/WORKSPACE.md](specs/WORKSPACE.md)
 - **Overrides & optimization**:
   [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)
+- **Exhaustiveness checking**: [specs/EXHAUSTIVENESS.md](specs/EXHAUSTIVENESS.md)
 - **Formal verification**: [specs/FORMAL_VERIFICATION.md](specs/FORMAL_VERIFICATION.md)
   (embedding TLA+ specs in Python)
 - **Code review example**:
