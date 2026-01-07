@@ -161,6 +161,7 @@ Consult these specs before modifying related code:
 | `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, MainLoop integration |
 | `specs/MAILBOX_RESOLVER.md` | Mailbox routing, reply-to patterns, resolver configuration |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
+| `specs/PHANTOM_TYPES.md` | Phantom types for compile-time state encoding, smart constructors |
 | `specs/PROMPTS.md` | Prompt system, composition, structured output, resource lifecycle |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |
