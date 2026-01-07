@@ -406,65 +406,331 @@ class Divisible(ParameterizedRefinement[int]):
 batch_size: Divisible[int, 32]  # Must be divisible by 32
 ```
 
-## Implementation Sketch
+## Enforcement Mechanisms
 
-### Refined Type Base
+This section details how refined types are enforced at runtime.
+
+### Core Mechanism: `Annotated` Metadata
+
+Refined types are implemented using `typing.Annotated` to attach constraint
+metadata to base types. When you write `Positive[int]`, it expands to:
 
 ```python
-from typing import Generic, TypeVar, get_args, get_origin
+from typing import Annotated, get_type_hints, get_args, get_origin
 
-T = TypeVar("T")
+# Positive[int] is sugar for:
+Annotated[int, Positive]
 
-class Refinement(Generic[T]):
-    """Base class for refined types."""
-
-    __slots__ = ()
-
-    def __class_getitem__(cls, item: type[T]) -> type[T]:
-        # Return annotated type that carries refinement metadata
-        return Annotated[item, cls]
-
+# The refinement class carries validation logic
+class Positive:
     @staticmethod
-    def validate(value: T) -> T:
-        """Validate and optionally transform the value."""
-        raise NotImplementedError
+    def validate(value: int) -> int:
+        if value <= 0:
+            raise RefinementError(
+                field=None,  # Set by caller
+                constraint="Positive[int]",
+                value=value,
+                message=f"must be positive, got {value}",
+            )
+        return value
 ```
 
-### Validation Hook
+### Extraction from Type Hints
+
+At validation time, refinements are extracted from `Annotated` metadata:
 
 ```python
-def validate_refined(cls: type, values: dict[str, Any]) -> dict[str, Any]:
-    """Validate all refined fields in a dataclass."""
+def _extract_refinements(hint: type) -> list[type[Refinement]]:
+    """Extract all Refinement subclasses from an Annotated type."""
+    if get_origin(hint) is not Annotated:
+        return []
+
+    args = get_args(hint)  # (base_type, *metadata)
+    return [
+        meta for meta in args[1:]
+        if isinstance(meta, type) and issubclass(meta, Refinement)
+    ]
+
+# Example:
+# _extract_refinements(Positive[int]) -> [Positive]
+# _extract_refinements(NonEmpty[list[str]]) -> [NonEmpty]
+# _extract_refinements(int) -> []
+```
+
+### The `@refined` Decorator
+
+The primary integration point is a class decorator that wraps `__init__`:
+
+```python
+from dataclasses import dataclass
+from functools import wraps
+from typing import get_type_hints
+
+def refined[T](cls: type[T]) -> type[T]:
+    """Decorator that adds refined type validation to a dataclass."""
+    if not _refinement_enabled():
+        return cls  # No-op when disabled
+
+    original_init = cls.__init__
     hints = get_type_hints(cls, include_extras=True)
-    validated = {}
 
+    # Pre-compute which fields have refinements
+    refined_fields: dict[str, list[type[Refinement]]] = {}
     for name, hint in hints.items():
-        if name not in values:
-            continue
-
-        value = values[name]
         refinements = _extract_refinements(hint)
+        if refinements:
+            refined_fields[name] = refinements
 
-        for refinement in refinements:
-            value = refinement.validate(value)
+    if not refined_fields:
+        return cls  # No refined fields, nothing to wrap
 
-        validated[name] = value
+    @wraps(original_init)
+    def validating_init(self: T, *args: object, **kwargs: object) -> None:
+        # Convert positional args to kwargs for validation
+        bound = _bind_arguments(cls, args, kwargs)
 
-    return validated
+        # Validate each refined field
+        for name, refinements in refined_fields.items():
+            if name not in bound:
+                continue
+            value = bound[name]
+            for refinement in refinements:
+                try:
+                    bound[name] = refinement.validate(value)
+                except RefinementError as e:
+                    e.field = name
+                    raise
+
+        original_init(self, **bound)
+
+    cls.__init__ = validating_init  # type: ignore[method-assign]
+    return cls
+
+
+# Usage: combine with @dataclass
+@refined
+@dataclass(frozen=True, slots=True)
+class Budget:
+    max_tokens: Positive[int] | None = None
 ```
 
-### Dataclass Integration
+### Integration with `FrozenDataclass`
 
-Integration via `__init__` wrapper or metaclass:
+The `@refined` decorator composes with `FrozenDataclass`:
 
 ```python
-def _wrap_init(original_init):
-    @functools.wraps(original_init)
-    def wrapped(self, **kwargs):
-        validated = validate_refined(type(self), kwargs)
-        original_init(self, **validated)
-    return wrapped
+from weakincentives.dataclasses import FrozenDataclass
+from weakincentives.types.refined import refined, Positive, NonEmpty
+
+@refined
+@FrozenDataclass()
+class Config:
+    workers: Positive[int]
+    hosts: NonEmpty[list[str]]
 ```
+
+Alternatively, a combined decorator:
+
+```python
+@RefinedDataclass()  # Combines @refined + @FrozenDataclass
+class Config:
+    workers: Positive[int]
+    hosts: NonEmpty[list[str]]
+```
+
+### Integration with Serde
+
+The serde module already validates field metadata. Refined types integrate by
+translating to equivalent metadata:
+
+```python
+# Refined types map to serde constraint keys:
+Positive[int]           -> {"gt": 0}
+NonNegative[int]        -> {"ge": 0}
+ClosedRange[int, 0, 10] -> {"ge": 0, "le": 10}
+NonEmpty[list[T]]       -> {"min_length": 1}
+MaxLength[str, 100]     -> {"max_length": 100}
+Pattern[str, r"..."]    -> {"pattern": r"..."}
+```
+
+This means refined types work automatically with `from_dict`/`to_dict`:
+
+```python
+from weakincentives.serde import from_dict
+
+@refined
+@dataclass(frozen=True, slots=True)
+class Config:
+    port: ClosedRange[int, 1, 65535]
+
+# Validation happens during deserialization
+config = from_dict(Config, {"port": 8080})  # OK
+config = from_dict(Config, {"port": 0})     # RefinementError
+```
+
+### Validation Order
+
+When a field has multiple refinements (via intersection or nesting),
+validation runs left-to-right:
+
+```python
+# TrimmedStr validates first, then LengthRange
+type Name = TrimmedStr & LengthRange[str, 1, 50]
+
+# Validation order:
+# 1. TrimmedStr.validate(value) -> stripped = value.strip()
+# 2. LengthRange.validate(stripped) -> check 1 <= len <= 50
+```
+
+For nested refinements:
+
+```python
+# Outer refinement first, then inner
+items: NonEmpty[list[Positive[int]]]
+
+# Validation order:
+# 1. NonEmpty.validate(items) -> check len >= 1
+# 2. For each item: Positive.validate(item) -> check > 0
+```
+
+### Runtime Toggle
+
+Validation can be disabled via environment variable:
+
+```python
+import os
+from contextvars import ContextVar
+
+_REFINEMENT_ENABLED: ContextVar[bool | None] = ContextVar(
+    "refinement_enabled", default=None
+)
+
+def _refinement_enabled() -> bool:
+    """Check if refinement validation is enabled."""
+    # Context var takes precedence
+    ctx_value = _REFINEMENT_ENABLED.get()
+    if ctx_value is not None:
+        return ctx_value
+
+    # Fall back to environment variable (default: enabled)
+    env = os.environ.get("WEAKINCENTIVES_REFINED", "1")
+    return env.lower() not in ("0", "false", "no", "off")
+
+
+@contextmanager
+def refinement_enabled(enabled: bool = True):
+    """Context manager to temporarily enable/disable refinement."""
+    token = _REFINEMENT_ENABLED.set(enabled)
+    try:
+        yield
+    finally:
+        _REFINEMENT_ENABLED.reset(token)
+```
+
+### Handling Optional Fields
+
+For `Optional` types, refinement only applies to non-None values:
+
+```python
+@refined
+@dataclass(frozen=True, slots=True)
+class Budget:
+    max_tokens: Positive[int] | None = None
+
+# None bypasses validation
+Budget(max_tokens=None)  # OK
+
+# Non-None values are validated
+Budget(max_tokens=100)   # OK
+Budget(max_tokens=-1)    # RefinementError
+```
+
+Implementation:
+
+```python
+def _validate_field(
+    name: str,
+    value: object,
+    refinements: list[type[Refinement]],
+    is_optional: bool,
+) -> object:
+    # Skip validation for None in Optional fields
+    if is_optional and value is None:
+        return value
+
+    for refinement in refinements:
+        try:
+            value = refinement.validate(value)
+        except RefinementError as e:
+            e.field = name
+            raise
+    return value
+```
+
+### Error Propagation
+
+`RefinementError` is a `ValueError` subclass with structured fields:
+
+```python
+@dataclass(frozen=True, slots=True)
+class RefinementError(ValueError):
+    field: str | None
+    constraint: str
+    value: object
+    message: str
+
+    def __str__(self) -> str:
+        if self.field:
+            return f"{self.field}: {self.message}"
+        return self.message
+```
+
+Errors propagate with full context:
+
+```python
+try:
+    Budget(max_tokens=-5)
+except RefinementError as e:
+    print(e.field)       # "max_tokens"
+    print(e.constraint)  # "Positive[int]"
+    print(e.value)       # -5
+    print(e.message)     # "must be positive, got -5"
+    print(str(e))        # "max_tokens: must be positive, got -5"
+```
+
+### Lazy vs Eager Validation
+
+By default, validation is **eager** (fail on first error). For forms or batch
+processing, **exhaustive** mode collects all errors:
+
+```python
+from weakincentives.types.refined import validate_exhaustive
+
+errors = validate_exhaustive(
+    Budget,
+    max_tokens=-5,
+    max_input_tokens=-10,
+)
+# Returns: [RefinementError(...), RefinementError(...)]
+
+# Or via environment variable
+# WEAKINCENTIVES_REFINED=exhaustive python app.py
+```
+
+### Performance Considerations
+
+1. **Decorator overhead**: The `@refined` decorator adds one function call
+   per `__init__`. For hot paths, consider disabling validation after testing.
+
+2. **Type hint caching**: Refinement extraction is cached per-class at
+   decoration time, not per-instantiation.
+
+3. **No-op when disabled**: When `WEAKINCENTIVES_REFINED=0`, the decorator
+   returns the class unchanged with zero overhead.
+
+4. **Validation cost**: Each refinement's `validate()` runs once per field.
+   For complex refinements (regex patterns), cost is dominated by the
+   underlying check, not the framework.
 
 ## Testing Strategy
 
