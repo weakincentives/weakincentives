@@ -826,7 +826,8 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             template = f"{_PODMAN_TEMPLATE}\n\n{mounts_block}"
 
         # Default policy: must read file before overwriting
-        default_policies = (ReadBeforeWritePolicy(),)
+        # Pass mount_point so policy normalizes paths like handlers do
+        default_policies = (ReadBeforeWritePolicy(mount_point=_DEFAULT_WORKDIR),)
 
         super().__init__(
             title="Podman Workspace",

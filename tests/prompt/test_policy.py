@@ -32,7 +32,7 @@ from weakincentives.prompt import (
     ToolContext,
     ToolResult,
 )
-from weakincentives.prompt.policy import _extract_path
+from weakincentives.prompt.policy import _extract_path, _normalize_path
 from weakincentives.resources import Binding, ResourceRegistry
 from weakincentives.runtime import InProcessDispatcher, Session
 
@@ -131,6 +131,44 @@ class TestExtractPath:
 
         params = IntPath(path=123)
         assert _extract_path(params) is None
+
+
+# --- _normalize_path Tests ---
+
+
+class TestNormalizePath:
+    def test_strips_leading_slash(self) -> None:
+        assert _normalize_path("/config.yaml", None) == "config.yaml"
+
+    def test_strips_multiple_leading_slashes(self) -> None:
+        assert _normalize_path("///config.yaml", None) == "config.yaml"
+
+    def test_preserves_relative_path(self) -> None:
+        assert _normalize_path("config.yaml", None) == "config.yaml"
+
+    def test_strips_mount_point_prefix(self) -> None:
+        assert _normalize_path("/workspace/config.yaml", "/workspace") == "config.yaml"
+
+    def test_strips_mount_point_with_nested_path(self) -> None:
+        result = _normalize_path("/workspace/src/main.py", "/workspace")
+        assert result == "src/main.py"
+
+    def test_strips_mount_point_without_leading_slash(self) -> None:
+        # Input path has leading slash stripped first, then mount_point applied
+        assert _normalize_path("workspace/config.yaml", "/workspace") == "config.yaml"
+
+    def test_handles_mount_point_only_path(self) -> None:
+        assert _normalize_path("/workspace", "/workspace") == ""
+
+    def test_preserves_path_not_matching_mount_point(self) -> None:
+        assert (
+            _normalize_path("/other/config.yaml", "/workspace") == "other/config.yaml"
+        )
+
+    def test_none_mount_point_only_strips_slashes(self) -> None:
+        assert (
+            _normalize_path("/workspace/config.yaml", None) == "workspace/config.yaml"
+        )
 
 
 # --- SequentialDependencyPolicy Tests ---
@@ -372,16 +410,16 @@ class TestReadBeforeWritePolicy:
 
     def test_allows_overwrite_after_read(self) -> None:
         fs = InMemoryFilesystem()
-        fs.write("/existing.txt", "content")
+        fs.write("existing.txt", "content")
 
         policy = ReadBeforeWritePolicy()
         bus = InProcessDispatcher()
         session = Session(bus=bus)
-        # Record that file was read
+        # Record that file was read (path stored in normalized form)
         session[PolicyState].seed(
             PolicyState(
                 policy_name="test",
-                invoked_keys=frozenset({("read_file", "/existing.txt")}),
+                invoked_keys=frozenset({("read_file", "existing.txt")}),
             )
         )
         context = self._make_context(session, filesystem=fs)
@@ -402,7 +440,8 @@ class TestReadBeforeWritePolicy:
 
         state = session[PolicyState].latest()
         assert state is not None
-        assert ("read_file", "/test.txt") in state.invoked_keys
+        # Path is normalized (leading slash stripped) when stored
+        assert ("read_file", "test.txt") in state.invoked_keys
 
     def test_on_result_does_not_record_failed_read(self) -> None:
         policy = ReadBeforeWritePolicy()
@@ -451,11 +490,12 @@ class TestReadBeforeWritePolicy:
         policy = ReadBeforeWritePolicy()
         bus = InProcessDispatcher()
         session = Session(bus=bus)
+        # Use normalized paths (no leading slashes) as that's how policy stores them
         session[PolicyState].seed(
             PolicyState(
                 policy_name="test",
                 invoked_tools=frozenset({"lint"}),
-                invoked_keys=frozenset({("read_file", "/x")}),
+                invoked_keys=frozenset({("read_file", "x")}),
             )
         )
         context = self._make_context(session)
@@ -467,8 +507,8 @@ class TestReadBeforeWritePolicy:
         state = session[PolicyState].latest()
         assert state is not None
         assert "lint" in state.invoked_tools
-        assert ("read_file", "/x") in state.invoked_keys
-        assert ("read_file", "/y") in state.invoked_keys
+        assert ("read_file", "x") in state.invoked_keys
+        assert ("read_file", "y") in state.invoked_keys
 
     def test_custom_read_write_tools(self) -> None:
         policy = ReadBeforeWritePolicy(
@@ -476,7 +516,7 @@ class TestReadBeforeWritePolicy:
             write_tools=frozenset({"save_file"}),
         )
         fs = InMemoryFilesystem()
-        fs.write("/data.json", "{}")
+        fs.write("data.json", "{}")  # Use normalized path for filesystem
 
         bus = InProcessDispatcher()
         session = Session(bus=bus)
@@ -492,15 +532,120 @@ class TestReadBeforeWritePolicy:
         decision2 = policy.check(tool2, FileParams(path="/data.json"), context=context)
         assert decision2.allowed is False
 
-        # After fetch, save should be allowed
+        # After fetch, save should be allowed (path stored in normalized form)
         session[PolicyState].seed(
             PolicyState(
                 policy_name="test",
-                invoked_keys=frozenset({("fetch_file", "/data.json")}),
+                invoked_keys=frozenset({("fetch_file", "data.json")}),
             )
         )
         decision3 = policy.check(tool2, FileParams(path="/data.json"), context=context)
         assert decision3.allowed is True
+
+    def test_mount_point_normalizes_paths_for_existence_check(self) -> None:
+        """Policy should normalize paths before checking fs.exists().
+
+        This tests the fix for the issue where /workspace/file.txt would
+        bypass read-before-write because HostFilesystem rejects absolute
+        paths outside its root.
+        """
+        # Policy with mount_point matching the tool's virtual mount
+        policy = ReadBeforeWritePolicy(mount_point="/workspace")
+        fs = InMemoryFilesystem()
+        fs.write("config.yaml", "existing content")  # Relative path in fs
+
+        bus = InProcessDispatcher()
+        session = Session(bus=bus)
+        context = self._make_context(session, filesystem=fs)
+
+        # Tool passes /workspace/config.yaml (absolute with mount point)
+        tool = self._make_tool("write_file")
+        decision = policy.check(
+            tool, FileParams(path="/workspace/config.yaml"), context=context
+        )
+
+        # Should be denied because file exists and wasn't read
+        assert decision.allowed is False
+        assert "config.yaml" in (decision.reason or "")
+
+    def test_mount_point_normalizes_paths_when_recording_reads(self) -> None:
+        """on_result should normalize paths so check() can match them."""
+        policy = ReadBeforeWritePolicy(mount_point="/workspace")
+        fs = InMemoryFilesystem()
+        fs.write("config.yaml", "content")
+
+        bus = InProcessDispatcher()
+        session = Session(bus=bus)
+        context = self._make_context(session, filesystem=fs)
+
+        # Record a read with mount-prefixed path
+        read_tool = self._make_tool("read_file")
+        result: ToolResult[None] = ToolResult.ok(None)
+        policy.on_result(
+            read_tool,
+            FileParams(path="/workspace/config.yaml"),
+            result,
+            context=context,
+        )
+
+        # Check state was recorded with normalized path
+        state = session[PolicyState].latest()
+        assert state is not None
+        # Path should be normalized (mount point stripped)
+        assert ("read_file", "config.yaml") in state.invoked_keys
+        # Mount-prefixed path should NOT be in state
+        assert ("read_file", "/workspace/config.yaml") not in state.invoked_keys
+
+    def test_mount_point_allows_write_after_normalized_read(self) -> None:
+        """Full flow: read with mount path, then write with mount path."""
+        policy = ReadBeforeWritePolicy(mount_point="/workspace")
+        fs = InMemoryFilesystem()
+        fs.write("config.yaml", "content")
+
+        bus = InProcessDispatcher()
+        session = Session(bus=bus)
+        context = self._make_context(session, filesystem=fs)
+
+        # First: write should be denied (file not read)
+        write_tool = self._make_tool("write_file")
+        decision1 = policy.check(
+            write_tool, FileParams(path="/workspace/config.yaml"), context=context
+        )
+        assert decision1.allowed is False
+
+        # Record a read
+        read_tool = self._make_tool("read_file")
+        result: ToolResult[None] = ToolResult.ok(None)
+        policy.on_result(
+            read_tool,
+            FileParams(path="/workspace/config.yaml"),
+            result,
+            context=context,
+        )
+
+        # Now write should be allowed
+        decision2 = policy.check(
+            write_tool, FileParams(path="/workspace/config.yaml"), context=context
+        )
+        assert decision2.allowed is True
+
+    def test_no_mount_point_strips_leading_slashes_only(self) -> None:
+        """Without mount_point, only leading slashes are stripped."""
+        policy = ReadBeforeWritePolicy()  # No mount_point
+        fs = InMemoryFilesystem()
+        fs.write("workspace/config.yaml", "content")
+
+        bus = InProcessDispatcher()
+        session = Session(bus=bus)
+        context = self._make_context(session, filesystem=fs)
+
+        # /workspace/config.yaml becomes workspace/config.yaml
+        tool = self._make_tool("write_file")
+        decision = policy.check(
+            tool, FileParams(path="/workspace/config.yaml"), context=context
+        )
+        # File exists at workspace/config.yaml, so should be denied
+        assert decision.allowed is False
 
 
 # --- Tool Executor Policy Integration Tests ---
@@ -651,10 +796,10 @@ class TestToolExecutorPolicyHelpers:
             context=context,
         )
 
-        # State should be updated for successful read
+        # State should be updated for successful read (path normalized)
         state = session[PolicyState].latest()
         assert state is not None
-        assert ("read_file", "/test.txt") in state.invoked_keys
+        assert ("read_file", "test.txt") in state.invoked_keys
 
     def test_build_policy_denied_result_creates_error_result(self) -> None:
         from weakincentives.adapters.tool_executor import _build_policy_denied_result

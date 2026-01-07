@@ -184,6 +184,26 @@ def _extract_path(params: SupportsDataclass | None) -> str | None:
     return None
 
 
+def _normalize_path(path: str, mount_point: str | None) -> str:
+    """Normalize a path by stripping leading slashes and mount point prefix.
+
+    This mirrors the normalization done by FilesystemToolHandlers so that
+    policy checks use the same path form that handlers will use.
+    """
+    # Strip leading slashes (absolute → relative)
+    normalized = path.lstrip("/")
+
+    # Strip mount point prefix if present
+    if mount_point is not None:
+        prefix = mount_point.lstrip("/")
+        if normalized.startswith(prefix + "/"):
+            normalized = normalized[len(prefix) + 1 :]
+        elif normalized == prefix:
+            normalized = ""
+
+    return normalized
+
+
 @dataclass(frozen=True)
 class ReadBeforeWritePolicy:
     """Enforce read-before-write semantics on filesystem tools.
@@ -199,12 +219,20 @@ class ReadBeforeWritePolicy:
         # write_file(path="config.yaml")  → DENIED (exists, not read)
         # read_file(path="config.yaml")   → OK (records path)
         # write_file(path="config.yaml")  → OK (was read)
+
+    For tools that use mount point prefixes (e.g., Podman with /workspace),
+    specify mount_point to normalize paths before existence checks::
+
+        policy = ReadBeforeWritePolicy(mount_point="/workspace")
+
+        # write_file(path="/workspace/config.yaml") checks "config.yaml"
     """
 
     read_tools: frozenset[str] = field(default_factory=lambda: frozenset({"read_file"}))
     write_tools: frozenset[str] = field(
         default_factory=lambda: frozenset({"write_file", "edit_file"})
     )
+    mount_point: str | None = None
 
     @property
     def name(self) -> str:
@@ -222,9 +250,12 @@ class ReadBeforeWritePolicy:
         if tool.name not in self.write_tools:
             return PolicyDecision.allow()
 
-        path = _extract_path(params)
-        if path is None:
+        raw_path = _extract_path(params)
+        if raw_path is None:
             return PolicyDecision.allow()
+
+        # Normalize path to match what handlers will use
+        path = _normalize_path(raw_path, self.mount_point)
 
         # No filesystem available: allow (other safety checks apply)
         fs = context.filesystem
@@ -244,7 +275,7 @@ class ReadBeforeWritePolicy:
 
         if path not in read_paths:
             return PolicyDecision.deny(
-                f"File '{path}' must be read before overwriting."
+                f"File '{raw_path}' must be read before overwriting."
             )
         return PolicyDecision.allow()
 
@@ -262,9 +293,12 @@ class ReadBeforeWritePolicy:
         if tool.name not in self.read_tools:
             return
 
-        path = _extract_path(params)
-        if path is None:
+        raw_path = _extract_path(params)
+        if raw_path is None:
             return
+
+        # Normalize path to match what check() will use
+        path = _normalize_path(raw_path, self.mount_point)
 
         state = context.session[PolicyState].latest()
         if state is None:
