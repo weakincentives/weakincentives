@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -32,6 +33,7 @@ from weakincentives.skills import (
     validate_skill,
     validate_skill_name,
 )
+from weakincentives.skills._validation import _load_yaml_module
 
 
 class TestSkill:
@@ -549,3 +551,35 @@ class TestDemoSkills:
             validate_skill(skill_dir)
             # Also validate the directory name
             validate_skill_name(skill_dir.name)
+
+
+class TestLazyYamlImport:
+    """Tests for lazy yaml import behavior."""
+
+    def test_load_yaml_module_success(self) -> None:
+        """Verify yaml module loads successfully when installed."""
+        module = _load_yaml_module()
+        # Should have safe_load function
+        assert hasattr(module, "safe_load")
+        assert hasattr(module, "YAMLError")
+
+    def test_load_yaml_module_raises_when_missing(self) -> None:
+        """Verify helpful error when yaml is not installed."""
+        with mock.patch.dict("sys.modules", {"yaml": None}):
+            # Clear cached import
+            with mock.patch(
+                "weakincentives.skills._validation.import_module",
+                side_effect=ModuleNotFoundError("No module named 'yaml'"),
+            ):
+                with pytest.raises(RuntimeError, match="pyyaml is required"):
+                    _load_yaml_module()
+
+    def test_error_message_includes_install_hint(self) -> None:
+        """Verify error message includes install instructions."""
+        with mock.patch(
+            "weakincentives.skills._validation.import_module",
+            side_effect=ModuleNotFoundError("No module named 'yaml'"),
+        ):
+            with pytest.raises(RuntimeError) as exc_info:
+                _load_yaml_module()
+            assert "pip install 'weakincentives[skills]'" in str(exc_info.value)
