@@ -1,3 +1,8 @@
+---
+name: python-style
+description: Apply Python best practices when reviewing or writing code, including PEP 8, type annotations, docstrings, and common anti-patterns to avoid.
+---
+
 # Python Style Skill
 
 Apply Python best practices when reviewing or writing code.

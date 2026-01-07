@@ -1,3 +1,8 @@
+---
+name: ascii-art
+description: Generate creative ASCII art for text banners, logos, and decorative elements using various character patterns and styles.
+---
+
 # ASCII Art Skill
 
 Generate creative ASCII art for text, logos, and decorative elements.

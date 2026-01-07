@@ -39,6 +39,9 @@ Repository = "https://github.com/weakincentives/weakincentives"
 "Issue Tracker" = "https://github.com/weakincentives/weakincentives/issues"
 
 [project.optional-dependencies]
+skills = [
+    "pyyaml>=6.0.0",
+]
 asteval = [
     "asteval>=1.0.7",
 ]
@@ -89,6 +92,7 @@ path = "hatch_build.py"
 
 [dependency-groups]
 dev = [
+    "weakincentives[skills]",
     "bandit>=1.8.6",
     "deptry>=0.24.0",
     "pytest>=9.0.1",

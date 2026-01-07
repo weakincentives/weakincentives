@@ -2445,6 +2445,9 @@ podman = [
 redis = [
     { name = "redis" },
 ]
+skills = [
+    { name = "pyyaml" },
+]
 wink = [
     { name = "fastapi" },
     { name = "markdown-it-py", extra = ["linkify"] },
@@ -2467,6 +2470,7 @@ dev = [
     { name = "ruff" },
     { name = "ty" },
     { name = "vulture" },
+    { name = "weakincentives", extra = ["skills"] },
 ]
 
 [package.metadata]
@@ -2478,10 +2482,11 @@ requires-dist = [
     { name = "markdown-it-py", extras = ["linkify"], marker = "extra == 'wink'", specifier = ">=4.0.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=2.8.0" },
     { name = "podman", marker = "extra == 'podman'", specifier = ">=5.6.0" },
+    { name = "pyyaml", marker = "extra == 'skills'", specifier = ">=6.0.0" },
     { name = "redis", marker = "extra == 'redis'", specifier = ">=5.0.0" },
     { name = "uvicorn", marker = "extra == 'wink'", specifier = ">=0.30.0" },
 ]
-provides-extras = ["asteval", "claude-agent-sdk", "litellm", "openai", "podman", "redis", "wink"]
+provides-extras = ["asteval", "claude-agent-sdk", "litellm", "openai", "podman", "redis", "skills", "wink"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -2499,6 +2504,7 @@ dev = [
     { name = "ruff", specifier = ">=0.14.5" },
     { name = "ty", specifier = "==0.0.1a35" },
     { name = "vulture", specifier = ">=2.14" },
+    { name = "weakincentives", extras = ["skills"] },
 ]
 
 [[package]]

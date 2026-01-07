@@ -1,3 +1,8 @@
+---
+name: code-review
+description: Perform thorough code reviews checking for security vulnerabilities, error handling, test coverage, performance issues, and proper logging.
+---
+
 # Code Review Skill
 
 You are a thorough code reviewer. When reviewing code:

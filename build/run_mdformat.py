@@ -18,7 +18,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-EXCLUDED_PARTS = {"test-repositories"}
+EXCLUDED_PARTS = {"test-repositories", "demo-skills"}
 
 
 def _collect_markdown_files(root: Path) -> list[Path]:
