@@ -307,7 +307,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                     raise PromptOverridesError(msg)
                 tools[override.name] = override
             else:
-                # TaskExampleOverride case
+                # TaskExampleOverride - type narrowed by pyright after above checks
                 found = False
                 for i, existing in enumerate(task_examples):
                     if (
