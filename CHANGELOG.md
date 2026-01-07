@@ -4,6 +4,30 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Effect Tracking Specification
+
+Added a comprehensive specification for effect tracking and effect systems
+(`specs/EFFECT_TRACKING.md`). This spec defines a system for annotating
+functions with their side effects and verifying that callers properly account
+for those effects.
+
+Key concepts:
+
+- **`@effects` decorator**: Annotate functions with `reads`, `writes`, `raises`,
+  and `calls` parameters to declare their effect signature
+- **Effect targets**: Distinguish between approved channels (Filesystem, Session,
+  sandboxed execution) and forbidden channels (real filesystem, network)
+- **Effect propagation**: Effects compose through call graphs; a function's
+  effective effects include callee effects
+- **`@sandbox_boundary`**: Mark functions that provide approved boundaries for
+  otherwise-forbidden effects
+- **Tool handler verification**: Ensure tool handlers only use approved effect
+  channels through `ToolContext`
+
+This extends the existing DBC framework to catch impure function calls from pure
+contexts, undocumented side effects, and effect leakage through abstraction
+boundaries.
+
 ### Skills as Core Library Concept
 
 Skills are now a first-class concept in the core library. The skill types have
