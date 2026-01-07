@@ -199,136 +199,6 @@ class TestPreToolUseHook:
 
         assert result == {}
 
-    def test_denies_structured_output_when_tasks_incomplete(
-        self, session: Session
-    ) -> None:
-        """PreToolUse denies StructuredOutput when tasks are incomplete."""
-        PlanningToolsSection._initialize_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test objective",
-                status="active",
-                steps=(
-                    PlanStep(step_id=1, title="Done task", status="done"),
-                    PlanStep(step_id=2, title="Pending task", status="pending"),
-                ),
-            )
-        )
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_pre_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
-        )
-        input_data = {
-            "tool_name": "StructuredOutput",
-            "tool_input": {"output": {"key": "value"}},
-        }
-
-        result = asyncio.run(hook(input_data, "call-structured", context))
-
-        # Should deny the tool with feedback
-        assert result.get("hookSpecificOutput", {}).get("permissionDecision") == "deny"
-        reason = result.get("hookSpecificOutput", {}).get(
-            "permissionDecisionReason", ""
-        )
-        assert "Task completion check failed" in reason
-        assert "Pending task" in reason
-
-    def test_allows_structured_output_when_all_tasks_complete(
-        self, session: Session
-    ) -> None:
-        """PreToolUse allows StructuredOutput when all tasks are done."""
-        PlanningToolsSection._initialize_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test objective",
-                status="completed",
-                steps=(
-                    PlanStep(step_id=1, title="Task 1", status="done"),
-                    PlanStep(step_id=2, title="Task 2", status="done"),
-                ),
-            )
-        )
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_pre_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
-        )
-        input_data = {
-            "tool_name": "StructuredOutput",
-            "tool_input": {"output": {"key": "value"}},
-        }
-
-        result = asyncio.run(hook(input_data, "call-structured", context))
-
-        # Should allow - all tasks complete
-        assert result == {}
-
-    def test_allows_structured_output_without_plan(self, session: Session) -> None:
-        """PreToolUse allows StructuredOutput when no plan exists."""
-        # Don't initialize Plan slice
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_pre_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
-        )
-        input_data = {
-            "tool_name": "StructuredOutput",
-            "tool_input": {"output": {"key": "value"}},
-        }
-
-        result = asyncio.run(hook(input_data, "call-structured", context))
-
-        # Should allow - no plan means nothing to enforce
-        assert result == {}
-
-    def test_allows_non_structured_output_tools_with_checker(
-        self, session: Session
-    ) -> None:
-        """PreToolUse allows non-StructuredOutput tools even with incomplete tasks."""
-        PlanningToolsSection._initialize_session(session)
-        session.dispatch(
-            Plan(
-                objective="Test",
-                status="active",
-                steps=(PlanStep(step_id=1, title="Incomplete", status="pending"),),
-            )
-        )
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_pre_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
-        )
-        input_data = {
-            "tool_name": "Read",  # Not StructuredOutput
-            "tool_input": {"path": "/test.txt"},
-        }
-
-        result = asyncio.run(hook(input_data, "call-123", context))
-
-        # Should allow - only StructuredOutput is blocked
-        assert result == {}
-
 
 class TestPostToolUseHook:
     def test_publishes_tool_invoked_event(self, session: Session) -> None:
@@ -543,6 +413,105 @@ class TestPostToolUseHook:
 
         assert result == {}
         assert len(events) == 0
+
+    def test_returns_error_when_structured_output_with_incomplete_tasks(
+        self, session: Session
+    ) -> None:
+        """PostToolUse returns error for StructuredOutput when tasks incomplete."""
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test objective",
+                status="active",
+                steps=(
+                    PlanStep(step_id=1, title="Done task", status="done"),
+                    PlanStep(step_id=2, title="Pending task", status="pending"),
+                ),
+            )
+        )
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(
+            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
+        )
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should return error with feedback
+        assert result.get("toolResultModification", {}).get("isError") is True
+        content = result.get("toolResultModification", {}).get("replaceContent", "")
+        assert "Cannot complete" in content
+        assert "Pending task" in content
+
+    def test_stops_when_structured_output_with_complete_tasks(
+        self, session: Session
+    ) -> None:
+        """PostToolUse stops after StructuredOutput when all tasks complete."""
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test objective",
+                status="completed",
+                steps=(
+                    PlanStep(step_id=1, title="Task 1", status="done"),
+                    PlanStep(step_id=2, title="Task 2", status="done"),
+                ),
+            )
+        )
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(
+            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
+        )
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop - all tasks complete
+        assert result == {"continue": False}
+
+    def test_stops_when_structured_output_without_plan(self, session: Session) -> None:
+        """PostToolUse stops after StructuredOutput when no plan exists."""
+        # Don't initialize Plan slice
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(
+            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
+        )
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop - no plan means nothing to enforce
+        assert result == {"continue": False}
 
 
 class TestUserPromptSubmitHook:
