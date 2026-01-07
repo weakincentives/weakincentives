@@ -2,6 +2,111 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Skills as Core Library Concept
+
+Skills are now a first-class concept in the core library. The skill types have
+been promoted from the Claude Agent SDK adapter to a new `weakincentives.skills`
+module, following the [Agent Skills specification](https://agentskills.io).
+
+```python
+from weakincentives.skills import Skill, SkillMount, SkillConfig
+
+# Define skill configuration
+config = SkillConfig(
+    mounts=(
+        SkillMount(name="code-review", path="/path/to/skill"),
+    ),
+)
+```
+
+**New types:**
+
+- `Skill`: Core representation of a skill definition
+- `SkillMount`: Configuration for mounting a skill
+- `SkillConfig`: Collection of skill mounts
+
+**Error hierarchy:**
+
+- `SkillError`: Base class for skill-related errors
+- `SkillValidationError`: Invalid skill configuration
+- `SkillNotFoundError`: Skill not found at specified path
+- `SkillMountError`: Failed to mount skill
+
+**Validation utilities:** `validate_skill()`, `validate_skill_name()`,
+`resolve_skill_name()`.
+
+The Claude Agent SDK adapter continues to re-export these types for backward
+compatibility.
+
+### Workspace Protocols Promoted to Core
+
+`ToolSuiteSection` and `WorkspaceSection` protocols have been promoted from
+`contrib.tools.workspace` to `prompt.protocols`. These are foundational
+contracts used by core code (`Prompt.filesystem()`, adapters), so they belong
+in core rather than contrib.
+
+A new static check (`make check-core-imports`) validates that core modules
+never import from contrib, enforcing the architectural constraint.
+
+### HostFilesystem Moved to Core
+
+`HostFilesystem` has been moved from `contrib.tools` to `weakincentives.filesystem`
+where the `Filesystem` protocol lives. This reflects its status as a core
+abstraction needed by adapters.
+
+```python
+# New location (preferred)
+from weakincentives.filesystem import HostFilesystem
+
+# Backward-compatible re-export still works
+from weakincentives.contrib.tools import HostFilesystem
+```
+
+### Enhanced Debug Logging
+
+Comprehensive DEBUG logging coverage for better observability during task
+execution:
+
+- **HookStats dataclass:** Tracks cumulative execution statistics (tool count,
+  turn count, subagent count, compact count, token usage)
+- **Turn boundary tracking:** UserPromptSubmit hook enhanced with turn tracking
+- **Timing metrics:** `elapsed_ms` and `hook_duration_ms` in hook events
+- **Budget/deadline status:** Pre-tool-use logging includes remaining budget
+- **Token usage tracking:** Cumulative usage in message logging with thinking
+  support
+- **Context window logging:** Includes utilization percentage
+- **Subagent tracking:** Detailed start/stop metrics
+- **Stop hook:** Final execution statistics summary
+
+### Fixed
+
+- **Logging formatter KeyError:** The text formatter now gracefully handles
+  missing `event` and `context` fields, fixing crashes when external libraries
+  (like claude_agent_sdk) log directly without structured fields.
+
+- **Circular import in contrib:** Replaced eager imports with lazy loading via
+  `__getattr__`, eliminating ModuleNotFoundError when import order wasn't
+  correct (e.g., optimizers.workspace_digest importing from tools.asteval).
+
+### Internal
+
+- **Removed mutation testing:** Deleted mutmut-based mutation testing
+  infrastructure (runner script, Makefile targets, CI job, dependencies).
+
+- **CI/CD optimizations:**
+
+  - Consolidated 4 static analysis jobs into 1
+  - Added concurrency control to cancel in-progress runs on new commits
+  - Standardized on actions/checkout@v5 across all workflows
+  - Created single detect-changes.yml reusable workflow for both CI and
+    Formal Verification
+  - Upgraded Python 3.12 → 3.14 in verify.yml
+
+- **Dependency upgrades:** aiohttp, anyio, certifi, filelock, huggingface-hub,
+  hypothesis, sse-starlette, textual (6.x → 7.x), tokenizers, typer-slim.
+
 ## v0.18.0 - 2026-01-05
 
 ### Breaking Changes
