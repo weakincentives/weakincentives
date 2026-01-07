@@ -29,6 +29,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
     SectionDescriptor,
     SectionOverride,
+    TaskExampleOverride,
     ToolOverride,
 )
 from weakincentives.prompt.overrides._fs import OverrideFilesystem
@@ -117,6 +118,7 @@ def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body="Cheer loudly for ${subject}.",
             )
@@ -129,7 +131,7 @@ def test_upsert_resolve_and_delete_roundtrip(tmp_path: Path) -> None:
     override_path = _override_path(tmp_path, descriptor)
     assert override_path.is_file()
     payload = json.loads(override_path.read_text(encoding="utf-8"))
-    assert payload["version"] == 1
+    assert payload["version"] == 2
     assert payload["sections"]["greeting"]["body"] == "Cheer loudly for ${subject}."
 
     resolved = store.resolve(descriptor)
@@ -210,7 +212,7 @@ def test_resolve_filters_stale_override_returns_none(tmp_path: Path) -> None:
     override_path = _override_path(tmp_path, descriptor)
     override_path.parent.mkdir(parents=True, exist_ok=True)
     payload: dict[str, JSONValue] = {
-        "version": 1,
+        "version": 2,
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
         "tag": "latest",
@@ -277,7 +279,7 @@ def test_resolve_tool_payload_validation_errors(tmp_path: Path) -> None:
     assert load_tools(empty_tools, descriptor) == {}
 
     base_payload = {
-        "version": 1,
+        "version": 2,
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
         "tag": "latest",
@@ -375,6 +377,7 @@ def test_upsert_rejects_mismatched_metadata(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body="Text",
             )
@@ -398,6 +401,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             ("unknown",): SectionOverride(
+                path=("unknown",),
                 expected_hash=section.content_hash,
                 body="Body",
             )
@@ -412,6 +416,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=OTHER_DIGEST,
                 body="Body",
             )
@@ -426,6 +431,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body=123,  # type: ignore[arg-type]
             )
@@ -440,7 +446,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -459,7 +465,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -478,7 +484,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -498,7 +504,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -518,7 +524,7 @@ def test_upsert_validation_errors(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
-                expected_hash=section.content_hash, body="Body"
+                path=section.path, expected_hash=section.content_hash, body="Body"
             )
         },
         tool_overrides={
@@ -545,6 +551,7 @@ def test_upsert_rejects_non_string_section_hash(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=cast(Any, 123),
                 body="Body",
             )
@@ -569,6 +576,7 @@ def test_upsert_rejects_non_string_tool_hash(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body="Body",
             )
@@ -599,6 +607,7 @@ def test_upsert_allows_none_tool_description(tmp_path: Path) -> None:
         tag="latest",
         sections={
             section.path: SectionOverride(
+                path=section.path,
                 expected_hash=section.content_hash,
                 body="Body",
             )
@@ -654,7 +663,7 @@ def test_seed_errors_on_stale_override(tmp_path: Path) -> None:
     override_path.parent.mkdir(parents=True, exist_ok=True)
     section = descriptor.sections[0]
     payload = {
-        "version": 1,
+        "version": 2,
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
         "tag": "latest",
@@ -763,7 +772,7 @@ def test_resolve_header_validation_errors(tmp_path: Path) -> None:
     override_path = _override_path(tmp_path, descriptor)
     override_path.parent.mkdir(parents=True, exist_ok=True)
     bad_version = {
-        "version": 2,
+        "version": 99,  # Unsupported version
         "ns": descriptor.ns,
         "prompt_key": descriptor.key,
         "tag": "latest",
@@ -780,7 +789,7 @@ def test_resolve_header_validation_errors(tmp_path: Path) -> None:
         store.resolve(descriptor)
 
     bad_metadata = dict(bad_version)
-    bad_metadata["version"] = 1
+    bad_metadata["version"] = 2
     bad_metadata["ns"] = "other"
     override_path.write_text(json.dumps(bad_metadata), encoding="utf-8")
     with pytest.raises(PromptOverridesError):
@@ -904,3 +913,342 @@ def test_collect_param_descriptions_with_partial_metadata(tmp_path: Path) -> Non
 
     # Only the field with a non-empty description should be included
     assert overrides[tool.name].param_descriptions == {"with_desc": "Has a description"}
+
+
+def test_store_section_override_hash_mismatch(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    wrong_hash = HexDigest("b" * 64)
+    override = SectionOverride(
+        path=section.path,
+        expected_hash=wrong_hash,
+        body="Modified body",
+    )
+
+    with pytest.raises(PromptOverridesError, match="Hash mismatch for section"):
+        store.store(prompt, override)
+
+
+def test_store_tool_override_hash_mismatch(tmp_path: Path) -> None:
+    prompt = _build_prompt_with_tool()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    tool = descriptor.tools[0]
+    wrong_hash = HexDigest("c" * 64)
+    override = ToolOverride(
+        name=tool.name,
+        expected_contract_hash=wrong_hash,
+        description="Modified description",
+        param_descriptions={},
+    )
+
+    with pytest.raises(PromptOverridesError, match="Hash mismatch for tool"):
+        store.store(prompt, override)
+
+
+def test_store_task_example_override(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    task_override = TaskExampleOverride(
+        path=("section", "example"),
+        index=0,
+        expected_hash=None,
+        action="append",
+        objective="New objective",
+    )
+
+    result = store.store(prompt, task_override, tag="latest")
+    assert len(result.task_example_overrides) == 1
+    assert result.task_example_overrides[0] == task_override
+
+
+def test_store_task_example_override_updates_existing(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    task_override1 = TaskExampleOverride(
+        path=("section", "example"),
+        index=0,
+        expected_hash=None,
+        action="append",
+        objective="First objective",
+    )
+    task_override2 = TaskExampleOverride(
+        path=("section", "example"),
+        index=0,
+        expected_hash=None,
+        action="modify",
+        objective="Updated objective",
+    )
+
+    store.store(prompt, task_override1, tag="latest")
+    result = store.store(prompt, task_override2, tag="latest")
+
+    # Should replace the existing override with same path+index
+    assert len(result.task_example_overrides) == 1
+    assert result.task_example_overrides[0].action == "modify"
+    assert result.task_example_overrides[0].objective == "Updated objective"
+
+
+def test_store_task_example_override_appends_different_index(tmp_path: Path) -> None:
+    prompt = _build_prompt()
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    task_override1 = TaskExampleOverride(
+        path=("section", "example"),
+        index=0,
+        expected_hash=None,
+        action="append",
+    )
+    task_override2 = TaskExampleOverride(
+        path=("section", "example"),
+        index=1,
+        expected_hash=None,
+        action="append",
+    )
+
+    store.store(prompt, task_override1, tag="latest")
+    result = store.store(prompt, task_override2, tag="latest")
+
+    # Should have both overrides since they have different indices
+    assert len(result.task_example_overrides) == 2
+
+
+def test_upsert_and_resolve_section_with_summary_and_visibility(tmp_path: Path) -> None:
+    """Test that summary and visibility fields are persisted and resolved."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                path=section.path,
+                expected_hash=section.content_hash,
+                body="Full body content for ${subject}.",
+                summary="Brief summary for ${subject}.",
+                visibility="summary",
+            )
+        },
+    )
+
+    persisted = store.upsert(descriptor, override)
+    assert persisted.sections[section.path].body == "Full body content for ${subject}."
+    assert persisted.sections[section.path].summary == "Brief summary for ${subject}."
+    assert persisted.sections[section.path].visibility == "summary"
+
+    # Check the JSON file contains the new fields
+    override_path = _override_path(tmp_path, descriptor)
+    payload = json.loads(override_path.read_text(encoding="utf-8"))
+    section_data = payload["sections"]["greeting"]
+    assert section_data["body"] == "Full body content for ${subject}."
+    assert section_data["summary"] == "Brief summary for ${subject}."
+    assert section_data["visibility"] == "summary"
+
+    # Resolve and verify
+    resolved = store.resolve(descriptor)
+    assert resolved is not None
+    assert resolved.sections[section.path].body == "Full body content for ${subject}."
+    assert resolved.sections[section.path].summary == "Brief summary for ${subject}."
+    assert resolved.sections[section.path].visibility == "summary"
+
+
+def test_resolve_section_without_summary_and_visibility(tmp_path: Path) -> None:
+    """Test that sections without summary/visibility default to None."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    override = PromptOverride(
+        ns=descriptor.ns,
+        prompt_key=descriptor.key,
+        tag="latest",
+        sections={
+            section.path: SectionOverride(
+                path=section.path,
+                expected_hash=section.content_hash,
+                body="Body without summary.",
+            )
+        },
+    )
+
+    persisted = store.upsert(descriptor, override)
+    assert persisted.sections[section.path].summary is None
+    assert persisted.sections[section.path].visibility is None
+
+    resolved = store.resolve(descriptor)
+    assert resolved is not None
+    assert resolved.sections[section.path].summary is None
+    assert resolved.sections[section.path].visibility is None
+
+
+def test_load_sections_invalid_summary_raises(tmp_path: Path) -> None:
+    """Test that non-string summary values raise an error."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    section = descriptor.sections[0]
+    section_key = "/".join(section.path)
+
+    with pytest.raises(PromptOverridesError, match="summary must be a string"):
+        load_sections(
+            {
+                section_key: {
+                    "expected_hash": section.content_hash,
+                    "body": "Body",
+                    "summary": 123,
+                }
+            },
+            descriptor,
+        )
+
+
+def test_load_sections_invalid_visibility_raises(tmp_path: Path) -> None:
+    """Test that invalid visibility values raise an error."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    section = descriptor.sections[0]
+    section_key = "/".join(section.path)
+
+    with pytest.raises(
+        PromptOverridesError, match="visibility must be 'full' or 'summary'"
+    ):
+        load_sections(
+            {
+                section_key: {
+                    "expected_hash": section.content_hash,
+                    "body": "Body",
+                    "visibility": "invalid",
+                }
+            },
+            descriptor,
+        )
+
+
+def test_store_section_with_summary_and_visibility(tmp_path: Path) -> None:
+    """Test that store() preserves summary and visibility fields."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    section = descriptor.sections[0]
+    override = SectionOverride(
+        path=section.path,
+        expected_hash=section.content_hash,
+        body="Full content.",
+        summary="Short summary.",
+        visibility="full",
+    )
+
+    result = store.store(prompt, override)
+    stored_section = result.sections[section.path]
+    assert stored_section.body == "Full content."
+    assert stored_section.summary == "Short summary."
+    assert stored_section.visibility == "full"
+
+
+def test_store_tool_override_success(tmp_path: Path) -> None:
+    """Test successful tool override storage via store()."""
+    prompt = _build_prompt_with_tool()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    tool = descriptor.tools[0]
+    override = ToolOverride(
+        name=tool.name,
+        expected_contract_hash=tool.contract_hash,
+        description="New description",
+        param_descriptions={"query": "Updated param description"},
+    )
+
+    result = store.store(prompt, override)
+    stored_tool = result.tool_overrides[tool.name]
+    assert stored_tool.description == "New description"
+    assert stored_tool.param_descriptions == {"query": "Updated param description"}
+
+
+def test_store_tool_override_unknown_tool(tmp_path: Path) -> None:
+    """Test that store() raises error for unknown tool names."""
+    prompt = _build_prompt_with_tool()  # Has tools, but we'll look for a different one
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    override = ToolOverride(
+        name="unknown_tool",
+        expected_contract_hash=VALID_DIGEST,
+        description="Some description",
+        param_descriptions={},
+    )
+
+    with pytest.raises(
+        PromptOverridesError, match="not registered in prompt descriptor"
+    ):
+        store.store(prompt, override)
+
+
+def test_store_with_malformed_existing_json(tmp_path: Path) -> None:
+    """Test store() raises error when existing file contains malformed JSON."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    # Create malformed JSON file
+    override_path = _override_path(tmp_path, descriptor)
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    override_path.write_text("{ invalid json }", encoding="utf-8")
+
+    section = descriptor.sections[0]
+    override = SectionOverride(
+        path=section.path,
+        expected_hash=section.content_hash,
+        body="New content",
+    )
+
+    with pytest.raises(PromptOverridesError, match="Failed to parse prompt override"):
+        store.store(prompt, override)
+
+
+def test_store_when_existing_overrides_are_stale(tmp_path: Path) -> None:
+    """Test store() handles case where existing overrides are all stale."""
+    prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    # Create a file with a stale section override (wrong hash)
+    override_path = _override_path(tmp_path, descriptor)
+    override_path.parent.mkdir(parents=True, exist_ok=True)
+    stale_payload = {
+        "version": 2,
+        "ns": descriptor.ns,
+        "prompt_key": descriptor.key,
+        "tag": "latest",
+        "sections": {
+            "greeting": {
+                "path": ["greeting"],
+                "expected_hash": "0" * 64,  # Wrong hash
+                "body": "Stale content",
+            }
+        },
+        "tools": {},
+        "task_example_overrides": [],
+    }
+    override_path.write_text(json.dumps(stale_payload), encoding="utf-8")
+
+    # Store a new section override - should work even though existing is stale
+    section = descriptor.sections[0]
+    new_override = SectionOverride(
+        path=section.path,
+        expected_hash=section.content_hash,
+        body="Fresh content",
+    )
+
+    result = store.store(prompt, new_override)
+    assert result.sections[section.path].body == "Fresh content"

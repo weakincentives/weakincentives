@@ -23,10 +23,12 @@ from .validation import (
     FORMAT_VERSION,
     filter_override_for_descriptor,
     load_sections,
+    load_task_example_overrides,
     load_tools,
     seed_sections,
     seed_tools,
     serialize_sections,
+    serialize_task_example_overrides,
     serialize_tools,
     validate_header,
     validate_sections_for_write,
@@ -40,6 +42,8 @@ from .versioning import (
     PromptOverridesError,
     PromptOverridesStore,
     SectionOverride,
+    TaskExampleOverride,
+    ToolOverride,
     descriptor_for_prompt,
 )
 
@@ -106,6 +110,9 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         sections = load_sections(sections_payload, descriptor)
         tools_payload = payload.get("tools")
         tools = load_tools(tools_payload, descriptor)
+        task_example_overrides = load_task_example_overrides(
+            payload.get("task_example_overrides")
+        )
 
         raw_override = PromptOverride(
             ns=descriptor.ns,
@@ -113,13 +120,14 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             tag=tag,
             sections=sections,
             tool_overrides=tools,
+            task_example_overrides=task_example_overrides,
         )
 
         filtered_sections, filtered_tools = filter_override_for_descriptor(
             descriptor, raw_override
         )
 
-        if not filtered_sections and not filtered_tools:
+        if not filtered_sections and not filtered_tools and not task_example_overrides:
             _LOGGER.debug(
                 "No applicable overrides remain after validation.",
                 event="prompt_override_empty",
@@ -137,6 +145,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             tag=tag,
             sections=filtered_sections,
             tool_overrides=filtered_tools,
+            task_example_overrides=task_example_overrides,
         )
         _LOGGER.info(
             "Resolved prompt override.",
@@ -147,6 +156,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "tag": normalized_tag,
                 "section_count": len(filtered_sections),
                 "tool_count": len(filtered_tools),
+                "task_example_count": len(task_example_overrides),
             },
         )
         return override
@@ -185,6 +195,9 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             "tag": normalized_tag,
             "sections": serialize_sections(validated_sections),
             "tools": serialize_tools(validated_tools),
+            "task_example_overrides": serialize_task_example_overrides(
+                override.task_example_overrides
+            ),
         }
 
         with self._filesystem.locked_override_path(file_path):
@@ -196,6 +209,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             tag=normalized_tag,
             sections=validated_sections,
             tool_overrides=validated_tools,
+            task_example_overrides=override.task_example_overrides,
         )
         _LOGGER.info(
             "Persisted prompt override.",
@@ -206,6 +220,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 "tag": normalized_tag,
                 "section_count": len(validated_sections),
                 "tool_count": len(validated_tools),
+                "task_example_count": len(override.task_example_overrides),
             },
         )
         return persisted
@@ -239,31 +254,173 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 )
 
     @override
-    def set_section_override(
+    def store(
         self,
         prompt: PromptLike,
+        override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
-        path: tuple[str, ...],
-        body: str,
     ) -> PromptOverride:
+        """Store a single override, dispatching by type.
+
+        Holds a lock for the entire read-modify-write sequence to prevent
+        TOCTOU race conditions.
+        """
         descriptor = descriptor_for_prompt(prompt)
         normalized_tag = self._filesystem.validate_identifier(tag, "tag")
-        existing_override = self.resolve(descriptor=descriptor, tag=normalized_tag)
-        sections = dict(existing_override.sections) if existing_override else {}
-        tools = dict(existing_override.tool_overrides) if existing_override else {}
-
-        expected_hash = _lookup_section_hash(descriptor, path)
-        sections[path] = SectionOverride(expected_hash=expected_hash, body=body)
-
-        override = PromptOverride(
+        file_path = self._filesystem.override_file_path(
             ns=descriptor.ns,
             prompt_key=descriptor.key,
             tag=normalized_tag,
+        )
+
+        # Hold lock for entire read-modify-write sequence
+        with self._filesystem.locked_override_path(file_path):
+            existing_override = self._resolve_unlocked(
+                descriptor, normalized_tag, file_path
+            )
+
+            sections = dict(existing_override.sections) if existing_override else {}
+            tools = dict(existing_override.tool_overrides) if existing_override else {}
+            task_examples = (
+                list(existing_override.task_example_overrides)
+                if existing_override
+                else []
+            )
+
+            if isinstance(override, SectionOverride):
+                expected_hash = _lookup_section_hash(descriptor, override.path)
+                if override.expected_hash != expected_hash:
+                    msg = (
+                        f"Hash mismatch for section {override.path!r}: expected "
+                        f"{expected_hash}, got {override.expected_hash}."
+                    )
+                    raise PromptOverridesError(msg)
+                sections[override.path] = override
+            elif isinstance(override, ToolOverride):
+                expected_hash = _lookup_tool_hash(descriptor, override.name)
+                if override.expected_contract_hash != expected_hash:
+                    msg = (
+                        f"Hash mismatch for tool {override.name!r}: expected "
+                        f"{expected_hash}, got {override.expected_contract_hash}."
+                    )
+                    raise PromptOverridesError(msg)
+                tools[override.name] = override
+            else:
+                # TaskExampleOverride case
+                found = False
+                for i, existing in enumerate(task_examples):
+                    if (
+                        existing.path == override.path
+                        and existing.index == override.index
+                    ):
+                        task_examples[i] = override
+                        found = True
+                        break
+                if not found:
+                    task_examples.append(override)
+
+            prompt_override = PromptOverride(
+                ns=descriptor.ns,
+                prompt_key=descriptor.key,
+                tag=normalized_tag,
+                sections=sections,
+                tool_overrides=tools,
+                task_example_overrides=tuple(task_examples),
+            )
+            return self._upsert_unlocked(descriptor, prompt_override, file_path)
+
+    def _resolve_unlocked(  # noqa: PLR6301
+        self,
+        descriptor: PromptDescriptor,
+        tag: str,
+        file_path: Path,
+    ) -> PromptOverride | None:
+        """Resolve override without acquiring lock (caller must hold lock)."""
+        if not file_path.exists():
+            return None
+
+        payload: dict[str, JSONValue]
+        try:
+            with file_path.open("r", encoding="utf-8") as handle:
+                payload = cast(dict[str, JSONValue], json.load(handle))
+        except json.JSONDecodeError as error:
+            raise PromptOverridesError(
+                f"Failed to parse prompt override JSON: {file_path}"
+            ) from error
+
+        validate_header(payload, descriptor, tag, file_path)
+
+        sections = load_sections(payload.get("sections"), descriptor)
+        tools = load_tools(payload.get("tools"), descriptor)
+        task_example_overrides = load_task_example_overrides(
+            payload.get("task_example_overrides")
+        )
+
+        raw_override = PromptOverride(
+            ns=descriptor.ns,
+            prompt_key=descriptor.key,
+            tag=tag,
             sections=sections,
             tool_overrides=tools,
+            task_example_overrides=task_example_overrides,
         )
-        return self.upsert(descriptor, override)
+
+        filtered_sections, filtered_tools = filter_override_for_descriptor(
+            descriptor, raw_override
+        )
+
+        if not filtered_sections and not filtered_tools and not task_example_overrides:
+            return None
+
+        return PromptOverride(
+            ns=descriptor.ns,
+            prompt_key=descriptor.key,
+            tag=tag,
+            sections=filtered_sections,
+            tool_overrides=filtered_tools,
+            task_example_overrides=task_example_overrides,
+        )
+
+    def _upsert_unlocked(
+        self,
+        descriptor: PromptDescriptor,
+        override: PromptOverride,
+        file_path: Path,
+    ) -> PromptOverride:
+        """Upsert override without acquiring lock (caller must hold lock)."""
+        # Uses self._filesystem.atomic_write - must be instance method
+        validated_sections = validate_sections_for_write(
+            override.sections,
+            descriptor,
+        )
+        validated_tools = validate_tools_for_write(
+            override.tool_overrides,
+            descriptor,
+        )
+
+        payload = {
+            "version": FORMAT_VERSION,
+            "ns": descriptor.ns,
+            "prompt_key": descriptor.key,
+            "tag": override.tag,
+            "sections": serialize_sections(validated_sections),
+            "tools": serialize_tools(validated_tools),
+            "task_example_overrides": serialize_task_example_overrides(
+                override.task_example_overrides
+            ),
+        }
+
+        self._filesystem.atomic_write(file_path, payload)
+
+        return PromptOverride(
+            ns=descriptor.ns,
+            prompt_key=descriptor.key,
+            tag=override.tag,
+            sections=validated_sections,
+            tool_overrides=validated_tools,
+            task_example_overrides=override.task_example_overrides,
+        )
 
     @override
     def seed(
@@ -298,6 +455,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 tag=normalized_tag,
                 sections=sections,
                 tool_overrides=tools,
+                task_example_overrides=(),  # Task examples not seeded by default
             )
             return self.upsert(descriptor, seed_override)
 
@@ -310,6 +468,15 @@ def _lookup_section_hash(
             return candidate.content_hash
     raise PromptOverridesError(
         f"Section {path!r} not registered in prompt descriptor; cannot override."
+    )
+
+
+def _lookup_tool_hash(descriptor: PromptDescriptor, name: str) -> HexDigest:
+    for candidate in descriptor.tools:
+        if candidate.name == name:
+            return candidate.contract_hash
+    raise PromptOverridesError(
+        f"Tool {name!r} not registered in prompt descriptor; cannot override."
     )
 
 

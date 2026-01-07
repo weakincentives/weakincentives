@@ -19,6 +19,7 @@ from hashlib import sha256
 from typing import Literal, Protocol, Self, cast, overload
 
 from ...dataclasses import FrozenDataclass
+from ...dbc import require
 from ...errors import WinkError
 from ...serde.schema import schema
 from ...types import JSONValue
@@ -35,6 +36,18 @@ def _tool_override_mapping_factory() -> dict[str, ToolOverride]:
 
 def _param_description_mapping_factory() -> dict[str, str]:
     return {}
+
+
+def _tool_example_overrides_factory() -> tuple[ToolExampleOverride, ...]:
+    return ()
+
+
+def _task_example_overrides_factory() -> tuple[TaskExampleOverride, ...]:
+    return ()
+
+
+def _task_example_descriptors_factory() -> list[TaskExampleDescriptor]:
+    return []
 
 
 class ToolContractProtocol(Protocol):
@@ -94,6 +107,11 @@ def ensure_hex_digest(value: HexDigest, *, field_name: str) -> HexDigest: ...
 def ensure_hex_digest(value: str, *, field_name: str) -> HexDigest: ...
 
 
+def _require_field_name(value: object, field_name: str) -> tuple[bool, str]:
+    return (bool(field_name), "field_name must be non-empty")
+
+
+@require(_require_field_name)
 def ensure_hex_digest(value: object, *, field_name: str) -> HexDigest:
     """Normalize an object to a :class:`HexDigest` with helpful errors."""
 
@@ -125,6 +143,16 @@ class ToolDescriptor:
     path: tuple[str, ...]
     name: str
     contract_hash: HexDigest
+    example_hashes: tuple[HexDigest, ...] = ()
+
+
+@FrozenDataclass()
+class TaskExampleDescriptor:
+    """Metadata describing a task example within a section."""
+
+    path: tuple[str, ...]
+    index: int
+    content_hash: HexDigest
 
 
 @FrozenDataclass()
@@ -135,11 +163,15 @@ class PromptDescriptor:
     key: str
     sections: list[SectionDescriptor]
     tools: list[ToolDescriptor]
+    task_examples: list[TaskExampleDescriptor] = field(
+        default_factory=_task_example_descriptors_factory
+    )
 
     @classmethod
     def from_prompt(cls, prompt: PromptLike) -> PromptDescriptor:
         sections: list[SectionDescriptor] = []
         tools: list[ToolDescriptor] = []
+        task_examples: list[TaskExampleDescriptor] = []
         for node in prompt.sections:
             if getattr(node.section, "accepts_overrides", True):
                 template = node.section.original_body_template()
@@ -153,14 +185,31 @@ class PromptDescriptor:
                     path=node.path,
                     name=tool.name,
                     contract_hash=_tool_contract_hash(tool),
+                    example_hashes=_tool_example_hashes(tool),
                 )
                 for tool in node.section.tools()
                 if tool.accepts_overrides
             ]
             tools.extend(tool_descriptors)
-        return cls(prompt.ns, prompt.key, sections, tools)
+            # Collect task example descriptors
+            task_example_descs = _task_example_descriptors(node)
+            task_examples.extend(task_example_descs)
+        return cls(prompt.ns, prompt.key, sections, tools, task_examples)
 
 
+def _require_prompt_ns_key(prompt: object) -> tuple[bool, str]:
+    return (
+        hasattr(prompt, "ns") and hasattr(prompt, "key"),
+        "prompt must have ns and key attributes",
+    )
+
+
+def _require_prompt_sections(prompt: object) -> tuple[bool, str]:
+    return (hasattr(prompt, "sections"), "prompt must have sections attribute")
+
+
+@require(_require_prompt_ns_key)
+@require(_require_prompt_sections)
 def descriptor_for_prompt(prompt: PromptLike) -> PromptDescriptor:
     """Return a cached prompt descriptor when available."""
 
@@ -172,10 +221,33 @@ def descriptor_for_prompt(prompt: PromptLike) -> PromptDescriptor:
 
 @FrozenDataclass()
 class SectionOverride:
-    """Override payload for a prompt section validated by hash."""
+    """Override payload for a prompt section validated by hash.
 
+    Attributes:
+        path: Section path tuple identifying the section.
+        expected_hash: Hash of the original section content for staleness detection.
+        body: Override text for the section body (FULL visibility).
+        summary: Optional override text for summary (SUMMARY visibility).
+        visibility: Optional default visibility override (FULL or SUMMARY).
+    """
+
+    path: tuple[str, ...]
     expected_hash: HexDigest
     body: str
+    summary: str | None = None
+    visibility: Literal["full", "summary"] | None = None
+
+
+@FrozenDataclass()
+class ToolExampleOverride:
+    """Override for a single tool example."""
+
+    index: int  # Original index, or -1 for append
+    expected_hash: HexDigest | None  # None for new examples
+    action: Literal["modify", "remove", "append"]
+    description: str | None = None
+    input_json: str | None = None  # JSON-serialized params
+    output_json: str | None = None  # JSON-serialized result
 
 
 @FrozenDataclass()
@@ -188,6 +260,35 @@ class ToolOverride:
     param_descriptions: dict[str, str] = field(
         default_factory=_param_description_mapping_factory
     )
+    example_overrides: tuple[ToolExampleOverride, ...] = field(
+        default_factory=_tool_example_overrides_factory
+    )
+
+
+@FrozenDataclass()
+class TaskStepOverride:
+    """Override for a single step within a task example."""
+
+    index: int
+    tool_name: str | None = None  # None = keep original
+    description: str | None = None
+    input_json: str | None = None
+    output_json: str | None = None
+
+
+@FrozenDataclass()
+class TaskExampleOverride:
+    """Override for a task example within TaskExamplesSection."""
+
+    path: tuple[str, ...]
+    index: int  # Original index, or -1 for append
+    expected_hash: HexDigest | None  # None for new examples
+    action: Literal["modify", "remove", "append"]
+    objective: str | None = None
+    outcome: str | None = None  # String or JSON-serialized dataclass
+    step_overrides: tuple[TaskStepOverride, ...] = ()
+    steps_to_remove: tuple[int, ...] = ()  # Indices to remove
+    steps_to_append: tuple[TaskStepOverride, ...] = ()  # New steps
 
 
 @FrozenDataclass()
@@ -202,6 +303,9 @@ class PromptOverride:
     )
     tool_overrides: dict[str, ToolOverride] = field(
         default_factory=_tool_override_mapping_factory
+    )
+    task_example_overrides: tuple[TaskExampleOverride, ...] = field(
+        default_factory=_task_example_overrides_factory
     )
 
 
@@ -228,14 +332,15 @@ class PromptOverridesStore(Protocol):
         tag: str,
     ) -> None: ...
 
-    def set_section_override(
+    def store(
         self,
         prompt: PromptLike,
+        override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
-        path: tuple[str, ...],
-        body: str,
-    ) -> PromptOverride: ...
+    ) -> PromptOverride:
+        """Store a single override, dispatching by type."""
+        ...
 
     def seed(
         self,
@@ -257,8 +362,13 @@ __all__ = [
     "PromptOverridesStore",
     "SectionDescriptor",
     "SectionOverride",
+    "TaskExampleDescriptor",
+    "TaskExampleOverride",
+    "TaskStepOverride",
     "ToolDescriptor",
+    "ToolExampleOverride",
     "ToolOverride",
+    "descriptor_for_prompt",
     "ensure_hex_digest",
     "hash_json",
     "hash_text",
@@ -277,7 +387,13 @@ def _tool_contract_hash(tool: ToolContractProtocol) -> HexDigest:
     )
 
 
+def _require_str_value(value: object) -> tuple[bool, str]:
+    return (isinstance(value, str), "value must be a string")
+
+
+@require(_require_str_value)
 def hash_text(value: str) -> HexDigest:
+    """Compute SHA-256 hash of text content."""
     return HexDigest(sha256(value.encode("utf-8")).hexdigest())
 
 
@@ -315,3 +431,86 @@ def _result_schema(
             "items": item_schema,
         }
     return schema(result_type, extra="ignore")
+
+
+def _tool_example_hashes(tool: ToolContractProtocol) -> tuple[HexDigest, ...]:
+    """Compute content hashes for all examples of a tool."""
+    examples = getattr(tool, "examples", ())
+    hashes: list[HexDigest] = []
+    for example in examples:
+        # Use None for missing values to distinguish from empty strings
+        description = getattr(example, "description", None)
+        example_data = {
+            "description": description,
+            "input": _serialize_example_value(getattr(example, "input", None)),
+            "output": _serialize_example_value(getattr(example, "output", None)),
+        }
+        hashes.append(hash_json(example_data))
+    return tuple(hashes)
+
+
+def _serialize_example_value(value: object) -> JSONValue:
+    """Serialize an example input/output value to JSON-compatible form."""
+    if value is None:
+        return None
+    # Try to use serde.dump if it's a dataclass
+    from ...serde import dump
+
+    try:
+        return dump(value, exclude_none=True)
+    except TypeError:
+        # Non-dataclass values fall back to str() - expected for primitives
+        from ...runtime.logging import get_logger
+
+        logger = get_logger(__name__, context={"component": "prompt_overrides"})
+        logger.warning(
+            "Falling back to str() for non-dataclass example value.",
+            event="example_value_fallback",
+            context={"value_type": type(value).__name__},
+        )
+        return str(value)
+
+
+def _task_example_descriptors(node: SectionNodeLike) -> list[TaskExampleDescriptor]:
+    """Extract task example descriptors from a section node."""
+    section = node.section
+    # Check if this is a TaskExamplesSection by looking for children that are TaskExample
+    children = getattr(section, "children", None)
+    if children is None:
+        return []
+
+    descriptors: list[TaskExampleDescriptor] = []
+    for idx, child in enumerate(children):
+        # Check if child is a TaskExample by looking for objective, steps, outcome
+        objective = getattr(child, "objective", None)
+        steps = getattr(child, "steps", None)
+        outcome = getattr(child, "outcome", None)
+        if objective is None or steps is None or outcome is None:
+            continue
+
+        # Compute content hash for the task example
+        step_data: list[dict[str, str]] = []
+        for step in steps:
+            tool_name: str = getattr(step, "tool_name", "")
+            example = getattr(step, "example", None)
+            description: str = getattr(example, "description", "") if example else ""
+            step_data.append({"tool": tool_name, "description": description})
+
+        example_data: dict[str, JSONValue] = {
+            "objective": objective,
+            "steps": step_data,
+            "outcome": _serialize_example_value(outcome)
+            if not isinstance(outcome, str)
+            else outcome,
+        }
+        content_hash = hash_json(example_data)
+
+        child_key = getattr(child, "key", f"example-{idx}")
+        example_path = (*node.path, child_key)
+        descriptors.append(
+            TaskExampleDescriptor(
+                path=example_path, index=idx, content_hash=content_hash
+            )
+        )
+
+    return descriptors

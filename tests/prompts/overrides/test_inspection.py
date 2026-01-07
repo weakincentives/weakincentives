@@ -48,7 +48,7 @@ def test_iter_override_files_yields_metadata(tmp_path: Path) -> None:
     section_hash = "a" * 64
     tool_hash = "b" * 64
     payload = {
-        "version": 1,
+        "version": 2,
         "ns": "example/ns",
         "prompt_key": "prompt",
         "tag": "latest",
@@ -102,7 +102,7 @@ def test_iter_override_files_raises_on_invalid_sections(tmp_path: Path) -> None:
     overrides_root.mkdir(parents=True)
     override_path = overrides_root / "invalid.json"
     payload = {
-        "version": 1,
+        "version": 2,
         "ns": "example/ns",
         "prompt_key": "prompt",
         "tag": "latest",
@@ -120,7 +120,7 @@ def test_iter_override_files_raises_on_invalid_tools(tmp_path: Path) -> None:
     overrides_root.mkdir(parents=True)
     override_path = overrides_root / "invalid_tools.json"
     payload = {
-        "version": 1,
+        "version": 2,
         "ns": "example/ns",
         "prompt_key": "prompt",
         "tag": "latest",
@@ -141,7 +141,7 @@ def test_iter_override_files_skips_non_file_matches(tmp_path: Path) -> None:
     target_dir.mkdir(parents=True)
     override_path = target_dir / "latest.json"
     payload = {
-        "version": 1,
+        "version": 2,
         "ns": "example/ns",
         "prompt_key": "prompt",
         "tag": "latest",

@@ -24,8 +24,10 @@ from weakincentives.contrib.tools.digests import (
 from weakincentives.prompt import MarkdownSection, PromptTemplate
 from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.prompt.overrides import (
+    HexDigest,
     LocalPromptOverridesStore,
     PromptOverridesError,
+    SectionOverride,
 )
 from weakincentives.prompt.overrides.versioning import PromptDescriptor
 from weakincentives.runtime.session import Session
@@ -54,15 +56,18 @@ def test_prompt_find_section_by_key_and_candidates() -> None:
         prompt.find_section((WorkspaceDigestSection,))
 
 
-def test_set_section_override_requires_registered_path(tmp_path: Path) -> None:
+def test_store_section_override_requires_registered_path(tmp_path: Path) -> None:
     prompt = _build_prompt()
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     descriptor = PromptDescriptor.from_prompt(prompt)
     assert any(section.path == ("one",) for section in descriptor.sections)
 
+    # Using a fake hash since the path doesn't exist
+    fake_hash = HexDigest("a" * 64)
+    override = SectionOverride(path=("missing",), expected_hash=fake_hash, body="X")
     with pytest.raises(PromptOverridesError):
-        store.set_section_override(prompt, path=("missing",), body="X")
+        store.store(prompt, override)
 
 
 def test_workspace_digest_section_in_descriptor() -> None:

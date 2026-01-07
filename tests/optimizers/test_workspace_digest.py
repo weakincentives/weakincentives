@@ -45,6 +45,9 @@ from weakincentives.prompt.overrides import (
     PromptOverride,
     PromptOverridesError,
     PromptOverridesStore,
+    SectionOverride,
+    TaskExampleOverride,
+    ToolOverride,
 )
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import ToolInvoked
@@ -98,15 +101,17 @@ class _RecordingOverridesStore(PromptOverridesStore):
             (cast(PromptTemplate[Any], object()), tag, (ns, prompt_key), "delete")
         )
 
-    def set_section_override(
+    def store(
         self,
-        prompt: PromptTemplate[Any],
+        prompt: PromptLike,
+        override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
-        path: tuple[str, ...],
-        body: str,
     ) -> PromptOverride:
-        self.calls.append((prompt, tag, path, body))
+        if isinstance(override, SectionOverride):
+            self.calls.append(
+                (cast(PromptTemplate[Any], prompt), tag, override.path, override.body)
+            )
         return cast(PromptOverride, object())
 
     def seed(
@@ -537,3 +542,14 @@ def test_latest_workspace_digest_handles_section_key_mismatch() -> None:
     # Should return None when no match
     result = latest_workspace_digest(session, "non-existent")
     assert result is None
+
+
+def test_find_section_hash_raises_for_missing_path() -> None:
+    """Test that _find_section_hash raises for unknown paths."""
+    adapter = _RecordingAdapter(mode="dataclass")
+    optimizer = _create_optimizer(adapter)
+    prompt = Prompt(_build_prompt())
+    descriptor = PromptDescriptor.from_prompt(prompt)
+
+    with pytest.raises(PromptOverridesError, match="Section hash not found"):
+        optimizer._find_section_hash(descriptor, ("nonexistent", "path"))
