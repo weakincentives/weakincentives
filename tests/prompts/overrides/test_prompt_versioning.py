@@ -525,3 +525,62 @@ def test_tool_example_hash_handles_missing_input_attribute() -> None:
     # Test with None value (covering line 430)
     result = _serialize_example_value(None)
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# DbC Precondition Tests
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_hex_digest_requires_field_name() -> None:
+    """ensure_hex_digest requires non-empty field_name."""
+    import pytest
+
+    from weakincentives.dbc import dbc_enabled
+    from weakincentives.prompt.overrides.versioning import ensure_hex_digest
+
+    with dbc_enabled():
+        with pytest.raises(AssertionError, match="field_name must be non-empty"):
+            ensure_hex_digest("a" * 64, field_name="")
+
+
+def test_descriptor_for_prompt_requires_ns_key() -> None:
+    """descriptor_for_prompt requires prompt to have ns and key attributes."""
+    import pytest
+
+    from weakincentives.dbc import dbc_enabled
+    from weakincentives.prompt.overrides.versioning import descriptor_for_prompt
+
+    class _FakePrompt:
+        sections: tuple[object, ...] = ()
+
+    with dbc_enabled():
+        with pytest.raises(AssertionError, match="prompt must have ns and key"):
+            descriptor_for_prompt(_FakePrompt())  # type: ignore[arg-type]
+
+
+def test_descriptor_for_prompt_requires_sections() -> None:
+    """descriptor_for_prompt requires prompt to have sections attribute."""
+    import pytest
+
+    from weakincentives.dbc import dbc_enabled
+    from weakincentives.prompt.overrides.versioning import descriptor_for_prompt
+
+    class _FakePrompt:
+        ns = "test"
+        key = "test"
+
+    with dbc_enabled():
+        with pytest.raises(AssertionError, match="prompt must have sections"):
+            descriptor_for_prompt(_FakePrompt())  # type: ignore[arg-type]
+
+
+def test_hash_text_requires_string() -> None:
+    """hash_text requires value to be a string."""
+    import pytest
+
+    from weakincentives.dbc import dbc_enabled
+
+    with dbc_enabled():
+        with pytest.raises(AssertionError, match="value must be a string"):
+            hash_text(123)  # type: ignore[arg-type]
