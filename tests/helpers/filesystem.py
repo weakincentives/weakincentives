@@ -213,6 +213,18 @@ class FilesystemValidationSuite:  # noqa: PLR0904
         with pytest.raises(ValueError, match=r"binary content.*read_bytes"):
             fs.read("binary.bin")
 
+    def test_read_bytes_negative_offset_raises(self, fs: Filesystem) -> None:
+        """read_bytes() should raise ValueError for negative offset."""
+        fs.write_bytes("file.bin", b"content")
+        with pytest.raises(ValueError, match=r"offset must be non-negative"):
+            fs.read_bytes("file.bin", offset=-1)
+
+    def test_read_bytes_negative_limit_raises(self, fs: Filesystem) -> None:
+        """read_bytes() should raise ValueError for negative limit."""
+        fs.write_bytes("file.bin", b"content")
+        with pytest.raises(ValueError, match=r"limit must be non-negative"):
+            fs.read_bytes("file.bin", limit=-1)
+
     # -------------------------------------------------------------------------
     # Write Operation
     # -------------------------------------------------------------------------
@@ -249,6 +261,13 @@ class FilesystemValidationSuite:  # noqa: PLR0904
         fs.write("missing.txt", "content", mode="append")
         result = fs.read("missing.txt")
         assert result.content == "content"
+
+    def test_write_append_bytes_written(self, fs: Filesystem) -> None:
+        """write() with mode='append' should report bytes written, not total size."""
+        fs.write("file.txt", "hello")  # 5 bytes
+        result = fs.write("file.txt", " world", mode="append")  # 6 bytes
+        # bytes_written should be 6 (what we just wrote), not 11 (total size)
+        assert result.bytes_written == len(b" world")
 
     def test_write_creates_parents(self, fs: Filesystem) -> None:
         """write() should create parent directories by default."""
@@ -312,6 +331,13 @@ class FilesystemValidationSuite:  # noqa: PLR0904
         fs.write_bytes("file.bin", b" world", mode="append")
         result = fs.read_bytes("file.bin")
         assert result.content == b"hello world"
+
+    def test_write_bytes_append_bytes_written(self, fs: Filesystem) -> None:
+        """write_bytes() with mode='append' should report bytes written, not total size."""
+        fs.write_bytes("file.bin", b"hello")  # 5 bytes
+        result = fs.write_bytes("file.bin", b" world", mode="append")  # 6 bytes
+        # bytes_written should be 6 (what we just wrote), not 11 (total size)
+        assert result.bytes_written == 6
 
     def test_write_bytes_creates_parents(self, fs: Filesystem) -> None:
         """write_bytes() should create parent directories by default."""
@@ -595,6 +621,14 @@ class FilesystemValidationSuite:  # noqa: PLR0904
         fs.write("a/b/c/file.txt", "content")
         result = fs.read("a/b/../b/c/file.txt")
         assert result.content == "content"
+
+    def test_utf8_path_handling(self, fs: Filesystem) -> None:
+        """Filesystem should handle UTF-8 characters in paths."""
+        # Test various UTF-8 characters: accented, emoji, CJK
+        fs.write("café/日本語/файл.txt", "content with émojis 🎉")
+        assert fs.exists("café/日本語/файл.txt")
+        result = fs.read("café/日本語/файл.txt")
+        assert result.content == "content with émojis 🎉"
 
 
 class ReadOnlyFilesystemValidationSuite:

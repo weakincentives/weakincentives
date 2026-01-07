@@ -233,6 +233,13 @@ class HostFilesystem:
         limit: int | None = None,
     ) -> ReadBytesResult:
         """Read file content as raw bytes with optional pagination."""
+        if offset < 0:
+            msg = f"offset must be non-negative, got {offset}"
+            raise ValueError(msg)
+        if limit is not None and limit < 0:
+            msg = f"limit must be non-negative, got {limit}"
+            raise ValueError(msg)
+
         resolved = self._resolve_path(path)
 
         if not resolved.exists():
@@ -469,8 +476,8 @@ class HostFilesystem:
         with resolved.open(file_mode, encoding="utf-8") as f:
             _ = f.write(content)
 
-        # Calculate bytes written
-        bytes_written = resolved.stat().st_size
+        # Calculate bytes written (actual bytes written, not total file size)
+        bytes_written = len(content.encode("utf-8"))
 
         return WriteResult(
             path=normalized,
@@ -523,8 +530,8 @@ class HostFilesystem:
         with resolved.open(file_mode) as f:
             _ = f.write(content)
 
-        # Calculate bytes written
-        bytes_written = resolved.stat().st_size
+        # Calculate bytes written (actual bytes written, not total file size)
+        bytes_written = len(content)
 
         return WriteResult(
             path=normalized,

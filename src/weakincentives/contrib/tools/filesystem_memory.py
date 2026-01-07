@@ -200,6 +200,13 @@ class InMemoryFilesystem:
         limit: int | None = None,
     ) -> ReadBytesResult:
         """Read file content as raw bytes with optional pagination."""
+        if offset < 0:
+            msg = f"offset must be non-negative, got {offset}"
+            raise ValueError(msg)
+        if limit is not None and limit < 0:
+            msg = f"limit must be non-negative, got {limit}"
+            raise ValueError(msg)
+
         normalized = normalize_path(path)
         validate_path(normalized)
 
@@ -467,7 +474,7 @@ class InMemoryFilesystem:
 
         return WriteResult(
             path=normalized,
-            bytes_written=len(final_content),
+            bytes_written=len(content_bytes),
             mode=mode,
         )
 
@@ -517,7 +524,7 @@ class InMemoryFilesystem:
 
         return WriteResult(
             path=normalized,
-            bytes_written=len(final_content),
+            bytes_written=len(content),
             mode=mode,
         )
 
