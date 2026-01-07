@@ -572,6 +572,328 @@ def sqrt(x: Positive[float]) -> float:
 
 Keep DbC for relational constraints that refined types cannot express.
 
+## Codebase Examples
+
+This section shows concrete examples from the weakincentives codebase where
+refined types would eliminate defensive checks.
+
+### Budget Token Counts
+
+**Current code** (`budget.py:64-74`):
+
+```python
+@dataclass(frozen=True, slots=True)
+class Budget:
+    max_total_tokens: int | None = None
+    max_input_tokens: int | None = None
+    max_output_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.max_total_tokens is not None and self.max_total_tokens <= 0:
+            msg = "max_total_tokens must be positive."
+            raise ValueError(msg)
+        if self.max_input_tokens is not None and self.max_input_tokens <= 0:
+            msg = "max_input_tokens must be positive."
+            raise ValueError(msg)
+        if self.max_output_tokens is not None and self.max_output_tokens <= 0:
+            msg = "max_output_tokens must be positive."
+            raise ValueError(msg)
+```
+
+**With refined types**:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Budget:
+    max_total_tokens: Positive[int] | None = None
+    max_input_tokens: Positive[int] | None = None
+    max_output_tokens: Positive[int] | None = None
+    # No __post_init__ needed - constraints enforced by type
+```
+
+### Visibility Timeout Range
+
+**Current code** (`runtime/mailbox/_types.py:96-113`):
+
+```python
+MAX_VISIBILITY_TIMEOUT = 43200
+
+def validate_visibility_timeout(
+    value: int, param_name: str = "visibility_timeout"
+) -> None:
+    """Validate visibility_timeout is within valid range [0, 43200]."""
+    if value < 0:
+        raise InvalidParameterError(f"{param_name} must be non-negative, got {value}")
+    if value > MAX_VISIBILITY_TIMEOUT:
+        raise InvalidParameterError(
+            f"{param_name} must be at most {MAX_VISIBILITY_TIMEOUT} seconds, got {value}"
+        )
+```
+
+**With refined types**:
+
+```python
+type VisibilityTimeout = ClosedRange[int, 0, 43200]
+
+# Function signature encodes the constraint
+def extend_visibility(timeout: VisibilityTimeout) -> None:
+    # No validation needed - type guarantees valid range
+    ...
+```
+
+### Skill Name Validation
+
+**Current code** (`skills/_validation.py:114-128`):
+
+```python
+_MAX_SKILL_NAME_LENGTH = 64
+_SKILL_NAME_PATTERN = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+def validate_skill_name(name: str) -> None:
+    if not name:
+        msg = "Skill name cannot be empty"
+        raise SkillMountError(msg)
+
+    if len(name) > _MAX_SKILL_NAME_LENGTH:
+        msg = f"Skill name exceeds {_MAX_SKILL_NAME_LENGTH} characters: {name}"
+        raise SkillMountError(msg)
+
+    if not _SKILL_NAME_PATTERN.match(name):
+        msg = f"Invalid skill name format: {name}"
+        raise SkillMountError(msg)
+```
+
+**With refined types**:
+
+```python
+type SkillName = LengthRange[str, 1, 64] & Pattern[str, r"^[a-z0-9]+(-[a-z0-9]+)*$"]
+
+@dataclass(frozen=True, slots=True)
+class SkillMount:
+    name: SkillName  # All three constraints encoded in type
+    path: Path
+```
+
+### Tool Description Bounds
+
+**Current code** (`prompt/tool.py:284-298`):
+
+```python
+_DESCRIPTION_MAX_LENGTH = 200
+
+def validate(self) -> None:
+    description_clean = self.description.strip()
+    if not description_clean or len(description_clean) > _DESCRIPTION_MAX_LENGTH:
+        raise PromptValidationError(
+            "Tool description must be 1-200 ASCII characters."
+        )
+```
+
+**With refined types**:
+
+```python
+type ToolDescription = TrimmedStr & LengthRange[str, 1, 200]
+
+@dataclass(frozen=True, slots=True)
+class Tool:
+    name: ToolName
+    description: ToolDescription  # Non-blank, trimmed, 1-200 chars
+    handler: Callable[..., ToolResult[Any]]
+```
+
+### Watchdog Thresholds
+
+**Current code** (`runtime/watchdog.py:106-130`):
+
+```python
+def __init__(
+    self,
+    heartbeats: Sequence[Heartbeat],
+    *,
+    stall_threshold: float = 720.0,  # Must be > 0 (implicit)
+    check_interval: float = 60.0,    # Must be > 0 (implicit)
+) -> None:
+    self._stall_threshold = stall_threshold
+    self._check_interval = check_interval
+```
+
+**With refined types**:
+
+```python
+def __init__(
+    self,
+    heartbeats: NonEmpty[Sequence[Heartbeat]],  # At least one heartbeat
+    *,
+    stall_threshold: Positive[float] = 720.0,   # Constraint explicit
+    check_interval: Positive[float] = 60.0,     # Constraint explicit
+) -> None:
+    ...
+```
+
+### Message Queue Bounds
+
+**Current code** (`runtime/mailbox/_in_memory.py:309`):
+
+```python
+max_messages = min(max(1, max_messages), 10)  # Clamping to [1, 10]
+```
+
+**With refined types**:
+
+```python
+type MaxMessages = ClosedRange[int, 1, 10]
+
+def receive(self, max_messages: MaxMessages = 1) -> list[Message]:
+    # No clamping needed - type guarantees valid range
+    ...
+```
+
+### Token Count Coercion
+
+**Current code** (`adapters/token_usage.py:28`):
+
+```python
+def _coerce_token_count(value: object) -> int | None:
+    if isinstance(value, (int, float)):
+        coerced = int(value)
+        return coerced if coerced >= 0 else None  # Reject negative
+    return None
+```
+
+**With refined types**:
+
+```python
+def _coerce_token_count(value: object) -> NonNegative[int] | None:
+    if isinstance(value, (int, float)):
+        coerced = int(value)
+        try:
+            return NonNegative.validate(coerced)
+        except RefinementError:
+            return None
+    return None
+```
+
+### Filesystem Path Depth
+
+**Current code** (`filesystem/_types.py:158-164`):
+
+```python
+MAX_PATH_DEPTH = 10
+MAX_SEGMENT_LENGTH = 200
+
+def validate_path(path: str) -> None:
+    segments = path.split("/")
+    if len(segments) > MAX_PATH_DEPTH:
+        msg = f"Path depth exceeds limit of {MAX_PATH_DEPTH} segments."
+        raise ValueError(msg)
+
+    for segment in segments:
+        if len(segment) > MAX_SEGMENT_LENGTH:
+            msg = f"Path segment exceeds limit of {MAX_SEGMENT_LENGTH} characters."
+            raise ValueError(msg)
+```
+
+**With refined types**:
+
+```python
+type PathSegment = MaxLength[str, 200]
+type FilesystemPath = MaxLength[tuple[PathSegment, ...], 10]
+
+# Or as a custom refinement
+class SandboxedPath(Refinement[str]):
+    """Path within sandbox constraints."""
+
+    MAX_DEPTH = 10
+    MAX_SEGMENT = 200
+
+    @staticmethod
+    def validate(value: str) -> str:
+        segments = value.split("/")
+        if len(segments) > SandboxedPath.MAX_DEPTH:
+            raise RefinementError(
+                constraint="SandboxedPath",
+                value=value,
+                message=f"path depth exceeds {SandboxedPath.MAX_DEPTH}",
+            )
+        for seg in segments:
+            if len(seg) > SandboxedPath.MAX_SEGMENT:
+                raise RefinementError(
+                    constraint="SandboxedPath",
+                    value=value,
+                    message=f"segment exceeds {SandboxedPath.MAX_SEGMENT} chars",
+                )
+        return value
+```
+
+### Session Evaluator Counts
+
+**Current code** (`evals/_session_evaluators.py:95-110`):
+
+```python
+def tool_call_count(
+    name: str,
+    *,
+    min_count: int = 0,       # Implicit: must be >= 0
+    max_count: int | None = None,  # Implicit: must be > 0 if set
+) -> SessionEvaluator:
+    ...
+```
+
+**With refined types**:
+
+```python
+def tool_call_count(
+    name: NonBlank[str],
+    *,
+    min_count: NonNegative[int] = 0,
+    max_count: Positive[int] | None = None,
+) -> SessionEvaluator:
+    ...
+```
+
+### Domain Type Aliases
+
+Define reusable refined types for common domain concepts:
+
+```python
+# weakincentives/types/domain.py
+
+# Token and budget constraints
+type TokenCount = NonNegative[int]
+type PositiveTokens = Positive[int]
+
+# Time constraints
+type TimeoutSeconds = NonNegative[float]
+type PositiveTimeout = Positive[float]
+type VisibilityTimeout = ClosedRange[int, 0, 43200]
+
+# String constraints
+type SkillName = LengthRange[str, 1, 64] & Pattern[str, r"^[a-z0-9]+(-[a-z0-9]+)*$"]
+type ToolName = LengthRange[str, 1, 64] & Pattern[str, r"^[a-zA-Z_][a-zA-Z0-9_]*$"]
+type ToolDescription = TrimmedStr & LengthRange[str, 1, 200]
+
+# Collection constraints
+type NonEmptyMessages = NonEmpty[list[Message]]
+type MaxMessages = ClosedRange[int, 1, 10]
+
+# Filesystem constraints
+type PathSegment = MaxLength[str, 200]
+type PathDepth = MaxLength[tuple[str, ...], 10]
+```
+
+### Impact Summary
+
+| Module | Current Checks | With Refined Types |
+|--------|---------------|-------------------|
+| `budget.py` | 3 runtime checks | 0 (type-enforced) |
+| `mailbox/_types.py` | 2 validation functions | 0 (type-enforced) |
+| `skills/_validation.py` | 6 validation checks | 0 (type-enforced) |
+| `prompt/tool.py` | 4 validation checks | 0 (type-enforced) |
+| `watchdog.py` | Implicit assumptions | Explicit in types |
+| `filesystem/_types.py` | 3 validation checks | 0 (type-enforced) |
+
+Total: **18+ runtime checks eliminated**, constraints moved to type definitions.
+
 ## Summary
 
 Refined types shift validation from scattered defensive checks to
