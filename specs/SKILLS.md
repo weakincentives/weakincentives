@@ -167,15 +167,13 @@ my-skill/
 
 When referencing other files in your skill, use relative paths from the skill root:
 
-````markdown
+```markdown
 See [the reference guide](references/REFERENCE.md) for details.
 
 Run the extraction script:
-```bash
-python scripts/extract.py input.pdf
-````
 
-````
+    python scripts/extract.py input.pdf
+```
 
 ## WINK Implementation
 
@@ -218,7 +216,7 @@ sequenceDiagram
     end
     Home->>SDK: Spawn with HOME=ephemeral
     SDK->>Skills: Discover skills natively
-````
+```
 
 ### Validation at Mount Time
 
