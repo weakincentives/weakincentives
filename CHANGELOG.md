@@ -4,6 +4,25 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Property-Based Testing Specification
+
+Added `specs/PROPERTY_TESTING.md` documenting Hypothesis-based property testing
+patterns for WINK. The spec covers:
+
+- **Strategy composition**: Building reusable strategies for dataclasses, serde
+  types, session events, and prompt components
+- **Property categories**: Round-trip, idempotent, invariant, commutative,
+  associative, monotonic, identity, and inverse properties
+- **Stateful testing**: `RuleBasedStateMachine` patterns for protocol
+  verification (session state machines, mailbox operations)
+- **WINK-specific strategies**: Pre-built strategies for serde, session, and
+  dataclass modules in `tests/property/strategies/`
+- **CI integration**: Hypothesis profiles for dev/CI, database management, and
+  coverage integration
+
+Property tests complement example-based tests by verifying "for all valid
+inputs, these properties hold" rather than "these specific inputs work."
+
 ### Skills as Core Library Concept
 
 Skills are now a first-class concept in the core library. The skill types have

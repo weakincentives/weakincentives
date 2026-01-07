@@ -163,6 +163,7 @@ Consult these specs before modifying related code:
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
 | `specs/PROMPTS.md` | Prompt system, composition, structured output, resource lifecycle |
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
+| `specs/PROPERTY_TESTING.md` | Hypothesis strategies, property categories, stateful testing |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
 | `specs/SKILLS.md` | Agent Skills specification and WINK skill mounting |

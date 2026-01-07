@@ -89,6 +89,8 @@ a goal at any time.
   progressive disclosure—required for prompt system work.
 - **PROMPT_OPTIMIZATION.md**: Override system and optimizer abstraction—when
   altering prompt overrides or optimization.
+- **PROPERTY_TESTING.md**: Hypothesis strategies, property categories, and
+  stateful testing—when writing property-based tests.
 - **SESSIONS.md**: Session lifecycle, events, deadlines, and budgets—when
   modifying runtime session code.
 - **SLICES.md**: Slice storage protocol, factory configuration, and JSONL
