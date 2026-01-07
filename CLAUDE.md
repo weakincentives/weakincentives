@@ -166,7 +166,7 @@ Consult these specs before modifying related code:
 | `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
-| `specs/SKILL_MOUNTING.md` | Mounting skills into Claude Agent SDK hermetic environment |
+| `specs/SKILLS.md` | Agent Skills specification and WINK skill mounting |
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
