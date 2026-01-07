@@ -50,6 +50,7 @@ from ._hooks import (
     create_user_prompt_submit_hook,
 )
 from ._notifications import Notification
+from ._task_completion import TaskCompletionContext
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
 
@@ -601,6 +602,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             messages, rendered, budget_tracker, prompt_name
         )
 
+        # Final verification: if we got structured output but tasks are incomplete,
+        # reject the output. This catches cases where the SDK captured output before
+        # our hooks could prevent it.
+        self._verify_task_completion(
+            output, session, hook_context.stop_reason, prompt_name
+        )
+
         response = PromptResponse(
             prompt_name=prompt_name,
             text=result_text,
@@ -957,3 +965,41 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             budget_tracker.record_cumulative(prompt_name, usage)
 
         return result_text, structured_output, usage
+
+    def _verify_task_completion(
+        self,
+        output: Any,
+        session: SessionProtocol,
+        stop_reason: str | None,
+        prompt_name: str,
+    ) -> None:
+        """Verify task completion if checker is configured.
+
+        Raises PromptEvaluationError if structured output was produced but
+        tasks are incomplete.
+        """
+        checker = self._client_config.task_completion_checker
+        if output is None or checker is None:
+            return
+
+        context = TaskCompletionContext(
+            session=session,
+            tentative_output=output,
+            stop_reason=stop_reason or "structured_output",
+        )
+        completion = checker.check(context)
+        if not completion.complete:
+            logger.warning(
+                "claude_agent_sdk.evaluate.incomplete_tasks",
+                event="sdk.evaluate.incomplete_tasks",
+                context={
+                    "prompt_name": prompt_name,
+                    "feedback": completion.feedback,
+                    "stop_reason": stop_reason,
+                },
+            )
+            raise PromptEvaluationError(
+                message=f"Tasks incomplete: {completion.feedback}",
+                prompt_name=prompt_name,
+                phase="response",
+            )

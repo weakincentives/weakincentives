@@ -1332,3 +1332,127 @@ class TestMessageContentExtraction:
 
         result = _extract_message_content(message)
         assert result == {}
+
+
+class TestVerifyTaskCompletion:
+    """Tests for _verify_task_completion method."""
+
+    @pytest.fixture
+    def session(self) -> Session:
+        return Session(bus=InProcessDispatcher())
+
+    @pytest.fixture
+    def adapter(self) -> ClaudeAgentSDKAdapter:
+        return ClaudeAgentSDKAdapter()
+
+    def test_no_checker_configured_does_nothing(
+        self, adapter: ClaudeAgentSDKAdapter, session: Session
+    ) -> None:
+        """When no checker is configured, verification passes."""
+        # Default adapter has no task_completion_checker
+        adapter._verify_task_completion(
+            output={"key": "value"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test",
+        )
+        # Should not raise
+
+    def test_no_output_does_nothing(self, session: Session) -> None:
+        """When output is None, verification passes."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.contrib.tools.planning import Plan
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+        adapter._verify_task_completion(
+            output=None,
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test",
+        )
+        # Should not raise
+
+    def test_raises_when_tasks_incomplete(self, session: Session) -> None:
+        """When tasks are incomplete, raises PromptEvaluationError."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.contrib.tools.planning import (
+            Plan,
+            PlanningToolsSection,
+            PlanStep,
+        )
+
+        # Initialize plan with incomplete tasks
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(
+                    PlanStep(step_id=1, title="Done", status="done"),
+                    PlanStep(step_id=2, title="Pending", status="pending"),
+                ),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+
+        with pytest.raises(PromptEvaluationError) as exc_info:
+            adapter._verify_task_completion(
+                output={"summary": "done"},
+                session=session,
+                stop_reason="structured_output",
+                prompt_name="test_prompt",
+            )
+
+        assert "Tasks incomplete" in str(exc_info.value)
+        assert "Pending" in str(exc_info.value)
+
+    def test_passes_when_tasks_complete(self, session: Session) -> None:
+        """When all tasks are complete, verification passes."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.contrib.tools.planning import (
+            Plan,
+            PlanningToolsSection,
+            PlanStep,
+        )
+
+        # Initialize plan with all tasks done
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="completed",
+                steps=(
+                    PlanStep(step_id=1, title="Task 1", status="done"),
+                    PlanStep(step_id=2, title="Task 2", status="done"),
+                ),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+
+        # Should not raise
+        adapter._verify_task_completion(
+            output={"summary": "done"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+        )

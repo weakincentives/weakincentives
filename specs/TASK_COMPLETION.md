@@ -222,18 +222,19 @@ adapter = ClaudeAgentSDKAdapter(
 When `task_completion_checker` is configured:
 
 1. **PostToolUse Hook (StructuredOutput)**: After `StructuredOutput` runs, the
-   checker verifies completion. If incomplete, returns an error result to the
-   model with feedback on remaining tasks. If complete, signals stop. This
-   design is simpler than blocking the tool in PreToolUse because it:
-
-   - Lets the model see its attempted output
-   - Returns actionable feedback as a tool error
-   - Naturally guides the model to complete remaining tasks
+   checker verifies completion. If incomplete, adds `additionalContext` with
+   feedback to encourage the model to continue. If complete, signals stop with
+   `{"continue": False}`.
 
 1. **Stop Hook**: Before allowing the agent to stop for other reasons (e.g.,
    end_turn), the checker verifies completion. If incomplete, returns
    `{"needsMoreTurns": True, "decision": "continue", "reason": feedback}` to
    signal continuation.
+
+1. **Final Verification**: After the SDK completes, the adapter verifies task
+   completion before returning structured output. If tasks are incomplete,
+   raises `PromptEvaluationError`. This catches cases where the SDK captured
+   output before hooks could signal continuation.
 
 ## User Stories
 

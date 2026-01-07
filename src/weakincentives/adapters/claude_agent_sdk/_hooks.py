@@ -598,7 +598,10 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             if task_completion_checker is not None:
                 result = _check_task_completion(data.tool_input)
                 if not result.complete:
-                    # Tasks incomplete - return error to model with feedback
+                    # Tasks incomplete - provide feedback via additionalContext
+                    # Note: The SDK will still capture the output, but we add
+                    # context that may help if the model continues. Final
+                    # verification happens in the adapter after SDK completes.
                     logger.info(
                         "claude_agent_sdk.hook.structured_output_incomplete",
                         event="hook.structured_output_incomplete",
@@ -607,15 +610,14 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                             "elapsed_ms": hook_context.elapsed_ms,
                         },
                     )
-                    error_message = (
-                        f"Cannot complete: {result.feedback}\n\n"
-                        "Please complete the remaining tasks, then call "
-                        "StructuredOutput again."
+                    feedback_message = (
+                        f"Warning: Tasks incomplete - {result.feedback}. "
+                        "Please complete remaining tasks."
                     )
                     return {
-                        "toolResultModification": {
-                            "replaceContent": error_message,
-                            "isError": True,
+                        "hookSpecificOutput": {
+                            "hookEventName": "PostToolUse",
+                            "additionalContext": feedback_message,
                         }
                     }
                 # Tasks complete - allow stop

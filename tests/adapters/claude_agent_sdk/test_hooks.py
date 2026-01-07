@@ -414,10 +414,10 @@ class TestPostToolUseHook:
         assert result == {}
         assert len(events) == 0
 
-    def test_returns_error_when_structured_output_with_incomplete_tasks(
+    def test_returns_context_when_structured_output_with_incomplete_tasks(
         self, session: Session
     ) -> None:
-        """PostToolUse returns error for StructuredOutput when tasks incomplete."""
+        """PostToolUse returns additionalContext for StructuredOutput when tasks incomplete."""
         PlanningToolsSection._initialize_session(session)
         session.dispatch(
             Plan(
@@ -447,11 +447,14 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", context))
 
-        # Should return error with feedback
-        assert result.get("toolResultModification", {}).get("isError") is True
-        content = result.get("toolResultModification", {}).get("replaceContent", "")
-        assert "Cannot complete" in content
-        assert "Pending task" in content
+        # Should return additionalContext with feedback (not continue: False)
+        hook_output = result.get("hookSpecificOutput", {})
+        assert hook_output.get("hookEventName") == "PostToolUse"
+        additional_context = hook_output.get("additionalContext", "")
+        assert "incomplete" in additional_context.lower()
+        assert "Pending task" in additional_context
+        # Should NOT return continue: False - let model continue working
+        assert "continue" not in result
 
     def test_stops_when_structured_output_with_complete_tasks(
         self, session: Session
