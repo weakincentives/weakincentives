@@ -34,7 +34,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://weakincentives.com/"
-Documentation = "https://github.com/weakincentives/weakincentives#readme"
+Documentation = "https://github.com/weakincentives/weakincentives/blob/main/WINK_GUIDE.md"
 Repository = "https://github.com/weakincentives/weakincentives"
 "Issue Tracker" = "https://github.com/weakincentives/weakincentives/issues"
 
