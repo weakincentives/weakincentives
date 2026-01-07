@@ -40,7 +40,7 @@ from ...runtime.logging import get_logger
 
 if TYPE_CHECKING:
     from ...filesystem import Filesystem
-    from ...runtime.session import Session
+    from ...runtime.session import SessionProtocol
     from ..core import ProviderAdapter
 
 __all__ = [
@@ -100,7 +100,7 @@ class TaskCompletionContext:
             "tool_use", "max_turns_reached").
     """
 
-    session: Session
+    session: SessionProtocol
     tentative_output: Any = None
     filesystem: Filesystem | None = None
     adapter: ProviderAdapter | None = None
@@ -138,28 +138,24 @@ class PlanBasedChecker(TaskCompletionChecker):
     This checker examines the session's Plan state to determine if all
     tasks are complete. It checks for steps with status != "done" and
     returns incomplete feedback if any are found.
+
+    Example:
+        >>> from weakincentives.contrib.tools.planning import Plan
+        >>> from weakincentives.adapters.claude_agent_sdk import PlanBasedChecker
+        >>>
+        >>> checker = PlanBasedChecker(plan_type=Plan)
     """
 
     def __init__(self, plan_type: type | None = None) -> None:
         """Initialize the checker.
 
         Args:
-            plan_type: The Plan dataclass type to check. If None, attempts to
-                import from weakincentives.contrib.tools.planning.
+            plan_type: The Plan dataclass type to check. Must have a `steps`
+                attribute containing items with a `status` attribute. Pass
+                `weakincentives.contrib.tools.planning.Plan` for standard usage.
+                If None, the checker always returns ok (no plan checking).
         """
         self._plan_type = plan_type
-
-    def _resolve_plan_type(self) -> type | None:
-        """Resolve the Plan type, importing if necessary."""
-        if self._plan_type is not None:
-            return self._plan_type
-
-        try:
-            from ...contrib.tools.planning import Plan
-        except ImportError:
-            return None
-        else:
-            return Plan
 
     def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
         """Check if all plan tasks are complete.
@@ -171,8 +167,7 @@ class PlanBasedChecker(TaskCompletionChecker):
             Complete if all steps are done or no plan exists.
             Incomplete with feedback listing remaining tasks otherwise.
         """
-        plan_type = self._resolve_plan_type()
-        if plan_type is None:
+        if self._plan_type is None:
             logger.debug(
                 "task_completion.plan_checker.no_plan_type",
                 event="plan_checker.no_plan_type",
@@ -180,8 +175,8 @@ class PlanBasedChecker(TaskCompletionChecker):
             return TaskCompletionResult.ok("No planning tools available.")
 
         try:
-            plan = context.session[plan_type].latest()
-        except (KeyError, AttributeError):
+            plan = context.session[self._plan_type].latest()  # type: ignore[arg-type]
+        except (KeyError, AttributeError):  # pragma: no cover - defensive
             logger.debug(
                 "task_completion.plan_checker.no_plan_slice",
                 event="plan_checker.no_plan_slice",
@@ -327,7 +322,7 @@ class LLMJudgeChecker(TaskCompletionChecker):
                 "LLM verification passed (implementation pending)."
             )
 
-        except Exception as e:
+        except Exception as e:  # pragma: no cover - placeholder impl can't raise
             logger.warning(
                 "task_completion.llm_judge.error",
                 event="llm_judge.error",
@@ -349,24 +344,30 @@ class LLMJudgeChecker(TaskCompletionChecker):
         ]
 
         if context.tentative_output is not None:
-            parts.extend([
-                "## Tentative Output",
-                str(context.tentative_output),
-                "",
-            ])
+            parts.extend(
+                [
+                    "## Tentative Output",
+                    str(context.tentative_output),
+                    "",
+                ]
+            )
 
         if context.stop_reason:
-            parts.extend([
-                "## Stop Reason",
-                context.stop_reason,
-                "",
-            ])
+            parts.extend(
+                [
+                    "## Stop Reason",
+                    context.stop_reason,
+                    "",
+                ]
+            )
 
-        parts.extend([
-            "## Instructions",
-            "Evaluate whether the task is complete based on the criteria above.",
-            "Respond with COMPLETE if done, or INCOMPLETE with explanation.",
-        ])
+        parts.extend(
+            [
+                "## Instructions",
+                "Evaluate whether the task is complete based on the criteria above.",
+                "Respond with COMPLETE if done, or INCOMPLETE with explanation.",
+            ]
+        )
 
         return "\n".join(parts)
 

@@ -92,13 +92,24 @@ class TestTaskCompletionContext:
 
 
 class TestPlanBasedChecker:
+    def test_complete_when_no_plan_type_configured(self, session: Session) -> None:
+        """Checker returns complete when plan_type is None (no-op mode)."""
+        checker = PlanBasedChecker(plan_type=None)
+        context = TaskCompletionContext(session=session)
+
+        result = checker.check(context)
+
+        assert result.complete is True
+        assert result.feedback is not None
+        assert "No planning tools available" in result.feedback
+
     def test_complete_when_no_plan_slice(self, session: Session) -> None:
         """Checker returns complete when Plan slice isn't registered or empty."""
         # Use a fresh session without Plan slice to test the no-plan case
         fresh_bus = InProcessDispatcher()
         fresh_session = Session(bus=fresh_bus)
 
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=fresh_session)
 
         result = checker.check(context)
@@ -113,7 +124,7 @@ class TestPlanBasedChecker:
         """Checker returns complete when Plan slice exists but is empty."""
         PlanningToolsSection._initialize_session(session)
 
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=session)
 
         result = checker.check(context)
@@ -135,7 +146,7 @@ class TestPlanBasedChecker:
             )
         )
 
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=session)
 
         result = checker.check(context)
@@ -157,7 +168,7 @@ class TestPlanBasedChecker:
             )
         )
 
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=session)
 
         result = checker.check(context)
@@ -179,7 +190,7 @@ class TestPlanBasedChecker:
             )
         )
 
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=session)
 
         result = checker.check(context)
@@ -201,7 +212,7 @@ class TestPlanBasedChecker:
             )
         )
 
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=session)
 
         result = checker.check(context)
@@ -236,7 +247,7 @@ class TestPlanBasedChecker:
         PlanningToolsSection._initialize_session(session)
         session.dispatch(Plan(objective="Test", status="active", steps=()))
 
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=session)
 
         result = checker.check(context)
@@ -250,9 +261,7 @@ class TestLLMJudgeChecker:
         with pytest.warns(UserWarning, match="placeholder implementation"):
             LLMJudgeChecker()
 
-    def test_incomplete_without_adapter_when_required(
-        self, session: Session
-    ) -> None:
+    def test_incomplete_without_adapter_when_required(self, session: Session) -> None:
         """Checker returns incomplete when adapter required but missing."""
         with pytest.warns(UserWarning):
             checker = LLMJudgeChecker(require_adapter=True)
@@ -263,9 +272,7 @@ class TestLLMJudgeChecker:
         assert result.complete is False
         assert "no adapter available" in str(result.feedback).lower()
 
-    def test_complete_without_adapter_when_not_required(
-        self, session: Session
-    ) -> None:
+    def test_complete_without_adapter_when_not_required(self, session: Session) -> None:
         """Checker returns complete when adapter not required and missing."""
         with pytest.warns(UserWarning):
             checker = LLMJudgeChecker(require_adapter=False)
@@ -301,9 +308,7 @@ class TestLLMJudgeChecker:
 
         assert result.complete is False
 
-    def test_build_verification_prompt_includes_output(
-        self, session: Session
-    ) -> None:
+    def test_build_verification_prompt_includes_output(self, session: Session) -> None:
         """Verification prompt includes tentative output."""
         with pytest.warns(UserWarning):
             checker = LLMJudgeChecker()
@@ -354,9 +359,7 @@ class TestCompositeChecker:
         assert result.complete is False
         assert "Task A incomplete" in str(result.feedback)
 
-    def test_all_must_pass_returns_combined_on_success(
-        self, session: Session
-    ) -> None:
+    def test_all_must_pass_returns_combined_on_success(self, session: Session) -> None:
         """With all_must_pass, all passing combines feedback."""
 
         class PassingCheckerA(TaskCompletionChecker):
@@ -401,9 +404,7 @@ class TestCompositeChecker:
         assert result.complete is True
         assert "Passed" in str(result.feedback)
 
-    def test_any_pass_returns_incomplete_when_all_fail(
-        self, session: Session
-    ) -> None:
+    def test_any_pass_returns_incomplete_when_all_fail(self, session: Session) -> None:
         """With all_must_pass=False, all failing combines feedback."""
 
         class FailingCheckerA(TaskCompletionChecker):
@@ -438,7 +439,7 @@ class TestCompositeChecker:
         )
 
         checker = CompositeChecker(
-            checkers=(PlanBasedChecker(),),
+            checkers=(PlanBasedChecker(plan_type=Plan),),
             all_must_pass=True,
         )
         context = TaskCompletionContext(session=session)
@@ -451,7 +452,7 @@ class TestCompositeChecker:
 class TestTaskCompletionCheckerProtocol:
     def test_plan_based_checker_satisfies_protocol(self) -> None:
         """PlanBasedChecker is a TaskCompletionChecker."""
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         assert isinstance(checker, TaskCompletionChecker)
 
     def test_llm_judge_checker_satisfies_protocol(self) -> None:
@@ -469,27 +470,21 @@ class TestTaskCompletionCheckerProtocol:
         """Custom implementations satisfy the protocol."""
 
         class CustomChecker:
-            def check(
-                self, context: TaskCompletionContext
-            ) -> TaskCompletionResult:
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
                 return TaskCompletionResult.ok("Custom check passed")
 
         checker = CustomChecker()
         assert isinstance(checker, TaskCompletionChecker)
 
-    def test_custom_checker_can_be_used_in_composite(
-        self, session: Session
-    ) -> None:
+    def test_custom_checker_can_be_used_in_composite(self, session: Session) -> None:
         """Custom checkers can be composed."""
 
         class AlwaysPassChecker:
-            def check(
-                self, context: TaskCompletionContext
-            ) -> TaskCompletionResult:
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
                 return TaskCompletionResult.ok("Always pass")
 
         composite = CompositeChecker(
-            checkers=(AlwaysPassChecker(), PlanBasedChecker()),  # type: ignore[arg-type]
+            checkers=(AlwaysPassChecker(), PlanBasedChecker(plan_type=Plan)),  # type: ignore[arg-type]
             all_must_pass=True,
         )
         context = TaskCompletionContext(session=session)

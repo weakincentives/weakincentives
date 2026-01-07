@@ -117,9 +117,16 @@ class TaskCompletionChecker(Protocol):
 Checks session `Plan` state for incomplete steps:
 
 ```python
-checker = PlanBasedChecker()
-# Or with explicit plan type
+from weakincentives.contrib.tools.planning import Plan
+
+# Must provide plan_type for actual checking
+checker = PlanBasedChecker(plan_type=Plan)
+
+# Or with custom plan type
 checker = PlanBasedChecker(plan_type=MyCustomPlan)
+
+# Without plan_type, checker is a no-op (always returns ok)
+checker = PlanBasedChecker()  # No-op, use only if plan checking not needed
 ```
 
 Behavior:
@@ -197,20 +204,28 @@ Behavior with `all_must_pass=False`:
 
 ### Default Behavior
 
-Task completion checking is **enabled by default** using `PlanBasedChecker`.
-This ensures agents complete all planned tasks before stopping or producing
-final output. No configuration is required for this default behavior:
+Task completion checking is **disabled by default**. To enable it, configure
+a `TaskCompletionChecker` via `ClaudeAgentSDKClientConfig`:
 
 ```python
-from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    PlanBasedChecker,
+)
+from weakincentives.contrib.tools.planning import Plan
 
-# PlanBasedChecker is used automatically
-adapter = ClaudeAgentSDKAdapter()
+# Enable plan-based task completion checking
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+    ),
+)
 ```
 
 ### Custom Configuration
 
-Override the default checker via `ClaudeAgentSDKClientConfig`:
+Provide a custom checker via `ClaudeAgentSDKClientConfig`:
 
 ```python
 from weakincentives.adapters.claude_agent_sdk import (
@@ -236,10 +251,9 @@ adapter = ClaudeAgentSDKAdapter(
 When `task_completion_checker` is configured:
 
 1. **Stop Hook**: Before allowing the agent to stop, the checker verifies
-   completion. If incomplete, returns `{"needsMoreTurns": True, "decision":
-   "continue", "reason": feedback}` to signal continuation.
+   completion. If incomplete, returns `{"needsMoreTurns": True, "decision": "continue", "reason": feedback}` to signal continuation.
 
-2. **StructuredOutput Hook**: Before accepting `StructuredOutput` as final
+1. **StructuredOutput Hook**: Before accepting `StructuredOutput` as final
    output, verifies completion. If incomplete, the output is not accepted and
    execution continues.
 
@@ -256,6 +270,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     PlanBasedChecker,
 )
 from weakincentives.contrib.tools import PlanningToolsSection
+from weakincentives.contrib.tools.planning import Plan
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.runtime import InProcessDispatcher, Session
 
@@ -272,7 +287,7 @@ template = PromptTemplate[None](
 
 adapter = ClaudeAgentSDKAdapter(
     client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(),
+        task_completion_checker=PlanBasedChecker(plan_type=Plan),
     ),
 )
 

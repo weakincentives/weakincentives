@@ -386,7 +386,7 @@ class TestPostToolUseHook:
             prompt_name="test_prompt",
         )
         hook = create_post_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker()
+            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
         )
         input_data = {
             "tool_name": "StructuredOutput",
@@ -422,7 +422,7 @@ class TestPostToolUseHook:
             prompt_name="test_prompt",
         )
         hook = create_post_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker()
+            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
         )
         input_data = {
             "tool_name": "StructuredOutput",
@@ -435,9 +435,7 @@ class TestPostToolUseHook:
         # Should not stop - continue execution to complete tasks
         assert result == {}
 
-    def test_stops_on_structured_output_without_plan(
-        self, session: Session
-    ) -> None:
+    def test_stops_on_structured_output_without_plan(self, session: Session) -> None:
         """StructuredOutput stops when no plan exists (nothing to enforce)."""
         # Don't initialize Plan slice
 
@@ -448,7 +446,7 @@ class TestPostToolUseHook:
             prompt_name="test_prompt",
         )
         hook = create_post_tool_use_hook(
-            context, task_completion_checker=PlanBasedChecker()
+            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
         )
         input_data = {
             "tool_name": "StructuredOutput",
@@ -459,6 +457,89 @@ class TestPostToolUseHook:
         result = asyncio.run(hook(input_data, "call-structured", context))
 
         # Should stop - no plan means nothing to enforce
+        assert result == {"continue": False}
+
+    def test_skips_structured_output_check_when_deadline_exceeded(
+        self, session: Session, frozen_utcnow: FrozenUtcNow
+    ) -> None:
+        """StructuredOutput check skipped when deadline expired."""
+        PlanningToolsSection._initialize_session(session)
+        # Create incomplete plan
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Incomplete", status="pending"),),
+            )
+        )
+
+        # Create expired deadline using frozen time
+        anchor = datetime.now(UTC)
+        frozen_utcnow.set(anchor)
+        expired_deadline = Deadline(anchor + timedelta(seconds=5))
+        frozen_utcnow.advance(timedelta(seconds=10))  # Now expired
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            deadline=expired_deadline,
+        )
+        hook = create_post_tool_use_hook(
+            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
+        )
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop - deadline expired skips task check
+        assert result == {"continue": False}
+
+    def test_skips_structured_output_check_when_budget_exhausted(
+        self, session: Session
+    ) -> None:
+        """StructuredOutput check skipped when budget exhausted."""
+        PlanningToolsSection._initialize_session(session)
+        # Create incomplete plan
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Incomplete", status="pending"),),
+            )
+        )
+
+        # Create exhausted budget tracker
+        budget = Budget(max_total_tokens=1000)
+        tracker = BudgetTracker(budget=budget)
+        tracker.record_cumulative(
+            "eval-1", TokenUsage(input_tokens=500, output_tokens=600)
+        )  # Over budget
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            budget_tracker=tracker,
+        )
+        hook = create_post_tool_use_hook(
+            context, task_completion_checker=PlanBasedChecker(plan_type=Plan)
+        )
+        input_data = {
+            "tool_name": "StructuredOutput",
+            "tool_input": {"output": {"key": "value"}},
+            "tool_response": {"stdout": ""},
+        }
+
+        result = asyncio.run(hook(input_data, "call-structured", context))
+
+        # Should stop - budget exhausted skips task check
         assert result == {"continue": False}
 
     def test_skips_mcp_wink_tools(self, session: Session) -> None:
@@ -1478,7 +1559,7 @@ class TestTaskCompletionStopHook:
     def test_allows_stop_when_no_plan_slice(self, hook_context: HookContext) -> None:
         """Stop is allowed when Plan slice is not installed in session."""
         hook = create_task_completion_stop_hook(
-            hook_context, checker=PlanBasedChecker()
+            hook_context, checker=PlanBasedChecker(plan_type=Plan)
         )
         input_data = {"stopReason": "end_turn"}
 
@@ -1499,7 +1580,9 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1529,7 +1612,9 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1560,7 +1645,9 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1582,7 +1669,9 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
         input_data = {"stopReason": "max_turns_reached"}
 
         assert context.stop_reason is None
@@ -1600,7 +1689,9 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
 
         asyncio.run(hook({}, None, None))
 
@@ -1625,7 +1716,9 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1654,7 +1747,9 @@ class TestTaskCompletionStopHook:
             prompt_name="test_prompt",
         )
 
-        hook = create_task_completion_stop_hook(context, checker=PlanBasedChecker())
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
         input_data = {"stopReason": "end_turn"}
 
         result = asyncio.run(hook(input_data, None, None))
@@ -1681,7 +1776,7 @@ class TestTaskCompletionStopHook:
         )
 
         # Create hook with PlanBasedChecker - verifies protocol compatibility
-        checker = PlanBasedChecker()
+        checker = PlanBasedChecker(plan_type=Plan)
         hook = create_task_completion_stop_hook(context, checker=checker)
         input_data = {"stopReason": "end_turn"}
 
@@ -1691,3 +1786,78 @@ class TestTaskCompletionStopHook:
         # No plan initialized, so stop is allowed
         assert result == {}
         assert context.stop_reason == "end_turn"
+
+    def test_skips_check_when_deadline_exceeded(
+        self, session: Session, frozen_utcnow: FrozenUtcNow
+    ) -> None:
+        """Stop hook skips task completion check when deadline expired."""
+        PlanningToolsSection._initialize_session(session)
+        # Create incomplete plan
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Incomplete", status="pending"),),
+            )
+        )
+
+        # Create expired deadline using frozen time
+        anchor = datetime.now(UTC)
+        frozen_utcnow.set(anchor)
+        expired_deadline = Deadline(anchor + timedelta(seconds=5))
+        frozen_utcnow.advance(timedelta(seconds=10))  # Now expired
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            deadline=expired_deadline,
+        )
+
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
+        input_data = {"stopReason": "end_turn"}
+
+        # Even with incomplete tasks, stop is allowed due to expired deadline
+        result = asyncio.run(hook(input_data, None, None))
+
+        assert result == {}
+
+    def test_skips_check_when_budget_exhausted(self, session: Session) -> None:
+        """Stop hook skips task completion check when budget exhausted."""
+        PlanningToolsSection._initialize_session(session)
+        # Create incomplete plan
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Incomplete", status="pending"),),
+            )
+        )
+
+        # Create exhausted budget tracker
+        budget = Budget(max_total_tokens=1000)
+        tracker = BudgetTracker(budget=budget)
+        tracker.record_cumulative(
+            "eval-1", TokenUsage(input_tokens=500, output_tokens=600)
+        )  # Over budget
+
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", _make_prompt()),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+            budget_tracker=tracker,
+        )
+
+        hook = create_task_completion_stop_hook(
+            context, checker=PlanBasedChecker(plan_type=Plan)
+        )
+        input_data = {"stopReason": "end_turn"}
+
+        # Even with incomplete tasks, stop is allowed due to exhausted budget
+        result = asyncio.run(hook(input_data, None, None))
+
+        assert result == {}

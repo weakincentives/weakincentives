@@ -175,7 +175,7 @@ class HookContext:
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
-        self.stats = HookStats()
+        self.stats: HookStats = HookStats()
         self._start_time = time.monotonic()
 
     @property
@@ -292,7 +292,7 @@ def create_pre_tool_use_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_tool_use_hook(
+    async def pre_tool_use_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -506,7 +506,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for budget/dead
         An async hook callback function matching SDK signature.
     """
 
-    async def post_tool_use_hook(  # noqa: C901 - complexity needed for budget/deadline checks
+    async def post_tool_use_hook(  # noqa: C901, RUF029 - complexity needed for budget/deadline checks; SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -591,11 +591,11 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for budget/dead
                 should_check = False
             if should_check and hook_context.budget_tracker is not None:
                 bt = hook_context.budget_tracker
-                if isinstance(bt, BudgetTracker):
+                if isinstance(bt, BudgetTracker):  # pragma: no branch
                     consumed_total = (bt.consumed.input_tokens or 0) + (
                         bt.consumed.output_tokens or 0
                     )
-                    if (
+                    if (  # pragma: no branch
                         bt.budget.max_total_tokens is not None
                         and consumed_total >= bt.budget.max_total_tokens
                     ):
@@ -679,7 +679,7 @@ def create_user_prompt_submit_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def user_prompt_submit_hook(
+    async def user_prompt_submit_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -741,7 +741,7 @@ def create_stop_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def stop_hook(
+    async def stop_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -812,7 +812,7 @@ def create_task_completion_stop_hook(
         >>> hook = create_task_completion_stop_hook(hook_context, checker=checker)
     """
 
-    async def task_completion_stop_hook(
+    async def task_completion_stop_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -847,7 +847,7 @@ def create_task_completion_stop_hook(
             consumed_total = (consumed.input_tokens or 0) + (
                 consumed.output_tokens or 0
             )
-            if (
+            if (  # pragma: no branch
                 budget.max_total_tokens is not None
                 and consumed_total >= budget.max_total_tokens
             ):
@@ -912,7 +912,7 @@ def create_subagent_start_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def subagent_start_hook(
+    async def subagent_start_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -973,7 +973,7 @@ def create_subagent_stop_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def subagent_stop_hook(
+    async def subagent_stop_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -1044,7 +1044,7 @@ def create_pre_compact_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_compact_hook(
+    async def pre_compact_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -1113,7 +1113,7 @@ def create_notification_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def notification_hook(
+    async def notification_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
