@@ -24,7 +24,7 @@ context. This enables soft course-correction without hard intervention.
 flowchart TB
     subgraph ToolExecution["Tool Execution"]
         Call["Tool call completes"]
-        Record["Record in ToolCallRecord slice"]
+        Record["ToolInvoked stored in slice"]
     end
 
     subgraph Observer["Trajectory Observer"]
@@ -161,7 +161,7 @@ class ObserverContext:
     @property
     def tool_call_count(self) -> int:
         """Total tool calls in session."""
-        return len(self.session[ToolCallRecord].all())
+        return len(self.session[ToolInvoked].all())
 
     def tool_calls_since_last_assessment(self) -> int:
         """Number of tool calls since last assessment."""
@@ -170,9 +170,9 @@ class ObserverContext:
             return self.tool_call_count
         return self.tool_call_count - last.call_index
 
-    def recent_tool_calls(self, n: int) -> Sequence[ToolCallRecord]:
-        """Retrieve the N most recent tool call records."""
-        records = self.session[ToolCallRecord].all()
+    def recent_tool_calls(self, n: int) -> Sequence[ToolInvoked]:
+        """Retrieve the N most recent tool invocations."""
+        records = self.session[ToolInvoked].all()
         return records[-n:] if len(records) >= n else records
 
     def error_rate(self, window: int) -> float:
@@ -180,22 +180,54 @@ class ObserverContext:
         recent = self.recent_tool_calls(window)
         if not recent:
             return 0.0
-        return sum(1 for r in recent if not r.success) / len(recent)
+        return sum(1 for r in recent if not _is_success(r)) / len(recent)
 ```
 
-### ToolCallRecord (Session Slice)
+### ToolInvoked (Existing Event)
+
+Trajectory observers use the existing `ToolInvoked` event from
+`weakincentives.runtime.events`. This event is dispatched after each tool
+execution and can be stored in a session slice by registering a reducer:
 
 ```python
-@dataclass(frozen=True)
-class ToolCallRecord:
-    """Record of a single tool invocation for trajectory analysis."""
+# ToolInvoked is already defined in runtime.events
+@FrozenDataclass()
+class ToolInvoked:
+    prompt_name: str
+    adapter: AdapterName
+    name: str              # Tool name
+    params: Any            # Full parameters
+    result: Any            # ToolResult with success/error
+    session_id: UUID | None
+    created_at: datetime
+    usage: TokenUsage | None
+    rendered_output: str
+    call_id: str | None
+    event_id: UUID
 
-    tool_name: str
-    params_summary: str  # Abbreviated params (e.g., path for file ops)
-    success: bool
-    error_message: str | None = None
-    timestamp: datetime = field(default_factory=datetime.utcnow)
-    call_index: int = 0  # Monotonic counter within session
+# Register a reducer to store ToolInvoked events in a slice
+session[ToolInvoked].register(
+    ToolInvoked,
+    lambda state, event: Append(event),
+)
+```
+
+The observer extracts what it needs:
+
+```python
+def _is_success(event: ToolInvoked) -> bool:
+    """Check if tool invocation succeeded."""
+    result = event.result
+    if hasattr(result, "success"):
+        return result.success
+    return True  # Assume success if no flag
+
+def _get_error_message(event: ToolInvoked) -> str | None:
+    """Extract error message from failed invocation."""
+    result = event.result
+    if hasattr(result, "message") and not _is_success(event):
+        return result.message
+    return None
 ```
 
 ## Trigger Configuration
@@ -256,7 +288,7 @@ injects it into context:
 ```python
 def build_context(session: Session, *, max_age_calls: int = 20) -> str:
     """Build additional context including trajectory assessment."""
-    current_call_index = len(session[ToolCallRecord].all())
+    current_call_index = len(session[ToolInvoked].all())
 
     # Get latest assessment if not stale
     assessment = session[Assessment].latest()
@@ -314,37 +346,37 @@ def build_prompt_messages(
 
 ## Execution Flow
 
-After each tool call completes:
+`ToolInvoked` events are already dispatched by adapters after tool execution.
+The observer hooks into this existing event flow:
 
 ```python
-def after_tool_call(
-    call: ToolCallRecord,
+def on_tool_invoked(
+    event: ToolInvoked,
     *,
     session: Session,
     prompt: Prompt,
 ) -> None:
     """Run trajectory observers after tool execution."""
 
-    # Record the call (append to history)
-    session.dispatch(RecordToolCall(call))
-
+    # ToolInvoked is already stored in slice via registered reducer
     # Build context for observers
     context = ObserverContext(session=session)
+    call_index = context.tool_call_count
 
     # Check each observer
     for config in prompt.observers:
-        if _should_trigger(config.trigger, context, call):
+        if _should_trigger(config.trigger, context, event):
             if config.observer.should_run(session, context=context):
                 assessment = config.observer.observe(session, context=context)
                 # Append assessment with call index
-                assessment = replace(assessment, call_index=call.call_index)
+                assessment = replace(assessment, call_index=call_index)
                 session.dispatch(RecordAssessment(assessment))
 
 
 def _should_trigger(
     trigger: ObserverTrigger,
     context: ObserverContext,
-    call: ToolCallRecord,
+    event: ToolInvoked,
 ) -> bool:
     """Check if any trigger condition is met."""
 
@@ -358,7 +390,7 @@ def _should_trigger(
     if trigger.after_consecutive_errors:
         recent = context.recent_tool_calls(trigger.after_consecutive_errors)
         if len(recent) >= trigger.after_consecutive_errors:
-            if all(not r.success for r in recent):
+            if all(not _is_success(r) for r in recent):
                 return True
 
     if trigger.every_n_seconds:
@@ -607,7 +639,7 @@ All observer state lives in session slices:
 | Slice | Purpose | Mutation |
 |-------|---------|----------|
 | `Budget` | Time/token/call constraints | Replace after LLM calls |
-| `ToolCallRecord` | Append-only log of tool invocations | Append after each call |
+| `ToolInvoked` | Append-only log of tool invocations | Append after each call |
 | `Assessment` | Append-only log of assessments | Append after observer runs |
 
 ```python
@@ -621,9 +653,9 @@ session[Budget].latest()
 # )
 
 # Tool call history
-len(session[ToolCallRecord].all())  # 51 calls
-session[ToolCallRecord].latest()
-# ToolCallRecord(tool_name="edit_file", params_summary="path=src/foo.py", ...)
+len(session[ToolInvoked].all())  # 51 calls
+session[ToolInvoked].latest()
+# ToolInvoked(name="edit_file", params={...}, result=..., created_at=...)
 
 # Assessment history (all retained, query latest for injection)
 len(session[Assessment].all())  # 5 assessments
