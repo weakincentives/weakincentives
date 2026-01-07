@@ -76,6 +76,8 @@ a goal at any time.
 
 - **ADAPTERS.md**: Provider adapters, structured output, and throttling—before
   adding or modifying adapters.
+- **ASSERTION_DENSITY.md**: Strategic assertions with structured messages—when
+  adding assertions at boundaries, loops, or state transitions.
 - **DATACLASSES.md**: Serde utilities and frozen dataclass patterns—when adding
   dataclass models or serialization.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
