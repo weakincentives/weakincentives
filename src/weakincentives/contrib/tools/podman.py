@@ -36,6 +36,7 @@ from weakincentives.filesystem import Filesystem, HostFilesystem
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
+from ...prompt.policy import ReadBeforeWritePolicy
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session, replace_latest
@@ -823,6 +824,10 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         mounts_block = vfs_module.render_host_mounts_block(self._mount_previews)
         if mounts_block:
             template = f"{_PODMAN_TEMPLATE}\n\n{mounts_block}"
+
+        # Default policy: must read file before overwriting
+        default_policies = (ReadBeforeWritePolicy(),)
+
         super().__init__(
             title="Podman Workspace",
             key="podman.shell",
@@ -831,6 +836,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
                 image=self._image, workspace_root=_DEFAULT_WORKDIR
             ),
             tools=tools,
+            policies=default_policies,
             accepts_overrides=accepts_overrides,
         )
 

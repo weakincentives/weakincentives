@@ -329,8 +329,9 @@ template = PromptTemplate(
 ```
 
 **Policy collection**: At execution time, policies are collected from:
+
 1. The section containing the invoked tool
-2. The prompt itself
+1. The prompt itself
 
 All collected policies must allow for execution to proceed.
 

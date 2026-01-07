@@ -37,6 +37,7 @@ from ...dataclasses import FrozenDataclass
 from ...resources import ResourceRegistry
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
+from ...prompt.policy import ReadBeforeWritePolicy
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Session
 from ...types import SupportsDataclass, SupportsToolResult
@@ -521,12 +522,17 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         )
 
         tools = _build_tools(accepts_overrides=resolved_accepts_overrides)
+
+        # Default policy: must read file before overwriting
+        default_policies = (ReadBeforeWritePolicy(),)
+
         super().__init__(
             title="Virtual Filesystem Tools",
             key="vfs.tools",
             template=render_section_template(mount_previews),
             default_params=_VfsSectionParams(),
             tools=tools,
+            policies=default_policies,
             accepts_overrides=resolved_accepts_overrides,
         )
 

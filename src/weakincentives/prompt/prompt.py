@@ -32,6 +32,7 @@ from ._prompt_resources import PromptResources
 from ._types import SupportsDataclass
 from .errors import PromptValidationError, SectionPath
 from .overrides import PromptDescriptor
+from .policy import ToolPolicy
 from .registry import PromptRegistry, SectionNode
 from .rendering import PromptRenderer, RenderedPrompt
 from .section import Section
@@ -111,6 +112,7 @@ class PromptTemplate[OutputT]:
         Sequence[Section[SupportsDataclass]]
         | tuple[SectionNode[SupportsDataclass], ...]
     ) = ()
+    policies: Sequence[ToolPolicy] = ()
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
@@ -154,6 +156,7 @@ class PromptTemplate[OutputT]:
         | tuple[SectionNode[SupportsDataclass], ...]
         | object
         | None = MISSING,
+        policies: Sequence[ToolPolicy] | object = MISSING,
         allow_extra_keys: bool | object = MISSING,
         resources: ResourceRegistry | object = MISSING,
     ) -> dict[str, Any]:
@@ -171,6 +174,9 @@ class PromptTemplate[OutputT]:
             cast(Sequence[Section[SupportsDataclass]] | None, sections)
             if sections is not MISSING
             else None
+        )
+        policies_input: Sequence[ToolPolicy] = (
+            cast(Sequence[ToolPolicy], policies) if policies is not MISSING else ()
         )
         allow_extra = (
             cast(bool, allow_extra_keys) if allow_extra_keys is not MISSING else False
@@ -203,6 +209,7 @@ class PromptTemplate[OutputT]:
             "key": stripped_key,
             "name": name_val,
             "sections": snapshot.sections,
+            "policies": tuple(policies_input),
             "allow_extra_keys": allow_extra,
             "resources": resources_val,
             "_snapshot": snapshot,
@@ -313,6 +320,27 @@ class Prompt[OutputT]:
     @property
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
         return self.template.structured_output
+
+    def policies_for_tool(self, tool_name: str) -> tuple[ToolPolicy, ...]:
+        """Collect policies that apply to a tool from sections and template.
+
+        Returns policies in order: section policies first, then prompt-level.
+        """
+        result: list[ToolPolicy] = []
+
+        # Find section containing the tool and add its policies
+        snapshot = self.template._snapshot  # pyright: ignore[reportPrivateUsage]
+        if snapshot is not None:  # pragma: no branch - snapshot always initialized
+            for node in snapshot.sections:
+                section = node.section
+                for tool in section.tools():
+                    if tool.name == tool_name:
+                        result.extend(section.policies())
+                        break
+
+        # Add prompt-level policies
+        result.extend(self.template.policies)
+        return tuple(result)
 
     @cached_property
     def renderer(self) -> PromptRenderer[OutputT]:

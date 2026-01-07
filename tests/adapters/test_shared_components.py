@@ -567,6 +567,10 @@ class _MockPromptWithFilesystem:
         """Return resources from the underlying prompt."""
         return self._prompt.resources
 
+    def policies_for_tool(self, tool_name: str) -> tuple[()]:
+        """Return no policies for mock prompt."""
+        return ()
+
 
 def _make_prompt(
     resources: dict[type[object], object] | None = None,

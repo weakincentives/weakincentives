@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, ClassVar, Self, TypeVar, cast
 if TYPE_CHECKING:
     from ..resources import ResourceRegistry
     from ..runtime.session.protocols import SessionProtocol
+    from .policy import ToolPolicy
     from .tool import Tool
 
 from ..types.dataclass import (
@@ -62,6 +63,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
         children: Sequence[Section[SupportsDataclass]] | None = None,
         enabled: EnabledPredicate | None = None,
         tools: Sequence[object] | None = None,
+        policies: Sequence[ToolPolicy] | None = None,
         accepts_overrides: bool = True,
         summary: str | None = None,
         visibility: VisibilitySelector = SectionVisibility.FULL,
@@ -97,6 +99,7 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
             enabled, params_type
         )
         self._tools = self._normalize_tools(tools)
+        self._policies = self._normalize_policies(policies)
         self._visibility: NormalizedVisibilitySelector = normalize_visibility_selector(
             visibility, params_type
         )
@@ -275,6 +278,11 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
 
         return self._tools
 
+    def policies(self) -> tuple[ToolPolicy, ...]:
+        """Return the policies declared by this section."""
+
+        return self._policies
+
     def original_body_template(self) -> str | None:
         """Return the template text that participates in hashing, when available."""
 
@@ -374,6 +382,14 @@ class Section(GenericParamsSpecializer[SectionParamsT], ABC):
                 cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
             )
         return tuple(normalized)
+
+    @staticmethod
+    def _normalize_policies(
+        policies: Sequence[ToolPolicy] | None,
+    ) -> tuple[ToolPolicy, ...]:
+        if not policies:
+            return ()
+        return tuple(policies)
 
 
 __all__ = ["Section", "SectionVisibility"]
