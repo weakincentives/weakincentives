@@ -364,6 +364,33 @@ def execute_tool(call: ToolCall, *, context: ToolContext) -> ToolResult:
     return result
 ```
 
+## Built-in Section Policies
+
+Some contrib sections include default policies:
+
+| Section | Default Policy | Behavior |
+|---------|----------------|----------|
+| `VFSToolsSection` | `ReadBeforeWritePolicy` | Must read before overwriting existing files |
+| `PlanningToolsSection` | None | No constraints |
+| `PodmanToolsSection` | None | No constraints |
+| `AstevalToolsSection` | None | No constraints |
+
+**Disabling default policies:**
+
+```python
+# VFSToolsSection with policy disabled
+vfs_section = VFSToolsSection(
+    filesystem=fs,
+    policies=(),  # Override with empty tuple
+)
+
+# Or with custom policies
+vfs_section = VFSToolsSection(
+    filesystem=fs,
+    policies=[CustomPolicy()],  # Replace defaults
+)
+```
+
 ## State Management
 
 Policy state lives in the session's `PolicyState` slice:
