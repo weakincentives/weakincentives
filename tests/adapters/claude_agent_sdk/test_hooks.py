@@ -433,7 +433,11 @@ class TestPostToolUseHook:
         result = asyncio.run(hook(input_data, "call-structured", context))
 
         # Should not stop - continue execution to complete tasks
-        assert result == {}
+        # Feedback should be returned via toolResultModification
+        assert "toolResultModification" in result
+        append_content = result["toolResultModification"]["appendContent"]
+        assert "[Task Completion Check]" in append_content
+        assert "Pending task" in append_content
 
     def test_stops_on_structured_output_without_plan(self, session: Session) -> None:
         """StructuredOutput stops when no plan exists (nothing to enforce)."""

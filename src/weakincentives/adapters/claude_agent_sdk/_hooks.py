@@ -618,7 +618,14 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for budget/dead
                         },
                     )
                     # Don't stop - let agent continue to complete tasks
-                    return {}
+                    # Return feedback to agent via tool result modification
+                    return {
+                        "toolResultModification": {
+                            "appendContent": (
+                                f"\n\n[Task Completion Check] {result.feedback}"
+                            ),
+                        },
+                    }
 
             logger.debug(
                 "claude_agent_sdk.hook.structured_output_stop",
