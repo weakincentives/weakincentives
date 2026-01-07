@@ -371,8 +371,8 @@ Some contrib sections include default policies:
 | Section | Default Policy | Behavior |
 |---------|----------------|----------|
 | `VFSToolsSection` | `ReadBeforeWritePolicy` | Must read before overwriting existing files |
+| `PodmanToolsSection` | `ReadBeforeWritePolicy` | Must read before overwriting existing files (in container) |
 | `PlanningToolsSection` | None | No constraints |
-| `PodmanToolsSection` | None | No constraints |
 | `AstevalToolsSection` | None | No constraints |
 
 **Disabling default policies:**
