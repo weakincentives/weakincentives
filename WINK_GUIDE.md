@@ -1339,8 +1339,9 @@ from weakincentives.prompt import (
 
 # Require 'test' and 'build' before 'deploy'
 deploy_policy = SequentialDependencyPolicy(
-    tool="deploy",
-    requires=("test", "build"),
+    dependencies={
+        "deploy": frozenset({"test", "build"}),
+    }
 )
 
 # Require reading a file before overwriting it (new files allowed)
@@ -3863,8 +3864,9 @@ from weakincentives.filesystem import (
     Filesystem,                # Protocol for file operations
     SnapshotableFilesystem,    # Extended protocol with snapshot/restore
     HostFilesystem,            # Host filesystem with git-based snapshots
-    InMemoryFilesystem,        # In-memory implementation for testing
 )
+# InMemoryFilesystem is in contrib:
+# from weakincentives.contrib.tools import InMemoryFilesystem
 
 # Binary operations (new in v0.19.0)
 content = fs.read_bytes("image.png", offset=0, limit=1024)

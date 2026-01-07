@@ -447,7 +447,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - `Filesystem`: Protocol for file operations (read, write, list, glob, grep).
   - `SnapshotableFilesystem`: Extended protocol with snapshot/restore support.
   - `HostFilesystem`: Host filesystem implementation with git-based snapshots.
-  - `InMemoryFilesystem`: In-memory implementation for testing.
+  - Note: `InMemoryFilesystem` is in `weakincentives.contrib.tools`.
   - Binary operations:
     - `read_bytes(path, *, offset=0, limit=None)`: Read file as bytes.
     - `write_bytes(path, content, *, mode="overwrite", create_parents=True)`:
