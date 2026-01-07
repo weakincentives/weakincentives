@@ -34,7 +34,7 @@ flowchart TB
     end
 
     subgraph Session["Session State"]
-        Store["Store in CurrentAssessment slice"]
+        Store["Append to Assessment slice"]
     end
 
     subgraph Prompt["Next Prompt"]
@@ -82,7 +82,22 @@ class TrajectoryObserver(Protocol):
         ...
 ```
 
-### Assessment
+### Observation
+
+```python
+@dataclass(frozen=True)
+class Observation:
+    """Single observation about the trajectory."""
+
+    category: str  # "loop", "error_rate", "drift", "stall", etc.
+    description: str
+    evidence: str | None = None  # Specific tool calls, patterns
+```
+
+### Assessment (Session Slice)
+
+Assessments are appended to a session slice. All history is retained; use
+`.latest()` for context injection:
 
 ```python
 @dataclass(frozen=True)
@@ -95,11 +110,19 @@ class Assessment:
     suggestions: tuple[str, ...] = ()
     severity: Literal["info", "caution", "warning"] = "info"
     timestamp: datetime = field(default_factory=datetime.utcnow)
+    call_index: int = 0  # Tool call index when generated
 
     def render(self) -> str:
         """Render as concise markdown for context injection."""
-        lines = [f"### {self.observer_name} [{self.severity}]", ""]
-        lines.append(self.summary)
+        lines = [
+            "## Trajectory Assessment",
+            "",
+            f"_Generated after tool call #{self.call_index}_",
+            "",
+            f"### {self.observer_name} [{self.severity}]",
+            "",
+            self.summary,
+        ]
 
         if self.observations:
             lines.append("")
@@ -113,49 +136,6 @@ class Assessment:
             lines.append("**Suggestions**:")
             for suggestion in self.suggestions:
                 lines.append(f"- {suggestion}")
-
-        return "\n".join(lines)
-```
-
-### Observation
-
-```python
-@dataclass(frozen=True)
-class Observation:
-    """Single observation about the trajectory."""
-
-    category: str  # "loop", "error_rate", "drift", "stall", etc.
-    description: str
-    evidence: str | None = None  # Specific tool calls, patterns
-```
-
-### CurrentAssessment (Session Slice)
-
-The current assessment is stored in a session slice for prompt injection:
-
-```python
-@dataclass(frozen=True)
-class CurrentAssessment:
-    """Holds the latest trajectory assessment for context injection."""
-
-    assessments: tuple[Assessment, ...] = ()
-    generated_at: datetime = field(default_factory=datetime.utcnow)
-    call_index: int = 0  # Tool call index when generated
-
-    def render(self) -> str:
-        """Render all assessments as a single context block."""
-        if not self.assessments:
-            return ""
-
-        lines = [
-            "## Trajectory Assessment",
-            "",
-            f"_Generated after tool call #{self.call_index}_",
-            "",
-        ]
-        for assessment in self.assessments:
-            lines.append(assessment.render())
-            lines.append("")
 
         return "\n".join(lines)
 
@@ -172,17 +152,28 @@ class ObserverContext:
     """Context provided to observers during assessment."""
 
     session: Session
-    observer_state: ObserverState
+
+    @property
+    def last_assessment(self) -> Assessment | None:
+        """Most recent assessment, if any."""
+        return self.session[Assessment].latest()
+
+    @property
+    def tool_call_count(self) -> int:
+        """Total tool calls in session."""
+        return len(self.session[ToolCallRecord].all())
+
+    def tool_calls_since_last_assessment(self) -> int:
+        """Number of tool calls since last assessment."""
+        last = self.last_assessment
+        if last is None:
+            return self.tool_call_count
+        return self.tool_call_count - last.call_index
 
     def recent_tool_calls(self, n: int) -> Sequence[ToolCallRecord]:
         """Retrieve the N most recent tool call records."""
         records = self.session[ToolCallRecord].all()
         return records[-n:] if len(records) >= n else records
-
-    def tool_calls_since(self, timestamp: datetime) -> Sequence[ToolCallRecord]:
-        """Retrieve tool calls since a given timestamp."""
-        records = self.session[ToolCallRecord].all()
-        return [r for r in records if r.timestamp >= timestamp]
 
     def error_rate(self, window: int) -> float:
         """Calculate error rate over the last N calls."""
@@ -190,19 +181,6 @@ class ObserverContext:
         if not recent:
             return 0.0
         return sum(1 for r in recent if not r.success) / len(recent)
-```
-
-### ObserverState (Session Slice)
-
-```python
-@dataclass(frozen=True)
-class ObserverState:
-    """Tracks observer execution state in the session."""
-
-    tool_calls_since_assessment: int = 0
-    last_assessment_time: datetime | None = None
-    last_assessment_call_index: int = 0
-    total_assessments: int = 0
 ```
 
 ### ToolCallRecord (Session Slice)
@@ -266,32 +244,26 @@ class ObserverConfig:
     trigger: ObserverTrigger
 ```
 
-Multiple observers can be configured; their assessments are collected into a
-single `CurrentAssessment` slice entry.
+Multiple observers can be configured; each appends to the `Assessment` slice.
 
 ## Prompt Integration
 
 ### Reading Assessment from Session
 
-The prompt system reads the current assessment from the session slice and
+The prompt system reads the latest assessment from the session slice and
 injects it into context:
 
 ```python
 def build_context(session: Session, *, max_age_calls: int = 20) -> str:
     """Build additional context including trajectory assessment."""
-    context_parts = []
+    current_call_index = len(session[ToolCallRecord].all())
 
-    # Get current assessment if not stale
-    current = session[CurrentAssessment].latest()
-    if current and not current.is_stale(
-        session[ObserverState].latest().last_assessment_call_index,
-        max_age_calls,
-    ):
-        rendered = current.render()
-        if rendered:
-            context_parts.append(rendered)
+    # Get latest assessment if not stale
+    assessment = session[Assessment].latest()
+    if assessment and not assessment.is_stale(current_call_index, max_age_calls):
+        return assessment.render()
 
-    return "\n\n".join(context_parts)
+    return ""
 ```
 
 ### Prompt Declaration
@@ -310,12 +282,8 @@ template = PromptTemplate(
     ],
     observers=[
         ObserverConfig(
-            observer=StallDetector(),
+            observer=ResourceObserver(),
             trigger=ObserverTrigger(every_n_calls=10),
-        ),
-        ObserverConfig(
-            observer=ErrorCascadeDetector(),
-            trigger=ObserverTrigger(after_consecutive_errors=3),
         ),
     ],
 )
@@ -357,53 +325,25 @@ def after_tool_call(
 ) -> None:
     """Run trajectory observers after tool execution."""
 
-    # Record the call
+    # Record the call (append to history)
     session.dispatch(RecordToolCall(call))
 
-    # Update observer state
-    state = session[ObserverState].latest() or ObserverState()
-    state = replace(
-        state,
-        tool_calls_since_assessment=state.tool_calls_since_assessment + 1,
-    )
-    session[ObserverState].seed(state)
+    # Build context for observers
+    context = ObserverContext(session=session)
 
     # Check each observer
-    assessments: list[Assessment] = []
     for config in prompt.observers:
-        if _should_trigger(config.trigger, session, state, call):
-            context = ObserverContext(
-                session=session,
-                observer_state=state,
-            )
+        if _should_trigger(config.trigger, context, call):
             if config.observer.should_run(session, context=context):
                 assessment = config.observer.observe(session, context=context)
-                assessments.append(assessment)
-
-    # Store assessment in session if any produced
-    if assessments:
-        current = CurrentAssessment(
-            assessments=tuple(assessments),
-            generated_at=datetime.utcnow(),
-            call_index=call.call_index,
-        )
-        session[CurrentAssessment].seed(current)
-
-        # Reset counter
-        new_state = replace(
-            state,
-            tool_calls_since_assessment=0,
-            last_assessment_time=datetime.utcnow(),
-            last_assessment_call_index=call.call_index,
-            total_assessments=state.total_assessments + 1,
-        )
-        session[ObserverState].seed(new_state)
+                # Append assessment with call index
+                assessment = replace(assessment, call_index=call.call_index)
+                session.dispatch(RecordAssessment(assessment))
 
 
 def _should_trigger(
     trigger: ObserverTrigger,
-    session: Session,
-    state: ObserverState,
+    context: ObserverContext,
     call: ToolCallRecord,
 ) -> bool:
     """Check if any trigger condition is met."""
@@ -411,19 +351,24 @@ def _should_trigger(
     if trigger.on_every_call:
         return True
 
-    if trigger.every_n_calls and state.tool_calls_since_assessment >= trigger.every_n_calls:
-        return True
+    if trigger.every_n_calls:
+        if context.tool_calls_since_last_assessment() >= trigger.every_n_calls:
+            return True
 
     if trigger.after_consecutive_errors:
-        recent = session[ToolCallRecord].all()[-trigger.after_consecutive_errors:]
+        recent = context.recent_tool_calls(trigger.after_consecutive_errors)
         if len(recent) >= trigger.after_consecutive_errors:
             if all(not r.success for r in recent):
                 return True
 
-    if trigger.every_n_seconds and state.last_assessment_time:
-        elapsed = (datetime.utcnow() - state.last_assessment_time).total_seconds()
-        if elapsed >= trigger.every_n_seconds:
-            return True
+    if trigger.every_n_seconds:
+        last = context.last_assessment
+        if last:
+            elapsed = (datetime.utcnow() - last.timestamp).total_seconds()
+            if elapsed >= trigger.every_n_seconds:
+                return True
+        else:
+            return True  # No previous assessment, run now
 
     return False
 ```
@@ -594,27 +539,13 @@ session[Budget].seed(replace(current, tokens_used=current.tokens_used + response
 
 ### ObserverContext Extension
 
-The observer context provides access to budget:
+The observer context provides access to budget (extending the base definition):
 
 ```python
-@dataclass(frozen=True)
-class ObserverContext:
-    """Context provided to observers during assessment."""
-
-    session: Session
-    observer_state: ObserverState
-
-    @property
-    def budget(self) -> Budget:
-        """Current resource budget."""
-        return self.session[Budget].latest() or Budget()
-
-    def recent_tool_calls(self, n: int) -> Sequence[ToolCallRecord]:
-        """Retrieve the N most recent tool call records."""
-        records = self.session[ToolCallRecord].all()
-        return records[-n:] if len(records) >= n else records
-
-    # ... other methods unchanged
+@property
+def budget(self) -> Budget:
+    """Current resource budget."""
+    return self.session[Budget].latest() or Budget()
 ```
 
 ## Example Rendered Assessment
@@ -677,8 +608,7 @@ All observer state lives in session slices:
 |-------|---------|----------|
 | `Budget` | Time/token/call constraints | Replace after LLM calls |
 | `ToolCallRecord` | Append-only log of tool invocations | Append after each call |
-| `ObserverState` | Assessment timing and counters | Replace after assessment |
-| `CurrentAssessment` | Latest assessment for injection | Replace after assessment |
+| `Assessment` | Append-only log of assessments | Append after observer runs |
 
 ```python
 # Budget tracking
@@ -690,25 +620,24 @@ session[Budget].latest()
 #     max_tool_calls=100,
 # )
 
-# Observer state after assessment
-session[ObserverState].latest()
-# ObserverState(
-#     tool_calls_since_assessment=0,
-#     last_assessment_time=datetime(2024, 1, 15, 14, 32),
-#     last_assessment_call_index=51,
-#     total_assessments=5,
-# )
+# Tool call history
+len(session[ToolCallRecord].all())  # 51 calls
+session[ToolCallRecord].latest()
+# ToolCallRecord(tool_name="edit_file", params_summary="path=src/foo.py", ...)
 
-session[CurrentAssessment].latest()
-# CurrentAssessment(
-#     assessments=(Assessment(...),),
-#     generated_at=datetime(2024, 1, 15, 14, 32),
-#     call_index=51,
+# Assessment history (all retained, query latest for injection)
+len(session[Assessment].all())  # 5 assessments
+session[Assessment].latest()
+# Assessment(
+#     observer_name="Resources",
+#     summary="You have 8 minutes remaining...",
+#     severity="caution",
+#     call_index=47,
 # )
 ```
 
 **Snapshot/restore**: All slices are captured in session snapshots. Restoring
-a snapshot resets observer state and current assessment to that point.
+a snapshot resets state to that point.
 
 ## Design Decisions
 
@@ -716,14 +645,8 @@ a snapshot resets observer state and current assessment to that point.
 
 1. **Simpler**: No filesystem operations, directory creation, or path handling
 2. **Atomic**: Assessment storage is transactional with session state
-3. **Bounded**: Assessments are short; no need for external storage
+3. **Bounded**: Only inject latest; history available for analysis
 4. **Integrated**: Naturally participates in snapshot/restore
-
-### Why overwrite instead of append?
-
-1. **Recency**: Only the latest assessment matters for guidance
-2. **Context budget**: Keeps injected content bounded
-3. **Relevance**: Old assessments become misleading as state changes
 
 ### Why no escalation path?
 
