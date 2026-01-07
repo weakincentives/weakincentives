@@ -237,8 +237,6 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
       `deploy` requires `test` and `build` to have run first).
     - `ReadBeforeWritePolicy`: Prevent file overwrites without reading first;
       new files can be created freely.
-    - `PolicyViolationError`: Raised when a tool call violates policy
-      constraints.
   - Enhanced override types:
     - `TaskExampleOverride`: Override entire task examples (objective, outcome,
       steps).

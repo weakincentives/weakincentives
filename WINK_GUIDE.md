@@ -1366,8 +1366,8 @@ section = MarkdownSection(
 
 **Enforcement:**
 
-When a tool call violates a policy, WINK raises `PolicyViolationError` before
-the handler executes. The error message explains which policy was violated and
+When a tool call violates a policy, WINK returns a `ToolResult.error()` without
+executing the handler. The error message explains which policy was violated and
 what the model should do instead.
 
 **Default policies on contrib sections:**
@@ -3628,9 +3628,8 @@ ToolResult.error(message)               # failure case
 **Tool policies:**
 
 - `ToolPolicy`: Protocol for tool invocation constraints
-- `SequentialDependencyPolicy(tool, requires)`: Enforce tool ordering
+- `SequentialDependencyPolicy(dependencies)`: Enforce tool ordering
 - `ReadBeforeWritePolicy()`: Prevent overwrites without reading first
-- `PolicyViolationError`: Raised when policy is violated
 
 **Progressive disclosure:**
 
