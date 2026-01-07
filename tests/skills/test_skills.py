@@ -504,3 +504,48 @@ class TestConstants:
 
     def test_max_total_bytes(self) -> None:
         assert MAX_SKILL_TOTAL_BYTES == 10 * 1024 * 1024  # 10 MiB
+
+
+class TestDemoSkills:
+    """Tests to validate all demo-skills."""
+
+    def test_python_style_skill_is_valid(self) -> None:
+        # Get path relative to repository root
+        skill_path = (
+            Path(__file__).parent.parent.parent / "demo-skills" / "python-style"
+        )
+        if not skill_path.exists():
+            pytest.skip("demo-skills/python-style not found")
+        validate_skill(skill_path)
+
+    def test_ascii_art_skill_is_valid(self) -> None:
+        skill_path = Path(__file__).parent.parent.parent / "demo-skills" / "ascii-art"
+        if not skill_path.exists():
+            pytest.skip("demo-skills/ascii-art not found")
+        validate_skill(skill_path)
+
+    def test_code_review_skill_is_valid(self) -> None:
+        skill_path = Path(__file__).parent.parent.parent / "demo-skills" / "code-review"
+        if not skill_path.exists():
+            pytest.skip("demo-skills/code-review not found")
+        validate_skill(skill_path)
+
+    def test_all_demo_skills_have_valid_names(self) -> None:
+        demo_skills_dir = Path(__file__).parent.parent.parent / "demo-skills"
+        if not demo_skills_dir.exists():
+            pytest.skip("demo-skills directory not found")
+
+        # Find all subdirectories with SKILL.md files
+        skill_dirs = [
+            d
+            for d in demo_skills_dir.iterdir()
+            if d.is_dir() and (d / "SKILL.md").exists()
+        ]
+
+        assert len(skill_dirs) > 0, "No demo skills found"
+
+        for skill_dir in skill_dirs:
+            # Validate the skill
+            validate_skill(skill_dir)
+            # Also validate the directory name
+            validate_skill_name(skill_dir.name)
