@@ -12,6 +12,8 @@
 
 """Design by contract utilities for :mod:`weakincentives`."""
 
+# pyright: reportImportCycles=false
+
 from __future__ import annotations
 
 import builtins
@@ -27,6 +29,17 @@ from threading import RLock
 from typing import ParamSpec, Protocol, TypeVar, cast
 
 from ..types import ContractResult
+from ._errors import InvalidStateError, StateError
+from ._state_machine import (
+    StateMachineSpec,
+    TransitionSpec,
+    enters,
+    extract_state_machine,
+    in_state,
+    iter_state_machines,
+    state_machine,
+    transition,
+)
 
 P = ParamSpec("P")
 Q = ParamSpec("Q")
@@ -501,13 +514,23 @@ def pure(func: Callable[P, R]) -> Callable[P, R]:  # noqa: UP047
 
 
 __all__ = [
+    "InvalidStateError",
+    "StateError",
+    "StateMachineSpec",
+    "TransitionSpec",
     "dbc_active",
     "dbc_enabled",
     "disable_dbc",
     "enable_dbc",
     "ensure",
+    "enters",
+    "extract_state_machine",
+    "in_state",
     "invariant",
+    "iter_state_machines",
     "pure",
     "require",
     "skip_invariant",
+    "state_machine",
+    "transition",
 ]

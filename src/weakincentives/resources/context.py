@@ -19,8 +19,10 @@ from __future__ import annotations
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from typing import TYPE_CHECKING, cast
 
+from ..dbc import enters, in_state, state_machine, transition
 from ..runtime.logging import StructuredLogger, get_logger
 from .binding import Binding
 from .errors import CircularDependencyError, ProviderError, UnboundResourceError
@@ -33,12 +35,31 @@ if TYPE_CHECKING:
 logger: StructuredLogger = get_logger(__name__, context={"component": "resources"})
 
 
+class ContextState(Enum):
+    """Lifecycle states for ScopedResourceContext."""
+
+    CREATED = auto()
+    """Initial state after construction."""
+
+    STARTED = auto()
+    """Context has been started; resources can be resolved."""
+
+    CLOSED = auto()
+    """Context has been closed; no further operations allowed."""
+
+
+@state_machine(state_var="_state", states=ContextState, initial=ContextState.CREATED)
 @dataclass(slots=True)
 class ScopedResourceContext:
     """Scoped resolution context with lifecycle management.
 
     Manages resource construction, caching per scope, and cleanup.
     Use ``tool_scope()`` to enter per-tool-call scopes.
+
+    Lifecycle states (enforced via @state_machine when DbC is active):
+        - CREATED: Initial state after construction
+        - STARTED: After start() called; resources can be resolved
+        - CLOSED: After close() called; no further operations allowed
 
     Example::
 
@@ -81,6 +102,10 @@ class ScopedResourceContext:
     )
     """Tracks instantiation order for cleanup."""
 
+    _state: ContextState = field(default=ContextState.CREATED, init=False, repr=False)
+    """Current lifecycle state (managed by @state_machine decorator)."""
+
+    @in_state(ContextState.STARTED)
     def get[T](self, protocol: type[T]) -> T:
         """Resolve and return resource for protocol.
 
@@ -92,37 +117,17 @@ class ScopedResourceContext:
             UnboundResourceError: No binding exists.
             CircularDependencyError: Dependency cycle detected.
             ProviderError: Provider raised an exception.
+            InvalidStateError: Context not in STARTED state (DbC mode).
         """
-        binding = self.registry.binding_for(protocol)
-        if binding is None:
-            raise UnboundResourceError(protocol)
+        return self._get_internal(protocol)
 
-        # Check caches
-        cache = self._cache_for_scope(binding.scope)
-        if cache is not None and protocol in cache:
-            return cast(T, cache[protocol])
-
-        # Cycle detection
-        if protocol in self._resolving:
-            cycle = (*self._resolving, protocol)
-            raise CircularDependencyError(cycle)
-
-        # Invoke provider
-        self._resolving.add(protocol)
-        try:
-            constructed = self._construct(binding)
-        finally:
-            self._resolving.discard(protocol)
-
-        # Cache per scope
-        if cache is not None:
-            cache[protocol] = constructed
-            self._instantiation_order.append((binding.scope, protocol))
-
-        return constructed
-
+    @in_state(ContextState.STARTED)
     def get_optional[T](self, protocol: type[T]) -> T | None:
-        """Resolve if bound, return None otherwise."""
+        """Resolve if bound, return None otherwise.
+
+        Raises:
+            InvalidStateError: Context not in STARTED state (DbC mode).
+        """
         if protocol not in self.registry:
             return None
         return self.get(protocol)
@@ -181,20 +186,54 @@ class ScopedResourceContext:
             return self._tool_call_cache
         return None  # PROTOTYPE or unknown scope
 
+    @transition(from_=ContextState.CREATED, to=ContextState.STARTED)
     def start(self) -> None:
         """Initialize context and instantiate eager singletons.
 
         Call before first use to fail fast on configuration errors.
+
+        Raises:
+            InvalidStateError: Context not in CREATED state (DbC mode).
         """
         for binding in self.registry.eager_bindings():
-            _ = self.get(binding.protocol)
+            _ = self._get_internal(binding.protocol)
 
+    def _get_internal[T](self, protocol: type[T]) -> T:
+        """Internal get that bypasses state check (for use during start)."""
+        binding = self.registry.binding_for(protocol)
+        if binding is None:
+            raise UnboundResourceError(protocol)
+
+        cache = self._cache_for_scope(binding.scope)
+        if cache is not None and protocol in cache:
+            return cast(T, cache[protocol])
+
+        if protocol in self._resolving:
+            cycle = (*self._resolving, protocol)
+            raise CircularDependencyError(cycle)
+
+        self._resolving.add(protocol)
+        try:
+            constructed = self._construct(binding)
+        finally:
+            self._resolving.discard(protocol)
+
+        if cache is not None:
+            cache[protocol] = constructed
+            self._instantiation_order.append((binding.scope, protocol))
+
+        return constructed
+
+    @enters(ContextState.CLOSED)
     def close(self) -> None:
         """Dispose all instantiated resources implementing Closeable.
 
         Resources are closed in reverse instantiation order.
         Only SINGLETON and TOOL_CALL scoped resources are tracked and closed;
         PROTOTYPE resources are not cached and thus not tracked.
+
+        Can be called from any state (idempotent). After close(), no further
+        operations are allowed.
         """
         logger.debug(
             "resource.context.close.start",
@@ -234,6 +273,7 @@ class ScopedResourceContext:
             event="resource.context.close.complete",
         )
 
+    @in_state(ContextState.STARTED)
     @contextmanager
     def tool_scope(self) -> Iterator[ResourceResolver]:
         """Enter a tool-call scope.
@@ -247,6 +287,9 @@ class ScopedResourceContext:
                 tracer = resolver.get(Tracer)  # Fresh instance
                 # ... use tracer ...
             # tracer.close() called automatically
+
+        Raises:
+            InvalidStateError: Context not in STARTED state (DbC mode).
         """
         logger.debug(
             "resource.tool_scope.enter",
@@ -296,4 +339,4 @@ class ScopedResourceContext:
             )
 
 
-__all__ = ["ScopedResourceContext"]
+__all__ = ["ContextState", "ScopedResourceContext"]

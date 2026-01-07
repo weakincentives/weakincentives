@@ -37,9 +37,11 @@ import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
+from weakincentives.dbc import enters, in_state, state_machine
 from weakincentives.formal import (
     Action,
     ActionParameter,
@@ -195,6 +197,16 @@ if TYPE_CHECKING:
     from redis.cluster import RedisCluster
 
 
+class MailboxState(Enum):
+    """Lifecycle states for RedisMailbox."""
+
+    OPEN = auto()
+    """Mailbox is open and can send/receive messages."""
+
+    CLOSED = auto()
+    """Mailbox has been closed; no further operations allowed."""
+
+
 @dataclass(frozen=True, slots=True)
 class _QueueKeys:
     """Redis keys for a named queue with hash tags for cluster compatibility."""
@@ -281,6 +293,7 @@ class RedisMailboxFactory[R]:
         )
 
 
+@state_machine(state_var="_state", states=MailboxState, initial=MailboxState.OPEN)
 @dataclass(slots=True)
 @formal_spec(
     module="RedisMailbox",
@@ -664,6 +677,9 @@ class RedisMailbox[T, R]:
     reaper threads and don't support reply resolution. Used by RedisMailboxFactory
     to prevent resource leaks when creating ephemeral reply mailboxes."""
 
+    _state: MailboxState = field(default=MailboxState.OPEN, init=False, repr=False)
+    """Current lifecycle state (managed by @state_machine decorator)."""
+
     def __post_init__(self) -> None:
         """Initialize keys, register Lua scripts, and optionally start reaper thread.
 
@@ -754,6 +770,7 @@ class RedisMailbox[T, R]:
         except Exception as e:
             raise SerializationError(f"Failed to deserialize message body: {e}") from e
 
+    @in_state(MailboxState.OPEN)
     def send(self, body: T, *, reply_to: str | None = None) -> str:
         """Enqueue a message.
 
@@ -772,6 +789,7 @@ class RedisMailbox[T, R]:
             MailboxFullError: Queue capacity exceeded (checked atomically).
             SerializationError: Body cannot be serialized.
             MailboxConnectionError: Cannot connect to Redis.
+            InvalidStateError: Mailbox not in OPEN state (DbC mode).
         """
         msg_id = str(uuid4())
         serialized = self._serialize(body)
@@ -805,6 +823,7 @@ class RedisMailbox[T, R]:
         except Exception as e:
             raise MailboxConnectionError(f"Failed to send message: {e}") from e
 
+    @in_state(MailboxState.OPEN)
     def receive(
         self,
         *,
@@ -826,6 +845,7 @@ class RedisMailbox[T, R]:
         Raises:
             InvalidParameterError: visibility_timeout or wait_time_seconds out of range.
             MailboxConnectionError: Cannot connect to Redis.
+            InvalidStateError: Mailbox not in OPEN state (DbC mode).
         """
         validate_visibility_timeout(visibility_timeout)
         validate_wait_time(wait_time_seconds)
@@ -1036,6 +1056,7 @@ class RedisMailbox[T, R]:
                 f"Message '{msg_id}' not found or receipt handle expired"
             )
 
+    @in_state(MailboxState.OPEN)
     def purge(self) -> int:
         """Delete all messages from the queue.
 
@@ -1044,6 +1065,9 @@ class RedisMailbox[T, R]:
 
         Note:
             Unlike SQS, Redis has no purge cooldown.
+
+        Raises:
+            InvalidStateError: Mailbox not in OPEN state (DbC mode).
         """
         keys = [
             self._keys.pending,
@@ -1057,11 +1081,15 @@ class RedisMailbox[T, R]:
         except Exception as e:
             raise MailboxConnectionError(f"Failed to purge queue: {e}") from e
 
+    @in_state(MailboxState.OPEN)
     def approximate_count(self) -> int:
         """Return exact number of messages in the queue.
 
         For Redis, this count is exact (unlike SQS which is approximate).
         Includes both visible (pending) and invisible (in-flight) messages.
+
+        Raises:
+            InvalidStateError: Mailbox not in OPEN state (DbC mode).
         """
         try:
             pending = self.client.llen(self._keys.pending)
@@ -1070,10 +1098,12 @@ class RedisMailbox[T, R]:
         except Exception as e:
             raise MailboxConnectionError(f"Failed to get queue count: {e}") from e
 
+    @enters(MailboxState.CLOSED)
     def close(self) -> None:
         """Stop the reaper thread if running. Does not close the Redis client.
 
         For send-only mailboxes, this is a no-op since no reaper thread is started.
+        Can be called from any state (idempotent).
         """
         with self._lock:
             self._closed = True
@@ -1089,4 +1119,4 @@ class RedisMailbox[T, R]:
         return self._closed
 
 
-__all__ = ["RedisMailbox", "RedisMailboxFactory"]
+__all__ = ["MailboxState", "RedisMailbox", "RedisMailboxFactory"]

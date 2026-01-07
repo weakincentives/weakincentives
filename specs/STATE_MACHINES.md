@@ -13,7 +13,7 @@ initialization" with clear error messages.
 Based on codebase analysis, the primary candidates are:
 
 | Class | Current Tracking | Bugs to Catch |
-|-------|------------------|---------------|
+| ----------------------- | ---------------- | --------------------------------- |
 | `MainLoop` | `_running` bool | Double-run, use-after-shutdown |
 | `ScopedResourceContext` | Implicit | Use-after-close, get-before-start |
 | `RedisMailbox` | `_closed` bool | Send/receive after close |
@@ -123,6 +123,7 @@ class MainLoop(ABC):
 ```
 
 **Bugs caught:**
+
 - `loop.run()` called twice → `InvalidStateError: run() requires IDLE, got RUNNING`
 - `loop.execute()` after shutdown → `InvalidStateError: execute() requires [IDLE, RUNNING], got STOPPED`
 
@@ -158,6 +159,7 @@ class ScopedResourceContext:
 ```
 
 **Bugs caught:**
+
 - `ctx.get(Service)` before `start()` → `InvalidStateError: get() requires STARTED, got CREATED`
 - `ctx.start()` after `close()` → `InvalidStateError: start() requires CREATED, got CLOSED`
 
@@ -184,6 +186,7 @@ class RedisMailbox:
 ```
 
 **Bugs caught:**
+
 - `mailbox.send(msg)` after `close()` → `InvalidStateError: send() requires OPEN, got CLOSED`
 
 ## Error Types
@@ -230,10 +233,10 @@ When `dbc_active()` is False, decorators are no-ops.
 For `@transition(from_=A, to=B)`:
 
 1. Check `dbc_active()` → if False, call method directly
-2. Check current state is `A` → if not, raise `InvalidStateError`
-3. Execute method body
-4. Set state to `B`
-5. Return result
+1. Check current state is `A` → if not, raise `InvalidStateError`
+1. Execute method body
+1. Set state to `B`
+1. Return result
 
 ## Graph Extraction
 
@@ -247,6 +250,7 @@ print(sm.to_mermaid())
 ```
 
 Output:
+
 ```
 stateDiagram-v2
     [*] --> IDLE
