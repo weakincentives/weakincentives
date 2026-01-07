@@ -19,13 +19,43 @@ skill names according to the Agent Skills specification.
 from __future__ import annotations
 
 import re
+from importlib import import_module
 from pathlib import Path
-from typing import Any
-
-import yaml
+from typing import Any, Protocol
 
 from ._errors import SkillMountError, SkillValidationError
 from ._types import MAX_SKILL_FILE_BYTES, SkillMount
+
+
+class _YAMLModule(Protocol):
+    """Protocol for the yaml module interface we use."""
+
+    YAMLError: type[Exception]
+
+    def safe_load(self, stream: str) -> object: ...
+
+
+_ERROR_MESSAGE = (
+    "pyyaml is required for skill validation. "
+    "Install it with: pip install 'weakincentives[skills]'"
+)
+
+
+def _load_yaml_module() -> _YAMLModule:
+    """Lazily load the yaml module.
+
+    Returns:
+        The yaml module.
+
+    Raises:
+        RuntimeError: If pyyaml is not installed.
+    """
+    try:
+        module = import_module("yaml")
+    except ModuleNotFoundError as exc:  # pragma: no cover - dependency guard
+        raise RuntimeError(_ERROR_MESSAGE) from exc
+    return module  # type: ignore[return-value]
+
 
 __all__ = [
     "resolve_skill_name",
@@ -139,6 +169,7 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
 
     Raises:
         SkillValidationError: If frontmatter is missing or invalid.
+        RuntimeError: If pyyaml is not installed.
     """
     if not content.startswith("---\n"):
         msg = "SKILL.md must start with YAML frontmatter (---)"
@@ -152,10 +183,11 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
         raise SkillValidationError(msg)
 
     yaml_content = content[4:end_pos]
+    yaml_module = _load_yaml_module()
 
     try:
-        parsed = yaml.safe_load(yaml_content)
-    except yaml.YAMLError as e:
+        parsed = yaml_module.safe_load(yaml_content)
+    except yaml_module.YAMLError as e:
         msg = f"Invalid YAML in SKILL.md frontmatter: {e}"
         raise SkillValidationError(msg) from e
 
@@ -165,7 +197,7 @@ def _parse_frontmatter(content: str) -> dict[str, Any]:
 
     # Type-checked: we've verified it's a dict
     # pyright doesn't know yaml.safe_load's return type, but we validate it's a dict
-    frontmatter: dict[str, Any] = parsed  # pyright: ignore[reportUnknownVariableType]
+    frontmatter: dict[str, Any] = parsed  # type: ignore[assignment]
     return frontmatter
 
 
