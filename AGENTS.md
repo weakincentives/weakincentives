@@ -82,6 +82,8 @@ a goal at any time.
   modules.
 - **EVALS.md**: Evaluation framework—when implementing evals, datasets,
   evaluators, or metrics aggregation.
+- **EXHAUSTIVENESS.md**: Union type totality and `assert_never` patterns—when
+  adding union variants or match statements on events and operations.
 - **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
   ToolContext integration—when adding or modifying filesystem operations.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.

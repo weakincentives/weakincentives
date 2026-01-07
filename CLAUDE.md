@@ -153,6 +153,7 @@ Consult these specs before modifying related code:
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, session evaluators |
 | `specs/EXAMPLES.md` | Code review agent reference implementation |
+| `specs/EXHAUSTIVENESS.md` | Union type totality, `assert_never` patterns, match statement coverage |
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/FORMAL_VERIFICATION.md` | Embedding TLA+ in Python, `@formal_spec` decorator, TLC verification |
 | `specs/HEALTH.md` | Health endpoints, watchdog, stuck worker detection, process termination |
