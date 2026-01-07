@@ -63,11 +63,14 @@ class Filesystem(Protocol):
         limit: int | None = None,
         encoding: str = "utf-8",
     ) -> ReadResult:
-        """Read file content as text with optional pagination.
+        """Read file content as text with optional line-based pagination.
+
+        Note: For binary files or exact file copying, use read_bytes() instead.
 
         Args:
             path: Relative path from workspace root.
-            offset: Line number to start reading (0-indexed).
+            offset: Line number to start reading (0-indexed). Unlike read_bytes()
+                which uses byte offset, this operates on lines.
             limit: Maximum lines to return. None means backend default (2000).
                 Use READ_ENTIRE_FILE (-1) to read entire file without truncation.
             encoding: Text encoding. Only "utf-8" is guaranteed.
@@ -76,6 +79,7 @@ class Filesystem(Protocol):
             FileNotFoundError: Path does not exist.
             IsADirectoryError: Path is a directory.
             PermissionError: Read access denied.
+            ValueError: File contains binary content that cannot be decoded.
         """
         ...
 
@@ -86,14 +90,15 @@ class Filesystem(Protocol):
         offset: int = 0,
         limit: int | None = None,
     ) -> ReadBytesResult:
-        """Read file content as raw bytes with optional pagination.
+        """Read file content as raw bytes with optional byte-based pagination.
 
         This is the recommended method for copying files, as it preserves
         binary content exactly without encoding/decoding overhead.
 
         Args:
             path: Relative path from workspace root.
-            offset: Byte offset to start reading (0-indexed).
+            offset: Byte offset to start reading (0-indexed). Unlike read()
+                which uses line offset, this operates on bytes.
             limit: Maximum bytes to return. None means read entire file.
 
         Raises:

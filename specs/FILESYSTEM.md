@@ -1227,7 +1227,7 @@ assert fs.read("config.py").content == "DEBUG = False"
 assert fs.exists("tests.py")
 ```
 
-### Limitations
+### Snapshot Limitations
 
 - **Git dependency**: Disk-backed snapshots require git to be installed
 - **No partial restore**: Restore is all-or-nothing for the entire workspace

@@ -4,6 +4,37 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Binary Read/Write Support for Filesystem
+
+The `Filesystem` protocol now supports binary file operations alongside text
+operations. This enables proper handling of binary files (images, compiled
+binaries, archives) and exact-copy file operations without encoding overhead.
+
+**New methods:**
+
+- `read_bytes(path, *, offset=0, limit=None)` → `ReadBytesResult`: Read file
+  content as raw bytes with optional byte-offset pagination
+- `write_bytes(path, content, *, mode="overwrite", create_parents=True)` →
+  `WriteResult`: Write raw bytes to a file
+
+**New types:**
+
+- `ReadBytesResult`: Result dataclass for binary reads with `content: bytes`,
+  `size_bytes`, `offset`, `limit`, `truncated`
+- `MAX_WRITE_BYTES`: Size limit constant for binary writes (48KB)
+
+**Behavior changes:**
+
+- `InMemoryFilesystem` now stores files as bytes internally, with text
+  operations encoding/decoding UTF-8 as needed
+- `read()` raises `ValueError` with actionable message when file contains
+  binary content: "Use read_bytes() for binary files"
+- `grep()` silently skips files that cannot be UTF-8 decoded
+- Path validation no longer requires ASCII-only segments (UTF-8 paths allowed)
+
+**Recommendation:** For file copying operations, prefer `read_bytes()` /
+`write_bytes()` as they preserve content exactly without encoding overhead.
+
 ### Skills as Core Library Concept
 
 Skills are now a first-class concept in the core library. The skill types have
