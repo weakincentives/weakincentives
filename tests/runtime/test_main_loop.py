@@ -319,7 +319,7 @@ def test_loop_processes_request() -> None:
         requests.send(request, reply_to=results)
 
         # Run single iteration
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Check response
         msgs = results.receive(max_messages=1)
@@ -349,7 +349,7 @@ def test_loop_sends_error_on_failure() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -378,7 +378,7 @@ def test_loop_acknowledges_request() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Request should be acknowledged (gone from queue)
         assert requests.approximate_count() == 0
@@ -402,7 +402,7 @@ def test_loop_calls_finalize() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         assert loop.finalize_called
     finally:
@@ -429,7 +429,7 @@ def test_loop_respects_max_iterations() -> None:
             )
 
         # Only run 2 iterations
-        loop.run(max_iterations=2, wait_time_seconds=0)
+        loop.run(max_turns=2, wait_time_seconds=0)
 
         # Some requests may still be pending (depending on batch size)
         # At least we should have some responses
@@ -457,7 +457,7 @@ def test_loop_handles_visibility_expansion() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Should succeed after visibility expansion
         msgs = results.receive(max_messages=1)
@@ -487,7 +487,7 @@ def test_loop_uses_config_budget() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         assert adapter._last_budget_tracker is not None
         assert adapter._last_budget_tracker.budget is budget
@@ -517,7 +517,7 @@ def test_loop_request_overrides_config() -> None:
         )
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         assert adapter._last_budget_tracker is not None
         assert adapter._last_budget_tracker.budget is override_budget
@@ -544,7 +544,7 @@ def test_loop_nacks_on_response_send_failure() -> None:
 
         results.set_connection_error(MailboxConnectionError("connection lost"))
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Request should be nacked (still in queue for retry)
         # Note: it's in invisible state after receive, so we need to wait
@@ -573,7 +573,7 @@ def test_loop_nacks_on_error_response_send_failure() -> None:
 
         results.set_connection_error(MailboxConnectionError("connection lost"))
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Request should be nacked (still in queue for retry)
         assert requests.approximate_count() == 1
@@ -633,7 +633,7 @@ def test_loop_default_finalize() -> None:
         requests.send(request, reply_to=results)
 
         # Run should succeed even without finalize override
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -692,7 +692,7 @@ def test_loop_passes_resources_from_config() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Resources are now bound to prompt and accessible via prompt.resources
         # (captured during evaluate while context is active)
@@ -723,7 +723,7 @@ def test_loop_request_resources_overrides_config() -> None:
         )
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Override resources are bound to prompt, overriding config resources
         # (captured during evaluate while context is active)
@@ -756,7 +756,7 @@ def test_same_resources_used_across_visibility_retries() -> None:
         )
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Called 3 times: 2 visibility expansions + 1 success
         assert adapter._call_count == 3
@@ -784,7 +784,7 @@ def test_no_resources_when_not_set() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # When no resources configured, the custom resource is None
         # (captured during evaluate while context is active)
@@ -818,7 +818,7 @@ def test_visibility_overrides_accumulate_in_session() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Check session state has accumulated overrides
         assert loop.session_created is not None
@@ -852,7 +852,7 @@ def test_same_budget_tracker_used_across_visibility_retries() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Called 3 times: 2 visibility expansions + 1 success
         assert adapter._call_count == 3
@@ -882,7 +882,7 @@ def test_no_budget_tracker_when_no_budget() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         assert adapter._last_budget_tracker is None
     finally:
@@ -984,8 +984,8 @@ def test_loop_exits_when_mailbox_closed() -> None:
     exited = []
 
     def run_loop() -> None:
-        # Would run forever with max_iterations=None
-        loop.run(max_iterations=None, wait_time_seconds=1)
+        # Would run forever with max_turns=None
+        loop.run(max_turns=None, wait_time_seconds=1)
         exited.append(True)
 
     thread = threading.Thread(target=run_loop)

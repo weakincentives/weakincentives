@@ -658,12 +658,12 @@ def test_main_loop_can_restart_after_shutdown() -> None:
 
         # First run
         requests.send(MainLoopRequest(request=_Request(message="first")))
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
         assert adapter.call_count == 1
 
         # Second run
         requests.send(MainLoopRequest(request=_Request(message="second")))
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         assert adapter.call_count == 2
     finally:
@@ -746,7 +746,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
 
         # Run - first message will trigger shutdown, remaining should be nacked
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # First message should be processed
         assert adapter.call_count == 1
@@ -850,7 +850,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
 
         # Run - should handle ReceiptHandleExpiredError gracefully during nack
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # First message should have been processed
         assert adapter.call_count == 1
@@ -1183,7 +1183,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
 
         # Run the loop - it will process first sample, then shutdown triggers,
         # then remaining messages in batch get nacked
-        eval_loop.run(wait_time_seconds=0, max_iterations=1)
+        eval_loop.run(wait_time_seconds=0, max_turns=1)
 
         # Should have processed exactly one sample (others were nacked/skipped)
         assert eval_count == 1
