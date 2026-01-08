@@ -41,6 +41,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "MODULE_BOUNDARIES": "Module organization and import boundaries",
     "POLICIES_OVER_WORKFLOWS": "Philosophy of declarative policies vs rigid workflows",
     "PROMPTS": "Prompt system, composition, overrides, structured output, resources",
+    "REDIS_PROMPT_OVERRIDES": "Redis-backed prompt overrides store, distributed storage",
     "RESOURCE_REGISTRY": "Dependency injection, resource scopes, transactional snapshots",
     "RUN_CONTEXT": "Execution metadata, request correlation, distributed tracing",
     "SESSIONS": "Session lifecycle, events, deadlines, budgets",
