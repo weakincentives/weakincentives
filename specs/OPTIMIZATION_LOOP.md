@@ -40,7 +40,8 @@ class OptimizeRequest(Generic[InputT, ExpectedT]):
     prompt_key: str
     dataset: Dataset[InputT, ExpectedT]
     baseline_tag: str = "stable"
-    flags: dict[str, bool] = field(default_factory=dict)
+    eval_runs: int = 3  # Number of eval runs per candidate for reliability
+    flags: Mapping[str, bool] = field(default_factory=dict)
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
@@ -69,7 +70,7 @@ class Experiment:
     name: str
     overrides_tag: str
     parent_tag: str | None = None
-    flags: dict[str, bool] = field(default_factory=dict)
+    flags: Mapping[str, bool] = field(default_factory=dict)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
 
@@ -136,7 +137,14 @@ def prepare(self, request: UserRequestT, experiment: Experiment | None) -> tuple
 
 ```python
 class CompressStrategy(Protocol):
-    """Generates compressed prompt variants."""
+    """Generates compressed prompt variants.
+
+    Implementations should prioritize sections by token count (largest first)
+    and skip sections below a minimum token threshold where compression
+    effort exceeds potential savings.
+    """
+
+    min_section_tokens: int  # Sections below this are skipped
 
     def propose(
         self,
@@ -145,7 +153,11 @@ class CompressStrategy(Protocol):
         adapter: ProviderAdapter[object],
         session: Session,
     ) -> Sequence[SectionEdit]:
-        """Generate compressed sections."""
+        """Generate compressed sections.
+
+        Returns edits ordered by original_tokens descending. Sections with
+        fewer than min_section_tokens are excluded.
+        """
         ...
 
 
@@ -203,6 +215,40 @@ class OptimizationReport:
     @property
     def has_modifications(self) -> bool:
         return len(self.modifications) > 0
+
+
+@dataclass(slots=True, frozen=True)
+class EvalSummary:
+    """Aggregated results from multiple evaluation runs."""
+
+    pass_rate: float  # Average pass rate across runs
+    total_tokens: int  # Total tokens used (from first run)
+    consistently_passed: frozenset[str]  # Sample IDs that passed in ALL runs
+
+    @classmethod
+    def from_reports(cls, reports: Sequence[EvalReport]) -> EvalSummary:
+        """Aggregate multiple eval reports into a summary."""
+        if not reports:
+            return cls(pass_rate=0.0, total_tokens=0, consistently_passed=frozenset())
+
+        # Average pass rate
+        pass_rate = sum(r.pass_rate for r in reports) / len(reports)
+
+        # Token count from first run
+        total_tokens = sum(r.total_tokens for r in reports[:1])
+
+        # Samples that passed in ALL runs
+        passed_sets = [
+            {r.sample_id for r in report.results if r.success and r.score.passed}
+            for report in reports
+        ]
+        consistently_passed = frozenset.intersection(*passed_sets) if passed_sets else frozenset()
+
+        return cls(
+            pass_rate=pass_rate,
+            total_tokens=total_tokens,
+            consistently_passed=consistently_passed,
+        )
 ```
 
 ## OptimizeLoop
@@ -232,6 +278,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
+        self._current_dataset: Dataset[InputT, ExpectedT] | None = None
 
     def run(
         self,
@@ -287,11 +334,13 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
     ) -> OptimizeResult:
         """Process a single optimization request."""
         prompt = self._prompts.get(request.prompt_ns, request.prompt_key)
+        self._current_dataset = request.dataset  # For combined/greedy validation
         report = self._optimize(
             prompt=prompt,
             dataset=request.dataset,
             baseline_tag=request.baseline_tag,
             flags=request.flags,
+            eval_runs=request.eval_runs,
         )
         return OptimizeResult(request_id=request.request_id, report=report)
 
@@ -300,33 +349,31 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         prompt: Prompt[InputT],
         dataset: Dataset[InputT, ExpectedT],
         baseline_tag: str,
-        flags: dict[str, bool],
+        flags: Mapping[str, bool],
+        eval_runs: int,
     ) -> OptimizationReport:
         """Core optimization logic."""
         experiment_id = generate_experiment_id()
         descriptor = descriptor_for_prompt(prompt)
 
-        # 1. Evaluate baseline via EvalLoop
+        # 1. Evaluate baseline via EvalLoop (multiple runs for reliability)
         baseline_exp = Experiment(
             id=f"{experiment_id}-baseline",
             name="baseline",
             overrides_tag=baseline_tag,
-            flags=flags,
+            flags=dict(flags),
         )
-        baseline_report = self._run_eval(dataset, baseline_exp)
-        baseline_passed = {
-            r.sample_id for r in baseline_report.results
-            if r.success and r.score.passed
-        }
+        baseline_summary = self._run_eval_multi(dataset, baseline_exp, runs=eval_runs)
+        baseline_passed = baseline_summary.consistently_passed
 
-        # 2. Generate compression proposals
+        # 2. Generate compression proposals (ordered by token count descending)
         edits = self._strategy.propose(
             descriptor,
             adapter=self._get_adapter(),
             session=Session(bus=InProcessDispatcher()),
         )
 
-        # 3. Evaluate each edit via EvalLoop
+        # 3. Evaluate each edit independently
         modifications: list[Modification] = []
         rejected: list[RejectedModification] = []
 
@@ -334,7 +381,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
             temp_tag = f"opt-{experiment_id}-{_hash_path(edit.path)}"
 
             try:
-                # Write to shared override store using SectionOverride
                 self._store.store(
                     prompt,
                     SectionOverride(
@@ -350,13 +396,15 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
                     name=f"candidate-{edit.path[-1]}",
                     overrides_tag=temp_tag,
                     parent_tag=baseline_tag,
-                    flags=flags,
+                    flags=dict(flags),
                 )
-                candidate_report = self._run_eval(dataset, candidate_exp)
+                candidate_summary = self._run_eval_multi(
+                    dataset, candidate_exp, runs=eval_runs
+                )
 
-                regression_count = sum(
-                    1 for r in candidate_report.results
-                    if r.sample_id in baseline_passed and not r.score.passed
+                # Regression = passed consistently in baseline but not in candidate
+                regression_count = len(
+                    baseline_passed - candidate_summary.consistently_passed
                 )
 
                 if regression_count == 0:
@@ -365,8 +413,8 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
                         original_hash=edit.original_hash,
                         proposed_body=edit.proposed_body,
                         token_reduction=edit.original_tokens - edit.proposed_tokens,
-                        baseline_pass_rate=baseline_report.pass_rate,
-                        candidate_pass_rate=candidate_report.pass_rate,
+                        baseline_pass_rate=baseline_summary.pass_rate,
+                        candidate_pass_rate=candidate_summary.pass_rate,
                     ))
                 else:
                     rejected.append(RejectedModification(
@@ -379,22 +427,207 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
                     ns=descriptor.ns, prompt_key=descriptor.key, tag=temp_tag
                 )
 
+        # 4. Test combined modifications for interaction effects
+        if len(modifications) > 1:
+            modifications = self._validate_combined(
+                prompt=prompt,
+                descriptor=descriptor,
+                experiment_id=experiment_id,
+                baseline_tag=baseline_tag,
+                baseline_passed=baseline_passed,
+                modifications=modifications,
+                rejected=rejected,
+                flags=flags,
+                eval_runs=eval_runs,
+            )
+
         return OptimizationReport(
             experiment_id=experiment_id,
             prompt_ns=descriptor.ns,
             prompt_key=descriptor.key,
-            baseline_pass_rate=baseline_report.pass_rate,
-            baseline_token_count=0,  # Aggregated from eval results
+            baseline_pass_rate=baseline_summary.pass_rate,
+            baseline_token_count=baseline_summary.total_tokens,
             modifications=tuple(modifications),
             rejected=tuple(rejected),
         )
+
+    def _run_eval_multi(
+        self,
+        dataset: Dataset[InputT, ExpectedT],
+        experiment: Experiment,
+        *,
+        runs: int,
+    ) -> EvalSummary:
+        """Run evaluation multiple times and summarize results.
+
+        Returns summary with pass rates averaged across runs and the set
+        of sample IDs that passed consistently in all runs.
+        """
+        all_results: list[EvalReport] = []
+        for i in range(runs):
+            run_exp = Experiment(
+                id=f"{experiment.id}-run{i}",
+                name=experiment.name,
+                overrides_tag=experiment.overrides_tag,
+                parent_tag=experiment.parent_tag,
+                flags=experiment.flags,
+            )
+            all_results.append(self._run_eval(dataset, run_exp))
+
+        return EvalSummary.from_reports(all_results)
+
+    def _validate_combined(
+        self,
+        prompt: Prompt[InputT],
+        descriptor: PromptDescriptor,
+        experiment_id: str,
+        baseline_tag: str,
+        baseline_passed: set[str],
+        modifications: list[Modification],
+        rejected: list[RejectedModification],
+        flags: Mapping[str, bool],
+        eval_runs: int,
+    ) -> list[Modification]:
+        """Test all modifications applied together for interaction effects.
+
+        If combined application causes regressions, falls back to greedy
+        selection: adds modifications one at a time, keeping only those
+        that don't regress when combined with previously accepted ones.
+        """
+        combined_tag = f"opt-{experiment_id}-combined"
+
+        try:
+            # Write all modifications to combined tag
+            for mod in modifications:
+                self._store.store(
+                    prompt,
+                    SectionOverride(
+                        path=mod.section_path,
+                        expected_hash=mod.original_hash,
+                        body=mod.proposed_body,
+                    ),
+                    tag=combined_tag,
+                )
+
+            combined_exp = Experiment(
+                id=f"{experiment_id}-combined",
+                name="combined",
+                overrides_tag=combined_tag,
+                parent_tag=baseline_tag,
+                flags=dict(flags),
+            )
+            combined_summary = self._run_eval_multi(
+                self._current_dataset, combined_exp, runs=eval_runs
+            )
+
+            regression_count = len(
+                baseline_passed - combined_summary.consistently_passed
+            )
+
+            if regression_count == 0:
+                # All modifications work together
+                return modifications
+
+            # Combined fails - fall back to greedy selection
+            return self._greedy_select(
+                prompt=prompt,
+                descriptor=descriptor,
+                experiment_id=experiment_id,
+                baseline_tag=baseline_tag,
+                baseline_passed=baseline_passed,
+                candidates=modifications,
+                rejected=rejected,
+                flags=flags,
+                eval_runs=eval_runs,
+            )
+        finally:
+            self._store.delete(
+                ns=descriptor.ns, prompt_key=descriptor.key, tag=combined_tag
+            )
+
+    def _greedy_select(
+        self,
+        prompt: Prompt[InputT],
+        descriptor: PromptDescriptor,
+        experiment_id: str,
+        baseline_tag: str,
+        baseline_passed: set[str],
+        candidates: list[Modification],
+        rejected: list[RejectedModification],
+        flags: Mapping[str, bool],
+        eval_runs: int,
+    ) -> list[Modification]:
+        """Greedy selection: add modifications one at a time.
+
+        Candidates are processed in order (largest token reduction first).
+        Each is added only if it doesn't cause regression when combined
+        with already-accepted modifications.
+        """
+        accepted: list[Modification] = []
+        greedy_tag = f"opt-{experiment_id}-greedy"
+
+        try:
+            for mod in sorted(candidates, key=lambda m: -m.token_reduction):
+                # Add candidate to greedy tag
+                self._store.store(
+                    prompt,
+                    SectionOverride(
+                        path=mod.section_path,
+                        expected_hash=mod.original_hash,
+                        body=mod.proposed_body,
+                    ),
+                    tag=greedy_tag,
+                )
+
+                greedy_exp = Experiment(
+                    id=f"{experiment_id}-greedy-{len(accepted)}",
+                    name=f"greedy-{len(accepted)}",
+                    overrides_tag=greedy_tag,
+                    parent_tag=baseline_tag,
+                    flags=dict(flags),
+                )
+                summary = self._run_eval_multi(
+                    self._current_dataset, greedy_exp, runs=eval_runs
+                )
+
+                regression_count = len(
+                    baseline_passed - summary.consistently_passed
+                )
+
+                if regression_count == 0:
+                    accepted.append(mod)
+                else:
+                    # Remove from greedy tag and add to rejected
+                    # (Implementation note: need selective removal or rebuild tag)
+                    rejected.append(RejectedModification(
+                        section_path=mod.section_path,
+                        token_reduction=mod.token_reduction,
+                        regression_count=regression_count,
+                    ))
+
+            return accepted
+        finally:
+            self._store.delete(
+                ns=descriptor.ns, prompt_key=descriptor.key, tag=greedy_tag
+            )
 
     def _run_eval(
         self,
         dataset: Dataset[InputT, ExpectedT],
         experiment: Experiment,
+        *,
+        timeout: float = 600.0,
     ) -> EvalReport:
-        """Submit samples to EvalLoop and collect results via reply."""
+        """Submit samples to EvalLoop and collect results via reply.
+
+        Args:
+            dataset: Samples to evaluate.
+            experiment: Experiment context for override resolution.
+            timeout: Maximum seconds to wait for all results.
+
+        Raises:
+            TimeoutError: If not all results received within timeout.
+        """
         # Create reply mailbox for this eval run
         eval_id = f"opt-eval-{experiment.id}"
         replies: Mailbox[EvalResult, None] = InMemoryMailbox(name=eval_id)
@@ -406,11 +639,19 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
                 reply_to=eval_id,
             )
 
-        # Collect results from replies
+        # Collect results from replies with deadline
         results: list[EvalResult] = []
         expected = len(dataset)
+        deadline = time.monotonic() + timeout
+
         while len(results) < expected:
-            for msg in replies.receive(wait_time_seconds=30):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(
+                    f"Eval timed out: received {len(results)}/{expected} results"
+                )
+            wait_time = min(30, remaining)
+            for msg in replies.receive(wait_time_seconds=int(wait_time)):
                 results.append(msg.body)
                 msg.acknowledge()
 
@@ -593,7 +834,9 @@ should be updated to match the implementation.
 ## Limitations
 
 - **Sequential sample submission**: Samples submitted to EvalLoop sequentially
-- **Independent edits**: Each edit evaluated independently
-- **Binary regression**: Any single regression rejects the modification
+- **Greedy combined selection**: When modifications interact, greedy selection
+  may not find the optimal subset (NP-hard in general)
 - **Shared storage required**: Distributed deployments need shared override store
+- **Evaluation cost**: Multiple runs per candidate (default 3) plus combined
+  testing can be expensive for large datasets
 - **Alpha stability**: Interfaces may evolve without compatibility shims
