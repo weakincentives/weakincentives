@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import threading
 import time
 from collections.abc import Sequence
@@ -65,6 +66,8 @@ from weakincentives.serde import dump, parse
 
 if TYPE_CHECKING:
     from weakincentives.runtime.mailbox import Mailbox, MailboxResolver
+
+_LOGGER = logging.getLogger(__name__)
 
 # Default TTL for Redis keys: 3 days in seconds.
 # Keys are refreshed on each operation, so active queues stay alive indefinitely.
@@ -1014,10 +1017,17 @@ class RedisMailbox[T, R]:
                 else str(reply_to_raw)
             )
             # Resolve the mailbox from the stored name
-            # If resolution fails, reply_to stays None and Message.reply() fails cleanly
+            # If resolution fails, reply_to stays None and Message.reply() will raise
+            # ReplyNotAvailableError with a clear message
             if self.reply_resolver is not None:
-                with contextlib.suppress(MailboxResolutionError):
+                try:
                     reply_to = self.reply_resolver.resolve(reply_to_name)
+                except MailboxResolutionError:
+                    _LOGGER.debug(
+                        "Failed to resolve reply_to mailbox '%s' for queue '%s'",
+                        reply_to_name,
+                        self.name,
+                    )
 
         # Compose receipt handle from msg_id and suffix
         receipt_handle = f"{msg_id}:{receipt_suffix}"

@@ -192,7 +192,8 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         thread = threading.Thread(target=lambda: loop.run(max_iterations=None))
         thread.start()
         # Send request with reply_to mailbox instance
-        requests.send(MainLoopRequest(request=...), reply_to=responses)
+        params = ReviewTurnParams(request="Review the latest changes")
+        requests.send(MainLoopRequest(request=params), reply_to=responses)
     """
 
     _persistent_session: Session
