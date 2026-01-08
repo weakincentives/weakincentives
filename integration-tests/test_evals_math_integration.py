@@ -303,7 +303,8 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
         )
         _ = requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
-        eval_loop.run(max_iterations=1)
+        # Run one turn to process the single sample
+        eval_loop.run(max_turns=1)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -348,8 +349,9 @@ def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
         for sample in dataset:
             _ = requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
-        # Run evaluations (10 samples, give some headroom for iterations)
-        eval_loop.run(max_iterations=15)
+        # Run evaluations (10 samples, with headroom for processing)
+        # Each turn processes one batch from the mailbox
+        eval_loop.run(max_turns=15)
 
         # Collect results
         report = collect_results(

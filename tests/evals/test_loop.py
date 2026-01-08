@@ -173,7 +173,7 @@ def test_eval_loop_processes_sample() -> None:
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
         # Run single iteration
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Check result
         msgs = results.receive(max_messages=1)
@@ -209,7 +209,7 @@ def test_eval_loop_handles_failure() -> None:
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -245,7 +245,7 @@ def test_eval_loop_respects_max_iterations() -> None:
             requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
         # Run only 2 iterations
-        eval_loop.run(max_iterations=2)
+        eval_loop.run(max_turns=2)
 
         # Should have processed some samples
         assert results.approximate_count() >= 1
@@ -273,7 +273,7 @@ def test_eval_loop_failing_score() -> None:
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -431,7 +431,7 @@ def test_end_to_end_evaluation() -> None:
         # Submit with reply_to and evaluate
         for sample in dataset:
             requests.send(EvalRequest(sample=sample), reply_to="eval-results")
-        eval_loop.run(max_iterations=5)
+        eval_loop.run(max_turns=5)
 
         # Collect results
         report = collect_results(results, expected_count=3, timeout_seconds=5)
@@ -524,7 +524,7 @@ def test_eval_loop_none_output() -> None:
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -603,7 +603,7 @@ def test_eval_loop_nacks_on_send_failure() -> None:
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
         # Run - evaluation succeeds, but send fails, should nack
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # The message should have been nacked (not acknowledged), so it should
         # still be in the queue after visibility timeout expires
@@ -636,7 +636,7 @@ def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
         # Run - evaluation fails, send also fails, should nack
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # The message should have been nacked (not acknowledged)
         assert requests.approximate_count() == 1
@@ -687,7 +687,7 @@ def test_eval_loop_handles_expired_receipt_on_send() -> None:
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
         # Run - should handle ReceiptHandleExpiredError gracefully (pass, not raise)
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Message was processed (expired handle means message already requeued)
         # The mailbox should be empty since we don't ack or nack on expired handle
@@ -767,7 +767,7 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
         # Run - send fails, nack raises ReceiptHandleExpiredError, should handle gracefully
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Should not raise, just pass
     finally:
@@ -802,7 +802,7 @@ def test_eval_loop_exits_when_mailbox_closed() -> None:
         loop_completed = threading.Event()
 
         def run_loop() -> None:
-            eval_loop.run(max_iterations=None)
+            eval_loop.run(max_turns=None)
             loop_completed.set()
 
         thread = threading.Thread(target=run_loop)
@@ -837,7 +837,7 @@ def test_eval_loop_handles_no_reply_to() -> None:
         requests.send(EvalRequest(sample=sample))
 
         # Run - should handle missing reply_to gracefully (log warning, ack)
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Message should have been acknowledged
         assert requests.approximate_count() == 0
@@ -878,7 +878,7 @@ def test_eval_loop_with_session_aware_evaluator() -> None:
         requests.send(EvalRequest(sample=sample), reply_to="eval-results")
 
         # Run single iteration
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Check result
         msgs = results.receive(max_messages=1)
