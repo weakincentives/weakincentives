@@ -687,7 +687,7 @@ class _NackExpiresMessage:
         return self._inner.id  # type: ignore[attr-defined, no-any-return]
 
     @property
-    def reply_to(self) -> str | None:
+    def reply_to(self) -> Mailbox[object, None] | None:
         return self._inner.reply_to  # type: ignore[attr-defined, no-any-return]
 
     @property
