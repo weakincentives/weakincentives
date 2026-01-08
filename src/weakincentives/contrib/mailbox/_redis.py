@@ -159,7 +159,7 @@ return 1
 """
 
 _LUA_NACK = """
--- KEYS: [invisible, pending, meta]
+-- KEYS: [invisible, pending, meta, data]
 -- ARGV: [msg_id, receipt_suffix, visibility_timeout_seconds, ttl]
 local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
 if expected ~= ARGV[2] then return 0 end
@@ -174,18 +174,19 @@ else
     local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
     redis.call('ZADD', KEYS[1], now + timeout, ARGV[1])
 end
--- Refresh TTL on keys
+-- Refresh TTL on all keys including data
 local ttl = tonumber(ARGV[4])
 if ttl and ttl > 0 then
     redis.call('EXPIRE', KEYS[1], ttl)
     redis.call('EXPIRE', KEYS[2], ttl)
     redis.call('EXPIRE', KEYS[3], ttl)
+    redis.call('EXPIRE', KEYS[4], ttl)
 end
 return 1
 """
 
 _LUA_EXTEND = """
--- KEYS: [invisible, meta]
+-- KEYS: [invisible, meta, data]
 -- ARGV: [msg_id, receipt_suffix, timeout_seconds, ttl]
 local expected = redis.call('HGET', KEYS[2], ARGV[1] .. ':handle')
 if expected ~= ARGV[2] then return 0 end
@@ -195,17 +196,18 @@ local expiry = now + tonumber(ARGV[3])
 redis.call('ZADD', KEYS[1], 'XX', expiry, ARGV[1])
 local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
 if not score then return 0 end
--- Refresh TTL on keys
+-- Refresh TTL on all keys including data
 local ttl = tonumber(ARGV[4])
 if ttl and ttl > 0 then
     redis.call('EXPIRE', KEYS[1], ttl)
     redis.call('EXPIRE', KEYS[2], ttl)
+    redis.call('EXPIRE', KEYS[3], ttl)
 end
 return 1
 """
 
 _LUA_REAP = """
--- KEYS: [invisible, pending, meta]
+-- KEYS: [invisible, pending, meta, data]
 -- ARGV: [ttl] (computes now from server time)
 local t = redis.call('TIME')
 local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
@@ -217,12 +219,13 @@ for i, msg_id in ipairs(expired) do
     redis.call('HDEL', KEYS[3], msg_id .. ':handle')
     count = count + 1
 end
--- Refresh TTL on keys if any work was done
+-- Refresh TTL on all keys including data if any work was done
 local ttl = tonumber(ARGV[1])
 if count > 0 and ttl and ttl > 0 then
     redis.call('EXPIRE', KEYS[1], ttl)
     redis.call('EXPIRE', KEYS[2], ttl)
     redis.call('EXPIRE', KEYS[3], ttl)
+    redis.call('EXPIRE', KEYS[4], ttl)
 end
 return count
 """
@@ -777,7 +780,12 @@ class RedisMailbox[T, R]:
         Returns:
             Number of messages requeued.
         """
-        keys = [self._keys.invisible, self._keys.pending, self._keys.meta]
+        keys = [
+            self._keys.invisible,
+            self._keys.pending,
+            self._keys.meta,
+            self._keys.data,
+        ]
         result = self._scripts["reap"](keys=keys, args=[self.default_ttl])
         return int(result) if result else 0
 
@@ -1063,7 +1071,12 @@ class RedisMailbox[T, R]:
             ReceiptHandleExpiredError: If the receipt handle doesn't match
                 the current delivery.
         """
-        keys = [self._keys.invisible, self._keys.pending, self._keys.meta]
+        keys = [
+            self._keys.invisible,
+            self._keys.pending,
+            self._keys.meta,
+            self._keys.data,
+        ]
         # Script computes expiry using Redis server TIME + visibility_timeout
         result = self._scripts["nack"](
             keys=keys,
@@ -1090,7 +1103,7 @@ class RedisMailbox[T, R]:
         """
         # Script computes expiry using Redis server TIME + timeout
         result = self._scripts["extend"](
-            keys=[self._keys.invisible, self._keys.meta],
+            keys=[self._keys.invisible, self._keys.meta, self._keys.data],
             args=[msg_id, receipt_suffix, timeout, self.default_ttl],
         )
         if result == 0:
