@@ -451,14 +451,14 @@ session[Assessment].latest()
 
 1. **Single prompt architecture**: WINK has one prompt that runs continuously.
    No outer workflow to inject context between turns.
-2. **Mirrors task completion**: Task completion checker uses `additionalContext`
+1. **Mirrors task completion**: Task completion checker uses `additionalContext`
    for immediate feedback.
-3. **No prompt rebuilding**: Assessment injects without re-rendering.
+1. **No prompt rebuilding**: Assessment injects without re-rendering.
 
 ### Why store in slice if delivered immediately?
 
 1. **Trigger state**: Need to know when last assessment occurred
-2. **Debugging**: Assessment history aids troubleshooting
+1. **Debugging**: Assessment history aids troubleshooting
 
 ### Why no escalation?
 
