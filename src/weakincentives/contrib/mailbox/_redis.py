@@ -66,6 +66,11 @@ from weakincentives.serde import dump, parse
 if TYPE_CHECKING:
     from weakincentives.runtime.mailbox import Mailbox, MailboxResolver
 
+# Default TTL for Redis keys: 3 days in seconds.
+# Keys are refreshed on each operation, so active queues stay alive indefinitely.
+# Set to 0 to disable TTL expiration.
+DEFAULT_TTL_SECONDS: int = 259200  # 3 days = 3 * 24 * 60 * 60
+
 # =============================================================================
 # Lua Scripts for Atomic Operations
 # =============================================================================
@@ -84,9 +89,10 @@ local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
 
 _LUA_SEND = """
 -- KEYS: [pending, invisible, data, meta]
--- ARGV: [msg_id, payload, enqueued_at, reply_to, max_size]
+-- ARGV: [msg_id, payload, enqueued_at, reply_to, max_size, ttl]
 -- reply_to may be empty string for no reply
 local max_size = tonumber(ARGV[5])
+local ttl = tonumber(ARGV[6])
 if max_size and max_size > 0 then
     local pending_n = redis.call('LLEN', KEYS[1])
     local invisible_n = redis.call('ZCARD', KEYS[2])
@@ -100,12 +106,19 @@ if ARGV[4] ~= '' then
     redis.call('HSET', KEYS[4], ARGV[1] .. ':reply_to', ARGV[4])
 end
 redis.call('LPUSH', KEYS[1], ARGV[1])
+-- Apply TTL to all keys
+if ttl and ttl > 0 then
+    redis.call('EXPIRE', KEYS[1], ttl)
+    redis.call('EXPIRE', KEYS[2], ttl)
+    redis.call('EXPIRE', KEYS[3], ttl)
+    redis.call('EXPIRE', KEYS[4], ttl)
+end
 return 1
 """
 
 _LUA_RECEIVE = """
 -- KEYS: [pending, invisible, data, meta]
--- ARGV: [visibility_timeout_seconds, receipt_suffix]
+-- ARGV: [visibility_timeout_seconds, receipt_suffix, ttl]
 local msg_id = redis.call('RPOP', KEYS[1])
 if not msg_id then return nil end
 local t = redis.call('TIME')
@@ -117,12 +130,20 @@ local data = redis.call('HGET', KEYS[3], msg_id)
 local count = redis.call('HINCRBY', KEYS[4], msg_id .. ':count', 1)
 local enqueued = redis.call('HGET', KEYS[4], msg_id .. ':enqueued')
 local reply_to = redis.call('HGET', KEYS[4], msg_id .. ':reply_to')
+-- Apply TTL to all keys
+local ttl = tonumber(ARGV[3])
+if ttl and ttl > 0 then
+    redis.call('EXPIRE', KEYS[1], ttl)
+    redis.call('EXPIRE', KEYS[2], ttl)
+    redis.call('EXPIRE', KEYS[3], ttl)
+    redis.call('EXPIRE', KEYS[4], ttl)
+end
 return {msg_id, data, count, enqueued, reply_to}
 """
 
 _LUA_ACKNOWLEDGE = """
 -- KEYS: [invisible, data, meta]
--- ARGV: [msg_id, receipt_suffix]
+-- ARGV: [msg_id, receipt_suffix, ttl]
 local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
 if expected ~= ARGV[2] then return 0 end
 local removed = redis.call('ZREM', KEYS[1], ARGV[1])
@@ -132,12 +153,19 @@ redis.call('HDEL', KEYS[3], ARGV[1] .. ':count')
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':enqueued')
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':handle')
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':reply_to')
+-- Refresh TTL on remaining keys
+local ttl = tonumber(ARGV[3])
+if ttl and ttl > 0 then
+    redis.call('EXPIRE', KEYS[1], ttl)
+    redis.call('EXPIRE', KEYS[2], ttl)
+    redis.call('EXPIRE', KEYS[3], ttl)
+end
 return 1
 """
 
 _LUA_NACK = """
--- KEYS: [invisible, pending, meta]
--- ARGV: [msg_id, receipt_suffix, visibility_timeout_seconds]
+-- KEYS: [invisible, pending, meta, data]
+-- ARGV: [msg_id, receipt_suffix, visibility_timeout_seconds, ttl]
 local expected = redis.call('HGET', KEYS[3], ARGV[1] .. ':handle')
 if expected ~= ARGV[2] then return 0 end
 local removed = redis.call('ZREM', KEYS[1], ARGV[1])
@@ -151,12 +179,20 @@ else
     local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
     redis.call('ZADD', KEYS[1], now + timeout, ARGV[1])
 end
+-- Refresh TTL on all keys including data
+local ttl = tonumber(ARGV[4])
+if ttl and ttl > 0 then
+    redis.call('EXPIRE', KEYS[1], ttl)
+    redis.call('EXPIRE', KEYS[2], ttl)
+    redis.call('EXPIRE', KEYS[3], ttl)
+    redis.call('EXPIRE', KEYS[4], ttl)
+end
 return 1
 """
 
 _LUA_EXTEND = """
--- KEYS: [invisible, meta]
--- ARGV: [msg_id, receipt_suffix, timeout_seconds]
+-- KEYS: [invisible, meta, data]
+-- ARGV: [msg_id, receipt_suffix, timeout_seconds, ttl]
 local expected = redis.call('HGET', KEYS[2], ARGV[1] .. ':handle')
 if expected ~= ARGV[2] then return 0 end
 local t = redis.call('TIME')
@@ -164,12 +200,20 @@ local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
 local expiry = now + tonumber(ARGV[3])
 redis.call('ZADD', KEYS[1], 'XX', expiry, ARGV[1])
 local score = redis.call('ZSCORE', KEYS[1], ARGV[1])
-return score and 1 or 0
+if not score then return 0 end
+-- Refresh TTL on all keys including data
+local ttl = tonumber(ARGV[4])
+if ttl and ttl > 0 then
+    redis.call('EXPIRE', KEYS[1], ttl)
+    redis.call('EXPIRE', KEYS[2], ttl)
+    redis.call('EXPIRE', KEYS[3], ttl)
+end
+return 1
 """
 
 _LUA_REAP = """
--- KEYS: [invisible, pending, meta]
--- ARGV: [] (computes now from server time)
+-- KEYS: [invisible, pending, meta, data]
+-- ARGV: [ttl] (computes now from server time)
 local t = redis.call('TIME')
 local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
 local expired = redis.call('ZRANGEBYSCORE', KEYS[1], '-inf', now, 'LIMIT', 0, 100)
@@ -179,6 +223,15 @@ for i, msg_id in ipairs(expired) do
     redis.call('LPUSH', KEYS[2], msg_id)
     redis.call('HDEL', KEYS[3], msg_id .. ':handle')
     count = count + 1
+end
+-- Always refresh TTL to keep active queues alive even when no messages expire.
+-- This prevents data loss for queues with long visibility timeouts.
+local ttl = tonumber(ARGV[1])
+if ttl and ttl > 0 then
+    redis.call('EXPIRE', KEYS[1], ttl)
+    redis.call('EXPIRE', KEYS[2], ttl)
+    redis.call('EXPIRE', KEYS[3], ttl)
+    redis.call('EXPIRE', KEYS[4], ttl)
 end
 return count
 """
@@ -235,7 +288,7 @@ class RedisMailboxFactory[R]:
             msg.acknowledge()
     """
 
-    __slots__ = ("body_type", "client")
+    __slots__ = ("body_type", "client", "default_ttl")
 
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client to use for all created mailboxes."""
@@ -243,21 +296,27 @@ class RedisMailboxFactory[R]:
     body_type: type[R] | None
     """Optional type hint for message body deserialization."""
 
+    default_ttl: int
+    """Default TTL in seconds for all Redis keys."""
+
     def __init__(
         self,
         client: Redis[bytes] | RedisCluster[bytes],
         *,
         body_type: type[R] | None = None,
+        default_ttl: int = DEFAULT_TTL_SECONDS,
     ) -> None:
         """Initialize factory with shared Redis client.
 
         Args:
             client: Redis client to use for all created mailboxes.
             body_type: Optional type hint for message body deserialization.
+            default_ttl: Default TTL in seconds for Redis keys (default: 3 days).
         """
         super().__init__()
         self.client = client
         self.body_type = body_type
+        self.default_ttl = default_ttl
 
     def create(self, identifier: str) -> Mailbox[R, None]:
         """Create a RedisMailbox for the given identifier.
@@ -277,6 +336,7 @@ class RedisMailboxFactory[R]:
             name=identifier,
             client=self.client,
             body_type=self.body_type,
+            default_ttl=self.default_ttl,
             _send_only=True,  # Send-only: no reaper thread, no nested resolution
         )
 
@@ -649,6 +709,11 @@ class RedisMailbox[T, R]:
     reaper_interval: float = 1.0
     """Interval in seconds between visibility reaper runs."""
 
+    default_ttl: int = DEFAULT_TTL_SECONDS
+    """Default TTL in seconds for all Redis keys (default: 3 days).
+    Set to 0 to disable TTL. Keys are refreshed on each operation including
+    the background reaper, so active queues stay alive indefinitely."""
+
     _keys: _QueueKeys = field(init=False, repr=False)
     _scripts: dict[str, Any] = field(init=False, default_factory=dict, repr=False)
     _reaper_thread: threading.Thread | None = field(
@@ -680,7 +745,9 @@ class RedisMailbox[T, R]:
         self._start_reaper()
         # Set up default resolver if none provided
         if self.reply_resolver is None:
-            factory: RedisMailboxFactory[R] = RedisMailboxFactory(client=self.client)
+            factory: RedisMailboxFactory[R] = RedisMailboxFactory(
+                client=self.client, default_ttl=self.default_ttl
+            )
             object.__setattr__(
                 self, "reply_resolver", CompositeResolver(registry={}, factory=factory)
             )
@@ -720,8 +787,13 @@ class RedisMailbox[T, R]:
         Returns:
             Number of messages requeued.
         """
-        keys = [self._keys.invisible, self._keys.pending, self._keys.meta]
-        result = self._scripts["reap"](keys=keys, args=[])
+        keys = [
+            self._keys.invisible,
+            self._keys.pending,
+            self._keys.meta,
+            self._keys.data,
+        ]
+        result = self._scripts["reap"](keys=keys, args=[self.default_ttl])
         return int(result) if result else 0
 
     def _serialize(self, body: T) -> str:
@@ -790,6 +862,7 @@ class RedisMailbox[T, R]:
                 enqueued_at,
                 reply_to or "",  # Empty string for no reply_to
                 self.max_size or 0,
+                self.default_ttl,
             ]
             result = self._scripts["send"](keys=keys, args=args)
 
@@ -886,7 +959,8 @@ class RedisMailbox[T, R]:
             # Atomic Lua script: RPOP + ZADD + metadata in one operation
             # Script computes expiry using Redis server TIME + visibility_timeout
             result = self._scripts["receive"](
-                keys=lua_keys, args=[visibility_timeout, receipt_suffix]
+                keys=lua_keys,
+                args=[visibility_timeout, receipt_suffix, self.default_ttl],
             )
 
             if result is not None:
@@ -982,7 +1056,9 @@ class RedisMailbox[T, R]:
                 the current delivery (message was redelivered or already acked).
         """
         keys = [self._keys.invisible, self._keys.data, self._keys.meta]
-        result = self._scripts["acknowledge"](keys=keys, args=[msg_id, receipt_suffix])
+        result = self._scripts["acknowledge"](
+            keys=keys, args=[msg_id, receipt_suffix, self.default_ttl]
+        )
         if result == 0:
             raise ReceiptHandleExpiredError(
                 f"Message '{msg_id}' not found or receipt handle expired"
@@ -1002,10 +1078,16 @@ class RedisMailbox[T, R]:
             ReceiptHandleExpiredError: If the receipt handle doesn't match
                 the current delivery.
         """
-        keys = [self._keys.invisible, self._keys.pending, self._keys.meta]
+        keys = [
+            self._keys.invisible,
+            self._keys.pending,
+            self._keys.meta,
+            self._keys.data,
+        ]
         # Script computes expiry using Redis server TIME + visibility_timeout
         result = self._scripts["nack"](
-            keys=keys, args=[msg_id, receipt_suffix, visibility_timeout]
+            keys=keys,
+            args=[msg_id, receipt_suffix, visibility_timeout, self.default_ttl],
         )
         if result == 0:
             raise ReceiptHandleExpiredError(
@@ -1028,8 +1110,8 @@ class RedisMailbox[T, R]:
         """
         # Script computes expiry using Redis server TIME + timeout
         result = self._scripts["extend"](
-            keys=[self._keys.invisible, self._keys.meta],
-            args=[msg_id, receipt_suffix, timeout],
+            keys=[self._keys.invisible, self._keys.meta, self._keys.data],
+            args=[msg_id, receipt_suffix, timeout, self.default_ttl],
         )
         if result == 0:
             raise ReceiptHandleExpiredError(
@@ -1089,4 +1171,4 @@ class RedisMailbox[T, R]:
         return self._closed
 
 
-__all__ = ["RedisMailbox", "RedisMailboxFactory"]
+__all__ = ["DEFAULT_TTL_SECONDS", "RedisMailbox", "RedisMailboxFactory"]

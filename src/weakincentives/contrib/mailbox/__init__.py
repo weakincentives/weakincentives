@@ -34,6 +34,6 @@ Example::
 
 from __future__ import annotations
 
-from ._redis import RedisMailbox, RedisMailboxFactory
+from ._redis import DEFAULT_TTL_SECONDS, RedisMailbox, RedisMailboxFactory
 
-__all__ = ["RedisMailbox", "RedisMailboxFactory"]
+__all__ = ["DEFAULT_TTL_SECONDS", "RedisMailbox", "RedisMailboxFactory"]
