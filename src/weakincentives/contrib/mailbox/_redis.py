@@ -31,6 +31,7 @@ See ``specs/MAILBOX.md`` for the complete specification.
 from __future__ import annotations
 
 import contextlib
+import importlib
 import json
 import threading
 import time
@@ -55,6 +56,7 @@ from weakincentives.runtime.mailbox import (
     Message,
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
+    ReplyRoutes,
     SerializationError,
 )
 from weakincentives.runtime.mailbox._types import (
@@ -89,8 +91,8 @@ local now = tonumber(t[1]) + tonumber(t[2]) / 1000000
 
 _LUA_SEND = """
 -- KEYS: [pending, invisible, data, meta]
--- ARGV: [msg_id, payload, enqueued_at, reply_to, max_size, ttl]
--- reply_to may be empty string for no reply
+-- ARGV: [msg_id, payload, enqueued_at, reply_routes_json, max_size, ttl]
+-- reply_routes_json may be empty string for no routes
 local max_size = tonumber(ARGV[5])
 local ttl = tonumber(ARGV[6])
 if max_size and max_size > 0 then
@@ -103,7 +105,7 @@ end
 redis.call('HSET', KEYS[3], ARGV[1], ARGV[2])
 redis.call('HSET', KEYS[4], ARGV[1] .. ':enqueued', ARGV[3])
 if ARGV[4] ~= '' then
-    redis.call('HSET', KEYS[4], ARGV[1] .. ':reply_to', ARGV[4])
+    redis.call('HSET', KEYS[4], ARGV[1] .. ':routes', ARGV[4])
 end
 redis.call('LPUSH', KEYS[1], ARGV[1])
 -- Apply TTL to all keys
@@ -129,7 +131,7 @@ redis.call('HSET', KEYS[4], msg_id .. ':handle', ARGV[2])
 local data = redis.call('HGET', KEYS[3], msg_id)
 local count = redis.call('HINCRBY', KEYS[4], msg_id .. ':count', 1)
 local enqueued = redis.call('HGET', KEYS[4], msg_id .. ':enqueued')
-local reply_to = redis.call('HGET', KEYS[4], msg_id .. ':reply_to')
+local routes = redis.call('HGET', KEYS[4], msg_id .. ':routes')
 -- Apply TTL to all keys
 local ttl = tonumber(ARGV[3])
 if ttl and ttl > 0 then
@@ -138,7 +140,7 @@ if ttl and ttl > 0 then
     redis.call('EXPIRE', KEYS[3], ttl)
     redis.call('EXPIRE', KEYS[4], ttl)
 end
-return {msg_id, data, count, enqueued, reply_to}
+return {msg_id, data, count, enqueued, routes}
 """
 
 _LUA_ACKNOWLEDGE = """
@@ -152,7 +154,7 @@ redis.call('HDEL', KEYS[2], ARGV[1])
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':count')
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':enqueued')
 redis.call('HDEL', KEYS[3], ARGV[1] .. ':handle')
-redis.call('HDEL', KEYS[3], ARGV[1] .. ':reply_to')
+redis.call('HDEL', KEYS[3], ARGV[1] .. ':routes')
 -- Refresh TTL on remaining keys
 local ttl = tonumber(ARGV[3])
 if ttl and ttl > 0 then
@@ -248,6 +250,43 @@ if TYPE_CHECKING:
     from redis.cluster import RedisCluster
 
 
+def _serialize_reply_routes(routes: ReplyRoutes) -> str:
+    """Serialize ReplyRoutes to JSON string.
+
+    Type keys are stored as fully-qualified names (module.ClassName)
+    for unambiguous deserialization across processes.
+    """
+    routes_dict: dict[str, str] = {}
+    for typ, identifier in routes.routes.items():
+        # Use fully-qualified name: module.ClassName
+        type_name = f"{typ.__module__}.{typ.__qualname__}"
+        routes_dict[type_name] = identifier
+
+    return json.dumps({"default": routes.default, "routes": routes_dict})
+
+
+def _deserialize_reply_routes(data: str) -> ReplyRoutes:
+    """Deserialize ReplyRoutes from JSON string.
+
+    Types are imported from their fully-qualified names.
+    """
+    parsed = json.loads(data)
+    routes: dict[type, str] = {}
+
+    for type_name, identifier in parsed.get("routes", {}).items():
+        # Import type from fully-qualified name
+        try:
+            module_name, class_name = type_name.rsplit(".", 1)
+            module = importlib.import_module(module_name)
+            typ = getattr(module, class_name)
+            routes[typ] = identifier
+        except (ValueError, ImportError, AttributeError):
+            # Skip types that can't be imported (may be from different process)
+            continue
+
+    return ReplyRoutes(default=parsed.get("default"), routes=routes)
+
+
 @dataclass(frozen=True, slots=True)
 class _QueueKeys:
     """Redis keys for a named queue with hash tags for cluster compatibility."""
@@ -273,7 +312,7 @@ class RedisMailboxFactory[R]:
     """Factory that creates RedisMailbox instances using a shared Redis client.
 
     Use with CompositeResolver for automatic reply routing. When a message's
-    reply_to identifier is resolved, this factory creates a new RedisMailbox
+    reply_routes identifier is resolved, this factory creates a new RedisMailbox
     connected to the same Redis server.
 
     Example::
@@ -284,7 +323,7 @@ class RedisMailboxFactory[R]:
 
         # Worker can now reply to any queue name
         for msg in requests.receive():
-            msg.reply(result)  # Resolves reply_to → new RedisMailbox with same client
+            msg.reply(result)  # Resolves identifier → new RedisMailbox with same client
             msg.acknowledge()
     """
 
@@ -652,7 +691,7 @@ class RedisMailbox[T, R]:
         {queue:name}:meta       # HASH - message ID:count → delivery count,
                                 #        message ID:enqueued → enqueued timestamp,
                                 #        message ID:handle → current receipt handle suffix
-                                #        message ID:reply_to → reply destination
+                                #        message ID:routes → serialized ReplyRoutes
 
     Formal Specification:
         The @formal_spec decorator above defines the complete TLA+ state machine
@@ -680,7 +719,7 @@ class RedisMailbox[T, R]:
         )
 
         try:
-            mailbox.send(MyEvent(data="hello"), reply_to="responses")
+            mailbox.send(MyEvent(data="hello"), reply_routes=ReplyRoutes.single("responses"))
             for msg in mailbox.receive(visibility_timeout=60):
                 result = process(msg.body)
                 msg.reply(result)
@@ -702,8 +741,8 @@ class RedisMailbox[T, R]:
     """Maximum queue capacity. None for unlimited (subject to Redis maxmemory)."""
 
     reply_resolver: MailboxResolver[R] | None = None
-    """Resolver for reply_to identifiers. If None, a default resolver using
-    RedisMailboxFactory is created automatically, enabling reply_to to resolve
+    """Resolver for reply_routes identifiers. If None, a default resolver using
+    RedisMailboxFactory is created automatically, enabling reply_routes to resolve
     to any queue name on the same Redis server."""
 
     reaper_interval: float = 1.0
@@ -826,7 +865,7 @@ class RedisMailbox[T, R]:
         except Exception as e:
             raise SerializationError(f"Failed to deserialize message body: {e}") from e
 
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    def send(self, body: T, *, reply_routes: ReplyRoutes | None = None) -> str:
         """Enqueue a message.
 
         This operation is atomic via Lua script, ensuring no partial state
@@ -834,8 +873,8 @@ class RedisMailbox[T, R]:
 
         Args:
             body: Message payload (must be serializable via serde).
-            reply_to: Identifier for response mailbox. Workers resolve this
-                via Message.reply().
+            reply_routes: Routing table for responses. Workers use this to
+                determine where to send replies based on response type.
 
         Returns:
             Message ID (unique within this queue).
@@ -849,6 +888,11 @@ class RedisMailbox[T, R]:
         serialized = self._serialize(body)
         enqueued_at = datetime.now(UTC).isoformat()
 
+        # Serialize reply_routes if provided
+        routes_json = ""
+        if reply_routes is not None:
+            routes_json = _serialize_reply_routes(reply_routes)
+
         try:
             keys = [
                 self._keys.pending,
@@ -860,7 +904,7 @@ class RedisMailbox[T, R]:
                 msg_id,
                 serialized,
                 enqueued_at,
-                reply_to or "",  # Empty string for no reply_to
+                routes_json,
                 self.max_size or 0,
                 self.default_ttl,
             ]
@@ -972,8 +1016,8 @@ class RedisMailbox[T, R]:
                 data = result[1]
                 delivery_count = int(result[2])
                 enqueued_raw = result[3]
-                # Result tuple: [msg_id, data, count, enqueued, reply_to?]
-                reply_to_raw = result[4] if len(result) > 4 else None  # noqa: PLR2004
+                # Result tuple: [msg_id, data, count, enqueued, routes?]
+                routes_raw = result[4] if len(result) > 4 else None  # noqa: PLR2004
                 break
 
             # No message available
@@ -999,14 +1043,15 @@ class RedisMailbox[T, R]:
         else:
             enqueued_at = datetime.now(UTC)
 
-        # Parse reply_to
-        reply_to: str | None = None
-        if reply_to_raw:
-            reply_to = (
-                reply_to_raw.decode("utf-8")
-                if isinstance(reply_to_raw, bytes)
-                else str(reply_to_raw)
+        # Parse reply_routes
+        reply_routes: ReplyRoutes | None = None
+        if routes_raw:
+            routes_str = (
+                routes_raw.decode("utf-8")
+                if isinstance(routes_raw, bytes)
+                else str(routes_raw)
             )
+            reply_routes = _deserialize_reply_routes(routes_str)
 
         # Compose receipt handle from msg_id and suffix
         receipt_handle = f"{msg_id}:{receipt_suffix}"
@@ -1021,7 +1066,7 @@ class RedisMailbox[T, R]:
             receipt_handle=receipt_handle,
             delivery_count=delivery_count,
             enqueued_at=enqueued_at,
-            reply_to=reply_to,
+            reply_routes=reply_routes,
             _acknowledge_fn=lambda mid=msg_id, suf=receipt_suffix: self._acknowledge(
                 mid, suf
             ),
@@ -1029,19 +1074,19 @@ class RedisMailbox[T, R]:
             _extend_fn=lambda t, mid=msg_id, suf=receipt_suffix: self._extend(
                 mid, suf, t
             ),
-            _reply_fn=lambda b, rt=reply_to: self._reply(rt, b),
+            _reply_fn=self._reply,
         )
 
-    def _reply(self, reply_to: str | None, body: R) -> str:
-        """Send a reply to the reply_to mailbox."""
-        if reply_to is None:
-            raise ReplyNotAvailableError("No reply_to specified")
+    def _reply(self, identifier: str, body: R) -> str:
+        """Send a reply to the resolved mailbox."""
         if self.reply_resolver is None:
             raise ReplyNotAvailableError("No reply_resolver configured")
         try:
-            mailbox = self.reply_resolver.resolve(reply_to)
+            mailbox = self.reply_resolver.resolve(identifier)
         except MailboxResolutionError as e:
-            raise ReplyNotAvailableError(f"Cannot resolve reply_to '{reply_to}'") from e
+            raise ReplyNotAvailableError(
+                f"Cannot resolve identifier '{identifier}'"
+            ) from e
         return mailbox.send(body)
 
     def _acknowledge(self, msg_id: str, receipt_suffix: str) -> None:

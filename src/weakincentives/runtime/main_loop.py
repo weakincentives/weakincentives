@@ -134,7 +134,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
     Features:
         - Polls requests mailbox for incoming work
-        - Uses Message.reply() for response routing (derives from reply_to)
+        - Uses Message.reply() for response routing (derives from reply_routes)
         - Acknowledges messages after successful processing
         - Visibility timeout prevents duplicate processing
         - Automatic retry with backoff on response send failure
@@ -181,7 +181,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         Args:
             adapter: Provider adapter for prompt evaluation.
             requests: Mailbox to receive MainLoopRequest messages from.
-                Response routing derives from each message's reply_to field.
+                Response routing derives from each message's reply_routes.
             config: Optional configuration for default deadline/budget.
         """
         super().__init__()
@@ -348,9 +348,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
             _ = msg.reply(result)
             msg.acknowledge()
         except ReplyNotAvailableError:
-            # No reply_to specified - log and acknowledge without reply
+            # No reply_routes specified - log and acknowledge without reply
             _logger.warning(
-                "No reply_to for message %s, acknowledging without reply", msg.id
+                "No reply_routes for message %s, acknowledging without reply", msg.id
             )
             with contextlib.suppress(ReceiptHandleExpiredError):
                 msg.acknowledge()

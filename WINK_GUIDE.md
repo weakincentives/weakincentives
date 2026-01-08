@@ -2530,7 +2530,7 @@ from weakincentives.runtime import InMemoryMailbox, MainLoop
 # Your existing MainLoop (defined elsewhere in your application)
 main_loop: MainLoop[Any, str] = ...  # type: ignore[assignment]
 
-# Create mailbox for evaluation requests (uses reply_to for result routing)
+# Create mailbox for evaluation requests (uses reply_routes for result routing)
 eval_requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
     name="eval-requests"
 )
@@ -2553,7 +2553,7 @@ from weakincentives.runtime.mailbox import InMemoryMailbox, RegistryResolver
 # Dataset defined in your application
 eval_dataset: Dataset[str, str] = ...  # type: ignore[assignment]
 
-# Results mailbox with resolver for reply_to routing
+# Results mailbox with resolver for reply_routes routing
 eval_results_mailbox: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
     name="eval-results"
 )
@@ -2564,7 +2564,7 @@ eval_requests_with_reply: InMemoryMailbox[Any, Any] = InMemoryMailbox(
     name="eval-requests", reply_resolver=results_resolver
 )
 
-# Submit all samples to the requests mailbox (sets reply_to="eval-results")
+# Submit all samples to the requests mailbox (sets reply_routes to "eval-results")
 submit_dataset(eval_dataset, eval_requests_with_reply)  # type: ignore[arg-type]
 
 # Run the evaluation worker
@@ -2622,7 +2622,7 @@ def run_production() -> None:
             msg.acknowledge()
 
 
-# Eval worker (wraps the same MainLoop, uses reply_to for result routing)
+# Eval worker (wraps the same MainLoop, uses reply_routes for result routing)
 prod_eval_loop = EvalLoop(
     loop=prod_main_loop,
     evaluator=cast(Evaluator, exact_match),  # Cast for strict type compatibility
@@ -2656,7 +2656,7 @@ programmatically before promoting changes.
 ### 8.7 Reply-to routing
 
 When workers need to send results to dynamic destinations (not a fixed result
-mailbox), use the `reply_to` pattern. The worker derives the response
+mailbox), use the `reply_routes` pattern. The worker derives the response
 destination from the incoming message:
 
 ```python
@@ -2681,9 +2681,11 @@ requests: InMemoryMailbox[Any, Any] = InMemoryMailbox(
 )
 
 # Client sends request with reply destination
+from weakincentives.runtime.mailbox import ReplyRoutes
+
 requests.send(
     body=AnalysisRequest(query="Find all bugs"),  # type: ignore[arg-type]
-    reply_to="client-123",  # Where to send the result
+    reply_routes=ReplyRoutes.single("client-123"),  # Where to send the result
 )
 
 # Worker processes and replies
@@ -2694,7 +2696,7 @@ for msg in requests.receive():
 ```
 
 **Eval run collection** is a natural fit for this pattern. All samples specify
-the same `reply_to`, and results collect into one mailbox regardless of which
+the same `reply_routes`, and results collect into one mailbox regardless of which
 worker processes each sample:
 
 ```python
@@ -2702,7 +2704,7 @@ from typing import Any
 from uuid import uuid4
 from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory
 from weakincentives.evals import EvalRequest, Sample
-from weakincentives.runtime.mailbox import CompositeResolver
+from weakincentives.runtime.mailbox import CompositeResolver, ReplyRoutes
 
 # External dependencies (defined in your application)
 redis_client: Any = ...  # type: ignore[assignment]
@@ -2721,7 +2723,7 @@ run_id = f"eval-run-{uuid4()}"
 for sample in eval_samples:
     redis_requests.send(
         body=EvalRequest(sample=sample),  # type: ignore[arg-type]
-        reply_to=run_id,  # All results go to same mailbox
+        reply_routes=ReplyRoutes.single(run_id),  # All results go to same mailbox
     )
 
 # Collect results from the run-specific mailbox

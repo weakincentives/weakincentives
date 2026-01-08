@@ -38,6 +38,7 @@ from weakincentives.runtime.mailbox import (
     Mailbox,
     MailboxFullError,
     ReceiptHandleExpiredError,
+    ReplyRoutes,
 )
 
 if TYPE_CHECKING:
@@ -414,10 +415,11 @@ class TestRedisMailboxStandalone:
                 name="test-reply-to", client=client, body_type=str
             )
             try:
-                mailbox.send("hello", reply_to="responses")
+                mailbox.send("hello", reply_routes=ReplyRoutes.single("responses"))
                 messages = mailbox.receive(max_messages=1)
                 assert len(messages) == 1
-                assert messages[0].reply_to == "responses"
+                assert messages[0].reply_routes is not None
+                assert messages[0].reply_routes.default == "responses"
             finally:
                 mailbox.close()
 

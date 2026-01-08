@@ -37,6 +37,7 @@ from weakincentives.runtime.mailbox import (
     InMemoryMailbox,
     MailboxResolver,
     RegistryResolver,
+    ReplyRoutes,
 )
 from weakincentives.runtime.main_loop import (
     MainLoop,
@@ -304,7 +305,7 @@ def test_loop_processes_request() -> None:
 
         # Send request with reply_to
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         # Run single iteration
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -338,7 +339,7 @@ def test_loop_sends_error_on_failure() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -370,7 +371,7 @@ def test_loop_acknowledges_request() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -397,7 +398,7 @@ def test_loop_calls_finalize() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -425,7 +426,7 @@ def test_loop_respects_max_iterations() -> None:
         for i in range(5):
             requests.send(
                 MainLoopRequest(request=_Request(message=f"msg-{i}")),
-                reply_to="results",
+                reply_routes=ReplyRoutes.single("results"),
             )
 
         # Only run 2 iterations
@@ -458,7 +459,7 @@ def test_loop_handles_visibility_expansion() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -491,7 +492,7 @@ def test_loop_uses_config_budget() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -524,7 +525,7 @@ def test_loop_request_overrides_config() -> None:
             request=_Request(message="hello"),
             budget=override_budget,
         )
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -549,7 +550,7 @@ def test_loop_nacks_on_response_send_failure() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         # Make response send fail
         from weakincentives.runtime.mailbox import MailboxConnectionError
@@ -581,7 +582,7 @@ def test_loop_nacks_on_error_response_send_failure() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         # Make error response send fail too
         from weakincentives.runtime.mailbox import MailboxConnectionError
@@ -642,7 +643,7 @@ def test_loop_default_finalize() -> None:
         loop = _TestLoopNoFinalizeOverride(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         # Run should succeed even without finalize override
         loop.run(max_iterations=1, wait_time_seconds=0)
@@ -705,7 +706,7 @@ def test_loop_passes_resources_from_config() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -739,7 +740,7 @@ def test_loop_request_resources_overrides_config() -> None:
             request=_Request(message="hello"),
             resources={_CustomResource: override_resource},
         )
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -775,7 +776,7 @@ def test_same_resources_used_across_visibility_retries() -> None:
             request=_Request(message="hello"),
             resources={_CustomResource: resource},
         )
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -806,7 +807,7 @@ def test_no_resources_when_not_set() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -843,7 +844,7 @@ def test_visibility_overrides_accumulate_in_session() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -880,7 +881,7 @@ def test_same_budget_tracker_used_across_visibility_retries() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests, config=config)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -913,7 +914,7 @@ def test_no_budget_tracker_when_no_budget() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         request = MainLoopRequest(request=_Request(message="hello"))
-        requests.send(request, reply_to="results")
+        requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
         loop.run(max_iterations=1, wait_time_seconds=0)
 
@@ -942,7 +943,7 @@ def test_loop_handles_expired_receipt_handle_on_ack() -> None:
     loop = _TestLoop(adapter=adapter, requests=requests)
 
     request = MainLoopRequest(request=_Request(message="hello"))
-    requests.send(request, reply_to="results")
+    requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
     # Receive the message to get the handle, then expire it
     msgs = requests.receive(max_messages=1)
@@ -982,7 +983,7 @@ def test_loop_handles_expired_receipt_handle_on_nack() -> None:
     loop = _TestLoop(adapter=adapter, requests=requests)
 
     request = MainLoopRequest(request=_Request(message="hello"))
-    requests.send(request, reply_to="results")
+    requests.send(request, reply_routes=ReplyRoutes.single("results"))
 
     # Receive the message to get the handle
     msgs = requests.receive(max_messages=1)

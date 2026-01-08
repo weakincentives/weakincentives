@@ -33,10 +33,12 @@ from weakincentives.runtime.mailbox import (
     MailboxResolutionError,
     Message,
     MessageFinalizedError,
+    NoRouteError,
     NullMailbox,
     ReceiptHandleExpiredError,
     RegistryResolver,
     ReplyNotAvailableError,
+    ReplyRoutes,
 )
 
 
@@ -104,15 +106,15 @@ def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
     assert extend_called == [60]
 
 
-def test_message_reply_without_reply_to_raises() -> None:
-    """Message.reply() raises ReplyNotAvailableError when no reply_to."""
+def test_message_reply_without_reply_routes_raises() -> None:
+    """Message.reply() raises ReplyNotAvailableError when no reply_routes."""
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
         enqueued_at=time.time(),  # type: ignore[arg-type]
-        reply_to=None,
+        reply_routes=None,
     )
 
     with pytest.raises(ReplyNotAvailableError):
@@ -121,15 +123,15 @@ def test_message_reply_without_reply_to_raises() -> None:
 
 def test_message_reply_after_acknowledge_raises() -> None:
     """Message.reply() raises MessageFinalizedError after acknowledge."""
-    replies = []
+    replies: list[tuple[str, str]] = []
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
         enqueued_at=time.time(),  # type: ignore[arg-type]
-        reply_to="responses",
-        _reply_fn=lambda body: (replies.append(body), "reply-id")[1],
+        reply_routes=ReplyRoutes.single("responses"),
+        _reply_fn=lambda ident, body: (replies.append((ident, body)), "reply-id")[1],
     )
 
     msg.acknowledge()
@@ -140,15 +142,15 @@ def test_message_reply_after_acknowledge_raises() -> None:
 
 def test_message_reply_after_nack_raises() -> None:
     """Message.reply() raises MessageFinalizedError after nack."""
-    replies = []
+    replies: list[tuple[str, str]] = []
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
         enqueued_at=time.time(),  # type: ignore[arg-type]
-        reply_to="responses",
-        _reply_fn=lambda body: (replies.append(body), "reply-id")[1],
+        reply_routes=ReplyRoutes.single("responses"),
+        _reply_fn=lambda ident, body: (replies.append((ident, body)), "reply-id")[1],
     )
 
     msg.nack(visibility_timeout=0)
@@ -158,8 +160,8 @@ def test_message_reply_after_nack_raises() -> None:
 
 
 def test_message_reply_success() -> None:
-    """Message.reply() sends to reply_to destination."""
-    replies: list[str] = []
+    """Message.reply() routes to reply_routes destination."""
+    replies: list[tuple[str, str]] = []
 
     msg: Message[str, str] = Message(
         id="msg-1",
@@ -167,13 +169,13 @@ def test_message_reply_success() -> None:
         receipt_handle="handle-1",
         delivery_count=1,
         enqueued_at=time.time(),  # type: ignore[arg-type]
-        reply_to="responses",
-        _reply_fn=lambda body: (replies.append(body), "reply-id")[1],
+        reply_routes=ReplyRoutes.single("responses"),
+        _reply_fn=lambda ident, body: (replies.append((ident, body)), "reply-id")[1],
     )
 
     result_id = msg.reply("response-body")
     assert result_id == "reply-id"
-    assert replies == ["response-body"]
+    assert replies == [("responses", "response-body")]
 
 
 # =============================================================================
@@ -208,14 +210,15 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_send_with_reply_to(self) -> None:
-        """send() accepts reply_to parameter."""
+    def test_send_with_reply_routes(self) -> None:
+        """send() accepts reply_routes parameter."""
         mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
         try:
-            mailbox.send("hello", reply_to="responses")
+            mailbox.send("hello", reply_routes=ReplyRoutes.single("responses"))
             messages = mailbox.receive(max_messages=1)
             assert len(messages) == 1
-            assert messages[0].reply_to == "responses"
+            assert messages[0].reply_routes is not None
+            assert messages[0].reply_routes.default == "responses"
         finally:
             mailbox.close()
 
@@ -484,7 +487,7 @@ class TestInMemoryMailbox:  # noqa: PLR0904
             name="requests", reply_resolver=resolver
         )
         try:
-            requests.send("hello", reply_to="responses")
+            requests.send("hello", reply_routes=ReplyRoutes.single("responses"))
             messages = requests.receive(max_messages=1)
             assert len(messages) == 1
 
@@ -505,8 +508,8 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         """Reply auto-creates response mailbox via default resolver."""
         mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
         try:
-            # Send with reply_to - auto-creates response mailbox
-            mailbox.send("hello", reply_to="responses")
+            # Send with reply_routes - auto-creates response mailbox
+            mailbox.send("hello", reply_routes=ReplyRoutes.single("responses"))
             messages = mailbox.receive(max_messages=1)
 
             # Reply should work - resolver auto-created
@@ -522,34 +525,34 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_reply_without_reply_to_raises(self) -> None:
-        """Message.reply() raises when no reply_to specified."""
+    def test_reply_without_reply_routes_raises(self) -> None:
+        """Message.reply() raises when no reply_routes specified."""
         responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
         resolver = RegistryResolver[str]({"responses": responses})
         mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(
             name="test", reply_resolver=resolver
         )
         try:
-            # Send without reply_to
+            # Send without reply_routes
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
 
-            with pytest.raises(ReplyNotAvailableError, match="no reply_to"):
+            with pytest.raises(ReplyNotAvailableError, match="no reply_routes"):
                 messages[0].reply("response")
         finally:
             mailbox.close()
             responses.close()
 
-    def test_reply_with_unknown_reply_to_raises(self) -> None:
-        """Message.reply() raises when reply_to cannot be resolved."""
+    def test_reply_with_unknown_reply_routes_raises(self) -> None:
+        """Message.reply() raises when reply_routes cannot be resolved."""
         responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
         resolver = RegistryResolver[str]({"responses": responses})
         mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(
             name="test", reply_resolver=resolver
         )
         try:
-            # Send with unknown reply_to
-            mailbox.send("hello", reply_to="unknown-mailbox")
+            # Send with unknown reply_routes
+            mailbox.send("hello", reply_routes=ReplyRoutes.single("unknown-mailbox"))
             messages = mailbox.receive(max_messages=1)
 
             with pytest.raises(ReplyNotAvailableError, match="Cannot resolve"):
@@ -643,7 +646,7 @@ class TestCollectingMailbox:
 # =============================================================================
 
 
-class TestFakeMailbox:
+class TestFakeMailbox:  # noqa: PLR0904
     """Tests for FakeMailbox implementation."""
 
     def test_basic_send_receive(self) -> None:
@@ -828,19 +831,57 @@ class TestFakeMailbox:
         assert count == 2
         assert mailbox.approximate_count() == 0
 
-    def test_send_with_reply_to(self) -> None:
-        """send() accepts reply_to parameter."""
+    def test_send_with_reply_routes(self) -> None:
+        """send() accepts reply_routes parameter."""
         mailbox: FakeMailbox[str, str] = FakeMailbox()
-        mailbox.send("hello", reply_to="responses")
+        mailbox.send("hello", reply_routes=ReplyRoutes.single("responses"))
         messages = mailbox.receive(max_messages=1)
-        assert messages[0].reply_to == "responses"
+        assert messages[0].reply_routes is not None
+        assert messages[0].reply_routes.default == "responses"
 
-    def test_inject_message_with_reply_to(self) -> None:
-        """inject_message() accepts reply_to parameter."""
+    def test_inject_message_with_reply_routes(self) -> None:
+        """inject_message() accepts reply_routes parameter."""
         mailbox: FakeMailbox[str, str] = FakeMailbox()
-        mailbox.inject_message("test", reply_to="responses")
+        mailbox.inject_message("test", reply_routes=ReplyRoutes.single("responses"))
         messages = mailbox.receive(max_messages=1)
-        assert messages[0].reply_to == "responses"
+        assert messages[0].reply_routes is not None
+        assert messages[0].reply_routes.default == "responses"
+
+    def test_send_with_typed_routes_no_default(self) -> None:
+        """send() handles typed routes without a default (branches 291->293, 297->296)."""
+        mailbox: FakeMailbox[str, _Result] = FakeMailbox(name="test")
+        # Create typed routes without default - exercises routes.default is None branch
+        routes = ReplyRoutes.typed({_Result: "results"})
+        assert routes.default is None  # Verify no default
+
+        mailbox.send("hello", reply_routes=routes)
+
+        # Verify the mailbox was created
+        results_mailbox = mailbox.resolver.resolve("results")
+        assert results_mailbox is not None
+
+        # Verify message has correct routes
+        messages = mailbox.receive(max_messages=1)
+        assert len(messages) == 1
+        assert messages[0].reply_routes is not None
+        assert messages[0].reply_routes.default is None
+        messages[0].acknowledge()
+
+    def test_send_with_same_routes_twice_uses_cache(self) -> None:
+        """send() uses cached mailbox when same reply_routes used again (branch 297->296)."""
+        mailbox: FakeMailbox[str, _Result] = FakeMailbox(name="test")
+        routes = ReplyRoutes.typed({_Result: "results"})
+
+        # First send creates the mailbox
+        mailbox.send("hello", reply_routes=routes)
+        results_mailbox_1 = mailbox.resolver.resolve("results")
+
+        # Second send with same routes should use cached mailbox (branch 297->296)
+        mailbox.send("world", reply_routes=routes)
+        results_mailbox_2 = mailbox.resolver.resolve("results")
+
+        # Same mailbox instance should be returned
+        assert results_mailbox_1 is results_mailbox_2
 
 
 # =============================================================================
@@ -848,26 +889,26 @@ class TestFakeMailbox:
 # =============================================================================
 
 
-def test_fake_mailbox_reply_without_reply_to_raises() -> None:
-    """FakeMailbox Message.reply() raises when no reply_to specified."""
+def test_fake_mailbox_reply_without_reply_routes_raises() -> None:
+    """FakeMailbox Message.reply() raises when no reply_routes specified."""
     responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
     resolver = RegistryResolver[str]({"responses": responses})
     mailbox: FakeMailbox[str, str] = FakeMailbox(name="test", reply_resolver=resolver)
     try:
-        # Send without reply_to
+        # Send without reply_routes
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
-        with pytest.raises(ReplyNotAvailableError, match="no reply_to"):
+        with pytest.raises(ReplyNotAvailableError, match="no reply_routes"):
             messages[0].reply("response")
     finally:
         responses.close()
 
 
 def test_fake_mailbox_reply_auto_creates_collecting_mailbox() -> None:
-    """FakeMailbox auto-creates CollectingMailbox for reply_to identifiers."""
+    """FakeMailbox auto-creates CollectingMailbox for reply_routes identifiers."""
     mailbox: FakeMailbox[str, str] = FakeMailbox(name="test")
-    mailbox.send("hello", reply_to="responses")
+    mailbox.send("hello", reply_routes=ReplyRoutes.single("responses"))
     messages = mailbox.receive(max_messages=1)
 
     # Reply should work - auto-creates CollectingMailbox
@@ -880,14 +921,14 @@ def test_fake_mailbox_reply_auto_creates_collecting_mailbox() -> None:
     assert responses.sent == ["response"]
 
 
-def test_fake_mailbox_reply_with_unknown_reply_to_raises() -> None:
-    """FakeMailbox Message.reply() raises when reply_to cannot be resolved."""
+def test_fake_mailbox_reply_with_unknown_reply_routes_raises() -> None:
+    """FakeMailbox Message.reply() raises when reply_routes cannot be resolved."""
     responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
     resolver = RegistryResolver[str]({"responses": responses})
     mailbox: FakeMailbox[str, str] = FakeMailbox(name="test", reply_resolver=resolver)
     try:
-        # Send with unknown reply_to
-        mailbox.send("hello", reply_to="unknown-mailbox")
+        # Send with unknown reply_routes
+        mailbox.send("hello", reply_routes=ReplyRoutes.single("unknown-mailbox"))
         messages = mailbox.receive(max_messages=1)
 
         with pytest.raises(ReplyNotAvailableError, match="Cannot resolve"):
@@ -924,6 +965,29 @@ class TestInMemoryMailboxCoverage:
             assert len(new_messages) == 0  # Still invisible
 
             # Acknowledge to clean up
+            messages[0].acknowledge()
+        finally:
+            mailbox.close()
+
+    def test_send_with_typed_routes_no_default(self) -> None:
+        """send() handles typed routes without a default (branches 233->235)."""
+        mailbox: InMemoryMailbox[str, _Result] = InMemoryMailbox(name="test")
+        try:
+            # Create typed routes without default - exercises routes.default is None branch
+            routes = ReplyRoutes.typed({_Result: "results"})
+            assert routes.default is None  # Verify no default
+
+            mailbox.send("hello", reply_routes=routes)
+
+            # Verify the mailbox was created
+            results_mailbox = mailbox.resolver.resolve("results")
+            assert results_mailbox is not None
+
+            # Verify message has correct routes
+            messages = mailbox.receive(max_messages=1)
+            assert len(messages) == 1
+            assert messages[0].reply_routes is not None
+            assert messages[0].reply_routes.default is None
             messages[0].acknowledge()
         finally:
             mailbox.close()
@@ -1305,3 +1369,103 @@ class TestParameterValidation:
 
         with pytest.raises(InvalidParameterError):
             mailbox.receive(wait_time_seconds=-1)
+
+
+# =============================================================================
+# ReplyRoutes Tests
+# =============================================================================
+
+
+@dataclass(slots=True, frozen=True)
+class _BaseResult:
+    """Base result type for testing inheritance routing."""
+
+    value: int
+
+
+@dataclass(slots=True, frozen=True)
+class _SuccessResult(_BaseResult):
+    """Success result extending base."""
+
+    message: str = ""
+
+
+@dataclass(slots=True, frozen=True)
+class _ErrorResult(_BaseResult):
+    """Error result extending base."""
+
+    error: str = ""
+
+
+class TestReplyRoutes:
+    """Tests for ReplyRoutes type-based routing."""
+
+    def test_single_creates_default_only(self) -> None:
+        """ReplyRoutes.single() creates routes with only a default."""
+        routes = ReplyRoutes.single("my-destination")
+        assert routes.default == "my-destination"
+        assert routes.routes == {}
+
+    def test_typed_creates_routes_with_types(self) -> None:
+        """ReplyRoutes.typed() creates routes with type mappings."""
+        routes = ReplyRoutes.typed(
+            {_SuccessResult: "success", _ErrorResult: "errors"},
+            default="other",
+        )
+        assert routes.default == "other"
+        assert routes.routes[_SuccessResult] == "success"
+        assert routes.routes[_ErrorResult] == "errors"
+
+    def test_route_for_exact_match(self) -> None:
+        """route_for() returns exact type match."""
+        routes = ReplyRoutes.typed({_SuccessResult: "success", _ErrorResult: "errors"})
+        result = _SuccessResult(value=1, message="ok")
+        assert routes.route_for(result) == "success"
+
+    def test_route_for_parent_match(self) -> None:
+        """route_for() matches parent type when exact not found."""
+        routes = ReplyRoutes.typed({_BaseResult: "base-results"})
+        success = _SuccessResult(value=1, message="ok")
+        error = _ErrorResult(value=2, error="fail")
+        # Both should match via parent type
+        assert routes.route_for(success) == "base-results"
+        assert routes.route_for(error) == "base-results"
+
+    def test_route_for_default_fallback(self) -> None:
+        """route_for() falls back to default when no type matches."""
+        routes = ReplyRoutes.typed(
+            {_SuccessResult: "success"},
+            default="other",
+        )
+        error = _ErrorResult(value=1, error="fail")
+        # ErrorResult not in routes, should fall back to default
+        assert routes.route_for(error) == "other"
+
+    def test_route_for_no_match_raises(self) -> None:
+        """route_for() raises NoRouteError when no match and no default."""
+        routes = ReplyRoutes.typed({_SuccessResult: "success"})
+        error = _ErrorResult(value=1, error="fail")
+
+        with pytest.raises(NoRouteError) as exc:
+            routes.route_for(error)
+
+        assert exc.value.body_type is _ErrorResult
+
+    def test_no_route_error_attributes(self) -> None:
+        """NoRouteError has body_type attribute."""
+        error = NoRouteError(_ErrorResult)
+        assert error.body_type is _ErrorResult
+        assert "_ErrorResult" in str(error)
+
+    def test_route_for_object_instance(self) -> None:
+        """route_for() handles bare object instances (empty MRO slice)."""
+        routes = ReplyRoutes.typed({_SuccessResult: "success"}, default="fallback")
+        # object().__mro__[1:] is empty, so loop never executes, falls back to default
+        assert routes.route_for(object()) == "fallback"
+
+    def test_route_for_object_no_default_raises(self) -> None:
+        """route_for() raises for object when no default."""
+        routes = ReplyRoutes.typed({_SuccessResult: "success"})
+        with pytest.raises(NoRouteError) as exc:
+            routes.route_for(object())
+        assert exc.value.body_type is object

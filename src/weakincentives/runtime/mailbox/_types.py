@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, runtime_checkable
@@ -64,11 +64,11 @@ class MailboxConnectionError(MailboxError):
 
 
 class ReplyNotAvailableError(MailboxError):
-    """Cannot resolve reply_to destination.
+    """Cannot resolve reply destination.
 
     Raised when Message.reply() is called but:
-    - No reply_to was specified in the original send()
-    - The reply_to identifier cannot be resolved by the resolver
+    - No reply_routes was specified in the original send()
+    - The resolved identifier cannot be found by the resolver
     """
 
 
@@ -87,6 +87,20 @@ class InvalidParameterError(MailboxError):
     - visibility_timeout must be 0-43200 (0 to 12 hours)
     - wait_time_seconds must be non-negative
     """
+
+
+class NoRouteError(MailboxError):
+    """No route matches the reply body type.
+
+    Raised when ReplyRoutes.route_for() cannot find:
+    - Exact type match in routes
+    - Parent type match in routes
+    - Default route
+    """
+
+    def __init__(self, body_type: type) -> None:
+        super().__init__(f"No route for reply type: {body_type.__name__}")
+        self.body_type = body_type
 
 
 # SQS-compatible bounds for visibility timeout (0 to 12 hours in seconds)
@@ -128,6 +142,102 @@ def validate_wait_time(value: int) -> None:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class ReplyRoutes:
+    """Type-based reply routing table.
+
+    Routes replies to different mailboxes based on the response type.
+    Supports inheritance: if no exact match, checks parent types in MRO order.
+
+    Attributes:
+        default: Fallback identifier when no type-specific route matches.
+        routes: Mapping from response types to mailbox identifiers.
+
+    Example::
+
+        # Single destination (simple case)
+        routes = ReplyRoutes.single("client-123")
+
+        # Type-based routing
+        routes = ReplyRoutes.typed({
+            SuccessResult: "client-123:success",
+            ErrorResult: "client-123:errors",
+        })
+    """
+
+    default: str | None = None
+    """Fallback identifier when no type-specific route matches."""
+
+    routes: Mapping[type, str] = field(default_factory=lambda: {})
+    """Mapping from response types to mailbox identifiers."""
+
+    def route_for(self, body: object) -> str:
+        """Determine the mailbox identifier for a reply body.
+
+        Resolution order:
+        1. Exact type match in routes
+        2. Parent type match (MRO order, excluding object)
+        3. Default route
+
+        Args:
+            body: The reply payload.
+
+        Returns:
+            Mailbox identifier string.
+
+        Raises:
+            NoRouteError: No matching route and no default configured.
+        """
+        body_type = type(body)
+
+        # Exact match
+        if body_type in self.routes:
+            return self.routes[body_type]
+
+        # Check parent types (MRO order)
+        for parent in body_type.__mro__[1:]:
+            if parent is object:
+                break
+            if parent in self.routes:
+                return self.routes[parent]
+
+        # Fallback to default
+        if self.default is not None:
+            return self.default
+
+        raise NoRouteError(body_type)
+
+    @classmethod
+    def single(cls, identifier: str) -> ReplyRoutes:
+        """Create routes with a single default destination.
+
+        Args:
+            identifier: The default mailbox identifier for all replies.
+
+        Returns:
+            ReplyRoutes with only a default route.
+        """
+        return cls(default=identifier)
+
+    @classmethod
+    def typed(
+        cls,
+        routes: Mapping[type, str],
+        *,
+        default: str | None = None,
+    ) -> ReplyRoutes:
+        """Create routes with type-specific destinations.
+
+        Args:
+            routes: Mapping from response types to mailbox identifiers.
+            default: Optional fallback for unmatched types.
+
+        Returns:
+            ReplyRoutes with type-based routing.
+        """
+        return cls(default=default, routes=routes)
+
+
 @dataclass(slots=True)
 class Message[T, R]:
     """A received message with delivery metadata and lifecycle methods.
@@ -158,8 +268,9 @@ class Message[T, R]:
     enqueued_at: datetime
     """Timestamp when message was originally sent (UTC)."""
 
-    reply_to: str | None = None
-    """Identifier for response mailbox. Workers resolve this via reply()."""
+    reply_routes: ReplyRoutes | None = None
+    """Routing table for responses. Workers use route_for() to determine
+    the destination mailbox based on reply body type."""
 
     _acknowledge_fn: Callable[[], None] = field(
         default=lambda: None, repr=False, compare=False
@@ -176,20 +287,19 @@ class Message[T, R]:
     )
     """Internal callback for extend_visibility operation."""
 
-    _reply_fn: Callable[[R], str] = field(
-        default=lambda _: "", repr=False, compare=False
+    _reply_fn: Callable[[str, R], str] = field(
+        default=lambda _id, _body: "", repr=False, compare=False
     )
-    """Internal callback for reply operation."""
+    """Internal callback for reply operation. Takes (identifier, body)."""
 
     _finalized: bool = field(default=False, repr=False, compare=False)
     """True if message has been acknowledged or nacked."""
 
     def reply(self, body: R) -> str:
-        """Send reply to reply_to destination.
+        """Send reply to type-appropriate destination.
 
+        Routes the reply based on body type using the message's ReplyRoutes.
         Multiple replies are allowed before finalization (acknowledge/nack).
-        The reply_to identifier is resolved internally via the mailbox's
-        reply_resolver.
 
         Args:
             body: Reply payload to send.
@@ -199,15 +309,21 @@ class Message[T, R]:
 
         Raises:
             MessageFinalizedError: Message already acknowledged or nacked.
-            ReplyNotAvailableError: No reply_to specified or cannot resolve.
+            NoRouteError: No route matches body type.
+            ReplyNotAvailableError: No reply_routes configured or cannot resolve.
         """
         if self._finalized:
             raise MessageFinalizedError(
                 f"Message '{self.id}' already finalized; cannot reply"
             )
-        if self.reply_to is None:
-            raise ReplyNotAvailableError(f"Message '{self.id}' has no reply_to")
-        return self._reply_fn(body)
+        if self.reply_routes is None:
+            raise ReplyNotAvailableError(f"Message '{self.id}' has no reply_routes")
+
+        # Route selection based on body type
+        identifier = self.reply_routes.route_for(body)
+
+        # Resolution and send via bound callback
+        return self._reply_fn(identifier, body)
 
     def acknowledge(self) -> None:
         """Delete the message from the queue.
@@ -283,13 +399,13 @@ class Mailbox[T, R](Protocol):
         ...
 
     @abstractmethod
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    def send(self, body: T, *, reply_routes: ReplyRoutes | None = None) -> str:
         """Enqueue a message.
 
         Args:
             body: Message payload (must be serializable).
-            reply_to: Identifier for response mailbox. Workers resolve this
-                via Message.reply().
+            reply_routes: Routing table for responses. Workers use this
+                to determine where to send replies based on response type.
 
         Returns:
             Message ID (unique within this queue).
@@ -368,7 +484,9 @@ __all__ = [
     "MailboxFullError",
     "Message",
     "MessageFinalizedError",
+    "NoRouteError",
     "ReceiptHandleExpiredError",
     "ReplyNotAvailableError",
+    "ReplyRoutes",
     "SerializationError",
 ]

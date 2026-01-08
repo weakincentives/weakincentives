@@ -50,9 +50,9 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     Supports both standard and session-aware evaluators. Session-aware
     evaluators receive a SessionViewProtocol for behavioral assertions.
 
-    The single mailbox pattern with reply_to routing:
-    - requests mailbox: receives EvalRequest messages with reply_to
-    - Workers use msg.reply(result) to route responses
+    The single mailbox pattern with reply_routes routing:
+    - requests mailbox: receives EvalRequest messages with reply_routes
+    - Workers use msg.reply(result) to route responses by type
 
     Lifecycle:
         - Use ``run()`` to start processing messages
@@ -91,7 +91,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 - Standard: (output, expected) -> Score
                 - Session-aware: (output, expected, session) -> Score
             requests: Mailbox to receive EvalRequest messages from.
-                Response routing derives from each message's reply_to field.
+                Response routing derives from each message's reply_routes.
         """
         super().__init__()
         self._loop = loop
@@ -210,7 +210,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     ) -> None:
         """Reply with result and acknowledge message, handling failures gracefully.
 
-        Uses Message.reply() for response routing based on reply_to.
+        Uses Message.reply() for response routing based on reply_routes.
         On reply failure, nack for retry instead of losing successful evaluations.
         """
         _ = self  # Uses self implicitly via Message callbacks
@@ -218,9 +218,9 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             _ = msg.reply(result)
             msg.acknowledge()
         except ReplyNotAvailableError:
-            # No reply_to specified - log and acknowledge without reply
+            # No reply_routes specified - log and acknowledge without reply
             _logger.warning(
-                "No reply_to for message %s, acknowledging without reply", msg.id
+                "No reply_routes for message %s, acknowledging without reply", msg.id
             )
             with contextlib.suppress(ReceiptHandleExpiredError):
                 msg.acknowledge()

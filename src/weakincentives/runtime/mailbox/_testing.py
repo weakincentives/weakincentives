@@ -26,6 +26,7 @@ from ._types import (
     Message,
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
+    ReplyRoutes,
     validate_visibility_timeout,
     validate_wait_time,
 )
@@ -62,9 +63,9 @@ class NullMailbox[T, R]:
         """Return True if mailbox has been closed."""
         return self._closed
 
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    def send(self, body: T, *, reply_routes: ReplyRoutes | None = None) -> str:
         """Accept and discard the message."""
-        _ = (self, body, reply_to)
+        _ = (self, body, reply_routes)
         return str(uuid4())
 
     def receive(
@@ -119,25 +120,25 @@ class CollectingMailbox[T, R]:
     """List of all sent message bodies in send order."""
 
     _message_ids: list[str] = field(init=False, repr=False)
-    _reply_tos: list[str | None] = field(init=False, repr=False)
+    _reply_routes_list: list[ReplyRoutes | None] = field(init=False, repr=False)
     _closed: bool = field(default=False, repr=False, init=False)
 
     def __post_init__(self) -> None:
         self.sent = []
         self._message_ids = []
-        self._reply_tos = []
+        self._reply_routes_list = []
 
     @property
     def closed(self) -> bool:
         """Return True if mailbox has been closed."""
         return self._closed
 
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    def send(self, body: T, *, reply_routes: ReplyRoutes | None = None) -> str:
         """Store the message body for later inspection."""
         msg_id = str(uuid4())
         self.sent.append(body)
         self._message_ids.append(msg_id)
-        self._reply_tos.append(reply_to)
+        self._reply_routes_list.append(reply_routes)
         return msg_id
 
     def receive(
@@ -156,7 +157,7 @@ class CollectingMailbox[T, R]:
         count = len(self.sent)
         self.sent.clear()
         self._message_ids.clear()
-        self._reply_tos.clear()
+        self._reply_routes_list.clear()
         return count
 
     def approximate_count(self) -> int:
@@ -194,7 +195,7 @@ class FakeMailbox[T, R]:
 
     Extends InMemoryMailbox semantics with methods to simulate failures
     and edge conditions. Auto-creates CollectingMailbox instances for
-    reply_to identifiers, accessible via the resolver property.
+    reply_routes identifiers, accessible via the resolver property.
 
     Type parameters:
         T: Message body type.
@@ -204,8 +205,8 @@ class FakeMailbox[T, R]:
 
         mailbox: FakeMailbox[Event, Result] = FakeMailbox()
 
-        # Send with reply_to (auto-creates CollectingMailbox)
-        mailbox.send(Event(...), reply_to="responses")
+        # Send with reply_routes (auto-creates CollectingMailbox)
+        mailbox.send(Event(...), reply_routes=ReplyRoutes.single("responses"))
         responses = mailbox.resolver.resolve("responses")
 
         # Simulate receipt handle expiry
@@ -222,18 +223,18 @@ class FakeMailbox[T, R]:
 
     name: str = "fake"
     reply_resolver: MailboxResolver[R] | None = None
-    """Resolver for reply_to identifiers. If None, a default resolver is created
-    that auto-registers CollectingMailbox instances for reply_to identifiers."""
+    """Resolver for reply_routes identifiers. If None, a default resolver is created
+    that auto-registers CollectingMailbox instances for reply_routes identifiers."""
 
-    _pending: list[tuple[str, T, datetime, int, str | None]] = field(
+    _pending: list[tuple[str, T, datetime, int, ReplyRoutes | None]] = field(
         init=False, repr=False
     )
-    """List of (id, body, enqueued_at, delivery_count, reply_to) tuples."""
+    """List of (id, body, enqueued_at, delivery_count, reply_routes) tuples."""
 
-    _invisible: dict[str, tuple[str, T, datetime, int, str | None]] = field(
+    _invisible: dict[str, tuple[str, T, datetime, int, ReplyRoutes | None]] = field(
         init=False, repr=False
     )
-    """Map of receipt_handle -> (id, body, enqueued_at, delivery_count, reply_to)."""
+    """Map of receipt_handle -> (id, body, enqueued_at, delivery_count, reply_routes)."""
 
     _reply_registry: dict[str, Mailbox[R, None]] = field(init=False, repr=False)
     """Registry of auto-created response mailboxes."""
@@ -265,9 +266,9 @@ class FakeMailbox[T, R]:
     def resolver(self) -> MailboxResolver[R]:
         """Return the reply resolver for accessing auto-created mailboxes.
 
-        Use this to retrieve CollectingMailbox instances created for reply_to::
+        Use this to retrieve CollectingMailbox instances created for reply_routes::
 
-            mailbox.send(msg, reply_to="responses")
+            mailbox.send(msg, reply_routes=ReplyRoutes.single("responses"))
             responses = mailbox.resolver.resolve("responses")
             assert responses.sent == [expected_reply]
         """
@@ -280,26 +281,40 @@ class FakeMailbox[T, R]:
         """Return True if mailbox has been closed."""
         return self._closed
 
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    def _ensure_reply_mailboxes(self, routes: ReplyRoutes) -> None:
+        """Ensure mailboxes exist for all identifiers in routes."""
+        if (
+            self.reply_resolver is None
+        ):  # pragma: no cover - always set in __post_init__
+            return
+
+        # Collect all unique identifiers
+        identifiers: set[str] = set()
+        if routes.default is not None:
+            identifiers.add(routes.default)
+        identifiers.update(routes.routes.values())
+
+        # Resolve each to trigger factory creation and caching
+        for identifier in identifiers:
+            if identifier not in self._reply_registry:
+                _ = self.reply_resolver.resolve_optional(identifier)
+
+    def send(self, body: T, *, reply_routes: ReplyRoutes | None = None) -> str:
         """Enqueue a message.
 
-        If reply_to is provided and a default resolver is configured, this
+        If reply_routes is provided and a default resolver is configured, this
         automatically creates and registers a CollectingMailbox that can be
-        retrieved via ``resolver.resolve(reply_to)``.
+        retrieved via ``resolver.resolve(identifier)``.
         """
         if self._connection_error is not None:
             raise self._connection_error
 
-        # Auto-register reply_to mailbox if using default resolver
-        if (
-            reply_to is not None
-            and reply_to not in self._reply_registry
-            and self.reply_resolver is not None
-        ):
-            _ = self.reply_resolver.resolve_optional(reply_to)
+        # Auto-register reply mailboxes if using default resolver
+        if reply_routes is not None:
+            self._ensure_reply_mailboxes(reply_routes)
 
         msg_id = str(uuid4())
-        self._pending.append((msg_id, body, datetime.now(UTC), 0, reply_to))
+        self._pending.append((msg_id, body, datetime.now(UTC), 0, reply_routes))
         return msg_id
 
     def receive(
@@ -319,7 +334,9 @@ class FakeMailbox[T, R]:
         count = min(max_messages, len(self._pending))
 
         for _ in range(count):
-            msg_id, body, enqueued_at, delivery_count, reply_to = self._pending.pop(0)
+            msg_id, body, enqueued_at, delivery_count, reply_routes = self._pending.pop(
+                0
+            )
             receipt_handle = str(uuid4())
             delivery_count += 1
 
@@ -328,7 +345,7 @@ class FakeMailbox[T, R]:
                 body,
                 enqueued_at,
                 delivery_count,
-                reply_to,
+                reply_routes,
             )
 
             message = Message[T, R](
@@ -337,28 +354,28 @@ class FakeMailbox[T, R]:
                 receipt_handle=receipt_handle,
                 delivery_count=delivery_count,
                 enqueued_at=enqueued_at,
-                reply_to=reply_to,
+                reply_routes=reply_routes,
                 _acknowledge_fn=lambda h=receipt_handle: self._acknowledge(h),
                 _nack_fn=lambda t, h=receipt_handle: self._nack(h, t),
                 _extend_fn=lambda t, h=receipt_handle: self._extend(h, t),
-                _reply_fn=lambda b, rt=reply_to: self._reply(rt, b),
+                _reply_fn=self._reply,
             )
             messages.append(message)
 
         return messages
 
-    def _reply(self, reply_to: str | None, body: R) -> str:
-        """Send a reply to the reply_to mailbox."""
-        if reply_to is None:  # pragma: no cover
-            raise ReplyNotAvailableError("No reply_to specified")
+    def _reply(self, identifier: str, body: R) -> str:
+        """Send a reply to the resolved mailbox."""
         if (
             self.reply_resolver is None
         ):  # pragma: no cover - always set in __post_init__
             raise ReplyNotAvailableError("No reply_resolver configured")
         try:
-            mailbox = self.reply_resolver.resolve(reply_to)
+            mailbox = self.reply_resolver.resolve(identifier)
         except MailboxResolutionError as e:
-            raise ReplyNotAvailableError(f"Cannot resolve reply_to '{reply_to}'") from e
+            raise ReplyNotAvailableError(
+                f"Cannot resolve identifier '{identifier}'"
+            ) from e
         return mailbox.send(body)
 
     def _acknowledge(self, receipt_handle: str) -> None:
@@ -377,10 +394,10 @@ class FakeMailbox[T, R]:
         if receipt_handle not in self._invisible:
             raise ReceiptHandleExpiredError(f"Handle '{receipt_handle}' not found")
 
-        msg_id, body, enqueued_at, delivery_count, reply_to = self._invisible.pop(
+        msg_id, body, enqueued_at, delivery_count, reply_routes = self._invisible.pop(
             receipt_handle
         )
-        self._pending.append((msg_id, body, enqueued_at, delivery_count, reply_to))
+        self._pending.append((msg_id, body, enqueued_at, delivery_count, reply_routes))
 
     def _extend(self, receipt_handle: str, timeout: int) -> None:
         """Extend visibility timeout (no-op for fake, just validates handle)."""
@@ -435,7 +452,7 @@ class FakeMailbox[T, R]:
         *,
         msg_id: str | None = None,
         delivery_count: int = 0,
-        reply_to: str | None = None,
+        reply_routes: ReplyRoutes | None = None,
     ) -> str:
         """Inject a message directly into the pending queue.
 
@@ -445,14 +462,14 @@ class FakeMailbox[T, R]:
             body: Message body.
             msg_id: Optional specific message ID.
             delivery_count: Initial delivery count.
-            reply_to: Optional reply_to identifier.
+            reply_routes: Optional reply routes.
 
         Returns:
             The message ID.
         """
         msg_id = msg_id or str(uuid4())
         self._pending.append(
-            (msg_id, body, datetime.now(UTC), delivery_count, reply_to)
+            (msg_id, body, datetime.now(UTC), delivery_count, reply_routes)
         )
         return msg_id
 
