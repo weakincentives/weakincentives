@@ -20,6 +20,7 @@ Subpackages:
 
 - ``contrib.mailbox``: Redis-backed mailbox implementation
 - ``contrib.optimizers``: Workspace digest optimizer
+- ``contrib.prompt_overrides``: Redis-backed prompt overrides store
 - ``contrib.tools``: Planning tools, VFS, Podman sandbox, asteval, workspace digest
 
 Example usage::
@@ -32,6 +33,7 @@ Example usage::
     )
 
     from weakincentives.contrib.mailbox import RedisMailbox
+    from weakincentives.contrib.prompt_overrides import RedisPromptOverridesStore
 """
 
 from __future__ import annotations
@@ -42,9 +44,9 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from types import ModuleType
 
-    from . import mailbox, optimizers, tools
+    from . import mailbox, optimizers, prompt_overrides, tools
 
-__all__ = ["mailbox", "optimizers", "tools"]
+__all__ = ["mailbox", "optimizers", "prompt_overrides", "tools"]
 
 
 def __dir__() -> list[str]:
