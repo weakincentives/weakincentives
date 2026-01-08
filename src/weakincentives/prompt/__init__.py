@@ -69,10 +69,26 @@ from .structured_output import (
 from .task_examples import TaskExample, TaskExamplesSection, TaskStep
 from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
+from .trajectory import (
+    Assessment,
+    DeadlineObserver,
+    Observation,
+    ObserverConfig,
+    ObserverContext,
+    ObserverTrigger,
+    TrajectoryObserver,
+    run_observers,
+)
 
 __all__ = [
+    "Assessment",
+    "DeadlineObserver",
     "LocalPromptOverridesStore",
     "MarkdownSection",
+    "Observation",
+    "ObserverConfig",
+    "ObserverContext",
+    "ObserverTrigger",
     "OpenSectionsParams",
     "OutputParseError",
     "PolicyDecision",
@@ -117,11 +133,13 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "ToolSuiteSection",
+    "TrajectoryObserver",
     "VisibilityExpansionRequired",
     "WorkspaceSection",
     "hash_json",
     "hash_text",
     "parse_structured_output",
+    "run_observers",
 ]
 
 

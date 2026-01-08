@@ -30,6 +30,7 @@ from ..prompt.policy import PolicyDecision, ToolPolicy
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
+from ..prompt.trajectory import ObserverContext, run_observers
 from ..runtime.events import HandlerFailure, ToolInvoked
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.transactions import (
@@ -680,7 +681,12 @@ def execute_tool_call(
     context: ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
-    """Execute a provider tool call and dispatch the resulting event."""
+    """Execute a provider tool call and dispatch the resulting event.
+
+    After dispatching the tool invocation, trajectory observers are executed
+    if configured on the prompt. Assessment feedback is appended to the tool
+    result message.
+    """
 
     with tool_execution(
         context=context,
@@ -690,6 +696,23 @@ def execute_tool_call(
             context=context,
             outcome=outcome,
         )
+
+    # Run trajectory observers from prompt
+    observers = context.prompt.observers
+    if observers:  # pragma: no cover - tested via integration
+        observer_context = ObserverContext(
+            session=context.session,
+            prompt=cast(PromptProtocol[Any], context.prompt),
+            deadline=context.deadline,
+        )
+        assessment_text = run_observers(
+            observers=observers,
+            context=observer_context,
+            session=context.session,
+        )
+        if assessment_text and outcome.result.message:
+            outcome.result.message = f"{outcome.result.message}\n\n{assessment_text}"
+
     return invocation, outcome.result
 
 

@@ -37,6 +37,7 @@ from .registry import PromptRegistry, SectionNode
 from .rendering import PromptRenderer, RenderedPrompt
 from .section import Section
 from .structured_output import StructuredOutputConfig
+from .trajectory import ObserverConfig
 
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
@@ -113,6 +114,7 @@ class PromptTemplate[OutputT]:
         | tuple[SectionNode[SupportsDataclass], ...]
     ) = ()
     policies: Sequence[ToolPolicy] = ()
+    observers: Sequence[ObserverConfig] = ()
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
@@ -157,6 +159,7 @@ class PromptTemplate[OutputT]:
         | object
         | None = MISSING,
         policies: Sequence[ToolPolicy] | object = MISSING,
+        observers: Sequence[ObserverConfig] | object = MISSING,
         allow_extra_keys: bool | object = MISSING,
         resources: ResourceRegistry | object = MISSING,
     ) -> dict[str, Any]:
@@ -177,6 +180,11 @@ class PromptTemplate[OutputT]:
         )
         policies_input: Sequence[ToolPolicy] = (
             cast(Sequence[ToolPolicy], policies) if policies is not MISSING else ()
+        )
+        observers_input: Sequence[ObserverConfig] = (
+            cast(Sequence[ObserverConfig], observers)
+            if observers is not MISSING
+            else ()
         )
         allow_extra = (
             cast(bool, allow_extra_keys) if allow_extra_keys is not MISSING else False
@@ -210,6 +218,7 @@ class PromptTemplate[OutputT]:
             "name": name_val,
             "sections": snapshot.sections,
             "policies": tuple(policies_input),
+            "observers": tuple(observers_input),
             "allow_extra_keys": allow_extra,
             "resources": resources_val,
             "_snapshot": snapshot,
@@ -320,6 +329,11 @@ class Prompt[OutputT]:
     @property
     def structured_output(self) -> StructuredOutputConfig[SupportsDataclass] | None:
         return self.template.structured_output
+
+    @property
+    def observers(self) -> tuple[ObserverConfig, ...]:
+        """Return trajectory observers configured on this prompt."""
+        return tuple(self.template.observers)
 
     def policies_for_tool(self, tool_name: str) -> tuple[ToolPolicy, ...]:
         """Collect policies that apply to a tool from sections and template.

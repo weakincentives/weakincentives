@@ -10,6 +10,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# pyright: reportImportCycles=false
+
 """Structural typing primitives shared across prompt tooling.
 
 This module provides protocols for prompt-related types:
@@ -40,6 +42,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from ._prompt_resources import PromptResources
     from ._structured_output_config import StructuredOutputConfig
     from .overrides import PromptDescriptor
+    from .trajectory.types import ObserverConfig
 
 
 class PromptResponseProtocol[AdapterOutputT](Protocol):
@@ -131,6 +134,11 @@ class PromptProtocol[PromptOutputT](Protocol):
     @property
     def resources(self) -> PromptResources:
         """Resource accessor for lifecycle management and dependency resolution."""
+        ...
+
+    @property
+    def observers(self) -> tuple[ObserverConfig, ...]:
+        """Return trajectory observers configured on this prompt."""
         ...
 
     def bind(

@@ -26,6 +26,7 @@ from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...filesystem import Filesystem
 from ...prompt.protocols import PromptProtocol
+from ...prompt.trajectory import ObserverContext, run_observers
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
@@ -186,6 +187,11 @@ class HookContext:
         return self._session
 
     @property
+    def prompt(self) -> PromptProtocol[object]:
+        """Get prompt."""
+        return self._prompt
+
+    @property
     def resources(
         self,
     ) -> PromptResources:  # pragma: no cover - tested via integration
@@ -224,6 +230,43 @@ class HookContext:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _run_trajectory_observers(  # pragma: no cover - tested via integration
+    hook_context: HookContext,
+) -> dict[str, Any] | None:
+    """Run trajectory observers and return hook response if assessment produced."""
+    observers = hook_context.prompt.observers
+    if not observers:
+        return None
+
+    observer_context = ObserverContext(
+        session=hook_context.session,
+        prompt=hook_context.prompt,
+        deadline=hook_context.deadline,
+    )
+    assessment_text = run_observers(
+        observers=observers,
+        context=observer_context,
+        session=hook_context.session,
+    )
+    if not assessment_text:
+        return None
+
+    logger.debug(
+        "claude_agent_sdk.hook.trajectory_assessment",
+        event="hook.trajectory_assessment",
+        context={
+            "assessment_length": len(assessment_text),
+            "elapsed_ms": hook_context.elapsed_ms,
+        },
+    )
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PostToolUse",
+            "additionalContext": assessment_text,
+        }
+    }
 
 
 def _read_transcript_file(path_str: str) -> list[dict[str, Any]]:
@@ -654,7 +697,8 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                 )
                 return {"continue": False}
 
-        return {}
+        # Run trajectory observers from prompt
+        return _run_trajectory_observers(hook_context) or {}
 
     return post_tool_use_hook
 
