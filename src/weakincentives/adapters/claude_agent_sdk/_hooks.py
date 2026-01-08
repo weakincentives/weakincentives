@@ -625,7 +625,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                         "StructuredOutput again with your final output."
                     )
                     return {
-                        "continue": True,
+                        "continue_": True,
                         "hookSpecificOutput": {
                             "hookEventName": "PostToolUse",
                             "additionalContext": feedback_message,
@@ -921,8 +921,7 @@ def create_task_completion_stop_hook(
         )
 
         return {
-            "needsMoreTurns": True,
-            "decision": "continue",
+            "continue_": True,
             "reason": result.feedback,
         }
 

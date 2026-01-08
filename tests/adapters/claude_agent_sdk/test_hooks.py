@@ -447,8 +447,8 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", context))
 
-        # Should return continue: True to force continuation
-        assert result.get("continue") is True
+        # Should return continue_: True to force continuation (SDK converts to "continue")
+        assert result.get("continue_") is True
         # Should return additionalContext with feedback
         hook_output = result.get("hookSpecificOutput", {})
         assert hook_output.get("hookEventName") == "PostToolUse"
@@ -1574,8 +1574,8 @@ class TestTaskCompletionStopHook:
 
         result = asyncio.run(hook(input_data, None, None))
 
-        assert result.get("needsMoreTurns") is True
-        assert result.get("decision") == "continue"
+        # Should return continue_: True to force continuation (SDK converts to "continue")
+        assert result.get("continue_") is True
         assert "2 incomplete task(s)" in result.get("reason", "")
         assert "Pending task" in result.get("reason", "")
         assert context.stop_reason == "end_turn"
@@ -1676,7 +1676,8 @@ class TestTaskCompletionStopHook:
 
         result = asyncio.run(hook(input_data, None, None))
 
-        assert result.get("needsMoreTurns") is True
+        # Should return continue_: True to force continuation (SDK converts to "continue")
+        assert result.get("continue_") is True
         reason = result.get("reason", "")
         # Should contain first 3 tasks and ellipsis
         assert "Task 1" in reason
