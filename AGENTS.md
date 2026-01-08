@@ -87,6 +87,8 @@ a goal at any time.
 - **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
   ToolContext integration—when adding or modifying filesystem operations.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
+- **POLICIES_OVER_WORKFLOWS.md**: Design philosophy—preferring declarative
+  policies over rigid workflows for unattended agent autonomy.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, and
   progressive disclosure—required for prompt system work.
 - **PROMPT_OPTIMIZATION.md**: Override system and optimizer abstraction—when
