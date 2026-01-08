@@ -24,6 +24,17 @@ from .errors import (
     VisibilityExpansionRequired,
 )
 from .markdown import MarkdownSection
+from .observer import (
+    Assessment,
+    Observation,
+    ObserverConfig,
+    ObserverContext,
+    ObserverTrigger,
+    RecordAssessment,
+    TrajectoryObserver,
+    run_observers,
+)
+from .observers import DeadlineObserver
 from .overrides import (
     LocalPromptOverridesStore,
     PromptDescriptor,
@@ -71,8 +82,14 @@ from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
+    "Assessment",
+    "DeadlineObserver",
     "LocalPromptOverridesStore",
     "MarkdownSection",
+    "Observation",
+    "ObserverConfig",
+    "ObserverContext",
+    "ObserverTrigger",
     "OpenSectionsParams",
     "OutputParseError",
     "PolicyDecision",
@@ -94,6 +111,7 @@ __all__ = [
     "ReadBeforeWritePolicy",
     "ReadSectionParams",
     "ReadSectionResult",
+    "RecordAssessment",
     "RenderedPrompt",
     "RenderedPromptProtocol",
     "Section",
@@ -117,11 +135,13 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "ToolSuiteSection",
+    "TrajectoryObserver",
     "VisibilityExpansionRequired",
     "WorkspaceSection",
     "hash_json",
     "hash_text",
     "parse_structured_output",
+    "run_observers",
 ]
 
 

@@ -133,6 +133,11 @@ class PromptProtocol[PromptOutputT](Protocol):
         """Resource accessor for lifecycle management and dependency resolution."""
         ...
 
+    @property
+    def observers(self) -> tuple[Any, ...]:
+        """Return trajectory observers configured on this prompt."""
+        ...
+
     def bind(
         self,
         *params: SupportsDataclass,

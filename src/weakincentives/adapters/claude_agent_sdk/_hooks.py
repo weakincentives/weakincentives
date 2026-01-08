@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...filesystem import Filesystem
+from ...prompt.observer import ObserverContext, run_observers
 from ...prompt.protocols import PromptProtocol
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
@@ -530,7 +531,40 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         )
         return task_completion_checker.check(context)  # type: ignore[union-attr]
 
-    async def post_tool_use_hook(  # noqa: RUF029 - SDK requires async signature
+    def _run_trajectory_observers(  # pragma: no cover - integration tested
+        data: _ParsedToolData,
+    ) -> dict[str, Any] | None:
+        """Run trajectory observers and return hook response if triggered."""
+        observer_context = ObserverContext(
+            session=hook_context.session,
+            prompt=hook_context._prompt,
+            deadline=hook_context.deadline,
+        )
+        assessment_text = run_observers(
+            observers=hook_context._prompt.observers,
+            context=observer_context,
+            session=hook_context.session,
+        )
+
+        if assessment_text:
+            logger.debug(
+                "claude_agent_sdk.hook.trajectory_assessment",
+                event="hook.trajectory_assessment",
+                context={
+                    "tool_name": data.tool_name,
+                    "assessment_length": len(assessment_text),
+                    "elapsed_ms": hook_context.elapsed_ms,
+                },
+            )
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": assessment_text,
+                }
+            }
+        return None
+
+    async def post_tool_use_hook(  # noqa: RUF029, C901 - SDK requires async; observer dispatch
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -601,6 +635,11 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                         "elapsed_ms": hook_context.elapsed_ms,
                     },
                 )
+
+        # Run trajectory observers after tool completion
+        observer_response = _run_trajectory_observers(data)
+        if observer_response is not None:  # pragma: no cover - integration tested
+            return observer_response
 
         # Handle StructuredOutput with task completion checking
         if data.tool_name == "StructuredOutput":

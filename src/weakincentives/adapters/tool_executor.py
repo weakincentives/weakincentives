@@ -26,6 +26,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
+from ..prompt.observer import ObserverContext, run_observers
 from ..prompt.policy import PolicyDecision, ToolPolicy
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
@@ -680,8 +681,11 @@ def execute_tool_call(
     context: ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
-    """Execute a provider tool call and dispatch the resulting event."""
+    """Execute a provider tool call and dispatch the resulting event.
 
+    After tool execution, runs trajectory observers and appends any assessment
+    to the tool result message.
+    """
     with tool_execution(
         context=context,
         tool_call=tool_call,
@@ -690,6 +694,27 @@ def execute_tool_call(
             context=context,
             outcome=outcome,
         )
+
+    # Run trajectory observers after tool completion
+    observer_context = ObserverContext(
+        session=context.session,
+        prompt=cast(PromptProtocol[Any], context.prompt),
+        deadline=context.deadline,
+    )
+    assessment_text = run_observers(
+        observers=context.prompt.observers,
+        context=observer_context,
+        session=context.session,
+    )
+
+    if assessment_text and outcome.result.message:  # pragma: no cover - integration
+        from dataclasses import replace
+
+        outcome.result = replace(
+            outcome.result,
+            message=f"{outcome.result.message}\n\n{assessment_text}",
+        )
+
     return invocation, outcome.result
 
 
