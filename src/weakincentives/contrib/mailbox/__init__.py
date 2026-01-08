@@ -23,13 +23,17 @@ Example::
     from weakincentives.contrib.mailbox import RedisMailbox
 
     client = Redis(host="localhost", port=6379)
-    mailbox: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
-        name="events",
+    requests: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
+        name="requests",
+        client=client,
+    )
+    responses: RedisMailbox[MyResult, None] = RedisMailbox(
+        name="responses",
         client=client,
     )
 
-    # reply_to automatically resolves to queues on the same Redis server
-    mailbox.send(MyEvent(data="hello"), reply_to="responses")
+    # Pass mailbox instance as reply_to
+    requests.send(MyEvent(data="hello"), reply_to=responses)
 """
 
 from __future__ import annotations

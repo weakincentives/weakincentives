@@ -81,7 +81,6 @@ from weakincentives.runtime import (
     Session,
     ShutdownCoordinator,
 )
-from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
 from weakincentives.skills import SkillConfig, SkillMount
 from weakincentives.types import SupportsDataclass
 
@@ -185,16 +184,16 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
             name="responses"
         )
-        resolver: MailboxResolver[MainLoopResult[ReviewResponse]] = RegistryResolver(
-            {"responses": responses}
-        )
         requests: InMemoryMailbox[
             MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
-        ] = InMemoryMailbox(name="requests", reply_resolver=resolver)
+        ] = InMemoryMailbox(name="requests")
         loop = CodeReviewLoop(adapter=adapter, requests=requests)
         # Run in background thread
         thread = threading.Thread(target=lambda: loop.run(max_iterations=None))
         thread.start()
+        # Send request with reply_to mailbox instance
+        params = ReviewTurnParams(request="Review the latest changes")
+        requests.send(MainLoopRequest(request=params), reply_to=responses)
     """
 
     _persistent_session: Session
@@ -352,12 +351,7 @@ class CodeReviewApp:
         self._shutdown_requested = False
         # Create mailboxes with reply routing
         self._responses = InMemoryMailbox(name="code-review-responses")
-        resolver: MailboxResolver[MainLoopResult[ReviewResponse]] = RegistryResolver(
-            {"code-review-responses": self._responses}
-        )
-        self._requests = InMemoryMailbox(
-            name="code-review-requests", reply_resolver=resolver
-        )
+        self._requests = InMemoryMailbox(name="code-review-requests")
         self._loop = CodeReviewLoop(
             adapter=adapter,
             requests=self._requests,
@@ -458,7 +452,7 @@ class CodeReviewApp:
                     deadline=_default_deadline(),
                 )
                 self._pending_requests[request_event.request_id] = user_prompt
-                self._requests.send(request_event, reply_to="code-review-responses")
+                self._requests.send(request_event, reply_to=self._responses)
                 print("Processing request...")
 
                 # Wait for response

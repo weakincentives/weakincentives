@@ -2539,7 +2539,7 @@ eval_requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMail
 eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=cast(Evaluator, exact_match),  # Cast for strict type compatibility
-    requests=eval_requests,
+    requests=eval_requests,  # type: ignore[arg-type]
 )
 ```
 
@@ -2553,19 +2553,14 @@ from weakincentives.runtime.mailbox import InMemoryMailbox, RegistryResolver
 # Dataset defined in your application
 eval_dataset: Dataset[str, str] = ...  # type: ignore[assignment]
 
-# Results mailbox with resolver for reply_to routing
+# Create mailboxes
+eval_requests_mailbox: InMemoryMailbox[Any, Any] = InMemoryMailbox(name="eval-requests")
 eval_results_mailbox: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
     name="eval-results"
 )
-results_resolver = RegistryResolver({"eval-results": eval_results_mailbox})
 
-# Configure eval_requests with reply resolver
-eval_requests_with_reply: InMemoryMailbox[Any, Any] = InMemoryMailbox(
-    name="eval-requests", reply_resolver=results_resolver
-)
-
-# Submit all samples to the requests mailbox (sets reply_to="eval-results")
-submit_dataset(eval_dataset, eval_requests_with_reply)  # type: ignore[arg-type]
+# Submit all samples to the requests mailbox with reply_to mailbox reference
+submit_dataset(eval_dataset, eval_requests_mailbox, reply_to=eval_results_mailbox)  # type: ignore[arg-type]
 
 # Run the evaluation worker
 eval_loop.run(max_iterations=1)
@@ -2672,24 +2667,20 @@ def process(body: Any) -> Any:
     ...  # type: ignore[empty-body]
 
 # Setup: resolver maps identifiers to mailboxes
+# Create request and response mailboxes
+requests: InMemoryMailbox[Any, Any] = InMemoryMailbox(name="requests")
 client_responses: InMemoryMailbox[Any, None] = InMemoryMailbox(name="client-123")
-reply_router = RegistryResolver({"client-123": client_responses})
 
-# Requests mailbox with reply resolver attached
-requests: InMemoryMailbox[Any, Any] = InMemoryMailbox(
-    name="requests", reply_resolver=reply_router
-)
-
-# Client sends request with reply destination
+# Client sends request with reply_to mailbox reference
 requests.send(
     body=AnalysisRequest(query="Find all bugs"),  # type: ignore[arg-type]
-    reply_to="client-123",  # Where to send the result
+    reply_to=client_responses,  # Mailbox to send the result to
 )
 
 # Worker processes and replies
 for msg in requests.receive():
     result = process(msg.body)
-    msg.reply(result)       # Resolves "client-123" → client_responses mailbox
+    msg.reply(result)       # Sends directly to client_responses mailbox
     msg.acknowledge()
 ```
 
@@ -2708,7 +2699,7 @@ from weakincentives.runtime.mailbox import CompositeResolver
 redis_client: Any = ...  # type: ignore[assignment]
 eval_samples: list[Sample[str, str]] = []
 
-# Factory creates mailboxes on demand
+# Factory creates mailboxes on demand for reconstructing from names
 factory: RedisMailboxFactory[Any] = RedisMailboxFactory(client=redis_client)
 redis_resolver: CompositeResolver[Any] = CompositeResolver(registry={}, factory=factory)
 
@@ -2716,16 +2707,20 @@ redis_requests: RedisMailbox[Any, Any] = RedisMailbox(
     name="eval-requests", client=redis_client, reply_resolver=redis_resolver
 )
 
-# Submit all samples with the same reply destination
+# Create run-specific results mailbox
 run_id = f"eval-run-{uuid4()}"
+results_mailbox: RedisMailbox[Any, None] = RedisMailbox(
+    name=run_id, client=redis_client
+)
+
+# Submit all samples with mailbox reference (name serialized to Redis)
 for sample in eval_samples:
     redis_requests.send(
         body=EvalRequest(sample=sample),  # type: ignore[arg-type]
-        reply_to=run_id,  # All results go to same mailbox
+        reply_to=results_mailbox,  # All results go to same mailbox
     )
 
-# Collect results from the run-specific mailbox
-results_mailbox = factory.create(run_id)
+# Collect results from the results mailbox
 collected: list[Any] = []
 while len(collected) < len(eval_samples):
     for msg in results_mailbox.receive(wait_time_seconds=5):

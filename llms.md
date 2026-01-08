@@ -1000,14 +1000,14 @@ requests: InMemoryMailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
 )
 responses: InMemoryMailbox[MainLoopResult, None] = InMemoryMailbox(name="responses")
 
-# Send request with reply routing
+# Send request with reply_to mailbox reference
 requests.send(
     MainLoopRequest(
         request=ReviewRequest(...),
         budget=Budget(max_total_tokens=10000),  # Overrides config default
         deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5)),
     ),
-    reply_to="responses",
+    reply_to=responses,  # Direct mailbox reference
 )
 
 # MainLoop processes from requests mailbox and replies via msg.reply()
@@ -1129,28 +1129,27 @@ for msg in messages:
 
 ### Reply-to routing
 
-Workers can send results to dynamic destinations derived from incoming messages:
+Workers send results to the reply_to mailbox instance:
 
 ```python
-from weakincentives.runtime.mailbox import InMemoryMailbox, RegistryResolver
+from weakincentives.runtime.mailbox import InMemoryMailbox
 
-# Setup resolver mapping identifiers to mailboxes
+# Create mailboxes
+requests = InMemoryMailbox(name="requests")
 responses = InMemoryMailbox(name="client-responses")
-resolver = RegistryResolver({"client-123": responses})
 
-requests = InMemoryMailbox(name="requests", reply_resolver=resolver)
+# Client sends with reply_to mailbox reference
+requests.send(body=Request(...), reply_to=responses)
 
-# Client sends with reply destination
-requests.send(body=Request(...), reply_to="client-123")
-
-# Worker replies - resolver routes to correct mailbox
+# Worker replies - sends directly to responses mailbox
 for msg in requests.receive():
-    msg.reply(process(msg.body))  # Resolves "client-123" → responses mailbox
+    msg.reply(process(msg.body))  # Calls responses.send() directly
     msg.acknowledge()
 ```
 
-For dynamic mailbox creation (e.g., per-request reply queues), use
-`CompositeResolver` with a `MailboxFactory`. See `specs/MAILBOX_RESOLVER.md`.
+For Redis mailboxes (where mailbox references can't be serialized), use
+`reply_resolver` to reconstruct mailboxes from stored names. See
+`specs/MAILBOX_RESOLVER.md`.
 
 ## Serialization (`weakincentives.serde`)
 

@@ -26,6 +26,7 @@ from weakincentives.runtime.mailbox import (
     CompositeResolver,
     FakeMailbox,
     InMemoryMailbox,
+    InMemoryMailboxFactory,
     Mailbox,
     MailboxConnectionError,
     MailboxFactory,
@@ -121,15 +122,14 @@ def test_message_reply_without_reply_to_raises() -> None:
 
 def test_message_reply_after_acknowledge_raises() -> None:
     """Message.reply() raises MessageFinalizedError after acknowledge."""
-    replies = []
+    responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
         enqueued_at=time.time(),  # type: ignore[arg-type]
-        reply_to="responses",
-        _reply_fn=lambda body: (replies.append(body), "reply-id")[1],
+        reply_to=responses,
     )
 
     msg.acknowledge()
@@ -140,15 +140,14 @@ def test_message_reply_after_acknowledge_raises() -> None:
 
 def test_message_reply_after_nack_raises() -> None:
     """Message.reply() raises MessageFinalizedError after nack."""
-    replies = []
+    responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
         enqueued_at=time.time(),  # type: ignore[arg-type]
-        reply_to="responses",
-        _reply_fn=lambda body: (replies.append(body), "reply-id")[1],
+        reply_to=responses,
     )
 
     msg.nack(visibility_timeout=0)
@@ -159,7 +158,7 @@ def test_message_reply_after_nack_raises() -> None:
 
 def test_message_reply_success() -> None:
     """Message.reply() sends to reply_to destination."""
-    replies: list[str] = []
+    responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
 
     msg: Message[str, str] = Message(
         id="msg-1",
@@ -167,13 +166,13 @@ def test_message_reply_success() -> None:
         receipt_handle="handle-1",
         delivery_count=1,
         enqueued_at=time.time(),  # type: ignore[arg-type]
-        reply_to="responses",
-        _reply_fn=lambda body: (replies.append(body), "reply-id")[1],
+        reply_to=responses,
     )
 
     result_id = msg.reply("response-body")
-    assert result_id == "reply-id"
-    assert replies == ["response-body"]
+    assert isinstance(result_id, str)
+    assert len(result_id) > 0
+    assert responses.sent == ["response-body"]
 
 
 # =============================================================================
@@ -211,13 +210,15 @@ class TestInMemoryMailbox:  # noqa: PLR0904
     def test_send_with_reply_to(self) -> None:
         """send() accepts reply_to parameter."""
         mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
+        responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
         try:
-            mailbox.send("hello", reply_to="responses")
+            mailbox.send("hello", reply_to=responses)
             messages = mailbox.receive(max_messages=1)
             assert len(messages) == 1
-            assert messages[0].reply_to == "responses"
+            assert messages[0].reply_to is responses
         finally:
             mailbox.close()
+            responses.close()
 
     def test_receive_empty_queue(self) -> None:
         """receive() returns empty list when queue is empty."""
@@ -476,15 +477,12 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_reply_with_resolver(self) -> None:
-        """Message.reply() resolves via reply_resolver."""
+    def test_reply_with_mailbox_reference(self) -> None:
+        """Message.reply() sends directly to reply_to mailbox."""
         responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
-        resolver = RegistryResolver[str]({"responses": responses})
-        requests: InMemoryMailbox[str, str] = InMemoryMailbox(
-            name="requests", reply_resolver=resolver
-        )
+        requests: InMemoryMailbox[str, str] = InMemoryMailbox(name="requests")
         try:
-            requests.send("hello", reply_to="responses")
+            requests.send("hello", reply_to=responses)
             messages = requests.receive(max_messages=1)
             assert len(messages) == 1
 
@@ -501,34 +499,31 @@ class TestInMemoryMailbox:  # noqa: PLR0904
             requests.close()
             responses.close()
 
-    def test_reply_auto_creates_response_mailbox(self) -> None:
-        """Reply auto-creates response mailbox via default resolver."""
-        mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
+    def test_reply_sends_directly_to_mailbox(self) -> None:
+        """Reply sends directly to the reply_to mailbox reference."""
+        requests: InMemoryMailbox[str, str] = InMemoryMailbox(name="requests")
+        responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
         try:
-            # Send with reply_to - auto-creates response mailbox
-            mailbox.send("hello", reply_to="responses")
-            messages = mailbox.receive(max_messages=1)
+            # Send with reply_to mailbox reference
+            requests.send("hello", reply_to=responses)
+            messages = requests.receive(max_messages=1)
 
-            # Reply should work - resolver auto-created
+            # Reply should send directly to responses mailbox
             messages[0].reply("response")
             messages[0].acknowledge()
 
-            # Response mailbox should be accessible via resolver
-            responses = mailbox.resolver.resolve("responses")
+            # Response should be in the responses mailbox
             response_msgs = responses.receive(max_messages=1)
             assert len(response_msgs) == 1
             assert response_msgs[0].body == "response"
             response_msgs[0].acknowledge()
         finally:
-            mailbox.close()
+            requests.close()
+            responses.close()
 
     def test_reply_without_reply_to_raises(self) -> None:
         """Message.reply() raises when no reply_to specified."""
-        responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
-        resolver = RegistryResolver[str]({"responses": responses})
-        mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(
-            name="test", reply_resolver=resolver
-        )
+        mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
         try:
             # Send without reply_to
             mailbox.send("hello")
@@ -538,25 +533,6 @@ class TestInMemoryMailbox:  # noqa: PLR0904
                 messages[0].reply("response")
         finally:
             mailbox.close()
-            responses.close()
-
-    def test_reply_with_unknown_reply_to_raises(self) -> None:
-        """Message.reply() raises when reply_to cannot be resolved."""
-        responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
-        resolver = RegistryResolver[str]({"responses": responses})
-        mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(
-            name="test", reply_resolver=resolver
-        )
-        try:
-            # Send with unknown reply_to
-            mailbox.send("hello", reply_to="unknown-mailbox")
-            messages = mailbox.receive(max_messages=1)
-
-            with pytest.raises(ReplyNotAvailableError, match="Cannot resolve"):
-                messages[0].reply("response")
-        finally:
-            mailbox.close()
-            responses.close()
 
 
 # =============================================================================
@@ -831,69 +807,49 @@ class TestFakeMailbox:
     def test_send_with_reply_to(self) -> None:
         """send() accepts reply_to parameter."""
         mailbox: FakeMailbox[str, str] = FakeMailbox()
-        mailbox.send("hello", reply_to="responses")
+        responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
+        mailbox.send("hello", reply_to=responses)
         messages = mailbox.receive(max_messages=1)
-        assert messages[0].reply_to == "responses"
+        assert messages[0].reply_to is responses
 
     def test_inject_message_with_reply_to(self) -> None:
         """inject_message() accepts reply_to parameter."""
         mailbox: FakeMailbox[str, str] = FakeMailbox()
-        mailbox.inject_message("test", reply_to="responses")
+        responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
+        mailbox.inject_message("test", reply_to=responses)
         messages = mailbox.receive(max_messages=1)
-        assert messages[0].reply_to == "responses"
+        assert messages[0].reply_to is responses
 
 
 # =============================================================================
-# FakeMailbox Reply Error Tests
+# FakeMailbox Reply Tests
 # =============================================================================
 
 
 def test_fake_mailbox_reply_without_reply_to_raises() -> None:
     """FakeMailbox Message.reply() raises when no reply_to specified."""
-    responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
-    resolver = RegistryResolver[str]({"responses": responses})
-    mailbox: FakeMailbox[str, str] = FakeMailbox(name="test", reply_resolver=resolver)
-    try:
-        # Send without reply_to
-        mailbox.send("hello")
-        messages = mailbox.receive(max_messages=1)
-
-        with pytest.raises(ReplyNotAvailableError, match="no reply_to"):
-            messages[0].reply("response")
-    finally:
-        responses.close()
-
-
-def test_fake_mailbox_reply_auto_creates_collecting_mailbox() -> None:
-    """FakeMailbox auto-creates CollectingMailbox for reply_to identifiers."""
     mailbox: FakeMailbox[str, str] = FakeMailbox(name="test")
-    mailbox.send("hello", reply_to="responses")
+    # Send without reply_to
+    mailbox.send("hello")
     messages = mailbox.receive(max_messages=1)
 
-    # Reply should work - auto-creates CollectingMailbox
+    with pytest.raises(ReplyNotAvailableError, match="no reply_to"):
+        messages[0].reply("response")
+
+
+def test_fake_mailbox_reply_sends_to_mailbox() -> None:
+    """FakeMailbox reply sends to the reply_to mailbox."""
+    mailbox: FakeMailbox[str, str] = FakeMailbox(name="test")
+    responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
+    mailbox.send("hello", reply_to=responses)
+    messages = mailbox.receive(max_messages=1)
+
+    # Reply should send directly to responses mailbox
     messages[0].reply("response")
     messages[0].acknowledge()
 
-    # Response mailbox should be a CollectingMailbox
-    responses = mailbox.resolver.resolve("responses")
-    assert hasattr(responses, "sent")  # CollectingMailbox has sent attribute
+    # Response should be in the CollectingMailbox
     assert responses.sent == ["response"]
-
-
-def test_fake_mailbox_reply_with_unknown_reply_to_raises() -> None:
-    """FakeMailbox Message.reply() raises when reply_to cannot be resolved."""
-    responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
-    resolver = RegistryResolver[str]({"responses": responses})
-    mailbox: FakeMailbox[str, str] = FakeMailbox(name="test", reply_resolver=resolver)
-    try:
-        # Send with unknown reply_to
-        mailbox.send("hello", reply_to="unknown-mailbox")
-        messages = mailbox.receive(max_messages=1)
-
-        with pytest.raises(ReplyNotAvailableError, match="Cannot resolve"):
-            messages[0].reply("response")
-    finally:
-        responses.close()
 
 
 # =============================================================================
@@ -1305,3 +1261,43 @@ class TestParameterValidation:
 
         with pytest.raises(InvalidParameterError):
             mailbox.receive(wait_time_seconds=-1)
+
+
+# =============================================================================
+# InMemoryMailboxFactory Tests
+# =============================================================================
+
+
+class TestInMemoryMailboxFactory:
+    """Tests for InMemoryMailboxFactory."""
+
+    def test_factory_creates_mailbox(self) -> None:
+        """Factory creates an InMemoryMailbox instance."""
+        factory: InMemoryMailboxFactory[str] = InMemoryMailboxFactory()
+        mailbox = factory.create("test-queue")
+        try:
+            assert mailbox.name == "test-queue"
+            # Verify it's functional
+            mailbox.send("hello")
+            msgs = mailbox.receive()
+            assert len(msgs) == 1
+            assert msgs[0].body == "hello"
+            msgs[0].acknowledge()
+        finally:
+            mailbox.close()
+
+    def test_factory_caches_mailbox_with_shared_registry(self) -> None:
+        """Factory caches mailbox when shared registry is provided."""
+        registry: dict[str, Mailbox[str, None]] = {}
+        factory: InMemoryMailboxFactory[str] = InMemoryMailboxFactory(registry=registry)
+
+        mailbox1 = factory.create("test-queue")
+        mailbox2 = factory.create("test-queue")
+
+        try:
+            # Same mailbox instance is returned
+            assert mailbox1 is mailbox2
+            assert "test-queue" in registry
+            assert registry["test-queue"] is mailbox1
+        finally:
+            mailbox1.close()

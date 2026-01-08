@@ -31,13 +31,18 @@ class Mailbox(Protocol[T, R]):
         R: Reply type (None if no replies expected).
     """
 
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    @property
+    def name(self) -> str:
+        """Unique identifier for this mailbox."""
+        ...
+
+    def send(self, body: T, *, reply_to: Mailbox[R, None] | None = None) -> str:
         """Enqueue a message.
 
         Args:
             body: Message payload (must be serializable).
-            reply_to: Identifier for response mailbox. Workers resolve this
-                via Message.reply().
+            reply_to: Mailbox instance for receiving replies. Workers access
+                this via Message.reply_to and call Message.reply() to respond.
 
         Returns:
             Message ID.
@@ -105,10 +110,10 @@ class Message(Generic[T, R]):
     receipt_handle: str
     delivery_count: int
     enqueued_at: datetime
-    reply_to: str | None
+    reply_to: Mailbox[R, None] | None
 
     def reply(self, body: R) -> str:
-        """Send reply to reply_to destination. Multiple replies allowed."""
+        """Send reply to reply_to mailbox. Multiple replies allowed."""
         ...
 
     def acknowledge(self) -> None:
@@ -163,34 +168,22 @@ require the current handle; after timeout, old handles become invalid.
 
 ## Reply Pattern
 
-Workers send responses via `Message.reply()`, which resolves the destination
-mailbox internally. Multiple replies are permitted before acknowledgment.
+Workers send responses via `Message.reply()`, which sends directly to the
+`reply_to` mailbox instance. Multiple replies are permitted before acknowledgment.
 
 ### Setup
 
 ```python
-# Registry for resolving reply_to identifiers
-registry: dict[str, Mailbox] = {"responses": InMemoryMailbox(name="responses")}
-
-# Request mailbox with resolver
-requests: Mailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(
-    name="requests",
-    reply_resolver=RegistryResolver(registry),
-)
+# Create request and response mailboxes
+requests: Mailbox[MainLoopRequest, MainLoopResult] = InMemoryMailbox(name="requests")
+responses: Mailbox[MainLoopResult, None] = InMemoryMailbox(name="responses")
 ```
-
-**Important:** Resolvers should cache mailbox instances to avoid resource leaks.
-See `specs/MAILBOX_RESOLVER.md` for resolver patterns.
 
 ### Client
 
 ```python
-# Create dedicated response queue
-responses: Mailbox[MainLoopResult, None] = InMemoryMailbox(name="my-responses")
-registry["my-responses"] = responses
-
-# Send request
-requests.send(MainLoopRequest(request=data), reply_to="my-responses")
+# Send request with reply_to mailbox reference
+requests.send(MainLoopRequest(request=data), reply_to=responses)
 
 # Collect response
 for msg in responses.receive(wait_time_seconds=20):
@@ -204,7 +197,7 @@ for msg in responses.receive(wait_time_seconds=20):
 for msg in requests.receive(visibility_timeout=300, wait_time_seconds=20):
     try:
         result = process(msg.body)
-        msg.reply(result)
+        msg.reply(result)  # Sends directly to msg.reply_to mailbox
         msg.acknowledge()
     except ReplyNotAvailableError:
         log.warning("No reply_to", msg_id=msg.id)
@@ -253,16 +246,15 @@ This prevents:
 
 ### Eval Run Collection
 
-All samples specify the same `reply_to`. Results collect into one mailbox
+All samples specify the same `reply_to` mailbox. Results collect into one mailbox
 regardless of which worker processes each sample:
 
 ```python
 run_id = uuid4()
 results: Mailbox[MainLoopResult, None] = InMemoryMailbox(name=f"eval-{run_id}")
-registry[f"eval-{run_id}"] = results
 
 for sample in dataset:
-    requests.send(MainLoopRequest(request=sample.input), reply_to=f"eval-{run_id}")
+    requests.send(MainLoopRequest(request=sample.input), reply_to=results)
 
 collected = []
 while len(collected) < len(dataset):
@@ -364,11 +356,11 @@ mailbox.set_connection_error(...)          # Simulate failure
 ### Testing Reply
 
 ```python
-def test_reply_sends_to_resolved_mailbox():
-    responses = CollectingMailbox()
-    requests = InMemoryMailbox(reply_resolver={"responses": responses}.get)
+def test_reply_sends_to_mailbox():
+    responses = CollectingMailbox(name="responses")
+    requests = InMemoryMailbox(name="requests")
 
-    requests.send("hello", reply_to="responses")
+    requests.send("hello", reply_to=responses)
     msg = requests.receive()[0]
     msg.reply("world")
     msg.acknowledge()
@@ -377,7 +369,8 @@ def test_reply_sends_to_resolved_mailbox():
 
 
 def test_multiple_replies_allowed():
-    msg = receive_message(reply_to="responses")
+    responses = CollectingMailbox(name="responses")
+    msg = receive_message(reply_to=responses)
     msg.reply(1)
     msg.reply(2)
     msg.reply(3)
@@ -385,7 +378,8 @@ def test_multiple_replies_allowed():
 
 
 def test_reply_after_finalization_raises():
-    msg = receive_message(reply_to="responses")
+    responses = CollectingMailbox(name="responses")
+    msg = receive_message(reply_to=responses)
     msg.acknowledge()
 
     with pytest.raises(MessageFinalizedError):

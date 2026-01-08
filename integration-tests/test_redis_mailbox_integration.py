@@ -407,19 +407,65 @@ class TestRedisMailboxStandalone:
             finally:
                 mailbox.close()
 
-    def test_send_with_reply_to(self) -> None:
-        """send() accepts reply_to parameter."""
+    def test_send_serializes_reply_to_name_without_resolver(self) -> None:
+        """send() serializes reply_to mailbox name; without resolver it stays None."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-reply-to", client=client, body_type=str
             )
+            responses: RedisMailbox[None, None] = RedisMailbox(
+                name="responses", client=client
+            )
             try:
-                mailbox.send("hello", reply_to="responses")
+                mailbox.send("hello", reply_to=responses)
                 messages = mailbox.receive(max_messages=1)
                 assert len(messages) == 1
-                assert messages[0].reply_to == "responses"
+                # reply_to is None because no resolver is configured to reconstruct
+                # the mailbox from the serialized name
+                assert messages[0].reply_to is None
             finally:
                 mailbox.close()
+                responses.close()
+
+    def test_send_with_reply_to_round_trip(self) -> None:
+        """send() with reply_to allows message.reply() when resolver configured."""
+        from weakincentives.runtime.mailbox import CompositeResolver
+
+        with redis_standalone() as client:
+            # Create response mailbox first
+            responses: RedisMailbox[str, None] = RedisMailbox(
+                name="responses", client=client, body_type=str
+            )
+            # Create resolver that knows about the responses mailbox
+            resolver = CompositeResolver[str](
+                registry={"responses": responses},
+                factory=None,
+            )
+            # Create request mailbox with resolver
+            requests: RedisMailbox[str, str] = RedisMailbox(
+                name="test-reply-roundtrip",
+                client=client,
+                body_type=str,
+                reply_resolver=resolver,
+            )
+            try:
+                requests.send("hello", reply_to=responses)
+                messages = requests.receive(max_messages=1)
+                assert len(messages) == 1
+                # reply_to should be resolved to the actual mailbox
+                assert messages[0].reply_to is not None
+                assert messages[0].reply_to.name == "responses"
+                # Should be able to reply
+                messages[0].reply("world")
+                messages[0].acknowledge()
+                # Check the reply arrived
+                reply_msgs = responses.receive(max_messages=1)
+                assert len(reply_msgs) == 1
+                assert reply_msgs[0].body == "world"
+                reply_msgs[0].acknowledge()
+            finally:
+                requests.close()
+                responses.close()
 
     def test_long_poll_wait_time(self) -> None:
         """wait_time_seconds blocks until message arrives."""

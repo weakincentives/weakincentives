@@ -158,8 +158,8 @@ class Message[T, R]:
     enqueued_at: datetime
     """Timestamp when message was originally sent (UTC)."""
 
-    reply_to: str | None = None
-    """Identifier for response mailbox. Workers resolve this via reply()."""
+    reply_to: Mailbox[R, None] | None = None
+    """Mailbox instance for sending replies. Workers call reply() to send responses."""
 
     _acknowledge_fn: Callable[[], None] = field(
         default=lambda: None, repr=False, compare=False
@@ -176,20 +176,14 @@ class Message[T, R]:
     )
     """Internal callback for extend_visibility operation."""
 
-    _reply_fn: Callable[[R], str] = field(
-        default=lambda _: "", repr=False, compare=False
-    )
-    """Internal callback for reply operation."""
-
     _finalized: bool = field(default=False, repr=False, compare=False)
     """True if message has been acknowledged or nacked."""
 
     def reply(self, body: R) -> str:
-        """Send reply to reply_to destination.
+        """Send reply to reply_to mailbox.
 
         Multiple replies are allowed before finalization (acknowledge/nack).
-        The reply_to identifier is resolved internally via the mailbox's
-        reply_resolver.
+        The reply is sent directly to the reply_to mailbox instance.
 
         Args:
             body: Reply payload to send.
@@ -199,7 +193,7 @@ class Message[T, R]:
 
         Raises:
             MessageFinalizedError: Message already acknowledged or nacked.
-            ReplyNotAvailableError: No reply_to specified or cannot resolve.
+            ReplyNotAvailableError: No reply_to mailbox specified.
         """
         if self._finalized:
             raise MessageFinalizedError(
@@ -207,7 +201,7 @@ class Message[T, R]:
             )
         if self.reply_to is None:
             raise ReplyNotAvailableError(f"Message '{self.id}' has no reply_to")
-        return self._reply_fn(body)
+        return self.reply_to.send(body)
 
     def acknowledge(self) -> None:
         """Delete the message from the queue.
@@ -278,18 +272,27 @@ class Mailbox[T, R](Protocol):
 
     @property
     @abstractmethod
+    def name(self) -> str:
+        """Unique identifier for this mailbox.
+
+        Used for serialization in distributed implementations (e.g., Redis).
+        """
+        ...
+
+    @property
+    @abstractmethod
     def closed(self) -> bool:
         """Return True if the mailbox has been closed."""
         ...
 
     @abstractmethod
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    def send(self, body: T, *, reply_to: Mailbox[R, None] | None = None) -> str:
         """Enqueue a message.
 
         Args:
             body: Message payload (must be serializable).
-            reply_to: Identifier for response mailbox. Workers resolve this
-                via Message.reply().
+            reply_to: Mailbox instance for receiving replies. Workers access this
+                via Message.reply_to and call Message.reply() to send responses.
 
         Returns:
             Message ID (unique within this queue).

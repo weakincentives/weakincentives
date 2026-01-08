@@ -2,20 +2,26 @@
 
 ## Purpose
 
-`MailboxResolver` provides service discovery for mailbox instances, enabling
-dynamic reply routing via string identifiers. This abstraction sits between
-the `Message.reply()` API and backend-specific mailbox construction.
+`MailboxResolver` enables reconstruction of mailbox instances from string
+identifiers in distributed systems. This is primarily used by Redis mailboxes
+where the `reply_to` mailbox reference cannot be serialized directly—only
+the mailbox name is stored in Redis.
 
 ```python
-# Worker sends reply - resolution happens internally
-for msg in requests.receive(visibility_timeout=300):
-    result = process(msg.body)
-    msg.reply(result)  # Resolves reply_to → Mailbox internally
-    msg.acknowledge()
+# Direct mailbox references (in-memory)
+requests.send("hello", reply_to=responses)  # Direct reference
+msg.reply(result)  # Calls responses.send() directly
+
+# Redis: name serialized, resolver reconstructs mailbox on receive
+redis_requests.send("hello", reply_to=redis_responses)  # Stores "responses"
+msg.reply(result)  # Resolver reconstructs mailbox from stored name
 ```
 
-**Use MailboxResolver for:** Dynamic reply routing, multi-tenant mailbox
-discovery, backend-agnostic mailbox construction from string identifiers.
+**Use MailboxResolver for:** Redis/distributed mailbox backends where mailbox
+names are serialized and must be reconstructed on receive.
+
+**Use direct Mailbox references for:** In-memory mailboxes where the actual
+mailbox instance can be stored and passed to Message.reply_to.
 
 **Use ResourceRegistry for:** Static dependency injection with scope-aware
 lifecycle management (singletons, per-tool instances).
@@ -120,7 +126,7 @@ class MailboxResolutionError(MailboxError):
 
 ## Message Integration
 
-`Message.reply()` uses a bound callback that was set at receive time:
+`Message.reply()` sends directly to the `reply_to` mailbox instance:
 
 ```python
 def reply(self, body: R) -> str:
@@ -128,19 +134,32 @@ def reply(self, body: R) -> str:
         raise MessageFinalizedError(...)
     if self.reply_to is None:
         raise ReplyNotAvailableError(...)
-    return self._reply_fn(body)  # Callback resolves and sends
+    return self.reply_to.send(body)  # Direct mailbox call
 
 def acknowledge(self) -> None:
     self._acknowledge_fn()
     self._finalized = True
 ```
 
-Mailboxes bind their resolver to messages at receive time via the `_reply_fn` callback:
+For in-memory mailboxes, the `reply_to` mailbox is stored directly:
 
 ```python
-requests = InMemoryMailbox(reply_resolver=resolver)
-msg = requests.receive()[0]  # msg._reply_fn bound to resolver
-msg.reply(result)            # Callback resolves reply_to and sends
+# In-memory: direct reference stored
+requests = InMemoryMailbox(name="requests")
+responses = InMemoryMailbox(name="responses")
+requests.send("hello", reply_to=responses)
+msg = requests.receive()[0]  # msg.reply_to is responses mailbox
+msg.reply(result)            # Calls responses.send(result) directly
+```
+
+For Redis mailboxes, the resolver reconstructs the mailbox from the stored name:
+
+```python
+# Redis: name serialized, resolver reconstructs on receive
+redis_requests = RedisMailbox(name="requests", reply_resolver=resolver)
+requests.send("hello", reply_to=redis_responses)  # Stores "responses" name
+msg = requests.receive()[0]  # resolver.resolve("responses") → mailbox
+msg.reply(result)            # Calls reconstructed mailbox.send(result)
 ```
 
 ## Backend Factories
@@ -176,19 +195,36 @@ class URIMailboxFactory[T]:
 
 ## Usage Patterns
 
-### Basic Reply
+### Basic Reply (In-Memory)
 
 ```python
-# Setup
-registry = {"responses": InMemoryMailbox()}
-requests = InMemoryMailbox(reply_resolver=RegistryResolver(registry))
+# Setup - direct mailbox references
+requests = InMemoryMailbox(name="requests")
+responses = InMemoryMailbox(name="responses")
 
-# Client
-requests.send(Request(...), reply_to="responses")
+# Client - pass mailbox reference
+requests.send(Request(...), reply_to=responses)
 
-# Worker
+# Worker - reply_to is the actual mailbox instance
 for msg in requests.receive():
-    msg.reply(process(msg.body))
+    msg.reply(process(msg.body))  # Sends directly to responses
+    msg.acknowledge()
+```
+
+### Basic Reply (Redis)
+
+```python
+# Setup - resolver needed for reconstruction
+resolver = CompositeResolver(registry={}, factory=RedisMailboxFactory(client))
+requests = RedisMailbox(name="requests", client=client, reply_resolver=resolver)
+responses = RedisMailbox(name="responses", client=client)
+
+# Client - pass mailbox reference (name serialized to Redis)
+requests.send(Request(...), reply_to=responses)
+
+# Worker - resolver reconstructs mailbox from stored name
+for msg in requests.receive():
+    msg.reply(process(msg.body))  # Resolved mailbox receives reply
     msg.acknowledge()
 ```
 
@@ -202,19 +238,20 @@ for msg in requests.receive():
     msg.acknowledge()
 ```
 
-### Dynamic Reply Queues
+### Dynamic Reply Queues (Redis)
 
 ```python
-# Factory creates mailboxes on demand
-resolver = CompositeResolver(registry={}, factory=RedisMailboxFactory(...))
-requests = RedisMailbox(reply_resolver=resolver)
+# Factory creates mailboxes on demand for unique client queues
+resolver = CompositeResolver(registry={}, factory=RedisMailboxFactory(client))
+requests = RedisMailbox(name="requests", reply_resolver=resolver)
 
-# Client uses unique reply queue
-requests.send(Request(...), reply_to=f"client-{uuid4()}")
+# Client creates unique reply mailbox
+client_responses = RedisMailbox(name=f"client-{uuid4()}", client=client)
+requests.send(Request(...), reply_to=client_responses)
 
-# Worker resolves dynamically - factory creates if not cached
+# Worker - factory reconstructs from stored name
 for msg in requests.receive():
-    msg.reply(result)  # Resolves "client-xxx" → new RedisMailbox
+    msg.reply(result)  # Factory creates mailbox for "client-xxx"
     msg.acknowledge()
 ```
 
@@ -259,15 +296,14 @@ def my_tool(params, *, context):
 
 ## Testing
 
-### Testing Reply
+### Testing Reply (In-Memory)
 
 ```python
-def test_reply_resolves_and_sends():
-    responses = CollectingMailbox()
-    resolver = RegistryResolver({"responses": responses})
-    requests = InMemoryMailbox(reply_resolver=resolver)
+def test_reply_sends_to_mailbox():
+    responses = CollectingMailbox(name="responses")
+    requests = InMemoryMailbox(name="requests")
 
-    requests.send("hello", reply_to="responses")
+    requests.send("hello", reply_to=responses)
     msg = requests.receive()[0]
     msg.reply("world")
     msg.acknowledge()
@@ -276,11 +312,10 @@ def test_reply_resolves_and_sends():
 
 
 def test_reply_after_ack_raises():
-    responses = CollectingMailbox()
-    resolver = RegistryResolver({"responses": responses})
-    requests = InMemoryMailbox(reply_resolver=resolver)
+    responses = CollectingMailbox(name="responses")
+    requests = InMemoryMailbox(name="requests")
 
-    requests.send("hello", reply_to="responses")
+    requests.send("hello", reply_to=responses)
     msg = requests.receive()[0]
     msg.acknowledge()
 
@@ -290,6 +325,9 @@ def test_reply_after_ack_raises():
 
 ## Limitations
 
+- **Redis-specific**: In-memory mailboxes don't need resolvers—they store
+  direct mailbox references. Resolvers are only needed for distributed
+  backends where mailbox instances can't be serialized.
 - **No caching**: Factory creates new mailbox on each resolution. Callers
   should cache or use registry for repeated access to same identifier.
 - **Single type parameter**: Resolver is typed for one reply type. Use

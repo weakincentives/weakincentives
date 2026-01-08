@@ -33,14 +33,14 @@ Example::
 
     from weakincentives.runtime.mailbox import InMemoryMailbox
 
-    # Create request mailbox - response mailboxes auto-created on send
+    # Create request and response mailboxes
     requests = InMemoryMailbox(name="requests")
+    responses = InMemoryMailbox(name="responses")
 
-    # Client: send request with reply_to (auto-creates response mailbox)
-    requests.send("process this", reply_to="my-responses")
-    responses = requests.resolver.resolve("my-responses")
+    # Client: send request with reply_to mailbox reference
+    requests.send("process this", reply_to=responses)
 
-    # Worker: process and reply (routes automatically)
+    # Worker: process and reply (routes directly to mailbox)
     for msg in requests.receive(visibility_timeout=60):
         try:
             result = do_work(msg.body)

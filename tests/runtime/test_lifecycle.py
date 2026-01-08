@@ -39,7 +39,6 @@ from weakincentives.runtime import (
     ShutdownCoordinator,
     wait_until,
 )
-from weakincentives.runtime.mailbox import MailboxResolver, RegistryResolver
 from weakincentives.runtime.session.protocols import SessionProtocol
 
 if TYPE_CHECKING:
@@ -944,9 +943,8 @@ def test_eval_loop_shutdown_stops_loop() -> None:
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
-    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests", reply_resolver=resolver
+        name="eval-requests"
     )
 
     try:
@@ -984,9 +982,8 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Sample, Score
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
-    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests", reply_resolver=resolver
+        name="eval-requests"
     )
 
     try:
@@ -1009,7 +1006,7 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
         # Send multiple samples
         for i in range(3):
             sample = Sample(id=str(i), input=f"input-{i}", expected="success")
-            requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+            requests.send(EvalRequest(sample=sample), reply_to=results)
 
         thread = threading.Thread(
             target=eval_loop.run,
@@ -1037,9 +1034,8 @@ def test_eval_loop_context_manager() -> None:
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
-    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests", reply_resolver=resolver
+        name="eval-requests"
     )
 
     try:
@@ -1071,9 +1067,8 @@ def test_eval_loop_running_property() -> None:
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
-    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests", reply_resolver=resolver
+        name="eval-requests"
     )
 
     try:
