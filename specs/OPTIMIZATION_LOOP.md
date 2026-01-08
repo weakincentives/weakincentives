@@ -264,7 +264,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         prompt_registry: PromptRegistry,
         eval_requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         requests: Mailbox[OptimizeRequest[InputT, ExpectedT], OptimizeResult],
-        reply_mailbox_factory: Callable[[str], Mailbox[EvalResult, None]],
     ) -> None:
         self._strategy = strategy
         self._adapter = adapter
@@ -272,7 +271,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         self._prompts = prompt_registry
         self._eval_requests = eval_requests
         self._requests = requests
-        self._reply_mailbox_factory = reply_mailbox_factory
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
@@ -638,32 +636,30 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         Raises:
             TimeoutError: If not all results received within timeout.
         """
-        # Create reply mailbox via factory (supports distributed deployments)
-        eval_id = f"opt-eval-{experiment.id}"
-        replies = self._reply_mailbox_factory(eval_id)
+        pending: list[Message[EvalRequest[InputT, ExpectedT]]] = []
 
         # Submit all samples with experiment context
         for sample in dataset:
-            self._eval_requests.send(
+            msg = self._eval_requests.send(
                 EvalRequest(sample=sample, experiment=experiment),
-                reply_to=eval_id,
             )
+            pending.append(msg)
 
-        # Collect results from replies with deadline
+        # Collect results via Message.reply() with deadline
         results: list[EvalResult] = []
-        expected = len(dataset)
         deadline = time.monotonic() + timeout
 
-        while len(results) < expected:
+        while len(results) < len(pending):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(
-                    f"Eval timed out: received {len(results)}/{expected} results"
+                    f"Eval timed out: received {len(results)}/{len(pending)} results"
                 )
-            wait_time = min(30, remaining)
-            for msg in replies.receive(wait_time_seconds=int(wait_time)):
-                results.append(msg.body)
-                msg.acknowledge()
+            for msg in pending:
+                if msg.has_reply():
+                    results.append(msg.get_reply())
+
+            time.sleep(min(1.0, remaining))
 
         return EvalReport(results=tuple(results))
 
@@ -767,16 +763,9 @@ from weakincentives.prompt.overrides import RedisPromptOverridesStore
 # Shared override store (all workers use same Redis)
 store = RedisPromptOverridesStore(client=redis)
 
-# Mailboxes with reply resolver
-resolver = RedisMailboxResolver(client=redis)
-eval_requests = RedisMailbox(name="eval-requests", client=redis, reply_resolver=resolver)
-optimize_requests = RedisMailbox(name="optimize-requests", client=redis, reply_resolver=resolver)
-
-# Factory for creating reply mailboxes (registered with resolver)
-def make_reply_mailbox(name: str) -> Mailbox[EvalResult, None]:
-    mailbox = RedisMailbox(name=name, client=redis, reply_resolver=resolver)
-    resolver.register(name, mailbox)
-    return mailbox
+# Mailboxes
+eval_requests = RedisMailbox(name="eval-requests", client=redis)
+optimize_requests = RedisMailbox(name="optimize-requests", client=redis)
 
 # Loops
 main_loop = MyMainLoop(adapter=adapter, bus=bus, overrides_store=store)
@@ -788,7 +777,6 @@ optimize_loop = OptimizeLoop(
     prompt_registry=prompts,
     eval_requests=eval_requests,
     requests=optimize_requests,
-    reply_mailbox_factory=make_reply_mailbox,
 )
 
 # Run all loops
