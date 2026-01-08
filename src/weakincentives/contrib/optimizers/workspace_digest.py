@@ -222,7 +222,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                 expected_hash=section_hash,
                 body=digest,
             )
-            _ = global_store.store(cast(PromptLike, prompt), override, tag=global_tag)
+            _ = global_store.store(descriptor, override, tag=global_tag)
             clear_workspace_digest(outer_session, digest_section.key)
 
         return WorkspaceDigestResult(

@@ -929,7 +929,7 @@ def test_store_section_override_hash_mismatch(tmp_path: Path) -> None:
     )
 
     with pytest.raises(PromptOverridesError, match="Hash mismatch for section"):
-        store.store(prompt, override)
+        store.store(descriptor, override)
 
 
 def test_store_tool_override_hash_mismatch(tmp_path: Path) -> None:
@@ -947,11 +947,12 @@ def test_store_tool_override_hash_mismatch(tmp_path: Path) -> None:
     )
 
     with pytest.raises(PromptOverridesError, match="Hash mismatch for tool"):
-        store.store(prompt, override)
+        store.store(descriptor, override)
 
 
 def test_store_task_example_override(tmp_path: Path) -> None:
     prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     task_override = TaskExampleOverride(
@@ -962,13 +963,14 @@ def test_store_task_example_override(tmp_path: Path) -> None:
         objective="New objective",
     )
 
-    result = store.store(prompt, task_override, tag="latest")
+    result = store.store(descriptor, task_override, tag="latest")
     assert len(result.task_example_overrides) == 1
     assert result.task_example_overrides[0] == task_override
 
 
 def test_store_task_example_override_updates_existing(tmp_path: Path) -> None:
     prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     task_override1 = TaskExampleOverride(
@@ -986,8 +988,8 @@ def test_store_task_example_override_updates_existing(tmp_path: Path) -> None:
         objective="Updated objective",
     )
 
-    store.store(prompt, task_override1, tag="latest")
-    result = store.store(prompt, task_override2, tag="latest")
+    store.store(descriptor, task_override1, tag="latest")
+    result = store.store(descriptor, task_override2, tag="latest")
 
     # Should replace the existing override with same path+index
     assert len(result.task_example_overrides) == 1
@@ -997,6 +999,7 @@ def test_store_task_example_override_updates_existing(tmp_path: Path) -> None:
 
 def test_store_task_example_override_appends_different_index(tmp_path: Path) -> None:
     prompt = _build_prompt()
+    descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     task_override1 = TaskExampleOverride(
@@ -1012,8 +1015,8 @@ def test_store_task_example_override_appends_different_index(tmp_path: Path) -> 
         action="append",
     )
 
-    store.store(prompt, task_override1, tag="latest")
-    result = store.store(prompt, task_override2, tag="latest")
+    store.store(descriptor, task_override1, tag="latest")
+    result = store.store(descriptor, task_override2, tag="latest")
 
     # Should have both overrides since they have different indices
     assert len(result.task_example_overrides) == 2
@@ -1149,7 +1152,7 @@ def test_store_section_with_summary_and_visibility(tmp_path: Path) -> None:
         visibility="full",
     )
 
-    result = store.store(prompt, override)
+    result = store.store(descriptor, override)
     stored_section = result.sections[section.path]
     assert stored_section.body == "Full content."
     assert stored_section.summary == "Short summary."
@@ -1170,7 +1173,7 @@ def test_store_tool_override_success(tmp_path: Path) -> None:
         param_descriptions={"query": "Updated param description"},
     )
 
-    result = store.store(prompt, override)
+    result = store.store(descriptor, override)
     stored_tool = result.tool_overrides[tool.name]
     assert stored_tool.description == "New description"
     assert stored_tool.param_descriptions == {"query": "Updated param description"}
@@ -1179,6 +1182,7 @@ def test_store_tool_override_success(tmp_path: Path) -> None:
 def test_store_tool_override_unknown_tool(tmp_path: Path) -> None:
     """Test that store() raises error for unknown tool names."""
     prompt = _build_prompt_with_tool()  # Has tools, but we'll look for a different one
+    descriptor = PromptDescriptor.from_prompt(prompt)
     store = LocalPromptOverridesStore(root_path=tmp_path)
 
     override = ToolOverride(
@@ -1191,7 +1195,7 @@ def test_store_tool_override_unknown_tool(tmp_path: Path) -> None:
     with pytest.raises(
         PromptOverridesError, match="not registered in prompt descriptor"
     ):
-        store.store(prompt, override)
+        store.store(descriptor, override)
 
 
 def test_store_with_malformed_existing_json(tmp_path: Path) -> None:
@@ -1213,7 +1217,7 @@ def test_store_with_malformed_existing_json(tmp_path: Path) -> None:
     )
 
     with pytest.raises(PromptOverridesError, match="Failed to parse prompt override"):
-        store.store(prompt, override)
+        store.store(descriptor, override)
 
 
 def test_store_when_existing_overrides_are_stale(tmp_path: Path) -> None:
@@ -1250,5 +1254,5 @@ def test_store_when_existing_overrides_are_stale(tmp_path: Path) -> None:
         body="Fresh content",
     )
 
-    result = store.store(prompt, new_override)
+    result = store.store(descriptor, new_override)
     assert result.sections[section.path].body == "Fresh content"

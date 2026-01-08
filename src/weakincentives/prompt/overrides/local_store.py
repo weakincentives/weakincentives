@@ -256,7 +256,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
     @override
     def store(
         self,
-        prompt: PromptLike,
+        descriptor: PromptDescriptor,
         override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
@@ -266,7 +266,6 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         Holds a lock for the entire read-modify-write sequence to prevent
         TOCTOU race conditions.
         """
-        descriptor = descriptor_for_prompt(prompt)
         normalized_tag = self._filesystem.validate_identifier(tag, "tag")
         file_path = self._filesystem.override_file_path(
             ns=descriptor.ns,
