@@ -193,9 +193,10 @@ class ObserverTrigger:
 
     every_n_calls: int | None = None
     every_n_seconds: float | None = None
+    on_session_event: type | None = None  # Trigger when this event is dispatched
 ```
 
-Triggers are OR'd together: if either condition is met, the observer runs.
+Triggers are OR'd together: if any condition is met, the observer runs.
 
 ## Observer Configuration
 
@@ -206,6 +207,155 @@ class ObserverConfig:
 
     observer: TrajectoryObserver
     trigger: ObserverTrigger
+```
+
+## Event-Driven Triggers
+
+Observers can be triggered by session events via `on_session_event`. This
+enables domain-specific triggers like "run after a plan step completes."
+
+### Pattern: Reducer Requests Observer Run
+
+```python
+# 1. Define a marker event for the trigger
+@dataclass(frozen=True)
+class PlanProgressCheck:
+    """Marker event requesting a plan progress observer run."""
+    pass
+
+# 2. Reducer dispatches marker when plan step completes
+def plan_step_reducer(state: SliceView[Plan], event: MarkStepDone) -> Append[Plan]:
+    updated = state.latest().mark_step_done(event.step_id)
+    # Request observer run after this tool call completes
+    state.session.dispatch(PlanProgressCheck())
+    return Append(updated)
+
+# 3. Configure observer to trigger on this event
+ObserverConfig(
+    observer=PlanProgressObserver(),
+    trigger=ObserverTrigger(on_session_event=PlanProgressCheck),
+)
+```
+
+### Trigger State Slice
+
+Event-driven triggers use a session slice to track pending requests:
+
+```python
+@dataclass(frozen=True)
+class PendingObserverTrigger:
+    """Tracks pending event-driven observer triggers."""
+
+    event_types: frozenset[type] = frozenset()
+
+    def has_pending(self, event_type: type) -> bool:
+        return event_type in self.event_types
+
+    def add(self, event_type: type) -> PendingObserverTrigger:
+        return PendingObserverTrigger(self.event_types | {event_type})
+
+    def clear(self, event_type: type) -> PendingObserverTrigger:
+        return PendingObserverTrigger(self.event_types - {event_type})
+```
+
+### Updated Trigger Check
+
+```python
+def _should_trigger(trigger: ObserverTrigger, context: ObserverContext) -> bool:
+    """Check if any trigger condition is met."""
+
+    if trigger.every_n_calls:
+        if context.tool_calls_since_last_assessment() >= trigger.every_n_calls:
+            return True
+
+    if trigger.every_n_seconds:
+        last = context.last_assessment
+        if last:
+            elapsed = (datetime.utcnow() - last.timestamp).total_seconds()
+            if elapsed >= trigger.every_n_seconds:
+                return True
+        else:
+            return True
+
+    if trigger.on_session_event:
+        pending = context.session[PendingObserverTrigger].latest()
+        if pending and pending.has_pending(trigger.on_session_event):
+            return True
+
+    return False
+```
+
+### Clear Pending After Run
+
+After an event-triggered observer runs, clear its pending state:
+
+```python
+def _run_observers(...) -> str | None:
+    # ... existing code ...
+
+    for config in observers:
+        if _should_trigger(config.trigger, context):
+            if config.observer.should_run(hook_context.session, context=context):
+                assessment = config.observer.observe(...)
+
+                # Clear pending event trigger if used
+                if config.trigger.on_session_event:
+                    pending = context.session[PendingObserverTrigger].latest()
+                    if pending:
+                        cleared = pending.clear(config.trigger.on_session_event)
+                        context.session[PendingObserverTrigger].seed(cleared)
+
+                return assessment.render()
+
+    return None
+```
+
+### Example: Plan Progress Observer
+
+```python
+@dataclass(frozen=True)
+class PlanProgressObserver:
+    """Report progress after plan steps complete."""
+
+    @property
+    def name(self) -> str:
+        return "Plan Progress"
+
+    def should_run(self, session: Session, *, context: ObserverContext) -> bool:
+        return session[Plan].latest() is not None
+
+    def observe(self, session: Session, *, context: ObserverContext) -> Assessment:
+        plan = session[Plan].latest()
+        completed = sum(1 for s in plan.steps if s.done)
+        total = len(plan.steps)
+        remaining = total - completed
+
+        if remaining == 0:
+            return Assessment(
+                observer_name=self.name,
+                summary=f"All {total} plan steps complete.",
+                severity="info",
+            )
+
+        return Assessment(
+            observer_name=self.name,
+            summary=f"Completed {completed}/{total} steps. {remaining} remaining.",
+            suggestions=(f"Next: {plan.next_step().description}",),
+            severity="info",
+        )
+```
+
+### Wiring the Reducer
+
+Register a handler to capture marker events and update pending state:
+
+```python
+def on_plan_progress_check(event: PlanProgressCheck) -> None:
+    """Handle PlanProgressCheck by marking trigger as pending."""
+    pending = session[PendingObserverTrigger].latest() or PendingObserverTrigger()
+    session[PendingObserverTrigger].seed(pending.add(PlanProgressCheck))
+
+session.dispatcher.subscribe(PlanProgressCheck, on_plan_progress_check)
 ```
 
 ## Integration: Claude Agent SDK
@@ -441,9 +591,11 @@ You have 90 seconds remaining.
 |-------|---------|----------|
 | `ToolInvoked` | Tool invocation log (existing) | Append via dispatch |
 | `Assessment` | Assessment history | Append after observer runs |
+| `PendingObserverTrigger` | Event-driven trigger state | Replace on event/clear |
 
 The `Assessment` slice provides history for analysis and trigger state. The
-immediate delivery happens via hook response, not slice reads.
+`PendingObserverTrigger` slice tracks pending event-driven triggers. Immediate
+delivery happens via hook response, not slice reads.
 
 ```python
 # Assessment history (retained for debugging/analysis)
