@@ -38,7 +38,6 @@ class RunnableLoop(Protocol):
     def run(
         self,
         *,
-        max_iterations: int | None = None,
         max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
@@ -47,13 +46,10 @@ class RunnableLoop(Protocol):
 
         Exits when:
         - max_turns reached
-        - max_iterations reached (deprecated, use max_turns)
         - shutdown() called
         - Mailbox closed
 
         Args:
-            max_iterations: Maximum polling iterations (None = unlimited).
-                Deprecated: use max_turns instead.
             max_turns: Maximum number of turns to execute (None = unlimited).
                 A turn is one iteration through the loop's main processing cycle.
             visibility_timeout: Seconds messages remain invisible during
@@ -323,7 +319,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
 def run(
     self,
     *,
-    max_iterations: int | None = None,
     max_turns: int | None = None,
     visibility_timeout: int = 300,
     wait_time_seconds: int = 20,
@@ -332,7 +327,6 @@ def run(
 
     The loop exits when:
     - max_turns is reached
-    - max_iterations is reached (deprecated, use max_turns)
     - shutdown() is called
     - The requests mailbox is closed
 
@@ -343,12 +337,9 @@ def run(
         self._running = True
         self._shutdown_event.clear()
 
-    # max_turns takes precedence over max_iterations
-    effective_max_turns = max_turns if max_turns is not None else max_iterations
-
     turns = 0
     try:
-        while effective_max_turns is None or turns < effective_max_turns:
+        while max_turns is None or turns < max_turns:
             if self._shutdown_event.is_set():
                 break
 

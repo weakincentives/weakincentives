@@ -72,7 +72,6 @@ class RunnableLoop(Protocol):
     def run(
         self,
         *,
-        max_iterations: int | None = None,
         max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
@@ -80,14 +79,11 @@ class RunnableLoop(Protocol):
         """Run the loop, processing messages until stopped.
 
         Exits when:
-        - max_iterations reached (deprecated, use max_turns)
         - max_turns reached
         - shutdown() called
         - Mailbox closed
 
         Args:
-            max_iterations: Maximum polling iterations (None = unlimited).
-                Deprecated: use max_turns instead.
             max_turns: Maximum number of turns to execute (None = unlimited).
                 A turn is one iteration through the loop's main processing cycle.
             visibility_timeout: Seconds messages remain invisible during

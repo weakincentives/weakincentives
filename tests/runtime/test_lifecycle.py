@@ -162,12 +162,11 @@ class _MockRunnable:
     def run(
         self,
         *,
-        max_iterations: int | None = None,
         max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
-        del max_iterations, max_turns, visibility_timeout, wait_time_seconds
+        del max_turns, visibility_timeout, wait_time_seconds
         with self._lock:
             self._running = True
         self.run_called = True
@@ -475,7 +474,7 @@ def test_main_loop_shutdown_stops_loop() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 1, "max_iterations": None}
+            target=loop.run, kwargs={"wait_time_seconds": 1, "max_turns": None}
         )
         thread.start()
 
@@ -507,7 +506,7 @@ def test_main_loop_shutdown_completes_in_flight() -> None:
         requests.send(MainLoopRequest(request=_Request(message="test")))
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+            target=loop.run, kwargs={"wait_time_seconds": 0, "max_turns": 1}
         )
         thread.start()
 
@@ -540,7 +539,7 @@ def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
             requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": None}
+            target=loop.run, kwargs={"wait_time_seconds": 0, "max_turns": None}
         )
         thread.start()
 
@@ -570,7 +569,7 @@ def test_main_loop_running_property() -> None:
         assert not loop.running
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+            target=loop.run, kwargs={"wait_time_seconds": 0, "max_turns": 1}
         )
         thread.start()
 
@@ -597,7 +596,7 @@ def test_main_loop_context_manager() -> None:
 
         with loop:
             thread = threading.Thread(
-                target=loop.run, kwargs={"wait_time_seconds": 1, "max_iterations": None}
+                target=loop.run, kwargs={"wait_time_seconds": 1, "max_turns": None}
             )
             thread.start()
             time.sleep(0.05)
@@ -623,7 +622,7 @@ def test_main_loop_shutdown_timeout_returns_false() -> None:
         requests.send(MainLoopRequest(request=_Request(message="slow")))
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+            target=loop.run, kwargs={"wait_time_seconds": 0, "max_turns": 1}
         )
         thread.start()
 
@@ -962,7 +961,7 @@ def test_eval_loop_shutdown_stops_loop() -> None:
 
         thread = threading.Thread(
             target=eval_loop.run,
-            kwargs={"wait_time_seconds": 1, "max_iterations": None},
+            kwargs={"wait_time_seconds": 1},
         )
         thread.start()
 
@@ -1014,7 +1013,7 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
 
         thread = threading.Thread(
             target=eval_loop.run,
-            kwargs={"wait_time_seconds": 0, "max_iterations": None},
+            kwargs={"wait_time_seconds": 0, "max_turns": None},
         )
         thread.start()
 
@@ -1054,7 +1053,7 @@ def test_eval_loop_context_manager() -> None:
         with eval_loop:
             thread = threading.Thread(
                 target=eval_loop.run,
-                kwargs={"wait_time_seconds": 1, "max_iterations": None},
+                kwargs={"wait_time_seconds": 1, "max_turns": None},
             )
             thread.start()
             time.sleep(0.05)
@@ -1088,7 +1087,7 @@ def test_eval_loop_running_property() -> None:
         assert not eval_loop.running
 
         thread = threading.Thread(
-            target=eval_loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+            target=eval_loop.run, kwargs={"wait_time_seconds": 0, "max_turns": 1}
         )
         thread.start()
 
@@ -1462,7 +1461,6 @@ class _MockRunnableWithHeartbeat(_MockRunnable):
     def run(
         self,
         *,
-        max_iterations: int | None = None,
         max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
@@ -1470,7 +1468,6 @@ class _MockRunnableWithHeartbeat(_MockRunnable):
         # Beat the heartbeat before calling parent run
         self._heartbeat.beat()
         super().run(
-            max_iterations=max_iterations,
             max_turns=max_turns,
             visibility_timeout=visibility_timeout,
             wait_time_seconds=wait_time_seconds,
