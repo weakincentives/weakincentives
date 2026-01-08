@@ -267,8 +267,8 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `MainLoopCompleted`: Success event published via bus.
     - `MainLoopFailed`: Failure event published via bus.
   - Lifecycle management:
-    - `Runnable`: Protocol for loops supporting graceful shutdown (`run()`,
-      `shutdown()`, `running`, `heartbeat` properties).
+    - `RunnableLoop`: Protocol for loops supporting graceful shutdown and turn
+      control (`run()`, `shutdown()`, `running`, `heartbeat` properties).
     - `ShutdownCoordinator`: Singleton for SIGTERM/SIGINT handling and
       coordinated callback invocation.
     - `LoopGroup`: Runs multiple loops in dedicated threads with coordinated
