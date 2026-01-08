@@ -130,13 +130,30 @@ class Assessment:
 
 ### ObserverContext
 
+Mirrors `ToolContext` for resource access:
+
 ```python
 @dataclass(frozen=True)
 class ObserverContext:
-    """Context provided to observers during assessment."""
+    """Context provided to observers during assessment.
+
+    Provides access to session state and prompt resources, mirroring the
+    ToolContext interface for consistency.
+    """
 
     session: Session
+    prompt: PromptProtocol[Any]
     deadline: Deadline | None = None
+
+    @property
+    def resources(self) -> PromptResources:
+        """Access resources from the prompt's resource context."""
+        return self.prompt.resources
+
+    @property
+    def filesystem(self) -> Filesystem | None:
+        """Return the filesystem resource, if available."""
+        return self.resources.get_optional(Filesystem)
 
     @property
     def last_assessment(self) -> Assessment | None:
@@ -411,6 +428,7 @@ def _run_observers(
 
     context = ObserverContext(
         session=hook_context.session,
+        prompt=hook_context._prompt,
         deadline=hook_context.deadline,
     )
     call_index = context.tool_call_count
@@ -483,10 +501,15 @@ def execute_tool_call(
         invocation = dispatch_tool_invocation(context=context, outcome=outcome)
 
     # Run trajectory observers after dispatch
+    # ToolExecutionContext has prompt, session, deadline
+    observer_context = ObserverContext(
+        session=context.session,
+        prompt=context.prompt,
+        deadline=context.deadline,
+    )
     assessment_text = _run_observers_openai(
         observers=observers,
-        session=context.session,
-        deadline=context.deadline,
+        context=observer_context,
     )
 
     # Append assessment to result if produced
