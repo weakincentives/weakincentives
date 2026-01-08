@@ -44,7 +44,7 @@ from .events import (
 from .lease_extender import LeaseExtender, LeaseExtenderConfig
 from .lifecycle import (
     LoopGroup,
-    Runnable,
+    RunnableLoop,
     ShutdownCoordinator,
     wait_until,
 )
@@ -145,7 +145,7 @@ __all__ = [
     "ReducerContextProtocol",
     "ReducerEvent",
     "RunContext",
-    "Runnable",
+    "RunnableLoop",
     "SerializationError",
     "Session",
     "SessionProtocol",
