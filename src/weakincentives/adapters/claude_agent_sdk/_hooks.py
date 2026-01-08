@@ -697,8 +697,13 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                 )
                 return {"continue": False}
 
-        # Run trajectory observers from prompt
-        return _run_trajectory_observers(hook_context) or {}
+        # Run trajectory observers from prompt (skip if task completion is active)
+        # These two systems are mutually exclusive to avoid conflicting feedback
+        return (
+            _run_trajectory_observers(hook_context)
+            if task_completion_checker is None
+            else None
+        ) or {}
 
     return post_tool_use_hook
 
