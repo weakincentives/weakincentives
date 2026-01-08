@@ -101,6 +101,8 @@ a goal at any time.
   modifying tools.
 - **TOOL_POLICIES.md**: Sequential tool dependencies (read-before-write, keyed
   constraints)—when adding policy enforcement to tools.
+- **TRAJECTORY_OBSERVERS.md**: Ongoing progress assessment for unattended
+  agents—stall detection, drift monitoring, and feedback injection.
 - **FORMAL_VERIFICATION.md**: Embedding TLA+ specifications in Python using
   `@formal_spec` decorator, running TLC model checker, and verification
   testing—when adding formal specs or modifying verified code.
