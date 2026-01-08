@@ -204,7 +204,6 @@ class OptimizationReport:
     prompt_ns: str
     prompt_key: str
     baseline_pass_rate: float
-    baseline_token_count: int
     modifications: tuple[Modification, ...]
     rejected: tuple[RejectedModification, ...]
 
@@ -222,20 +221,16 @@ class EvalSummary:
     """Aggregated results from multiple evaluation runs."""
 
     pass_rate: float  # Average pass rate across runs
-    total_tokens: int  # Total tokens used (from first run)
     consistently_passed: frozenset[str]  # Sample IDs that passed in ALL runs
 
     @classmethod
     def from_reports(cls, reports: Sequence[EvalReport]) -> EvalSummary:
         """Aggregate multiple eval reports into a summary."""
         if not reports:
-            return cls(pass_rate=0.0, total_tokens=0, consistently_passed=frozenset())
+            return cls(pass_rate=0.0, consistently_passed=frozenset())
 
         # Average pass rate
         pass_rate = sum(r.pass_rate for r in reports) / len(reports)
-
-        # Token count from first run
-        total_tokens = sum(r.total_tokens for r in reports[:1])
 
         # Samples that passed in ALL runs
         passed_sets = [
@@ -246,7 +241,6 @@ class EvalSummary:
 
         return cls(
             pass_rate=pass_rate,
-            total_tokens=total_tokens,
             consistently_passed=consistently_passed,
         )
 ```
@@ -265,16 +259,20 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         self,
         *,
         strategy: CompressStrategy,
+        adapter: ProviderAdapter[object],
         overrides_store: PromptOverridesStore,
         prompt_registry: PromptRegistry,
         eval_requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         requests: Mailbox[OptimizeRequest[InputT, ExpectedT], OptimizeResult],
+        reply_mailbox_factory: Callable[[str], Mailbox[EvalResult, None]],
     ) -> None:
         self._strategy = strategy
+        self._adapter = adapter
         self._store = overrides_store
         self._prompts = prompt_registry
         self._eval_requests = eval_requests
         self._requests = requests
+        self._reply_mailbox_factory = reply_mailbox_factory
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
@@ -369,7 +367,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         # 2. Generate compression proposals (ordered by token count descending)
         edits = self._strategy.propose(
             descriptor,
-            adapter=self._get_adapter(),
+            adapter=self._adapter,
             session=Session(bus=InProcessDispatcher()),
         )
 
@@ -446,7 +444,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
             prompt_ns=descriptor.ns,
             prompt_key=descriptor.key,
             baseline_pass_rate=baseline_summary.pass_rate,
-            baseline_token_count=baseline_summary.total_tokens,
             modifications=tuple(modifications),
             rejected=tuple(rejected),
         )
@@ -482,7 +479,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         descriptor: PromptDescriptor,
         experiment_id: str,
         baseline_tag: str,
-        baseline_passed: set[str],
+        baseline_passed: frozenset[str],
         modifications: list[Modification],
         rejected: list[RejectedModification],
         flags: Mapping[str, bool],
@@ -551,7 +548,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         descriptor: PromptDescriptor,
         experiment_id: str,
         baseline_tag: str,
-        baseline_passed: set[str],
+        baseline_passed: frozenset[str],
         candidates: list[Modification],
         rejected: list[RejectedModification],
         flags: Mapping[str, bool],
@@ -561,7 +558,8 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
 
         Candidates are processed in order (largest token reduction first).
         Each is added only if it doesn't cause regression when combined
-        with already-accepted modifications.
+        with already-accepted modifications. If rejected, the tag is rebuilt
+        without the rejected modification.
         """
         accepted: list[Modification] = []
         greedy_tag = f"opt-{experiment_id}-greedy"
@@ -597,13 +595,25 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
                 if regression_count == 0:
                     accepted.append(mod)
                 else:
-                    # Remove from greedy tag and add to rejected
-                    # (Implementation note: need selective removal or rebuild tag)
+                    # Rejected: rebuild tag with only accepted modifications
                     rejected.append(RejectedModification(
                         section_path=mod.section_path,
                         token_reduction=mod.token_reduction,
                         regression_count=regression_count,
                     ))
+                    self._store.delete(
+                        ns=descriptor.ns, prompt_key=descriptor.key, tag=greedy_tag
+                    )
+                    for accepted_mod in accepted:
+                        self._store.store(
+                            prompt,
+                            SectionOverride(
+                                path=accepted_mod.section_path,
+                                expected_hash=accepted_mod.original_hash,
+                                body=accepted_mod.proposed_body,
+                            ),
+                            tag=greedy_tag,
+                        )
 
             return accepted
         finally:
@@ -628,9 +638,9 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         Raises:
             TimeoutError: If not all results received within timeout.
         """
-        # Create reply mailbox for this eval run
+        # Create reply mailbox via factory (supports distributed deployments)
         eval_id = f"opt-eval-{experiment.id}"
-        replies: Mailbox[EvalResult, None] = InMemoryMailbox(name=eval_id)
+        replies = self._reply_mailbox_factory(eval_id)
 
         # Submit all samples with experiment context
         for sample in dataset:
@@ -671,7 +681,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
                     prompt_ns=msg.body.prompt_ns,
                     prompt_key=msg.body.prompt_key,
                     baseline_pass_rate=0.0,
-                    baseline_token_count=0,
                     modifications=(),
                     rejected=(),
                 ),
@@ -763,15 +772,23 @@ resolver = RedisMailboxResolver(client=redis)
 eval_requests = RedisMailbox(name="eval-requests", client=redis, reply_resolver=resolver)
 optimize_requests = RedisMailbox(name="optimize-requests", client=redis, reply_resolver=resolver)
 
+# Factory for creating reply mailboxes (registered with resolver)
+def make_reply_mailbox(name: str) -> Mailbox[EvalResult, None]:
+    mailbox = RedisMailbox(name=name, client=redis, reply_resolver=resolver)
+    resolver.register(name, mailbox)
+    return mailbox
+
 # Loops
 main_loop = MyMainLoop(adapter=adapter, bus=bus, overrides_store=store)
 eval_loop = EvalLoop(loop=main_loop, requests=eval_requests)
 optimize_loop = OptimizeLoop(
     strategy=LLMCompressStrategy(...),
+    adapter=adapter,
     overrides_store=store,
     prompt_registry=prompts,
     eval_requests=eval_requests,
     requests=optimize_requests,
+    reply_mailbox_factory=make_reply_mailbox,
 )
 
 # Run all loops
