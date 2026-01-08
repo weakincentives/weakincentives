@@ -136,7 +136,6 @@ class ObserverContext:
     """Context provided to observers during assessment."""
 
     session: Session
-    budget_tracker: BudgetTracker | None = None
     deadline: Deadline | None = None
 
     @property
@@ -193,12 +192,10 @@ class ObserverTrigger:
     """Conditions that trigger observer execution."""
 
     every_n_calls: int | None = None
-    after_consecutive_errors: int | None = None
     every_n_seconds: float | None = None
-    on_every_call: bool = False
 ```
 
-Multiple triggers are OR'd together.
+Triggers are OR'd together: if either condition is met, the observer runs.
 
 ## Observer Configuration
 
@@ -264,7 +261,6 @@ def _run_observers(
 
     context = ObserverContext(
         session=hook_context.session,
-        budget_tracker=hook_context.budget_tracker,
         deadline=hook_context.deadline,
     )
     call_index = context.tool_call_count
@@ -287,18 +283,9 @@ def _run_observers(
 def _should_trigger(trigger: ObserverTrigger, context: ObserverContext) -> bool:
     """Check if any trigger condition is met."""
 
-    if trigger.on_every_call:
-        return True
-
     if trigger.every_n_calls:
         if context.tool_calls_since_last_assessment() >= trigger.every_n_calls:
             return True
-
-    if trigger.after_consecutive_errors:
-        recent = context.recent_tool_calls(trigger.after_consecutive_errors)
-        if len(recent) >= trigger.after_consecutive_errors:
-            if all(not _is_success(r) for r in recent):
-                return True
 
     if trigger.every_n_seconds:
         last = context.last_assessment
@@ -320,8 +307,8 @@ adapter = ClaudeAgentSDKAdapter(
     session=session,
     observers=[
         ObserverConfig(
-            observer=ResourceObserver(),
-            trigger=ObserverTrigger(every_n_calls=10),
+            observer=DeadlineObserver(),
+            trigger=ObserverTrigger(every_n_seconds=30),
         ),
     ],
 )
@@ -349,7 +336,6 @@ def execute_tool_call(
     assessment_text = _run_observers_openai(
         observers=observers,
         session=context.session,
-        budget_tracker=context.budget_tracker,
         deadline=context.deadline,
     )
 
@@ -363,79 +349,58 @@ def execute_tool_call(
     return invocation, outcome.result
 ```
 
-## Built-in Observer: ResourceObserver
+## Built-in Observer: DeadlineObserver
 
-Reports time and token budget constraints in natural language.
+Reports remaining time until deadline. Configured to run every 30 seconds by
+default.
 
 ```python
 @dataclass(frozen=True)
-class ResourceObserver:
-    """Report remaining time and token budget in natural language."""
+class DeadlineObserver:
+    """Report remaining time until deadline."""
 
-    caution_threshold: float = 0.3  # 30% remaining
-    warning_threshold: float = 0.1  # 10% remaining
+    warning_threshold_seconds: float = 120  # 2 minutes
 
     @property
     def name(self) -> str:
-        return "Resources"
+        return "Deadline"
 
     def should_run(self, session: Session, *, context: ObserverContext) -> bool:
-        return True  # Always run when triggered
+        return context.deadline is not None
 
     def observe(self, session: Session, *, context: ObserverContext) -> Assessment:
-        statements: list[str] = []
-        suggestions: list[str] = []
+        if context.deadline is None:
+            return Assessment(
+                observer_name=self.name,
+                summary="No deadline configured.",
+                severity="info",
+            )
+
+        remaining = context.deadline.remaining().total_seconds()
+
+        if remaining <= 0:
+            return Assessment(
+                observer_name=self.name,
+                summary="You have reached the time deadline.",
+                suggestions=("Wrap up immediately.",),
+                severity="warning",
+            )
+
+        summary = f"You have {self._format_duration(remaining)} remaining."
+        suggestions: tuple[str, ...] = ()
         severity: Literal["info", "caution", "warning"] = "info"
 
-        # Check deadline
-        if context.deadline is not None:
-            remaining = context.deadline.remaining().total_seconds()
-            if remaining <= 0:
-                statements.append("You have reached the time deadline.")
-                severity = "warning"
-            else:
-                statements.append(
-                    f"You have {self._format_duration(remaining)} remaining."
-                )
-                # Estimate percentage based on elapsed time
-                # (deadline tracks remaining, not total)
-
-        # Check token budget
-        if context.budget_tracker is not None:
-            budget = context.budget_tracker.budget
-            consumed = context.budget_tracker.consumed
-            if budget.max_total_tokens:
-                used = (consumed.input_tokens or 0) + (consumed.output_tokens or 0)
-                remaining = budget.max_total_tokens - used
-                pct_used = used / budget.max_total_tokens
-
-                if remaining <= 0:
-                    statements.append("You have exhausted your token budget.")
-                    severity = "warning"
-                else:
-                    statements.append(
-                        f"You have used {used:,} of {budget.max_total_tokens:,} "
-                        f"tokens ({pct_used:.0%}). {remaining:,} remaining."
-                    )
-                    pct_remaining = remaining / budget.max_total_tokens
-                    if pct_remaining <= self.warning_threshold:
-                        severity = "warning"
-                    elif pct_remaining <= self.caution_threshold:
-                        severity = "caution"
-
-        # Build suggestions based on severity
-        if severity == "warning":
-            suggestions.append("Prioritize completing critical remaining work.")
-            suggestions.append("Consider summarizing progress and remaining tasks.")
-        elif severity == "caution":
-            suggestions.append("Be mindful of remaining resources.")
-
-        summary = " ".join(statements) if statements else "No constraints configured."
+        if remaining <= self.warning_threshold_seconds:
+            severity = "warning"
+            suggestions = (
+                "Prioritize completing critical remaining work.",
+                "Consider summarizing progress and remaining tasks.",
+            )
 
         return Assessment(
             observer_name=self.name,
             summary=summary,
-            suggestions=tuple(suggestions),
+            suggestions=suggestions,
             severity=severity,
         )
 
@@ -443,9 +408,11 @@ class ResourceObserver:
         if seconds < 60:
             return f"{int(seconds)} seconds"
         elif seconds < 3600:
-            return f"{int(seconds / 60)} minutes"
+            minutes = int(seconds / 60)
+            return f"{minutes} minute{'s' if minutes != 1 else ''}"
         else:
-            return f"{seconds / 3600:.1f} hours"
+            hours = seconds / 3600
+            return f"{hours:.1f} hours"
 ```
 
 ## Example: Rendered Assessment
@@ -453,27 +420,16 @@ class ResourceObserver:
 When injected via `additionalContext`, the agent sees:
 
 ```
-[Trajectory Assessment - Resources]
+[Trajectory Assessment - Deadline]
 
-You have 8 minutes remaining. You have used 35,000 of 50,000 tokens (70%). 15,000 remaining.
-
-→ Be mindful of remaining resources.
+You have 8 minutes remaining.
 ```
 
-### Severity Examples
-
-**Info** (plenty of runway):
+**Warning** (< 2 minutes):
 ```
-[Trajectory Assessment - Resources]
+[Trajectory Assessment - Deadline]
 
-You have 25 minutes remaining. You have used 12,000 of 50,000 tokens (24%). 38,000 remaining.
-```
-
-**Warning** (critical):
-```
-[Trajectory Assessment - Resources]
-
-You have 2 minutes remaining. You have used 48,500 of 50,000 tokens (97%). 1,500 remaining.
+You have 90 seconds remaining.
 
 → Prioritize completing critical remaining work.
 → Consider summarizing progress and remaining tasks.
@@ -496,7 +452,7 @@ session[Assessment].all()
 
 # Latest used for trigger calculations
 session[Assessment].latest()
-# Assessment(observer_name="Resources", call_index=47, ...)
+# Assessment(observer_name="Deadline", call_index=47, ...)
 ```
 
 ## Design Decisions
