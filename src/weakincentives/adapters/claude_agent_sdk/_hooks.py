@@ -24,12 +24,18 @@ from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
+from ...filesystem import Filesystem
 from ...prompt.protocols import PromptProtocol
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ._notifications import Notification
+from ._task_completion import (
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+)
 
 if TYPE_CHECKING:
     from ...prompt.prompt import PromptResources
@@ -47,6 +53,7 @@ __all__ = [
     "create_stop_hook",
     "create_subagent_start_hook",
     "create_subagent_stop_hook",
+    "create_task_completion_stop_hook",
     "create_user_prompt_submit_hook",
     "safe_hook_wrapper",
 ]
@@ -170,7 +177,7 @@ class HookContext:
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
-        self.stats = HookStats()
+        self.stats: HookStats = HookStats()
         self._start_time = time.monotonic()
 
     @property
@@ -277,8 +284,7 @@ def create_pre_tool_use_hook(
     """Create a PreToolUse hook for constraint enforcement and state snapshots.
 
     The hook checks deadlines and budgets before tool execution, blocking
-    tools that would violate constraints. It also takes a state snapshot
-    for transactional rollback.
+    tools that would violate constraints.
 
     Args:
         hook_context: Context with session, deadline, budget, and prompt.
@@ -287,7 +293,7 @@ def create_pre_tool_use_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_tool_use_hook(  # noqa: RUF029
+    async def pre_tool_use_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -475,10 +481,11 @@ def _parse_tool_data(input_data: Any) -> _ParsedToolData:  # noqa: ANN401
     )
 
 
-def create_post_tool_use_hook(
+def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task completion
     hook_context: HookContext,
     *,
     stop_on_structured_output: bool = True,
+    task_completion_checker: TaskCompletionChecker | None = None,
 ) -> AsyncHookCallback:
     """Create a PostToolUse hook for tool result recording and state rollback.
 
@@ -488,16 +495,42 @@ def create_post_tool_use_hook(
 
     If the tool failed, the hook restores state from the pre-execution snapshot.
 
+    When ``task_completion_checker`` is provided and StructuredOutput is called,
+    task completion is verified. If incomplete, returns an error result to the
+    model with feedback on remaining tasks. If complete, signals to stop.
+
     Args:
         hook_context: Context with session, adapter, and prompt.
-        stop_on_structured_output: If True, return ``continue: false`` after
-            the StructuredOutput tool to end the turn immediately.
+        stop_on_structured_output: If True and no checker configured, return
+            ``continue: false`` after StructuredOutput to end the turn.
+        task_completion_checker: Optional checker for verifying task completion
+            when StructuredOutput is called. When provided and tasks are
+            incomplete, returns error result with feedback.
 
     Returns:
         An async hook callback function matching SDK signature.
     """
 
-    async def post_tool_use_hook(  # noqa: RUF029
+    def _get_filesystem() -> Filesystem | None:
+        """Get filesystem from hook context resources if available."""
+        try:
+            return hook_context.resources.get(Filesystem)
+        except (LookupError, AttributeError):
+            return None
+
+    def _check_task_completion(
+        tool_input: dict[str, Any],
+    ) -> TaskCompletionResult:
+        """Check task completion using the configured checker."""
+        context = TaskCompletionContext(
+            session=hook_context.session,
+            tentative_output=tool_input.get("output"),
+            stop_reason="structured_output",
+            filesystem=_get_filesystem(),
+        )
+        return task_completion_checker.check(context)  # type: ignore[union-attr]
+
+    async def post_tool_use_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -569,18 +602,57 @@ def create_post_tool_use_hook(
                     },
                 )
 
-        # Stop execution after StructuredOutput tool to end turn cleanly
-        if stop_on_structured_output and data.tool_name == "StructuredOutput":
-            logger.debug(
-                "claude_agent_sdk.hook.structured_output_stop",
-                event="hook.structured_output_stop",
-                context={
-                    "tool_name": data.tool_name,
-                    "elapsed_ms": hook_context.elapsed_ms,
-                    "tool_count": hook_context.stats.tool_count,
-                },
-            )
-            return {"continue": False}
+        # Handle StructuredOutput with task completion checking
+        if data.tool_name == "StructuredOutput":
+            if task_completion_checker is not None:
+                result = _check_task_completion(data.tool_input)
+                if not result.complete:
+                    # Tasks incomplete - provide feedback via additionalContext
+                    # Don't return continue: False - let model continue working.
+                    # When model calls StructuredOutput again after completing tasks,
+                    # we'll return continue: False and the SDK will use that output.
+                    logger.info(
+                        "claude_agent_sdk.hook.structured_output_incomplete",
+                        event="hook.structured_output_incomplete",
+                        context={
+                            "feedback": result.feedback,
+                            "elapsed_ms": hook_context.elapsed_ms,
+                        },
+                    )
+                    feedback_message = (
+                        f"Tasks incomplete: {result.feedback}. "
+                        "Please complete the remaining tasks, then call "
+                        "StructuredOutput again with your final output."
+                    )
+                    return {
+                        "hookSpecificOutput": {
+                            "hookEventName": "PostToolUse",
+                            "additionalContext": feedback_message,
+                        }
+                    }
+                # Tasks complete - allow stop
+                logger.debug(
+                    "claude_agent_sdk.hook.structured_output_complete",
+                    event="hook.structured_output_complete",
+                    context={
+                        "feedback": result.feedback,
+                        "elapsed_ms": hook_context.elapsed_ms,
+                        "tool_count": hook_context.stats.tool_count,
+                    },
+                )
+                return {"continue": False}
+            if stop_on_structured_output:
+                # No checker - stop immediately
+                logger.debug(
+                    "claude_agent_sdk.hook.structured_output_stop",
+                    event="hook.structured_output_stop",
+                    context={
+                        "tool_name": data.tool_name,
+                        "elapsed_ms": hook_context.elapsed_ms,
+                        "tool_count": hook_context.stats.tool_count,
+                    },
+                )
+                return {"continue": False}
 
         return {}
 
@@ -630,7 +702,7 @@ def create_user_prompt_submit_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def user_prompt_submit_hook(  # noqa: RUF029
+    async def user_prompt_submit_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -692,7 +764,7 @@ def create_stop_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def stop_hook(  # noqa: RUF029
+    async def stop_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -735,6 +807,127 @@ def create_stop_hook(
     return stop_hook
 
 
+def create_task_completion_stop_hook(
+    hook_context: HookContext,
+    *,
+    checker: TaskCompletionChecker,
+) -> AsyncHookCallback:
+    """Create a Stop hook that checks task completion before allowing stop.
+
+    This hook uses the provided TaskCompletionChecker to verify that all tasks
+    are complete before allowing the agent to stop. When tasks are incomplete,
+    it returns a signal to continue execution with feedback.
+
+    Args:
+        hook_context: Context with session for state access.
+        checker: Task completion checker for verifying completion status.
+
+    Returns:
+        An async hook callback that enforces task completion.
+
+    Example:
+        >>> from weakincentives.adapters.claude_agent_sdk import (
+        ...     create_task_completion_stop_hook,
+        ...     PlanBasedChecker,
+        ... )
+        >>>
+        >>> checker = PlanBasedChecker()
+        >>> hook = create_task_completion_stop_hook(hook_context, checker=checker)
+    """
+
+    def _get_filesystem() -> Filesystem | None:
+        """Get filesystem from hook context resources if available."""
+        try:
+            return hook_context.resources.get(Filesystem)
+        except (LookupError, AttributeError):
+            return None
+
+    async def task_completion_stop_hook(  # noqa: RUF029 - SDK requires async signature
+        input_data: Any,  # noqa: ANN401
+        tool_use_id: str | None,
+        sdk_context: Any,  # noqa: ANN401
+    ) -> dict[str, Any]:
+        _ = tool_use_id
+        _ = sdk_context
+
+        stop_reason = (
+            input_data.get("stopReason", "end_turn")
+            if isinstance(input_data, dict)
+            else "end_turn"
+        )
+        hook_context.stop_reason = stop_reason
+
+        # Skip task completion check if deadline exceeded - can't do more work
+        if (
+            hook_context.deadline
+            and hook_context.deadline.remaining().total_seconds() <= 0
+        ):
+            logger.debug(
+                "claude_agent_sdk.hook.task_completion_stop.deadline_exceeded",
+                event="hook.task_completion_stop.deadline_exceeded",
+                context={"stop_reason": stop_reason},
+            )
+            return {}
+
+        # Skip task completion check if budget exhausted - can't do more work
+        budget_tracker = hook_context.budget_tracker
+        if budget_tracker is not None and isinstance(budget_tracker, BudgetTracker):
+            budget = budget_tracker.budget
+            consumed = budget_tracker.consumed
+            consumed_total = (consumed.input_tokens or 0) + (
+                consumed.output_tokens or 0
+            )
+            if (  # pragma: no branch
+                budget.max_total_tokens is not None
+                and consumed_total >= budget.max_total_tokens
+            ):
+                logger.debug(
+                    "claude_agent_sdk.hook.task_completion_stop.budget_exhausted",
+                    event="hook.task_completion_stop.budget_exhausted",
+                    context={"stop_reason": stop_reason},
+                )
+                return {}
+
+        # Check task completion using the checker
+        context = TaskCompletionContext(
+            session=hook_context.session,
+            tentative_output=None,
+            stop_reason=stop_reason,
+            filesystem=_get_filesystem(),
+        )
+        result = checker.check(context)
+
+        if result.complete:
+            # All tasks complete - allow stop
+            logger.debug(
+                "claude_agent_sdk.hook.task_completion_stop.allow",
+                event="hook.task_completion_stop.allow",
+                context={
+                    "stop_reason": stop_reason,
+                    "feedback": result.feedback,
+                },
+            )
+            return {}
+
+        # Tasks incomplete - signal to continue
+        logger.info(
+            "claude_agent_sdk.hook.task_completion_stop.incomplete",
+            event="hook.task_completion_stop.incomplete",
+            context={
+                "stop_reason": stop_reason,
+                "feedback": result.feedback,
+            },
+        )
+
+        return {
+            "needsMoreTurns": True,
+            "decision": "continue",
+            "reason": result.feedback,
+        }
+
+    return task_completion_stop_hook
+
+
 def create_subagent_start_hook(
     hook_context: HookContext,
 ) -> AsyncHookCallback:
@@ -750,7 +943,7 @@ def create_subagent_start_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def subagent_start_hook(  # noqa: RUF029
+    async def subagent_start_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -811,7 +1004,7 @@ def create_subagent_stop_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def subagent_stop_hook(  # noqa: RUF029
+    async def subagent_stop_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -882,7 +1075,7 @@ def create_pre_compact_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_compact_hook(  # noqa: RUF029
+    async def pre_compact_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -951,7 +1144,7 @@ def create_notification_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def notification_hook(  # noqa: RUF029
+    async def notification_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401

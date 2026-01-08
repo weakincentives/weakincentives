@@ -73,7 +73,15 @@ Example:
 
 from __future__ import annotations
 
+from ._hooks import create_task_completion_stop_hook
 from ._notifications import Notification, NotificationSource
+from ._task_completion import (
+    CompositeChecker,
+    PlanBasedChecker,
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+)
 from .adapter import CLAUDE_AGENT_SDK_ADAPTER_NAME, ClaudeAgentSDKAdapter
 from .config import (
     ClaudeAgentSDKClientConfig,
@@ -100,6 +108,7 @@ __all__ = [
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
     "ClaudeAgentWorkspaceSection",
+    "CompositeChecker",
     "EphemeralHome",
     "HostMount",
     "HostMountPreview",
@@ -108,7 +117,12 @@ __all__ = [
     "Notification",
     "NotificationSource",
     "PermissionMode",
+    "PlanBasedChecker",
     "SandboxConfig",
+    "TaskCompletionChecker",
+    "TaskCompletionContext",
+    "TaskCompletionResult",
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
+    "create_task_completion_stop_hook",
 ]

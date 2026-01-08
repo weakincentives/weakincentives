@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -46,9 +47,11 @@ from ._hooks import (
     create_stop_hook,
     create_subagent_start_hook,
     create_subagent_stop_hook,
+    create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
 )
 from ._notifications import Notification
+from ._task_completion import TaskCompletionContext
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
 
@@ -600,6 +603,19 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             messages, rendered, budget_tracker, prompt_name
         )
 
+        # Final verification: if we got structured output but tasks are incomplete,
+        # reject the output. This catches cases where the SDK captured output before
+        # our hooks could prevent it.
+        self._verify_task_completion(
+            output,
+            session,
+            hook_context.stop_reason,
+            prompt_name,
+            deadline=deadline,
+            budget_tracker=budget_tracker,
+            prompt=cast("PromptProtocol[Any]", prompt),
+        )
+
         response = PromptResponse(
             prompt_name=prompt_name,
             text=result_text,
@@ -650,7 +666,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return stderr_handler
 
-    async def _run_sdk_query(  # noqa: C901, PLR0912, PLR0915 - complexity needed for debug logging
+    async def _run_sdk_query(  # noqa: C901, PLR0912, PLR0914, PLR0915 - complexity needed for debug logging
         self,
         *,
         sdk: Any,
@@ -750,12 +766,21 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         options_kwargs["stderr"] = self._create_stderr_handler()
 
         # Create async hook callbacks
+        checker = self._client_config.task_completion_checker
         pre_hook = create_pre_tool_use_hook(hook_context)
         post_hook = create_post_tool_use_hook(
             hook_context,
             stop_on_structured_output=self._client_config.stop_on_structured_output,
+            task_completion_checker=checker,
         )
-        stop_hook_fn = create_stop_hook(hook_context)
+        # Use task completion stop hook if checker is configured, otherwise regular stop hook
+        if checker is not None:  # pragma: no cover - tested via hook tests
+            stop_hook_fn = create_task_completion_stop_hook(
+                hook_context,
+                checker=checker,
+            )
+        else:
+            stop_hook_fn = create_stop_hook(hook_context)
         prompt_hook = create_user_prompt_submit_hook(hook_context)
         subagent_start_hook = create_subagent_start_hook(hook_context)
         subagent_stop_hook = create_subagent_stop_hook(hook_context)
@@ -947,3 +972,90 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             budget_tracker.record_cumulative(prompt_name, usage)
 
         return result_text, structured_output, usage
+
+    def _verify_task_completion(
+        self,
+        output: Any,
+        session: SessionProtocol,
+        stop_reason: str | None,
+        prompt_name: str,
+        *,
+        deadline: Deadline | None = None,
+        budget_tracker: BudgetTracker | None = None,
+        prompt: PromptProtocol[Any] | None = None,
+    ) -> None:
+        """Verify task completion if checker is configured.
+
+        Raises PromptEvaluationError if structured output was produced but
+        tasks are incomplete. Skips verification if deadline or budget is
+        exhausted (partial output is acceptable when resources run out).
+
+        Args:
+            output: The structured output to verify.
+            session: The session containing state.
+            stop_reason: Why the agent stopped.
+            prompt_name: Name of the prompt for error reporting.
+            deadline: Optional deadline to check for exhaustion.
+            budget_tracker: Optional budget tracker to check for exhaustion.
+            prompt: Optional prompt for filesystem access.
+        """
+        checker = self._client_config.task_completion_checker
+        if output is None or checker is None:
+            return
+
+        # Skip verification if deadline exceeded - can't do more work
+        if deadline is not None and deadline.remaining().total_seconds() <= 0:
+            logger.debug(
+                "claude_agent_sdk.verify.deadline_exceeded",
+                event="sdk.verify.deadline_exceeded",
+                context={"prompt_name": prompt_name, "stop_reason": stop_reason},
+            )
+            return
+
+        # Skip verification if budget exhausted - can't do more work
+        if budget_tracker is not None:
+            budget = budget_tracker.budget
+            consumed = budget_tracker.consumed
+            consumed_total = (consumed.input_tokens or 0) + (
+                consumed.output_tokens or 0
+            )
+            if (
+                budget.max_total_tokens is not None
+                and consumed_total >= budget.max_total_tokens
+            ):
+                logger.debug(
+                    "claude_agent_sdk.verify.budget_exhausted",
+                    event="sdk.verify.budget_exhausted",
+                    context={"prompt_name": prompt_name, "stop_reason": stop_reason},
+                )
+                return
+
+        # Get filesystem from prompt resources if available
+        filesystem: Filesystem | None = None
+        if prompt is not None:
+            with contextlib.suppress(LookupError, AttributeError):
+                filesystem = prompt.resources.get(Filesystem)
+
+        context = TaskCompletionContext(
+            session=session,
+            tentative_output=output,
+            stop_reason=stop_reason or "structured_output",
+            filesystem=filesystem,
+            adapter=self,
+        )
+        completion = checker.check(context)
+        if not completion.complete:
+            logger.warning(
+                "claude_agent_sdk.evaluate.incomplete_tasks",
+                event="sdk.evaluate.incomplete_tasks",
+                context={
+                    "prompt_name": prompt_name,
+                    "feedback": completion.feedback,
+                    "stop_reason": stop_reason,
+                },
+            )
+            raise PromptEvaluationError(
+                message=f"Tasks incomplete: {completion.feedback}",
+                prompt_name=prompt_name,
+                phase="response",
+            )

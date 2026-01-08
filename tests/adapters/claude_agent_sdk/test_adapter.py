@@ -1332,3 +1332,352 @@ class TestMessageContentExtraction:
 
         result = _extract_message_content(message)
         assert result == {}
+
+
+class TestVerifyTaskCompletion:
+    """Tests for _verify_task_completion method."""
+
+    @pytest.fixture
+    def session(self) -> Session:
+        return Session(bus=InProcessDispatcher())
+
+    @pytest.fixture
+    def adapter(self) -> ClaudeAgentSDKAdapter:
+        return ClaudeAgentSDKAdapter()
+
+    def test_no_checker_configured_does_nothing(
+        self, adapter: ClaudeAgentSDKAdapter, session: Session
+    ) -> None:
+        """When no checker is configured, verification passes."""
+        # Default adapter has no task_completion_checker
+        adapter._verify_task_completion(
+            output={"key": "value"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test",
+        )
+        # Should not raise
+
+    def test_no_output_does_nothing(self, session: Session) -> None:
+        """When output is None, verification passes."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.contrib.tools.planning import Plan
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+        adapter._verify_task_completion(
+            output=None,
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test",
+        )
+        # Should not raise
+
+    def test_raises_when_tasks_incomplete(self, session: Session) -> None:
+        """When tasks are incomplete, raises PromptEvaluationError."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.contrib.tools.planning import (
+            Plan,
+            PlanningToolsSection,
+            PlanStep,
+        )
+
+        # Initialize plan with incomplete tasks
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(
+                    PlanStep(step_id=1, title="Done", status="done"),
+                    PlanStep(step_id=2, title="Pending", status="pending"),
+                ),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+
+        with pytest.raises(PromptEvaluationError) as exc_info:
+            adapter._verify_task_completion(
+                output={"summary": "done"},
+                session=session,
+                stop_reason="structured_output",
+                prompt_name="test_prompt",
+            )
+
+        assert "Tasks incomplete" in str(exc_info.value)
+        assert "Pending" in str(exc_info.value)
+
+    def test_passes_when_tasks_complete(self, session: Session) -> None:
+        """When all tasks are complete, verification passes."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.contrib.tools.planning import (
+            Plan,
+            PlanningToolsSection,
+            PlanStep,
+        )
+
+        # Initialize plan with all tasks done
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="completed",
+                steps=(
+                    PlanStep(step_id=1, title="Task 1", status="done"),
+                    PlanStep(step_id=2, title="Task 2", status="done"),
+                ),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+
+        # Should not raise
+        adapter._verify_task_completion(
+            output={"summary": "done"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+        )
+
+    def test_skips_when_deadline_exceeded(self, session: Session) -> None:
+        """When deadline is exceeded, verification is skipped."""
+        from datetime import timedelta
+        from unittest.mock import MagicMock
+
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.contrib.tools.planning import (
+            Plan,
+            PlanningToolsSection,
+            PlanStep,
+        )
+
+        # Initialize plan with incomplete tasks
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+
+        # Create a mock deadline that is exceeded (remaining returns negative)
+        exceeded_deadline = MagicMock()
+        exceeded_deadline.remaining.return_value = timedelta(seconds=-1)
+
+        # Should not raise despite incomplete tasks
+        adapter._verify_task_completion(
+            output={"summary": "partial"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+            deadline=exceeded_deadline,
+        )
+
+    def test_skips_when_budget_exhausted(self, session: Session) -> None:
+        """When budget is exhausted, verification is skipped."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.budget import Budget, BudgetTracker
+        from weakincentives.contrib.tools.planning import (
+            Plan,
+            PlanningToolsSection,
+            PlanStep,
+        )
+
+        # Initialize plan with incomplete tasks
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+
+        # Create exhausted budget tracker
+        budget = Budget(max_total_tokens=100)
+        tracker = BudgetTracker(budget)
+        # Consume all budget
+        from weakincentives.runtime.events._types import TokenUsage
+
+        tracker.record_cumulative("test", TokenUsage(input_tokens=50, output_tokens=50))
+
+        # Should not raise despite incomplete tasks
+        adapter._verify_task_completion(
+            output={"summary": "partial"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+            budget_tracker=tracker,
+        )
+
+    def test_passes_filesystem_and_adapter_to_context(self, session: Session) -> None:
+        """Filesystem and adapter are passed to TaskCompletionContext."""
+        from unittest.mock import MagicMock
+
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            TaskCompletionChecker,
+            TaskCompletionContext,
+            TaskCompletionResult,
+        )
+        from weakincentives.filesystem import Filesystem
+
+        # Create a mock checker that captures the context
+        captured_context: list[TaskCompletionContext] = []
+
+        class CapturingChecker(TaskCompletionChecker):
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+                captured_context.append(context)
+                return TaskCompletionResult.ok()
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=CapturingChecker(),
+            ),
+        )
+
+        # Create mock prompt with filesystem resource
+        mock_filesystem = MagicMock(spec=Filesystem)
+        mock_resources = MagicMock()
+        mock_resources.get.return_value = mock_filesystem
+        mock_prompt = MagicMock()
+        mock_prompt.resources = mock_resources
+
+        adapter._verify_task_completion(
+            output={"summary": "done"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+            prompt=mock_prompt,
+        )
+
+        assert len(captured_context) == 1
+        ctx = captured_context[0]
+        assert ctx.filesystem is mock_filesystem
+        assert ctx.adapter is adapter
+
+    def test_handles_filesystem_lookup_failure(self, session: Session) -> None:
+        """When filesystem lookup fails, context still gets adapter but no filesystem."""
+        from unittest.mock import MagicMock
+
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            TaskCompletionChecker,
+            TaskCompletionContext,
+            TaskCompletionResult,
+        )
+        from weakincentives.resources.errors import UnboundResourceError
+
+        # Create a mock checker that captures the context
+        captured_context: list[TaskCompletionContext] = []
+
+        class CapturingChecker(TaskCompletionChecker):
+            def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+                captured_context.append(context)
+                return TaskCompletionResult.ok()
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=CapturingChecker(),
+            ),
+        )
+
+        # Create mock prompt where filesystem lookup raises UnboundResourceError
+        mock_resources = MagicMock()
+        mock_resources.get.side_effect = UnboundResourceError(object)
+        mock_prompt = MagicMock()
+        mock_prompt.resources = mock_resources
+
+        adapter._verify_task_completion(
+            output={"summary": "done"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+            prompt=mock_prompt,
+        )
+
+        assert len(captured_context) == 1
+        ctx = captured_context[0]
+        assert ctx.filesystem is None  # Lookup failed
+        assert ctx.adapter is adapter  # Adapter still passed
+
+    def test_runs_checker_when_budget_not_exhausted(self, session: Session) -> None:
+        """When budget_tracker is provided but not exhausted, checker still runs."""
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.budget import Budget, BudgetTracker
+        from weakincentives.contrib.tools.planning import (
+            Plan,
+            PlanningToolsSection,
+            PlanStep,
+        )
+
+        # Initialize plan with incomplete tasks
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+
+        # Create budget tracker with plenty of budget remaining
+        budget = Budget(max_total_tokens=1000)
+        tracker = BudgetTracker(budget)
+        # Only consume 10% of budget
+        from weakincentives.runtime.events._types import TokenUsage
+
+        tracker.record_cumulative("test", TokenUsage(input_tokens=50, output_tokens=50))
+
+        # Should raise because tasks are incomplete and budget is not exhausted
+        with pytest.raises(PromptEvaluationError) as exc_info:
+            adapter._verify_task_completion(
+                output={"summary": "partial"},
+                session=session,
+                stop_reason="structured_output",
+                prompt_name="test_prompt",
+                budget_tracker=tracker,
+            )
+
+        assert "Tasks incomplete" in str(exc_info.value)

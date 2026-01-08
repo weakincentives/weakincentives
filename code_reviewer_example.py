@@ -39,6 +39,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     HostMount as ClaudeHostMount,
     IsolationConfig,
     NetworkPolicy,
+    PlanBasedChecker,
     SandboxConfig,
 )
 from weakincentives.adapters.openai import OpenAIAdapter
@@ -46,6 +47,7 @@ from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
 from weakincentives.contrib.tools import (
     AstevalSection,
     HostMount,
+    Plan,
     PlanningStrategy,
     PlanningToolsSection,
     PodmanSandboxConfig,
@@ -642,6 +644,8 @@ def build_claude_agent_adapter() -> tuple[
             permission_mode="bypassPermissions",
             cwd=str(workspace_section.temp_dir),
             isolation=isolation,
+            # Ensure all plan steps are completed before the agent finishes
+            task_completion_checker=PlanBasedChecker(plan_type=Plan),
         ),
     )
     return cast(ProviderAdapter[ReviewResponse], adapter), workspace_section

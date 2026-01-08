@@ -20,6 +20,7 @@ from ...dataclasses import FrozenDataclass
 from ..config import LLMConfig
 
 if TYPE_CHECKING:
+    from ._task_completion import TaskCompletionChecker
     from .isolation import IsolationConfig
 
 __all__ = [
@@ -52,6 +53,14 @@ class ClaudeAgentSDKClientConfig:
         stop_on_structured_output: If True, stop execution immediately after
             the StructuredOutput tool is called. This ensures the turn ends
             cleanly after structured output is produced.
+        task_completion_checker: Checker for verifying task completion before
+            allowing the agent to stop. Both the stop hook and StructuredOutput
+            handling use this checker to determine if tasks are complete.
+            Supports various implementations:
+            - ``PlanBasedChecker``: Checks session Plan state
+            - ``CompositeChecker``: Combines multiple checkers
+            When None, no task completion checking is performed and the agent
+            can stop freely.
         isolation: Hermetic isolation configuration. When provided, creates
             an ephemeral home directory and prevents access to the host's
             ~/.claude configuration. See :class:`IsolationConfig` for details.
@@ -65,6 +74,7 @@ class ClaudeAgentSDKClientConfig:
     max_budget_usd: float | None = None
     suppress_stderr: bool = True
     stop_on_structured_output: bool = True
+    task_completion_checker: TaskCompletionChecker | None = None
     isolation: IsolationConfig | None = None
     betas: tuple[str, ...] | None = None
 
