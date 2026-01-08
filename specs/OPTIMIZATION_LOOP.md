@@ -636,30 +636,32 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         Raises:
             TimeoutError: If not all results received within timeout.
         """
-        pending: list[Message[EvalRequest[InputT, ExpectedT]]] = []
+        # Create reply mailbox for this eval run
+        replies: Mailbox[EvalResult, None] = InMemoryMailbox(
+            name=f"opt-eval-{experiment.id}"
+        )
 
-        # Submit all samples with experiment context
+        # Submit all samples with experiment context, replies go to our mailbox
         for sample in dataset:
-            msg = self._eval_requests.send(
+            self._eval_requests.send(
                 EvalRequest(sample=sample, experiment=experiment),
+                reply_to=replies,
             )
-            pending.append(msg)
 
-        # Collect results via Message.reply() with deadline
+        # Collect results with deadline
         results: list[EvalResult] = []
+        expected = len(dataset)
         deadline = time.monotonic() + timeout
 
-        while len(results) < len(pending):
+        while len(results) < expected:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(
-                    f"Eval timed out: received {len(results)}/{len(pending)} results"
+                    f"Eval timed out: received {len(results)}/{expected} results"
                 )
-            for msg in pending:
-                if msg.has_reply():
-                    results.append(msg.get_reply())
-
-            time.sleep(min(1.0, remaining))
+            for msg in replies.receive(wait_time_seconds=min(30, int(remaining))):
+                results.append(msg.body)
+                msg.acknowledge()
 
         return EvalReport(results=tuple(results))
 
@@ -796,10 +798,11 @@ dataset = Dataset(samples=tuple(
 ))
 
 # Create reply mailbox
-my_replies = RedisMailbox(name=f"opt-replies-{uuid4()}", client=redis)
-resolver.register(my_replies.name, my_replies)
+my_replies: Mailbox[OptimizeResult, None] = RedisMailbox(
+    name=f"opt-replies-{uuid4()}", client=redis
+)
 
-# Submit request
+# Submit request with reply mailbox
 optimize_requests.send(
     OptimizeRequest(
         prompt_ns="agent",
@@ -807,10 +810,10 @@ optimize_requests.send(
         dataset=dataset,
         baseline_tag="stable",
     ),
-    reply_to=my_replies.name,
+    reply_to=my_replies,
 )
 
-# Collect result via reply
+# Collect result
 for msg in my_replies.receive(wait_time_seconds=300):
     result = msg.body
     if result.report.has_modifications:
@@ -831,10 +834,6 @@ This spec requires updates to:
 
 - **EVALS.md**: Update `EvalRequest` to include `experiment` field
 - **MAIN_LOOP.md**: Update `MainLoopRequest` to include `experiment` field
-
-Note: The EVALS.md spec text shows the two-mailbox pattern but the code
-(`src/weakincentives/evals/_loop.py`) already uses `msg.reply()`. The spec
-should be updated to match the implementation.
 
 ## Limitations
 
