@@ -3,14 +3,8 @@
 ## Purpose
 
 Decision lineage captures the reasoning behind agent actions — not just what
-happened, but why it was allowed. For unattended agents, this reasoning must be
-entirely policy-driven: the agent cannot pause for human approval. Instead,
-decisions are governed by versioned policies, standing exceptions, and
-queryable precedent.
-
-This specification defines how WINK agents record structured decision traces
-that explain context gathered, policies evaluated, exceptions applied, and
-precedents referenced.
+happened, but why it was allowed. This specification unifies decision recording
+with the existing policy framework, extending rather than replacing it.
 
 ## Motivating Example: The Data Science Agent
 
@@ -20,1125 +14,678 @@ This simple question forces dozens of implicit decisions:
 
 | Decision Point | Options | Business Impact |
 |----------------|---------|-----------------|
-| Retention definition | Logo retention vs. revenue retention vs. cohort-based | Could vary from 72% to 94% |
-| Time period | TTM, calendar year, fiscal year, quarter | Seasonal effects change story |
-| Customer inclusion | All customers, exclude pilots, exclude acquisitions | Pilots churn at 3x rate |
-| Data source | Finance system (authoritative, 2-day lag) vs. CRM (real-time, approximate) | Could differ by 2-3% |
-| Edge cases | Payment pause = churned or active? Contract amendment = new customer? | Edge cases are 8% of base |
+| Retention definition | Logo vs. revenue vs. cohort-based | 72% to 94% range |
+| Time period | TTM, calendar year, fiscal year | Seasonal effects |
+| Customer inclusion | All, exclude pilots, exclude acquisitions | Pilots churn 3x faster |
+| Data source | Finance (authoritative, 2-day lag) vs. CRM (real-time) | ±2-3% variance |
 
-Without decision lineage, the CEO receives "87%" with no way to know:
-- Is this comparable to the "91%" from last quarter? (Maybe different definition)
-- Why did it drop? (Maybe we started including pilots)
-- Can I quote this to the board? (Maybe it's from stale data)
+Without lineage, the CEO receives "87%" with no way to know if it's comparable
+to last quarter's "91%" or quotable to the board.
 
-With decision lineage, each decision is recorded:
+With lineage, each decision is recorded:
 
 ```
-Decision: select_retention_metric
-├── Inputs:
-│   ├── query_context: "retention rate" (no qualifier)
-│   ├── audience: "ceo" (implies board-level precision)
-│   └── prior_reports: ["Q3 Board Deck used revenue_retention"]
-├── Policy: MetricSelectionPolicy v2.1.0
-│   ├── Condition: audience in ["ceo", "board", "investor"] → require revenue_retention
-│   └── Result: ALLOW revenue_retention
-├── Precedent: Decision abc-123 (Q3 report, similarity=0.94)
-│   └── Used: revenue_retention, ttm, exclude_pilots
-├── Outcome: revenue_retention selected
-└── Rationale: "Board-level query requires revenue retention per policy v2.1.0,
-                consistent with Q3 board deck methodology"
+PolicyDecision: select_retention_metric
+├── allowed: true
+├── reason: "Revenue retention required for CEO audience"
+├── lineage:
+│   ├── inputs: {query.audience: "ceo", prior_reports: ["Q3 used revenue_retention"]}
+│   ├── policy: MetricSelectionPolicy v2.1.0
+│   ├── conditions: [(audience_check, true)]
+│   └── precedent: Decision abc-123 (similarity=0.94)
+└── outcome: revenue_retention selected
 ```
 
-The CEO now receives: "87% (revenue retention, TTM, excluding pilots, from
-finance system as of Jan 6)" — and can trace exactly why each choice was made.
+## Design Principles
 
-## Guiding Principles
+### Extend, Don't Replace
 
-- **Policy-driven**: All decisions derive from declared policies and standing
-  exceptions. No human-in-the-loop blocking.
-- **Deterministic**: Given the same inputs and policy version, the same
-  decision results. Precedent informs but does not override policy.
-- **Auditable**: Every decision records sufficient context to explain and
-  replay the reasoning.
-- **Queryable**: Past decisions become searchable precedent for consistency
-  and learning.
+Decision lineage enriches `PolicyDecision`, not replaces it. Simple policies
+return `PolicyDecision.allow()`. Rich policies add lineage fields. The type
+is the same; the detail varies by need.
+
+### Exceptions Are Policies
+
+Standing exceptions are policies with special characteristics:
+- Run after base policies (lower priority by default)
+- Can override denials from specific policies
+- Activate conditionally
+
+This keeps the policy framework unified rather than adding parallel machinery.
+
+### Observers Consume Decisions
+
+Trajectory observers already analyze session state. With richer decisions in
+the session, observers automatically gain access to lineage without API changes.
+
+## Unified Model
 
 ```mermaid
 flowchart TB
-    subgraph Execution["Tool Execution"]
+    subgraph ToolExecution["Tool Execution"]
         Call["Tool call"]
-        Gather["Gather context"]
-        Evaluate["Evaluate policies"]
-        Apply["Apply exceptions"]
-        Execute["Execute or deny"]
+        Check["Policies check()"]
+        Handler["Execute handler"]
+        Record["Policies on_result()"]
     end
 
-    subgraph Record["Decision Record"]
-        Inputs["Inputs gathered"]
-        Policy["Policy evaluated"]
-        Exception["Exception applied"]
-        Precedent["Precedent referenced"]
-        Outcome["Outcome + rationale"]
+    subgraph PolicyStack["Policy Stack"]
+        Base["Base policies"]
+        Override["Override policies"]
     end
 
-    subgraph Query["Precedent Query"]
-        Similar["Find similar decisions"]
-        Entity["Decisions by entity"]
-        Consistency["Check consistency"]
+    subgraph Session["Session State"]
+        PolicyState["PolicyState"]
+        ToolInvoked["ToolInvoked (with decision)"]
     end
 
-    Call --> Gather --> Evaluate --> Apply --> Execute
-    Execute --> Record
-    Record --> Query
-    Query -.->|informs| Gather
+    subgraph Analysis["Trajectory Analysis"]
+        Observers["Observers"]
+        Precedent["Precedent queries"]
+    end
+
+    Call --> Check
+    Base --> Check
+    Override --> Check
+    Check -->|allow| Handler
+    Handler --> Record
+    Record --> PolicyState
+    Record --> ToolInvoked
+    ToolInvoked --> Observers
+    ToolInvoked --> Precedent
 ```
 
 ## Core Types
 
-### Decision
+### PolicyDecision (Extended)
 
-A structured record of a decision point:
+The existing `PolicyDecision` gains optional lineage fields:
 
 ```python
-@FrozenDataclass()
-class Decision:
-    """Structured record of a policy decision."""
+@dataclass(slots=True, frozen=True)
+class PolicyDecision:
+    """Result of a policy check, optionally with rich lineage."""
 
-    decision_id: UUID
-    tool_name: str
-    params_digest: str  # Hash of parameters for deduplication
+    # Core (always present) - unchanged from current API
+    allowed: bool
+    reason: str | None = None
 
-    # Context: what inputs were considered
-    inputs: DecisionInputs
+    # Lineage (optional, for auditability)
+    lineage: DecisionLineage | None = None
 
-    # Policy: what rules governed
-    policy_evaluation: PolicyEvaluation
+    @classmethod
+    def allow(cls, reason: str | None = None) -> PolicyDecision:
+        """Permit the tool call."""
+        return cls(allowed=True, reason=reason)
 
-    # Exception: any standing exception that applied
-    exception_applied: ExceptionApplication | None
+    @classmethod
+    def deny(cls, reason: str) -> PolicyDecision:
+        """Block the tool call with an explanation."""
+        return cls(allowed=False, reason=reason)
 
-    # Precedent: similar past decisions referenced
-    precedent_refs: tuple[PrecedentRef, ...] = ()
+    @classmethod
+    def allow_with_lineage(
+        cls,
+        *,
+        reason: str,
+        lineage: DecisionLineage,
+    ) -> PolicyDecision:
+        """Permit with full decision trace."""
+        return cls(allowed=True, reason=reason, lineage=lineage)
 
-    # Outcome
-    outcome: Literal["allowed", "denied", "allowed_by_exception"]
-    rationale: str
-
-    # Metadata
-    session_id: UUID | None = None
-    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    def with_override(
+        self,
+        *,
+        overriding_policy: str,
+        reason: str,
+    ) -> PolicyDecision:
+        """Create allowed decision that records the override."""
+        override = OverrideApplication(
+            overriding_policy=overriding_policy,
+            original_decision=self,
+            reason=reason,
+        )
+        lineage = (self.lineage or DecisionLineage()).with_override(override)
+        return PolicyDecision(allowed=True, reason=reason, lineage=lineage)
 ```
 
-### DecisionInputs
+### DecisionLineage
 
-Captures context gathered before the decision:
+Rich context attached to a decision:
 
 ```python
 @FrozenDataclass()
-class DecisionInputs:
-    """Context gathered for a decision."""
+class DecisionLineage:
+    """Structured context for a policy decision."""
 
-    # Structured inputs by source
-    sources: Mapping[str, InputSource]
+    # What was considered
+    inputs: Mapping[str, InputRecord] = field(default_factory=dict)
 
-    # Entity references (for graph linkage)
-    entity_refs: tuple[EntityRef, ...] = ()
+    # What policy evaluated
+    policy_name: str | None = None
+    policy_version: str | None = None
+    conditions: tuple[ConditionResult, ...] = ()
 
+    # If an override policy flipped the decision
+    override: OverrideApplication | None = None
 
-@FrozenDataclass()
-class InputSource:
-    """Input gathered from a specific source."""
+    # Links to similar past decisions
+    precedents: tuple[PrecedentRef, ...] = ()
 
-    source_type: str  # "session_state", "resource", "external"
-    source_name: str  # "Plan", "Filesystem", "customer_tier"
-    keys_accessed: tuple[str, ...]  # What was read
-    digest: str  # Hash of values for change detection
+    def with_input(self, name: str, record: InputRecord) -> DecisionLineage:
+        """Add an input record."""
+        return replace(self, inputs={**self.inputs, name: record})
 
+    def with_override(self, override: OverrideApplication) -> DecisionLineage:
+        """Record that an override policy was applied."""
+        return replace(self, override=override)
 
-@FrozenDataclass()
-class EntityRef:
-    """Reference to a domain entity involved in the decision."""
-
-    entity_type: str  # "customer", "ticket", "file"
-    entity_id: str
+    def with_precedent(self, ref: PrecedentRef) -> DecisionLineage:
+        """Add a precedent reference."""
+        return replace(self, precedents=(*self.precedents, ref))
 ```
 
-### PolicyEvaluation
-
-Records which policy was evaluated and how:
+### Supporting Types
 
 ```python
 @FrozenDataclass()
-class PolicyEvaluation:
-    """Record of policy evaluation."""
+class InputRecord:
+    """Record of an input consulted during decision."""
 
-    policy_name: str
-    policy_version: str  # Semantic version or commit hash
-    policy_hash: str  # Content hash for exact reproducibility
-
-    # Evaluation details
-    conditions_checked: tuple[ConditionResult, ...] = ()
-    base_decision: Literal["allow", "deny"]
-    denial_reason: str | None = None
+    source: str  # "session", "resource", "external"
+    keys: tuple[str, ...] = ()  # What was accessed
+    digest: str | None = None  # Hash for change detection
 
 
 @FrozenDataclass()
 class ConditionResult:
-    """Result of evaluating a single policy condition."""
-
-    condition_name: str
-    expression: str  # Human-readable condition
-    result: bool
-    inputs_used: tuple[str, ...]  # Which inputs influenced this
-```
-
-### ExceptionApplication
-
-Records when a standing exception overrode base policy:
-
-```python
-@FrozenDataclass()
-class ExceptionApplication:
-    """Record of an exception being applied."""
-
-    exception_name: str
-    exception_version: str
-    condition_matched: str  # Which condition triggered
-    override_action: Literal["allow", "modify_params"]
-    rationale: str
-    expires_at: datetime | None = None
-```
-
-### PrecedentRef
-
-Links to similar past decisions:
-
-```python
-@FrozenDataclass()
-class PrecedentRef:
-    """Reference to a prior decision used as precedent."""
-
-    decision_id: UUID
-    similarity_score: float  # 0.0-1.0
-    match_reason: str  # Why this was considered similar
-    outcome_matched: bool  # Did we follow or deviate from precedent
-```
-
-## Standing Exceptions
-
-Standing exceptions are pre-declared policy overrides that activate when
-conditions match. They replace human approval with deterministic rules.
-
-### StandingException
-
-```python
-@FrozenDataclass()
-class StandingException:
-    """A named exception that can override policy decisions."""
+    """Result of evaluating a policy condition."""
 
     name: str
-    version: str
-    description: str
-
-    # Which policies this can override
-    applies_to_policies: frozenset[str]
-
-    # When this exception activates
-    condition: ExceptionCondition
-
-    # What happens when it activates
-    override: ExceptionOverride
-
-    # Lifecycle
-    effective_from: datetime
-    expires_at: datetime | None = None
-    max_applications: int | None = None  # None = unlimited
+    expression: str  # Human-readable
+    result: bool
 
 
 @FrozenDataclass()
-class ExceptionCondition:
-    """Condition for exception activation."""
+class OverrideApplication:
+    """Record of an override policy flipping a denial."""
 
-    # Predicate receives DecisionInputs, returns bool
-    predicate: Callable[[DecisionInputs], bool]
-    description: str  # Human-readable condition
+    overriding_policy: str
+    original_decision: PolicyDecision
+    reason: str
 
 
 @FrozenDataclass()
-class ExceptionOverride:
-    """Action taken when exception applies."""
+class PrecedentRef:
+    """Reference to a similar past decision."""
 
-    action: Literal["allow", "allow_with_warning", "modify_params"]
-    rationale_template: str  # Template for decision rationale
-    param_modifications: Mapping[str, Any] | None = None
+    tool_invoked_id: UUID  # Links to ToolInvoked in session
+    similarity: float
+    match_reason: str
 ```
 
-### ExceptionRegistry
+## Override Policies
+
+Override policies can flip denials from other policies. They're just policies
+with additional metadata:
 
 ```python
-class ExceptionRegistry:
-    """Registry of standing exceptions."""
+class OverridePolicy(Protocol):
+    """A policy that can override denials from other policies."""
 
-    def register(self, exception: StandingException) -> None:
-        """Register a standing exception."""
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def overrides(self) -> frozenset[str]:
+        """Names of policies this can override."""
         ...
 
-    def find_applicable(
+    @property
+    def priority(self) -> int:
+        """Lower priority = runs later. Override policies typically use -1."""
+        return -1
+
+    def should_override(
         self,
-        policy_name: str,
-        inputs: DecisionInputs,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        denial: PolicyDecision,
         *,
-        now: datetime | None = None,
-    ) -> StandingException | None:
-        """Find first applicable exception, if any.
-
-        Returns None if no exception applies. Exceptions are evaluated
-        in registration order; first match wins.
-        """
-        ...
-
-    def all_for_policy(self, policy_name: str) -> Sequence[StandingException]:
-        """List all exceptions that could apply to a policy."""
+        context: ToolContext,
+    ) -> PolicyDecision | None:
+        """Return overriding decision, or None to let denial stand."""
         ...
 ```
 
-### Example: Data Science Agent Exceptions
-
-Consider a data science agent answering executive queries. Standing exceptions
-encode business rules that override default metric policies:
-
-```python
-# Exception 1: Acquired companies use post-acquisition data only
-#
-# Problem: A company acquired 6 months ago would show artificially low YoY
-# growth because pre-acquisition revenue wasn't in our systems.
-#
-# Policy override: For acquired entities, use post-acquisition period only.
-
-acquired_company_exception = StandingException(
-    name="acquired_company_growth_calculation",
-    version="1.0.0",
-    description="Use post-acquisition period for acquired company metrics",
-    applies_to_policies=frozenset({"growth_rate_calculation"}),
-    condition=ExceptionCondition(
-        predicate=lambda inputs: any(
-            ref.entity_type == "company"
-            and inputs.sources.get("company_metadata", {}).get("acquired_date")
-            for ref in inputs.entity_refs
-        ),
-        description="Company was acquired within calculation period",
-    ),
-    override=ExceptionOverride(
-        action="modify_params",
-        rationale_template=(
-            "Company acquired {acquired_date}; using post-acquisition period "
-            "per acquired_company_growth_calculation v1.0.0"
-        ),
-        param_modifications={"period_start": "acquisition_date"},
-    ),
-    effective_from=datetime(2024, 1, 1, tzinfo=UTC),
-)
-
-
-# Exception 2: Exclude pilot customers from churn metrics
-#
-# Problem: Pilot customers churn at 3x the rate of paying customers because
-# pilots are exploratory. Including them skews retention metrics.
-#
-# Policy override: Exclude pilot-tagged accounts from retention calculations.
-
-exclude_pilots_exception = StandingException(
-    name="exclude_pilots_from_retention",
-    version="2.0.0",
-    description="Exclude pilot customers from retention/churn metrics",
-    applies_to_policies=frozenset({"retention_calculation", "churn_calculation"}),
-    condition=ExceptionCondition(
-        predicate=lambda inputs: inputs.sources.get("query_context", {}).get(
-            "metric_type"
-        ) in ["retention", "churn"],
-        description="Query involves retention or churn metrics",
-    ),
-    override=ExceptionOverride(
-        action="modify_params",
-        rationale_template=(
-            "Excluding pilot accounts per exclude_pilots_from_retention v2.0.0 "
-            "(pilots churn at 3x rate, excluded from board metrics since Q2 2024)"
-        ),
-        param_modifications={"exclude_customer_tags": ["pilot", "trial"]},
-    ),
-    effective_from=datetime(2024, 4, 1, tzinfo=UTC),
-)
-
-
-# Exception 3: Use CRM data during month-end close
-#
-# Problem: Finance system has 2-3 day lag during month-end close. Real-time
-# queries during this window would show stale data.
-#
-# Policy override: During close period, allow CRM as primary source with
-# explicit staleness warning.
-
-month_end_close_exception = StandingException(
-    name="crm_during_close",
-    version="1.1.0",
-    description="Allow CRM as primary source during finance close period",
-    applies_to_policies=frozenset({"data_source_authority"}),
-    condition=ExceptionCondition(
-        predicate=lambda inputs: (
-            inputs.sources.get("calendar", {}).get("is_close_period", False)
-            and inputs.sources.get("query_context", {}).get("requires_realtime", False)
-        ),
-        description="Query requires real-time data during finance close period",
-    ),
-    override=ExceptionOverride(
-        action="allow_with_warning",
-        rationale_template=(
-            "Using CRM data (real-time) instead of finance system (in close period). "
-            "Values may differ from final close by ±2%. Per crm_during_close v1.1.0"
-        ),
-        param_modifications={"primary_source": "crm", "add_staleness_warning": True},
-    ),
-    effective_from=datetime(2024, 1, 1, tzinfo=UTC),
-    # This exception only applies during close periods (roughly 3 days/month)
-)
-
-
-# Register exceptions for the data science agent
-registry = ExceptionRegistry()
-registry.register(acquired_company_exception)
-registry.register(exclude_pilots_exception)
-registry.register(month_end_close_exception)
-```
-
-These exceptions encode institutional knowledge that would otherwise live in
-analysts' heads: "we always exclude pilots," "acquired companies are special,"
-"don't trust finance data during close." With decision lineage, this knowledge
-becomes versioned, auditable policy.
-
-## Versioned Policies
-
-Policies must declare versions for reproducibility:
+### Example: Data Science Agent Overrides
 
 ```python
 @dataclass(frozen=True)
-class VersionedPolicy:
-    """Policy with version tracking."""
+class ExcludePilotsOverride:
+    """Override inclusion policies to exclude pilots from retention metrics.
 
-    policy: ToolPolicy
-    version: str  # Semantic version
-    effective_from: datetime
+    Problem: Pilot customers churn at 3x the rate of paying customers.
+    Including them skews retention metrics for board reporting.
+
+    This override activates when:
+    1. A metric policy denies (e.g., "must specify inclusion criteria")
+    2. The query involves retention/churn metrics
+
+    Effect: Allows the query with pilot exclusion applied.
+    """
 
     @property
-    def policy_hash(self) -> str:
-        """Content hash for exact match verification."""
-        # Hash of policy configuration
-        ...
+    def name(self) -> str:
+        return "exclude_pilots_from_retention"
+
+    @property
+    def overrides(self) -> frozenset[str]:
+        return frozenset({"customer_inclusion"})
+
+    @property
+    def priority(self) -> int:
+        return -1  # Run after base policies
+
+    def should_override(
+        self,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        denial: PolicyDecision,
+        *,
+        context: ToolContext,
+    ) -> PolicyDecision | None:
+        # Only override for retention-related queries
+        query_context = context.session[QueryContext].latest()
+        if query_context is None:
+            return None
+        if query_context.metric_type not in ("retention", "churn"):
+            return None
+
+        # Override with lineage
+        lineage = DecisionLineage(
+            inputs={
+                "query_context": InputRecord(
+                    source="session",
+                    keys=("metric_type",),
+                ),
+            },
+            policy_name=self.name,
+            policy_version="2.0.0",
+            conditions=(
+                ConditionResult(
+                    name="metric_type_check",
+                    expression="metric_type in ['retention', 'churn']",
+                    result=True,
+                ),
+            ),
+        )
+
+        return denial.with_override(
+            overriding_policy=self.name,
+            reason=(
+                "Excluding pilot accounts (churn at 3x rate, excluded from "
+                "board metrics since Q2 2024)"
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class AcquiredCompanyOverride:
+    """Use post-acquisition period for acquired company metrics.
+
+    Problem: Companies acquired within the calculation period show
+    artificially low YoY growth because pre-acquisition revenue
+    wasn't in our systems.
+    """
+
+    @property
+    def name(self) -> str:
+        return "acquired_company_adjustment"
+
+    @property
+    def overrides(self) -> frozenset[str]:
+        return frozenset({"time_period_selection"})
+
+    @property
+    def priority(self) -> int:
+        return -1
+
+    def should_override(
+        self,
+        tool: Tool[Any, Any],
+        params: SupportsDataclass | None,
+        denial: PolicyDecision,
+        *,
+        context: ToolContext,
+    ) -> PolicyDecision | None:
+        # Check if any referenced company was acquired recently
+        entities = context.session[EntityContext].latest()
+        if entities is None:
+            return None
+
+        acquired = [
+            e for e in entities.companies
+            if e.acquired_date and e.acquired_date > context.period_start
+        ]
+        if not acquired:
+            return None
+
+        return denial.with_override(
+            overriding_policy=self.name,
+            reason=(
+                f"Using post-acquisition period for {acquired[0].name} "
+                f"(acquired {acquired[0].acquired_date})"
+            ),
+        )
 ```
 
-Policy version is recorded in every decision. When replaying or auditing,
-the exact policy version can be reconstructed.
+## Policy Execution Flow
 
-## Precedent Store
+The executor runs policies in priority order, with override handling:
 
-The precedent store enables querying past decisions:
+```python
+def check_policies(
+    tool: Tool[Any, Any],
+    params: SupportsDataclass | None,
+    *,
+    context: ToolContext,
+    policies: Sequence[ToolPolicy],
+) -> PolicyDecision:
+    """Evaluate policies with override support."""
 
-### Protocol
+    # Sort by priority (higher first, overrides last)
+    sorted_policies = sorted(policies, key=lambda p: getattr(p, "priority", 0), reverse=True)
+
+    # Separate base policies from overrides
+    base_policies = [p for p in sorted_policies if not hasattr(p, "overrides")]
+    override_policies = [p for p in sorted_policies if hasattr(p, "overrides")]
+
+    # Check base policies
+    for policy in base_policies:
+        decision = policy.check(tool, params, context=context)
+        if not decision.allowed:
+            # Try override policies
+            for override in override_policies:
+                if policy.name not in override.overrides:
+                    continue
+                override_decision = override.should_override(
+                    tool, params, decision, context=context
+                )
+                if override_decision is not None:
+                    return override_decision
+
+            # No override applied
+            return decision
+
+    return PolicyDecision.allow()
+```
+
+## Session Integration
+
+Decisions are recorded in `ToolInvoked` events:
+
+```python
+@FrozenDataclass()
+class ToolInvoked:
+    """Event recording a tool invocation."""
+
+    tool_name: str
+    params: Mapping[str, Any]
+    result: ToolResult[Any]
+    timestamp: datetime
+
+    # Policy decision that allowed this call
+    decision: PolicyDecision | None = None
+```
+
+This means:
+- All tool invocations record their gating decision
+- Observers can access decision lineage via `ToolInvoked.decision.lineage`
+- Precedent queries can search by policy, outcome, or inputs
+
+## Precedent Queries
+
+Precedent lookup is a query over session history:
+
+```python
+def find_precedents(
+    session: Session,
+    *,
+    tool_name: str,
+    entity_refs: Sequence[tuple[str, str]] | None = None,
+    policy_name: str | None = None,
+    limit: int = 5,
+) -> Sequence[tuple[ToolInvoked, float]]:
+    """Find similar past decisions in session history.
+
+    Returns (ToolInvoked, similarity_score) pairs.
+    """
+    candidates = []
+
+    for invoked in session[ToolInvoked].all():
+        if invoked.tool_name != tool_name:
+            continue
+        if invoked.decision is None:
+            continue
+
+        score = _compute_similarity(
+            invoked,
+            entity_refs=entity_refs,
+            policy_name=policy_name,
+        )
+        if score > 0.5:
+            candidates.append((invoked, score))
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates[:limit]
+```
+
+For cross-session precedent, use an external `PrecedentStore`:
 
 ```python
 class PrecedentStore(Protocol):
-    """Storage and retrieval of decision precedents."""
+    """External storage for cross-session precedent queries."""
 
-    def record(self, decision: Decision) -> None:
-        """Store a decision for future lookup."""
-        ...
-
-    def find_by_id(self, decision_id: UUID) -> Decision | None:
-        """Retrieve a specific decision."""
+    def record(self, invoked: ToolInvoked, session_id: UUID) -> None:
+        """Persist a tool invocation for future lookup."""
         ...
 
     def find_similar(
         self,
         *,
         tool_name: str,
-        inputs: DecisionInputs,
+        inputs: Mapping[str, InputRecord],
         limit: int = 5,
-        min_similarity: float = 0.7,
-    ) -> Sequence[tuple[Decision, float]]:
-        """Find similar past decisions with similarity scores.
-
-        Similarity is computed over:
-        - Entity refs (same entities = higher similarity)
-        - Input sources accessed (same sources = higher similarity)
-        - Parameter patterns (similar params = higher similarity)
-        """
+    ) -> Sequence[tuple[ToolInvoked, float]]:
+        """Find similar decisions across sessions."""
         ...
+```
 
-    def find_by_entity(
+## Trajectory Observer Integration
+
+Observers automatically benefit from richer decisions:
+
+```python
+class PrecedentConsistencyObserver:
+    """Flag when decisions deviate from precedent."""
+
+    @property
+    def name(self) -> str:
+        return "precedent_consistency"
+
+    def observe(
         self,
-        entity_type: str,
-        entity_id: str,
+        session: Session,
         *,
-        limit: int = 100,
-    ) -> Sequence[Decision]:
-        """All decisions involving an entity."""
-        ...
+        context: ObserverContext,
+    ) -> Assessment | None:
+        recent = session[ToolInvoked].all()[-10:]
 
-    def find_by_policy(
-        self,
-        policy_name: str,
-        *,
-        outcome: Literal["allowed", "denied", "allowed_by_exception"] | None = None,
-        since: datetime | None = None,
-        limit: int = 100,
-    ) -> Sequence[Decision]:
-        """Decisions evaluated by a specific policy."""
-        ...
+        deviations = []
+        for invoked in recent:
+            if invoked.decision is None or invoked.decision.lineage is None:
+                continue
+
+            lineage = invoked.decision.lineage
+            for ref in lineage.precedents:
+                prior = session[ToolInvoked].where(
+                    lambda t: t.id == ref.tool_invoked_id
+                )
+                if prior and prior[0].decision:
+                    if prior[0].decision.allowed != invoked.decision.allowed:
+                        deviations.append((invoked, prior[0], ref))
+
+        if not deviations:
+            return None
+
+        return Assessment(
+            observer_name=self.name,
+            summary=f"{len(deviations)} decisions differ from precedent",
+            severity="caution",
+            suggestions=(
+                "Verify methodology is consistent with prior reports",
+                "Document rationale if intentional change",
+            ),
+        )
 ```
 
-### Session Integration
-
-Decisions are stored in the session and optionally persisted:
-
-```python
-# Decisions accumulate in session (LOG policy)
-session[Decision].all()  # All decisions in this session
-
-# Optional: persist to external store
-precedent_store.record(decision)
-```
-
-## Decision Flow
-
-### Extended Policy Check
-
-The policy check flow is extended to capture decision context:
-
-```python
-def check_with_lineage(
-    tool: Tool[Any, Any],
-    params: SupportsDataclass | None,
-    *,
-    context: ToolContext,
-    policies: Sequence[VersionedPolicy],
-    exception_registry: ExceptionRegistry,
-    precedent_store: PrecedentStore | None = None,
-) -> tuple[PolicyDecision, Decision]:
-    """Evaluate policies and produce decision record."""
-
-    # 1. Gather inputs
-    inputs = gather_decision_inputs(tool, params, context=context)
-
-    # 2. Find precedents (informational, does not change decision)
-    precedent_refs: tuple[PrecedentRef, ...] = ()
-    if precedent_store:
-        similar = precedent_store.find_similar(
-            tool_name=tool.name,
-            inputs=inputs,
-            limit=3,
-        )
-        precedent_refs = tuple(
-            PrecedentRef(
-                decision_id=d.decision_id,
-                similarity_score=score,
-                match_reason=f"Similar {tool.name} call",
-                outcome_matched=True,  # Updated after decision
-            )
-            for d, score in similar
-        )
-
-    # 3. Evaluate policies
-    for versioned_policy in policies:
-        policy = versioned_policy.policy
-        base_decision = policy.check(tool, params, context=context)
-
-        if base_decision.allowed:
-            # Policy allows, record and continue
-            evaluation = PolicyEvaluation(
-                policy_name=policy.name,
-                policy_version=versioned_policy.version,
-                policy_hash=versioned_policy.policy_hash,
-                base_decision="allow",
-            )
-            decision = Decision(
-                decision_id=uuid4(),
-                tool_name=tool.name,
-                params_digest=hash_params(params),
-                inputs=inputs,
-                policy_evaluation=evaluation,
-                exception_applied=None,
-                precedent_refs=precedent_refs,
-                outcome="allowed",
-                rationale=f"Allowed by {policy.name} v{versioned_policy.version}",
-                session_id=context.session.session_id,
-            )
-            return base_decision, decision
-
-        # Policy denies, check for exceptions
-        exception = exception_registry.find_applicable(
-            policy_name=policy.name,
-            inputs=inputs,
-        )
-
-        evaluation = PolicyEvaluation(
-            policy_name=policy.name,
-            policy_version=versioned_policy.version,
-            policy_hash=versioned_policy.policy_hash,
-            base_decision="deny",
-            denial_reason=base_decision.reason,
-        )
-
-        if exception:
-            # Exception overrides denial
-            application = ExceptionApplication(
-                exception_name=exception.name,
-                exception_version=exception.version,
-                condition_matched=exception.condition.description,
-                override_action=exception.override.action,
-                rationale=exception.override.rationale_template,
-                expires_at=exception.expires_at,
-            )
-            decision = Decision(
-                decision_id=uuid4(),
-                tool_name=tool.name,
-                params_digest=hash_params(params),
-                inputs=inputs,
-                policy_evaluation=evaluation,
-                exception_applied=application,
-                precedent_refs=precedent_refs,
-                outcome="allowed_by_exception",
-                rationale=exception.override.rationale_template,
-                session_id=context.session.session_id,
-            )
-            return PolicyDecision.allow(), decision
-
-        # No exception, denial stands
-        decision = Decision(
-            decision_id=uuid4(),
-            tool_name=tool.name,
-            params_digest=hash_params(params),
-            inputs=inputs,
-            policy_evaluation=evaluation,
-            exception_applied=None,
-            precedent_refs=update_precedent_match(precedent_refs, outcome="denied"),
-            outcome="denied",
-            rationale=base_decision.reason or "Policy denied",
-            session_id=context.session.session_id,
-        )
-        return base_decision, decision
-
-    # No policies, allow by default
-    decision = Decision(
-        decision_id=uuid4(),
-        tool_name=tool.name,
-        params_digest=hash_params(params),
-        inputs=inputs,
-        policy_evaluation=PolicyEvaluation(
-            policy_name="none",
-            policy_version="0.0.0",
-            policy_hash="",
-            base_decision="allow",
-        ),
-        exception_applied=None,
-        precedent_refs=precedent_refs,
-        outcome="allowed",
-        rationale="No policy constraints",
-        session_id=context.session.session_id,
-    )
-    return PolicyDecision.allow(), decision
-```
-
-### Input Gathering
-
-```python
-def gather_decision_inputs(
-    tool: Tool[Any, Any],
-    params: SupportsDataclass | None,
-    *,
-    context: ToolContext,
-) -> DecisionInputs:
-    """Gather context that will inform the decision."""
-
-    sources: dict[str, InputSource] = {}
-
-    # Session state accessed
-    # (In practice, policies declare what state they read)
-    sources["session"] = InputSource(
-        source_type="session_state",
-        source_name="Session",
-        keys_accessed=("PolicyState", "Plan"),
-        digest=hash_session_state(context.session),
-    )
-
-    # Tool parameters
-    if params:
-        sources["params"] = InputSource(
-            source_type="params",
-            source_name=tool.name,
-            keys_accessed=tuple(field.name for field in fields(params)),
-            digest=hash_params(params),
-        )
-
-    # Resources (filesystem state, etc.)
-    if context.filesystem:
-        sources["filesystem"] = InputSource(
-            source_type="resource",
-            source_name="Filesystem",
-            keys_accessed=(),  # Populated by policy during check
-            digest="",  # Computed lazily
-        )
-
-    return DecisionInputs(sources=MappingProxyType(sources))
-```
-
-## Prompt Integration
-
-Decision lineage is configured at the prompt level. For the data science agent:
+## Prompt Configuration
 
 ```python
 template = PromptTemplate[QueryResponse](
     ns="data-science-agent",
     key="executive-query",
-    name="executive_query_handler",
-    sections=[
-        MarkdownSection(
-            title="Role",
-            template=(
-                "You are a data analyst answering questions for $audience. "
-                "All metric calculations must follow declared policies and "
-                "record decision lineage for auditability."
-            ),
-            key="role",
-        ),
-        # ... other sections
-    ],
+    sections=[...],
     policies=[
-        VersionedPolicy(
-            policy=MetricSelectionPolicy(),
-            version="2.1.0",
-            effective_from=datetime(2024, 6, 1, tzinfo=UTC),
-        ),
-        VersionedPolicy(
-            policy=TimePeriodPolicy(),
-            version="1.0.0",
-            effective_from=datetime(2024, 1, 1, tzinfo=UTC),
-        ),
-        VersionedPolicy(
-            policy=CustomerInclusionPolicy(),
-            version="3.0.0",
-            effective_from=datetime(2024, 9, 1, tzinfo=UTC),
-        ),
-        VersionedPolicy(
-            policy=DataSourceAuthorityPolicy(),
-            version="1.5.0",
-            effective_from=datetime(2024, 3, 1, tzinfo=UTC),
+        # Base policies
+        MetricSelectionPolicy(version="2.1.0"),
+        TimePeriodPolicy(version="1.0.0"),
+        CustomerInclusionPolicy(version="3.0.0"),
+        DataSourcePolicy(version="1.5.0"),
+        # Override policies (run after base, can flip denials)
+        ExcludePilotsOverride(),
+        AcquiredCompanyOverride(),
+        MonthEndCloseOverride(),
+    ],
+    observers=[
+        ObserverConfig(
+            observer=PrecedentConsistencyObserver(),
+            trigger=ObserverTrigger(every_n_calls=5),
         ),
     ],
-    exception_registry=ExceptionRegistry.of(
-        acquired_company_exception,
-        exclude_pilots_exception,
-        month_end_close_exception,
-    ),
-    decision_lineage=DecisionLineageConfig(
-        enabled=True,
-        store_precedents=True,
-        max_precedent_refs=3,
-        include_in_response=True,  # Append methodology to output
-    ),
 )
 ```
 
-## Session State
+## Worked Example
 
-Decisions are stored in the session with LOG policy:
+CEO asks: "How did Enterprise segment retention change vs last quarter?"
 
-```python
-# Decisions use ledger semantics (append-only, never replaced)
-session[Decision].all()  # Full decision history
-
-# Query recent decisions
-session[Decision].where(lambda d: d.outcome == "denied")
-
-# Snapshot includes decisions
-snapshot = session.snapshot()  # Decisions preserved
-```
-
-## Precedent Consistency
-
-Precedent is informational — it aids consistency but does not override policy.
-The agent can note when its decision differs from precedent:
+### Step 1: Metric Selection
 
 ```python
-@FrozenDataclass()
-class PrecedentDeviation:
-    """Records when a decision deviates from precedent."""
-
-    decision_id: UUID
-    precedent_id: UUID
-    deviation_type: Literal["outcome_differs", "rationale_differs"]
-    explanation: str
-```
-
-Trajectory observers can flag precedent deviations:
-
-```python
-class PrecedentConsistencyObserver:
-    """Flag decisions that deviate from precedent."""
-
-    def observe(self, session: Session, *, context: ObserverContext) -> Assessment:
-        recent_decisions = session[Decision].all()[-5:]
-        deviations = [
-            d for d in recent_decisions
-            if any(not ref.outcome_matched for ref in d.precedent_refs)
-        ]
-
-        if deviations:
-            return Assessment(
-                observer_name="PrecedentConsistency",
-                summary=f"{len(deviations)} decisions deviated from precedent",
-                severity="caution",
-                suggestions=(
-                    "Review whether deviation is intentional",
-                    "Consider updating policy if new pattern is correct",
-                ),
-            )
-        ...
-```
-
-## Contrib: Precedent Store Implementations
-
-### InMemoryPrecedentStore
-
-For testing and single-session use:
-
-```python
-class InMemoryPrecedentStore:
-    """In-memory precedent store for testing."""
-
-    def __init__(self) -> None:
-        self._decisions: dict[UUID, Decision] = {}
-        self._by_entity: dict[tuple[str, str], list[UUID]] = defaultdict(list)
-        self._by_policy: dict[str, list[UUID]] = defaultdict(list)
-
-    def record(self, decision: Decision) -> None:
-        self._decisions[decision.decision_id] = decision
-        for ref in decision.inputs.entity_refs:
-            self._by_entity[(ref.entity_type, ref.entity_id)].append(
-                decision.decision_id
-            )
-        self._by_policy[decision.policy_evaluation.policy_name].append(
-            decision.decision_id
-        )
-
-    def find_similar(
-        self,
-        *,
-        tool_name: str,
-        inputs: DecisionInputs,
-        limit: int = 5,
-        min_similarity: float = 0.7,
-    ) -> Sequence[tuple[Decision, float]]:
-        # Simple similarity: entity overlap + source overlap
-        candidates = []
-        input_entities = set(
-            (r.entity_type, r.entity_id) for r in inputs.entity_refs
-        )
-        input_sources = set(inputs.sources.keys())
-
-        for decision in self._decisions.values():
-            if decision.tool_name != tool_name:
-                continue
-
-            decision_entities = set(
-                (r.entity_type, r.entity_id)
-                for r in decision.inputs.entity_refs
-            )
-            decision_sources = set(decision.inputs.sources.keys())
-
-            entity_overlap = len(input_entities & decision_entities)
-            source_overlap = len(input_sources & decision_sources)
-
-            # Simple Jaccard-like similarity
-            total = len(input_entities | decision_entities) + len(
-                input_sources | decision_sources
-            )
-            if total == 0:
-                continue
-
-            similarity = (entity_overlap + source_overlap) / total
-            if similarity >= min_similarity:
-                candidates.append((decision, similarity))
-
-        candidates.sort(key=lambda x: x[1], reverse=True)
-        return candidates[:limit]
-```
-
-### RedisPrecedentStore
-
-For production use with persistence:
-
-```python
-class RedisPrecedentStore:
-    """Redis-backed precedent store with TTL."""
-
-    def __init__(
-        self,
-        redis: Redis,
-        *,
-        key_prefix: str = "wink:precedent:",
-        ttl_days: int = 90,
-    ) -> None:
-        self._redis = redis
-        self._prefix = key_prefix
-        self._ttl = timedelta(days=ttl_days)
-
-    # Implementation uses Redis sorted sets for entity/policy indexes
-    # and JSON serialization for decision records
-    ...
-```
-
-## Worked Example: Complete Decision Trace
-
-The CEO asks: "How did Enterprise segment retention change vs last quarter?"
-
-The agent produces four decisions to answer this query:
-
-### Decision 1: Metric Selection
-
-```python
-Decision(
-    decision_id=UUID("d1-..."),
-    tool_name="select_metric",
-    inputs=DecisionInputs(
-        sources={
-            "query": InputSource(
-                source_type="params",
-                source_name="query",
-                keys_accessed=("text", "audience", "entities"),
-                digest="sha256:abc...",
-            ),
-            "prior_reports": InputSource(
-                source_type="external",
-                source_name="report_history",
-                keys_accessed=("Q3_board_deck", "Q2_board_deck"),
-                digest="sha256:def...",
-            ),
+# MetricSelectionPolicy checks
+decision = MetricSelectionPolicy.check(
+    tool=select_metric,
+    params=MetricParams(name="retention"),
+    context=context,
+)
+# Returns:
+PolicyDecision(
+    allowed=True,
+    reason="Revenue retention required for CEO audience",
+    lineage=DecisionLineage(
+        inputs={
+            "query": InputRecord(source="params", keys=("audience",)),
+            "prior_reports": InputRecord(source="external", keys=("Q3_board_deck",)),
         },
-        entity_refs=(EntityRef("segment", "enterprise"),),
-    ),
-    policy_evaluation=PolicyEvaluation(
-        policy_name="MetricSelectionPolicy",
+        policy_name="metric_selection",
         policy_version="2.1.0",
-        policy_hash="sha256:789...",
-        conditions_checked=(
-            ConditionResult(
-                condition_name="audience_requires_revenue_retention",
-                expression="audience in ['ceo', 'board'] → revenue_retention",
-                result=True,
-                inputs_used=("query.audience",),
-            ),
+        conditions=(
+            ConditionResult("audience_check", "audience == 'ceo'", True),
         ),
-        base_decision="allow",
-    ),
-    exception_applied=None,
-    precedent_refs=(
-        PrecedentRef(
-            decision_id=UUID("prev-q3-..."),
-            similarity_score=0.91,
-            match_reason="Same segment, same audience, quarterly comparison",
-            outcome_matched=True,
+        precedents=(
+            PrecedentRef(tool_invoked_id=UUID("..."), similarity=0.91, match_reason="Same segment"),
         ),
-    ),
-    outcome="allowed",
-    rationale=(
-        "Selected revenue_retention: CEO audience requires revenue-based metrics "
-        "per MetricSelectionPolicy v2.1.0. Consistent with Q3 board methodology."
     ),
 )
 ```
 
-### Decision 2: Time Period Selection
+### Step 2: Customer Filter (with Override)
 
 ```python
-Decision(
-    decision_id=UUID("d2-..."),
-    tool_name="select_time_period",
-    inputs=DecisionInputs(
-        sources={
-            "query": InputSource(...),  # "vs last quarter" implies QoQ
-            "calendar": InputSource(
-                source_type="external",
-                source_name="fiscal_calendar",
-                keys_accessed=("current_quarter", "quarter_boundaries"),
-                digest="sha256:...",
-            ),
-        },
-        entity_refs=(EntityRef("segment", "enterprise"),),
-    ),
-    policy_evaluation=PolicyEvaluation(
-        policy_name="TimePeriodPolicy",
-        policy_version="1.0.0",
-        policy_hash="sha256:...",
-        conditions_checked=(
-            ConditionResult(
-                condition_name="quarterly_comparison_uses_fiscal",
-                expression="'quarter' in query → fiscal_quarter boundaries",
-                result=True,
-                inputs_used=("query.text", "calendar.fiscal_year_start"),
-            ),
-        ),
-        base_decision="allow",
-    ),
-    exception_applied=None,
-    precedent_refs=(),
-    outcome="allowed",
-    rationale=(
-        "Using fiscal quarters (Q4: Oct-Dec, Q3: Jul-Sep) per TimePeriodPolicy v1.0.0. "
-        "Fiscal year starts October 1."
-    ),
+# CustomerInclusionPolicy denies (requires explicit filter)
+denial = PolicyDecision.deny("Must specify customer filter criteria")
+
+# ExcludePilotsOverride checks and overrides
+override_decision = ExcludePilotsOverride.should_override(
+    tool=filter_customers,
+    params=FilterParams(segment="enterprise"),
+    denial=denial,
+    context=context,
 )
-```
-
-### Decision 3: Customer Inclusion
-
-```python
-Decision(
-    decision_id=UUID("d3-..."),
-    tool_name="filter_customers",
-    inputs=DecisionInputs(
-        sources={
-            "segment_definition": InputSource(
-                source_type="external",
-                source_name="segment_rules",
-                keys_accessed=("enterprise_arr_threshold", "enterprise_employee_count"),
-                digest="sha256:...",
-            ),
-            "customer_metadata": InputSource(
-                source_type="external",
-                source_name="crm",
-                keys_accessed=("customer_tags", "acquisition_dates"),
-                digest="sha256:...",
-            ),
-        },
-        entity_refs=(EntityRef("segment", "enterprise"),),
-    ),
-    policy_evaluation=PolicyEvaluation(
-        policy_name="CustomerInclusionPolicy",
-        policy_version="3.0.0",
-        policy_hash="sha256:...",
-        base_decision="deny",  # Default would include all customers
-        denial_reason="Retention metrics require pilot exclusion",
-    ),
-    exception_applied=ExceptionApplication(
-        exception_name="exclude_pilots_from_retention",
-        exception_version="2.0.0",
-        condition_matched="Query involves retention metrics",
-        override_action="modify_params",
-        rationale=(
-            "Excluding pilot accounts per exclude_pilots_from_retention v2.0.0 "
-            "(pilots churn at 3x rate, excluded from board metrics since Q2 2024)"
+# Returns:
+PolicyDecision(
+    allowed=True,
+    reason="Excluding pilot accounts (churn at 3x rate)",
+    lineage=DecisionLineage(
+        policy_name="exclude_pilots_from_retention",
+        policy_version="2.0.0",
+        override=OverrideApplication(
+            overriding_policy="exclude_pilots_from_retention",
+            original_decision=denial,
+            reason="Pilots excluded from board metrics since Q2 2024",
         ),
-    ),
-    precedent_refs=(
-        PrecedentRef(
-            decision_id=UUID("prev-q3-..."),
-            similarity_score=0.91,
-            match_reason="Same segment retention query",
-            outcome_matched=True,  # Q3 also excluded pilots
-        ),
-    ),
-    outcome="allowed_by_exception",
-    rationale=(
-        "Enterprise segment: ARR ≥ $100K or employees ≥ 1000. "
-        "Excluding 12 pilot accounts per standing exception. "
-        "Final cohort: 847 customers."
-    ),
-)
-```
-
-### Decision 4: Data Source Selection
-
-```python
-Decision(
-    decision_id=UUID("d4-..."),
-    tool_name="select_data_source",
-    inputs=DecisionInputs(
-        sources={
-            "calendar": InputSource(
-                source_type="external",
-                source_name="fiscal_calendar",
-                keys_accessed=("is_close_period", "close_end_date"),
-                digest="sha256:...",
-            ),
-            "source_freshness": InputSource(
-                source_type="external",
-                source_name="data_catalog",
-                keys_accessed=("finance_last_sync", "crm_last_sync"),
-                digest="sha256:...",
-            ),
-        },
-    ),
-    policy_evaluation=PolicyEvaluation(
-        policy_name="DataSourceAuthorityPolicy",
-        policy_version="1.5.0",
-        policy_hash="sha256:...",
-        conditions_checked=(
-            ConditionResult(
-                condition_name="finance_is_authoritative",
-                expression="revenue metrics → finance system",
-                result=True,
-                inputs_used=(),
-            ),
-            ConditionResult(
-                condition_name="not_in_close_period",
-                expression="calendar.is_close_period == False",
-                result=True,  # Not in close period, so finance is fine
-                inputs_used=("calendar.is_close_period",),
-            ),
-        ),
-        base_decision="allow",
-    ),
-    exception_applied=None,  # Would apply if is_close_period=True
-    precedent_refs=(),
-    outcome="allowed",
-    rationale=(
-        "Using finance system (authoritative for revenue). "
-        "Last sync: Jan 6 2025 02:00 UTC. Not in close period."
     ),
 )
 ```
 
 ### Final Output
 
-The agent returns to the CEO:
-
 ```
 Enterprise segment retention: 87.2% (Q4) vs 89.1% (Q3), down 1.9pp
 
 Methodology:
-- Metric: Revenue retention (net dollar retention)
-- Period: Fiscal Q4 (Oct 1 - Dec 31) vs Fiscal Q3 (Jul 1 - Sep 30)
-- Cohort: 847 Enterprise customers (ARR ≥$100K or 1000+ employees)
-- Exclusions: 12 pilot accounts excluded per board-metric policy
-- Source: Finance system (synced Jan 6, 2025 02:00 UTC)
+- Metric: Revenue retention (per MetricSelectionPolicy v2.1.0)
+- Period: Fiscal quarters (per TimePeriodPolicy v1.0.0)
+- Cohort: 847 Enterprise customers, 12 pilots excluded
+  (per ExcludePilotsOverride, consistent with Q3)
+- Source: Finance system, synced Jan 6 2025
 
-[Decision trace: d1-..., d2-..., d3-..., d4-...]
+[4 decisions recorded in session]
 ```
 
-Each decision ID links to the full trace. If the CFO later asks "why did
-retention drop?" — the agent can query the decision trace and precedent store
-to identify what changed (e.g., "Q3 used calendar quarters, Q4 used fiscal;
-recommend re-running Q3 with fiscal for apples-to-apples comparison").
+## Migration
 
-## Limitations
+Existing code continues to work unchanged:
 
-- **No blocking approval**: Decisions are immediate; no human-in-the-loop
-- **Precedent is advisory**: Does not override policy; informs consistency
-- **Similarity is heuristic**: Entity/source overlap, not semantic similarity
-- **Storage growth**: Decisions accumulate; implement retention policies
+```python
+# Before: simple policy (still works)
+return PolicyDecision.allow()
+return PolicyDecision.deny("reason")
 
-## Future Extensions
+# After: rich policy (opt-in)
+return PolicyDecision.allow_with_lineage(
+    reason="...",
+    lineage=DecisionLineage(...),
+)
+```
 
-- **Semantic similarity**: Embed decision context for vector search
-- **Policy learning**: Surface common exception patterns for policy updates
-- **Cross-session consistency**: Query precedent across agent instances
-- **Audit reports**: Generate decision lineage reports for compliance
+The `lineage` field is optional. Policies that don't need rich tracing
+continue to return simple `PolicyDecision.allow()` or `deny()`.
+
+## Summary
+
+| Concept | Before | After |
+|---------|--------|-------|
+| Policy outcome | `PolicyDecision` (allowed + reason) | Same, with optional `lineage` field |
+| Exceptions | None | Override policies (same protocol, special behavior) |
+| Decision history | `PolicyState` + `ToolInvoked` | `ToolInvoked.decision` includes lineage |
+| Precedent | None | Query over `ToolInvoked` or external store |
+| Observers | Analyze `ToolInvoked` | Same, now have access to `decision.lineage` |
+
+This unified model:
+1. **Extends** `PolicyDecision` rather than adding new types
+2. **Makes overrides policies** rather than separate exception machinery
+3. **Records decisions in existing events** rather than new slices
+4. **Enables observers** to consume richer data automatically
