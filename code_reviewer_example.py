@@ -192,8 +192,8 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
         ] = InMemoryMailbox(name="requests", reply_resolver=resolver)
         loop = CodeReviewLoop(adapter=adapter, requests=requests)
-        # Run in background thread
-        thread = threading.Thread(target=lambda: loop.run(max_iterations=None))
+        # Run in background thread (runs indefinitely until shutdown)
+        thread = threading.Thread(target=loop.run)
         thread.start()
     """
 
@@ -372,7 +372,7 @@ class CodeReviewApp:
     def _run_worker(self) -> None:
         """Background worker that processes requests from the mailbox."""
         # Run indefinitely until mailbox is closed
-        self._loop.run(max_iterations=None, wait_time_seconds=5)
+        self._loop.run(wait_time_seconds=5)
         _LOGGER.debug("Worker thread exiting")
 
     def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:

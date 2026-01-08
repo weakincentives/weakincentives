@@ -137,7 +137,7 @@ ______________________________________________________________________
 1. [Lifecycle Management](#9-lifecycle-management)
    1. [LoopGroup: running multiple loops](#91-loopgroup-running-multiple-loops)
    1. [ShutdownCoordinator: manual signal handling](#92-shutdowncoordinator-manual-signal-handling)
-   1. [The Runnable protocol](#93-the-runnable-protocol)
+   1. [The RunnableLoop protocol](#93-the-runnableloop-protocol)
    1. [Health and watchdog configuration](#94-health-and-watchdog-configuration)
 1. [Progressive disclosure](#10-progressive-disclosure)
    1. [SectionVisibility: FULL vs SUMMARY](#101-sectionvisibility-full-vs-summary)
@@ -2806,19 +2806,24 @@ loop.run()
 The coordinator installs signal handlers for SIGTERM and SIGINT. When a signal
 arrives, all registered callbacks are invoked in registration order.
 
-### 9.3 The Runnable protocol
+### 9.3 The RunnableLoop protocol
 
-Both `MainLoop` and `EvalLoop` implement the `Runnable` protocol:
+Both `MainLoop` and `EvalLoop` implement the `RunnableLoop` protocol:
 
 ```python
 from typing import Protocol
 from weakincentives.runtime import Heartbeat
 
 
-class Runnable(Protocol):
-    """Protocol for loops managed by LoopGroup."""
+class RunnableLoop(Protocol):
+    """Protocol for loops managed by LoopGroup with turn control."""
 
-    def run(self, *, max_iterations: int | None = None) -> None: ...
+    def run(
+        self,
+        *,
+        max_iterations: int | None = None,
+        max_turns: int | None = None,
+    ) -> None: ...
     def shutdown(self, *, timeout: float = 30.0) -> bool: ...
 
     @property
@@ -3678,8 +3683,8 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 
 **Lifecycle management:**
 
-- `Runnable`: Protocol for loops with graceful shutdown (`run()`, `shutdown()`,
-  `running`, `heartbeat`)
+- `RunnableLoop`: Protocol for loops with graceful shutdown and turn control
+  (`run()`, `shutdown()`, `running`, `heartbeat`)
 - `ShutdownCoordinator.install()`: Singleton for SIGTERM/SIGINT handling
 - `LoopGroup(loops, health_port=..., watchdog_threshold=...)`: Run multiple
   loops with coordinated shutdown, health endpoints, and watchdog monitoring

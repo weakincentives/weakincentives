@@ -104,7 +104,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     def run(
         self,
         *,
-        max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
@@ -114,7 +114,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         MainLoop, and sends results via Message.reply().
 
         The loop exits when:
-        - max_iterations is reached
+        - max_turns is reached
         - shutdown() is called
         - The requests mailbox is closed
 
@@ -122,7 +122,8 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         the current batch are nacked for redelivery.
 
         Args:
-            max_iterations: Stop after N iterations (None = run forever).
+            max_turns: Maximum number of turns to execute (None = unlimited).
+                A turn is one iteration through the loop's main processing cycle.
             visibility_timeout: Seconds messages remain invisible during
                 processing. Must exceed maximum expected execution time.
             wait_time_seconds: Long poll duration (0-20 seconds).
@@ -131,9 +132,9 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             self._running = True
             self._shutdown_event.clear()
 
-        iterations = 0
+        turns = 0
         try:
-            while max_iterations is None or iterations < max_iterations:
+            while max_turns is None or turns < max_turns:
                 # Check shutdown before blocking on receive
                 if self._shutdown_event.is_set():
                     break
@@ -163,7 +164,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                             error=str(e),
                         )
                     self._reply_and_ack(msg, result)
-                iterations += 1
+                turns += 1
         finally:
             with self._lock:
                 self._running = False

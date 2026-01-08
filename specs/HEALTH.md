@@ -289,13 +289,13 @@ The watchdog uses `SIGKILL` rather than `SIGTERM` because:
 1. **Prevent resource exhaustion**: A stuck process continues consuming CPU,
    memory, and connections. Immediate termination releases resources.
 
-## Runnable Protocol Extension
+## RunnableLoop Protocol Extension
 
 Loops that support watchdog monitoring implement an optional `heartbeat`
 property:
 
 ```python
-class Runnable(Protocol):
+class RunnableLoop(Protocol):
     # Existing methods...
 
     @property
@@ -367,7 +367,7 @@ LoopGroup manages both health endpoints and watchdog:
 class LoopGroup:
     def __init__(
         self,
-        loops: Sequence[Runnable],
+        loops: Sequence[RunnableLoop],
         *,
         shutdown_timeout: float = 30.0,
         health_port: int | None = None,
