@@ -597,7 +597,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
     def run(
         self,
         *,
-        max_iterations: int | None = None,
         max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
@@ -610,7 +609,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         The loop exits when:
         - max_turns is reached
-        - max_iterations is reached (deprecated, use max_turns)
         - shutdown() is called
         - The requests mailbox is closed
 
@@ -618,11 +616,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
         the current batch are nacked for redelivery.
 
         Args:
-            max_iterations: Maximum polling iterations. None for unlimited.
-                Deprecated: use max_turns instead.
             max_turns: Maximum number of turns to execute (None = unlimited).
                 A turn is one iteration through the loop's main processing cycle.
-                Takes precedence over max_iterations if both are provided.
             visibility_timeout: Seconds messages remain invisible during processing.
                 Should exceed maximum expected execution time.
             wait_time_seconds: Long poll duration for receiving messages.
@@ -631,12 +626,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
             self._running = True
             self._shutdown_event.clear()
 
-        # max_turns takes precedence over max_iterations
-        effective_max_turns = max_turns if max_turns is not None else max_iterations
-
         turns = 0
         try:
-            while effective_max_turns is None or turns < effective_max_turns:
+            while max_turns is None or turns < max_turns:
                 # Check shutdown before blocking on receive
                 if self._shutdown_event.is_set():
                     break

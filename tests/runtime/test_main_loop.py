@@ -410,8 +410,8 @@ def test_loop_calls_finalize() -> None:
         results.close()
 
 
-def test_loop_respects_max_iterations() -> None:
-    """MainLoop respects max_iterations limit."""
+def test_loop_respects_max_turns() -> None:
+    """MainLoop respects max_turns limit."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
         name="results"
     )
@@ -1043,7 +1043,7 @@ def test_loop_includes_run_context_in_result() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -1080,7 +1080,7 @@ def test_loop_preserves_run_context_from_request() -> None:
         )
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -1120,7 +1120,7 @@ def test_loop_run_id_matches_during_and_after_execution() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Get run_context that was passed to adapter during execution
         assert adapter._last_run_context is not None
@@ -1160,7 +1160,7 @@ def test_loop_includes_run_context_on_error() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
