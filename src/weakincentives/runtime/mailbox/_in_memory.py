@@ -20,29 +20,23 @@ from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from ..logging import StructuredLogger, get_logger
-from ._resolver import CompositeResolver, MailboxResolutionError
 from ._types import (
+    Mailbox,
     MailboxFullError,
     Message,
     ReceiptHandleExpiredError,
-    ReplyNotAvailableError,
     validate_visibility_timeout,
     validate_wait_time,
 )
-
-if TYPE_CHECKING:
-    from ._resolver import MailboxResolver
-    from ._types import Mailbox
 
 logger: StructuredLogger = get_logger(__name__, context={"component": "mailbox"})
 
 
 @dataclass
-class _InFlightMessage[T]:
+class _InFlightMessage[T, R]:
     """Internal tracking for messages that have been received but not acknowledged."""
 
     id: str
@@ -50,21 +44,23 @@ class _InFlightMessage[T]:
     enqueued_at: datetime
     delivery_count: int
     receipt_handle: str
-    reply_to: str | None
+    reply_to: Mailbox[R, None] | None
     expires_at: float  # time.monotonic() value
 
 
 class InMemoryMailboxFactory[R]:
     """Factory that creates InMemoryMailbox instances for reply routing.
 
-    Used internally by InMemoryMailbox to auto-create response mailboxes
-    when reply_to identifiers are used.
+    Used with RedisMailbox to auto-create in-memory response mailboxes
+    when reply_to identifiers need to be resolved. This is useful for
+    testing Redis mailbox flows where responses should be collected
+    in-memory.
 
     Example::
 
         factory = InMemoryMailboxFactory()
         resolver = CompositeResolver(registry={}, factory=factory)
-        requests = InMemoryMailbox(name="requests", reply_resolver=resolver)
+        requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
     """
 
     __slots__ = ("_registry",)
@@ -93,10 +89,7 @@ class InMemoryMailboxFactory[R]:
         """
         if identifier in self._registry:  # pragma: no cover - defensive
             return self._registry[identifier]
-        mailbox: Mailbox[R, None] = InMemoryMailbox(
-            name=identifier,
-            reply_resolver=None,  # Reply mailboxes don't need nested resolution
-        )
+        mailbox: Mailbox[R, None] = InMemoryMailbox(name=identifier)
         self._registry[identifier] = mailbox
         return mailbox
 
@@ -113,7 +106,7 @@ class InMemoryMailbox[T, R]:
     - FIFO ordering guaranteed
     - Exact message counts
     - No persistence
-    - Auto-creates response mailboxes for reply_to identifiers
+    - Direct mailbox references for reply routing
 
     Type parameters:
         T: Message body type.
@@ -121,14 +114,14 @@ class InMemoryMailbox[T, R]:
 
     Example::
 
-        # Create request mailbox - response mailboxes auto-created
+        # Create mailboxes
         requests: InMemoryMailbox[Request, Result] = InMemoryMailbox(name="requests")
+        responses: InMemoryMailbox[Result, None] = InMemoryMailbox(name="responses")
 
-        # Client: send request, retrieve auto-created response mailbox
-        requests.send(Request(data="hello"), reply_to="my-responses")
-        responses = requests.resolver.resolve("my-responses")
+        # Client: send request with response mailbox
+        requests.send(Request(data="hello"), reply_to=responses)
 
-        # Worker: reply routes automatically
+        # Worker: reply routes directly to the response mailbox
         for msg in requests.receive():
             msg.reply(Result(value=42))
             msg.acknowledge()
@@ -145,16 +138,11 @@ class InMemoryMailbox[T, R]:
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited."""
 
-    reply_resolver: MailboxResolver[R] | None = None
-    """Resolver for reply_to identifiers. If None, a default resolver is created
-    that auto-registers mailboxes for reply_to identifiers on send()."""
-
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _condition: threading.Condition = field(init=False, repr=False)
-    _pending: deque[_InFlightMessage[T]] = field(init=False, repr=False)
-    _invisible: dict[str, _InFlightMessage[T]] = field(init=False, repr=False)
+    _pending: deque[_InFlightMessage[T, R]] = field(init=False, repr=False)
+    _invisible: dict[str, _InFlightMessage[T, R]] = field(init=False, repr=False)
     _delivery_counts: dict[str, int] = field(init=False, repr=False)
-    _reply_registry: dict[str, Mailbox[R, None]] = field(init=False, repr=False)
     _reaper_thread: threading.Thread | None = field(
         default=None, repr=False, init=False
     )
@@ -168,31 +156,7 @@ class InMemoryMailbox[T, R]:
         self._pending = deque()
         self._invisible = {}
         self._delivery_counts = {}
-        self._reply_registry = {}
         self._start_reaper()
-        # Set up default resolver if none provided
-        if self.reply_resolver is None:
-            factory: InMemoryMailboxFactory[R] = InMemoryMailboxFactory(
-                registry=self._reply_registry
-            )
-            object.__setattr__(
-                self,
-                "reply_resolver",
-                CompositeResolver(registry=self._reply_registry, factory=factory),
-            )
-
-    @property
-    def resolver(self) -> MailboxResolver[R]:
-        """Return the reply resolver for accessing auto-created mailboxes.
-
-        Use this to retrieve mailboxes created for reply_to identifiers::
-
-            requests.send(msg, reply_to="responses")
-            responses = requests.resolver.resolve("responses")
-        """
-        if self.reply_resolver is None:  # pragma: no cover
-            raise RuntimeError("No resolver configured")
-        return self.reply_resolver
 
     def _start_reaper(self) -> None:
         """Start background thread to requeue expired messages."""
@@ -222,18 +186,13 @@ class InMemoryMailbox[T, R]:
                 self._pending.append(msg)
                 self._condition.notify_all()
 
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    def send(self, body: T, *, reply_to: Mailbox[R, None] | None = None) -> str:
         """Enqueue a message.
-
-        If reply_to is provided and a default resolver is configured, this
-        automatically creates and registers a response mailbox that can be
-        retrieved via ``resolver.resolve(reply_to)``.
 
         Args:
             body: Message payload.
-            reply_to: Identifier for response mailbox. Workers resolve this
-                via Message.reply(). If using the default resolver, a mailbox
-                is auto-created for this identifier.
+            reply_to: Mailbox instance for receiving replies. The reference is
+                stored directly and passed to Message.reply_to on receive.
 
         Returns:
             Message ID (unique within this queue).
@@ -241,15 +200,6 @@ class InMemoryMailbox[T, R]:
         Raises:
             MailboxFullError: Queue capacity exceeded.
         """
-        # Auto-register reply_to mailbox if using default resolver
-        if (
-            reply_to is not None
-            and reply_to not in self._reply_registry
-            and self.reply_resolver is not None
-        ):
-            # Resolve to trigger factory creation and caching
-            _ = self.reply_resolver.resolve_optional(reply_to)
-
         msg_id = str(uuid4())
 
         with self._lock:
@@ -259,7 +209,7 @@ class InMemoryMailbox[T, R]:
                     f"Queue '{self.name}' at capacity ({self.max_size})"
                 )
 
-            in_flight = _InFlightMessage(
+            in_flight = _InFlightMessage[T, R](
                 id=msg_id,
                 body=body,
                 enqueued_at=datetime.now(UTC),
@@ -278,7 +228,7 @@ class InMemoryMailbox[T, R]:
             context={
                 "mailbox": self.name,
                 "message_id": msg_id,
-                "reply_to": reply_to,
+                "reply_to": reply_to.name if reply_to else None,
                 "body_type": type(body).__qualname__,
             },
         )
@@ -344,9 +294,6 @@ class InMemoryMailbox[T, R]:
                         _acknowledge_fn=lambda h=receipt_handle: self._acknowledge(h),
                         _nack_fn=lambda t, h=receipt_handle: self._nack(h, t),
                         _extend_fn=lambda t, h=receipt_handle: self._extend(h, t),
-                        _reply_fn=lambda body, rt=in_flight.reply_to: self._reply(
-                            rt, body
-                        ),
                     )
                     messages.append(message)
                 else:
@@ -372,20 +319,6 @@ class InMemoryMailbox[T, R]:
                 },
             )
         return messages
-
-    def _reply(self, reply_to: str | None, body: R) -> str:
-        """Send a reply to the reply_to mailbox."""
-        if reply_to is None:  # pragma: no cover
-            raise ReplyNotAvailableError("No reply_to specified")
-        if (
-            self.reply_resolver is None
-        ):  # pragma: no cover - always set in __post_init__
-            raise ReplyNotAvailableError("No reply_resolver configured")
-        try:
-            mailbox = self.reply_resolver.resolve(reply_to)
-        except MailboxResolutionError as e:
-            raise ReplyNotAvailableError(f"Cannot resolve reply_to '{reply_to}'") from e
-        return mailbox.send(body)
 
     def _acknowledge(self, receipt_handle: str) -> None:
         """Delete message from queue."""

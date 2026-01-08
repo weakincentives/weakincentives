@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, override
+from typing import override
 
 import pytest
 
@@ -37,11 +37,7 @@ from weakincentives.evals import (
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
-from weakincentives.runtime.mailbox import RegistryResolver
 from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
-
-if TYPE_CHECKING:
-    from weakincentives.runtime.mailbox import MailboxResolver
 
 pytest.importorskip("openai")
 
@@ -273,11 +269,10 @@ def adapter(openai_model: str) -> OpenAIAdapter[MathAnswer]:
 
 def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
     """Test a single math problem evaluation."""
-    # Setup mailboxes with reply routing
+    # Setup mailboxes
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
-    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
     requests: InMemoryMailbox[EvalRequest[MathProblem, str], EvalResult] = (
-        InMemoryMailbox(name="eval-requests", reply_resolver=resolver)
+        InMemoryMailbox(name="eval-requests")
     )
     dummy_requests: InMemoryMailbox[
         MainLoopRequest[MathProblem], MainLoopResult[MathAnswer]
@@ -301,7 +296,7 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
             input=MathProblem(question="What is 2 + 2?"),
             expected="4",
         )
-        _ = requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+        _ = requests.send(EvalRequest(sample=sample), reply_to=results)
 
         eval_loop.run(max_iterations=1)
 
@@ -321,11 +316,10 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
 
 def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
     """Test the full math dataset evaluation."""
-    # Setup mailboxes with reply routing
+    # Setup mailboxes
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
-    resolver: MailboxResolver[EvalResult] = RegistryResolver({"eval-results": results})
     requests: InMemoryMailbox[EvalRequest[MathProblem, str], EvalResult] = (
-        InMemoryMailbox(name="eval-requests", reply_resolver=resolver)
+        InMemoryMailbox(name="eval-requests")
     )
     dummy_requests: InMemoryMailbox[
         MainLoopRequest[MathProblem], MainLoopResult[MathAnswer]
@@ -346,7 +340,7 @@ def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
         # Create and submit the full dataset with reply_to
         dataset = _create_math_dataset()
         for sample in dataset:
-            _ = requests.send(EvalRequest(sample=sample), reply_to="eval-results")
+            _ = requests.send(EvalRequest(sample=sample), reply_to=results)
 
         # Run evaluations (10 samples, give some headroom for iterations)
         eval_loop.run(max_iterations=15)

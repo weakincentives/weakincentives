@@ -413,13 +413,19 @@ class TestRedisMailboxStandalone:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-reply-to", client=client, body_type=str
             )
+            responses: RedisMailbox[None, None] = RedisMailbox(
+                name="responses", client=client
+            )
             try:
-                mailbox.send("hello", reply_to="responses")
+                mailbox.send("hello", reply_to=responses)
                 messages = mailbox.receive(max_messages=1)
                 assert len(messages) == 1
-                assert messages[0].reply_to == "responses"
+                # reply_to is None because no resolver is configured to reconstruct
+                # (tests without resolver show that name serialization works)
+                assert messages[0].reply_to is None
             finally:
                 mailbox.close()
+                responses.close()
 
     def test_long_poll_wait_time(self) -> None:
         """wait_time_seconds blocks until message arrives."""

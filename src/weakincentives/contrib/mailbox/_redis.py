@@ -49,12 +49,12 @@ from weakincentives.formal import (
 )
 from weakincentives.runtime.mailbox import (
     CompositeResolver,
+    Mailbox,
     MailboxConnectionError,
     MailboxFullError,
     MailboxResolutionError,
     Message,
     ReceiptHandleExpiredError,
-    ReplyNotAvailableError,
     SerializationError,
 )
 from weakincentives.runtime.mailbox._types import (
@@ -674,19 +674,25 @@ class RedisMailbox[T, R]:
         from weakincentives.contrib.mailbox import RedisMailbox
 
         client = Redis(host="localhost", port=6379)
-        mailbox: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
-            name="events",
+        requests: RedisMailbox[MyEvent, MyResult] = RedisMailbox(
+            name="requests",
+            client=client,
+        )
+        responses: RedisMailbox[MyResult, None] = RedisMailbox(
+            name="responses",
             client=client,
         )
 
         try:
-            mailbox.send(MyEvent(data="hello"), reply_to="responses")
-            for msg in mailbox.receive(visibility_timeout=60):
+            # Send with mailbox reference (name is serialized to Redis)
+            requests.send(MyEvent(data="hello"), reply_to=responses)
+            for msg in requests.receive(visibility_timeout=60):
                 result = process(msg.body)
-                msg.reply(result)
+                msg.reply(result)  # Replies to resolved mailbox
                 msg.acknowledge()
         finally:
-            mailbox.close()
+            requests.close()
+            responses.close()
     """
 
     name: str
@@ -702,9 +708,9 @@ class RedisMailbox[T, R]:
     """Maximum queue capacity. None for unlimited (subject to Redis maxmemory)."""
 
     reply_resolver: MailboxResolver[R] | None = None
-    """Resolver for reply_to identifiers. If None, a default resolver using
-    RedisMailboxFactory is created automatically, enabling reply_to to resolve
-    to any queue name on the same Redis server."""
+    """Resolver for reconstructing reply mailboxes from names stored in Redis.
+    If None, a default resolver using RedisMailboxFactory is created automatically,
+    enabling any queue name to be resolved to a mailbox on the same Redis server."""
 
     reaper_interval: float = 1.0
     """Interval in seconds between visibility reaper runs."""
@@ -826,7 +832,7 @@ class RedisMailbox[T, R]:
         except Exception as e:
             raise SerializationError(f"Failed to deserialize message body: {e}") from e
 
-    def send(self, body: T, *, reply_to: str | None = None) -> str:
+    def send(self, body: T, *, reply_to: Mailbox[R, None] | None = None) -> str:
         """Enqueue a message.
 
         This operation is atomic via Lua script, ensuring no partial state
@@ -834,8 +840,8 @@ class RedisMailbox[T, R]:
 
         Args:
             body: Message payload (must be serializable via serde).
-            reply_to: Identifier for response mailbox. Workers resolve this
-                via Message.reply().
+            reply_to: Mailbox instance for receiving replies. The mailbox name
+                is serialized to Redis and resolved on receive.
 
         Returns:
             Message ID (unique within this queue).
@@ -860,7 +866,7 @@ class RedisMailbox[T, R]:
                 msg_id,
                 serialized,
                 enqueued_at,
-                reply_to or "",  # Empty string for no reply_to
+                reply_to.name if reply_to else "",  # Serialize mailbox name
                 self.max_size or 0,
                 self.default_ttl,
             ]
@@ -999,14 +1005,19 @@ class RedisMailbox[T, R]:
         else:
             enqueued_at = datetime.now(UTC)
 
-        # Parse reply_to
-        reply_to: str | None = None
+        # Parse reply_to name and resolve to mailbox
+        reply_to: Mailbox[R, None] | None = None
         if reply_to_raw:
-            reply_to = (
+            reply_to_name = (
                 reply_to_raw.decode("utf-8")
                 if isinstance(reply_to_raw, bytes)
                 else str(reply_to_raw)
             )
+            # Resolve the mailbox from the stored name
+            # If resolution fails, reply_to stays None and Message.reply() fails cleanly
+            if self.reply_resolver is not None:
+                with contextlib.suppress(MailboxResolutionError):
+                    reply_to = self.reply_resolver.resolve(reply_to_name)
 
         # Compose receipt handle from msg_id and suffix
         receipt_handle = f"{msg_id}:{receipt_suffix}"
@@ -1029,20 +1040,7 @@ class RedisMailbox[T, R]:
             _extend_fn=lambda t, mid=msg_id, suf=receipt_suffix: self._extend(
                 mid, suf, t
             ),
-            _reply_fn=lambda b, rt=reply_to: self._reply(rt, b),
         )
-
-    def _reply(self, reply_to: str | None, body: R) -> str:
-        """Send a reply to the reply_to mailbox."""
-        if reply_to is None:
-            raise ReplyNotAvailableError("No reply_to specified")
-        if self.reply_resolver is None:
-            raise ReplyNotAvailableError("No reply_resolver configured")
-        try:
-            mailbox = self.reply_resolver.resolve(reply_to)
-        except MailboxResolutionError as e:
-            raise ReplyNotAvailableError(f"Cannot resolve reply_to '{reply_to}'") from e
-        return mailbox.send(body)
 
     def _acknowledge(self, msg_id: str, receipt_suffix: str) -> None:
         """Delete message from queue.
