@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -606,7 +607,13 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # reject the output. This catches cases where the SDK captured output before
         # our hooks could prevent it.
         self._verify_task_completion(
-            output, session, hook_context.stop_reason, prompt_name
+            output,
+            session,
+            hook_context.stop_reason,
+            prompt_name,
+            deadline=deadline,
+            budget_tracker=budget_tracker,
+            prompt=cast("PromptProtocol[Any]", prompt),
         )
 
         response = PromptResponse(
@@ -972,20 +979,69 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         session: SessionProtocol,
         stop_reason: str | None,
         prompt_name: str,
+        *,
+        deadline: Deadline | None = None,
+        budget_tracker: BudgetTracker | None = None,
+        prompt: PromptProtocol[Any] | None = None,
     ) -> None:
         """Verify task completion if checker is configured.
 
         Raises PromptEvaluationError if structured output was produced but
-        tasks are incomplete.
+        tasks are incomplete. Skips verification if deadline or budget is
+        exhausted (partial output is acceptable when resources run out).
+
+        Args:
+            output: The structured output to verify.
+            session: The session containing state.
+            stop_reason: Why the agent stopped.
+            prompt_name: Name of the prompt for error reporting.
+            deadline: Optional deadline to check for exhaustion.
+            budget_tracker: Optional budget tracker to check for exhaustion.
+            prompt: Optional prompt for filesystem access.
         """
         checker = self._client_config.task_completion_checker
         if output is None or checker is None:
             return
 
+        # Skip verification if deadline exceeded - can't do more work
+        if deadline is not None and deadline.remaining().total_seconds() <= 0:
+            logger.debug(
+                "claude_agent_sdk.verify.deadline_exceeded",
+                event="sdk.verify.deadline_exceeded",
+                context={"prompt_name": prompt_name, "stop_reason": stop_reason},
+            )
+            return
+
+        # Skip verification if budget exhausted - can't do more work
+        if budget_tracker is not None:
+            budget = budget_tracker.budget
+            consumed = budget_tracker.consumed
+            consumed_total = (consumed.input_tokens or 0) + (
+                consumed.output_tokens or 0
+            )
+            if (
+                budget.max_total_tokens is not None
+                and consumed_total >= budget.max_total_tokens
+            ):
+                logger.debug(
+                    "claude_agent_sdk.verify.budget_exhausted",
+                    event="sdk.verify.budget_exhausted",
+                    context={"prompt_name": prompt_name, "stop_reason": stop_reason},
+                )
+                return
+
+        # Get filesystem from prompt resources if available
+        filesystem: Filesystem | None = None
+        if prompt is not None:
+            with contextlib.suppress(LookupError, AttributeError):
+                filesystem = prompt.resources.get(Filesystem)
+
         context = TaskCompletionContext(
             session=session,
             tentative_output=output,
             stop_reason=stop_reason or "structured_output",
+            filesystem=filesystem,
+            adapter=self,
         )
         completion = checker.check(context)
         if not completion.complete:

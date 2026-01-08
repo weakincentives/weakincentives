@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
+from ...filesystem import Filesystem
 from ...prompt.protocols import PromptProtocol
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
@@ -510,6 +511,13 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         An async hook callback function matching SDK signature.
     """
 
+    def _get_filesystem() -> Filesystem | None:
+        """Get filesystem from hook context resources if available."""
+        try:
+            return hook_context.resources.get(Filesystem)
+        except (LookupError, AttributeError):
+            return None
+
     def _check_task_completion(
         tool_input: dict[str, Any],
     ) -> TaskCompletionResult:
@@ -518,6 +526,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             session=hook_context.session,
             tentative_output=tool_input.get("output"),
             stop_reason="structured_output",
+            filesystem=_get_filesystem(),
         )
         return task_completion_checker.check(context)  # type: ignore[union-attr]
 
@@ -826,6 +835,13 @@ def create_task_completion_stop_hook(
         >>> hook = create_task_completion_stop_hook(hook_context, checker=checker)
     """
 
+    def _get_filesystem() -> Filesystem | None:
+        """Get filesystem from hook context resources if available."""
+        try:
+            return hook_context.resources.get(Filesystem)
+        except (LookupError, AttributeError):
+            return None
+
     async def task_completion_stop_hook(  # noqa: RUF029 - SDK requires async signature
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
@@ -877,6 +893,7 @@ def create_task_completion_stop_hook(
             session=hook_context.session,
             tentative_output=None,
             stop_reason=stop_reason,
+            filesystem=_get_filesystem(),
         )
         result = checker.check(context)
 
