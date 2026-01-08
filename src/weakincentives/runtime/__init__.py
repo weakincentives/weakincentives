@@ -29,7 +29,7 @@ from .events import (
 )
 from .lifecycle import (
     LoopGroup,
-    Runnable,
+    RunnableLoop,
     ShutdownCoordinator,
     wait_until,
 )
@@ -123,7 +123,7 @@ __all__ = [
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
-    "Runnable",
+    "RunnableLoop",
     "SerializationError",
     "Session",
     "SessionProtocol",

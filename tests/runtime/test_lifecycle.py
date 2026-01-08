@@ -34,7 +34,7 @@ from weakincentives.runtime import (
     MainLoop,
     MainLoopRequest,
     MainLoopResult,
-    Runnable,
+    RunnableLoop,
     Session,
     ShutdownCoordinator,
     wait_until,
@@ -149,7 +149,7 @@ def _create_test_loop(
 
 
 class _MockRunnable:
-    """Mock implementation of Runnable for testing LoopGroup."""
+    """Mock implementation of RunnableLoop for testing LoopGroup."""
 
     def __init__(self, *, run_delay: float = 0.0) -> None:
         self._run_delay = run_delay
@@ -163,10 +163,11 @@ class _MockRunnable:
         self,
         *,
         max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
-        del max_iterations, visibility_timeout, wait_time_seconds
+        del max_iterations, max_turns, visibility_timeout, wait_time_seconds
         with self._lock:
             self._running = True
         self.run_called = True
@@ -849,12 +850,12 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
 
 
 # =============================================================================
-# Runnable Protocol Tests
+# RunnableLoop Protocol Tests
 # =============================================================================
 
 
-def test_main_loop_implements_runnable() -> None:
-    """MainLoop conforms to Runnable protocol."""
+def test_main_loop_implements_runnable_loop() -> None:
+    """MainLoop conforms to RunnableLoop protocol."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
@@ -863,8 +864,8 @@ def test_main_loop_implements_runnable() -> None:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        # Type check - MainLoop should be usable where Runnable is expected
-        runnable: Runnable = loop
+        # Type check - MainLoop should be usable where RunnableLoop is expected
+        runnable: RunnableLoop = loop
         assert hasattr(runnable, "run")
         assert hasattr(runnable, "shutdown")
         assert hasattr(runnable, "running")
@@ -1445,7 +1446,7 @@ def test_loop_group_health_server_stops_on_shutdown(reset_coordinator: None) -> 
 
 
 class _MockRunnableWithHeartbeat(_MockRunnable):
-    """Mock implementation of Runnable with heartbeat for testing watchdog."""
+    """Mock implementation of RunnableLoop with heartbeat for testing watchdog."""
 
     def __init__(self, *, run_delay: float = 0.0) -> None:
         super().__init__(run_delay=run_delay)
@@ -1462,6 +1463,7 @@ class _MockRunnableWithHeartbeat(_MockRunnable):
         self,
         *,
         max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
@@ -1469,6 +1471,7 @@ class _MockRunnableWithHeartbeat(_MockRunnable):
         self._heartbeat.beat()
         super().run(
             max_iterations=max_iterations,
+            max_turns=max_turns,
             visibility_timeout=visibility_timeout,
             wait_time_seconds=wait_time_seconds,
         )

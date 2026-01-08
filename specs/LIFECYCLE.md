@@ -19,34 +19,43 @@ in-flight work completes and messages are not lost.
 
 ## Core Abstractions
 
-### Runnable Protocol
+### RunnableLoop Protocol
 
 Both `MainLoop` and `EvalLoop` implement a common interface for lifecycle
-management:
+management and turn control:
 
 ```python
 from typing import Protocol, Self
 from contextlib import AbstractContextManager
 
-class Runnable(Protocol):
-    """Protocol for loops that support graceful shutdown."""
+class RunnableLoop(Protocol):
+    """Protocol for loops that support graceful shutdown and turn control.
+
+    A "turn" represents one iteration through the loop's main processing cycle,
+    typically consisting of receiving a batch of messages and processing them.
+    """
 
     def run(
         self,
         *,
         max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
         """Run the loop, processing messages until stopped.
 
         Exits when:
-        - max_iterations reached
+        - max_turns reached
+        - max_iterations reached (deprecated, use max_turns)
         - shutdown() called
         - Mailbox closed
 
         Args:
             max_iterations: Maximum polling iterations (None = unlimited).
+                Deprecated: use max_turns instead.
+            max_turns: Maximum number of turns to execute (None = unlimited).
+                A turn is one iteration through the loop's main processing cycle.
             visibility_timeout: Seconds messages remain invisible during
                 processing. Must exceed maximum expected execution time.
             wait_time_seconds: Long poll duration (0-20 seconds).
@@ -204,6 +213,10 @@ class LoopGroup:
         group = LoopGroup(loops=[main_loop, eval_loop])
         group.run()  # Blocks until shutdown signal or all loops exit
 
+    Example with turn control:
+        group = LoopGroup(loops=[main_loop, eval_loop])
+        group.run(max_turns=100)  # Run each loop for 100 turns
+
     Example with context manager:
         with LoopGroup(loops=[main_loop, eval_loop]) as group:
             group.run()
@@ -212,7 +225,7 @@ class LoopGroup:
 
     def __init__(
         self,
-        loops: Sequence[Runnable],
+        loops: Sequence[RunnableLoop],
         *,
         shutdown_timeout: float = 30.0,
     ) -> None:
@@ -225,6 +238,7 @@ class LoopGroup:
         self,
         *,
         install_signals: bool = True,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
@@ -235,6 +249,8 @@ class LoopGroup:
 
         Args:
             install_signals: If True, install SIGTERM/SIGINT handlers.
+            max_turns: Maximum number of turns for each loop (None = unlimited).
+                A turn is one iteration through the loop's main processing cycle.
             visibility_timeout: Passed to each loop's run() method.
             wait_time_seconds: Passed to each loop's run() method.
         """
@@ -251,6 +267,7 @@ class LoopGroup:
             for loop in self.loops:
                 future = self._executor.submit(
                     loop.run,
+                    max_turns=max_turns,
                     visibility_timeout=visibility_timeout,
                     wait_time_seconds=wait_time_seconds,
                 )
@@ -307,13 +324,15 @@ def run(
     self,
     *,
     max_iterations: int | None = None,
+    max_turns: int | None = None,
     visibility_timeout: int = 300,
     wait_time_seconds: int = 20,
 ) -> None:
     """Run the worker loop with graceful shutdown support.
 
     The loop exits when:
-    - max_iterations is reached
+    - max_turns is reached
+    - max_iterations is reached (deprecated, use max_turns)
     - shutdown() is called
     - The requests mailbox is closed
 
@@ -324,9 +343,12 @@ def run(
         self._running = True
         self._shutdown_event.clear()
 
-    iterations = 0
+    # max_turns takes precedence over max_iterations
+    effective_max_turns = max_turns if max_turns is not None else max_iterations
+
+    turns = 0
     try:
-        while max_iterations is None or iterations < max_iterations:
+        while effective_max_turns is None or turns < effective_max_turns:
             if self._shutdown_event.is_set():
                 break
 
@@ -346,7 +368,7 @@ def run(
 
                 self._handle_message(msg)
 
-            iterations += 1
+            turns += 1
     finally:
         with self._lock:
             self._running = False

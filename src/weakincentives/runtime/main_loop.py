@@ -369,6 +369,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         self,
         *,
         max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
@@ -379,7 +380,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
         sending an error response.
 
         The loop exits when:
-        - max_iterations is reached
+        - max_turns is reached
+        - max_iterations is reached (deprecated, use max_turns)
         - shutdown() is called
         - The requests mailbox is closed
 
@@ -388,6 +390,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         Args:
             max_iterations: Maximum polling iterations. None for unlimited.
+                Deprecated: use max_turns instead.
+            max_turns: Maximum number of turns to execute (None = unlimited).
+                A turn is one iteration through the loop's main processing cycle.
+                Takes precedence over max_iterations if both are provided.
             visibility_timeout: Seconds messages remain invisible during processing.
                 Should exceed maximum expected execution time.
             wait_time_seconds: Long poll duration for receiving messages.
@@ -396,9 +402,12 @@ class MainLoop[UserRequestT, OutputT](ABC):
             self._running = True
             self._shutdown_event.clear()
 
-        iterations = 0
+        # max_turns takes precedence over max_iterations
+        effective_max_turns = max_turns if max_turns is not None else max_iterations
+
+        turns = 0
         try:
-            while max_iterations is None or iterations < max_iterations:
+            while effective_max_turns is None or turns < effective_max_turns:
                 # Check shutdown before blocking on receive
                 if self._shutdown_event.is_set():
                     break
@@ -428,7 +437,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     # Beat after each message (proves processing completes)
                     self._heartbeat.beat()
 
-                iterations += 1
+                turns += 1
         finally:
             with self._lock:
                 self._running = False
