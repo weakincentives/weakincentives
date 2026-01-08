@@ -66,6 +66,11 @@ from weakincentives.serde import dump, parse
 if TYPE_CHECKING:
     from weakincentives.runtime.mailbox import Mailbox, MailboxResolver
 
+# Default TTL for Redis keys: 3 days in seconds.
+# Keys are refreshed on each operation, so active queues stay alive indefinitely.
+# Set to 0 to disable TTL expiration.
+DEFAULT_TTL_SECONDS: int = 259200  # 3 days = 3 * 24 * 60 * 60
+
 # =============================================================================
 # Lua Scripts for Atomic Operations
 # =============================================================================
@@ -219,9 +224,10 @@ for i, msg_id in ipairs(expired) do
     redis.call('HDEL', KEYS[3], msg_id .. ':handle')
     count = count + 1
 end
--- Refresh TTL on all keys including data if any work was done
+-- Always refresh TTL to keep active queues alive even when no messages expire.
+-- This prevents data loss for queues with long visibility timeouts.
 local ttl = tonumber(ARGV[1])
-if count > 0 and ttl and ttl > 0 then
+if ttl and ttl > 0 then
     redis.call('EXPIRE', KEYS[1], ttl)
     redis.call('EXPIRE', KEYS[2], ttl)
     redis.call('EXPIRE', KEYS[3], ttl)
@@ -298,7 +304,7 @@ class RedisMailboxFactory[R]:
         client: Redis[bytes] | RedisCluster[bytes],
         *,
         body_type: type[R] | None = None,
-        default_ttl: int = 259200,
+        default_ttl: int = DEFAULT_TTL_SECONDS,
     ) -> None:
         """Initialize factory with shared Redis client.
 
@@ -703,9 +709,10 @@ class RedisMailbox[T, R]:
     reaper_interval: float = 1.0
     """Interval in seconds between visibility reaper runs."""
 
-    default_ttl: int = 259200
-    """Default TTL in seconds for all Redis keys (3 days = 259200 seconds).
-    Set to 0 to disable TTL. Keys are refreshed on each write operation."""
+    default_ttl: int = DEFAULT_TTL_SECONDS
+    """Default TTL in seconds for all Redis keys (default: 3 days).
+    Set to 0 to disable TTL. Keys are refreshed on each operation including
+    the background reaper, so active queues stay alive indefinitely."""
 
     _keys: _QueueKeys = field(init=False, repr=False)
     _scripts: dict[str, Any] = field(init=False, default_factory=dict, repr=False)
@@ -1164,4 +1171,4 @@ class RedisMailbox[T, R]:
         return self._closed
 
 
-__all__ = ["RedisMailbox", "RedisMailboxFactory"]
+__all__ = ["DEFAULT_TTL_SECONDS", "RedisMailbox", "RedisMailboxFactory"]

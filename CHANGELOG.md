@@ -2,6 +2,33 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### RedisMailbox: Default TTL for Redis Keys
+
+RedisMailbox now applies a default 3-day TTL to all Redis keys, preventing
+orphaned data from accumulating indefinitely. TTL is refreshed on every
+operation (send, receive, acknowledge, nack, extend, and reaper cycles), so
+active queues stay alive indefinitely.
+
+```python
+from weakincentives.contrib.mailbox import RedisMailbox, DEFAULT_TTL_SECONDS
+
+# Uses default 3-day TTL
+mailbox = RedisMailbox(name="events", client=redis_client)
+
+# Custom TTL (1 day)
+mailbox = RedisMailbox(name="events", client=redis_client, default_ttl=86400)
+
+# Disable TTL expiration
+mailbox = RedisMailbox(name="events", client=redis_client, default_ttl=0)
+```
+
+The `DEFAULT_TTL_SECONDS` constant (259200 seconds = 3 days) is exported for
+reference. The reaper thread always refreshes TTL regardless of whether any
+messages expired, ensuring queues with long visibility timeouts don't lose
+data.
+
 ## v0.19.0 - 2026-01-07
 
 ### Tool Policies: Declarative Constraints for Safe Tool Invocation
