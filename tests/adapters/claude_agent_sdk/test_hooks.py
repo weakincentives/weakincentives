@@ -447,14 +447,14 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-structured", context))
 
-        # Should return additionalContext with feedback (not continue: False)
+        # Should return continue: True to force continuation
+        assert result.get("continue") is True
+        # Should return additionalContext with feedback
         hook_output = result.get("hookSpecificOutput", {})
         assert hook_output.get("hookEventName") == "PostToolUse"
         additional_context = hook_output.get("additionalContext", "")
         assert "incomplete" in additional_context.lower()
         assert "Pending task" in additional_context
-        # Should NOT return continue: False - let model continue working
-        assert "continue" not in result
 
     def test_stops_when_structured_output_with_complete_tasks(
         self, session: Session
