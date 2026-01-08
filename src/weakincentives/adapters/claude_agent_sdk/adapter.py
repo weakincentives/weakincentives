@@ -1003,6 +1003,18 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         if output is None or checker is None:
             return
 
+        # Skip verification if trajectory observers are configured - they are
+        # mutually exclusive with task completion checking to avoid conflicting
+        # feedback. When observers are active, soft feedback is preferred over
+        # hard verification errors.
+        if prompt is not None and prompt.observers:
+            logger.debug(
+                "claude_agent_sdk.verify.observers_active",
+                event="sdk.verify.observers_active",
+                context={"prompt_name": prompt_name, "stop_reason": stop_reason},
+            )
+            return
+
         # Skip verification if deadline exceeded - can't do more work
         if deadline is not None and deadline.remaining().total_seconds() <= 0:
             logger.debug(

@@ -646,8 +646,10 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                 )
 
         # Handle StructuredOutput with task completion checking
+        # Skip task completion if trajectory observers are configured (mutually exclusive)
         if data.tool_name == "StructuredOutput":
-            if task_completion_checker is not None:
+            observers_active = bool(hook_context.prompt.observers)
+            if task_completion_checker is not None and not observers_active:
                 result = _check_task_completion(data.tool_input)
                 if not result.complete:
                     # Tasks incomplete - provide feedback via additionalContext
@@ -697,13 +699,11 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                 )
                 return {"continue": False}
 
-        # Run trajectory observers from prompt (skip if task completion is active)
-        # These two systems are mutually exclusive to avoid conflicting feedback
-        return (
-            _run_trajectory_observers(hook_context)
-            if task_completion_checker is None
-            else None
-        ) or {}
+        # Run trajectory observers from prompt
+        # When observers are configured, they take precedence over task completion
+        # checking (mutually exclusive) - the check above skips task completion
+        # if observers are active
+        return _run_trajectory_observers(hook_context) or {}
 
     return post_tool_use_hook
 

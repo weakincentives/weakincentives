@@ -1576,6 +1576,7 @@ class TestVerifyTaskCompletion:
         mock_resources.get.return_value = mock_filesystem
         mock_prompt = MagicMock()
         mock_prompt.resources = mock_resources
+        mock_prompt.observers = ()  # No observers - allow task completion check
 
         adapter._verify_task_completion(
             output={"summary": "done"},
@@ -1620,6 +1621,7 @@ class TestVerifyTaskCompletion:
         mock_resources.get.side_effect = UnboundResourceError(object)
         mock_prompt = MagicMock()
         mock_prompt.resources = mock_resources
+        mock_prompt.observers = ()  # No observers - allow task completion check
 
         adapter._verify_task_completion(
             output={"summary": "done"},
@@ -1681,3 +1683,49 @@ class TestVerifyTaskCompletion:
             )
 
         assert "Tasks incomplete" in str(exc_info.value)
+
+    def test_skips_when_observers_configured(self, session: Session) -> None:
+        """Verification is skipped when trajectory observers are configured.
+
+        Trajectory observers and task completion checking are mutually exclusive
+        to avoid conflicting feedback mechanisms.
+        """
+        from unittest.mock import MagicMock
+
+        from weakincentives.adapters.claude_agent_sdk._task_completion import (
+            PlanBasedChecker,
+        )
+        from weakincentives.contrib.tools.planning import (
+            Plan,
+            PlanningToolsSection,
+            PlanStep,
+        )
+
+        # Initialize plan with incomplete tasks
+        PlanningToolsSection._initialize_session(session)
+        session.dispatch(
+            Plan(
+                objective="Test",
+                status="active",
+                steps=(PlanStep(step_id=1, title="Pending", status="pending"),),
+            )
+        )
+
+        adapter = ClaudeAgentSDKAdapter(
+            client_config=ClaudeAgentSDKClientConfig(
+                task_completion_checker=PlanBasedChecker(plan_type=Plan),
+            ),
+        )
+
+        # Create mock prompt WITH observers configured
+        mock_prompt = MagicMock()
+        mock_prompt.observers = (MagicMock(),)  # Non-empty = observers active
+
+        # Should NOT raise even though tasks are incomplete - observers take precedence
+        adapter._verify_task_completion(
+            output={"summary": "done"},
+            session=session,
+            stop_reason="structured_output",
+            prompt_name="test_prompt",
+            prompt=mock_prompt,
+        )
