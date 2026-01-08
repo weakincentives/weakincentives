@@ -201,66 +201,130 @@ class ObserverConfig:
     trigger: ObserverTrigger
 ```
 
+## Prompt Integration
+
+Observers are declared on the prompt template, following the same pattern as policies:
+
+```python
+template = PromptTemplate[OutputType](
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    policies=[ReadBeforeWritePolicy()],
+    observers=[
+        ObserverConfig(
+            observer=DeadlineObserver(),
+            trigger=ObserverTrigger(every_n_seconds=30),
+        ),
+    ],
+)
+```
+
+The `Prompt` class exposes the configured observers:
+
+```python
+@property
+def observers(self) -> tuple[ObserverConfig, ...]:
+    """Return trajectory observers configured on this prompt."""
+    return self.template.observers
+```
+
+Adapters access observers from the prompt rather than receiving them as
+constructor arguments. This keeps configuration centralized and consistent
+with how policies are managed.
+
 ## Integration: Claude Agent SDK
 
 The observer runs in the `PostToolUse` hook and returns assessment via
 `additionalContext`. This mirrors how task completion feedback is delivered.
 
 ```python
-def create_post_tool_use_hook(
-    hook_context: HookContext,
+async def post_tool_use_hook(
+    input_data: Any,
+    tool_use_id: str | None,
+    sdk_context: Any,
+) -> dict[str, Any]:
+    # ... existing ToolInvoked dispatch ...
+
+    # Run trajectory observers from prompt
+    prompt = hook_context.prompt
+    observer_context = ObserverContext(
+        session=hook_context.session,
+        prompt=prompt,
+        deadline=hook_context.deadline,
+    )
+    assessment_text = run_observers(
+        observers=prompt.observers,
+        context=observer_context,
+        session=hook_context.session,
+    )
+
+    if assessment_text:
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PostToolUse",
+                "additionalContext": assessment_text,
+            }
+        }
+
+    return {}
+```
+
+## Integration: OpenAI Adapter
+
+For the OpenAI adapter, assessment is appended to the tool result message:
+
+```python
+def execute_tool_call(
     *,
-    observers: Sequence[ObserverConfig] = (),
-) -> AsyncHookCallback:
-    """Create PostToolUse hook with trajectory observation."""
+    context: ToolExecutionContext,
+    tool_call: ProviderToolCall,
+) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
+    """Execute tool call with trajectory observation."""
 
-    async def post_tool_use_hook(
-        input_data: Any,
-        tool_use_id: str | None,
-        sdk_context: Any,
-    ) -> dict[str, Any]:
-        # ... existing ToolInvoked dispatch ...
+    with tool_execution(context=context, tool_call=tool_call) as outcome:
+        invocation = dispatch_tool_invocation(context=context, outcome=outcome)
 
-        # Run trajectory observers
-        assessment_text = _run_observers(
-            observers=observers,
-            hook_context=hook_context,
+    # Run observers from prompt
+    observer_context = ObserverContext(
+        session=context.session,
+        prompt=context.prompt,
+        deadline=context.deadline,
+    )
+    assessment_text = run_observers(
+        observers=context.prompt.observers,
+        context=observer_context,
+        session=context.session,
+    )
+
+    if assessment_text and outcome.result.message:
+        outcome.result = replace(
+            outcome.result,
+            message=f"{outcome.result.message}\n\n{assessment_text}",
         )
 
-        if assessment_text:
-            return {
-                "hookSpecificOutput": {
-                    "hookEventName": "PostToolUse",
-                    "additionalContext": assessment_text,
-                }
-            }
+    return invocation, outcome.result
+```
 
-        return {}
+## Shared Observer Runner
 
-    return post_tool_use_hook
+Both adapters use shared helpers for observer execution:
 
-
-def _run_observers(
+```python
+def run_observers(
     *,
     observers: Sequence[ObserverConfig],
-    hook_context: HookContext,
+    context: ObserverContext,
+    session: Session,
 ) -> str | None:
     """Run observers and return rendered assessment if triggered."""
 
-    context = ObserverContext(
-        session=hook_context.session,
-        prompt=hook_context._prompt,
-        deadline=hook_context.deadline,
-    )
-
     for config in observers:
         if _should_trigger(config.trigger, context):
-            if config.observer.should_run(hook_context.session, context=context):
-                assessment = config.observer.observe(
-                    hook_context.session, context=context
-                )
+            if config.observer.should_run(session, context=context):
+                assessment = config.observer.observe(session, context=context)
                 assessment = replace(assessment, call_index=context.tool_call_count)
-                hook_context.session.dispatch(RecordAssessment(assessment))
+                session.dispatch(RecordAssessment(assessment))
                 return assessment.render()
 
     return None
@@ -283,56 +347,6 @@ def _should_trigger(trigger: ObserverTrigger, context: ObserverContext) -> bool:
             return True  # No previous assessment
 
     return False
-```
-
-### Adapter Configuration
-
-```python
-adapter = ClaudeAgentSDKAdapter(
-    prompt=prompt,
-    session=session,
-    observers=[
-        ObserverConfig(
-            observer=DeadlineObserver(),
-            trigger=ObserverTrigger(every_n_seconds=30),
-        ),
-    ],
-)
-```
-
-## Integration: OpenAI Adapter
-
-For the OpenAI adapter, assessment is appended to the tool result message:
-
-```python
-def execute_tool_call(
-    *,
-    context: ToolExecutionContext,
-    tool_call: ProviderToolCall,
-    observers: Sequence[ObserverConfig] = (),
-) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
-    """Execute tool call with trajectory observation."""
-
-    with tool_execution(context=context, tool_call=tool_call) as outcome:
-        invocation = dispatch_tool_invocation(context=context, outcome=outcome)
-
-    observer_context = ObserverContext(
-        session=context.session,
-        prompt=context.prompt,
-        deadline=context.deadline,
-    )
-    assessment_text = _run_observers(
-        observers=observers,
-        context=observer_context,
-    )
-
-    if assessment_text and outcome.result.message:
-        outcome.result = replace(
-            outcome.result,
-            message=f"{outcome.result.message}\n\n{assessment_text}",
-        )
-
-    return invocation, outcome.result
 ```
 
 ## Built-in Observer: DeadlineObserver
