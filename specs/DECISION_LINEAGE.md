@@ -12,6 +12,46 @@ This specification defines how WINK agents record structured decision traces
 that explain context gathered, policies evaluated, exceptions applied, and
 precedents referenced.
 
+## Motivating Example: The Data Science Agent
+
+A CEO asks an unattended agent: "What's our customer retention rate?"
+
+This simple question forces dozens of implicit decisions:
+
+| Decision Point | Options | Business Impact |
+|----------------|---------|-----------------|
+| Retention definition | Logo retention vs. revenue retention vs. cohort-based | Could vary from 72% to 94% |
+| Time period | TTM, calendar year, fiscal year, quarter | Seasonal effects change story |
+| Customer inclusion | All customers, exclude pilots, exclude acquisitions | Pilots churn at 3x rate |
+| Data source | Finance system (authoritative, 2-day lag) vs. CRM (real-time, approximate) | Could differ by 2-3% |
+| Edge cases | Payment pause = churned or active? Contract amendment = new customer? | Edge cases are 8% of base |
+
+Without decision lineage, the CEO receives "87%" with no way to know:
+- Is this comparable to the "91%" from last quarter? (Maybe different definition)
+- Why did it drop? (Maybe we started including pilots)
+- Can I quote this to the board? (Maybe it's from stale data)
+
+With decision lineage, each decision is recorded:
+
+```
+Decision: select_retention_metric
+├── Inputs:
+│   ├── query_context: "retention rate" (no qualifier)
+│   ├── audience: "ceo" (implies board-level precision)
+│   └── prior_reports: ["Q3 Board Deck used revenue_retention"]
+├── Policy: MetricSelectionPolicy v2.1.0
+│   ├── Condition: audience in ["ceo", "board", "investor"] → require revenue_retention
+│   └── Result: ALLOW revenue_retention
+├── Precedent: Decision abc-123 (Q3 report, similarity=0.94)
+│   └── Used: revenue_retention, ttm, exclude_pilots
+├── Outcome: revenue_retention selected
+└── Rationale: "Board-level query requires revenue retention per policy v2.1.0,
+                consistent with Q3 board deck methodology"
+```
+
+The CEO now receives: "87% (revenue retention, TTM, excluding pilots, from
+finance system as of Jan 6)" — and can trace exactly why each choice was made.
+
 ## Guiding Principles
 
 - **Policy-driven**: All decisions derive from declared policies and standing
@@ -262,33 +302,118 @@ class ExceptionRegistry:
         ...
 ```
 
-### Usage Pattern
+### Example: Data Science Agent Exceptions
+
+Consider a data science agent answering executive queries. Standing exceptions
+encode business rules that override default metric policies:
 
 ```python
-# Define a standing exception
-healthcare_exception = StandingException(
-    name="healthcare_extended_timeout",
+# Exception 1: Acquired companies use post-acquisition data only
+#
+# Problem: A company acquired 6 months ago would show artificially low YoY
+# growth because pre-acquisition revenue wasn't in our systems.
+#
+# Policy override: For acquired entities, use post-acquisition period only.
+
+acquired_company_exception = StandingException(
+    name="acquired_company_growth_calculation",
     version="1.0.0",
-    description="Healthcare customers get extended processing time",
-    applies_to_policies=frozenset({"deadline_enforcement"}),
+    description="Use post-acquisition period for acquired company metrics",
+    applies_to_policies=frozenset({"growth_rate_calculation"}),
     condition=ExceptionCondition(
-        predicate=lambda inputs: inputs.sources.get("customer", {}).get(
-            "industry"
-        ) == "healthcare",
-        description="Customer industry is healthcare",
+        predicate=lambda inputs: any(
+            ref.entity_type == "company"
+            and inputs.sources.get("company_metadata", {}).get("acquired_date")
+            for ref in inputs.entity_refs
+        ),
+        description="Company was acquired within calculation period",
     ),
     override=ExceptionOverride(
         action="modify_params",
-        rationale_template="Extended timeout for healthcare customer per policy v1.0",
-        param_modifications={"timeout_multiplier": 1.5},
+        rationale_template=(
+            "Company acquired {acquired_date}; using post-acquisition period "
+            "per acquired_company_growth_calculation v1.0.0"
+        ),
+        param_modifications={"period_start": "acquisition_date"},
     ),
     effective_from=datetime(2024, 1, 1, tzinfo=UTC),
 )
 
-# Register globally or per-prompt
+
+# Exception 2: Exclude pilot customers from churn metrics
+#
+# Problem: Pilot customers churn at 3x the rate of paying customers because
+# pilots are exploratory. Including them skews retention metrics.
+#
+# Policy override: Exclude pilot-tagged accounts from retention calculations.
+
+exclude_pilots_exception = StandingException(
+    name="exclude_pilots_from_retention",
+    version="2.0.0",
+    description="Exclude pilot customers from retention/churn metrics",
+    applies_to_policies=frozenset({"retention_calculation", "churn_calculation"}),
+    condition=ExceptionCondition(
+        predicate=lambda inputs: inputs.sources.get("query_context", {}).get(
+            "metric_type"
+        ) in ["retention", "churn"],
+        description="Query involves retention or churn metrics",
+    ),
+    override=ExceptionOverride(
+        action="modify_params",
+        rationale_template=(
+            "Excluding pilot accounts per exclude_pilots_from_retention v2.0.0 "
+            "(pilots churn at 3x rate, excluded from board metrics since Q2 2024)"
+        ),
+        param_modifications={"exclude_customer_tags": ["pilot", "trial"]},
+    ),
+    effective_from=datetime(2024, 4, 1, tzinfo=UTC),
+)
+
+
+# Exception 3: Use CRM data during month-end close
+#
+# Problem: Finance system has 2-3 day lag during month-end close. Real-time
+# queries during this window would show stale data.
+#
+# Policy override: During close period, allow CRM as primary source with
+# explicit staleness warning.
+
+month_end_close_exception = StandingException(
+    name="crm_during_close",
+    version="1.1.0",
+    description="Allow CRM as primary source during finance close period",
+    applies_to_policies=frozenset({"data_source_authority"}),
+    condition=ExceptionCondition(
+        predicate=lambda inputs: (
+            inputs.sources.get("calendar", {}).get("is_close_period", False)
+            and inputs.sources.get("query_context", {}).get("requires_realtime", False)
+        ),
+        description="Query requires real-time data during finance close period",
+    ),
+    override=ExceptionOverride(
+        action="allow_with_warning",
+        rationale_template=(
+            "Using CRM data (real-time) instead of finance system (in close period). "
+            "Values may differ from final close by ±2%. Per crm_during_close v1.1.0"
+        ),
+        param_modifications={"primary_source": "crm", "add_staleness_warning": True},
+    ),
+    effective_from=datetime(2024, 1, 1, tzinfo=UTC),
+    # This exception only applies during close periods (roughly 3 days/month)
+)
+
+
+# Register exceptions for the data science agent
 registry = ExceptionRegistry()
-registry.register(healthcare_exception)
+registry.register(acquired_company_exception)
+registry.register(exclude_pilots_exception)
+registry.register(month_end_close_exception)
 ```
+
+These exceptions encode institutional knowledge that would otherwise live in
+analysts' heads: "we always exclude pilots," "acquired companies are special,"
+"don't trust finance data during close." With decision lineage, this knowledge
+becomes versioned, auditable policy.
 
 ## Versioned Policies
 
@@ -567,28 +692,57 @@ def gather_decision_inputs(
 
 ## Prompt Integration
 
-Decision lineage is configured at the prompt level:
+Decision lineage is configured at the prompt level. For the data science agent:
 
 ```python
-template = PromptTemplate[OutputType](
-    ns="my-agent",
-    key="main",
-    sections=[...],
+template = PromptTemplate[QueryResponse](
+    ns="data-science-agent",
+    key="executive-query",
+    name="executive_query_handler",
+    sections=[
+        MarkdownSection(
+            title="Role",
+            template=(
+                "You are a data analyst answering questions for $audience. "
+                "All metric calculations must follow declared policies and "
+                "record decision lineage for auditability."
+            ),
+            key="role",
+        ),
+        # ... other sections
+    ],
     policies=[
         VersionedPolicy(
-            policy=ReadBeforeWritePolicy(),
-            version="1.2.0",
+            policy=MetricSelectionPolicy(),
+            version="2.1.0",
             effective_from=datetime(2024, 6, 1, tzinfo=UTC),
+        ),
+        VersionedPolicy(
+            policy=TimePeriodPolicy(),
+            version="1.0.0",
+            effective_from=datetime(2024, 1, 1, tzinfo=UTC),
+        ),
+        VersionedPolicy(
+            policy=CustomerInclusionPolicy(),
+            version="3.0.0",
+            effective_from=datetime(2024, 9, 1, tzinfo=UTC),
+        ),
+        VersionedPolicy(
+            policy=DataSourceAuthorityPolicy(),
+            version="1.5.0",
+            effective_from=datetime(2024, 3, 1, tzinfo=UTC),
         ),
     ],
     exception_registry=ExceptionRegistry.of(
-        healthcare_exception,
-        legacy_system_exception,
+        acquired_company_exception,
+        exclude_pilots_exception,
+        month_end_close_exception,
     ),
     decision_lineage=DecisionLineageConfig(
         enabled=True,
-        store_precedents=True,  # Persist to PrecedentStore
+        store_precedents=True,
         max_precedent_refs=3,
+        include_in_response=True,  # Append methodology to output
     ),
 )
 ```
@@ -741,6 +895,239 @@ class RedisPrecedentStore:
     # and JSON serialization for decision records
     ...
 ```
+
+## Worked Example: Complete Decision Trace
+
+The CEO asks: "How did Enterprise segment retention change vs last quarter?"
+
+The agent produces four decisions to answer this query:
+
+### Decision 1: Metric Selection
+
+```python
+Decision(
+    decision_id=UUID("d1-..."),
+    tool_name="select_metric",
+    inputs=DecisionInputs(
+        sources={
+            "query": InputSource(
+                source_type="params",
+                source_name="query",
+                keys_accessed=("text", "audience", "entities"),
+                digest="sha256:abc...",
+            ),
+            "prior_reports": InputSource(
+                source_type="external",
+                source_name="report_history",
+                keys_accessed=("Q3_board_deck", "Q2_board_deck"),
+                digest="sha256:def...",
+            ),
+        },
+        entity_refs=(EntityRef("segment", "enterprise"),),
+    ),
+    policy_evaluation=PolicyEvaluation(
+        policy_name="MetricSelectionPolicy",
+        policy_version="2.1.0",
+        policy_hash="sha256:789...",
+        conditions_checked=(
+            ConditionResult(
+                condition_name="audience_requires_revenue_retention",
+                expression="audience in ['ceo', 'board'] → revenue_retention",
+                result=True,
+                inputs_used=("query.audience",),
+            ),
+        ),
+        base_decision="allow",
+    ),
+    exception_applied=None,
+    precedent_refs=(
+        PrecedentRef(
+            decision_id=UUID("prev-q3-..."),
+            similarity_score=0.91,
+            match_reason="Same segment, same audience, quarterly comparison",
+            outcome_matched=True,
+        ),
+    ),
+    outcome="allowed",
+    rationale=(
+        "Selected revenue_retention: CEO audience requires revenue-based metrics "
+        "per MetricSelectionPolicy v2.1.0. Consistent with Q3 board methodology."
+    ),
+)
+```
+
+### Decision 2: Time Period Selection
+
+```python
+Decision(
+    decision_id=UUID("d2-..."),
+    tool_name="select_time_period",
+    inputs=DecisionInputs(
+        sources={
+            "query": InputSource(...),  # "vs last quarter" implies QoQ
+            "calendar": InputSource(
+                source_type="external",
+                source_name="fiscal_calendar",
+                keys_accessed=("current_quarter", "quarter_boundaries"),
+                digest="sha256:...",
+            ),
+        },
+        entity_refs=(EntityRef("segment", "enterprise"),),
+    ),
+    policy_evaluation=PolicyEvaluation(
+        policy_name="TimePeriodPolicy",
+        policy_version="1.0.0",
+        policy_hash="sha256:...",
+        conditions_checked=(
+            ConditionResult(
+                condition_name="quarterly_comparison_uses_fiscal",
+                expression="'quarter' in query → fiscal_quarter boundaries",
+                result=True,
+                inputs_used=("query.text", "calendar.fiscal_year_start"),
+            ),
+        ),
+        base_decision="allow",
+    ),
+    exception_applied=None,
+    precedent_refs=(),
+    outcome="allowed",
+    rationale=(
+        "Using fiscal quarters (Q4: Oct-Dec, Q3: Jul-Sep) per TimePeriodPolicy v1.0.0. "
+        "Fiscal year starts October 1."
+    ),
+)
+```
+
+### Decision 3: Customer Inclusion
+
+```python
+Decision(
+    decision_id=UUID("d3-..."),
+    tool_name="filter_customers",
+    inputs=DecisionInputs(
+        sources={
+            "segment_definition": InputSource(
+                source_type="external",
+                source_name="segment_rules",
+                keys_accessed=("enterprise_arr_threshold", "enterprise_employee_count"),
+                digest="sha256:...",
+            ),
+            "customer_metadata": InputSource(
+                source_type="external",
+                source_name="crm",
+                keys_accessed=("customer_tags", "acquisition_dates"),
+                digest="sha256:...",
+            ),
+        },
+        entity_refs=(EntityRef("segment", "enterprise"),),
+    ),
+    policy_evaluation=PolicyEvaluation(
+        policy_name="CustomerInclusionPolicy",
+        policy_version="3.0.0",
+        policy_hash="sha256:...",
+        base_decision="deny",  # Default would include all customers
+        denial_reason="Retention metrics require pilot exclusion",
+    ),
+    exception_applied=ExceptionApplication(
+        exception_name="exclude_pilots_from_retention",
+        exception_version="2.0.0",
+        condition_matched="Query involves retention metrics",
+        override_action="modify_params",
+        rationale=(
+            "Excluding pilot accounts per exclude_pilots_from_retention v2.0.0 "
+            "(pilots churn at 3x rate, excluded from board metrics since Q2 2024)"
+        ),
+    ),
+    precedent_refs=(
+        PrecedentRef(
+            decision_id=UUID("prev-q3-..."),
+            similarity_score=0.91,
+            match_reason="Same segment retention query",
+            outcome_matched=True,  # Q3 also excluded pilots
+        ),
+    ),
+    outcome="allowed_by_exception",
+    rationale=(
+        "Enterprise segment: ARR ≥ $100K or employees ≥ 1000. "
+        "Excluding 12 pilot accounts per standing exception. "
+        "Final cohort: 847 customers."
+    ),
+)
+```
+
+### Decision 4: Data Source Selection
+
+```python
+Decision(
+    decision_id=UUID("d4-..."),
+    tool_name="select_data_source",
+    inputs=DecisionInputs(
+        sources={
+            "calendar": InputSource(
+                source_type="external",
+                source_name="fiscal_calendar",
+                keys_accessed=("is_close_period", "close_end_date"),
+                digest="sha256:...",
+            ),
+            "source_freshness": InputSource(
+                source_type="external",
+                source_name="data_catalog",
+                keys_accessed=("finance_last_sync", "crm_last_sync"),
+                digest="sha256:...",
+            ),
+        },
+    ),
+    policy_evaluation=PolicyEvaluation(
+        policy_name="DataSourceAuthorityPolicy",
+        policy_version="1.5.0",
+        policy_hash="sha256:...",
+        conditions_checked=(
+            ConditionResult(
+                condition_name="finance_is_authoritative",
+                expression="revenue metrics → finance system",
+                result=True,
+                inputs_used=(),
+            ),
+            ConditionResult(
+                condition_name="not_in_close_period",
+                expression="calendar.is_close_period == False",
+                result=True,  # Not in close period, so finance is fine
+                inputs_used=("calendar.is_close_period",),
+            ),
+        ),
+        base_decision="allow",
+    ),
+    exception_applied=None,  # Would apply if is_close_period=True
+    precedent_refs=(),
+    outcome="allowed",
+    rationale=(
+        "Using finance system (authoritative for revenue). "
+        "Last sync: Jan 6 2025 02:00 UTC. Not in close period."
+    ),
+)
+```
+
+### Final Output
+
+The agent returns to the CEO:
+
+```
+Enterprise segment retention: 87.2% (Q4) vs 89.1% (Q3), down 1.9pp
+
+Methodology:
+- Metric: Revenue retention (net dollar retention)
+- Period: Fiscal Q4 (Oct 1 - Dec 31) vs Fiscal Q3 (Jul 1 - Sep 30)
+- Cohort: 847 Enterprise customers (ARR ≥$100K or 1000+ employees)
+- Exclusions: 12 pilot accounts excluded per board-metric policy
+- Source: Finance system (synced Jan 6, 2025 02:00 UTC)
+
+[Decision trace: d1-..., d2-..., d3-..., d4-...]
+```
+
+Each decision ID links to the full trace. If the CFO later asks "why did
+retention drop?" — the agent can query the decision trace and precedent store
+to identify what changed (e.g., "Q3 used calendar quarters, Q4 used fiscal;
+recommend re-running Q3 with fiscal for apples-to-apples comparison").
 
 ## Limitations
 
