@@ -33,7 +33,7 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol
 from ...serde import parse, schema
-from .._names import AdapterName
+from ...types import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server

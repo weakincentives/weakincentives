@@ -34,12 +34,12 @@ from ..deadlines import Deadline
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..runtime.events import HandlerFailure, PromptExecuted, PromptRendered
 from ..runtime.logging import StructuredLogger, get_logger
+from ..types import AdapterName
 from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
-from ._names import AdapterName
 from ._provider_protocols import ProviderChoice, ProviderMessage, ProviderToolCall
 from .core import (
     PROMPT_EVALUATION_PHASE_BUDGET,

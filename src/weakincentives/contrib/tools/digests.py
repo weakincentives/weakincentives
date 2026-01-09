@@ -18,7 +18,7 @@ import textwrap
 from typing import override
 
 from ...dataclasses import FrozenDataclass
-from ...prompt import normalize_component_key
+from ...prompt._normalization import normalize_component_key
 from ...prompt.section import Section, SectionVisibility
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session

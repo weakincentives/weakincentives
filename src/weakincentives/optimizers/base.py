@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from ..prompt import Prompt
 from ..runtime.session import Session
 from ..runtime.session.protocols import SessionProtocol
-from ._context import OptimizationContext
+from .context import OptimizationContext
 
 
 @dataclass(slots=True, frozen=True)

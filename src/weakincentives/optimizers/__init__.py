@@ -38,10 +38,10 @@ Example usage::
 
 from __future__ import annotations
 
-from .base import BasePromptOptimizer, OptimizerConfig
-from .context import OptimizationContext
 from ._events import OptimizationCompleted, OptimizationFailed, OptimizationStarted
 from ._protocol import PromptOptimizer
+from .base import BasePromptOptimizer, OptimizerConfig
+from .context import OptimizationContext
 from .results import OptimizationResult, PersistenceScope, WorkspaceDigestResult
 
 __all__ = [

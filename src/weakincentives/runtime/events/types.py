@@ -20,8 +20,8 @@ from datetime import datetime
 from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
-from ...types import AdapterName
 from ...dataclasses import FrozenDataclass
+from ...types import AdapterName
 
 EventHandler = Callable[[object], None]
 
