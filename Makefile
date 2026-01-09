@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules all clean
 
 # Format code with ruff
 format:
@@ -31,6 +31,10 @@ deptry:
 # Check that core modules don't import from contrib
 check-core-imports:
 	@uv run python build/check_core_imports.py
+
+# Validate module boundaries and import patterns
+validate-modules:
+	@uv run python scripts/validate_module_boundaries.py
 
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
@@ -206,8 +210,11 @@ demo-claude-agent:
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
-# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, check-core-imports, pip-audit, markdown, doc-examples, validate-integration-tests, test)
+# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, check-core-imports, validate-modules, pip-audit, markdown, doc-examples, validate-integration-tests, test)
+# Note: validate-modules is commented out pending fixes for existing violations
 check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports pip-audit markdown-check verify-doc-examples validate-integration-tests test
+# Uncomment after fixing module boundary violations:
+# check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports validate-modules pip-audit markdown-check verify-doc-examples validate-integration-tests test
 
 # Synchronize documentation files into package
 sync-docs:
