@@ -26,7 +26,6 @@ import weakincentives.contrib.tools.vfs_types as vfs_types_module
 from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives import ToolValidationError
 from weakincentives.contrib.tools import (
-    READ_ENTIRE_FILE,
     AstevalSection,
     EvalFileRead,
     EvalFileWrite,
@@ -41,6 +40,7 @@ from weakincentives.contrib.tools import (
     WriteFile,
     WriteFileParams,
 )
+from weakincentives.filesystem import READ_ENTIRE_FILE
 from weakincentives.prompt.tool import Tool, ToolResult
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
@@ -1101,7 +1101,7 @@ def test_asteval_config_accepts_overrides() -> None:
 
 def test_asteval_filesystem_property_returns_filesystem() -> None:
     """Test that the filesystem property returns the filesystem instance."""
-    from weakincentives.contrib.tools import Filesystem
+    from weakincentives.filesystem import Filesystem
 
     bus = InProcessDispatcher()
     session = Session(bus=bus)

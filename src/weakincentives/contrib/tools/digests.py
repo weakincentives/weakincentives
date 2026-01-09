@@ -19,7 +19,8 @@ from typing import override
 
 from ...dataclasses import FrozenDataclass
 from ...prompt._normalization import normalize_component_key
-from ...prompt.section import Section, SectionVisibility
+from ...prompt._visibility import SectionVisibility
+from ...prompt.section import Section
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session
 from ...runtime.session.protocols import SessionProtocol

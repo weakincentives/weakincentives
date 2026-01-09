@@ -56,7 +56,7 @@ from weakincentives.runtime.events import (
     TokenUsage,
     ToolInvoked,
 )
-from weakincentives.runtime.events._types import EventHandler
+from weakincentives.runtime.events.types import EventHandler
 from weakincentives.runtime.session import (
     DEFAULT_SNAPSHOT_POLICIES,
     SessionProtocol,

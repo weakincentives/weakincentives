@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from weakincentives.runtime.events import DispatchResult
-from weakincentives.runtime.events._types import EventHandler
+from weakincentives.runtime.events.types import EventHandler
 
 
 class NullDispatcher:
