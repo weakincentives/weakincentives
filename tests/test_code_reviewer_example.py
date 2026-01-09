@@ -207,7 +207,7 @@ def test_workspace_digest_override_applied_when_no_session_digest(
         expected_hash=digest_section.content_hash,
         body="- Override digest",
     )
-    overrides_store.store(template, override, tag="seed")
+    overrides_store.store(descriptor, override, tag="seed")
 
     rendered = (
         Prompt(
@@ -236,7 +236,7 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
         expected_hash=digest_section.content_hash,
         body="- Override digest",
     )
-    overrides_store.store(template, override, tag="seed")
+    overrides_store.store(descriptor, override, tag="seed")
     # When a digest exists, visibility is SUMMARY by default, so we provide
     # an explicit summary to verify it's used instead of the override body.
     set_workspace_digest(

@@ -71,15 +71,24 @@ class _ToolEventParams:
 
 
 class _RecordingOverridesStore(PromptOverridesStore):
+    """Mock store that records calls for verification.
+
+    The calls list stores: (first_arg, tag, path, action_or_body).
+    - For store(): first_arg is PromptDescriptor, action_or_body is the override body
+    - For seed(): first_arg is PromptLike, action_or_body is "seed"
+    - For resolve(): first_arg is PromptDescriptor, action_or_body is "resolve"
+    """
+
     def __init__(self) -> None:
-        self.calls: list[tuple[PromptTemplate[Any], str, tuple[str, ...], str]] = []
+        # Using object as first element since different methods receive different types
+        self.calls: list[tuple[object, str, tuple[str, ...], str]] = []
 
     def resolve(
         self,
         descriptor: PromptDescriptor,
         tag: str = "latest",
     ) -> PromptOverride | None:
-        self.calls.append((cast(PromptTemplate[Any], descriptor), tag, (), "resolve"))
+        self.calls.append((descriptor, tag, (), "resolve"))
         return None
 
     def upsert(
@@ -87,7 +96,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         descriptor: PromptLike,
         override: PromptOverride,
     ) -> PromptOverride:
-        self.calls.append((cast(PromptTemplate[Any], descriptor), "", (), "upsert"))
+        self.calls.append((descriptor, "", (), "upsert"))
         return override
 
     def delete(
@@ -97,21 +106,17 @@ class _RecordingOverridesStore(PromptOverridesStore):
         prompt_key: str,
         tag: str,
     ) -> None:
-        self.calls.append(
-            (cast(PromptTemplate[Any], object()), tag, (ns, prompt_key), "delete")
-        )
+        self.calls.append((None, tag, (ns, prompt_key), "delete"))
 
     def store(
         self,
-        prompt: PromptLike,
+        descriptor: PromptDescriptor,
         override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",
     ) -> PromptOverride:
         if isinstance(override, SectionOverride):
-            self.calls.append(
-                (cast(PromptTemplate[Any], prompt), tag, override.path, override.body)
-            )
+            self.calls.append((descriptor, tag, override.path, override.body))
         return cast(PromptOverride, object())
 
     def seed(
@@ -120,7 +125,7 @@ class _RecordingOverridesStore(PromptOverridesStore):
         *,
         tag: str = "latest",
     ) -> PromptOverride:
-        self.calls.append((cast(PromptTemplate[Any], prompt), tag, (), "seed"))
+        self.calls.append((prompt, tag, (), "seed"))
         return cast(PromptOverride, object())
 
 
@@ -292,12 +297,15 @@ def test_optimize_updates_global_overrides() -> None:
     result = optimizer.optimize(prompt, session=session)
 
     assert overrides_store.calls
-    recorded_prompt, tag, path, body = next(
+    recorded_descriptor, tag, path, body = next(
         call
         for call in overrides_store.calls
         if call[3] not in {"seed", "resolve", "upsert", "delete"}
     )
-    assert recorded_prompt is prompt
+    # store() now receives a PromptDescriptor, not the Prompt itself
+    assert isinstance(recorded_descriptor, PromptDescriptor)
+    assert recorded_descriptor.ns == prompt.ns
+    assert recorded_descriptor.key == prompt.key
     assert tag == "tag"
     assert path[-1] == "workspace-digest"
     assert body == result.digest

@@ -334,7 +334,7 @@ class PromptOverridesStore(Protocol):
 
     def store(
         self,
-        prompt: PromptLike,
+        descriptor: PromptDescriptor,
         override: SectionOverride | ToolOverride | TaskExampleOverride,
         *,
         tag: str = "latest",

@@ -67,7 +67,7 @@ def test_store_section_override_requires_registered_path(tmp_path: Path) -> None
     fake_hash = HexDigest("a" * 64)
     override = SectionOverride(path=("missing",), expected_hash=fake_hash, body="X")
     with pytest.raises(PromptOverridesError):
-        store.store(prompt, override)
+        store.store(descriptor, override)
 
 
 def test_workspace_digest_section_in_descriptor() -> None:

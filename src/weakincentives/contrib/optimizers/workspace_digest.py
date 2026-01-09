@@ -37,7 +37,6 @@ from ...prompt.overrides import (
     PromptLike,
     PromptOverridesError,
     SectionOverride,
-    descriptor_for_prompt,
 )
 from ...prompt.section import Section
 from ...runtime.session import Session
@@ -215,14 +214,14 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                     phase=PROMPT_EVALUATION_PHASE_REQUEST,
                 )
             section_path = self._find_section_path(prompt, digest_section.key)
-            descriptor = descriptor_for_prompt(cast(PromptLike, prompt))
+            descriptor = prompt.descriptor
             section_hash = self._find_section_hash(descriptor, section_path)
             override = SectionOverride(
                 path=section_path,
                 expected_hash=section_hash,
                 body=digest,
             )
-            _ = global_store.store(cast(PromptLike, prompt), override, tag=global_tag)
+            _ = global_store.store(descriptor, override, tag=global_tag)
             clear_workspace_digest(outer_session, digest_section.key)
 
         return WorkspaceDigestResult(
