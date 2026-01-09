@@ -868,6 +868,1207 @@ make deptry
 make check
 ```
 
+## 15.6 Concurrency and Thread Safety
+
+> **Canonical Reference**: See [specs/THREAD_SAFETY.md](/specs/THREAD_SAFETY.md) for the complete thread safety specification.
+
+### Introduction
+
+Agent systems often need concurrency:
+
+- **Tool adapters** may use thread pools for parallel I/O
+- **Main loops** coordinate multiple subsystems (mailboxes, evaluators, health checks)
+- **Distributed deployments** run multiple workers sharing state via databases or queues
+
+Python's threading model makes concurrency straightforward, but it introduces data races, ordering issues, and subtle bugs that are hard to reproduce. Traditional thread-safety patterns don't always fit agent systems—sessions have complex state, reducers expect deterministic ordering, and prompt overrides involve file I/O.
+
+WINK provides **thread-safe core components** with clear guarantees and non-guarantees. This section explains WINK's thread model, which components are safe, and how to write thread-safe agent code.
+
+### Thread Safety Philosophy
+
+WINK's thread safety follows three principles:
+
+1. **Prefer deterministic delivery over opportunistic concurrency**: Keep locks localized so handler ordering is stable and testable
+2. **Copy-on-write for state transitions**: Avoid leaking partially-mutated objects across reducer boundaries
+3. **Single synchronization primitive per structure**: One lock per shared component (event bus, session, override store)
+
+```mermaid
+flowchart TB
+    subgraph Safe["Thread-Safe Components"]
+        Bus["InProcessDispatcher
+        RLock on _handlers"]
+        Session["Session
+        RLock on _state"]
+        Store["PromptOverridesStore
+        Per-file locks"]
+    end
+
+    subgraph Patterns["Synchronization Patterns"]
+        COW["Copy-on-Write
+        inside critical section"]
+        Atomic["Atomic File Write
+        temp + rename"]
+        Snapshot["Handler Snapshot
+        before delivery"]
+    end
+
+    subgraph Unsafe["Not Thread-Safe by Default"]
+        Handlers["User Event Handlers"]
+        Tools["Tool Handlers"]
+        Examples["Example Code"]
+    end
+
+    Bus --> Snapshot
+    Session --> COW
+    Store --> Atomic
+
+    style Safe fill:#e1ffe1
+    style Unsafe fill:#ffe1e1
+```
+
+**Key insight**: Core components are thread-safe, but user code must add its own synchronization when publishing from multiple threads.
+
+### Current Thread Model
+
+WINK's threading assumptions:
+
+- **Synchronous delivery**: Event bus delivers events on the publisher thread (no thread pools or async dispatchers)
+- **Inline reducers**: Reducers are invoked synchronously during `publish()`—callers see updated state by the end of the call
+- **Single-process file locking**: Prompt overrides use atomic writes within a process, but no inter-process coordination
+- **Stress testing**: Components opt into threadstress plugin runs (`@pytest.mark.threadstress`) to prove behavior under contention
+
+#### What This Means for Your Code
+
+If you:
+
+- **Call `session.dispatch()` from multiple threads**: Session state updates are atomic per event, but concurrent events may interleave
+- **Subscribe handlers from multiple threads**: Safe—handler registration is protected
+- **Access session state from outside reducers**: Use `session.lock` to coordinate with dispatch
+- **Write custom handlers that mutate shared state**: Add your own locks
+
+### Thread-Safe Components
+
+#### InProcessDispatcher
+
+The in-process event bus is fully thread-safe:
+
+```python
+from weakincentives.runtime import InProcessDispatcher
+
+bus = InProcessDispatcher()
+
+# All operations are thread-safe
+bus.subscribe(EventType, handler)  # Protected by RLock
+bus.unsubscribe(handler)            # Protected by RLock
+bus.publish(event)                  # Snapshots handlers under lock
+```
+
+**Guarantee**: Handler snapshots are taken under an `RLock` before delivery. The lock is **not** held during handler execution—this prevents deadlocks but allows concurrent publishes to interleave handler invocations.
+
+**Non-guarantee**: Handler ordering across concurrent `publish()` calls is undefined. If thread A and thread B both publish, handlers may see interleaved events.
+
+#### Session
+
+Sessions protect reducer registration and state mutation with an `RLock`:
+
+```python
+from weakincentives.runtime import Session
+
+session = Session(bus=bus)
+
+# All operations are thread-safe
+session.dispatch(event)                    # Protected by RLock
+session[Plan].register(AddStep, reducer)   # Protected by RLock
+snapshot = session.snapshot()              # Protected by RLock
+session.restore(snapshot)                  # Protected by RLock
+```
+
+**Guarantee**: Each reducer application is atomic. Copy-on-write happens inside the critical section, so reducers never see partially-updated state.
+
+**Non-guarantee**: If multiple threads dispatch events concurrently, reducer execution order is determined by lock acquisition order (not guaranteed FIFO).
+
+#### Session Lock Access
+
+For advanced use cases, access the session lock directly:
+
+```python
+# Coordinate with session dispatch
+with session.lock:
+    # Session state is stable here
+    current_plan = session[Plan].latest()
+    # Perform multi-step logic atomically
+    if current_plan is not None:
+        session.dispatch(CompleteStep(step_id=current_plan.steps[0].id))
+```
+
+Use this pattern when you need **atomic read-modify-write** sequences that span multiple session operations.
+
+#### LocalPromptOverridesStore
+
+The file-backed override store is thread-safe within a single process:
+
+```python
+from weakincentives.prompt import LocalPromptOverridesStore
+
+store = LocalPromptOverridesStore()
+
+# Thread-safe operations
+store.read_override(descriptor)   # Per-file lock
+store.write_override(descriptor, text)  # Atomic write (temp + rename)
+store.delete_override(descriptor)       # Per-file lock
+```
+
+**Guarantee**:
+- Git root discovery is protected by a lock (runs once)
+- Per-file locks serialize operations on the same override
+- Atomic writes use temporary files with rename for consistency
+
+**Non-guarantee**: No inter-process locking. Concurrent writers from multiple processes can race.
+
+#### Copy-on-Write Pattern
+
+Session reducers use copy-on-write to avoid leaking mutable references:
+
+```python
+def reducer(
+    view: SliceView[Plan],
+    event: AddStep,
+    *,
+    context: ReducerContext,
+) -> Replace[Plan]:
+    # Load current state
+    current = view.latest()
+
+    # Create new state (frozen dataclass)
+    new_plan = replace(current, steps=(*current.steps, event.step))
+
+    # Session copies tuple inside critical section
+    return Replace((new_plan,))
+```
+
+The session implementation:
+
+```python
+def _apply_slice_op(self, op: SliceOp[S], slice: Slice[S]) -> None:
+    """Apply under lock—mutations are atomic."""
+    with self._lock:
+        match op:
+            case Replace(items=items):
+                # Copy inside critical section
+                slice.replace(items)
+            case Append(item=item):
+                slice.append(item)
+```
+
+This pattern ensures reducers never observe intermediate states.
+
+### Not Thread-Safe by Default
+
+#### User Event Handlers
+
+Custom event handlers are invoked on the publisher thread without additional synchronization:
+
+```python
+from weakincentives.runtime import InProcessDispatcher
+
+bus = InProcessDispatcher()
+shared_list = []
+
+def handler(event: MyEvent) -> None:
+    # NOT thread-safe if multiple threads publish
+    shared_list.append(event.data)
+
+bus.subscribe(MyEvent, handler)
+
+# Concurrent publishes will race
+thread_a = Thread(target=lambda: bus.publish(MyEvent(data="A")))
+thread_b = Thread(target=lambda: bus.publish(MyEvent(data="B")))
+```
+
+**Solution**: Add your own lock or use thread-safe collections:
+
+```python
+from threading import Lock
+
+handler_lock = Lock()
+
+def safe_handler(event: MyEvent) -> None:
+    with handler_lock:
+        shared_list.append(event.data)
+```
+
+#### Tool Handlers
+
+Tool handlers receive `ToolContext` which includes a session reference. If tools call `session.dispatch()`, those operations are thread-safe. But if tools maintain **their own state**, you must synchronize:
+
+```python
+# Example: tool with internal state (NOT thread-safe)
+call_count = 0
+
+def my_tool(params: Params, *, context: ToolContext) -> ToolResult:
+    global call_count
+    call_count += 1  # Race condition
+    return ToolResult.ok(count=call_count)
+```
+
+**Solution**: Move state to session or add synchronization:
+
+```python
+# Use session state (thread-safe via session lock)
+@dataclass(frozen=True)
+class CallCount:
+    count: int = 0
+
+def my_tool(params: Params, *, context: ToolContext) -> ToolResult:
+    context.session[CallCount].register(CallCount, replace_latest)
+    current = context.session[CallCount].latest() or CallCount()
+    context.session.dispatch(CallCount(count=current.count + 1))
+    return ToolResult.ok(count=current.count + 1)
+```
+
+#### Example Orchestration Code
+
+Code in `examples/` and agent scaffolding often keeps mutable state:
+
+```python
+class CodeReviewSession:
+    def __init__(self):
+        self._history: list[str] = []  # NOT thread-safe
+
+    def on_tool_invoked(self, event: ToolInvoked) -> None:
+        self._history.append(event.tool_name)  # Race condition
+```
+
+**Solution**: If examples publish from multiple threads, add locks:
+
+```python
+from threading import Lock
+
+class CodeReviewSession:
+    def __init__(self):
+        self._history: list[str] = []
+        self._lock = Lock()
+
+    def on_tool_invoked(self, event: ToolInvoked) -> None:
+        with self._lock:
+            self._history.append(event.tool_name)
+```
+
+Or better: use session state exclusively:
+
+```python
+@dataclass(frozen=True)
+class ReviewHistory:
+    tools: tuple[str, ...]
+
+# Store in session instead of instance variable
+# Session handles synchronization
+```
+
+### Immutability as Thread Safety
+
+WINK's immutable-by-default design provides natural thread safety:
+
+#### Frozen Dataclasses
+
+All state containers are frozen:
+
+```python
+@dataclass(frozen=True, slots=True)
+class Plan:
+    steps: tuple[Step, ...]
+    active: bool
+
+# Frozen = immutable after construction
+# Safe to share across threads without locks
+plan = Plan(steps=(step1, step2), active=True)
+
+# This fails at construction
+plan.steps = (step3,)  # ❌ FrozenInstanceError
+```
+
+**Benefit**: Once constructed, dataclasses can be shared freely. No defensive copying needed.
+
+#### Tuple-Based Slices
+
+Session slices are tuples, not lists:
+
+```python
+# Session slice is tuple (immutable)
+plans = session[Plan].all()  # tuple[Plan, ...]
+
+# Safe to iterate without locks
+for plan in plans:
+    process(plan)
+
+# Concurrent dispatch creates new tuple
+# Old tuple remains valid
+```
+
+**Benefit**: Snapshots and queries see consistent state. No "concurrent modification" errors.
+
+#### Copy-on-Write Events
+
+Events are frozen dataclasses:
+
+```python
+@dataclass(frozen=True)
+class ToolInvoked:
+    tool_name: str
+    params: dict[str, object]
+    result: object
+
+# Once created, event is immutable
+event = ToolInvoked(tool_name="search", params={}, result="...")
+
+# Safe to pass to multiple handlers concurrently
+bus.publish(event)
+```
+
+**Benefit**: No worries about handlers mutating event objects.
+
+### Testing Thread Safety
+
+WINK provides a `threadstress` pytest plugin for testing under contention:
+
+```python
+import pytest
+
+@pytest.mark.threadstress(threads=4, iterations=100)
+def test_concurrent_dispatch():
+    """Test session dispatch from multiple threads."""
+    bus = InProcessDispatcher()
+    session = Session(bus=bus)
+    session[CallCount].register(CallCount, replace_latest)
+
+    def worker():
+        for _ in range(100):
+            current = session[CallCount].latest() or CallCount(count=0)
+            session.dispatch(CallCount(count=current.count + 1))
+
+    threads = [Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    # Should see 400 increments (4 threads × 100 iterations)
+    final = session[CallCount].latest()
+    assert final is not None
+    # Due to race conditions, count may be less than 400
+    # This test would fail without proper locking
+```
+
+The plugin reruns tests with varying thread pool sizes to expose race conditions.
+
+#### Opting Out
+
+If a component is explicitly single-threaded, document it and skip threadstress:
+
+```python
+@pytest.mark.skip_threadstress(reason="Single-threaded component")
+def test_my_feature():
+    ...
+```
+
+### Best Practices
+
+#### 1. Favor Immutability
+
+Use frozen dataclasses and tuples by default. Mutation requires explicit opt-in:
+
+```python
+# Good: Immutable state
+@dataclass(frozen=True)
+class AgentConfig:
+    max_steps: int
+
+# Avoid: Mutable state shared across threads
+class AgentConfig:
+    def __init__(self):
+        self.max_steps = 10  # Tempting to mutate
+```
+
+#### 2. Store State in Session
+
+Session state is synchronized automatically:
+
+```python
+# Good: Session state
+context.session[Progress].append(Progress(step="done"))
+
+# Avoid: Instance variables
+self.progress.append("done")  # Requires manual locking
+```
+
+#### 3. Minimize Critical Sections
+
+Hold locks for the shortest time possible:
+
+```python
+# Good: Short critical section
+with lock:
+    state = copy.copy(shared_state)
+# Process outside lock
+result = expensive_operation(state)
+
+# Avoid: Long critical section
+with lock:
+    state = copy.copy(shared_state)
+    result = expensive_operation(state)  # Blocks other threads
+```
+
+#### 4. Document Threading Assumptions
+
+If a component is single-threaded, say so:
+
+```python
+class SingleThreadedOrchestrator:
+    """Orchestrates agent execution.
+
+    Thread safety: This class assumes single-threaded use.
+    Callers must serialize access if using from multiple threads.
+    """
+```
+
+#### 5. Test with Threadstress
+
+Add `threadstress` markers to integration tests:
+
+```python
+@pytest.mark.threadstress(threads=8, iterations=50)
+def test_concurrent_main_loop():
+    """Test main loop with concurrent mailbox and eval workers."""
+    # ...
+```
+
+### Known Limitations
+
+#### No Async Support
+
+WINK's synchronization is thread-based. Mixing `asyncio` with threaded components requires careful coordination:
+
+```python
+# This pattern is NOT supported
+async def async_handler(event: MyEvent) -> None:
+    await some_async_call()
+    session.dispatch(event)  # Session expects sync context
+```
+
+**Workaround**: Use `asyncio.to_thread()` or run session operations in a dedicated thread.
+
+#### No Cross-Process Locking
+
+File-based prompt overrides use `fcntl.flock()` or atomic rename, but no distributed locking:
+
+```python
+# Multiple processes writing overrides can race
+# Process A: writes override
+# Process B: writes override simultaneously
+# Result: last write wins (no conflict detection)
+```
+
+**Workaround**: Coordinate override writes at the process level (e.g., use a coordinator process).
+
+#### Handler Ordering Not Guaranteed
+
+Concurrent `publish()` calls may interleave:
+
+```mermaid
+sequenceDiagram
+    participant ThreadA
+    participant ThreadB
+    participant Bus
+    participant Handler
+
+    ThreadA->>Bus: publish(Event1)
+    ThreadB->>Bus: publish(Event2)
+    Bus->>Handler: handle(Event1)
+    Bus->>Handler: handle(Event2)
+
+    Note over Bus,Handler: Order depends on lock acquisition
+```
+
+**Workaround**: If order matters, serialize publishes or use versioning in events.
+
+### Debugging Race Conditions
+
+#### Use Logging
+
+Structured logging helps identify interleaving:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)
+
+def handler(event: MyEvent) -> None:
+    logger.info("Handler started", extra={"thread": threading.current_thread().name})
+    # ...
+    logger.info("Handler finished", extra={"thread": threading.current_thread().name})
+```
+
+#### Thread Sanitizer
+
+Python 3.13+ includes experimental thread sanitizer:
+
+```bash
+# Run with thread sanitizer
+PYTHONTHREADSAFETY=1 pytest tests/
+```
+
+#### pytest-threadstress
+
+The threadstress plugin exposes races by running tests repeatedly with varying concurrency:
+
+```bash
+# Run with high thread counts
+pytest tests/ --threadstress-threads=16 --threadstress-iterations=200
+```
+
+### Migration Guide
+
+If you have existing single-threaded agent code and need concurrency:
+
+#### Step 1: Identify Shared State
+
+List all state accessed from multiple threads:
+
+- Instance variables
+- Global variables
+- Session slices
+- File-backed state
+
+#### Step 2: Move to Session or Add Locks
+
+For each item:
+
+- **Session state**: Already thread-safe, no changes needed
+- **Instance variables**: Move to session or add locks
+- **Global variables**: Move to session or use thread-safe collections
+
+#### Step 3: Test with Threadstress
+
+Add threadstress markers to tests:
+
+```python
+@pytest.mark.threadstress(threads=4, iterations=50)
+def test_my_feature():
+    # Run test with concurrent access
+    ...
+```
+
+#### Step 4: Document Guarantees
+
+Update docstrings:
+
+```python
+class MyComponent:
+    """Component that orchestrates agent tasks.
+
+    Thread safety: All public methods are thread-safe. Internal
+    state is protected by self._lock.
+    """
+```
+
+### Summary
+
+WINK provides thread-safe core components with clear contracts:
+
+| Component | Thread-Safe | Guarantees |
+|-----------|-------------|------------|
+| `InProcessDispatcher` | ✅ Yes | Handler registration, snapshot before delivery |
+| `Session` | ✅ Yes | Atomic dispatch, snapshot, restore |
+| `LocalPromptOverridesStore` | ✅ Yes (single-process) | Per-file locks, atomic writes |
+| User handlers | ❌ No | Must synchronize manually |
+| Tool handlers | ⚠️ Partial | Session operations safe, tool state not |
+| Example code | ❌ No | Explicitly single-threaded |
+
+**Key principles**:
+
+1. Immutability by default (frozen dataclasses, tuples)
+2. Session state synchronized automatically
+3. User code must add locks when maintaining its own state
+4. Test with threadstress plugin
+
+For most use cases, relying on session state and frozen dataclasses provides sufficient thread safety without explicit locks. When you need more, WINK's patterns (copy-on-write, atomic file writes) are proven and battle-tested.
+
+## 15.7 Exhaustive Type Checking
+
+> **Canonical Reference**: See [specs/EXHAUSTIVENESS.md](/specs/EXHAUSTIVENESS.md) for the complete specification.
+
+When you add a new variant to a union type, every match statement handling that union must be updated. Without exhaustiveness checking, missing handlers are discovered at runtime—often after expensive model calls or in production. The `assert_never` pattern catches them at type-check time, **before any code runs**.
+
+### The Problem: Silent Union Extensions
+
+Consider a session operation type:
+
+```python
+from typing import Literal
+
+OpType = Literal["append", "extend", "replace"]
+
+def apply_operation(op_type: OpType, data: list[str]) -> None:
+    if op_type == "append":
+        data.append("item")
+    elif op_type == "extend":
+        data.extend(["a", "b"])
+    elif op_type == "replace":
+        data.clear()
+        data.extend(["new"])
+```
+
+Later, a developer adds a new operation:
+
+```python
+OpType = Literal["append", "extend", "replace", "clear"]  # Added "clear"
+```
+
+**The problem**: The `apply_operation` function still compiles. It runs without errors. But when `op_type == "clear"`, it silently does nothing—it falls through to the end with no handler.
+
+```mermaid
+sequenceDiagram
+    participant Code as Your Code
+    participant TypeChecker as Type Checker
+    participant Runtime as Runtime
+
+    Note over Code: Developer adds "clear" to union
+    Code->>TypeChecker: Type check
+    TypeChecker->>Code: ✓ Pass (no error)
+
+    Note over Runtime: User triggers "clear" operation
+    Runtime->>Code: apply_operation("clear", data)
+    Code->>Runtime: (silently does nothing)
+
+    Note over Runtime: 💸 Bug in production
+```
+
+### The Solution: `assert_never` Pattern
+
+End match statements on union types with an `assert_never` sentinel:
+
+```python
+from typing import assert_never
+
+def apply_operation(op_type: OpType, data: list[str]) -> None:
+    if op_type == "append":
+        data.append("item")
+    elif op_type == "extend":
+        data.extend(["a", "b"])
+    elif op_type == "replace":
+        data.clear()
+        data.extend(["new"])
+    else:  # pragma: no cover - exhaustiveness sentinel
+        assert_never(op_type)  # pyright: ignore[reportUnreachable]
+```
+
+Now when `"clear"` is added to the union:
+
+```mermaid
+sequenceDiagram
+    participant Code as Your Code
+    participant TypeChecker as Type Checker (pyright)
+    participant Developer as You
+
+    Note over Code: Developer adds "clear" to union
+    Code->>TypeChecker: Type check
+    TypeChecker->>TypeChecker: ❌ Type error at assert_never
+    TypeChecker->>Developer: Error: Argument of type "Literal['clear']" is not assignable to "Never"
+
+    Note over Developer: Fix before commit ✓
+```
+
+**The type checker immediately reports**:
+
+```
+Argument of type "Literal['clear']" is not assignable to parameter of type "Never"
+```
+
+This forces you to add a handler for `"clear"` before the code can be committed.
+
+### The Pattern in Practice
+
+#### With Match Statements
+
+Match statements on union types benefit most from this pattern:
+
+```python
+from typing import assert_never
+from weakincentives.runtime.session import SliceOp, Append, Extend, Replace, Clear
+
+def apply_slice_op[T](slice: Slice[T], op: SliceOp[T]) -> None:
+    match op:
+        case Append(item=item):
+            slice.append(item)
+        case Extend(items=items):
+            slice.extend(items)
+        case Replace(items=items):
+            slice.clear()
+            slice.extend(items)
+        case Clear(predicate=pred):
+            slice.clear(pred)
+        case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
+            assert_never(unreachable)  # pyright: ignore[reportUnreachable]
+```
+
+If a new variant (e.g., `Insert`) is added to `SliceOp`, pyright immediately reports a type error at the `assert_never` call.
+
+#### With If-Elif Chains
+
+The pattern works equally well with if-elif chains:
+
+```python
+from typing import Literal, assert_never
+
+Status = Literal["pending", "running", "completed", "failed"]
+
+def handle_status(status: Status) -> str:
+    if status == "pending":
+        return "Waiting to start"
+    elif status == "running":
+        return "In progress"
+    elif status == "completed":
+        return "Done"
+    elif status == "failed":
+        return "Error occurred"
+    else:  # pragma: no cover
+        assert_never(status)  # pyright: ignore[reportUnreachable]
+```
+
+#### Union Types as Algebraic Data Types
+
+The pattern shines with dataclass-based union types:
+
+```python
+from dataclasses import dataclass
+from typing import assert_never
+
+@dataclass(frozen=True)
+class ToolSuccess:
+    result: str
+
+@dataclass(frozen=True)
+class ToolFailure:
+    error: str
+
+@dataclass(frozen=True)
+class ToolPending:
+    task_id: str
+
+ToolStatus = ToolSuccess | ToolFailure | ToolPending
+
+def render_status(status: ToolStatus) -> str:
+    match status:
+        case ToolSuccess(result=r):
+            return f"✓ Success: {r}"
+        case ToolFailure(error=e):
+            return f"✗ Error: {e}"
+        case ToolPending(task_id=tid):
+            return f"⏳ Pending: {tid}"
+        case _ as unreachable:  # pragma: no cover
+            assert_never(unreachable)  # pyright: ignore[reportUnreachable]
+```
+
+If you later add `ToolCancelled`, pyright forces you to handle it.
+
+### Pyright Integration
+
+The sentinel is intentionally unreachable when all cases are covered. Suppress the strict mode warnings with inline comments:
+
+```python
+case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
+    assert_never(unreachable)  # pyright: ignore[reportUnreachable]
+```
+
+**Why these comments?**
+
+1. **`# pragma: no cover`**: Excludes from coverage requirements (since it's unreachable when exhaustive)
+2. **`# pyright: ignore[reportUnreachable]`**: Suppresses pyright's "unreachable code" error (since we want it to be unreachable)
+
+### When to Use `assert_never`
+
+**Use `assert_never` for:**
+
+✅ **Match statements on union types**
+
+```python
+match event:
+    case ToolInvoked(...): ...
+    case PromptExecuted(...): ...
+    case _ as unreachable:
+        assert_never(unreachable)
+```
+
+✅ **If-elif chains on Literal types**
+
+```python
+if status == "pending": ...
+elif status == "running": ...
+else:
+    assert_never(status)
+```
+
+✅ **Algebraic data type handlers**
+
+```python
+match op:
+    case Append(...): ...
+    case Replace(...): ...
+    case _ as unreachable:
+        assert_never(unreachable)
+```
+
+**Skip `assert_never` for:**
+
+❌ **isinstance chains** (pyright's type narrowing already handles exhaustiveness):
+
+```python
+# Pyright narrows types automatically
+if isinstance(override, SectionOverride):
+    ...
+elif isinstance(override, ToolOverride):
+    ...
+else:
+    # Pyright knows: must be TaskExampleOverride
+    # Adding a 4th type would change the narrowed type
+    assert isinstance(override, TaskExampleOverride)
+```
+
+❌ **Simple boolean checks**
+
+```python
+if condition:
+    ...
+else:
+    # No need for assert_never
+    ...
+```
+
+❌ **Open-ended branches** (where exhaustiveness isn't expected)
+
+```python
+# Parser might encounter unknown token types
+if token.type == "identifier":
+    ...
+else:
+    # OK to have catch-all
+    raise ParseError(f"Unexpected token: {token.type}")
+```
+
+### Critical Union Types in WINK
+
+These union types in WINK use `assert_never` for exhaustiveness:
+
+#### `SliceOp[T]`
+
+Session slice operations in `weakincentives.runtime.session`:
+
+```python
+from weakincentives.runtime.session import SliceOp, Append, Extend, Replace, Clear
+
+def _apply_slice_op[T](slice: Slice[T], op: SliceOp[T]) -> None:
+    match op:
+        case Append(item=item):
+            slice.append(item)
+        case Extend(items=items):
+            slice.extend(items)
+        case Replace(items=items):
+            slice.clear()
+            slice.extend(items)
+        case Clear(predicate=pred):
+            slice.clear(pred)
+        case _ as unreachable:  # pragma: no cover
+            assert_never(unreachable)  # pyright: ignore[reportUnreachable]
+```
+
+If a new operation (e.g., `Insert`, `Upsert`) is added, type checking fails until handlers are updated.
+
+#### `DataEvent`
+
+Subscription routing for session events relies on explicit subscriptions rather than match statements, so `assert_never` isn't used here. But the pattern could apply if routing logic becomes centralized.
+
+### Practical Workflow
+
+**Step 1: Write exhaustive handler**
+
+```python
+from typing import Literal, assert_never
+
+Color = Literal["red", "green", "blue"]
+
+def render_color(color: Color) -> str:
+    if color == "red":
+        return "#FF0000"
+    elif color == "green":
+        return "#00FF00"
+    elif color == "blue":
+        return "#0000FF"
+    else:  # pragma: no cover
+        assert_never(color)  # pyright: ignore[reportUnreachable]
+```
+
+**Step 2: Run type checker**
+
+```bash
+make typecheck
+# ✓ All checks pass
+```
+
+**Step 3: Extend union**
+
+```python
+Color = Literal["red", "green", "blue", "yellow"]  # Added "yellow"
+```
+
+**Step 4: Type checker catches missing handler**
+
+```bash
+make typecheck
+# Error: Argument of type "Literal['yellow']" is not assignable to "Never"
+#   File "colors.py", line 12, in render_color
+#     assert_never(color)
+```
+
+**Step 5: Add handler before commit**
+
+```python
+def render_color(color: Color) -> str:
+    if color == "red":
+        return "#FF0000"
+    elif color == "green":
+        return "#00FF00"
+    elif color == "blue":
+        return "#0000FF"
+    elif color == "yellow":  # New handler
+        return "#FFFF00"
+    else:  # pragma: no cover
+        assert_never(color)  # pyright: ignore[reportUnreachable]
+```
+
+**Step 6: Type checker passes**
+
+```bash
+make typecheck
+# ✓ All checks pass
+```
+
+### Benefits
+
+**1. Catch errors at type-check time (milliseconds), not runtime (after expensive operations):**
+
+```mermaid
+graph LR
+    subgraph Without["Without assert_never"]
+        Write1["Write Code"] --> Commit1["Commit"]
+        Commit1 --> Deploy1["Deploy"]
+        Deploy1 --> Bug["💸 Bug in Production"]
+    end
+
+    subgraph With["With assert_never"]
+        Write2["Write Code"] --> TypeCheck["Type Check"]
+        TypeCheck -->|Fail| Fix["Fix Handlers"]
+        Fix --> TypeCheck
+        TypeCheck -->|Pass| Commit2["Commit"]
+        Commit2 --> Deploy2["Deploy"]
+        Deploy2 --> Safe["✓ Exhaustive"]
+    end
+
+    style Bug fill:#f88
+    style Safe fill:#8f8
+```
+
+**2. Force explicit handling of all cases:**
+
+Every variant gets a deliberate handler. No silent fall-throughs.
+
+**3. Enable safe refactoring:**
+
+When refactoring union types (splitting, merging, renaming), type checker guides you to all usage sites.
+
+**4. Document completeness:**
+
+The `assert_never` sentinel serves as documentation: "This match is exhaustive."
+
+### Configuration
+
+Pyright strict mode (already enforced in WINK) is required for effective exhaustiveness checking:
+
+```toml
+# pyproject.toml
+[tool.pyright]
+typeCheckingMode = "strict"
+```
+
+Strict mode ensures:
+
+- All code paths are analyzed
+- Type narrowing is precise
+- `assert_never` type errors are reported
+
+### Common Pitfalls
+
+**Pitfall 1: Forgetting `# pragma: no cover`**
+
+```python
+else:
+    assert_never(status)  # Coverage complains: line not covered
+```
+
+**Fix:** Add `# pragma: no cover` to exclude from coverage (it's intentionally unreachable):
+
+```python
+else:  # pragma: no cover
+    assert_never(status)
+```
+
+**Pitfall 2: Forgetting `# pyright: ignore[reportUnreachable]`**
+
+```python
+else:  # pragma: no cover
+    assert_never(status)  # Pyright complains: code is unreachable
+```
+
+**Fix:** Add `# pyright: ignore[reportUnreachable]` to suppress the error:
+
+```python
+else:  # pragma: no cover
+    assert_never(status)  # pyright: ignore[reportUnreachable]
+```
+
+**Pitfall 3: Using `assert_never` in non-exhaustive contexts**
+
+```python
+# Bad: Open-ended token parsing
+if token.type in ["identifier", "number"]:
+    ...
+else:
+    assert_never(token.type)  # Error: token.type could be anything
+```
+
+**Fix:** Use `assert_never` only on closed union types where exhaustiveness is intended.
+
+**Pitfall 4: Not binding the unreachable value**
+
+```python
+match status:
+    case "pending": ...
+    case "running": ...
+    case _:  # Bad: unbound
+        assert_never(???)  # What do we pass?
+```
+
+**Fix:** Bind the unreachable value with `as`:
+
+```python
+match status:
+    case "pending": ...
+    case "running": ...
+    case _ as unreachable:  # Good: bound
+        assert_never(unreachable)
+```
+
+### Real-World Example: Session Slice Operations
+
+WINK's session slice operations demonstrate the pattern in production code:
+
+```python
+# From weakincentives/runtime/session.py
+
+from dataclasses import dataclass
+from typing import assert_never
+
+@dataclass(frozen=True)
+class Append[T]:
+    item: T
+
+@dataclass(frozen=True)
+class Extend[T]:
+    items: tuple[T, ...]
+
+@dataclass(frozen=True)
+class Replace[T]:
+    items: tuple[T, ...]
+
+@dataclass(frozen=True)
+class Clear[T]:
+    predicate: Callable[[T], bool] | None = None
+
+SliceOp = Append[T] | Extend[T] | Replace[T] | Clear[T]
+
+def _apply_slice_op[T](slice: Slice[T], op: SliceOp[T]) -> None:
+    """Apply a slice operation to a mutable slice."""
+    match op:
+        case Append(item=item):
+            slice.append(item)
+        case Extend(items=items):
+            slice.extend(items)
+        case Replace(items=items):
+            slice.clear()
+            slice.extend(items)
+        case Clear(predicate=pred):
+            slice.clear(pred)
+        case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
+            assert_never(unreachable)  # pyright: ignore[reportUnreachable]
+```
+
+**Why this matters:**
+
+- `SliceOp` is a critical type used throughout session state management
+- If a developer adds a new operation (e.g., `Insert`, `Upsert`), the type checker immediately identifies all locations that need updates
+- Without `assert_never`, the new operation would silently fall through, causing subtle state corruption
+
+### Integration with Tests
+
+Exhaustiveness checking complements test coverage:
+
+```python
+# Test all variants
+def test_render_status_success():
+    assert render_status(ToolSuccess(result="OK")) == "✓ Success: OK"
+
+def test_render_status_failure():
+    assert render_status(ToolFailure(error="timeout")) == "✗ Error: timeout"
+
+def test_render_status_pending():
+    assert render_status(ToolPending(task_id="123")) == "⏳ Pending: 123"
+
+# No need to test the assert_never branch (it's unreachable)
+```
+
+**Coverage of the `assert_never` branch**: Excluded via `# pragma: no cover`, since it's intentionally unreachable when exhaustive.
+
+### Summary
+
+Exhaustive type checking with `assert_never`:
+
+1. **Forces explicit handling** of all union variants
+2. **Catches missing handlers at type-check time**, before any code runs
+3. **Enables safe refactoring** of union types
+4. **Documents completeness** in code
+
+**The pattern:**
+
+```python
+from typing import assert_never
+
+match value:
+    case VariantA(...): ...
+    case VariantB(...): ...
+    case _ as unreachable:  # pragma: no cover
+        assert_never(unreachable)  # pyright: ignore[reportUnreachable]
+```
+
+**When to use:**
+
+- Match statements on union types
+- If-elif chains on Literal types
+- Algebraic data type handlers
+
+**When to skip:**
+
+- isinstance chains (pyright narrows types automatically)
+- Open-ended branches (where exhaustiveness isn't expected)
+
 ## Quality Checklist
 
 Before every commit:

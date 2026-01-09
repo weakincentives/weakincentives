@@ -1124,6 +1124,1142 @@ def test_expanded_rendering():
         assert "This section is summarized" not in rendered.text
 ```
 
+## 3.13 Advanced Resource Management
+
+> **Canonical Reference**: See [specs/RESOURCE_REGISTRY.md](/specs/RESOURCE_REGISTRY.md) for the complete specification.
+
+The resource registry provides dependency injection with scope-aware lifecycle management for complex agent architectures. Resources can depend on each other, have different lifetimes, and support transactional rollback—all through a clean, immutable API.
+
+This section expands on the basics covered earlier, diving deep into dependency injection patterns, scope lifecycle details, and transactional snapshot/restore semantics.
+
+### Architecture Overview
+
+```mermaid
+flowchart TB
+    subgraph Configuration["Registry Configuration (Immutable)"]
+        Bindings["Bindings<br/>(protocol → provider + scope)"]
+    end
+
+    subgraph Prompt["Prompt Lifecycle"]
+        Enter["__enter__()"]
+        Create["create_context()"]
+        Start["start()"]
+        Use["Tool execution"]
+        Close["close()"]
+        Exit["__exit__()"]
+    end
+
+    subgraph Resolution["Resolution (per request)"]
+        Get["get(Protocol)"] --> Check{"Cached?"}
+        Check -->|Yes| Return["Return instance"]
+        Check -->|No| Resolve["Invoke provider"]
+        Resolve --> Deps["Resolve dependencies"]
+        Deps --> Construct["Construct instance"]
+        Construct --> Cache{"Scope?"}
+        Cache -->|SINGLETON| SingletonCache["Session cache"]
+        Cache -->|TOOL_CALL| ToolCache["Tool-call cache"]
+        Cache -->|PROTOTYPE| NoCache["No cache"]
+        SingletonCache --> Return
+        ToolCache --> Return
+        NoCache --> Return
+    end
+
+    subgraph Scopes["Scope Lifecycles"]
+        Singleton["SINGLETON<br/>Lives for prompt context"]
+        ToolCall["TOOL_CALL<br/>Fresh per invocation"]
+        Prototype["PROTOTYPE<br/>Fresh every access"]
+    end
+
+    Configuration --> Prompt
+    Prompt --> Resolution
+    Enter --> Create --> Start --> Use --> Close --> Exit
+```
+
+The resource registry separates **immutable configuration** (`ResourceRegistry`) from **mutable resolution** (`ScopedResourceContext`). This enables:
+
+- **Shared configuration** across multiple contexts
+- **Snapshot/restore** for transactional tool execution
+- **Lazy construction** with dependency resolution
+- **Automatic cleanup** in reverse instantiation order
+
+### Scope Lifecycles in Detail
+
+Resources declare their lifetime via `Scope`:
+
+```python
+from weakincentives.resources import Scope
+
+class Scope(Enum):
+    """Determines instance lifetime and caching behavior."""
+
+    SINGLETON = "singleton"
+    """One instance per prompt context. Created on first access, reused thereafter."""
+
+    TOOL_CALL = "tool_call"
+    """Fresh instance per tool invocation. Disposed after tool completes."""
+
+    PROTOTYPE = "prototype"
+    """Fresh instance on every access. Never cached."""
+```
+
+#### SINGLETON: Session-Scoped Resources
+
+**Use when:** Expensive to create, stateless or thread-safe, shared across tool calls.
+
+**Examples:** HTTP clients, connection pools, configuration, caches.
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry, Scope
+import httpx
+
+registry = ResourceRegistry.of(
+    Binding(
+        httpx.Client,
+        lambda r: httpx.Client(timeout=30.0),
+        scope=Scope.SINGLETON,  # Default
+    ),
+)
+
+with registry.open() as ctx:
+    # First access: constructs the client
+    client1 = ctx.get(httpx.Client)
+
+    # Second access: returns cached instance
+    client2 = ctx.get(httpx.Client)
+
+    assert client1 is client2  # Same instance
+# Client closed on context exit
+```
+
+**Lifecycle:**
+
+1. **Construction**: On first `get()` call
+2. **Caching**: Stored in `singleton_cache`
+3. **Cleanup**: `close()` called on context exit (if `Closeable`)
+
+**Key characteristics:**
+
+- Survives across multiple tool calls
+- Included in snapshot/restore operations
+- Disposed in reverse instantiation order
+
+#### TOOL_CALL: Per-Invocation Resources
+
+**Use when:** Needs fresh state per tool, or tracks tool-specific context.
+
+**Examples:** Request tracers, tool-scoped transactions, per-call rate limiters.
+
+```python
+from uuid import uuid4
+from weakincentives.resources import Binding, Scope
+
+class RequestTracer:
+    def __init__(self, request_id: str):
+        self.request_id = request_id
+        self.events: list[str] = []
+
+    def log(self, event: str) -> None:
+        self.events.append(event)
+
+registry = ResourceRegistry.of(
+    Binding(
+        RequestTracer,
+        lambda r: RequestTracer(request_id=str(uuid4())),
+        scope=Scope.TOOL_CALL,  # Fresh per tool call
+    ),
+)
+
+with registry.open() as ctx:
+    # Each tool scope gets a fresh tracer
+    with ctx.tool_scope() as resolver1:
+        tracer1 = resolver1.get(RequestTracer)
+        tracer1.log("event A")
+
+    with ctx.tool_scope() as resolver2:
+        tracer2 = resolver2.get(RequestTracer)
+        tracer2.log("event B")
+
+    assert tracer1 is not tracer2  # Different instances
+    assert tracer1.request_id != tracer2.request_id
+```
+
+**Lifecycle:**
+
+1. **Construction**: On first `get()` within a tool scope
+2. **Caching**: Stored in tool-call cache (scoped to `with ctx.tool_scope()`)
+3. **Cleanup**: `close()` called on tool scope exit (if `Closeable`)
+
+**Key characteristics:**
+
+- Fresh instance per `with ctx.tool_scope()` block
+- NOT included in snapshot/restore (ephemeral)
+- Disposed when tool scope exits
+
+#### PROTOTYPE: Always Fresh
+
+**Use when:** Cheap to create, each caller needs independent instance.
+
+**Examples:** Builders, temporary buffers, one-off computations.
+
+```python
+from weakincentives.resources import Binding, Scope
+
+class QueryBuilder:
+    def __init__(self):
+        self.filters: list[str] = []
+
+    def add_filter(self, f: str) -> "QueryBuilder":
+        self.filters.append(f)
+        return self
+
+registry = ResourceRegistry.of(
+    Binding(
+        QueryBuilder,
+        lambda r: QueryBuilder(),
+        scope=Scope.PROTOTYPE,  # Always fresh
+    ),
+)
+
+with registry.open() as ctx:
+    builder1 = ctx.get(QueryBuilder)
+    builder2 = ctx.get(QueryBuilder)
+
+    assert builder1 is not builder2  # Different instances every time
+```
+
+**Lifecycle:**
+
+1. **Construction**: On every `get()` call
+2. **Caching**: Not cached
+3. **Cleanup**: Not tracked (caller responsible)
+
+**Key characteristics:**
+
+- New instance on every access
+- NOT included in snapshot/restore (transient)
+- No automatic cleanup
+
+### Dependency Injection Patterns
+
+#### Basic Dependency Resolution
+
+Providers receive a `ResourceResolver` to access dependencies:
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry
+from dataclasses import dataclass
+
+@dataclass
+class Config:
+    api_url: str
+    timeout: float
+
+@dataclass
+class APIClient:
+    config: Config
+
+registry = ResourceRegistry.of(
+    Binding(Config, lambda r: Config(api_url="https://api.example.com", timeout=30.0)),
+    Binding(APIClient, lambda r: APIClient(config=r.get(Config))),
+)
+
+with registry.open() as ctx:
+    # Resolves Config first, then APIClient
+    client = ctx.get(APIClient)
+    assert client.config.api_url == "https://api.example.com"
+```
+
+**Resolution order:**
+
+1. `ctx.get(APIClient)` invokes the provider
+2. Provider calls `r.get(Config)`
+3. Config provider invokes and caches result
+4. APIClient provider constructs with resolved Config
+5. APIClient cached and returned
+
+#### Multi-Level Dependencies
+
+Dependencies can form deep graphs:
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry
+
+@dataclass
+class Database:
+    connection_string: str
+
+@dataclass
+class UserRepository:
+    db: Database
+
+@dataclass
+class UserService:
+    repo: UserRepository
+
+registry = ResourceRegistry.of(
+    Binding(Database, lambda r: Database(connection_string="postgres://...")),
+    Binding(UserRepository, lambda r: UserRepository(db=r.get(Database))),
+    Binding(UserService, lambda r: UserService(repo=r.get(UserRepository))),
+)
+
+with registry.open() as ctx:
+    # Resolves: Database → UserRepository → UserService
+    service = ctx.get(UserService)
+```
+
+**Lazy construction:** The entire graph is constructed on first access, not upfront.
+
+#### Cycle Detection
+
+Circular dependencies fail fast:
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry, CircularDependencyError
+
+@dataclass
+class A:
+    b: "B"
+
+@dataclass
+class B:
+    a: A
+
+registry = ResourceRegistry.of(
+    Binding(A, lambda r: A(b=r.get(B))),
+    Binding(B, lambda r: B(a=r.get(A))),
+)
+
+with registry.open() as ctx:
+    try:
+        ctx.get(A)
+    except CircularDependencyError as e:
+        print(f"Cycle detected: {e.cycle}")
+        # Cycle detected: (<class 'A'>, <class 'B'>, <class 'A'>)
+```
+
+**Error diagnostics:**
+
+- `CircularDependencyError.cycle` contains the full dependency path
+- Error raised during resolution, before any instances are cached
+
+#### Optional Dependencies
+
+Use `get_optional()` for conditional dependencies:
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry
+
+@dataclass
+class Service:
+    logger: "Logger | None"
+
+registry = ResourceRegistry.of(
+    Binding(Service, lambda r: Service(logger=r.get_optional(Logger))),
+)
+
+with registry.open() as ctx:
+    service = ctx.get(Service)
+    assert service.logger is None  # Logger not bound
+```
+
+**Use cases:**
+
+- Feature flags (optional integrations)
+- Testing (mock dependencies conditionally)
+- Graceful degradation
+
+### Registry Composition
+
+Registries are immutable, enabling safe composition:
+
+#### Merging Registries
+
+```python
+from weakincentives.resources import ResourceRegistry, Binding
+
+# Base configuration
+base = ResourceRegistry.of(
+    Binding(Config, lambda r: Config(env="prod")),
+    Binding(Logger, lambda r: Logger(level="INFO")),
+)
+
+# Test overrides
+test_overrides = ResourceRegistry.of(
+    Binding(Config, lambda r: Config(env="test")),  # Override Config
+)
+
+# Merge: test_overrides wins on conflicts
+merged = base.merge(test_overrides)
+
+with merged.open() as ctx:
+    config = ctx.get(Config)
+    assert config.env == "test"  # Override applied
+
+    logger = ctx.get(Logger)
+    assert logger.level == "INFO"  # Base preserved
+```
+
+**Merge behavior:**
+
+- Later registry wins on conflicts (override semantics)
+- No mutation (returns new registry)
+- Efficient (shares binding references)
+
+#### Detecting Conflicts
+
+Use `conflicts()` to inspect overlaps:
+
+```python
+base = ResourceRegistry.of(
+    Binding(Config, ...),
+    Binding(Logger, ...),
+)
+
+overrides = ResourceRegistry.of(
+    Binding(Config, ...),  # Conflicts with base
+)
+
+conflicts = base.conflicts(overrides)
+assert Config in conflicts
+assert Logger not in conflicts
+```
+
+**Use cases:**
+
+- Warn on unexpected overrides
+- Validate test fixtures
+- Debug configuration issues
+
+#### Strict Merging
+
+Raise on conflicts with `strict=True`:
+
+```python
+from weakincentives.resources import DuplicateBindingError
+
+try:
+    merged = base.merge(overrides, strict=True)
+except DuplicateBindingError as e:
+    print(f"Conflict on {e.protocol}")
+```
+
+**Use cases:**
+
+- Enforce single source of truth
+- Detect accidental duplicates
+- Strict test environments
+
+### Lifecycle Protocols
+
+Resources can implement lifecycle protocols for initialization and cleanup.
+
+#### PostConstruct: Post-Construction Initialization
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry
+from typing import Protocol, runtime_checkable
+
+@runtime_checkable
+class PostConstruct(Protocol):
+    def post_construct(self) -> None:
+        """Called after construction, before caching."""
+        ...
+
+class DatabasePool:
+    def __init__(self, connection_string: str):
+        self.connection_string = connection_string
+        self.pool: list[Connection] = []
+
+    def post_construct(self) -> None:
+        """Initialize connection pool."""
+        for _ in range(5):
+            self.pool.append(Connection(self.connection_string))
+
+registry = ResourceRegistry.of(
+    Binding(DatabasePool, lambda r: DatabasePool("postgres://..."))
+)
+
+with registry.open() as ctx:
+    # Construction → post_construct() → caching
+    pool = ctx.get(DatabasePool)
+    assert len(pool.pool) == 5
+```
+
+**Behavior:**
+
+- Called after provider returns instance
+- Called before instance is cached
+- Failures prevent caching and are wrapped in `ProviderError`
+
+#### Closeable: Resource Cleanup
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry
+from typing import Protocol, runtime_checkable
+
+@runtime_checkable
+class Closeable(Protocol):
+    def close(self) -> None:
+        """Release resources. Called when scope ends."""
+        ...
+
+class FileHandle:
+    def __init__(self, path: str):
+        self.file = open(path, "r")
+
+    def close(self) -> None:
+        self.file.close()
+
+registry = ResourceRegistry.of(
+    Binding(FileHandle, lambda r: FileHandle("/tmp/data.txt"))
+)
+
+with registry.open() as ctx:
+    handle = ctx.get(FileHandle)
+    assert not handle.file.closed
+# Automatic cleanup: handle.close() called on exit
+assert handle.file.closed
+```
+
+**Cleanup behavior:**
+
+- `close()` called on context exit (SINGLETON) or tool scope exit (TOOL_CALL)
+- Reverse instantiation order (dependencies closed before dependents)
+- Exceptions suppressed (logged but don't propagate)
+
+#### Reverse Order Cleanup
+
+Dependencies are closed in reverse instantiation order:
+
+```python
+closed_order: list[str] = []
+
+class ResourceA:
+    def close(self) -> None:
+        closed_order.append("A")
+
+class ResourceB:
+    def __init__(self, a: ResourceA):
+        self.a = a
+
+    def close(self) -> None:
+        closed_order.append("B")
+
+registry = ResourceRegistry.of(
+    Binding(ResourceA, lambda r: ResourceA()),
+    Binding(ResourceB, lambda r: ResourceB(a=r.get(ResourceA))),
+)
+
+with registry.open() as ctx:
+    _ = ctx.get(ResourceB)  # Constructs A, then B
+# Cleanup order: B closed first, then A
+assert closed_order == ["B", "A"]
+```
+
+**Why reverse order?**
+
+Ensures resources are closed in dependency order (dependents before dependencies).
+
+### Eager Initialization
+
+By default, resources are lazy (constructed on first access). Use `eager=True` to construct during `start()`:
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry
+
+class Config:
+    def __init__(self):
+        # May raise on invalid configuration
+        self.api_key = os.environ["API_KEY"]
+
+registry = ResourceRegistry.of(
+    Binding(
+        Config,
+        lambda r: Config(),
+        eager=True,  # Construct during start()
+    ),
+)
+
+# Raises immediately if API_KEY missing
+with registry.open() as ctx:
+    # Config already validated at this point
+    pass
+```
+
+**Use cases:**
+
+- Validate configuration at startup
+- Fail fast on missing dependencies
+- Warm up expensive resources
+
+**Restrictions:**
+
+- Only available for SINGLETON scope
+- `ProviderError` raised if construction fails
+
+### Transactional Snapshot and Restore
+
+Resources can participate in transactional rollback via the `Snapshotable` protocol. The `runtime.transactions` module provides snapshot/restore operations that work with both sessions and resources.
+
+#### Snapshotable Protocol
+
+```python
+from typing import Protocol
+
+class Snapshotable[SnapshotT](Protocol):
+    """Protocol for state containers that support snapshot and restore."""
+
+    def snapshot(self, *, tag: str | None = None) -> SnapshotT:
+        """Capture current state as an immutable snapshot."""
+        ...
+
+    def restore(self, snapshot: SnapshotT) -> None:
+        """Restore state from a snapshot."""
+        ...
+```
+
+**Implementations in WINK:**
+
+| Component | Snapshot Type | Storage Strategy |
+|-----------|---------------|------------------|
+| `InMemoryFilesystem` | `FilesystemSnapshot` | Structural sharing of file dicts |
+| `HostFilesystem` | `FilesystemSnapshot` | Git commits |
+| `Session` | `SessionSnapshot` | Slice state tuples |
+
+#### Creating Snapshots
+
+Use `runtime.transactions.create_snapshot()` to capture both session and resource state:
+
+```python
+from weakincentives.runtime.transactions import create_snapshot
+from weakincentives.contrib.tools import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
+from weakincentives.resources import ResourceRegistry
+
+fs = InMemoryFilesystem()
+registry = ResourceRegistry.build({Filesystem: fs})
+prompt = Prompt(template).bind(resources=registry)
+
+with prompt.resources:
+    # Write initial state
+    fs.write("config.json", '{"version": 1}')
+
+    # Capture snapshot
+    snapshot = create_snapshot(session, prompt.resources.context, tag="before_tool")
+
+    # Mutate state
+    fs.write("config.json", '{"version": 2}')
+    session[Plan].append(Plan(steps=("new_step",)))
+
+    assert fs.read("config.json").content == '{"version": 2}'
+```
+
+**What's captured:**
+
+- **Session state**: All slice contents (via `session.snapshot()`)
+- **Resource state**: SINGLETON resources implementing `Snapshotable`
+- **Metadata**: Tag, timestamp
+
+**What's NOT captured:**
+
+- TOOL_CALL resources (ephemeral)
+- PROTOTYPE resources (transient)
+- Resources not implementing `Snapshotable`
+
+#### Restoring Snapshots
+
+Use `runtime.transactions.restore_snapshot()` to rollback:
+
+```python
+from weakincentives.runtime.transactions import restore_snapshot
+
+# Restore from snapshot
+restore_snapshot(session, prompt.resources.context, snapshot)
+
+# State rolled back
+assert fs.read("config.json").content == '{"version": 1}'
+assert session[Plan].latest() is None  # Plan cleared
+```
+
+**Restore behavior:**
+
+- Session slices restored via `session.restore(snapshot.session_snapshot)`
+- Resources restored via `resource.restore(snapshot.resource_snapshots[Protocol])`
+- Restoration is atomic (all-or-nothing within each component)
+
+#### Tool Transaction Context Manager
+
+The recommended pattern for transactional tool execution:
+
+```python
+from weakincentives.runtime.transactions import tool_transaction
+
+with prompt.resources:
+    with tool_transaction(session, prompt.resources.context, tag="my_tool") as snapshot:
+        # Tool execution
+        result = execute_tool(...)
+
+        if not result.success:
+            # Automatic rollback on error
+            restore_snapshot(session, prompt.resources.context, snapshot)
+```
+
+**Automatic rollback pattern:**
+
+```python
+with prompt.resources:
+    snapshot = create_snapshot(session, prompt.resources.context, tag="tool")
+    try:
+        result = execute_tool(...)
+        if not result.success:
+            restore_snapshot(session, prompt.resources.context, snapshot)
+    except Exception:
+        restore_snapshot(session, prompt.resources.context, snapshot)
+        raise
+```
+
+**Use cases:**
+
+- Rollback on tool failures
+- Speculative execution (try, rollback if unsatisfactory)
+- Multi-step transactions (commit or rollback entire sequence)
+
+### Pre-Constructed Instances
+
+Often you have pre-constructed instances to inject:
+
+```python
+from weakincentives.resources import Binding, ResourceRegistry
+from weakincentives.contrib.tools import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
+
+# Pre-constructed filesystem
+fs = InMemoryFilesystem()
+fs.write("readme.txt", "Welcome!")
+
+# Bind instance
+registry = ResourceRegistry.of(
+    Binding.instance(Filesystem, fs),  # Eager singleton binding
+)
+
+with registry.open() as ctx:
+    filesystem = ctx.get(Filesystem)
+    assert filesystem is fs  # Same instance
+```
+
+**`Binding.instance()` behavior:**
+
+- Creates an eager SINGLETON binding
+- Provider returns the given instance (no construction)
+- Instance used as-is (no `PostConstruct` called)
+
+#### Convenience Builder
+
+For multiple pre-constructed instances:
+
+```python
+from weakincentives.resources import ResourceRegistry
+from weakincentives.runtime import BudgetTracker, Budget
+
+fs = InMemoryFilesystem()
+tracker = BudgetTracker(budget=Budget(max_tokens=1000))
+
+# Build from mapping
+registry = ResourceRegistry.build({
+    Filesystem: fs,
+    BudgetTracker: tracker,
+})
+
+# Equivalent to:
+# ResourceRegistry.of(
+#     Binding.instance(Filesystem, fs),
+#     Binding.instance(BudgetTracker, tracker),
+# )
+```
+
+**Key behaviors:**
+
+- `None` values are filtered out (allows conditional bindings)
+- Returns empty registry if mapping is empty
+
+### Resource Collection in Prompts
+
+Prompts collect resources from multiple sources in precedence order:
+
+```mermaid
+flowchart TB
+    subgraph Sources["Resource Sources"]
+        Template["1. Template Resources
+        PromptTemplate.resources
+        (lowest precedence)"]
+
+        Sections["2. Section Resources
+        section.resources()
+        (depth-first traversal)"]
+
+        Bind["3. Bind-Time Resources
+        prompt.bind(resources=...)
+        (highest precedence)"]
+    end
+
+    subgraph Merging["Merge Strategy"]
+        Merge["Later sources override earlier
+        on conflicts"]
+    end
+
+    subgraph Result["Final Registry"]
+        Final["Merged ResourceRegistry"]
+    end
+
+    Template --> Merge
+    Sections --> Merge
+    Bind --> Merge
+    Merge --> Final
+```
+
+**Collection order:**
+
+1. **Template resources** - Defined at template construction
+2. **Section resources** - Each section's `resources()` method (depth-first)
+3. **Bind-time resources** - Passed to `prompt.bind(resources=...)`
+
+**Example:**
+
+```python
+from weakincentives.resources import ResourceRegistry, Binding
+from weakincentives import PromptTemplate, MarkdownSection
+
+# 1. Template-level resources
+template = PromptTemplate(
+    ns="agent",
+    key="task",
+    sections=(...),
+    resources=ResourceRegistry.of(
+        Binding(Config, lambda r: Config(env="prod")),
+    ),
+)
+
+# 2. Section resources (contributed via section.resources())
+# WorkspaceSection contributes Filesystem binding
+
+# 3. Bind-time override
+prompt = Prompt(template).bind(
+    params,
+    resources=ResourceRegistry.of(
+        Binding(Config, lambda r: Config(env="test")),  # Overrides template
+    ),
+)
+
+# Final registry: test Config + section Filesystem
+```
+
+**Conflict detection:**
+
+Use `registry.conflicts(other)` to detect overlaps during development:
+
+```python
+template_registry = template.resources
+bind_registry = ResourceRegistry.of(...)
+
+conflicts = template_registry.conflicts(bind_registry)
+if conflicts:
+    print(f"Warning: {len(conflicts)} bindings will be overridden")
+```
+
+**Strict mode:**
+
+Use `merge(strict=True)` to raise on duplicates:
+
+```python
+try:
+    merged = template_registry.merge(bind_registry, strict=True)
+except DuplicateBindingError as e:
+    print(f"Conflict on {e.protocol}")
+```
+
+### Error Hierarchy
+
+Resource resolution errors are explicit and actionable:
+
+```python
+from weakincentives.resources import (
+    ResourceError,  # Base class
+    UnboundResourceError,  # No binding exists
+    CircularDependencyError,  # Dependency cycle
+    DuplicateBindingError,  # Same protocol bound twice
+    ProviderError,  # Provider raised exception
+)
+```
+
+**Error examples:**
+
+```python
+# UnboundResourceError
+with registry.open() as ctx:
+    ctx.get(MissingProtocol)
+# UnboundResourceError: No binding for <class 'MissingProtocol'>
+
+# CircularDependencyError
+registry = ResourceRegistry.of(
+    Binding(A, lambda r: A(b=r.get(B))),
+    Binding(B, lambda r: B(a=r.get(A))),
+)
+with registry.open() as ctx:
+    ctx.get(A)
+# CircularDependencyError: Circular dependency: A → B → A
+
+# ProviderError
+def failing_provider(r):
+    raise ValueError("Config missing")
+
+registry = ResourceRegistry.of(Binding(Config, failing_provider))
+with registry.open() as ctx:
+    ctx.get(Config)
+# ProviderError: Provider for <class 'Config'> raised ValueError: Config missing
+```
+
+**Error metadata:**
+
+- `UnboundResourceError.protocol` - The requested protocol type
+- `CircularDependencyError.cycle` - Full dependency path
+- `DuplicateBindingError.protocol` - Conflicting protocol
+- `ProviderError.protocol` - Provider that failed
+- `ProviderError.cause` - Original exception
+
+### Context Manager Lifecycle
+
+The resource context lifecycle:
+
+```python
+with registry.open() as ctx:
+    # 1. create_context() - Creates ScopedResourceContext
+    # 2. start() - Instantiates eager singletons, calls post_construct()
+    # 3. Body executes
+    pass
+# 4. close() - Disposes all Closeable resources in reverse order
+```
+
+**Manual lifecycle (advanced):**
+
+```python
+ctx = registry.create_context()
+try:
+    ctx.start()  # Initialize eager singletons
+    # Use ctx...
+finally:
+    ctx.close()  # Cleanup
+```
+
+**Why context manager is preferred:**
+
+- Automatic cleanup on exceptions
+- Clear resource boundaries
+- Prevents resource leaks
+
+### Limitations
+
+**Synchronous only:**
+
+Resolution is single-threaded; async providers not supported.
+
+```python
+# Not supported
+Binding(Service, async lambda r: await fetch_service())
+```
+
+**No conditional bindings:**
+
+Cannot bind different implementations based on runtime conditions:
+
+```python
+# Not supported
+if env == "prod":
+    Binding(Database, prod_factory)
+else:
+    Binding(Database, test_factory)
+
+# Workaround: construct registry conditionally
+registry = (
+    prod_registry if env == "prod" else test_registry
+)
+```
+
+**No interception:**
+
+No AOP-style interceptors on resource access:
+
+```python
+# Not supported
+@intercept_access(Protocol)
+def log_access(...): ...
+```
+
+**No named bindings:**
+
+Use wrapper types if you need multiple implementations of the same protocol:
+
+```python
+# Not supported: distinguish multiple Config instances
+
+# Workaround: wrapper types
+@dataclass
+class ProdConfig:
+    config: Config
+
+@dataclass
+class TestConfig:
+    config: Config
+
+registry = ResourceRegistry.of(
+    Binding(ProdConfig, lambda r: ProdConfig(Config(env="prod"))),
+    Binding(TestConfig, lambda r: TestConfig(Config(env="test"))),
+)
+```
+
+**Snapshot scope:**
+
+Only SINGLETON resources are snapshotted; TOOL_CALL and PROTOTYPE resources are not tracked.
+
+### Practical Patterns
+
+#### Multi-Environment Configuration
+
+```python
+from weakincentives.resources import ResourceRegistry, Binding
+
+def create_registry(env: str) -> ResourceRegistry:
+    base = ResourceRegistry.of(
+        Binding(Logger, lambda r: Logger(level="INFO")),
+    )
+
+    if env == "prod":
+        overrides = ResourceRegistry.of(
+            Binding(Config, lambda r: Config(api_url="https://api.prod.com")),
+        )
+    else:
+        overrides = ResourceRegistry.of(
+            Binding(Config, lambda r: Config(api_url="http://localhost:8000")),
+        )
+
+    return base.merge(overrides)
+
+registry = create_registry(os.getenv("ENV", "dev"))
+```
+
+#### Test Fixtures with Overrides
+
+```python
+import pytest
+from weakincentives.resources import ResourceRegistry
+
+@pytest.fixture
+def prod_registry():
+    return ResourceRegistry.of(
+        Binding(Database, lambda r: Database("postgres://...")),
+    )
+
+@pytest.fixture
+def test_registry(prod_registry):
+    overrides = ResourceRegistry.of(
+        Binding(Database, lambda r: InMemoryDatabase()),
+    )
+    return prod_registry.merge(overrides)
+
+def test_with_memory_db(test_registry):
+    with test_registry.open() as ctx:
+        db = ctx.get(Database)
+        assert isinstance(db, InMemoryDatabase)
+```
+
+#### Tool-Scoped Tracing
+
+```python
+from weakincentives.resources import Binding, Scope
+from uuid import uuid4
+
+class ToolTracer:
+    def __init__(self, tool_id: str):
+        self.tool_id = tool_id
+        self.events: list[str] = []
+
+    def log(self, event: str) -> None:
+        self.events.append(event)
+
+registry = ResourceRegistry.of(
+    Binding(
+        ToolTracer,
+        lambda r: ToolTracer(tool_id=str(uuid4())),
+        scope=Scope.TOOL_CALL,
+    ),
+)
+
+# In tool handler
+def my_tool_handler(params: dict, *, context: ToolContext) -> ToolResult:
+    tracer = context.resources.get(ToolTracer)
+    tracer.log("Started")
+    # Tool logic...
+    tracer.log("Completed")
+    return ToolResult.ok(result)
+```
+
+#### Filesystem with Transactional Rollback
+
+```python
+from weakincentives.contrib.tools import InMemoryFilesystem
+from weakincentives.filesystem import Filesystem
+from weakincentives.resources import ResourceRegistry
+from weakincentives.runtime.transactions import create_snapshot, restore_snapshot
+
+fs = InMemoryFilesystem()
+registry = ResourceRegistry.build({Filesystem: fs})
+prompt = Prompt(template).bind(resources=registry)
+
+with prompt.resources:
+    # Initial state
+    fs.write("counter.txt", "0")
+
+    # Snapshot before tool
+    snapshot = create_snapshot(session, prompt.resources.context, tag="before")
+
+    # Tool modifies filesystem
+    fs.write("counter.txt", "1")
+
+    # Tool fails - rollback
+    restore_snapshot(session, prompt.resources.context, snapshot)
+
+    # Filesystem restored
+    assert fs.read("counter.txt").content == "0"
+```
+
+### Summary
+
+Advanced resource management in WINK provides:
+
+1. **Scope-aware lifecycles** - SINGLETON, TOOL_CALL, PROTOTYPE
+2. **Dependency injection** - Lazy, explicit, cycle-detected
+3. **Registry composition** - Immutable, mergeable, conflict-aware
+4. **Lifecycle protocols** - PostConstruct, Closeable, Snapshotable
+5. **Transactional rollback** - Snapshot/restore for session + resources
+6. **Prompt-owned lifecycle** - Context manager with automatic cleanup
+
+**Key principles:**
+
+- **Lazy by default**: Resources constructed on first access
+- **Explicit scopes**: Every binding declares lifetime
+- **Immutable configuration**: Registry is immutable, only caches are mutable
+- **Automatic cleanup**: Reverse instantiation order, exception-safe
+- **Transactional**: Snapshot/restore for rollback semantics
+
+### Cross-References
+
+- [Chapter 3: Prompts](03-prompts.md) - Resource collection in prompts
+- [Chapter 4: Tools](04-tools.md) - ToolContext resource access
+- [Chapter 5: Sessions](05-sessions.md) - Session snapshot/restore
+- [Chapter 12: Workspace Tools](12-workspace-tools.md) - Filesystem snapshots
+- [specs/RESOURCE_REGISTRY.md](/specs/RESOURCE_REGISTRY.md) - Complete specification
+- [specs/SESSIONS.md](/specs/SESSIONS.md) - Session lifecycle and snapshots
+- [specs/FILESYSTEM.md](/specs/FILESYSTEM.md) - Filesystem snapshot protocol
+
 ## Summary
 
 WINK's prompt system provides:

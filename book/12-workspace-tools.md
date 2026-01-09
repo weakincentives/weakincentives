@@ -1079,6 +1079,741 @@ assert result.data["content"] == "Hello, world!"
 
 No model needed—test business logic in isolation.
 
+## 12.7 Filesystem Protocol and Custom Backends
+
+> **Canonical Reference**: See [specs/FILESYSTEM.md](/specs/FILESYSTEM.md) for the complete filesystem protocol specification.
+
+### Introduction
+
+Agents need to read and write files. But file operations are inherently dangerous:
+
+- **Accidental deletion** of production code
+- **Path traversal** attacks escaping sandboxes
+- **Credential leaks** from reading sensitive files
+- **Corrupted state** from partial writes
+
+WINK solves this through the **`Filesystem` protocol**—a unified abstraction that tools access through `ToolContext`. The protocol decouples tool handlers from storage implementations, enabling:
+
+- **Sandbox isolation**: In-memory VFS, containers, restricted host access
+- **Testing**: Mock filesystems for unit tests
+- **Progressive complexity**: Start with VFS, graduate to containers
+- **Custom backends**: Implement the protocol for specialized storage
+
+This section covers:
+
+1. The Filesystem protocol and its guarantees
+2. How tools access filesystems via context
+3. Built-in backends (InMemoryFilesystem, HostFilesystem)
+4. Implementing custom backends
+5. Snapshot and restore capabilities
+
+### The Filesystem Protocol
+
+The `Filesystem` protocol defines a common interface for file operations. Tools use this protocol regardless of the underlying storage:
+
+```python
+from typing import Protocol, Literal
+
+class Filesystem(Protocol):
+    """Unified filesystem protocol for workspace operations."""
+
+    # Read operations
+    def read(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+        encoding: str = "utf-8",
+    ) -> ReadResult: ...
+
+    def read_bytes(
+        self,
+        path: str,
+        *,
+        offset: int = 0,
+        limit: int | None = None,
+    ) -> ReadBytesResult: ...
+
+    def exists(self, path: str) -> bool: ...
+
+    def stat(self, path: str) -> FileStat: ...
+
+    def list(self, path: str = ".") -> Sequence[FileEntry]: ...
+
+    def glob(self, pattern: str, *, path: str = ".") -> Sequence[GlobMatch]: ...
+
+    def grep(
+        self,
+        pattern: str,
+        *,
+        path: str = ".",
+        glob: str | None = None,
+        max_matches: int | None = None,
+    ) -> Sequence[GrepMatch]: ...
+
+    # Write operations
+    def write(
+        self,
+        path: str,
+        content: str,
+        *,
+        mode: Literal["create", "overwrite", "append"] = "overwrite",
+        create_parents: bool = True,
+    ) -> WriteResult: ...
+
+    def write_bytes(
+        self,
+        path: str,
+        content: bytes,
+        *,
+        mode: Literal["create", "overwrite", "append"] = "overwrite",
+        create_parents: bool = True,
+    ) -> WriteResult: ...
+
+    def delete(self, path: str, *, recursive: bool = False) -> None: ...
+
+    def mkdir(
+        self,
+        path: str,
+        *,
+        parents: bool = True,
+        exist_ok: bool = True,
+    ) -> None: ...
+
+    # Metadata
+    @property
+    def root(self) -> str: ...
+
+    @property
+    def read_only(self) -> bool: ...
+```
+
+#### Result Types
+
+Operations return structured results, not raw strings:
+
+```python
+class ReadResult(Protocol):
+    """Content returned from text read operations."""
+
+    @property
+    def content(self) -> str: ...
+
+    @property
+    def path(self) -> str: ...
+
+    @property
+    def total_lines(self) -> int: ...
+
+    @property
+    def truncated(self) -> bool: ...
+
+
+class WriteResult(Protocol):
+    """Confirmation of write operation."""
+
+    @property
+    def path(self) -> str: ...
+
+    @property
+    def bytes_written(self) -> int: ...
+
+    @property
+    def mode(self) -> Literal["create", "overwrite", "append"]: ...
+```
+
+This enables tools to provide rich feedback: "Read 1,234 lines from config.py (truncated to 2,000 chars)."
+
+### Accessing Filesystems in Tools
+
+Tools access filesystems through `ToolContext`:
+
+```python
+from weakincentives.prompt import ToolContext, ToolResult
+
+def read_file_handler(
+    params: ReadFileParams,
+    *,
+    context: ToolContext,
+) -> ToolResult[ReadFileResult]:
+    # Check if filesystem is available
+    if context.filesystem is None:
+        return ToolResult(
+            message="No filesystem available in this context.",
+            value=None,
+            success=False,
+        )
+
+    # Use the protocol
+    try:
+        result = context.filesystem.read(
+            params.path,
+            offset=params.offset,
+            limit=params.limit,
+        )
+    except FileNotFoundError:
+        return ToolResult(
+            message=f"File not found: {params.path}",
+            value=None,
+            success=False,
+        )
+
+    return ToolResult(
+        message=f"Read {result.total_lines} lines",
+        value=ReadFileResult(
+            content=result.content,
+            path=result.path,
+        ),
+    )
+```
+
+#### Backend Transparency
+
+The handler works identically regardless of backend:
+
+- **VfsToolsSection**: In-memory VFS
+- **PodmanSandboxSection**: Containerized overlay
+- **Custom section**: S3, database, etc.
+
+Tools remain portable. Change the section, not the tool.
+
+### Section Ownership
+
+Filesystem instances are owned by **workspace sections** that provide file tools. Sections implementing `WorkspaceSection` expose their filesystem:
+
+```python
+from weakincentives.filesystem import Filesystem
+
+class WorkspaceSection(Protocol):
+    """Section that provides filesystem access."""
+
+    @property
+    def filesystem(self) -> Filesystem: ...
+```
+
+#### Example: VfsToolsSection
+
+```python
+from weakincentives.contrib.tools import VfsToolsSection, HostMount
+
+section = VfsToolsSection(
+    mounts=(
+        HostMount(host_path="src/", include_glob=("*.py",)),
+        HostMount(host_path="docs/", include_glob=("*.md",)),
+    ),
+    allowed_host_roots=("/path/to/project",),
+)
+
+# Section creates and manages InMemoryFilesystem
+fs = section.filesystem
+assert fs.exists("src/main.py")  # Hydrated from host mount
+```
+
+The section:
+
+1. Creates a filesystem backend (InMemoryFilesystem)
+2. Hydrates it from host mounts
+3. Exposes it via the `filesystem` property
+4. Passes it to tools via `ToolContext`
+
+#### Prompt Integration
+
+Prompts expose a convenience method to locate the filesystem:
+
+```python
+from weakincentives.prompt import Prompt
+
+prompt = Prompt(template)
+
+# Delegates to workspace section
+fs = prompt.filesystem()
+
+# Pre-populate before evaluation
+if fs is not None:
+    fs.write("notes.txt", "Working notes...")
+```
+
+Adapters propagate the filesystem to `ToolContext`:
+
+```python
+context = ToolContext(
+    prompt=prompt,
+    session=session,
+    adapter=adapter,
+    filesystem=prompt.filesystem(),  # From workspace section
+)
+```
+
+### InMemoryFilesystem: Session-Scoped VFS
+
+`InMemoryFilesystem` provides an in-memory copy-on-write filesystem. State is managed internally; writes don't touch the host:
+
+```python
+from weakincentives.filesystem import InMemoryFilesystem
+
+fs = InMemoryFilesystem()
+
+# All operations are in-memory
+fs.write("config.yaml", "debug: true")
+fs.mkdir("logs")
+fs.write("logs/app.log", "Starting...")
+
+# Read operations
+content = fs.read("config.yaml").content
+assert content == "debug: true"
+
+# Directory listing
+entries = fs.list(".")
+assert any(e.name == "config.yaml" for e in entries)
+```
+
+#### Hydration from Host
+
+VFS can be hydrated from host directories using **mounts**:
+
+```python
+from weakincentives.contrib.tools import HostMount
+
+fs = InMemoryFilesystem()
+
+# Copy files from host into VFS
+mount = HostMount(
+    host_path="/path/to/project/src",
+    vfs_path="src",
+    include_glob=("*.py", "*.txt"),
+)
+
+fs.hydrate_from_host(mount, allowed_roots=("/path/to/project",))
+
+# Files now available in VFS
+assert fs.exists("src/main.py")
+assert fs.exists("src/utils.py")
+```
+
+**Key point**: Hydration is a one-time copy. Subsequent writes to VFS don't affect the host. This provides isolation—agents can modify files without risk.
+
+#### Read-Only Mode
+
+Disable writes to enforce read-only access:
+
+```python
+fs = InMemoryFilesystem(_read_only=True)
+
+# Reads work
+content = fs.read("file.txt").content
+
+# Writes raise PermissionError
+fs.write("file.txt", "new content")  # ❌ PermissionError
+```
+
+Useful for giving agents read access to sensitive files without modification risk.
+
+#### Performance Characteristics
+
+| Operation | Complexity | Notes |
+|-----------|------------|-------|
+| `read()` | O(1) | In-memory lookup |
+| `write()` | O(1) | Dict insertion |
+| `list()` | O(n) | Filter directories by prefix |
+| `glob()` | O(n) | Pattern match all paths |
+| `grep()` | O(n × m) | Regex match file contents |
+
+Memory usage grows linearly with file count and total content size.
+
+### HostFilesystem: Sandboxed Host Access
+
+`HostFilesystem` provides sandboxed access to a host directory with path restrictions:
+
+```python
+from weakincentives.filesystem import HostFilesystem
+
+fs = HostFilesystem(_root="/workspace/project")
+
+# Operations are restricted to root directory
+fs.write("config.yaml", "debug: true")  # → /workspace/project/config.yaml
+
+# Path traversal is blocked
+fs.read("../etc/passwd")  # ❌ PermissionError: Path escapes root
+```
+
+#### Path Resolution
+
+The backend resolves relative paths and validates they stay within the root:
+
+```python
+def _resolve_path(self, path: str) -> Path:
+    """Resolve path within root, block escapes."""
+    root_path = Path(self._root).resolve()
+    if not path or path in {".", "/"}:
+        return root_path
+
+    candidate = (root_path / path).resolve()
+    try:
+        _ = candidate.relative_to(root_path)
+    except ValueError:
+        raise PermissionError(f"Path escapes root: {path}")
+
+    return candidate
+```
+
+Symlink attacks and `..` traversals are blocked.
+
+#### Use in PodmanSandboxSection
+
+`PodmanSandboxSection` uses `HostFilesystem` for the overlay directory:
+
+```python
+class PodmanSandboxSection:
+    def __init__(self, *, session: Session, config: PodmanSandboxConfig):
+        # Create overlay directory
+        self._overlay_path = Path(f"/tmp/wink-overlay-{session.session_id}")
+        self._overlay_path.mkdir(parents=True, exist_ok=True)
+
+        # Use HostFilesystem rooted at overlay
+        self._filesystem = HostFilesystem(_root=str(self._overlay_path))
+
+    @property
+    def filesystem(self) -> Filesystem:
+        return self._filesystem
+```
+
+The overlay is bind-mounted into the container at `/workspace`. Filesystem operations work before the container starts and persist across restarts.
+
+### Implementing Custom Backends
+
+To implement a custom backend, satisfy the `Filesystem` protocol:
+
+```python
+from weakincentives.filesystem import Filesystem, ReadResult, WriteResult
+import boto3
+
+class S3Filesystem:
+    """Filesystem backed by AWS S3."""
+
+    def __init__(self, bucket: str, prefix: str = ""):
+        self.bucket = bucket
+        self.prefix = prefix
+        self.s3 = boto3.client("s3")
+
+    def read(self, path: str, **kwargs) -> ReadResult:
+        """Read file from S3."""
+        key = f"{self.prefix}/{path}".strip("/")
+        try:
+            response = self.s3.get_object(Bucket=self.bucket, Key=key)
+            content = response["Body"].read().decode("utf-8")
+        except self.s3.exceptions.NoSuchKey:
+            raise FileNotFoundError(path)
+
+        return S3ReadResult(
+            content=content,
+            path=path,
+            total_lines=content.count("\n"),
+        )
+
+    def write(self, path: str, content: str, **kwargs) -> WriteResult:
+        """Write file to S3."""
+        key = f"{self.prefix}/{path}".strip("/")
+        self.s3.put_object(
+            Bucket=self.bucket,
+            Key=key,
+            Body=content.encode("utf-8"),
+        )
+        return S3WriteResult(path=path, bytes_written=len(content))
+
+    def exists(self, path: str) -> bool:
+        """Check if object exists."""
+        key = f"{self.prefix}/{path}".strip("/")
+        try:
+            self.s3.head_object(Bucket=self.bucket, Key=key)
+            return True
+        except:
+            return False
+
+    @property
+    def root(self) -> str:
+        return f"s3://{self.bucket}/{self.prefix}"
+
+    @property
+    def read_only(self) -> bool:
+        return False
+
+    # Implement remaining protocol methods...
+```
+
+#### Expose via Section
+
+Create a section that owns the custom filesystem:
+
+```python
+from weakincentives.prompt import MarkdownSection
+
+class S3WorkspaceSection(MarkdownSection):
+    """Section providing S3-backed workspace."""
+
+    def __init__(self, bucket: str, prefix: str, **kwargs):
+        self._filesystem = S3Filesystem(bucket, prefix)
+        tools = self._build_s3_tools()
+        super().__init__(tools=tools, **kwargs)
+
+    @property
+    def filesystem(self) -> Filesystem:
+        return self._filesystem
+```
+
+Tools automatically receive the S3 backend via `ToolContext.filesystem`.
+
+### Binary File Support
+
+The protocol supports both text and binary operations:
+
+```python
+# Text operations (UTF-8 encoding)
+fs.write("config.yaml", "debug: true")
+content = fs.read("config.yaml").content  # str
+
+# Binary operations (no encoding)
+fs.write_bytes("image.png", png_bytes)
+data = fs.read_bytes("image.png").content  # bytes
+```
+
+**For file copying**, always use `read_bytes()` / `write_bytes()` to preserve content exactly:
+
+```python
+# Copy file between filesystems
+source_data = source_fs.read_bytes("archive.tar.gz").content
+dest_fs.write_bytes("archive.tar.gz", source_data)
+```
+
+This avoids encoding/decoding overhead and potential data loss for binary files.
+
+### Snapshot and Restore
+
+Some backends support **snapshot and restore** for rollback after failed tool invocations:
+
+```python
+from weakincentives.filesystem import SnapshotableFilesystem
+
+class SnapshotableFilesystem(Filesystem, Protocol):
+    """Filesystem that supports snapshot operations."""
+
+    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot: ...
+
+    def restore(self, snapshot: FilesystemSnapshot) -> None: ...
+```
+
+#### Git-Based Snapshots (HostFilesystem)
+
+`HostFilesystem` uses git for copy-on-write snapshots:
+
+```python
+fs = HostFilesystem(_root="/workspace/project")
+
+# Initial state
+fs.write("config.py", "DEBUG = True")
+snapshot1 = fs.snapshot(tag="initial")
+
+# Make changes
+fs.write("config.py", "DEBUG = False")
+fs.write("new_file.py", "...")
+snapshot2 = fs.snapshot(tag="modified")
+
+# Rollback to initial
+fs.restore(snapshot1)
+assert fs.read("config.py").content == "DEBUG = True"
+assert not fs.exists("new_file.py")
+
+# Restore modified state
+fs.restore(snapshot2)
+assert fs.read("config.py").content == "DEBUG = False"
+assert fs.exists("new_file.py")
+```
+
+**Implementation details**:
+
+- Git repository is stored **outside** the workspace root (e.g., `/tmp/wink-git-abc123`)
+- Snapshots are git commits with content-addressed storage
+- Unchanged files share blobs between snapshots (efficient)
+- `restore()` uses `git reset --hard` + `git clean -xfd` for strict rollback
+
+#### In-Memory Snapshots
+
+`InMemoryFilesystem` uses Python's structural sharing:
+
+```python
+fs = InMemoryFilesystem()
+
+fs.write("data.txt", "original")
+snapshot = fs.snapshot()
+
+fs.write("data.txt", "modified")
+fs.restore(snapshot)
+
+assert fs.read("data.txt").content == "original"
+```
+
+File content strings are shared between active filesystem and snapshots (copy-on-write at the Python level).
+
+#### Session Integration
+
+Snapshots are frozen dataclasses that can be stored in session state:
+
+```python
+from weakincentives.filesystem import FilesystemSnapshot
+
+# Snapshot filesystem and store in session
+fs_snapshot = filesystem.snapshot(tag="before-refactor")
+session[FilesystemSnapshot].append(fs_snapshot)
+
+# Later: retrieve and restore
+snapshots = session[FilesystemSnapshot].all()
+filesystem.restore(snapshots[-1])
+```
+
+For coordinated rollback:
+
+```python
+def rollback_session_and_filesystem(
+    session: Session,
+    session_snapshot: Snapshot,
+    filesystem: SnapshotableFilesystem,
+) -> None:
+    """Restore both session state and filesystem."""
+    # Find filesystem snapshot from that session state
+    fs_snapshots = session_snapshot.slices.get(FilesystemSnapshot, ())
+    if fs_snapshots:
+        filesystem.restore(fs_snapshots[-1])
+
+    session.restore(session_snapshot)
+```
+
+### Error Handling
+
+All backends map errors to standard Python exceptions:
+
+| Backend Error | Python Exception |
+|---------------|------------------|
+| File not found | `FileNotFoundError` |
+| Path is directory | `IsADirectoryError` |
+| Path is file | `NotADirectoryError` |
+| Access denied | `PermissionError` |
+| File exists | `FileExistsError` |
+| Invalid content | `ValueError` |
+
+#### Tool Handler Pattern
+
+```python
+def my_handler(params: Params, *, context: ToolContext) -> ToolResult:
+    fs = context.filesystem
+    if fs is None:
+        return ToolResult.error("No filesystem available")
+
+    try:
+        result = fs.read(params.path)
+    except FileNotFoundError:
+        return ToolResult.error(f"File not found: {params.path}")
+    except PermissionError as e:
+        return ToolResult.error(str(e))
+
+    return ToolResult.ok(content=result.content)
+```
+
+Consistent error handling across backends simplifies tool logic.
+
+### Testing with Mock Filesystems
+
+For unit tests, use a mock filesystem:
+
+```python
+class MockFilesystem:
+    """Test double for filesystem operations."""
+
+    def __init__(self, files: dict[str, str] | None = None):
+        self._files = files or {}
+        self.read_calls: list[str] = []
+        self.write_calls: list[tuple[str, str]] = []
+
+    def read(self, path: str, **kwargs) -> ReadResult:
+        self.read_calls.append(path)
+        if path not in self._files:
+            raise FileNotFoundError(path)
+        return MockReadResult(content=self._files[path], path=path)
+
+    def write(self, path: str, content: str, **kwargs) -> WriteResult:
+        self.write_calls.append((path, content))
+        self._files[path] = content
+        return MockWriteResult(path=path, bytes_written=len(content))
+
+    # Implement remaining protocol methods...
+```
+
+Then inject into context:
+
+```python
+def test_read_file_tool():
+    mock_fs = MockFilesystem(files={"config.yaml": "debug: true"})
+    context = ToolContext(filesystem=mock_fs, ...)
+
+    result = read_file_handler(
+        ReadFileParams(path="config.yaml"),
+        context=context,
+    )
+
+    assert result.success
+    assert "debug: true" in result.value.content
+    assert mock_fs.read_calls == ["config.yaml"]
+```
+
+No filesystem I/O in tests—fast and isolated.
+
+### Limits and Recommendations
+
+#### Backend Limits
+
+| Limit | Recommended Value | Notes |
+|-------|-------------------|-------|
+| Max file size | 48,000 chars | Per write operation |
+| Max path depth | 16 segments | Prevents deep nesting |
+| Max segment length | 80 chars | Per path component |
+| Default read limit | 2,000 lines | Pagination default |
+| Max grep matches | 1,000 | Prevents runaway searches |
+
+#### When to Use Each Backend
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Safe experimentation | `InMemoryFilesystem` with mounts |
+| Arbitrary code execution | `PodmanSandboxSection` (HostFilesystem + container) |
+| Cloud storage | Custom backend (S3, GCS) |
+| Debugging | `HostFilesystem` with snapshots |
+| Testing | `MockFilesystem` |
+
+#### Limitations
+
+- **No symlinks**: Symbolic links are not followed by default
+- **No permissions model**: Beyond read-only flag, no Unix-style permissions
+- **Single-threaded**: Backends are not thread-safe
+- **No streaming**: Large files are loaded entirely into memory
+- **Path normalization**: Original casing may not be preserved
+
+### Section Summary
+
+The `Filesystem` protocol decouples tools from storage implementations:
+
+| Benefit | How It Helps |
+|---------|--------------|
+| **Portability** | Tools work across backends (VFS, host, S3) |
+| **Testability** | Mock filesystems for fast unit tests |
+| **Safety** | Sandboxed backends prevent host damage |
+| **Flexibility** | Custom backends for specialized storage |
+| **Snapshot support** | Rollback after failed operations |
+
+**Core pattern**: Sections own filesystems. Tools access via context. Backends implement the protocol.
+
+Start with `InMemoryFilesystem` for safe exploration. Graduate to `PodmanSandboxSection` when you need arbitrary code execution. Implement custom backends when you need specialized storage (databases, cloud, etc.).
+
+The protocol is the contract. Tools remain agnostic to implementation details.
+
 ## Summary
 
 WINK's workspace tools provide:

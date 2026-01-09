@@ -46,9 +46,11 @@ DOC_FILES = [
     "book/03-prompts.md",
     "book/04-tools.md",
     "book/04.5-tool-policies.md",
+    "book/04.6-task-monitoring.md",
     "book/05-sessions.md",
     "book/06-adapters.md",
     "book/07-main-loop.md",
+    "book/07.5-distributed-orchestration.md",
     "book/08-evaluation.md",
     "book/09-lifecycle.md",
     "book/10-progressive-disclosure.md",
@@ -62,7 +64,7 @@ DOC_FILES = [
     "book/18-api-reference.md",
     "book/appendix-a-from-langgraph.md",
     "book/appendix-b-from-dspy.md",
-    "book/appendix-c-formal-verification.md",
+    "book/appendix-c-from-formal-verification.md",
 ]
 
 # Builtins that don't need to be defined

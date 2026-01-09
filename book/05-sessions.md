@@ -1419,6 +1419,583 @@ cutoff = datetime.now(UTC) - timedelta(days=7)
 session[LogEntry].clear(lambda e: e.timestamp < cutoff)
 ```
 
+## 5.7 Storage Backends and Persistence
+
+> **Canonical Reference**: See [specs/SLICES.md](/specs/SLICES.md) for the complete slice storage specification.
+
+### Introduction
+
+By default, session slices live in memory as immutable tuples. This works well for short-lived sessions, but some scenarios demand persistence:
+
+- **Debugging**: Inspecting session state after a crash
+- **Audit trails**: Preserving a complete record of tool invocations
+- **Long-running agents**: State that outlives process restarts
+- **Distributed systems**: Sharing state across multiple workers
+
+WINK solves this through the **Slice protocol**—an abstraction that decouples session operations from storage backends. Sessions work identically whether slices are stored in memory, on disk, or in a database.
+
+This section covers:
+
+1. The Slice protocol and storage abstraction
+2. Built-in backends (MemorySlice, JsonlSlice)
+3. Configuring storage per slice policy
+4. Performance characteristics and trade-offs
+5. Implementing custom backends
+
+### The Slice Protocol
+
+The `Slice[T]` protocol defines a common interface for storage backends. Sessions interact only with this protocol, making backends pluggable:
+
+```python
+from typing import Protocol
+from collections.abc import Callable, Iterable
+
+@runtime_checkable
+class Slice[T: SupportsDataclass](Protocol):
+    """Storage backend for immutable tuple-based state."""
+
+    def all(self) -> tuple[T, ...]:
+        """Return all items as an immutable tuple."""
+        ...
+
+    def latest(self) -> T | None:
+        """Return the most recent item, or None if empty."""
+        ...
+
+    def append(self, item: T) -> None:
+        """Append a single item."""
+        ...
+
+    def extend(self, items: Iterable[T]) -> None:
+        """Append multiple items."""
+        ...
+
+    def replace(self, items: tuple[T, ...]) -> None:
+        """Replace all items atomically."""
+        ...
+
+    def clear(self, predicate: Callable[[T], bool] | None = None) -> None:
+        """Remove items. If predicate is None, clear all."""
+        ...
+
+    def snapshot(self) -> tuple[T, ...]:
+        """Capture current state for serialization."""
+        ...
+
+    def view(self) -> SliceView[T]:
+        """Return a lazy readonly view for reducer input."""
+        ...
+```
+
+#### SliceView: Lazy Access for Reducers
+
+Reducers receive a `SliceView[T]` instead of eager tuples. This enables efficient patterns like append-only reducers that never load existing data:
+
+```python
+class SliceView[T: SupportsDataclass](Protocol):
+    """Readonly lazy view of slice contents."""
+
+    @property
+    def is_empty(self) -> bool:
+        """Check if slice is empty without loading data."""
+        ...
+
+    def latest(self) -> T | None:
+        """Return most recent item."""
+        ...
+
+    def all(self) -> tuple[T, ...]:
+        """Load all items (expensive for file-backed slices)."""
+        ...
+
+    def where(self, predicate: Callable[[T], bool]) -> Iterator[T]:
+        """Stream items matching predicate."""
+        ...
+```
+
+For file-backed slices, `is_empty` can stat the file without parsing, and `latest()` can read just the last line. Append-only reducers avoid I/O entirely.
+
+### Factory Configuration
+
+`SliceFactoryConfig` maps slice policies to storage backends. WINK defines two policies:
+
+- **`SlicePolicy.STATE`**: Working state rolled back on failure (e.g., `Plan`, custom agent state)
+- **`SlicePolicy.LOG`**: Append-only records preserved during restore (e.g., `ToolInvoked`, `PromptExecuted`)
+
+```python
+from weakincentives.runtime.session import SliceFactoryConfig
+from weakincentives.runtime.session.slices import MemorySliceFactory, JsonlSliceFactory
+from pathlib import Path
+
+# In-memory state, persistent logs
+config = SliceFactoryConfig(
+    state_factory=MemorySliceFactory(),
+    log_factory=JsonlSliceFactory(base_dir=Path("./session_logs")),
+)
+
+session = Session(bus=bus, slice_config=config)
+```
+
+Each slice type is assigned a policy when registered. The factory creates appropriate backends automatically:
+
+```python
+# Register slice with policy
+session[Plan].set_policy(SlicePolicy.STATE)
+session[ToolInvoked].set_policy(SlicePolicy.LOG)
+
+# Session uses factories to create backends
+# Plan -> MemorySliceFactory -> MemorySlice
+# ToolInvoked -> JsonlSliceFactory -> JsonlSlice
+```
+
+### MemorySlice: The Default Backend
+
+`MemorySlice` stores data as an in-memory tuple. It's simple, fast, and implements both `Slice` and `SliceView` protocols (serving as its own view since all data is already in memory):
+
+```python
+@dataclass(slots=True)
+class MemorySlice[T: SupportsDataclass]:
+    """In-memory tuple-backed slice."""
+
+    _data: tuple[T, ...] = ()
+
+    # SliceView protocol (readonly)
+    @property
+    def is_empty(self) -> bool:
+        return len(self._data) == 0
+
+    def all(self) -> tuple[T, ...]:
+        return self._data
+
+    def latest(self) -> T | None:
+        return self._data[-1] if self._data else None
+
+    # Slice protocol (mutable)
+    def append(self, item: T) -> None:
+        self._data = (*self._data, item)  # O(n) copy
+
+    def replace(self, items: tuple[T, ...]) -> None:
+        self._data = items
+
+    def view(self) -> "MemorySlice[T]":
+        return self  # Self is its own view
+```
+
+#### Performance Characteristics
+
+| Operation | Complexity | Notes |
+|-----------|------------|-------|
+| `all()` | O(1) | Direct tuple reference |
+| `latest()` | O(1) | Index last element |
+| `append()` | O(n) | Tuple expansion creates new tuple |
+| `replace()` | O(1) | Reassignment |
+
+Memory usage grows linearly with slice size. For large slices (thousands of items), consider alternative backends.
+
+### JsonlSlice: File-Backed Persistence
+
+`JsonlSlice` stores each item as a JSON line in a file. Reads load the entire file; appends are O(1) file operations. Separate `JsonlSliceView` provides lazy access:
+
+```python
+@dataclass(slots=True)
+class JsonlSlice[T: SupportsDataclass]:
+    """JSONL file-backed slice with caching."""
+
+    path: Path
+    item_type: type[T]
+    _cache: tuple[T, ...] | None = None
+
+    def append(self, item: T) -> None:
+        """O(1) append - writes single line without reading file."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.path.open("a") as f:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+            try:
+                data = dump(item, include_dataclass_type=True)
+                f.write(json.dumps(data, separators=(",", ":")) + "\n")
+            finally:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        self._cache = None  # Invalidate
+
+    def all(self) -> tuple[T, ...]:
+        """Load all items, using cache if available."""
+        if self._cache is not None:
+            return self._cache
+        result = self._read_all()
+        self._cache = result
+        return result
+
+    def view(self) -> JsonlSliceView[T]:
+        """Return lazy view for reducer input."""
+        return JsonlSliceView(
+            path=self.path,
+            item_type=self.item_type,
+            _slice=self,
+        )
+```
+
+#### JsonlSliceView: Optimized Access
+
+The view provides lazy operations that avoid loading the entire file:
+
+```python
+@dataclass(slots=True)
+class JsonlSliceView[T: SupportsDataclass]:
+    """Lazy readonly view of JsonlSlice."""
+
+    path: Path
+    item_type: type[T]
+    _slice: JsonlSlice[T]
+
+    @property
+    def is_empty(self) -> bool:
+        """O(1) check using file stat."""
+        if not self.path.exists():
+            return True
+        return self.path.stat().st_size == 0
+
+    def __iter__(self) -> Iterator[T]:
+        """Stream items without loading all into memory."""
+        if not self.path.exists():
+            return
+        with self.path.open() as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    data = json.loads(line)
+                    yield parse(self.item_type, data, allow_dataclass_type=True)
+
+    def latest(self) -> T | None:
+        """Return last item. Uses cache if available."""
+        if self._slice._cache is not None:
+            cache = self._slice._cache
+            return cache[-1] if cache else None
+        # Could optimize to read only last line
+        items = self._slice.all()
+        return items[-1] if items else None
+```
+
+#### Performance Characteristics
+
+| Operation | Cold (no cache) | Cached | Notes |
+|-----------|-----------------|--------|-------|
+| `append()` | O(1) | O(1) | Single line write |
+| `extend()` | O(k) | O(k) | Write k lines |
+| `all()` | O(n) file read | O(1) | Lazy loading with cache |
+| `latest()` | O(n) file read | O(1) | Could optimize to O(1) by seeking |
+| `is_empty` | O(1) stat | O(1) | No file parsing |
+| Memory | O(1) base | O(n) cached | Cache persists until write |
+
+#### File Format
+
+Each line is a self-contained JSON object with type information:
+
+```jsonl
+{"__type__":"myapp.events:ToolInvoked","tool":"search","result":"found 3 items"}
+{"__type__":"myapp.events:ToolInvoked","tool":"read","result":"file contents..."}
+```
+
+The `__type__` field enables polymorphic deserialization when slice types use unions or inheritance.
+
+#### Thread Safety
+
+`JsonlSlice` uses `fcntl.flock()` for file-level locking:
+
+- **Shared locks** (`LOCK_SH`) for reads
+- **Exclusive locks** (`LOCK_EX`) for writes
+
+Combined with Session's `RLock`, this provides:
+- Session-level atomicity for reducer execution
+- File-level atomicity for disk operations
+
+For cross-platform support, consider using the `filelock` library or conditional imports for Windows (`msvcrt.locking`).
+
+### Reducer Performance and SliceOp
+
+Reducers return `SliceOp[T]` to describe mutations. The operation type determines efficiency:
+
+```python
+from weakincentives.runtime.session import Append, Replace
+
+# Efficient for file-backed slices
+def append_only_reducer(
+    view: SliceView[AuditLog],
+    event: UserAction,
+    *,
+    context: ReducerContext,
+) -> Append[AuditLog]:
+    """Never accesses view - O(1) for JSONL."""
+    return Append(AuditLog(action=event.name, timestamp=event.at))
+
+# Requires loading existing data
+def transform_reducer(
+    view: SliceView[Plan],
+    event: AddStep,
+    *,
+    context: ReducerContext,
+) -> Replace[Plan]:
+    """Must load to transform - O(n) for JSONL."""
+    current = view.latest()
+    if current is None:
+        new_plan = Plan(steps=(event.step,))
+    else:
+        new_plan = replace(current, steps=(*current.steps, event.step))
+    return Replace((new_plan,))
+```
+
+#### Performance by Pattern
+
+| Reducer Pattern | MemorySlice | JsonlSlice |
+|-----------------|-------------|------------|
+| Append-only (never accesses view) | O(n) copy | **O(1) file append** |
+| Replace entire slice | O(1) | O(n) file rewrite |
+| Transform existing data | O(1) read + O(n) copy | O(n) file read + O(n) rewrite |
+
+**Key insight**: Append-only reducers (common for logs) become O(1) for file-backed slices.
+
+### Configuration Patterns
+
+#### Default: All In-Memory
+
+```python
+# Implicit default - no configuration needed
+session = Session(bus=bus)
+```
+
+All slices use `MemorySlice`. State lives only in memory.
+
+#### Persistent Logs, In-Memory State
+
+```python
+config = SliceFactoryConfig(
+    state_factory=MemorySliceFactory(),
+    log_factory=JsonlSliceFactory(base_dir=Path("./logs")),
+)
+session = Session(bus=bus, slice_config=config)
+```
+
+`ToolInvoked`, `PromptExecuted`, and other `LOG` slices persist. `Plan` and custom state stay in memory.
+
+#### Temporary Debugging Logs
+
+```python
+# JsonlSliceFactory() creates a temporary directory
+log_factory = JsonlSliceFactory()
+config = SliceFactoryConfig(
+    state_factory=MemorySliceFactory(),
+    log_factory=log_factory,
+)
+session = Session(bus=bus, slice_config=config)
+
+# Logs written to /tmp/wink_slices_abc123/
+print(f"Debug logs: {log_factory.directory}")
+```
+
+Useful for debugging without polluting the working directory.
+
+#### All Persistent
+
+```python
+jsonl_factory = JsonlSliceFactory(base_dir=Path("./session_data"))
+config = SliceFactoryConfig(
+    state_factory=jsonl_factory,
+    log_factory=jsonl_factory,
+)
+session = Session(bus=bus, slice_config=config)
+```
+
+Everything persists to disk. Slower but enables crash recovery.
+
+### Snapshots and Restore
+
+Snapshots call `slice.snapshot()` for each slice:
+
+```python
+def snapshot(self) -> Snapshot:
+    state: dict[SessionSliceType, tuple[SupportsDataclass, ...]] = {}
+    for slice_type, slice_instance in self._slices.items():
+        policy = self._slice_policies.get(slice_type, SlicePolicy.STATE)
+        if policy in (SlicePolicy.STATE, SlicePolicy.BOTH):
+            state[slice_type] = slice_instance.snapshot()
+    return Snapshot(state=state, ...)
+```
+
+For `JsonlSlice`, `snapshot()` returns the current cached tuple. The snapshot is independent of file contents—it's a point-in-time capture for session serialization.
+
+Restore uses `slice.replace()`:
+
+```python
+def restore(self, snapshot: Snapshot) -> None:
+    for slice_type, items in snapshot.state.items():
+        policy = self._slice_policies.get(slice_type, SlicePolicy.STATE)
+        if policy == SlicePolicy.LOG:
+            continue  # Logs are preserved, not restored
+        self._get_or_create_slice(slice_type).replace(items)
+```
+
+`LOG` slices are preserved during restore—their file contents remain untouched.
+
+### Implementing Custom Backends
+
+To implement a custom backend, satisfy the `Slice[T]` protocol:
+
+```python
+from weakincentives.runtime.session import Slice, SliceView
+
+class SqliteSlice[T: SupportsDataclass]:
+    """SQLite-backed slice with indexed queries."""
+
+    def __init__(self, db_path: Path, table_name: str, item_type: type[T]):
+        self.db_path = db_path
+        self.table_name = table_name
+        self.item_type = item_type
+        self._ensure_table()
+
+    def all(self) -> tuple[T, ...]:
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.execute(f"SELECT data FROM {self.table_name} ORDER BY id")
+        items = []
+        for (json_data,) in cursor:
+            data = json.loads(json_data)
+            items.append(parse(self.item_type, data, allow_dataclass_type=True))
+        conn.close()
+        return tuple(items)
+
+    def append(self, item: T) -> None:
+        data = dump(item, include_dataclass_type=True)
+        json_data = json.dumps(data)
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            f"INSERT INTO {self.table_name} (data) VALUES (?)",
+            (json_data,),
+        )
+        conn.commit()
+        conn.close()
+
+    # ... other protocol methods
+```
+
+#### Factory for Custom Backend
+
+```python
+class SqliteSliceFactory:
+    """Factory for SQLite-backed slices."""
+
+    def __init__(self, db_path: Path):
+        self.db_path = db_path
+
+    def create[T: SupportsDataclass](self, slice_type: type[T]) -> SqliteSlice[T]:
+        table_name = f"{slice_type.__module__}_{slice_type.__name__}"
+        return SqliteSlice(self.db_path, table_name, slice_type)
+```
+
+Then configure:
+
+```python
+config = SliceFactoryConfig(
+    state_factory=MemorySliceFactory(),
+    log_factory=SqliteSliceFactory(Path("./logs.db")),
+)
+```
+
+#### Protocol Compliance Testing
+
+WINK provides abstract test suites for validating backends:
+
+```python
+from weakincentives.runtime.session.slices import FilesystemProtocolTests
+
+class TestSqliteSlice(FilesystemProtocolTests):
+    def create_slice(self) -> Slice[MyDataclass]:
+        return SqliteSlice(Path(":memory:"), "test", MyDataclass)
+
+    # Inherits comprehensive protocol tests
+```
+
+### Error Handling
+
+#### File I/O Errors
+
+`JsonlSlice` propagates I/O errors (permission denied, disk full):
+
+```python
+try:
+    session.dispatch(event)
+except OSError as e:
+    logger.error(f"Slice persistence failed: {e}")
+    # Consider fallback to memory-only mode
+```
+
+#### Serialization Errors
+
+Non-serializable fields raise during `dump()`:
+
+```python
+@dataclass(frozen=True)
+class BadSlice:
+    callback: Callable[[], None]  # Cannot serialize
+
+# Raises when JsonlSlice tries to write
+session[BadSlice].append(BadSlice(lambda: None))
+```
+
+Ensure slice types use only serializable fields (primitives, nested dataclasses, standard collections).
+
+#### Deserialization Errors
+
+Corrupt files or missing types raise during `parse()`:
+
+```python
+try:
+    items = slice.all()
+except (json.JSONDecodeError, TypeError, ValueError) as e:
+    logger.error(f"Failed to load {slice.path}: {e}")
+    # Consider clearing and starting fresh
+    slice.clear()
+```
+
+### Recommendations
+
+#### When to Use Each Backend
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Short-lived sessions (&lt; 1 hour) | `MemorySliceFactory` for everything |
+| Debugging/audit needs | `JsonlSliceFactory` for LOG slices only |
+| Crash recovery required | `JsonlSliceFactory` for both STATE and LOG |
+| Large slices (&gt; 10,000 items) | Consider custom backend (SQLite, Redis) |
+| Distributed agents | Custom backend with shared storage |
+
+#### Performance Tips
+
+1. **Use append-only reducers** when possible—they're O(1) for file-backed slices
+2. **Enable caching** by reading `all()` once and reusing the result
+3. **Batch operations** with `extend()` instead of multiple `append()` calls
+4. **Clear old data** periodically to prevent unbounded growth
+5. **Use memory for working state**, files for logs
+
+#### Limitations
+
+- **No partial reads**: `all()` loads the entire slice into memory
+- **No indexing**: File-backed slices don't support efficient key-based lookup
+- **Single-process locking**: `fcntl.flock` doesn't work across NFS or distributed filesystems
+- **No streaming writes**: Each append is a separate file operation
+
+For advanced use cases (indexed queries, distributed locking, streaming), implement a custom backend.
+
+### Summary
+
+WINK's slice abstraction decouples session operations from storage. This enables:
+
+- **Flexible persistence**: Choose backends per slice policy
+- **Efficient patterns**: Append-only reducers become O(1) for files
+- **Custom backends**: Implement the protocol for specialized storage
+- **Backward compatibility**: In-memory default matches existing behavior
+
+The protocol, not the implementation, is the contract. Sessions remain agnostic to storage details, and tools work identically across backends.
+
+For most use cases, `MemorySlice` for state and `JsonlSlice` for logs provides the right balance of simplicity and observability. When requirements demand more, the protocol enables extension without modifying core session logic.
+
 ## Summary
 
 WINK's session system provides:
@@ -1432,6 +2009,7 @@ WINK's session system provides:
 - **Snapshotting** - Capture and restore entire session state as JSON
 - **Slice policies** - Distinguish working state (`STATE`) from logs (`LOG`)
 - **Hierarchical organization** - Sessions form trees for nested orchestration
+- **Pluggable storage** - MemorySlice, JsonlSlice, or custom backends
 
 The session is the foundation of WINK's deterministic architecture. Every state change is explicit, auditable, and reproducible—making agent behavior predictable and debuggable at scale.
 

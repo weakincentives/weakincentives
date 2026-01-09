@@ -378,6 +378,599 @@ wink docs --changelog   # Print CHANGELOG.md
 For detailed explanations of debugging, see:
 - [Chapter 13: Debugging](13-debugging.md)
 
+## 18.12 Dataclass Utilities and Serialization
+
+> **Canonical Reference**: See [specs/DATACLASSES.md](/specs/DATACLASSES.md) for the complete specification.
+
+WINK provides dependency-free dataclass utilities for serialization, validation, and immutable patterns. These utilities bridge stdlib `dataclasses` with validation without runtime decorators or third-party packages like Pydantic.
+
+### Overview
+
+The dataclass utilities provide three core capabilities:
+
+1. **Serde API** (`parse`, `dump`, `clone`, `schema`) - Serialization and deserialization with validation
+2. **FrozenDataclass decorator** - Lightweight immutable dataclasses with pre-construction hooks
+3. **Constraint metadata** - Field-level validation via `Annotated` and `field(metadata=...)`
+
+```mermaid
+flowchart TB
+    subgraph Input["Input Data"]
+        Dict["dict[str, Any]
+        From JSON/API"]
+    end
+
+    subgraph Parsing["parse() Pipeline"]
+        Normalize["1. Normalize
+        strip, lower, upper"]
+        Coerce["2. Coerce Types
+        str → int, UUID, Path"]
+        Validate["3. Validate
+        bounds, length, pattern"]
+        Transform["4. Transform
+        convert/transform hooks"]
+        Construct["5. Construct
+        __pre_init__ → __init__"]
+        PostValidate["6. Post-Validate
+        __validate__, __post_validate__"]
+    end
+
+    subgraph Output["Validated Dataclass"]
+        Instance["MyDataclass
+        Type-safe instance"]
+    end
+
+    Dict --> Normalize
+    Normalize --> Coerce
+    Coerce --> Validate
+    Validate --> Transform
+    Transform --> Construct
+    Construct --> PostValidate
+    PostValidate --> Instance
+
+    style Input fill:#e1f5ff
+    style Output fill:#d4edda
+```
+
+### The Serde API
+
+Import from `weakincentives.serde`:
+
+```python
+from weakincentives.serde import parse, dump, clone, schema
+```
+
+#### `parse()` - Deserialize with Validation
+
+Parse a dictionary into a dataclass with automatic validation:
+
+```python
+from dataclasses import dataclass, field
+from typing import Annotated
+from uuid import UUID
+from weakincentives.serde import parse
+
+@dataclass(slots=True, frozen=True)
+class User:
+    user_id: UUID = field(metadata={"alias": "id"})
+    name: Annotated[str, {"min_length": 1, "strip": True}]
+    age: Annotated[int, {"ge": 0, "le": 150}]
+
+# Parse with validation
+user = parse(
+    User,
+    {"id": "a9f95576-8c4a-4b5f-8e5f-9c0d1e2f3a4b", "name": "  Ada  ", "age": 36},
+)
+
+# user.name == "Ada" (stripped)
+# user.user_id is a UUID instance
+```
+
+**Signature:**
+
+```python
+parse(
+    cls: type[T] | None,
+    data: dict[str, Any] | object,
+    *,
+    extra: Literal["ignore", "forbid", "allow"] = "ignore",
+    coerce: bool = True,
+    case_insensitive: bool = False,
+    alias_generator: Callable[[str], str] | None = None,
+    aliases: dict[str, str] | None = None,
+    allow_dataclass_type: bool = False,
+    type_key: str = "__type__",
+) -> T
+```
+
+**Key behaviors:**
+
+- **Missing required fields** raise `ValueError("Missing required field: 'field'")`
+- **Extras handling**:
+  - `"ignore"` (default): Drop unknown keys
+  - `"forbid"`: Raise on unknown keys
+  - `"allow"`: Attach to `__extras__` dict (or fall back if `slots=True`)
+- **Coercion** (enabled by default): Converts strings to numerics, UUID, paths, enums, datetime
+- **Alias resolution**: `aliases` arg > `field(metadata={"alias": ...})` > `alias_generator`
+- **Validation order**: Normalizers → numeric constraints → length → pattern → membership → validators → `convert`/`transform`
+- **Error paths**: Use dotted notation: `"address.street"`, `"items[0].price"`
+
+**Example with nested dataclasses:**
+
+```python
+@dataclass(slots=True, frozen=True)
+class Address:
+    street: str
+    city: str
+    zipcode: Annotated[str, {"pattern": r"^\d{5}$"}]
+
+@dataclass(slots=True, frozen=True)
+class Customer:
+    name: str
+    address: Address
+
+customer = parse(
+    Customer,
+    {
+        "name": "Alice",
+        "address": {
+            "street": "123 Main St",
+            "city": "Springfield",
+            "zipcode": "12345",
+        },
+    },
+)
+# Nested dataclasses are recursively parsed
+```
+
+#### `dump()` - Serialize to JSON-Safe Dicts
+
+Convert dataclass instances to JSON-compatible dictionaries:
+
+```python
+from weakincentives.serde import dump
+
+data = dump(user)
+# {"id": "a9f95576-8c4a-4b5f-8e5f-9c0d1e2f3a4b", "name": "Ada", "age": 36}
+```
+
+**Signature:**
+
+```python
+dump(
+    obj: object,
+    *,
+    by_alias: bool = True,
+    exclude_none: bool = False,
+    computed: bool = False,
+    include_dataclass_type: bool = False,
+    type_key: str = "__type__",
+    alias_generator: Callable[[str], str] | None = None,
+) -> dict[str, Any]
+```
+
+**Key behaviors:**
+
+- **Recursion**: Nested dataclasses are recursively serialized
+- **Type conversions**:
+  - Enums emit values (`.value`)
+  - `datetime` uses ISO format (`.isoformat()`)
+  - `UUID`, `Decimal`, `Path` stringify
+- **Computed properties**: With `computed=True`, materializes `__computed__` properties
+
+**Example with computed properties:**
+
+```python
+@dataclass(slots=True, frozen=True)
+class Invoice:
+    subtotal: int
+    tax: int
+
+    @property
+    def total(self) -> int:
+        return self.subtotal + self.tax
+
+    __computed__ = ("total",)
+
+invoice = Invoice(subtotal=100, tax=10)
+dump(invoice, computed=True)
+# {"subtotal": 100, "tax": 10, "total": 110}
+```
+
+#### `clone()` - Immutable Update Pattern
+
+Wrap `dataclasses.replace` while preserving extras and re-running validation:
+
+```python
+from weakincentives.serde import clone
+
+updated_user = clone(user, age=37)
+# Returns a new User instance with age=37, re-validates constraints
+```
+
+**Use cases:**
+
+- Update frozen dataclasses
+- Re-run validation after field changes
+- Preserve `__extras__` from `parse(extra="allow")`
+
+#### `schema()` - Generate JSON Schema
+
+Emit JSON Schema for dataclass types:
+
+```python
+from weakincentives.serde import schema
+
+user_schema = schema(User)
+# Returns JSON Schema dict with inlined nested dataclasses (no $ref)
+```
+
+**Key behaviors:**
+
+- Mirrors alias resolution (respects `alias_generator`, field metadata)
+- Propagates constraint metadata (`min_length`, `pattern`, etc.)
+- Nested dataclasses are inlined (not referenced via `$ref`)
+
+**Example output:**
+
+```python
+{
+    "type": "object",
+    "properties": {
+        "id": {"type": "string", "format": "uuid"},
+        "name": {"type": "string", "minLength": 1},
+        "age": {"type": "integer", "minimum": 0, "maximum": 150},
+    },
+    "required": ["id", "name", "age"],
+}
+```
+
+### Constraints and Transforms
+
+Merge keys from `Annotated[..., {...}]` and `field(metadata=...)`:
+
+| Key | Description | Example |
+|-----|-------------|---------|
+| `ge`, `gt`, `le`, `lt` | Numeric bounds | `Annotated[int, {"ge": 0}]` |
+| `minimum`, `maximum` | Alias for `ge`, `le` | `{"minimum": 0}` |
+| `exclusiveMinimum`, `exclusiveMaximum` | Alias for `gt`, `lt` | `{"exclusiveMinimum": 0}` |
+| `min_length`, `max_length` | String/collection length | `{"min_length": 1}` |
+| `minLength`, `maxLength` | Alias for length constraints | `{"minLength": 1}` |
+| `pattern`, `regex` | Regex validation | `{"pattern": r"^\d+$"}` |
+| `strip`, `lower`, `upper` | String normalizers | `{"strip": True}` |
+| `lowercase`, `uppercase` | Alias for `lower`, `upper` | `{"lowercase": True}` |
+| `in`, `enum` | Membership inclusion | `{"in": ["a", "b"]}` |
+| `not_in` | Membership exclusion | `{"not_in": ["x"]}` |
+| `validate` | Single validation callable | `{"validate": lambda x: x > 0}` |
+| `validators` | Iterable of validators | `{"validators": [check_email]}` |
+| `convert`, `transform` | Final value transformation | `{"convert": str.upper}` |
+
+**Example with multiple constraints:**
+
+```python
+@dataclass(slots=True, frozen=True)
+class Product:
+    sku: Annotated[str, {"pattern": r"^[A-Z]{3}-\d{6}$", "upper": True}]
+    price: Annotated[int, {"ge": 0}]
+    tags: Annotated[tuple[str, ...], {"min_length": 1}]
+
+product = parse(
+    Product,
+    {"sku": "abc-123456", "price": 999, "tags": ["electronics"]},
+)
+# product.sku == "ABC-123456" (uppercased)
+```
+
+### Validation Hooks
+
+Dataclasses may define lifecycle hooks:
+
+```python
+@dataclass(slots=True, frozen=True)
+class Order:
+    subtotal: int
+    tax: int
+    total: int
+
+    def __validate__(self) -> None:
+        """Post-construction validation (called after __init__)."""
+        if self.total != self.subtotal + self.tax:
+            raise ValueError("Total must equal subtotal + tax")
+
+    def __post_validate__(self) -> None:
+        """After all fields validated (called by parse)."""
+        if self.subtotal < 0:
+            raise ValueError("Subtotal must be non-negative")
+```
+
+**Hook execution order:**
+
+1. Field normalization (strip, lower, upper)
+2. Field coercion (str → int, UUID, etc.)
+3. Field validation (bounds, length, pattern)
+4. Field transforms (convert/transform)
+5. `__pre_init__` (if using `FrozenDataclass`)
+6. `__init__`
+7. `__validate__` (if defined)
+8. `__post_validate__` (if defined by `parse`)
+
+### FrozenDataclass Decorator
+
+Lightweight decorator for immutable dataclasses:
+
+```python
+from weakincentives.dataclasses import FrozenDataclass
+
+@FrozenDataclass()
+class Config:
+    host: str
+    port: int = 8080
+
+config = Config(host="localhost")
+# config.port = 9000  # Error: frozen dataclass
+```
+
+**Defaults applied:**
+
+- `frozen=True` (immutable)
+- `slots=True` (memory-efficient)
+- `kw_only=False`, `order=False`, `eq=True`, `repr=True`
+- `match_args=True`, `unsafe_hash=False`
+
+#### Pre-Construction Hook: `__pre_init__`
+
+Derive fields before `__init__` without mutation:
+
+```python
+from weakincentives.dataclasses import FrozenDataclass
+
+@FrozenDataclass()
+class Invoice:
+    subtotal: int
+    tax: int
+    total: int
+
+    @classmethod
+    def __pre_init__(cls, *, subtotal: int, tax_rate: float = 0.1, **_):
+        """Derive fields before __init__."""
+        tax = int(subtotal * tax_rate)
+        return {
+            "subtotal": subtotal,
+            "tax": tax,
+            "total": subtotal + tax,
+        }
+
+    def __post_init__(self) -> None:
+        """Validate invariants after __init__."""
+        if self.total != self.subtotal + self.tax:
+            raise ValueError("Total mismatch")
+
+invoice = Invoice(subtotal=1000, tax_rate=0.24)
+# invoice.total == 1240 (derived)
+```
+
+**Key behaviors:**
+
+- Runs before `__init__`
+- Returns mapping with all required fields
+- Enables derivation without `__post_init__` mutation
+- Takes `**kwargs` to accept extra parameters (like `tax_rate`)
+
+#### Copy Helpers
+
+Immutable update patterns:
+
+```python
+# update(**changes) - Apply field changes
+updated = invoice.update(subtotal=1200)
+
+# merge(mapping_or_obj) - Merge from dict or object
+merged = invoice.merge({"subtotal": 1200})
+
+# map(transform) - Transform via callable
+remapped = invoice.map(lambda f: {"tax": f["subtotal"] * 0.24})
+```
+
+**All helpers:**
+
+- Return new instances (immutable)
+- Re-run `__post_init__` for invariants
+- Raise `TypeError` for unknown fields
+- Invoke `__pre_init__` when the class defines non-init fields (so derived fields stay consistent); skip `__pre_init__` for simple all-init dataclasses
+
+**Example:**
+
+```python
+@FrozenDataclass()
+class Point:
+    x: int
+    y: int
+
+    def distance_from_origin(self) -> float:
+        return (self.x**2 + self.y**2) ** 0.5
+
+p1 = Point(x=3, y=4)
+p2 = p1.update(x=5)  # Point(x=5, y=4)
+p3 = p1.map(lambda f: {"x": f["x"] * 2, "y": f["y"] * 2})  # Point(x=6, y=8)
+```
+
+### Supported Types
+
+The serde utilities support:
+
+- **Dataclasses** (including nested)
+- **Primitives**: `str`, `int`, `float`, `bool`, `None`
+- **Standard types**: `Enum`, `UUID`, `Path`, `Decimal`
+- **Datetime types**: `datetime`, `date`, `time`
+- **Collections**: `list`, `set`, `tuple`, `dict`
+- **Type hints**: `Literal`, `Union`, `Optional`
+
+**Type coercion examples:**
+
+```python
+@dataclass
+class Example:
+    user_id: UUID
+    path: Path
+    created_at: datetime
+    status: Literal["active", "inactive"]
+
+example = parse(
+    Example,
+    {
+        "user_id": "a9f95576-8c4a-4b5f-8e5f-9c0d1e2f3a4b",  # str → UUID
+        "path": "/tmp/file.txt",  # str → Path
+        "created_at": "2025-01-09T12:00:00",  # str → datetime
+        "status": "active",  # Literal validation
+    },
+)
+```
+
+### Edge Cases and Limitations
+
+**Slots vs extras:**
+
+With `slots=True`, extras fall back to `__extras__` dict:
+
+```python
+@dataclass(slots=True, frozen=True)
+class Config:
+    host: str
+
+config = parse(Config, {"host": "localhost", "port": 8080}, extra="allow")
+# config.__extras__ == {"port": 8080}
+```
+
+**Empty strings:**
+
+With coercion, empty strings are treated as missing for optional fields:
+
+```python
+@dataclass
+class User:
+    name: str
+    email: str | None = None
+
+user = parse(User, {"name": "Alice", "email": ""})
+# user.email == None (empty string coerced to None)
+```
+
+**Union errors:**
+
+Only the final branch error is surfaced:
+
+```python
+@dataclass
+class Message:
+    payload: int | str
+
+# If "abc" fails int parsing, tries str (succeeds)
+msg = parse(Message, {"payload": "abc"})  # OK
+
+# If both fail, only last error shown
+msg = parse(Message, {"payload": []})  # Error from str coercion
+```
+
+**Datetime parsing:**
+
+Uses `fromisoformat` without timezone coercion. Ensure ISO format:
+
+```python
+parse(MyClass, {"created": "2025-01-09T12:00:00"})  # OK
+parse(MyClass, {"created": "Jan 9, 2025"})  # Error
+```
+
+**Schema reuse:**
+
+Nested dataclasses are inlined, no `$ref`:
+
+```python
+@dataclass
+class Address:
+    street: str
+
+@dataclass
+class User:
+    address: Address
+
+schema(User)
+# Address schema inlined in User schema, not referenced via "$ref"
+```
+
+### Limitations
+
+- **No discriminated unions**: Cannot parse union types based on a discriminator field
+- **No `$ref` schema components**: Nested schemas are always inlined
+- **No assignment-time validation**: Validation only occurs during `parse()`
+- **No external parsers**: No support for `dateutil`, `pytz`, etc.
+- **Validators may mutate**: Ensure validators return transformed values
+
+### Practical Patterns
+
+**Tool parameters with validation:**
+
+```python
+from dataclasses import dataclass
+from typing import Annotated
+from weakincentives import Tool, ToolContext, ToolResult
+from weakincentives.serde import parse
+
+@dataclass(slots=True, frozen=True)
+class SearchParams:
+    query: Annotated[str, {"min_length": 1, "strip": True}]
+    limit: Annotated[int, {"ge": 1, "le": 100}] = 10
+
+def search_handler(params: dict[str, object], *, context: ToolContext) -> ToolResult[list[str]]:
+    validated = parse(SearchParams, params)
+    results = perform_search(validated.query, limit=validated.limit)
+    return ToolResult.ok(results)
+
+search_tool = Tool(
+    name="search",
+    description="Search the knowledge base",
+    handler=search_handler,
+)
+```
+
+**Session state with immutable updates:**
+
+```python
+from weakincentives.dataclasses import FrozenDataclass
+
+@FrozenDataclass()
+class AgentState:
+    step_count: int = 0
+    last_action: str | None = None
+
+# Update immutably
+state = AgentState()
+state = state.update(step_count=1, last_action="search")
+state = state.update(step_count=state.step_count + 1)
+```
+
+**Structured output parsing:**
+
+```python
+from weakincentives import parse_structured_output
+
+@dataclass(slots=True, frozen=True)
+class CodeReview:
+    approved: bool
+    comments: tuple[str, ...]
+    confidence: Annotated[float, {"ge": 0.0, "le": 1.0}]
+
+# Parse model output
+response = adapter.evaluate(prompt, session=session)
+review = parse_structured_output(CodeReview, response.output)
+# Automatic validation via parse()
+```
+
+### Cross-References
+
+- [Chapter 3: Prompts](03-prompts.md) - Structured output with prompts
+- [Chapter 4: Tools](04-tools.md) - Tool parameter validation
+- [Chapter 5: Sessions](05-sessions.md) - Immutable state patterns
+- [specs/DATACLASSES.md](/specs/DATACLASSES.md) - Complete specification
+
 ---
 
 ## Where to go deeper
