@@ -2,15 +2,16 @@
 
 This chapter introduces the core philosophy behind WINK (Weak Incentives) and
 explains the fundamental design principles that shape the library. You'll learn
-why the project is called "weak incentives," how modern agent development
-differs from traditional frameworks, and what makes WINK's approach to
-prompts-as-programs distinctive.
+why the project is called "weak incentives," how this philosophy manifests as
+policies over workflows, why modern agent development focuses on context over
+orchestration, and what makes WINK's approach to prompts-as-programs
+distinctive.
 
 Understanding these philosophical foundations will help you make better decisions
 as you design agents, choose which abstractions to use, and debug systems when
 things go wrong.
 
-## The Weak Incentives Philosophy
+## 1. The Weak Incentives Philosophy
 
 "Weak incentives" is an engineering stance borrowed from mechanism design:
 
@@ -107,7 +108,498 @@ point. When prompts are clear, tools are well-documented, and state is explicit,
 the model has strong signals about what to do. When something goes wrong, you
 can see exactly what happened and refine the incentives for next time.
 
-## From Orchestration to Context Engineering
+**The most important application of this philosophy is choosing policies over
+workflows**—letting agents reason within constraints rather than scripting their
+actions. We'll explore this in depth next.
+
+## 2. Policies Over Workflows
+
+> **Canonical Reference**: See [specs/POLICIES_OVER_WORKFLOWS.md](../src/weakincentives/docs/specs/POLICIES_OVER_WORKFLOWS.md) for the complete specification.
+
+The weak incentives philosophy has a direct, practical implication for how you
+design agents: **prefer declarative policies over prescriptive workflows**.
+
+Traditional agent frameworks often use **workflows**—predetermined sequences of
+steps that guide agent behavior:
+
+```
+1. Read the file
+2. Parse the AST
+3. Generate the patch
+4. Write the file
+5. Run tests
+```
+
+This works for the happy path. But unattended agents encounter situations
+workflow authors can't anticipate: files that don't exist yet, parsers that fail
+on malformed syntax, tests that require environment setup, patches that reveal
+deeper design issues.
+
+When workflows meet the unexpected, they fail, skip, or branch into sprawling
+decision trees. WINK takes a different approach: **policies, not workflows**.
+
+### The Problem with Workflows
+
+A workflow encodes **how** to accomplish a goal:
+
+```python
+def deploy_workflow():
+    """Rigid sequence of steps."""
+    read_config()
+    run_tests()
+    build_artifacts()
+    push_to_production()
+```
+
+This breaks down when reality diverges from expectations:
+
+- **The config doesn't exist** → Should we create it? Use defaults? Abort?
+- **Tests fail** → Skip deployment? Fix tests first? Deploy anyway?
+- **Build errors** → Retry? Notify? Rollback?
+
+Each edge case demands a branch:
+
+```python
+def deploy_workflow_v2():
+    """Now with edge cases."""
+    if not config_exists():
+        if can_create_config():
+            create_default_config()
+        else:
+            return abort("No config")
+
+    test_result = run_tests()
+    if test_result.failed:
+        if test_result.flaky:
+            retry_tests()
+        else:
+            return abort("Tests failed")
+
+    # ... more branches
+```
+
+The workflow transforms into a program—and a brittle one. Each branch encodes
+domain knowledge in control flow. When new edge cases emerge, the workflow
+fractures further.
+
+```mermaid
+flowchart TB
+    A["Step 1"] --> B{Edge Case?}
+    B -->|Yes| C["Branch A"]
+    B -->|No| D["Step 2"]
+    C --> E{Another Edge?}
+    E -->|Yes| F["Branch A.1"]
+    E -->|No| G["Branch A.2"]
+    D --> H{Yet Another?}
+    H -->|Yes| I["..."]
+    H -->|No| J["..."]
+
+    style B fill:#ffe1e1
+    style E fill:#ffe1e1
+    style H fill:#ffe1e1
+```
+
+**The fundamental issue**: Workflows encode procedures, not requirements. When
+the procedure breaks, the agent has no recourse—it can't reason about what
+matters, only what the workflow says to do next.
+
+### Policies Preserve Agency
+
+A **policy** is a declarative constraint:
+
+- "A file must be read before it can be overwritten"
+- "Tests must pass before deployment"
+- "Tool X cannot be called after tool Y"
+
+Policies describe **what must be true**, not **how to make it true**. The agent
+remains free to find any path satisfying the constraints.
+
+```mermaid
+flowchart TB
+    subgraph Policy["Policy Space"]
+        Goal["Goal: Deploy to Production"]
+        C1["Constraint: Tests Pass"]
+        C2["Constraint: Config Exists"]
+        C3["Constraint: Build Succeeds"]
+
+        Path1["Path A:
+        Create config → Build → Test → Deploy"]
+        Path2["Path B:
+        Build → Test → Fix → Retest → Deploy"]
+        Path3["Path C:
+        Test → Create config → Build → Deploy"]
+
+        Path1 -.->|satisfies| C1
+        Path1 -.->|satisfies| C2
+        Path1 -.->|satisfies| C3
+
+        Path2 -.->|satisfies| C1
+        Path2 -.->|satisfies| C3
+
+        Path3 -.->|satisfies| C1
+        Path3 -.->|satisfies| C2
+        Path3 -.->|satisfies| C3
+
+        Path1 --> Goal
+        Path2 --> Goal
+        Path3 --> Goal
+    end
+
+    style Goal fill:#e1ffe1
+    style C1 fill:#ffe1e1
+    style C2 fill:#ffe1e1
+    style C3 fill:#ffe1e1
+```
+
+When the agent encounters an unexpected situation, it:
+
+1. **Reasons** about which constraints apply
+2. **Discovers** alternative approaches that satisfy them
+3. **Adapts** its strategy without violating invariants
+
+This is the difference between giving directions ("turn left, then right") and
+giving a map with constraints ("stay on paved roads, avoid tolls"). Directions
+fail when the road is closed. Maps enable rerouting.
+
+### Why Unattended Agents Need Policies
+
+**Attended agents** have a human in the loop. When a workflow breaks, the human
+intervenes—provides context, adjusts the approach, takes over entirely. The
+workflow's brittleness is masked by human adaptability.
+
+**Unattended agents** operate without this safety net. Every edge case the
+workflow doesn't handle becomes a failure. And the long tail of edge cases is
+effectively infinite—**no workflow can be complete**.
+
+Policies offer a different contract:
+
+| Aspect | Workflow | Policy |
+|--------|----------|--------|
+| **Specifies** | Steps to execute | Constraints to satisfy |
+| **On unexpected input** | Fails or branches | Agent reasons about constraints |
+| **Composability** | Sequential coupling | Independent conjunction |
+| **Completeness** | Requires enumeration | Permits discovery |
+| **Agent role** | Executor | Reasoner |
+
+Language models are general-purpose reasoners. Workflows deliberately bypass this
+capability, treating agents as script runners. Policies leverage it, treating
+agents as problem-solvers that happen to be constrained.
+
+### Characteristics of Good Policies
+
+#### 1. Declarative, Not Procedural
+
+Policies state **what must be true**, not **how to make it true**:
+
+```python
+# ❌ Procedural (workflow fragment)
+def deploy():
+    run_tests()
+    build()
+    push()
+
+# ✅ Declarative (policy)
+from weakincentives.contrib.tools import SequentialDependencyPolicy
+
+policy = SequentialDependencyPolicy(
+    dependencies={"deploy": frozenset({"test", "build"})}
+)
+```
+
+The procedural version locks in execution order. The declarative version expresses
+that deployment requires testing and building, but permits the agent to determine
+when and how to satisfy prerequisites.
+
+#### 2. Independently Composable
+
+Each policy evaluates in isolation. Policies compose through conjunction: all
+must allow, any may deny:
+
+```python
+from weakincentives.contrib.tools import (
+    ReadBeforeWritePolicy,
+    BudgetLimitPolicy,
+)
+
+policies = [
+    ReadBeforeWritePolicy(),        # Filesystem safety
+    BudgetLimitPolicy(max=10000),   # Resource bounds
+]
+
+# Each policy checks independently; all must pass
+for policy in policies:
+    decision = policy.check(tool, params, context=context)
+    if not decision.allowed:
+        return deny(decision.reason)
+```
+
+Avoid policies that depend on each other's internal state. If policy A needs to
+know what policy B decided, refactor into a single policy or share state through
+the session.
+
+#### 3. Fail-Closed by Default
+
+When a policy cannot determine whether to allow an action, it should **deny**.
+This preserves safety at the cost of capability:
+
+```python
+def check(self, tool, params, *, context):
+    if not self._can_evaluate(context):
+        return PolicyDecision.deny(
+            "Insufficient context to evaluate safety"
+        )
+    # ...
+```
+
+The agent can then reason about why denial occurred and adjust its approach
+(e.g., gather more context, try a different tool).
+
+#### 4. Observable and Debuggable
+
+Policies should expose their reasoning. When a policy denies an action, the agent
+and human reviewers should understand why:
+
+```python
+return PolicyDecision.deny(
+    f"File '{path}' must be read before overwriting. "
+    f"Read {', '.join(read_paths)} so far."
+)
+```
+
+This feedback enables the agent to self-correct rather than simply retry.
+
+### Policies in WINK
+
+WINK implements policy-driven design through several mechanisms:
+
+#### Tool Policies
+
+Gate individual tool invocations based on session state. See [Chapter 4.5: Tool Policies](04.5-tool-policies.md) for comprehensive coverage.
+
+```python
+from weakincentives.contrib.tools import (
+    ReadBeforeWritePolicy,
+    SequentialDependencyPolicy,
+)
+
+# Prevent blind file overwrites
+read_before_write = ReadBeforeWritePolicy()
+
+# Enforce prerequisite ordering
+dependencies = SequentialDependencyPolicy(
+    dependencies={"deploy": frozenset({"test", "build"})}
+)
+
+# Attach to tools or sections
+section = MarkdownSection(
+    title="Deployment",
+    tools=(deploy_tool,),
+    tool_policies=(read_before_write, dependencies),
+)
+```
+
+Policies are checked before tool execution. If any policy denies, the tool is
+blocked and the agent receives feedback explaining why.
+
+#### Budget Constraints
+
+Hard limits on resource consumption. See [Chapter 5: Sessions](05-sessions.md).
+
+```python
+from weakincentives.runtime import Budget, Deadline
+from datetime import datetime, timedelta, UTC
+
+budget = Budget(
+    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10)),
+    max_total_tokens=50000,
+)
+
+session = Session(bus=bus, budget=budget)
+```
+
+Budgets are policies at the resource level: the agent is free to allocate tokens
+however it chooses, but cannot exceed the total.
+
+#### Task Completion Checking
+
+Verify **goal achievement** without prescribing how to achieve it. See
+[Chapter 4.6: Task Completion Verification](04.6-task-monitoring.md).
+
+```python
+from weakincentives.adapters.claude_agent_sdk import PlanBasedChecker
+
+checker = PlanBasedChecker()
+
+# Checks if all plan steps are complete
+# Doesn't care HOW the agent completed them
+is_complete = checker.check(session=session)
+```
+
+The checker assesses whether the task is complete based on current state, not
+whether specific steps were followed.
+
+### Anti-Patterns
+
+#### Workflow Masquerading as Policy
+
+```python
+# ❌ Anti-pattern: sequential workflow encoded as dependencies
+policy = SequentialDependencyPolicy(
+    dependencies={
+        "step_2": frozenset({"step_1"}),
+        "step_3": frozenset({"step_2"}),
+        "step_4": frozenset({"step_3"}),
+        "step_5": frozenset({"step_4"}),
+    }
+)
+```
+
+This is a workflow in policy clothing. If the sequence is truly invariant,
+consider whether the agent needs individual tools at all—or whether a single
+composite operation is more appropriate.
+
+#### Over-Constraining the Solution Space
+
+```python
+# ❌ Anti-pattern: leaves only one valid path
+policies = [
+    MustUseToolX(),
+    MustNotUseToolY(),
+    MustCallInOrderABC(),
+    MustCompleteInUnderNSeconds(),
+]
+```
+
+If policies eliminate all flexibility, you've rebuilt a workflow. Step back and
+identify which constraints are truly invariants versus preferences.
+
+#### Policies That Require Orchestration
+
+```python
+# ❌ Anti-pattern: policy depends on external state machine
+class StateMachinePolicy:
+    def check(self, tool, params, *, context):
+        current_state = self.state_machine.current
+        if current_state == "INIT" and tool.name == "read":
+            self.state_machine.transition("READING")
+            return allow()
+        # ...
+```
+
+This conflates policy enforcement with workflow execution. Policies should be
+stateless with respect to their evaluation logic; state lives in the session.
+
+### When Workflows Are Appropriate
+
+Policies are not universally superior. Workflows are appropriate when:
+
+1. **The sequence is truly invariant** — Not just common, but required by
+   external systems (e.g., protocol handshakes, database transactions)
+
+2. **Failure is preferable to adaptation** — Some contexts require strict
+   reproducibility over resilience
+
+3. **The agent lacks reasoning capability** — Rule-based systems or simple state
+   machines don't benefit from flexible policies
+
+4. **Human oversight is continuous** — Attended operation can course-correct
+   workflow failures in real-time
+
+For unattended agents with language model reasoning, **policies are almost always
+the better default**.
+
+### Example: Code Deployment
+
+#### Workflow Approach
+
+```python
+def deploy_code():
+    """Rigid workflow with branching for edge cases."""
+    if not file_exists("config.yaml"):
+        if env_var_exists("DEFAULT_CONFIG"):
+            create_config_from_env()
+        else:
+            raise DeploymentError("No config")
+
+    result = run_tests()
+    if result.failed:
+        if result.flaky_test_count > 0:
+            retry_flaky_tests()
+        else:
+            raise DeploymentError("Tests failed")
+
+    build_result = build_artifacts()
+    if build_result.warnings:
+        log_warnings(build_result.warnings)
+
+    push_to_production()
+```
+
+**Problems**:
+- Rigid sequence: config → tests → build → deploy
+- Edge cases branched explicitly
+- New edge cases require code changes
+- Agent can't adapt when assumptions break
+
+#### Policy Approach
+
+```python
+from weakincentives.contrib.tools import SequentialDependencyPolicy
+
+# Declarative constraints
+policy = SequentialDependencyPolicy(
+    dependencies={
+        "deploy": frozenset({"test_pass", "build_success"}),
+        "test_pass": frozenset({"config_exists"}),
+    }
+)
+
+# Agent receives tools with policy attached
+tools = (
+    Tool(name="create_config", ...),
+    Tool(name="run_tests", ...),
+    Tool(name="build", ...),
+    Tool(name="deploy", ...),
+)
+
+# Agent can:
+# - Create config if missing
+# - Run tests in any order after config exists
+# - Retry tests if flaky
+# - Build before or after tests
+# - Deploy once prerequisites satisfied
+```
+
+**Benefits**:
+- Agent reasons about constraints
+- Can adapt to unexpected situations (missing config, flaky tests)
+- New edge cases don't require policy changes
+- Multiple valid paths to deployment
+
+The policy says "tests must pass and build must succeed before deployment," but
+doesn't prescribe the order or method. The agent discovers a valid approach.
+
+### Summary: Policies as Weak Incentives
+
+| Principle | Implication |
+|-----------|-------------|
+| **Preserve agency** | Let the agent reason; don't script actions |
+| **Declare constraints** | State invariants, not procedures |
+| **Compose independently** | Policies are conjunction-friendly |
+| **Fail closed** | Deny when uncertain; let agent adapt |
+| **Surface reasoning** | Explain denials to enable self-correction |
+| **Avoid pseudo-workflows** | If only one path satisfies constraints, reconsider |
+
+Policies are the practical manifestation of weak incentives. Instead of
+constraining the model with rigid workflows, policies provide structure that
+works **with** the agent's reasoning. Policies define the boundaries; the agent
+finds the path.
+
+For attended agents or simple automation, workflows may suffice. For unattended
+agents facing novel situations, policies are essential—they preserve the agent's
+ability to reason while ensuring safety and correctness.
+
+## 3. From Orchestration to Context Engineering
 
 Many early "agent frameworks" assumed the hard part would be workflow logic:
 routers, planners, branching graphs, and elaborate loops. These frameworks spent
@@ -170,12 +662,12 @@ discipline:
 - **Safety** is enforced at tool boundaries where side effects happen
 
 For the formal specification of these behaviors, see:
-- [specs/PROMPTS.md](../specs/PROMPTS.md)
-- [specs/TOOLS.md](../specs/TOOLS.md)
-- [specs/SESSIONS.md](../specs/SESSIONS.md)
-- [specs/MAIN_LOOP.md](../specs/MAIN_LOOP.md)
+- [specs/PROMPTS.md](../src/weakincentives/docs/specs/PROMPTS.md)
+- [specs/TOOLS.md](../src/weakincentives/docs/specs/TOOLS.md)
+- [specs/SESSIONS.md](../src/weakincentives/docs/specs/SESSIONS.md)
+- [specs/MAIN_LOOP.md](../src/weakincentives/docs/specs/MAIN_LOOP.md)
 
-## Prompts as First-Class, Typed Programs
+## 4. Prompts as First-Class, Typed Programs
 
 Most systems treat prompts as strings and hope conventions keep everything
 aligned:
@@ -264,7 +756,7 @@ Two "novel" properties fall out of this structure:
 These properties make prompt development feel more like traditional software
 engineering: you can version control prompts, write tests, and iterate safely.
 
-## What WINK Is (and Is Not)
+## 5. What WINK Is (and Is Not)
 
 Understanding WINK's scope helps you decide when to use it and how to integrate
 it with other tools.
@@ -310,465 +802,6 @@ state snapshots—and let something else coordinate the rest.
 WINK is designed to be composable. You can use `PromptTemplate` and `Session`
 without using `MainLoop`. You can use the adapters without the contrib tools.
 Pick the pieces that solve your problems.
-
-## 1.5 Policies Over Workflows
-
-> **Canonical Reference**: See [specs/POLICIES_OVER_WORKFLOWS.md](/specs/POLICIES_OVER_WORKFLOWS.md) for the complete philosophy specification.
-
-### Introduction
-
-Traditional agent frameworks often use **workflows**—predetermined sequences of steps that guide agent behavior:
-
-```
-1. Read the file
-2. Parse the AST
-3. Generate the patch
-4. Write the file
-5. Run tests
-```
-
-This works for the happy path. But unattended agents encounter situations workflow authors can't anticipate: files that don't exist yet, parsers that fail on malformed syntax, tests that require environment setup, patches that reveal deeper design issues.
-
-When workflows meet the unexpected, they fail, skip, or branch into sprawling decision trees. WINK takes a different approach: **policies, not workflows**.
-
-This section explains the philosophy behind policies, why they matter for unattended agents, and how WINK implements policy-driven design.
-
-### The Problem with Workflows
-
-A workflow encodes **how** to accomplish a goal:
-
-```python
-def deploy_workflow():
-    """Rigid sequence of steps."""
-    read_config()
-    run_tests()
-    build_artifacts()
-    push_to_production()
-```
-
-This breaks down when reality diverges from expectations:
-
-- **The config doesn't exist** → Should we create it? Use defaults? Abort?
-- **Tests fail** → Skip deployment? Fix tests first? Deploy anyway?
-- **Build errors** → Retry? Notify? Rollback?
-
-Each edge case demands a branch:
-
-```python
-def deploy_workflow_v2():
-    """Now with edge cases."""
-    if not config_exists():
-        if can_create_config():
-            create_default_config()
-        else:
-            return abort("No config")
-
-    test_result = run_tests()
-    if test_result.failed:
-        if test_result.flaky:
-            retry_tests()
-        else:
-            return abort("Tests failed")
-
-    # ... more branches
-```
-
-The workflow transforms into a program—and a brittle one. Each branch encodes domain knowledge in control flow. When new edge cases emerge, the workflow fractures further.
-
-```mermaid
-flowchart TB
-    A["Step 1"] --> B{Edge Case?}
-    B -->|Yes| C["Branch A"]
-    B -->|No| D["Step 2"]
-    C --> E{Another Edge?}
-    E -->|Yes| F["Branch A.1"]
-    E -->|No| G["Branch A.2"]
-    D --> H{Yet Another?}
-    H -->|Yes| I["..."]
-    H -->|No| J["..."]
-
-    style B fill:#ffe1e1
-    style E fill:#ffe1e1
-    style H fill:#ffe1e1
-```
-
-**The fundamental issue**: Workflows encode procedures, not requirements. When the procedure breaks, the agent has no recourse—it can't reason about what matters, only what the workflow says to do next.
-
-### Policies Preserve Agency
-
-A **policy** is a declarative constraint:
-
-- "A file must be read before it can be overwritten"
-- "Tests must pass before deployment"
-- "Tool X cannot be called after tool Y"
-
-Policies describe **what must be true**, not **how to make it true**. The agent remains free to find any path satisfying the constraints.
-
-```mermaid
-flowchart TB
-    subgraph Policy["Policy Space"]
-        Goal["Goal: Deploy to Production"]
-        C1["Constraint: Tests Pass"]
-        C2["Constraint: Config Exists"]
-        C3["Constraint: Build Succeeds"]
-
-        Path1["Path A:
-        Create config → Build → Test → Deploy"]
-        Path2["Path B:
-        Build → Test → Fix → Retest → Deploy"]
-        Path3["Path C:
-        Test → Create config → Build → Deploy"]
-
-        Path1 -.->|satisfies| C1
-        Path1 -.->|satisfies| C2
-        Path1 -.->|satisfies| C3
-
-        Path2 -.->|satisfies| C1
-        Path2 -.->|satisfies| C3
-
-        Path3 -.->|satisfies| C1
-        Path3 -.->|satisfies| C2
-        Path3 -.->|satisfies| C3
-
-        Path1 --> Goal
-        Path2 --> Goal
-        Path3 --> Goal
-    end
-
-    style Goal fill:#e1ffe1
-    style C1 fill:#ffe1e1
-    style C2 fill:#ffe1e1
-    style C3 fill:#ffe1e1
-```
-
-When the agent encounters an unexpected situation, it:
-
-1. **Reasons** about which constraints apply
-2. **Discovers** alternative approaches that satisfy them
-3. **Adapts** its strategy without violating invariants
-
-This is the difference between giving directions ("turn left, then right") and giving a map with constraints ("stay on paved roads, avoid tolls"). Directions fail when the road is closed. Maps enable rerouting.
-
-### Why Unattended Agents Need Policies
-
-**Attended agents** have a human in the loop. When a workflow breaks, the human intervenes—provides context, adjusts the approach, takes over entirely. The workflow's brittleness is masked by human adaptability.
-
-**Unattended agents** operate without this safety net. Every edge case the workflow doesn't handle becomes a failure. And the long tail of edge cases is effectively infinite—**no workflow can be complete**.
-
-Policies offer a different contract:
-
-| Aspect | Workflow | Policy |
-|--------|----------|--------|
-| **Specifies** | Steps to execute | Constraints to satisfy |
-| **On unexpected input** | Fails or branches | Agent reasons about constraints |
-| **Composability** | Sequential coupling | Independent conjunction |
-| **Completeness** | Requires enumeration | Permits discovery |
-| **Agent role** | Executor | Reasoner |
-
-Language models are general-purpose reasoners. Workflows deliberately bypass this capability, treating agents as script runners. Policies leverage it, treating agents as problem-solvers that happen to be constrained.
-
-### Characteristics of Good Policies
-
-#### 1. Declarative, Not Procedural
-
-Policies state **what must be true**, not **how to make it true**:
-
-```python
-# ❌ Procedural (workflow fragment)
-def deploy():
-    run_tests()
-    build()
-    push()
-
-# ✅ Declarative (policy)
-from weakincentives.contrib.tools import SequentialDependencyPolicy
-
-policy = SequentialDependencyPolicy(
-    dependencies={"deploy": frozenset({"test", "build"})}
-)
-```
-
-The procedural version locks in execution order. The declarative version expresses that deployment requires testing and building, but permits the agent to determine when and how to satisfy prerequisites.
-
-#### 2. Independently Composable
-
-Each policy evaluates in isolation. Policies compose through conjunction: all must allow, any may deny:
-
-```python
-from weakincentives.contrib.tools import (
-    ReadBeforeWritePolicy,
-    BudgetLimitPolicy,
-)
-
-policies = [
-    ReadBeforeWritePolicy(),        # Filesystem safety
-    BudgetLimitPolicy(max=10000),   # Resource bounds
-]
-
-# Each policy checks independently; all must pass
-for policy in policies:
-    decision = policy.check(tool, params, context=context)
-    if not decision.allowed:
-        return deny(decision.reason)
-```
-
-Avoid policies that depend on each other's internal state. If policy A needs to know what policy B decided, refactor into a single policy or share state through the session.
-
-#### 3. Fail-Closed by Default
-
-When a policy cannot determine whether to allow an action, it should **deny**. This preserves safety at the cost of capability:
-
-```python
-def check(self, tool, params, *, context):
-    if not self._can_evaluate(context):
-        return PolicyDecision.deny(
-            "Insufficient context to evaluate safety"
-        )
-    # ...
-```
-
-The agent can then reason about why denial occurred and adjust its approach (e.g., gather more context, try a different tool).
-
-#### 4. Observable and Debuggable
-
-Policies should expose their reasoning. When a policy denies an action, the agent and human reviewers should understand why:
-
-```python
-return PolicyDecision.deny(
-    f"File '{path}' must be read before overwriting. "
-    f"Read {', '.join(read_paths)} so far."
-)
-```
-
-This feedback enables the agent to self-correct rather than simply retry.
-
-### Policies in WINK
-
-WINK implements policy-driven design through several mechanisms:
-
-#### Tool Policies
-
-Gate individual tool invocations based on session state. See [Chapter 4.5: Tool Policies](04.5-tool-policies.md).
-
-```python
-from weakincentives.contrib.tools import (
-    ReadBeforeWritePolicy,
-    SequentialDependencyPolicy,
-)
-
-# Prevent blind file overwrites
-read_before_write = ReadBeforeWritePolicy()
-
-# Enforce prerequisite ordering
-dependencies = SequentialDependencyPolicy(
-    dependencies={"deploy": frozenset({"test", "build"})}
-)
-
-# Attach to tools or sections
-section = MarkdownSection(
-    title="Deployment",
-    tools=(deploy_tool,),
-    tool_policies=(read_before_write, dependencies),
-)
-```
-
-Policies are checked before tool execution. If any policy denies, the tool is blocked and the agent receives feedback explaining why.
-
-#### Trajectory Observers
-
-Provide **soft guidance** based on patterns over time. Unlike policies (hard denials), observers inject feedback without blocking actions. See [specs/TRAJECTORY_OBSERVERS.md](/specs/TRAJECTORY_OBSERVERS.md).
-
-```python
-from weakincentives.runtime import DeadlineObserver
-
-# Remind agent of time constraints
-observer = DeadlineObserver(warning_threshold_seconds=120)
-
-# Observer injects messages when deadline approaches:
-# "⚠️ Deadline warning: 2 minutes remaining. Focus on critical tasks."
-```
-
-Observers preserve agent autonomy while surfacing concerns.
-
-#### Budget Constraints
-
-Hard limits on resource consumption. See [Chapter 5: Sessions](05-sessions.md).
-
-```python
-from weakincentives.runtime import Budget, Deadline
-from datetime import datetime, timedelta, UTC
-
-budget = Budget(
-    deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10)),
-    max_total_tokens=50000,
-)
-
-session = Session(bus=bus, budget=budget)
-```
-
-Budgets are policies at the resource level: the agent is free to allocate tokens however it chooses, but cannot exceed the total.
-
-#### Task Completion Checking
-
-Verify **goal achievement** without prescribing how to achieve it. See [specs/TASK_COMPLETION.md](/specs/TASK_COMPLETION.md).
-
-```python
-from weakincentives.contrib.tools import PlanBasedChecker
-
-checker = PlanBasedChecker()
-
-# Checks if all plan steps are marked complete
-# Doesn't care HOW the agent completed them
-is_complete = checker.check(session=session)
-```
-
-The checker assesses whether the task is complete based on current state, not whether specific steps were followed.
-
-### Anti-Patterns
-
-#### Workflow Masquerading as Policy
-
-```python
-# ❌ Anti-pattern: sequential workflow encoded as dependencies
-policy = SequentialDependencyPolicy(
-    dependencies={
-        "step_2": frozenset({"step_1"}),
-        "step_3": frozenset({"step_2"}),
-        "step_4": frozenset({"step_3"}),
-        "step_5": frozenset({"step_4"}),
-    }
-)
-```
-
-This is a workflow in policy clothing. If the sequence is truly invariant, consider whether the agent needs individual tools at all—or whether a single composite operation is more appropriate.
-
-#### Over-Constraining the Solution Space
-
-```python
-# ❌ Anti-pattern: leaves only one valid path
-policies = [
-    MustUseToolX(),
-    MustNotUseToolY(),
-    MustCallInOrderABC(),
-    MustCompleteInUnderNSeconds(),
-]
-```
-
-If policies eliminate all flexibility, you've rebuilt a workflow. Step back and identify which constraints are truly invariants versus preferences.
-
-#### Policies That Require Orchestration
-
-```python
-# ❌ Anti-pattern: policy depends on external state machine
-class StateMachinePolicy:
-    def check(self, tool, params, *, context):
-        current_state = self.state_machine.current
-        if current_state == "INIT" and tool.name == "read":
-            self.state_machine.transition("READING")
-            return allow()
-        # ...
-```
-
-This conflates policy enforcement with workflow execution. Policies should be stateless with respect to their evaluation logic; state lives in the session.
-
-### When Workflows Are Appropriate
-
-Policies are not universally superior. Workflows are appropriate when:
-
-1. **The sequence is truly invariant** — Not just common, but required by external systems (e.g., protocol handshakes, database transactions)
-
-2. **Failure is preferable to adaptation** — Some contexts require strict reproducibility over resilience
-
-3. **The agent lacks reasoning capability** — Rule-based systems or simple state machines don't benefit from flexible policies
-
-4. **Human oversight is continuous** — Attended operation can course-correct workflow failures in real-time
-
-For unattended agents with language model reasoning, **policies are almost always the better default**.
-
-### Example: Code Deployment
-
-#### Workflow Approach
-
-```python
-def deploy_code():
-    """Rigid workflow with branching for edge cases."""
-    if not file_exists("config.yaml"):
-        if env_var_exists("DEFAULT_CONFIG"):
-            create_config_from_env()
-        else:
-            raise DeploymentError("No config")
-
-    result = run_tests()
-    if result.failed:
-        if result.flaky_test_count > 0:
-            retry_flaky_tests()
-        else:
-            raise DeploymentError("Tests failed")
-
-    build_result = build_artifacts()
-    if build_result.warnings:
-        log_warnings(build_result.warnings)
-
-    push_to_production()
-```
-
-**Problems**:
-- Rigid sequence: config → tests → build → deploy
-- Edge cases branched explicitly
-- New edge cases require code changes
-- Agent can't adapt when assumptions break
-
-#### Policy Approach
-
-```python
-from weakincentives.contrib.tools import SequentialDependencyPolicy
-
-# Declarative constraints
-policy = SequentialDependencyPolicy(
-    dependencies={
-        "deploy": frozenset({"test_pass", "build_success"}),
-        "test_pass": frozenset({"config_exists"}),
-    }
-)
-
-# Agent receives tools with policy attached
-tools = (
-    Tool(name="create_config", ...),
-    Tool(name="run_tests", ...),
-    Tool(name="build", ...),
-    Tool(name="deploy", ...),
-)
-
-# Agent can:
-# - Create config if missing
-# - Run tests in any order after config exists
-# - Retry tests if flaky
-# - Build before or after tests
-# - Deploy once prerequisites satisfied
-```
-
-**Benefits**:
-- Agent reasons about constraints
-- Can adapt to unexpected situations (missing config, flaky tests)
-- New edge cases don't require policy changes
-- Multiple valid paths to deployment
-
-The policy says "tests must pass and build must succeed before deployment," but doesn't prescribe the order or method. The agent discovers a valid approach.
-
-### Summary
-
-| Principle | Implication |
-|-----------|-------------|
-| **Preserve agency** | Let the agent reason; don't script actions |
-| **Declare constraints** | State invariants, not procedures |
-| **Compose independently** | Policies are conjunction-friendly |
-| **Fail closed** | Deny when uncertain; let agent adapt |
-| **Surface reasoning** | Explain denials to enable self-correction |
-| **Avoid pseudo-workflows** | If only one path satisfies constraints, reconsider |
-
-WINK's policy-driven design aligns with the "weak incentives" philosophy (see [Section 1.1](#the-weak-incentives-philosophy)): provide structure that works **with** the agent's reasoning rather than **around** it. Policies define the boundaries; the agent finds the path.
-
-For attended agents or simple automation, workflows may suffice. For unattended agents facing novel situations, policies are essential. They preserve the agent's ability to reason while ensuring safety and correctness.
 
 ---
 
