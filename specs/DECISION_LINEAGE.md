@@ -47,6 +47,7 @@ is the same; the detail varies by need.
 ### Overrides Are Policies, Not Workflows
 
 Standing exceptions are policies with special characteristics:
+
 - Run after base policies (lower priority by default)
 - Can override denials from specific policies
 - Activate conditionally based on context
@@ -62,6 +63,7 @@ underlying philosophy.
 ### Lineage Is Observability, Not Prescription
 
 Lineage records *why* decisions were made, enabling:
+
 - **Debugging**: Understand why an action was allowed or denied
 - **Consistency**: Compare methodology across reports
 - **Auditing**: Trace decisions back to policies and inputs
@@ -466,6 +468,7 @@ class ToolInvoked:
 ```
 
 This means:
+
 - All tool invocations record their gating decision
 - Observers can access decision lineage via `ToolInvoked.decision.lineage`
 - Precedent queries can search by policy, outcome, or inputs
@@ -791,7 +794,8 @@ base policies with orthogonal concerns.
 | Observers | Analyze `ToolInvoked` | Same, now have access to `decision.lineage` |
 
 This unified model:
+
 1. **Extends** `PolicyDecision` rather than adding new types
-2. **Makes overrides policies** rather than separate exception machinery
-3. **Records decisions in existing events** rather than new slices
-4. **Enables observers** to consume richer data automatically
+1. **Makes overrides policies** rather than separate exception machinery
+1. **Records decisions in existing events** rather than new slices
+1. **Enables observers** to consume richer data automatically
