@@ -461,7 +461,12 @@ class LocalPromptOverridesStore(PromptOverridesStore):
 
 
 def _require_descriptor(descriptor: object) -> None:
-    """Fail fast if caller passes PromptLike instead of PromptDescriptor."""
+    """Fail fast if caller passes PromptLike instead of PromptDescriptor.
+
+    Uses explicit isinstance() rather than @require decorator because DbC
+    decorators are test-time only. This check must run in production to
+    provide a clear TypeError with guidance on how to fix the call.
+    """
     if not isinstance(descriptor, PromptDescriptor):
         msg = (
             "store() requires a PromptDescriptor, not a Prompt or PromptTemplate. "
