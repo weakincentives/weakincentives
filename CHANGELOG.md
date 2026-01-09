@@ -194,7 +194,10 @@ store.set_section_override(prompt, tag="latest", path=("section",), body="...")
 
 # After
 from weakincentives.prompt import SectionOverride
-store.store(prompt, SectionOverride(path=("section",), expected_hash="...", body="..."), tag="latest")
+from weakincentives.prompt.overrides import PromptDescriptor
+
+descriptor = PromptDescriptor.from_prompt(prompt)
+store.store(descriptor, SectionOverride(path=("section",), expected_hash="...", body="..."), tag="latest")
 ```
 
 **Override file format upgraded from v1 to v2.** Existing override files in

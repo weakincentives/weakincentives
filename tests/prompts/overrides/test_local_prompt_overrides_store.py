@@ -1256,3 +1256,20 @@ def test_store_when_existing_overrides_are_stale(tmp_path: Path) -> None:
 
     result = store.store(descriptor, new_override)
     assert result.sections[section.path].body == "Fresh content"
+
+
+def test_store_rejects_prompt_instead_of_descriptor(tmp_path: Path) -> None:
+    """Test that store() raises TypeError when passed a Prompt instead of PromptDescriptor."""
+    prompt = _build_prompt()
+    store = LocalPromptOverridesStore(root_path=tmp_path)
+
+    descriptor = PromptDescriptor.from_prompt(prompt)
+    section = descriptor.sections[0]
+    override = SectionOverride(
+        path=section.path,
+        expected_hash=section.content_hash,
+        body="Content",
+    )
+
+    with pytest.raises(TypeError, match="requires a PromptDescriptor"):
+        store.store(prompt, override)  # type: ignore[arg-type]

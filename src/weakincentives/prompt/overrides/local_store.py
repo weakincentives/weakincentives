@@ -266,6 +266,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
         Holds a lock for the entire read-modify-write sequence to prevent
         TOCTOU race conditions.
         """
+        _require_descriptor(descriptor)
         normalized_tag = self._filesystem.validate_identifier(tag, "tag")
         file_path = self._filesystem.override_file_path(
             ns=descriptor.ns,
@@ -457,6 +458,16 @@ class LocalPromptOverridesStore(PromptOverridesStore):
                 task_example_overrides=(),  # Task examples not seeded by default
             )
             return self.upsert(descriptor, seed_override)
+
+
+def _require_descriptor(descriptor: object) -> None:
+    """Fail fast if caller passes PromptLike instead of PromptDescriptor."""
+    if not isinstance(descriptor, PromptDescriptor):
+        msg = (
+            "store() requires a PromptDescriptor, not a Prompt or PromptTemplate. "
+            "Use PromptDescriptor.from_prompt(prompt) to create a descriptor."
+        )
+        raise TypeError(msg)
 
 
 def _lookup_section_hash(
