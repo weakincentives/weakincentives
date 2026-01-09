@@ -45,6 +45,7 @@ DOC_FILES = [
     "book/02-quickstart.md",
     "book/03-prompts.md",
     "book/04-tools.md",
+    "book/04.5-tool-policies.md",
     "book/05-sessions.md",
     "book/06-adapters.md",
     "book/07-main-loop.md",
