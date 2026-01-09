@@ -20,10 +20,10 @@ from threading import RLock
 from typing import TYPE_CHECKING, Any
 from uuid import UUID, uuid4
 
-from ...adapters._names import AdapterName
+from ...types import AdapterName
 from ...dataclasses import FrozenDataclass
 from ..logging import StructuredLogger, get_logger
-from ._types import (
+from .types import (
     ControlDispatcher,
     Dispatcher,
     DispatchResult,

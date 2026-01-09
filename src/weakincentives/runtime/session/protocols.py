@@ -20,7 +20,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, Self
 
 from ...types.dataclass import SupportsDataclass
-from ..events._types import DispatchResult, TelemetryDispatcher
+from ..events.types import DispatchResult, TelemetryDispatcher
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import Snapshot
 

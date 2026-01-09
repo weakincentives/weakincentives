@@ -28,7 +28,7 @@ from ...prompt import Prompt, RenderedPrompt
 from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.protocols import PromptProtocol
 from ...runtime.events import PromptExecuted, PromptRendered
-from ...runtime.events._types import TokenUsage
+from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol

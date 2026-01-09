@@ -14,6 +14,7 @@
 
 from __future__ import annotations
 
+from ._normalization import normalize_component_key
 from ._prompt_resources import PromptResources
 from ._types import ToolRenderableResult
 from .errors import (
@@ -73,6 +74,7 @@ from .tool_result import ToolResult
 __all__ = [
     "LocalPromptOverridesStore",
     "MarkdownSection",
+    "normalize_component_key",
     "OpenSectionsParams",
     "OutputParseError",
     "PolicyDecision",

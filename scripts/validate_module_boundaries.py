@@ -138,7 +138,9 @@ class ModuleBoundaryValidator:
 
         return ".".join(parts)
 
-    def _extract_imports(self, tree: ast.AST, module_name: str, file_path: Path) -> None:
+    def _extract_imports(
+        self, tree: ast.AST, module_name: str, file_path: Path
+    ) -> None:
         """Extract imports from AST."""
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -309,7 +311,9 @@ class ModuleBoundaryValidator:
                     graph[module_package].add(imported_package)
 
         # Detect cycles
-        def find_cycles(node: str, path: list[str], visited: set[str]) -> list[list[str]]:
+        def find_cycles(
+            node: str, path: list[str], visited: set[str]
+        ) -> list[list[str]]:
             if node in path:
                 cycle_start = path.index(node)
                 return [path[cycle_start:] + [node]]

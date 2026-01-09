@@ -79,6 +79,8 @@ from ._types import (
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
     SerializationError,
+    validate_visibility_timeout,
+    validate_wait_time,
 )
 
 __all__ = [
@@ -102,6 +104,8 @@ __all__ = [
     "RegistryResolver",
     "ReplyNotAvailableError",
     "SerializationError",
+    "validate_visibility_timeout",
+    "validate_wait_time",
 ]
 
 

@@ -26,7 +26,7 @@ from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...filesystem import Filesystem
 from ...prompt.protocols import PromptProtocol
-from ...runtime.events._types import ToolInvoked
+from ...runtime.events.types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker

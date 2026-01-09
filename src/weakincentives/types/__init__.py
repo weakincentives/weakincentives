@@ -14,6 +14,12 @@
 
 from __future__ import annotations
 
+from .adapter import (
+    CLAUDE_AGENT_SDK_ADAPTER_NAME,
+    LITELLM_ADAPTER_NAME,
+    OPENAI_ADAPTER_NAME,
+    AdapterName,
+)
 from .dataclass import (
     DataclassFieldMapping,
     SupportsDataclass,
@@ -32,6 +38,8 @@ from .json import (
 )
 
 __all__ = [
+    "AdapterName",
+    "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "ContractResult",
     "DataclassFieldMapping",
     "JSONArray",
@@ -39,6 +47,8 @@ __all__ = [
     "JSONObject",
     "JSONObjectT",
     "JSONValue",
+    "LITELLM_ADAPTER_NAME",
+    "OPENAI_ADAPTER_NAME",
     "ParseableDataclassT",
     "SupportsDataclass",
     "SupportsDataclassOrNone",

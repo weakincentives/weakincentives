@@ -20,7 +20,7 @@ from datetime import datetime
 from typing import Any, Protocol, cast, override
 from uuid import UUID, uuid4
 
-from ...adapters._names import AdapterName
+from ...types import AdapterName
 from ...dataclasses import FrozenDataclass
 
 EventHandler = Callable[[object], None]

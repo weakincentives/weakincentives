@@ -25,11 +25,7 @@ from uuid import UUID
 from ...dataclasses import FrozenDataclass
 from ...errors import WinkError
 from ...serde import dump, parse
-from ...serde._utils import (
-    TYPE_REF_KEY,
-    resolve_type_identifier,
-    type_identifier,
-)
+from ...serde import TYPE_REF_KEY, resolve_type_identifier, type_identifier
 from ...types import JSONValue
 from ...types.dataclass import SupportsDataclass
 from ._slice_types import SessionSlice, SessionSliceType
