@@ -131,46 +131,112 @@ python build/select_tests.py --files src/foo.py src/bar.py
 
 ### CI Integration
 
-Example GitHub Actions workflow:
+The `weakincentives` repository uses smart test selection in its GitHub Actions CI workflow. The strategy is:
+
+**On main branch pushes:**
+1. Build coverage cache with full test suite
+2. Upload cache with commit-specific key and latest key
+
+**On pull requests:**
+1. Restore coverage cache from main branch
+2. Run smart test selection if cache available
+3. Fall back to targeted/full tests if cache unavailable or smart selection fails
+
+**Implementation in `.github/workflows/ci.yml`:**
 
 ```yaml
-name: PR Tests
+# Build coverage cache on main branch pushes
+build-coverage-cache:
+  if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v5
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+    - name: Set up Python
+      run: uv python install 3.14
+    - name: Install dependencies
+      run: uv sync --all-extras
 
-on: pull_request
+    - name: Build coverage cache
+      run: make build-coverage-cache
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Need full history for git diff
+    - name: Upload coverage cache
+      uses: actions/cache/save@v4
+      with:
+        path: .coverage-cache
+        key: coverage-cache-${{ github.sha }}
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+    - name: Upload coverage cache (latest)
+      uses: actions/cache/save@v4
+      with:
+        path: .coverage-cache
+        key: coverage-cache-main-latest
 
-      - name: Install dependencies
-        run: |
-          pip install uv
-          uv sync --all-extras
+# Test job with smart selection
+test:
+  needs: detect-changes
+  runs-on: ubuntu-latest
+  steps:
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0  # Need full history for git diff
 
-      - name: Download coverage cache
-        uses: actions/cache@v4
-        with:
-          path: .coverage-cache
-          key: coverage-cache-${{ github.event.pull_request.base.sha }}
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
 
-      - name: Run smart tests
-        run: make test-smart
-        env:
-          BASE: origin/${{ github.event.pull_request.base.ref }}
+    - name: Set up Python
+      run: uv python install 3.14
 
-      - name: Fallback to full tests if needed
-        if: failure()
-        run: make test
+    - name: Install dependencies
+      run: uv sync --all-extras
+
+    # Restore coverage cache for PRs
+    - name: Restore coverage cache
+      if: github.event_name == 'pull_request'
+      id: restore-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .coverage-cache
+        key: coverage-cache-main-latest
+        restore-keys: |
+          coverage-cache-main-
+
+    # Smart test selection (PRs only, when cache available)
+    - name: Run smart test selection
+      if: |
+        github.event_name == 'pull_request' &&
+        steps.restore-cache.outputs.cache-hit == 'true'
+      id: smart-tests
+      continue-on-error: true
+      run: make test-smart
+      env:
+        BASE: ${{ github.event.pull_request.base.sha }}
+
+    # Fallback to full tests if smart selection unavailable/failed
+    - name: Run full test suite
+      if: |
+        steps.smart-tests.outcome == 'failure' ||
+        steps.smart-tests.outcome == 'skipped'
+      run: make test
 ```
+
+**Key Features:**
+- **Dual cache keys**: Commit-specific and latest for flexibility
+- **Graceful degradation**: Falls back to full tests if cache unavailable
+- **Full history checkout**: `fetch-depth: 0` enables git diff for change detection
+- **Safe failure handling**: `continue-on-error: true` prevents false failures
+- **Automatic cache updates**: Main branch pushes refresh the cache
+
+**Benefits:**
+- ✅ Faster PR feedback (5-50x speedup for isolated changes)
+- ✅ No maintenance overhead (cache updates automatically)
+- ✅ Safe fallbacks (never skips necessary tests)
+- ✅ Works alongside existing targeted test strategy
 
 ## Exit Codes
 

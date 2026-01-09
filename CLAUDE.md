@@ -174,6 +174,7 @@ Consult these specs before modifying related code:
 | `specs/SKILLS.md` | Agent Skills specification and WINK skill mounting |
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
 | `specs/SMART_TEST_SELECTION.md` | Coverage caching, smart test selection, CI optimization |
+| `specs/SMART_TEST_SELECTION_CI.md` | CI integration guide, workflow strategy, cache management |
 | `specs/TASK_COMPLETION.md` | Task completion checking, PlanBasedChecker, composite verification |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
