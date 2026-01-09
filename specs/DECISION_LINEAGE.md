@@ -44,14 +44,40 @@ Decision lineage enriches `PolicyDecision`, not replaces it. Simple policies
 return `PolicyDecision.allow()`. Rich policies add lineage fields. The type
 is the same; the detail varies by need.
 
-### Exceptions Are Policies
+### Overrides Are Policies, Not Workflows
 
 Standing exceptions are policies with special characteristics:
 - Run after base policies (lower priority by default)
 - Can override denials from specific policies
-- Activate conditionally
+- Activate conditionally based on context
 
-This keeps the policy framework unified rather than adding parallel machinery.
+This keeps the policy framework unified. An override policy is still a
+declarative constraint ("if retention query and no filter specified, exclude
+pilots"), not a workflow step. The agent remains free to reach any goal state
+that satisfies all active constraints.
+
+See [POLICIES_OVER_WORKFLOWS.md](./POLICIES_OVER_WORKFLOWS.md) for the
+underlying philosophy.
+
+### Lineage Is Observability, Not Prescription
+
+Lineage records *why* decisions were made, enabling:
+- **Debugging**: Understand why an action was allowed or denied
+- **Consistency**: Compare methodology across reports
+- **Auditing**: Trace decisions back to policies and inputs
+
+Lineage does not prescribe *how* to make decisions. The agent reasons freely;
+lineage captures that reasoning for later inspection.
+
+### Precedent Is Advisory, Not Binding
+
+Precedent queries surface similar past decisions to inform consistency. They
+do **not** constrain the agent's choices. The agent may deviate from precedent
+when appropriate — lineage records both the precedent and the deviation.
+
+This preserves agency: the agent reasons about constraints, discovers
+approaches, and adapts. Precedent is information that aids reasoning, not a
+rule that restricts it.
 
 ### Observers Consume Decisions
 
@@ -673,6 +699,86 @@ return PolicyDecision.allow_with_lineage(
 
 The `lineage` field is optional. Policies that don't need rich tracing
 continue to return simple `PolicyDecision.allow()` or `deny()`.
+
+## Anti-Patterns
+
+### Precedent as Constraint
+
+```python
+# Anti-pattern: blocking deviation from precedent
+def check(self, tool, params, *, context):
+    precedent = find_precedents(context.session, tool_name=tool.name)
+    if precedent and precedent[0].decision.lineage:
+        prior_method = precedent[0].decision.lineage.inputs.get("method")
+        current_method = params.method
+        if prior_method != current_method:
+            return PolicyDecision.deny(
+                f"Must use {prior_method} to match precedent"
+            )
+    return PolicyDecision.allow()
+```
+
+This transforms precedent from information into constraint, eliminating agent
+flexibility. The agent may have good reason to deviate — a new data source,
+corrected methodology, or changed business context. Record the deviation in
+lineage; don't prevent it.
+
+### Lineage as Workflow Enforcement
+
+```python
+# Anti-pattern: using lineage to enforce step ordering
+def check(self, tool, params, *, context):
+    decisions = [t.decision for t in context.session[ToolInvoked].all()]
+
+    # Enforce: must have done metric_selection before data_query
+    if tool.name == "data_query":
+        if not any(d.lineage.policy_name == "metric_selection" for d in decisions):
+            return PolicyDecision.deny("Must select metric first")
+    return PolicyDecision.allow()
+```
+
+This encodes workflow steps as lineage checks. If metric selection is truly
+required before data query, express it as a policy dependency, not a lineage
+inspection. Lineage records what happened; policies constrain what can happen.
+
+### Over-Recording Trivial Decisions
+
+```python
+# Anti-pattern: full lineage for every policy check
+def check(self, tool, params, *, context):
+    return PolicyDecision.allow_with_lineage(
+        reason="Allowed",
+        lineage=DecisionLineage(
+            inputs={"everything": InputRecord(...)},
+            policy_name=self.name,
+            policy_version="1.0.0",
+            conditions=(
+                ConditionResult("always_true", "True", True),
+            ),
+        ),
+    )
+```
+
+Not every decision needs rich lineage. A simple `ReadBeforeWritePolicy` can
+return `PolicyDecision.allow()` — the audit trail is in `ToolInvoked` events.
+Reserve rich lineage for decisions where methodology matters: metric
+definitions, data source selection, business rule application.
+
+### Override Chains
+
+```python
+# Anti-pattern: overrides that override overrides
+policies = [
+    BasePolicy(),
+    OverrideA(overrides={"base_policy"}),
+    OverrideB(overrides={"override_a"}),  # Overrides the override
+    OverrideC(overrides={"override_b"}),  # And again
+]
+```
+
+Deep override chains recreate workflow complexity. If you need to override an
+override, the original constraints are likely wrong. Refactor into clearer
+base policies with orthogonal concerns.
 
 ## Summary
 
