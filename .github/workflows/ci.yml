@@ -146,9 +146,9 @@ jobs:
       - name: Run pyright
         run: make pyright
 
-  # Test job - always runs core tests, then targeted or full suite based on changes
-  test:
-    needs: detect-changes
+  # Build coverage cache on main branch pushes
+  build-coverage-cache:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -161,21 +161,91 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras
 
+      - name: Build coverage cache
+        run: make build-coverage-cache
+
+      - name: Upload coverage cache
+        uses: actions/cache/save@v4
+        with:
+          path: .coverage-cache
+          key: coverage-cache-${{ github.sha }}
+
+      - name: Upload coverage cache (latest)
+        uses: actions/cache/save@v4
+        with:
+          path: .coverage-cache
+          key: coverage-cache-main-latest
+
+  # Test job - smart test selection on PRs, full suite on main
+  test:
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # Need full history for git diff
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.14
+
+      - name: Install dependencies
+        run: uv sync --all-extras
+
       # Always run core tests (fast, high-value smoke tests)
       - name: Run core tests
         run: uv run --all-extras pytest -m core --strict-config --strict-markers -q --no-header --no-cov
 
-      # Run full test suite when core infrastructure changes
+      # Try to restore coverage cache for smart test selection (PRs only)
+      - name: Restore coverage cache
+        if: github.event_name == 'pull_request'
+        id: restore-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .coverage-cache
+          key: coverage-cache-main-latest
+          restore-keys: |
+            coverage-cache-main-
+
+      # Smart test selection on PRs (when cache available)
+      - name: Run smart test selection
+        if: |
+          github.event_name == 'pull_request' &&
+          steps.restore-cache.outputs.cache-hit == 'true' &&
+          needs.detect-changes.outputs.run_all != 'true' &&
+          needs.detect-changes.outputs.core != 'true' &&
+          needs.detect-changes.outputs.ci != 'true'
+        id: smart-tests
+        continue-on-error: true
+        run: |
+          BASE="${{ github.event.pull_request.base.sha }}"
+          echo "Running smart test selection against $BASE"
+          make test-smart
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+
+      # Run full test suite when:
+      # - Main branch push
+      # - Core/CI changes
+      # - Smart test selection failed or unavailable
       - name: Run full test suite
         if: |
           needs.detect-changes.outputs.run_all == 'true' ||
           needs.detect-changes.outputs.core == 'true' ||
-          needs.detect-changes.outputs.ci == 'true'
+          needs.detect-changes.outputs.ci == 'true' ||
+          steps.smart-tests.outcome == 'failure' ||
+          steps.smart-tests.outcome == 'skipped'
         run: make test
 
-      # Run targeted tests for isolated module changes
+      # Run targeted tests for isolated module changes (fallback when no cache)
       - name: Run targeted tests
         if: |
+          github.event_name == 'pull_request' &&
+          steps.restore-cache.outputs.cache-hit != 'true' &&
           needs.detect-changes.outputs.run_all != 'true' &&
           needs.detect-changes.outputs.core != 'true' &&
           needs.detect-changes.outputs.ci != 'true'
