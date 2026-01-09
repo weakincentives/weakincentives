@@ -51,11 +51,13 @@ PR opened/updated
 ### Cache Keys
 
 **Primary key**: `coverage-cache-main-latest`
+
 - Updated on every main branch push
 - Used by all PRs for smart test selection
 - Always contains the most recent coverage data
 
 **Commit-specific key**: `coverage-cache-{sha}`
+
 - Allows restoring exact historical coverage
 - Useful for debugging or bisecting
 - Not typically used in normal workflow
@@ -63,9 +65,9 @@ PR opened/updated
 ### Cache Lifecycle
 
 1. **Creation**: Main branch push → `build-coverage-cache` job
-2. **Storage**: GitHub Actions cache (7-day retention, 10GB limit)
-3. **Restoration**: PR → `restore-cache` step
-4. **Invalidation**: Automatic after 7 days or manual cache deletion
+1. **Storage**: GitHub Actions cache (7-day retention, 10GB limit)
+1. **Restoration**: PR → `restore-cache` step
+1. **Invalidation**: Automatic after 7 days or manual cache deletion
 
 ### Cache Size
 
@@ -78,9 +80,11 @@ PR opened/updated
 ### Main Branch Pushes
 
 **Before smart test selection:**
+
 - Run full test suite: ~60s
 
 **After smart test selection:**
+
 - Run full test suite: ~60s (same)
 - Build coverage cache: +10-15s (context tracking overhead)
 - **Total**: ~75s (+25% on main branch)
@@ -88,9 +92,11 @@ PR opened/updated
 ### Pull Requests
 
 **Before smart test selection:**
+
 - Run targeted tests: ~30-60s (depends on change scope)
 
 **After smart test selection:**
+
 - Restore cache: ~5s
 - Smart test selection: ~5-20s (5-50 tests)
 - **Total**: ~10-25s (50-80% faster for typical PRs)
@@ -102,13 +108,14 @@ PR opened/updated
 ### Key Metrics to Track
 
 1. **Cache hit rate**: % of PRs that successfully use smart selection
-2. **Test reduction**: Average # of tests run (smart vs full)
-3. **Time savings**: PR test time before/after
-4. **False negative rate**: PRs that should have run more tests
+1. **Test reduction**: Average # of tests run (smart vs full)
+1. **Time savings**: PR test time before/after
+1. **False negative rate**: PRs that should have run more tests
 
 ### GitHub Actions Insights
 
 View cache performance in Actions:
+
 - Cache hit/miss rates
 - Cache download times
 - Test execution times
@@ -118,40 +125,46 @@ View cache performance in Actions:
 ### Cache Not Found
 
 **Symptoms:**
+
 ```
 Restore coverage cache: Cache not found for key: coverage-cache-main-latest
 ```
 
 **Solutions:**
+
 1. Wait for next main branch push to build cache
-2. Manually trigger cache build workflow
-3. Fall back to targeted tests (automatic)
+1. Manually trigger cache build workflow
+1. Fall back to targeted tests (automatic)
 
 ### Smart Test Selection Failed
 
 **Symptoms:**
+
 ```
 Error querying coverage database: ...
 Running full test suite (fallback)
 ```
 
 **Solutions:**
+
 1. Check coverage.py version compatibility
-2. Verify git history is available (fetch-depth: 0)
-3. Review error logs for specific issues
-4. Fallback to full tests happens automatically
+1. Verify git history is available (fetch-depth: 0)
+1. Review error logs for specific issues
+1. Fallback to full tests happens automatically
 
 ### Cache Size Limit Exceeded
 
 **Symptoms:**
+
 ```
 Cache size exceeded: 10GB limit
 ```
 
 **Solutions:**
+
 1. Review cache retention policy
-2. Delete old caches manually
-3. Consider cache size optimization
+1. Delete old caches manually
+1. Consider cache size optimization
 
 ## Migration Guide
 
@@ -164,7 +177,7 @@ Already enabled in `.github/workflows/ci.yml`! No action needed.
 To temporarily disable:
 
 1. **Option 1**: Comment out `build-coverage-cache` job
-2. **Option 2**: Add condition to skip smart tests:
+1. **Option 2**: Add condition to skip smart tests:
    ```yaml
    - name: Run smart test selection
      if: false  # Disable smart tests
@@ -246,7 +259,7 @@ python_files = [
 A: Every main branch push automatically rebuilds and updates the cache.
 
 **Q: What if the cache is stale?**
-A: Smart selection falls back to full tests when uncertain. Cache is usually fresh (<1 day old).
+A: Smart selection falls back to full tests when uncertain. Cache is usually fresh (\<1 day old).
 
 **Q: Does this work with matrix builds?**
 A: Yes, each matrix job can restore the same cache independently.

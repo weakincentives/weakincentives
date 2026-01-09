@@ -15,9 +15,9 @@ Running the full test suite on every PR can be time-consuming, especially as the
 By caching the mapping between tests and the code they cover, we can:
 
 1. **Reduce CI time**: Run only affected tests on PRs
-2. **Maintain confidence**: Still achieve 100% coverage of changed code
-3. **Enable faster iteration**: Get quicker feedback during development
-4. **Optimize resources**: Use less compute time for test runs
+1. **Maintain confidence**: Still achieve 100% coverage of changed code
+1. **Enable faster iteration**: Get quicker feedback during development
+1. **Optimize resources**: Use less compute time for test runs
 
 ## Architecture
 
@@ -67,9 +67,9 @@ The `--cov-context=test` flag enables dynamic context tracking, which records th
 Given a set of changed files:
 
 1. **Normalize paths**: Convert to repo-relative paths
-2. **Filter to source files**: Only consider `src/**/*.py` files
-3. **Query database**: Find all contexts (tests) that executed any lines in those files
-4. **Return test set**: Sorted list of pytest node IDs to run
+1. **Filter to source files**: Only consider `src/**/*.py` files
+1. **Query database**: Find all contexts (tests) that executed any lines in those files
+1. **Return test set**: Sorted list of pytest node IDs to run
 
 ### Fallback Strategy
 
@@ -93,11 +93,13 @@ make build-coverage-cache
 ```
 
 This will:
+
 1. Run pytest with `--cov-context=test`
-2. Store the `.coverage` database in `.coverage-cache/`
-3. Save metadata (git commit, timestamp, statistics)
+1. Store the `.coverage` database in `.coverage-cache/`
+1. Save metadata (git commit, timestamp, statistics)
 
 **When to rebuild**:
+
 - After merging to main
 - Periodically (e.g., nightly)
 - When test structure changes significantly
@@ -134,13 +136,15 @@ python build/select_tests.py --files src/foo.py src/bar.py
 The `weakincentives` repository uses smart test selection in its GitHub Actions CI workflow. The strategy is:
 
 **On main branch pushes:**
+
 1. Build coverage cache with full test suite
-2. Upload cache with commit-specific key and latest key
+1. Upload cache with commit-specific key and latest key
 
 **On pull requests:**
+
 1. Restore coverage cache from main branch
-2. Run smart test selection if cache available
-3. Fall back to targeted/full tests if cache unavailable or smart selection fails
+1. Run smart test selection if cache available
+1. Fall back to targeted/full tests if cache unavailable or smart selection fails
 
 **Implementation in `.github/workflows/ci.yml`:**
 
@@ -226,6 +230,7 @@ test:
 ```
 
 **Key Features:**
+
 - **Dual cache keys**: Commit-specific and latest for flexibility
 - **Graceful degradation**: Falls back to full tests if cache unavailable
 - **Full history checkout**: `fetch-depth: 0` enables git diff for change detection
@@ -233,6 +238,7 @@ test:
 - **Automatic cache updates**: Main branch pushes refresh the cache
 
 **Benefits:**
+
 - ✅ Faster PR feedback (5-50x speedup for isolated changes)
 - ✅ No maintenance overhead (cache updates automatically)
 - ✅ Safe fallbacks (never skips necessary tests)
@@ -260,9 +266,9 @@ When using `--run`, exit code 2 triggers a fallback to `make test`.
 The system is designed to **never skip a test that should run**:
 
 1. **Uncovered files**: If any changed file isn't in the cache, run all tests
-2. **New tests**: Tests not in the cache will be discovered by fallback
-3. **Test changes**: Changes to test files trigger full runs
-4. **Indirect dependencies**: Coverage tracks actual execution, catching indirect dependencies
+1. **New tests**: Tests not in the cache will be discovered by fallback
+1. **Test changes**: Changes to test files trigger full runs
+1. **Indirect dependencies**: Coverage tracks actual execution, catching indirect dependencies
 
 ### Coverage Completeness
 
@@ -291,18 +297,20 @@ Results are deterministic given the same cache and changes:
 
 ### Test Selection
 
-- **Query time**: <1 second for typical PR (10-50 changed files)
+- **Query time**: \<1 second for typical PR (10-50 changed files)
 - **Memory**: Minimal (SQLite is on-disk)
 - **Speedup**: 5-50x for typical PRs (depends on change scope)
 
 ### Example Metrics
 
 For a codebase with:
+
 - 142 test files
 - 1000+ test cases
 - 10,000+ lines of source code
 
 Typical PR changing 5 files:
+
 - Full test run: 60 seconds
 - Smart test selection: 5-15 seconds (run ~50-200 tests)
 - **Speedup**: 4-12x
@@ -413,9 +421,10 @@ Error querying coverage database: ...
 ```
 
 **Solutions**:
+
 1. Rebuild cache: `make build-coverage-cache`
-2. Check coverage.py version: `uv run python -c "import coverage; print(coverage.__version__)"`
-3. Delete and rebuild: `rm -rf .coverage-cache && make build-coverage-cache`
+1. Check coverage.py version: `uv run python -c "import coverage; print(coverage.__version__)"`
+1. Delete and rebuild: `rm -rf .coverage-cache && make build-coverage-cache`
 
 ### All Tests Running
 
@@ -424,6 +433,7 @@ Running all tests due to uncovered files.
 ```
 
 This is expected when:
+
 - New files added
 - Cache is stale
 - Non-source files changed
@@ -444,9 +454,11 @@ If too many tests are selected, the cache may be tracking shared utility code.
 ## References
 
 Coverage.py documentation:
+
 - [Database Schema](https://coverage.readthedocs.io/en/7.13.0/dbschema.html)
 - [Dynamic Contexts](https://coverage.readthedocs.io/en/7.13.0/contexts.html)
 - [API Reference](https://coverage.readthedocs.io/en/7.13.0/api.html)
 
 Pytest-cov:
+
 - [Context Support](https://pytest-cov.readthedocs.io/en/latest/contexts.html)

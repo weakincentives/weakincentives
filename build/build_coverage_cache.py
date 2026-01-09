@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Build a cached coverage database with test-to-code mappings.
 
 This script runs the full test suite with dynamic context tracking enabled,
@@ -21,7 +33,7 @@ import json
 import shutil
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 
@@ -104,15 +116,15 @@ def analyze_coverage_database(coverage_path: Path) -> dict[str, int]:
         schema_version = cursor.fetchone()[0]
 
         conn.close()
-
+    except Exception as e:
+        print(f"Warning: Failed to analyze coverage database: {e}")
+        return {}
+    else:
         return {
             "test_count": test_count,
             "file_count": file_count,
             "schema_version": schema_version,
         }
-    except Exception as e:
-        print(f"Warning: Failed to analyze coverage database: {e}")
-        return {}
 
 
 def build_cache(cache_dir: Path) -> int:
@@ -149,7 +161,7 @@ def build_cache(cache_dir: Path) -> int:
 
     # Create metadata
     metadata = {
-        "created_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(datetime.UTC).isoformat(),
         "git_commit": get_git_commit(),
         "git_branch": get_git_branch(),
         "coverage_file": str(coverage_dest),
@@ -158,7 +170,7 @@ def build_cache(cache_dir: Path) -> int:
 
     # Write metadata
     metadata_path = cache_dir / "metadata.json"
-    with open(metadata_path, "w") as f:
+    with metadata_path.open("w") as f:
         json.dump(metadata, f, indent=2)
     print(f"Wrote metadata to {metadata_path}")
 

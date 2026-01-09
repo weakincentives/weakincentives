@@ -1,4 +1,16 @@
 #!/usr/bin/env python3
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Select tests to run based on changed files and cached coverage data.
 
 This script queries a cached coverage database (built with build_coverage_cache.py)
@@ -35,6 +47,12 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import NamedTuple
+
+# Maximum number of tests to show in verbose output before truncating
+_MAX_TESTS_TO_DISPLAY = 10
+
+# Exit code indicating that all tests should be run (fallback)
+_EXIT_CODE_RUN_ALL_TESTS = 2
 
 
 class CoverageQuery(NamedTuple):
@@ -157,7 +175,9 @@ def query_coverage_for_files(
     uncovered_files = set()
     for changed_file in changed_files:
         norm_file = normalize_path(changed_file, repo_root)
-        if any(norm_file in path or Path(norm_file).name in path for path in covered_paths):
+        if any(
+            norm_file in path or Path(norm_file).name in path for path in covered_paths
+        ):
             covered_files.add(changed_file)
         else:
             uncovered_files.add(changed_file)
@@ -197,11 +217,11 @@ def load_cache_metadata(cache_dir: Path) -> dict | None:
     if not metadata_path.exists():
         return None
 
-    with open(metadata_path) as f:
+    with metadata_path.open() as f:
         return json.load(f)
 
 
-def select_tests(
+def select_tests(  # noqa: C901, PLR0912
     changed_files: list[str],
     cache_dir: Path,
     repo_root: Path,
@@ -224,12 +244,14 @@ def select_tests(
     if not coverage_db.exists():
         print("Coverage cache not found. Run 'make build-coverage-cache' first.")
         print("Falling back to running all tests.")
-        return [], 2
+        return [], _EXIT_CODE_RUN_ALL_TESTS
 
     # Load cache metadata
     metadata = load_cache_metadata(cache_dir)
     if metadata and verbose:
-        print(f"Using coverage cache from commit {metadata.get('git_commit', 'unknown')[:8]}")
+        print(
+            f"Using coverage cache from commit {metadata.get('git_commit', 'unknown')[:8]}"
+        )
         print(f"Cache created: {metadata.get('created_at', 'unknown')}")
         print(f"Tests tracked: {metadata.get('test_count', 'unknown')}")
         print()
@@ -242,7 +264,7 @@ def select_tests(
     if not python_files:
         if verbose:
             print("No Python source files changed in src/. Running all tests.")
-        return [], 2
+        return [], _EXIT_CODE_RUN_ALL_TESTS
 
     if verbose:
         print(f"Changed Python files ({len(python_files)}):")
@@ -256,11 +278,13 @@ def select_tests(
     except Exception as e:
         print(f"Error querying coverage database: {e}", file=sys.stderr)
         print("Falling back to running all tests.")
-        return [], 2
+        return [], _EXIT_CODE_RUN_ALL_TESTS
 
     # Report uncovered files
     if result.uncovered_files and verbose:
-        print(f"Warning: {len(result.uncovered_files)} files not found in coverage cache:")
+        print(
+            f"Warning: {len(result.uncovered_files)} files not found in coverage cache:"
+        )
         for f in sorted(result.uncovered_files):
             print(f"  - {f}")
         print("These may be new files or the cache may be stale.")
@@ -270,17 +294,17 @@ def select_tests(
     if result.uncovered_files:
         if verbose:
             print("Running all tests due to uncovered files.")
-        return [], 2
+        return [], _EXIT_CODE_RUN_ALL_TESTS
 
     # Convert test set to sorted list
     tests = sorted(result.tests)
 
     if verbose:
         print(f"Selected {len(tests)} tests to run:")
-        for test in tests[:10]:  # Show first 10
+        for test in tests[:_MAX_TESTS_TO_DISPLAY]:
             print(f"  - {test}")
-        if len(tests) > 10:
-            print(f"  ... and {len(tests) - 10} more")
+        if len(tests) > _MAX_TESTS_TO_DISPLAY:
+            print(f"  ... and {len(tests) - _MAX_TESTS_TO_DISPLAY} more")
         print()
 
     return tests, 0
@@ -311,14 +335,15 @@ def run_tests(test_ids: list[str]) -> int:
         "--cov-fail-under=100",
         "--maxfail=1",
         "-v",
-    ] + test_ids
+        *test_ids,
+    ]
 
     print(f"Running {len(test_ids)} selected tests...")
     result = subprocess.run(cmd)
     return result.returncode
 
 
-def main() -> int:
+def main() -> int:  # noqa: C901, PLR0911
     parser = argparse.ArgumentParser(
         description="Select tests to run based on changed files and cached coverage"
     )
@@ -386,30 +411,30 @@ def main() -> int:
     )
 
     # Handle fallback cases
-    if exit_code == 2:
+    if exit_code == _EXIT_CODE_RUN_ALL_TESTS:
         if args.run:
             # Run all tests
             result = subprocess.run(["make", "test"])
             return result.returncode
-        else:
-            print("ALL_TESTS")  # Signal to caller to run all tests
-            return 2
-    elif exit_code != 0:
+        print("ALL_TESTS")  # Signal to caller to run all tests
+        return _EXIT_CODE_RUN_ALL_TESTS
+    if exit_code != 0:
         return exit_code
 
     # Output or run tests
     if args.run:
         if not tests:
-            print("No tests selected. This likely means the changes don't affect tested code.")
+            print(
+                "No tests selected. This likely means the changes don't affect tested code."
+            )
             print("Running all tests to be safe...")
             result = subprocess.run(["make", "test"])
             return result.returncode
         return run_tests(tests)
-    else:
-        # Print test IDs (one per line for easy parsing)
-        for test in tests:
-            print(test)
-        return 0
+    # Print test IDs (one per line for easy parsing)
+    for test in tests:
+        print(test)
+    return 0
 
 
 if __name__ == "__main__":
