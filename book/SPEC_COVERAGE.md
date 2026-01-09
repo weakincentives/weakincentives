@@ -13,7 +13,7 @@ This document tracks which specs in `/specs/` are covered by book chapters in `/
 ✅ **New Coverage Added:**
 - MAILBOX.md, MAILBOX_RESOLVER.md, VERIFICATION.md → Chapter 7.5: Distributed Orchestration
 - SKILLS.md → Chapter 6.5: Agent Skills Integration
-- TASK_COMPLETION.md, TRAJECTORY_OBSERVERS.md → Chapter 4.6: Task Monitoring
+- TASK_COMPLETION.md → Chapter 4.6: Task Completion Verification
 - WINK_DEBUG.md → Chapter 13.5: The Debug UI
 - LOGGING.md → Chapter 13.6: Structured Logging
 - SLICES.md → Chapter 5.7: Storage Backends
@@ -21,21 +21,25 @@ This document tracks which specs in `/specs/` are covered by book chapters in `/
 - POLICIES_OVER_WORKFLOWS.md → Chapter 1.5: Policies Over Workflows
 - EXHAUSTIVENESS.md → Chapter 15.7: Exhaustive Type Checking
 
+⚠️ **Spec-Only (Not Implemented):**
+- TRAJECTORY_OBSERVERS.md → Design spec only; implementation pending
+
 ✅ **Expanded from Partial to Full:**
 - RESOURCE_REGISTRY.md → Chapter 3.13: Advanced Resource Management
 - FILESYSTEM.md → Chapter 12.7: Filesystem Protocol
 - DATACLASSES.md → Chapter 18.12: Dataclasses
 - CLAUDE_AGENT_SDK.md → Chapter 6 (expanded coverage)
 
-**Result**: Coverage improved from 44% to **94%** fully covered specs.
+**Result**: Coverage improved from 44% to **91%** of implemented specs (29/32). One additional spec (TRAJECTORY_OBSERVERS.md) exists as design-only.
 
 ---
 
 ## Coverage Summary
 
 - **Total specs**: 32
-- **Fully covered**: 30 specs (94%)
+- **Fully covered**: 29 specs (91%)
 - **Partially covered**: 1 spec (3%)
+- **Spec-only (not yet implemented)**: 1 spec (3%)
 - **Not covered**: 1 spec (3%)
 
 ---
@@ -67,12 +71,11 @@ These specs have comprehensive book chapter coverage:
 | SESSIONS.md | Chapter 5: Sessions | Complete session lifecycle coverage |
 | SKILLS.md | Chapter 6.5 | Agent Skills spec and integration guide |
 | SLICES.md | Chapter 5.7 | Storage backends and JSONL persistence |
-| TASK_COMPLETION.md | Chapter 4.6 | Task monitoring and PlanBasedChecker |
+| TASK_COMPLETION.md | Chapter 4.6 | Task completion checking with PlanBasedChecker |
 | TESTING.md | Chapter 14: Testing & Reliability | Test harnesses and strategies |
 | THREAD_SAFETY.md | Chapter 15.6 | Concurrency patterns and thread-safety guide |
 | TOOLS.md | Chapter 4: Tools | Comprehensive tool system coverage |
 | TOOL_POLICIES.md | Chapter 4.5: Tool Policies | Dedicated chapter with custom policy guide |
-| TRAJECTORY_OBSERVERS.md | Chapter 4.6 | Progress monitoring and stall detection |
 | VERIFICATION.md | Chapter 7.5 | Redis mailbox verification and invariants |
 | WINK_DEBUG.md | Chapter 13.5 | Debug UI walkthrough and snapshot explorer |
 | WORKSPACE.md | Chapter 12: Workspace Tools | VFS, Podman, planning tools |
@@ -86,6 +89,16 @@ Only one spec remains partially covered:
 | Spec | Current Coverage | Gap | Recommendation |
 |------|-----------------|-----|----------------|
 | HEALTH.md | Ch. 9 (brief) | Missing watchdog details, health endpoint patterns | Expand health monitoring in Ch. 9 or 13 |
+
+---
+
+## Spec-Only (Not Yet Implemented) 📋
+
+These specs describe features that are designed but not yet implemented in the codebase:
+
+| Spec | Description | Status | Notes |
+|------|-------------|--------|-------|
+| TRAJECTORY_OBSERVERS.md | Ongoing progress assessment, stall/drift detection | Design only | Protocol and interfaces defined in spec; implementation pending. Chapter 4.6 covers only the implemented TaskCompletionChecker. |
 
 ---
 
@@ -116,7 +129,8 @@ Only one spec remains without coverage:
    - ✅ Added: LOGGING.md structured logging guide (Ch. 13.6)
 
 4. ~~**Add Task Monitoring Section**~~ → **COMPLETED** (Chapter 4.6)
-   - ✅ Covered: TASK_COMPLETION.md, TRAJECTORY_OBSERVERS.md
+   - ✅ Covered: TASK_COMPLETION.md (implemented feature)
+   - ⚠️ TRAJECTORY_OBSERVERS.md is spec-only (not yet implemented)
    - ✅ Positioned in Ch. 4 (Tools)
 
 5. ~~**Expand Chapter 6 (Adapters)**~~ → **COMPLETED**
@@ -156,8 +170,9 @@ Only one spec remains without coverage:
 - ✅ **No gaps** - POLICIES_OVER_WORKFLOWS.md now covered in Ch. 1.5
 
 ### Part II: Core Abstractions
-- ✅ **No gaps** - All core specs fully covered
-- ✅ TASK_COMPLETION.md, TRAJECTORY_OBSERVERS.md → Ch. 4.6
+- ✅ **No gaps** - All implemented core specs fully covered
+- ✅ TASK_COMPLETION.md → Ch. 4.6
+- ⚠️ TRAJECTORY_OBSERVERS.md → Spec-only (not yet implemented)
 - ✅ RESOURCE_REGISTRY.md → Ch. 3.13
 - ✅ FILESYSTEM.md → Ch. 12.7
 
@@ -203,7 +218,7 @@ Only one spec remains without coverage:
 - Lifecycle: ✅ Full (LIFECYCLE.md)
 - Testing: ✅ Full (TESTING.md)
 - Debugging: ✅ Full (WINK_DEBUG.md, LOGGING.md)
-- Monitoring: ✅ Full (TRAJECTORY_OBSERVERS.md, TASK_COMPLETION.md)
+- Monitoring: ✅ Partial (TASK_COMPLETION.md implemented; TRAJECTORY_OBSERVERS.md spec-only)
 - Concurrency: ✅ Full (THREAD_SAFETY.md)
 - Health: ⚠️ Partial (HEALTH.md - brief mention in Ch. 9)
 
@@ -221,9 +236,10 @@ Only one spec remains without coverage:
 ### Completed Work (January 2026) ✅
 
 1. ✅ **Reviewed coverage gaps** - All high-priority specs identified and addressed
-2. ✅ **Added critical chapters** - Mailbox, Skills, Monitoring all now fully covered
-3. ✅ **Expanded existing chapters** - 16 specs moved from partial/missing to full coverage
-4. ✅ **Updated this document** - Coverage improved from 44% to 94%
+2. ✅ **Added critical chapters** - Mailbox, Skills, Task Completion all now fully covered
+3. ✅ **Expanded existing chapters** - 15 implemented specs moved from partial/missing to full coverage
+4. ✅ **Updated this document** - Coverage improved from 44% to 91% (29/32 implemented specs)
+5. ✅ **Identified spec-only features** - TRAJECTORY_OBSERVERS.md documented as design-only
 
 ### Remaining Work (Optional)
 
@@ -249,10 +265,11 @@ Only one spec remains without coverage:
 
 ### Success Metrics
 
-- **94% coverage achieved** - Up from 44% at start of restructuring
-- **All high-priority specs covered** - Mailbox, Skills, Monitoring, Debug UI
+- **91% coverage of implemented specs (29/32)** - Up from 44% at start of restructuring
+- **All high-priority specs covered** - Mailbox, Skills, Task Completion, Debug UI
 - **All core abstractions documented** - Prompts, Tools, Sessions, Resources
 - **Production-ready documentation** - Only 2 specs remain incomplete (both low priority)
+- **1 spec-only feature identified** - TRAJECTORY_OBSERVERS.md (design exists, implementation pending)
 
 ### Coverage Philosophy
 
@@ -263,4 +280,4 @@ Only one spec remains without coverage:
 
 ### Achievement Summary
 
-The book now provides **comprehensive coverage** of the WINK framework. Users can rely on the book as the primary learning resource, with specs serving as implementation references for maintainers.
+The book now provides **comprehensive coverage** of the WINK framework's implemented features (91% of specs). Users can rely on the book as the primary learning resource, with specs serving as both implementation references and design documentation for future features.
