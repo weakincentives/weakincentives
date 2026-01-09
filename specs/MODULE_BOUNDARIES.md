@@ -360,12 +360,16 @@ class MyTool:
 ### Running the Validator
 
 ```bash
-# Run validation manually
+# Run validation manually (recommended for local development)
 python scripts/validate_module_boundaries.py
 
-# Add to CI/development workflow
+# Or use the Makefile target
 make validate-modules
 ```
+
+**Note**: The validator is currently available for local development but **not
+enforced in CI** due to false positives with `TYPE_CHECKING` imports and other
+acceptable patterns. See "Known Limitations" below for details.
 
 ### Exit Codes
 
@@ -550,7 +554,7 @@ from weakincentives.runtime import InProcessDispatcher  # Circular
 
 ### Pre-commit Hooks
 
-The validation script can be added to pre-commit hooks:
+The validation script can be added to pre-commit hooks for local enforcement:
 
 ```bash
 # In .git/hooks/pre-commit
@@ -558,9 +562,14 @@ The validation script can be added to pre-commit hooks:
 python scripts/validate_module_boundaries.py || exit 1
 ```
 
+**Note**: Review violations carefully as some may be false positives (see "Known
+Limitations").
+
 ### CI Pipeline
 
-Add to GitHub Actions or CI config:
+**Not yet enabled**: The validator has false positives with `TYPE_CHECKING`
+imports and needs improvements before CI enforcement. Once enhanced, it can be
+added to GitHub Actions:
 
 ```yaml
 - name: Validate Module Boundaries
