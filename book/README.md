@@ -41,6 +41,7 @@ This book is your comprehensive guide to WINK (Weak Incentives), a Python librar
 
 3. [**Prompts**](03-prompts.md) - Type-safe prompt composition
 4. [**Tools**](04-tools.md) - Sandboxed, deterministic tool execution
+   - 4.5 [**Tool Policies**](04.5-tool-policies.md) - Declarative constraints and custom policy development
 5. [**Sessions**](05-sessions.md) - Event-driven state management
 
 ### Part III: Integration & Orchestration
