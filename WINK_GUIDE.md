@@ -464,8 +464,8 @@ prompt = Prompt(template).bind(SummarizeRequest(
          "typed programs. Tools are explicit. State is inspectable."
 ))
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # To actually run this, you need an adapter and API key:
 #
@@ -1690,7 +1690,7 @@ class Hello:
     message: str
 
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[Hello](
     ns="demo",
@@ -1779,7 +1779,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 from weakincentives.runtime import InProcessDispatcher, Session
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 workspace = ClaudeAgentWorkspaceSection(
     session=session,
@@ -2080,7 +2080,7 @@ mcp_search_tool = Tool[MCPSearchParams, MCPSearchResult](
     handler=mcp_search,
 )
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[None](
     ns="demo",
@@ -2144,7 +2144,7 @@ class Review:
     findings: list[str]
 
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 # Create workspace with mounted repository
 workspace = ClaudeAgentWorkspaceSection(

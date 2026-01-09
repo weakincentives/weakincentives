@@ -79,8 +79,8 @@ class TestHostMountPreview:
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessDispatcher()
-    return Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    return Session(dispatcher=dispatcher)
 
 
 class TestClaudeAgentWorkspaceSectionCore:
@@ -231,8 +231,8 @@ class TestClaudeAgentWorkspaceSectionCleanup:
             )
 
             try:
-                new_bus = InProcessDispatcher()
-                new_session = Session(bus=new_bus)
+                new_dispatcher = InProcessDispatcher()
+                new_session = Session(dispatcher=new_dispatcher)
                 cloned = section.clone(session=new_session)
 
                 assert cloned is not section
@@ -251,8 +251,8 @@ class TestClaudeAgentWorkspaceSectionCleanup:
             _ = fs.write("test_file.txt", "test content")
 
             # Clone to a new session
-            new_bus = InProcessDispatcher()
-            new_session = Session(bus=new_bus)
+            new_dispatcher = InProcessDispatcher()
+            new_session = Session(dispatcher=new_dispatcher)
             cloned = section.clone(session=new_session)
 
             # Filesystem instance should be the same
@@ -277,12 +277,12 @@ class TestClaudeAgentWorkspaceSectionCleanup:
         section = ClaudeAgentWorkspaceSection(session=session)
 
         try:
-            new_bus = InProcessDispatcher()
-            new_session = Session(bus=new_bus)
-            other_bus = InProcessDispatcher()
+            new_dispatcher = InProcessDispatcher()
+            new_session = Session(dispatcher=new_dispatcher)
+            other_dispatcher = InProcessDispatcher()
 
-            with pytest.raises(TypeError, match="bus must match"):
-                section.clone(session=new_session, bus=other_bus)
+            with pytest.raises(TypeError, match="dispatcher must match"):
+                section.clone(session=new_session, dispatcher=other_dispatcher)
         finally:
             section.cleanup()
 
@@ -557,8 +557,8 @@ class TestClaudeAgentWorkspaceSectionResources:
 
     @pytest.fixture
     def session(self) -> Session:
-        bus = InProcessDispatcher()
-        return Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        return Session(dispatcher=dispatcher)
 
     def test_resources_returns_filesystem(self, session: Session) -> None:
         """resources() returns a ResourceRegistry containing the filesystem."""

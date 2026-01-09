@@ -77,8 +77,8 @@ def _setup_sections() -> tuple[
     VfsToolsSection,
     Tool[EvalParams, EvalResult],
 ]:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     vfs_section = VfsToolsSection(session=session)
     section = AstevalSection(session=session, filesystem=vfs_section.filesystem)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -146,8 +146,8 @@ def test_missing_dependency_instructs_extra_install(
 
 
 def test_asteval_section_disables_tool_overrides_by_default() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = AstevalSection(session=session)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
@@ -156,8 +156,8 @@ def test_asteval_section_disables_tool_overrides_by_default() -> None:
 
 
 def test_asteval_section_override_flags_opt_in() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = AstevalSection(
         session=session,
         accepts_overrides=True,
@@ -780,8 +780,8 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     readme = sunfish / "README.md"
     readme.write_text("hello mount", encoding="utf-8")
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     vfs_section = VfsToolsSection(
         session=session,
         mounts=(HostMount(host_path="sunfish", mount_path=VfsPath(("sunfish",))),),
@@ -1091,8 +1091,8 @@ def test_asteval_config_accepts_overrides() -> None:
     """Test that config accepts_overrides is respected."""
     from weakincentives.contrib.tools import AstevalConfig
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     config = AstevalConfig(accepts_overrides=True)
     section = AstevalSection(session=session, config=config)
 
@@ -1103,8 +1103,8 @@ def test_asteval_filesystem_property_returns_filesystem() -> None:
     """Test that the filesystem property returns the filesystem instance."""
     from weakincentives.contrib.tools import Filesystem
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = AstevalSection(session=session)
 
     fs = section.filesystem
@@ -1113,10 +1113,10 @@ def test_asteval_filesystem_property_returns_filesystem() -> None:
 
 def test_asteval_clone_rejects_invalid_filesystem_type() -> None:
     """Test that clone raises TypeError for invalid filesystem argument."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = AstevalSection(session=session)
 
-    new_session = Session(bus=bus)
+    new_session = Session(dispatcher=dispatcher)
     with pytest.raises(TypeError, match="filesystem must be a Filesystem instance"):
         section.clone(session=new_session, filesystem="not a filesystem")

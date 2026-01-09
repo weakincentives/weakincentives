@@ -262,7 +262,10 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         session: Session,
         filesystem: Filesystem | None = None,
     ) -> Section[SupportsDataclass]:
-        kwargs: dict[str, object] = {"session": session, "bus": session.dispatcher}
+        kwargs: dict[str, object] = {
+            "session": session,
+            "dispatcher": session.dispatcher,
+        }
         if filesystem is not None:
             kwargs["filesystem"] = filesystem
         return section.clone(**kwargs)

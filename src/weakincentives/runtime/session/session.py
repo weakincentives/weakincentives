@@ -12,7 +12,7 @@
 
 # pyright: reportImportCycles=false
 
-"""Session state container synchronized with the event bus."""
+"""Session state container synchronized with the dispatcher."""
 
 from __future__ import annotations
 
@@ -186,7 +186,7 @@ class Session(SessionProtocol):
     def __init__(
         self,
         *,
-        bus: TelemetryDispatcher | None = None,
+        dispatcher: TelemetryDispatcher | None = None,
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -205,12 +205,12 @@ class Session(SessionProtocol):
         self.session_id: UUID = resolved_session_id
         self.created_at: datetime = resolved_created_at.astimezone(UTC)
 
-        if bus is None:
+        if dispatcher is None:
             from ..events import InProcessDispatcher
 
-            self._bus: TelemetryDispatcher = InProcessDispatcher()
+            self._dispatcher: TelemetryDispatcher = InProcessDispatcher()
         else:
-            self._bus = bus
+            self._dispatcher = dispatcher
 
         self._slice_config = (
             slice_config if slice_config is not None else default_slice_config()
@@ -232,7 +232,7 @@ class Session(SessionProtocol):
             raise ValueError(msg)
         if parent is not None:
             parent._register_child(self)
-        self._attach_to_dispatcher(self._bus)
+        self._attach_to_dispatcher(self._dispatcher)
         self._register_builtin_reducers()
 
     @contextmanager
@@ -328,7 +328,7 @@ class Session(SessionProtocol):
     def clone(
         self,
         *,
-        bus: TelemetryDispatcher,
+        dispatcher: TelemetryDispatcher,
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -340,7 +340,7 @@ class Session(SessionProtocol):
             self._snapshot_reducers_and_state()
         )
         clone = Session(
-            bus=bus,
+            dispatcher=dispatcher,
             parent=self._resolve_clone_parent(parent),
             session_id=self._resolve_clone_id(session_id),
             created_at=self._resolve_clone_created(created_at),
@@ -469,7 +469,7 @@ class Session(SessionProtocol):
             },
         )
         self._dispatch_data_event(event_type, event)
-        return self._bus.dispatch(event)
+        return self._dispatcher.dispatch(event)
 
     # ──────────────────────────────────────────────────────────────────────
     # Global Mutation Operations
@@ -668,7 +668,7 @@ class Session(SessionProtocol):
     def dispatcher(self) -> TelemetryDispatcher:
         """Return the dispatcher backing this session."""
 
-        return self._bus
+        return self._dispatcher
 
     @property
     @override
@@ -922,15 +922,15 @@ class Session(SessionProtocol):
             case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
                 assert_never(unreachable)  # pyright: ignore[reportUnreachable]
 
-    def _attach_to_dispatcher(self, bus: TelemetryDispatcher) -> None:
+    def _attach_to_dispatcher(self, dispatcher: TelemetryDispatcher) -> None:
         with self.locked():
-            if self._subscriptions_attached and self._bus is bus:
+            if self._subscriptions_attached and self._dispatcher is dispatcher:
                 return
-            self._bus = bus
+            self._dispatcher = dispatcher
             self._subscriptions_attached = True
-            bus.subscribe(ToolInvoked, self._on_tool_invoked)
-            bus.subscribe(PromptExecuted, self._on_prompt_executed)
-            bus.subscribe(PromptRendered, self._on_prompt_rendered)
+            dispatcher.subscribe(ToolInvoked, self._on_tool_invoked)
+            dispatcher.subscribe(PromptExecuted, self._on_prompt_executed)
+            dispatcher.subscribe(PromptRendered, self._on_prompt_rendered)
 
     def _register_builtin_reducers(self) -> None:
         """Register built-in reducers for prompt visibility overrides.

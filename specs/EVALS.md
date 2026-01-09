@@ -947,7 +947,7 @@ class QALoop(MainLoop[str, str]):
 
     def initialize(self, question: str) -> tuple[Prompt[str], Session]:
         prompt = Prompt(self._template).bind(QAParams(question=question))
-        session = Session(bus=self._bus)
+        session = Session(dispatcher=self._bus)
         return prompt, session
 
 

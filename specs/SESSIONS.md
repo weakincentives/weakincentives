@@ -265,7 +265,7 @@ class AgentPlan:
 ### Installing a State Slice
 
 ```python
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 session.install(AgentPlan)
 
 # Now use the slice
@@ -366,8 +366,8 @@ session[PodmanWorkspace].register(PodmanWorkspace, replace_latest)
 Sessions form a tree for nested orchestration:
 
 ```python
-parent_session = Session(bus=bus)
-child_session = Session(bus=bus, parent=parent_session)
+parent_session = Session(dispatcher=dispatcher)
+child_session = Session(dispatcher=bus, parent=parent_session)
 
 # Traverse from leaves up
 for session in iter_sessions_bottom_up(root_session):
@@ -401,9 +401,9 @@ In-process pub/sub for prompt lifecycle events:
 ```python
 from weakincentives.runtime.events import InProcessDispatcher
 
-bus = InProcessDispatcher()
-bus.subscribe(PromptExecuted, handler)
-result = bus.dispatch(event)
+dispatcher = InProcessDispatcher()
+dispatcher.subscribe(PromptExecuted, handler)
+result = dispatcher.dispatch(event)
 
 if not result.ok:
     result.raise_if_errors()  # Optional strict mode
@@ -643,8 +643,8 @@ from weakincentives.deadlines import Deadline
 from weakincentives.budget import Budget, BudgetTracker
 
 # Setup
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # Optional: register custom reducers
 session[ResearchMetrics].register(ResearchSummary, update_metrics_reducer)

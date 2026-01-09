@@ -82,8 +82,8 @@ def test_callable_accepts_session_kwarg_detects_keyword_only() -> None:
 
 
 def test_normalize_enabled_predicate_with_session_kwarg() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     received_session: list[SessionProtocol | None] = []
 
@@ -100,8 +100,8 @@ def test_normalize_enabled_predicate_with_session_kwarg() -> None:
 
 
 def test_normalize_enabled_predicate_with_params_and_session() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     received: list[tuple[ToggleParams, SessionProtocol | None]] = []
 

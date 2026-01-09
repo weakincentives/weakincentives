@@ -58,11 +58,11 @@ pytestmark = pytest.mark.core
 def test_tool_invoked_appends_payload_every_time(
     session_factory: SessionFactory,
 ) -> None:
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     event = make_tool_event(1)
-    first_result = bus.dispatch(event)
-    second_result = bus.dispatch(event)
+    first_result = dispatcher.dispatch(event)
+    second_result = dispatcher.dispatch(event)
 
     assert first_result.ok
     assert second_result.ok
@@ -78,7 +78,7 @@ def test_tool_invoked_extracts_value_from_result(
     session_factory: SessionFactory,
 ) -> None:
     """Session extracts value from result.value for slice dispatch."""
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     payload = ExamplePayload(value=7)
     tool_result = cast(ToolResult[object], ToolResult(message="ok", value=payload))
@@ -93,7 +93,7 @@ def test_tool_invoked_extracts_value_from_result(
         rendered_output=tool_result.render(),
     )
 
-    bus.dispatch(event)
+    dispatcher.dispatch(event)
 
     # Session dispatches result.value to slice reducers
     assert session[ExamplePayload].all() == (payload,)
@@ -104,14 +104,14 @@ def test_prompt_rendered_appends_start_event(
 ) -> None:
     from uuid import uuid4
 
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     event = make_prompt_rendered(
         rendered_prompt="Rendered prompt text",
         session_id=uuid4(),
     )
 
-    result = bus.dispatch(event)
+    result = dispatcher.dispatch(event)
 
     assert result.ok
     lifecycle = session[PromptRendered].all()
@@ -125,9 +125,9 @@ def test_prompt_executed_emits_multiple_dataclasses(
 ) -> None:
     outputs = [ExampleOutput(text="first"), ExampleOutput(text="second")]
 
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
-    result = bus.dispatch(make_prompt_event(outputs))
+    result = dispatcher.dispatch(make_prompt_event(outputs))
 
     assert result.ok
     assert session[ExampleOutput].all() == tuple(outputs)
@@ -142,7 +142,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     class SecondSlice:
         value: str
 
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     call_order: list[str] = []
 
@@ -171,7 +171,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     session[FirstSlice].register(ExampleOutput, first)
     session[SecondSlice].register(ExampleOutput, second)
 
-    result = bus.dispatch(make_prompt_event(ExampleOutput(text="hello")))
+    result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="hello")))
 
     assert call_order == ["first", "second"]
     assert session[FirstSlice].all() == (FirstSlice("hello"),)
@@ -182,9 +182,9 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
 def test_default_append_used_when_no_custom_reducer(
     session_factory: SessionFactory,
 ) -> None:
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
-    result = bus.dispatch(make_prompt_event(ExampleOutput(text="hello")))
+    result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="hello")))
 
     assert result.ok
     assert session[ExampleOutput].all() == (ExampleOutput(text="hello"),)
@@ -194,7 +194,7 @@ def test_prompt_executed_extracts_value_from_result(
     session_factory: SessionFactory,
 ) -> None:
     """Session extracts output from result.output for slice dispatch."""
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     output = ExampleOutput(text="filled")
     event = PromptExecuted(
@@ -212,14 +212,14 @@ def test_prompt_executed_extracts_value_from_result(
         created_at=datetime.now(UTC),
     )
 
-    bus.dispatch(event)
+    dispatcher.dispatch(event)
 
     # Session dispatches result.output to slice reducers
     assert session[ExampleOutput].all() == (output,)
 
 
 def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> None:
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     event = make_tool_event(1)
     non_dataclass_result = cast(
@@ -236,8 +236,8 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
         rendered_output=non_dataclass_result.render(),
     )
 
-    first_result = bus.dispatch(event)
-    second_result = bus.dispatch(non_dataclass_event)
+    first_result = dispatcher.dispatch(event)
+    second_result = dispatcher.dispatch(non_dataclass_event)
 
     assert first_result.ok
     assert second_result.ok
@@ -245,15 +245,15 @@ def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> 
 
 
 def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> None:
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     session[ExamplePayload].register(
         ExamplePayload, upsert_by(lambda payload: payload.value)
     )
 
-    first_result = bus.dispatch(make_tool_event(1))
-    second_result = bus.dispatch(make_tool_event(1))
-    third_result = bus.dispatch(make_tool_event(2))
+    first_result = dispatcher.dispatch(make_tool_event(1))
+    second_result = dispatcher.dispatch(make_tool_event(1))
+    third_result = dispatcher.dispatch(make_tool_event(2))
 
     assert first_result.ok
     assert second_result.ok
@@ -267,12 +267,12 @@ def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> No
 def test_replace_latest_keeps_only_newest_value(
     session_factory: SessionFactory,
 ) -> None:
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     session[ExamplePayload].register(ExamplePayload, replace_latest)
 
-    first_result = bus.dispatch(make_tool_event(1))
-    second_result = bus.dispatch(make_tool_event(2))
+    first_result = dispatcher.dispatch(make_tool_event(1))
+    second_result = dispatcher.dispatch(make_tool_event(2))
 
     assert first_result.ok
     assert second_result.ok
@@ -280,9 +280,9 @@ def test_replace_latest_keeps_only_newest_value(
 
 
 def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> None:
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
-    bus.dispatch(make_tool_event(1))
+    dispatcher.dispatch(make_tool_event(1))
 
     failure = cast(
         ToolResult[object],
@@ -298,7 +298,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
         created_at=datetime.now(UTC),
         rendered_output=failure.render(),
     )
-    bus.dispatch(failure_event)
+    dispatcher.dispatch(failure_event)
 
     tool_events = session[ToolInvoked].all()
     assert len(tool_events) == 2
@@ -312,7 +312,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
 def test_reducer_failure_leaves_previous_slice_unchanged(
     session_factory: SessionFactory,
 ) -> None:
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
@@ -327,14 +327,14 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 
     session[ExampleOutput].register(ExampleOutput, faulty)
 
-    first_result = bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    first_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
 
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert first_result.handled_count == 1
 
     # Second publish adds another entry (append_all doesn't dedupe)
     # The faulty reducer fails but append_all already ran successfully
-    second_result = bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    second_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     assert second_result.handled_count == 1
     assert session[ExampleOutput].all() == (
@@ -367,11 +367,11 @@ def test_dispatch_clear_slice(session_factory: SessionFactory) -> None:
     """Test that dispatching ClearSlice directly works."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     # Add some initial data
-    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
     assert len(session[ExampleOutput].all()) == 2
 
     # Dispatch ClearSlice directly
@@ -384,12 +384,12 @@ def test_dispatch_clear_slice_with_predicate(session_factory: SessionFactory) ->
     """Test that dispatching ClearSlice with a predicate works."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     # Add some initial data
-    bus.dispatch(make_prompt_event(ExampleOutput(text="apple")))
-    bus.dispatch(make_prompt_event(ExampleOutput(text="banana")))
-    bus.dispatch(make_prompt_event(ExampleOutput(text="apricot")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apple")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="banana")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apricot")))
 
     # Dispatch ClearSlice with predicate
     session.dispatch(
@@ -408,11 +408,11 @@ def test_clear_slice_with_no_matching_predicate(
     """Test that ClearSlice with a predicate that matches nothing leaves values unchanged."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     # Add some initial data (none starts with 'z')
-    bus.dispatch(make_prompt_event(ExampleOutput(text="apple")))
-    bus.dispatch(make_prompt_event(ExampleOutput(text="banana")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apple")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="banana")))
 
     # Dispatch ClearSlice with predicate that matches nothing
     session.dispatch(
@@ -511,7 +511,7 @@ def test_prompt_executed_with_mixed_iterable_output(
     session_factory: SessionFactory,
 ) -> None:
     """Test branch 759->758: non-dataclass items in iterable are skipped."""
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
@@ -531,7 +531,7 @@ def test_prompt_executed_with_mixed_iterable_output(
         created_at=datetime.now(UTC),
     )
 
-    result = bus.dispatch(event)
+    result = dispatcher.dispatch(event)
     assert result.ok
 
     # Only dataclass instances should be in the session state
@@ -542,10 +542,10 @@ def test_prompt_executed_with_mixed_iterable_output(
 
 
 def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None:
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
-    bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
     assert session[ExampleOutput].all()
 
     session.reset()

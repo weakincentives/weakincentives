@@ -30,8 +30,8 @@ from weakincentives.runtime.session import Session
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessDispatcher()
-    return Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    return Session(dispatcher=dispatcher)
 
 
 class TestTaskCompletionResult:
@@ -102,8 +102,8 @@ class TestPlanBasedChecker:
     def test_complete_when_no_plan_slice(self, session: Session) -> None:
         """Checker returns complete when Plan slice isn't registered or empty."""
         # Use a fresh session without Plan slice to test the no-plan case
-        fresh_bus = InProcessDispatcher()
-        fresh_session = Session(bus=fresh_bus)
+        fresh_dispatcher = InProcessDispatcher()
+        fresh_session = Session(dispatcher=fresh_dispatcher)
 
         checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=fresh_session)

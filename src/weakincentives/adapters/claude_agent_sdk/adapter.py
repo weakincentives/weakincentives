@@ -191,8 +191,8 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         ...     ClaudeAgentSDKClientConfig,
         ... )
         >>>
-        >>> bus = InProcessDispatcher()
-        >>> session = Session(bus=bus)
+        >>> dispatcher = InProcessDispatcher()
+        >>> session = Session(dispatcher=dispatcher)
         >>>
         >>> adapter = ClaudeAgentSDKAdapter(
         ...     model="claude-sonnet-4-5-20250929",

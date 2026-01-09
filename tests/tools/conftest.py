@@ -97,6 +97,6 @@ def _install_asteval_stub(
 
 
 @pytest.fixture()
-def session_and_bus() -> tuple[Session, InProcessDispatcher]:
-    bus = InProcessDispatcher()
-    return Session(bus=bus), bus
+def session_and_dispatcher() -> tuple[Session, InProcessDispatcher]:
+    dispatcher = InProcessDispatcher()
+    return Session(dispatcher=dispatcher), dispatcher

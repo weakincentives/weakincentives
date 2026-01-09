@@ -978,7 +978,7 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 
     def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        session = Session(dispatcher=self._bus, tags={"loop": "code-review"})
         return prompt, session
 ```
 

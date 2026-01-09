@@ -79,7 +79,7 @@ class DummyAdapter(ProviderAdapter[object]):
         self,
         prompt: Prompt[object],
         *,
-        bus: Dispatcher,
+        dispatcher: Dispatcher,
         session: SessionProtocol | None = None,
         deadline: Deadline | None = None,
     ) -> PromptResponse[object]:
@@ -117,7 +117,7 @@ def serialize_tool_message(
     return {"message": result.message, "payload": payload}
 
 
-class RecordingBus(Dispatcher):
+class RecordingDispatcher(Dispatcher):
     def __init__(
         self,
         *,
@@ -265,7 +265,7 @@ class SessionStub(SessionProtocol):
     def __init__(self, *, dispatcher: Dispatcher | None = None) -> None:
         self.snapshots: list[SnapshotProtocol] = []
         self.restores: list[SnapshotProtocol] = []
-        self._dispatcher = dispatcher or RecordingBus()
+        self._dispatcher = dispatcher or RecordingDispatcher()
 
     @property
     def dispatcher(self) -> Dispatcher:
@@ -301,15 +301,15 @@ def test_inner_loop_success() -> None:
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
 
     assert response.text == "Hello"
     assert response.output is None
-    assert isinstance(bus.events[-1], PromptExecuted)
+    assert isinstance(dispatcher.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
 
 
@@ -323,13 +323,13 @@ def test_inner_loop_includes_usage_in_event() -> None:
         )
     ]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     _ = loop.run()
 
-    prompt_event = cast(PromptExecuted, bus.events[-1])
+    prompt_event = cast(PromptExecuted, dispatcher.events[-1])
     assert prompt_event.usage == TokenUsage(
         input_tokens=12, output_tokens=5, cached_tokens=3
     )
@@ -340,8 +340,8 @@ def test_inner_loop_publishes_prompt_rendered_event() -> None:
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
     params = EchoParams(value="hello")
 
     loop = build_inner_loop(
@@ -353,8 +353,8 @@ def test_inner_loop_publishes_prompt_rendered_event() -> None:
     loop.run()
 
     assert provider.calls
-    assert bus.events and isinstance(bus.events[0], PromptRendered)
-    event = cast(PromptRendered, bus.events[0])
+    assert dispatcher.events and isinstance(dispatcher.events[0], PromptRendered)
+    event = cast(PromptRendered, dispatcher.events[0])
     assert event.rendered_prompt == "system"
     assert event.render_inputs == (params,)
     assert event.prompt_ns == "tests"
@@ -384,8 +384,8 @@ def test_inner_loop_parses_structured_output() -> None:
         )
     ]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(
         rendered=rendered,
@@ -408,8 +408,8 @@ def test_inner_loop_records_usage_to_budget_tracker() -> None:
         )
     ]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
     budget = Budget(max_total_tokens=1000)
     tracker = BudgetTracker(budget=budget)
 
@@ -429,14 +429,14 @@ def test_run_inner_loop_function() -> None:
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template)
     # Enter prompt context for resource lifecycle
     prompt.resources.__enter__()
-    session: SessionProtocol = Session(bus=bus)
+    session: SessionProtocol = Session(dispatcher=dispatcher)
 
     inputs = InnerLoopInputs[object](
         adapter_name=DUMMY_ADAPTER_NAME,
@@ -460,7 +460,7 @@ def test_run_inner_loop_function() -> None:
     response = run_inner_loop(inputs=inputs, config=config)
 
     assert response.text == "Hello"
-    assert isinstance(bus.events[-1], PromptExecuted)
+    assert isinstance(dispatcher.events[-1], PromptExecuted)
 
 
 def test_inner_loop_raises_on_budget_exceeded() -> None:
@@ -473,8 +473,8 @@ def test_inner_loop_raises_on_budget_exceeded() -> None:
         )
     ]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
     budget = Budget(max_total_tokens=500)
     tracker = BudgetTracker(budget=budget)
 
@@ -500,8 +500,8 @@ def test_inner_loop_requires_message_payload() -> None:
             self.choices[0].message = None
 
     provider = ProviderStub([MissingMessageResponse()])
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
 
     with pytest.raises(PromptEvaluationError):
@@ -517,14 +517,16 @@ def test_inner_loop_executes_tool_calls() -> None:
     )
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
 
     assert response.text == "All done"
-    tool_event = next(event for event in bus.events if isinstance(event, ToolInvoked))
+    tool_event = next(
+        event for event in dispatcher.events if isinstance(event, ToolInvoked)
+    )
     assert tool_event.name == "echo"
 
 
@@ -533,8 +535,8 @@ def test_inner_loop_continues_on_prompt_rendered_publish_failure() -> None:
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus(fail_rendered=True)
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher(fail_rendered=True)
+    session = Session(dispatcher=dispatcher)
     params = EchoParams(value="blocked")
 
     loop = build_inner_loop(
@@ -547,8 +549,8 @@ def test_inner_loop_continues_on_prompt_rendered_publish_failure() -> None:
 
     assert response.text == "Hello"
     assert provider.calls
-    assert bus.events and isinstance(bus.events[0], PromptRendered)
-    assert isinstance(bus.events[-1], PromptExecuted)
+    assert dispatcher.events and isinstance(dispatcher.events[0], PromptRendered)
+    assert isinstance(dispatcher.events[-1], PromptExecuted)
 
 
 def test_inner_loop_raises_on_prompt_publish_failure() -> None:
@@ -556,8 +558,8 @@ def test_inner_loop_raises_on_prompt_publish_failure() -> None:
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus(fail_prompt=True)
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher(fail_prompt=True)
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
 
@@ -565,7 +567,7 @@ def test_inner_loop_raises_on_prompt_publish_failure() -> None:
         loop.run()
 
     assert "prompt dispatch failure" in str(exc_info.value)
-    assert isinstance(bus.events[-1], PromptExecuted)
+    assert isinstance(dispatcher.events[-1], PromptExecuted)
     assert provider.calls[0]["messages"][0]["content"] == "system"
 
 
@@ -578,14 +580,16 @@ def test_inner_loop_formats_tool_dispatch_failures() -> None:
     )
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
-    bus = RecordingBus(fail_tool=True)
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher(fail_tool=True)
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
 
     assert response.text == "All done"
-    tool_event = next(event for event in bus.events if isinstance(event, ToolInvoked))
+    tool_event = next(
+        event for event in dispatcher.events if isinstance(event, ToolInvoked)
+    )
     failure_message = tool_event.result.message
     assert "Reducer errors prevented applying tool result" in failure_message
 
@@ -599,7 +603,7 @@ def test_inner_loop_rolls_back_on_tool_dispatch_failure() -> None:
     )
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
-    session = SessionStub(dispatcher=RecordingBus(fail_tool=True))
+    session = SessionStub(dispatcher=RecordingDispatcher(fail_tool=True))
 
     loop = build_inner_loop(
         rendered=rendered,
@@ -619,14 +623,14 @@ def test_inner_loop_includes_prompt_descriptor_in_event() -> None:
     rendered = RenderedPrompt(text="system", descriptor=descriptor)
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     loop.run()
 
     rendered_event = next(
-        event for event in bus.events if isinstance(event, PromptRendered)
+        event for event in dispatcher.events if isinstance(event, PromptRendered)
     )
     assert rendered_event.descriptor is descriptor
 
@@ -636,8 +640,8 @@ def test_inner_loop_ensure_deadline_remaining_no_deadline() -> None:
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     # This should not raise since there's no deadline
@@ -651,8 +655,8 @@ def test_inner_loop_raise_deadline_error() -> None:
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     loop = build_inner_loop(
@@ -679,8 +683,8 @@ def test_inner_loop_ensure_deadline_remaining_expired(
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     loop = build_inner_loop(
         rendered=rendered, provider=provider, session=session, deadline=deadline

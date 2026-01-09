@@ -483,8 +483,8 @@ accessors dispatch events internally rather than mutating state directly.
 from weakincentives.runtime import Session, InProcessDispatcher
 from weakincentives.runtime.session import InitializeSlice, ClearSlice
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # All mutations go through dispatch
 session.dispatch(AddStep(step="Research"))

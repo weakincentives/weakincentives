@@ -249,14 +249,14 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:  #
 class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     def __init__(self, adapter: Any, bus: Any) -> None:
         super().__init__(adapter=adapter, bus=bus)
-        self._session = Session(bus=bus)
+        self._session = Session(dispatcher=dispatcher)
         self._template = build_task_prompt(session=self._session)
 
     def prepare(self, request: ReviewTurnParams) -> tuple[Prompt[ReviewResponse], Session]:
         prompt = Prompt(self._template).bind(request)
         return prompt, self._session
 
-bus = InProcessDispatcher()
+dispatcher = InProcessDispatcher()
 adapter = OpenAIAdapter(model="gpt-5.2")
 loop = ReviewLoop(adapter, bus)
 

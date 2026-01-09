@@ -56,8 +56,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_to_json_basic(self) -> None:
         """Test serializing a composite snapshot to JSON."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "content")
         prompt = _make_prompt_with_fs(fs)
@@ -76,8 +76,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_to_json_without_resources(self) -> None:
         """Test serializing a snapshot without snapshotable resources."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt()
 
         snapshot = create_snapshot(
@@ -91,8 +91,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_to_json_without_metadata(self) -> None:
         """Test serializing a snapshot without metadata."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt()
 
         # Create snapshot without tag to have minimal metadata
@@ -104,8 +104,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_from_json_basic(self) -> None:
         """Test deserializing a composite snapshot from JSON."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
@@ -175,8 +175,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_from_json_invalid_resources_not_list(self) -> None:
         """Test that resources not being a list raises SnapshotRestoreError."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         session_snapshot = session.snapshot()
 
         payload = {
@@ -191,8 +191,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_from_json_invalid_resource_entry(self) -> None:
         """Test that invalid resource entry raises SnapshotRestoreError."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         session_snapshot = session.snapshot()
 
         payload = {
@@ -209,8 +209,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_from_json_invalid_metadata_not_object(self) -> None:
         """Test that invalid metadata raises SnapshotRestoreError."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         session_snapshot = session.snapshot()
 
         payload = {
@@ -226,8 +226,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_from_json_invalid_metadata_phase(self) -> None:
         """Test that invalid metadata phase raises SnapshotRestoreError."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         session_snapshot = session.snapshot()
 
         payload = {
@@ -243,8 +243,8 @@ class TestCompositeSnapshotSerialization:
 
     def test_roundtrip_with_filesystem_resource(self) -> None:
         """Test full roundtrip serialization with filesystem resource."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
@@ -267,8 +267,8 @@ class TestRestoreSnapshotErrors:
 
     def test_restore_handles_session_restore_failure(self) -> None:
         """Test that session restore failure raises RestoreFailedError."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt()
 
         snapshot = create_snapshot(session, prompt.resources.context, tag="test")
@@ -287,8 +287,8 @@ class TestRestoreSnapshotErrors:
 
     def test_restore_skips_missing_resources(self) -> None:
         """Test that restore skips resources not in current context."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt_with_fs = _make_prompt_with_fs(fs)
@@ -316,8 +316,8 @@ class TestRestoreSnapshotErrors:
             def restore(self, snapshot: Any) -> None:  # noqa: ANN401
                 raise SnapshotRestoreError("Restore failed!")
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
 
         # Create prompt with failing filesystem
         prompt: Prompt[object] = Prompt(
@@ -337,8 +337,8 @@ class TestPendingToolTracker:
 
     def test_abort_tool_execution_restores_state(self) -> None:
         """Test that abort_tool_execution restores state."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
@@ -361,8 +361,8 @@ class TestPendingToolTracker:
 
     def test_abort_tool_execution_unknown_id_returns_false(self) -> None:
         """Test that aborting unknown tool returns False."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt()
 
         tracker = PendingToolTracker(
@@ -374,8 +374,8 @@ class TestPendingToolTracker:
 
     def test_pending_tool_executions_property(self) -> None:
         """Test the pending_tool_executions property."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt()
 
         tracker = PendingToolTracker(
@@ -402,8 +402,8 @@ class TestPendingToolTracker:
 
     def test_end_tool_execution_returns_false_for_unknown(self) -> None:
         """Test that ending unknown tool returns False."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt()
 
         tracker = PendingToolTracker(
@@ -415,8 +415,8 @@ class TestPendingToolTracker:
 
     def test_end_tool_execution_restores_on_failure(self) -> None:
         """Test that end_tool_execution restores state on failure."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
@@ -438,8 +438,8 @@ class TestPendingToolTracker:
 
     def test_end_tool_execution_preserves_on_success(self) -> None:
         """Test that end_tool_execution preserves state on success."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
@@ -465,8 +465,8 @@ class TestToolTransaction:
 
     def test_restores_on_exception(self) -> None:
         """Test that tool_transaction restores state on exception."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
@@ -480,8 +480,8 @@ class TestToolTransaction:
 
     def test_preserves_on_success(self) -> None:
         """Test that tool_transaction preserves state on success."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
@@ -493,8 +493,8 @@ class TestToolTransaction:
 
     def test_yields_snapshot_for_manual_restore(self) -> None:
         """Test that tool_transaction yields snapshot for manual restore."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         fs = InMemoryFilesystem()
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
@@ -515,8 +515,8 @@ class TestCompositeSnapshotErrors:
 
     def test_snapshot_with_metadata_roundtrip(self) -> None:
         """Test that snapshot with metadata serializes and deserializes."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt()
 
         snapshot = create_snapshot(
@@ -542,8 +542,8 @@ class TestRestoreSnapshotEdgeCases:
 
     def test_restore_skips_non_snapshotable_resources(self) -> None:
         """Test that restore_snapshot skips resources without Snapshotable."""
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
 
         # Create a simple non-snapshotable resource
         class SimpleResource:

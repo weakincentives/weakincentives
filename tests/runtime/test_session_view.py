@@ -145,10 +145,10 @@ class TestSessionViewProperties:
     def test_view_dispatcher_returns_session_dispatcher(
         self, session_factory: SessionFactory
     ) -> None:
-        session, bus = session_factory()
+        session, dispatcher = session_factory()
         view = SessionView(session)
 
-        assert view.dispatcher is bus
+        assert view.dispatcher is dispatcher
 
     def test_view_tags_returns_session_tags(
         self, session_factory: SessionFactory
@@ -168,9 +168,9 @@ class TestSessionViewProperties:
         assert view.parent is None
 
     def test_view_parent_returns_view_of_parent(self) -> None:
-        bus = InProcessDispatcher()
-        parent = Session(bus=bus)
-        child = Session(bus=bus, parent=parent)
+        dispatcher = InProcessDispatcher()
+        parent = Session(dispatcher=dispatcher)
+        child = Session(dispatcher=dispatcher, parent=parent)
 
         view = SessionView(child)
         parent_view = view.parent
@@ -180,10 +180,10 @@ class TestSessionViewProperties:
         assert parent_view.tags["session_id"] == str(parent.session_id)
 
     def test_view_children_returns_views_of_children(self) -> None:
-        bus = InProcessDispatcher()
-        parent = Session(bus=bus)
-        child1 = Session(bus=bus, parent=parent)
-        child2 = Session(bus=bus, parent=parent)
+        dispatcher = InProcessDispatcher()
+        parent = Session(dispatcher=dispatcher)
+        child1 = Session(dispatcher=dispatcher, parent=parent)
+        child2 = Session(dispatcher=dispatcher, parent=parent)
 
         view = SessionView(parent)
         children_views = view.children

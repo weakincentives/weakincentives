@@ -137,8 +137,8 @@ def test_render_plan_snapshot_returns_no_plan_message_when_empty() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     invoke_tool(setup_tool, SetupPlan(objective="Test the app"), session=session)
@@ -149,8 +149,8 @@ def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_steps() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -181,8 +181,8 @@ def test_render_plan_snapshot_renders_plan_steps() -> None:
 
 
 def test_render_plan_snapshot_renders_completed_plan() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -205,8 +205,8 @@ def test_render_plan_snapshot_renders_completed_plan() -> None:
 
 
 def test_render_plan_snapshot_renders_plan_without_steps() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     invoke_tool(

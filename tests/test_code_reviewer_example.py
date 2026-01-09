@@ -76,7 +76,7 @@ class _RepositoryOptimizationAdapter:
         self,
         prompt: Prompt[SupportsDataclass],
         *,
-        bus: InProcessDispatcher | None = None,
+        dispatcher: InProcessDispatcher | None = None,
         session: Session | None = None,
         deadline: object | None = None,
         budget: object | None = None,
@@ -89,7 +89,7 @@ class _RepositoryOptimizationAdapter:
         if "workspace-digest" in prompt.key:
             assert session is not None
             self.optimization_sessions.append(session)
-            if bus is not None:
+            if dispatcher is not None:
                 optimization_event = PromptRendered(
                     prompt_ns=prompt.ns,
                     prompt_key=prompt.key,
@@ -101,7 +101,7 @@ class _RepositoryOptimizationAdapter:
                     created_at=datetime.now(UTC),
                     event_id=uuid4(),
                 )
-                bus.dispatch(optimization_event)
+                dispatcher.dispatch(optimization_event)
             return PromptResponse(
                 prompt_name=prompt.name or prompt.key,
                 text=self.instructions,
@@ -125,14 +125,14 @@ class _RecordingDeadlineAdapter:
         self,
         prompt: Prompt[SupportsDataclass],
         *,
-        bus: InProcessDispatcher | None = None,
+        dispatcher: InProcessDispatcher | None = None,
         session: Session | None = None,
         deadline: Deadline | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
         resources: object | None = None,
     ) -> PromptResponse[Any]:
-        del bus, session, budget, budget_tracker, resources
+        del dispatcher, session, budget, budget_tracker, resources
         self.deadlines.append(deadline)
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,
@@ -146,9 +146,9 @@ def test_prompt_render_reducer_prints_full_prompt(
     tmp_path: Path,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    bus = InProcessDispatcher()
-    attach_logging_subscribers(bus)
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    attach_logging_subscribers(dispatcher)
+    session = Session(dispatcher=dispatcher)
 
     event = PromptRendered(
         prompt_ns="example",
@@ -162,7 +162,7 @@ def test_prompt_render_reducer_prints_full_prompt(
         event_id=uuid4(),
     )
 
-    publish_result = bus.dispatch(event)
+    publish_result = dispatcher.dispatch(event)
     assert publish_result.handled_count >= 1
     del overrides_store  # Not needed for this test
 
@@ -176,8 +176,8 @@ def test_prompt_render_reducer_prints_full_prompt(
 
 
 def test_workspace_digest_section_empty_by_default() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     template = build_task_prompt(session=session)
 
     rendered = Prompt(template).bind(ReviewTurnParams(request="demo request")).render()
@@ -194,8 +194,8 @@ def test_workspace_digest_override_applied_when_no_session_digest(
     tmp_path: Path,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     template = build_task_prompt(session=session)
 
     descriptor = descriptor_for_prompt(template)
