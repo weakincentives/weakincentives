@@ -238,15 +238,9 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
         futures = [executor.submit(seed) for _ in range(max_workers * 2)]
         overrides = [future.result() for future in futures]
 
-    expected_path = (
-        tmp_path
-        / ".weakincentives"
-        / "prompts"
-        / "overrides"
-        / "sample"
-        / "prompt"
-        / "concurrent.json"
-    )
+    # When root_path is explicit, it is used directly as the overrides directory
+    # (no .weakincentives/prompts/overrides prefix)
+    expected_path = tmp_path / "sample" / "prompt" / "concurrent.json"
     assert expected_path.exists()
     with expected_path.open(encoding="utf-8") as handle:
         payload = json.load(handle)

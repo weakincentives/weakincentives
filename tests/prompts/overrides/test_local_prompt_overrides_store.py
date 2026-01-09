@@ -94,7 +94,27 @@ def _build_prompt_with_tool() -> PromptTemplate:
 def _override_path(
     tmp_path: Path, descriptor: PromptDescriptor, tag: str = "latest"
 ) -> Path:
-    override_dir = tmp_path / ".weakincentives" / "prompts" / "overrides"
+    """Build expected override path when root_path is explicitly provided.
+
+    When root_path is explicit, it is used directly as the overrides directory
+    (no .weakincentives/prompts/overrides prefix).
+    """
+    override_dir = tmp_path
+    for segment in descriptor.ns.split("/"):
+        override_dir /= segment
+    override_dir /= descriptor.key
+    return override_dir / f"{tag}.json"
+
+
+def _auto_discovery_override_path(
+    repo_root: Path, descriptor: PromptDescriptor, tag: str = "latest"
+) -> Path:
+    """Build expected override path when using automatic discovery.
+
+    When using automatic discovery (no explicit root_path), the path
+    includes the .weakincentives/prompts/overrides prefix.
+    """
+    override_dir = repo_root / ".weakincentives" / "prompts" / "overrides"
     for segment in descriptor.ns.split("/"):
         override_dir /= segment
     override_dir /= descriptor.key
@@ -186,7 +206,7 @@ def test_root_detection_manual_traversal(
     section = descriptor.sections[0]
     assert override.sections[section.path].body == "Greet ${subject} warmly."
 
-    override_path = _override_path(tmp_path, descriptor)
+    override_path = _auto_discovery_override_path(tmp_path, descriptor)
     assert override_path.exists()
 
 
