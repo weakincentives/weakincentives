@@ -29,6 +29,10 @@ make typecheck       # ty check + pyright (strict mode)
 make test            # Pytest with 100% coverage requirement
 make check           # ALL checks - run before every commit
 
+# Smart test selection (see specs/SMART_TEST_SELECTION.md)
+make build-coverage-cache  # Build coverage cache for smart test selection
+make test-smart            # Run only tests affected by changes vs main
+
 # Additional checks
 make bandit          # Security scanning
 make deptry          # Dependency analysis
@@ -169,6 +173,7 @@ Consult these specs before modifying related code:
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
 | `specs/SKILLS.md` | Agent Skills specification and WINK skill mounting |
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
+| `specs/SMART_TEST_SELECTION.md` | Coverage caching, smart test selection, CI optimization |
 | `specs/TASK_COMPLETION.md` | Task completion checking, PlanBasedChecker, composite verification |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |

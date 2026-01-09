@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports all clean
+.PHONY: format check test build-coverage-cache test-smart lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports all clean
 
 # Format code with ruff
 format:
@@ -67,6 +67,18 @@ type-coverage:
 # Run tests with coverage (100% minimum)
 test:
 	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= tests
+
+# Build coverage cache for smart test selection
+build-coverage-cache:
+	@uv run python build/build_coverage_cache.py
+
+# Run only tests affected by changes (compared to base branch)
+test-smart:
+	@if [ -z "$$BASE" ]; then \
+		echo "BASE not set, defaulting to 'main'" >&2; \
+		BASE=main; \
+	fi; \
+	uv run python build/select_tests.py --base $$BASE --run --verbose
 
 # Run OpenAI integration tests
 integration-tests:
@@ -225,5 +237,6 @@ all: format lint-fix bandit deptry pip-audit typecheck test
 clean:
 	rm -rf .pytest_cache .ruff_cache __pycache__
 	rm -rf specs/tla/extracted/
+	rm -rf .coverage-cache/
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type f -name "*.pyc" -delete
