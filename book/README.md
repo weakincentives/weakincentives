@@ -42,12 +42,14 @@ This book is your comprehensive guide to WINK (Weak Incentives), a Python librar
 3. [**Prompts**](03-prompts.md) - Type-safe prompt composition
 4. [**Tools**](04-tools.md) - Sandboxed, deterministic tool execution
    - 4.5 [**Tool Policies**](04.5-tool-policies.md) - Declarative constraints and custom policy development
+   - 4.6 [**Task Monitoring**](04.6-task-monitoring.md) - Completion verification and progress tracking
 5. [**Sessions**](05-sessions.md) - Event-driven state management
 
 ### Part III: Integration & Orchestration
 
 6. [**Adapters**](06-adapters.md) - Provider integrations (OpenAI, LiteLLM, Claude Agent SDK)
 7. [**Main Loop**](07-main-loop.md) - Event loop orchestration
+   - 7.5 [**Distributed Orchestration**](07.5-distributed-orchestration.md) - Message queues and distributed agents
 8. [**Evaluation**](08-evaluation.md) - Testing and quality assurance
 
 ### Part IV: Advanced Features

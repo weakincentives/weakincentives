@@ -1203,6 +1203,985 @@ Extended thinking gives Claude more "scratch space" for complex reasoning before
 
 The hermetic isolation (HOME redirection, `.claude/settings.json` generation) works on all platforms.
 
+## 6.5 Agent Skills Integration
+
+Agent Skills are a lightweight, open standard for extending AI agents with specialized knowledge and workflows. Originally developed by Anthropic and released as an [open specification](https://agentskills.io), skills provide a declarative way to add domain expertise to agents without modifying prompts or code.
+
+In WINK, skills integrate seamlessly with the Claude Agent SDK adapter, giving you **progressive disclosure of domain knowledge**, **reproducible skill composition**, and **version-controlled agent capabilities**.
+
+This section covers:
+
+- **What skills are** and how they differ from prompts
+- **Skill structure** and manifest validation
+- **Mounting skills** in Claude Agent SDK adapter
+- **Progressive disclosure** patterns with skills
+- **Testing and validation** workflows
+- **Best practices** for skill design
+
+By the end, you'll understand how to package reusable agent knowledge as skills and compose them into production agents.
+
+### What Are Agent Skills?
+
+At its core, a **skill** is a directory containing a `SKILL.md` file. This file includes YAML frontmatter (metadata) and Markdown instructions that tell an agent how to perform a specific task.
+
+```
+code-review/
+├── SKILL.md          # Required: instructions + metadata
+├── examples/         # Optional: example code
+├── references/       # Optional: detailed docs
+└── templates/        # Optional: templates, configs
+```
+
+Skills can also be single markdown files—WINK automatically wraps them in a directory structure when mounting.
+
+**Skills vs Prompts**:
+
+| Aspect | Skills | WINK Prompts |
+|--------|--------|--------------|
+| **Scope** | Domain knowledge, workflows | Task-specific instructions |
+| **Discovery** | Progressive disclosure (name + description first) | Always fully loaded |
+| **Activation** | Agent chooses when to load | Defined by orchestration |
+| **Format** | Markdown with YAML frontmatter | Python dataclasses |
+| **Lifecycle** | Mounted at adapter creation | Created per evaluation |
+| **Reusability** | Shared across agents | Composed in templates |
+
+Think of skills as **libraries of domain knowledge** that agents discover and use when relevant, while prompts are **task-specific orchestration** that you control explicitly.
+
+### Progressive Disclosure Model
+
+Skills use **progressive disclosure** to manage context efficiently:
+
+```mermaid
+sequenceDiagram
+    participant Agent as Claude Code
+    participant Discovery as Skill Discovery
+    participant SKILL as SKILL.md Files
+    participant Context as Agent Context
+
+    Note over Agent,Context: 1. Discovery Phase (Low Cost)
+    Agent->>Discovery: Load available skills
+    Discovery->>SKILL: Read YAML frontmatter only
+    SKILL-->>Discovery: name + description (50-100 tokens each)
+    Discovery-->>Context: "code-review: Perform thorough code reviews..."
+
+    Note over Agent,Context: 2. Activation Phase (On Demand)
+    Agent->>Agent: Task matches "code review"
+    Agent->>SKILL: Read full SKILL.md content
+    SKILL-->>Context: Full instructions (500-2000 tokens)
+
+    Note over Agent,Context: 3. Execution Phase (Lazy Loading)
+    Agent->>SKILL: Read examples/security-checklist.md
+    SKILL-->>Context: Detailed reference material
+```
+
+**Key insight**: At startup, Claude Code loads only the `name` and `description` of each skill—just enough to know when a skill might be relevant. When a task matches, the full instructions are loaded. This keeps initial context lean while maintaining access to comprehensive knowledge.
+
+**Comparison to WINK's Section Visibility**:
+
+Skills and WINK's progressive disclosure (see [Chapter 10: Progressive Disclosure](10-progressive-disclosure.md)) serve complementary purposes:
+
+- **Section visibility**: Progressive disclosure within a single prompt (WINK controls expansion)
+- **Skills**: Progressive disclosure across the agent's lifetime (Claude Code controls activation)
+
+You can combine both—mount skills for domain knowledge, use section visibility for task-specific context.
+
+### Skill Structure and Manifest Format
+
+Every skill follows the [Agent Skills specification](https://agentskills.io). The `SKILL.md` file must contain **YAML frontmatter** and **Markdown instructions**.
+
+#### Required Frontmatter Fields
+
+```yaml
+---
+name: code-review
+description: Perform thorough code reviews checking for security vulnerabilities, error handling, test coverage, performance issues, and proper logging.
+---
+```
+
+**Field constraints**:
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `name` | `str` | 1-64 chars, lowercase letters/numbers/hyphens only, no consecutive hyphens, cannot start/end with hyphen | Skill identifier, must match directory name |
+| `description` | `str` | 1-1024 chars, non-empty | What the skill does and when to use it |
+
+**Name validation**:
+
+The `name` field must:
+
+- Be 1-64 characters long
+- Contain only lowercase letters (`a-z`), numbers (`0-9`), and hyphens (`-`)
+- Not start or end with a hyphen
+- Not contain consecutive hyphens (`--`)
+- Match the parent directory name (for directory skills)
+
+**Valid examples**:
+- `code-review`
+- `python-style`
+- `api-v2-testing`
+
+**Invalid examples**:
+- `Code-Review` (uppercase)
+- `-review` (starts with hyphen)
+- `code--review` (consecutive hyphens)
+- `code_review` (underscores not allowed)
+
+**Description best practices**:
+
+Write descriptions that help agents identify relevant tasks:
+
+```yaml
+# Good: Specific keywords and use cases
+description: Extracts text and tables from PDF files, fills PDF forms, and merges multiple PDFs. Use when working with PDF documents or when the user mentions PDFs, forms, or document extraction.
+
+# Poor: Too generic
+description: Helps with PDFs.
+```
+
+#### Optional Frontmatter Fields
+
+```yaml
+---
+name: code-review
+description: Perform thorough code reviews...
+license: Apache-2.0
+compatibility: Requires pyright and ruff for Python analysis
+metadata:
+  author: myteam
+  version: "2.1"
+  category: code-quality
+allowed-tools: Bash(python:*) Read Write Grep
+---
+```
+
+| Field | Type | Constraints | Description |
+|-------|------|-------------|-------------|
+| `license` | `str` | Any string | License name or reference to LICENSE file |
+| `compatibility` | `str` | Max 500 chars | Environment requirements |
+| `metadata` | `dict[str, str]` | String keys/values only | Arbitrary key-value metadata |
+| `allowed-tools` | `str` | Space-delimited | Pre-approved tools (experimental) |
+
+#### Body Content
+
+The Markdown body after the frontmatter contains the skill instructions. There are no format restrictions—write whatever helps agents perform the task effectively.
+
+**Recommended sections**:
+
+- **When to use this skill**: Help agents identify relevant tasks
+- **Step-by-step instructions**: Clear workflow
+- **Examples**: Input/output samples
+- **Common edge cases**: Pitfalls to avoid
+- **References**: Links to external resources or bundled files
+
+**Example structure**:
+
+```markdown
+---
+name: code-review
+description: Perform thorough code reviews...
+---
+
+# Code Review Skill
+
+You are a thorough code reviewer. When reviewing code:
+
+## When to Use This Skill
+
+Use this skill when:
+- The user asks for code review or PR review
+- You need to assess code quality, security, or performance
+- The task involves providing feedback on existing code
+
+## Review Checklist
+
+- [ ] Check for security vulnerabilities (injection, XSS, auth bypass)
+- [ ] Verify error handling covers edge cases
+- [ ] Ensure tests cover new functionality
+- [ ] Look for performance issues (N+1 queries, unnecessary allocations)
+- [ ] Check for proper logging and observability
+
+## Output Format
+
+Structure your review as:
+
+1. **Summary**: One-paragraph overview
+2. **Issues**: Concrete problems found (severity: high/medium/low)
+3. **Suggestions**: Improvements that aren't blocking
+4. **Questions**: Clarifications needed from the author
+
+## Common Pitfalls
+
+- Don't just list style violations—focus on correctness and maintainability
+- Provide specific code suggestions, not just "fix this"
+- Balance criticism with positive feedback
+
+## References
+
+For security patterns, see [references/security-checklist.md](references/security-checklist.md).
+```
+
+**Keep it concise**: The full `SKILL.md` is loaded when the skill activates. Keep the main file under 500 lines and move detailed reference material to separate files in `references/` or `examples/`.
+
+### Mounting Skills in WINK
+
+WINK provides skill mounting through the `ClaudeAgentSDKAdapter` via `IsolationConfig`. Skills are copied to `~/.claude/skills/` in the ephemeral home directory before Claude Code starts.
+
+#### Skill Mounting Flow
+
+```mermaid
+flowchart TB
+    subgraph Host["Host Filesystem"]
+        SkillDir["skills/code-review/"]
+        SkillFile["skills/python-style.md"]
+    end
+
+    subgraph Config["WINK Configuration"]
+        Mount1["SkillMount(Path('skills/code-review'))"]
+        Mount2["SkillMount(Path('skills/python-style.md'))"]
+        SkillConfig["SkillConfig(skills=(...))"]
+    end
+
+    subgraph Validation["Validation Phase"]
+        CheckStructure["Check SKILL.md exists"]
+        ParseYAML["Parse YAML frontmatter"]
+        ValidateFields["Validate required fields"]
+        CheckConstraints["Check field constraints"]
+    end
+
+    subgraph Ephemeral["Ephemeral Home"]
+        EphemeralHome["~/.claude-XXXXX/"]
+        SkillsDir[".claude/skills/"]
+        Mounted1["code-review/SKILL.md"]
+        Mounted2["python-style/SKILL.md"]
+    end
+
+    subgraph SDK["Claude Code"]
+        Discovery["Skill Discovery"]
+        Context["Agent Context"]
+    end
+
+    SkillDir --> Mount1
+    SkillFile --> Mount2
+    Mount1 --> SkillConfig
+    Mount2 --> SkillConfig
+
+    SkillConfig --> CheckStructure
+    CheckStructure --> ParseYAML
+    ParseYAML --> ValidateFields
+    ValidateFields --> CheckConstraints
+
+    CheckConstraints --> SkillsDir
+    SkillsDir --> Mounted1
+    SkillsDir --> Mounted2
+
+    EphemeralHome --> SkillsDir
+
+    Mounted1 --> Discovery
+    Mounted2 --> Discovery
+    Discovery --> Context
+
+    style Validation fill:#fff4e1
+    style Ephemeral fill:#e1f5ff
+```
+
+**Step-by-step process**:
+
+1. **Configuration**: Define `SkillMount` instances pointing to host paths
+2. **Validation**: WINK validates skill structure and frontmatter (if `validate_on_mount=True`)
+3. **Copy**: Skills are copied to ephemeral `~/.claude/skills/{skill_name}/`
+4. **Discovery**: Claude Code discovers skills natively at startup
+5. **Activation**: Claude Code loads full instructions when tasks match
+
+#### Basic Example
+
+```python
+from pathlib import Path
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+from weakincentives.skills import SkillConfig, SkillMount
+
+# Mount two skills
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            skills=SkillConfig(
+                skills=(
+                    SkillMount(Path("./skills/code-review")),
+                    SkillMount(Path("./skills/python-style.md")),
+                )
+            ),
+        ),
+    ),
+)
+
+# Skills are now available to Claude Code for the entire session
+```
+
+#### Auto-Discovering Skills
+
+Scan a directory for all valid skills:
+
+```python
+from pathlib import Path
+from weakincentives.skills import SkillConfig, SkillMount
+
+SKILLS_ROOT = Path("./demo-skills")
+
+# Auto-discover all directory skills with SKILL.md
+skill_mounts = tuple(
+    SkillMount(source=skill_dir)
+    for skill_dir in SKILLS_ROOT.iterdir()
+    if skill_dir.is_dir() and (skill_dir / "SKILL.md").exists()
+)
+
+skills = SkillConfig(skills=skill_mounts)
+```
+
+#### Custom Skill Names
+
+Override the skill name (useful for versioning or aliasing):
+
+```python
+from weakincentives.skills import SkillConfig, SkillMount
+
+skills = SkillConfig(
+    skills=(
+        # Use custom name instead of directory name
+        SkillMount(
+            source=Path("./internal/review-v2"),
+            name="code-review",
+        ),
+        # Single-file skill with explicit name
+        SkillMount(
+            source=Path("./prompts/test-helper.md"),
+            name="testing",
+        ),
+    )
+)
+```
+
+#### Conditional Skills
+
+Enable/disable skills dynamically:
+
+```python
+from weakincentives.skills import SkillConfig, SkillMount
+
+def get_skills(enable_experimental: bool) -> SkillConfig:
+    """Build skill config based on feature flags."""
+    return SkillConfig(
+        skills=(
+            SkillMount(Path("./skills/core")),
+            SkillMount(
+                source=Path("./skills/experimental"),
+                enabled=enable_experimental,  # Conditionally enable
+            ),
+        )
+    )
+```
+
+#### Validation Settings
+
+By default, WINK validates skills at mount time. Disable for rapid iteration:
+
+```python
+from weakincentives.skills import SkillConfig, SkillMount
+
+# Skip validation during development
+skills = SkillConfig(
+    skills=(SkillMount(Path("./wip-skill")),),
+    validate_on_mount=False,  # Disable validation
+)
+```
+
+**Validation checks** (when enabled):
+
+- Directory skills contain `SKILL.md` at root
+- File skills have `.md` extension
+- YAML frontmatter is present and valid
+- Required fields (`name`, `description`) are present
+- Optional fields meet type and length constraints
+- For directory skills, `name` matches directory name
+- Individual files ≤ 1 MiB
+- Total skill size ≤ 10 MiB
+
+**Validation errors**:
+
+| Error Type | Condition |
+|------------|-----------|
+| `SkillNotFoundError` | Source path does not exist |
+| `SkillValidationError` | Missing SKILL.md, invalid YAML, field constraints violated |
+| `SkillMountError` | Invalid skill name format, duplicate names, I/O error during copy |
+
+### Skills and Progressive Disclosure Integration
+
+Skills integrate naturally with WINK's progressive disclosure system (see [Chapter 10: Progressive Disclosure](10-progressive-disclosure.md)). Both reduce token consumption by loading context on demand, but they operate at different levels:
+
+**Skill progressive disclosure** (Claude Code-managed):
+
+1. **Discovery**: Claude Code loads `name` + `description` for all skills (~50-100 tokens each)
+2. **Activation**: When a task matches, Claude Code loads the full `SKILL.md` (~500-2000 tokens)
+3. **Reference loading**: Claude Code may read additional files from the skill directory as needed
+
+**Section progressive disclosure** (WINK-managed):
+
+1. **Summary rendering**: Sections start as one-sentence summaries (~10-30 tokens each)
+2. **Expansion**: Model calls `open_sections()` to permanently expand sections
+3. **Temporary access**: Model calls `read_section()` for one-time content access
+
+**Combined optimization flow**:
+
+```mermaid
+flowchart LR
+    subgraph AgentStartup["Agent Startup"]
+        SkillDiscovery["Load skill names<br/>(~200 tokens)"]
+        SectionSummaries["Load section summaries<br/>(~100 tokens)"]
+        InitialPrompt["Initial prompt<br/>(~300 tokens total)"]
+    end
+
+    subgraph TaskExecution["Task: Code Review"]
+        ActivateSkill["Activate 'code-review' skill<br/>(+1500 tokens)"]
+        ExpandSection["open_sections(['style_guide'])<br/>(+2000 tokens)"]
+        TotalContext["Total: ~3800 tokens"]
+    end
+
+    subgraph Alternative["Without Progressive Disclosure"]
+        AllSkills["Load all skills upfront<br/>(~8000 tokens)"]
+        AllSections["Load all sections full<br/>(~6000 tokens)"]
+        WastedContext["Total: ~14000 tokens<br/>(73% waste for this task)"]
+    end
+
+    SkillDiscovery --> InitialPrompt
+    SectionSummaries --> InitialPrompt
+    InitialPrompt --> ActivateSkill
+    ActivateSkill --> ExpandSection
+    ExpandSection --> TotalContext
+
+    style TotalContext fill:#d4edda
+    style WastedContext fill:#f8d7da
+```
+
+**Cost savings**: Progressive disclosure (skills + sections) can reduce token consumption by **60-80%** for agents with extensive domain knowledge.
+
+### Complete Example: Custom Testing Skill
+
+Let's create a complete skill for Python testing best practices.
+
+#### 1. Create Skill Directory
+
+```bash
+mkdir -p skills/python-testing/{examples,references}
+```
+
+#### 2. Write SKILL.md
+
+**File: `skills/python-testing/SKILL.md`**
+
+```markdown
+---
+name: python-testing
+description: Write comprehensive Python tests using pytest, including fixtures, parametrization, mocks, and coverage best practices. Use when writing or reviewing test code.
+license: MIT
+metadata:
+  author: platform-team
+  version: "1.2"
+  category: testing
+---
+
+# Python Testing Skill
+
+You are an expert at writing comprehensive, maintainable Python tests.
+
+## When to Use This Skill
+
+Use this skill when:
+- Writing new test cases
+- Reviewing test coverage
+- Debugging failing tests
+- Setting up test infrastructure
+
+## Testing Principles
+
+1. **Arrange-Act-Assert**: Structure tests clearly
+2. **One assertion per test**: Keep tests focused (or use subtests)
+3. **Test behavior, not implementation**: Focus on contracts
+4. **Fixture composition**: Reuse setup code via fixtures
+5. **Parametrize exhaustively**: Cover edge cases with `@pytest.mark.parametrize`
+
+## Common Patterns
+
+### Basic Test Structure
+
+```python
+def test_user_creation():
+    # Arrange
+    name = "Alice"
+    email = "alice@example.com"
+
+    # Act
+    user = User.create(name=name, email=email)
+
+    # Assert
+    assert user.name == name
+    assert user.email == email
+    assert user.id is not None
+```
+
+### Using Fixtures
+
+```python
+@pytest.fixture
+def db_session():
+    """Provide a database session with rollback."""
+    session = create_session()
+    yield session
+    session.rollback()
+    session.close()
+
+def test_user_persistence(db_session):
+    user = User(name="Bob")
+    db_session.add(user)
+    db_session.commit()
+
+    assert db_session.query(User).filter_by(name="Bob").first() is not None
+```
+
+### Parametrized Tests
+
+```python
+@pytest.mark.parametrize("input,expected", [
+    ("", 0),
+    ("hello", 5),
+    ("hello world", 11),
+])
+def test_string_length(input, expected):
+    assert len(input) == expected
+```
+
+### Mocking External Services
+
+```python
+from unittest.mock import patch, MagicMock
+
+def test_api_client_success():
+    with patch("requests.get") as mock_get:
+        mock_get.return_value = MagicMock(
+            status_code=200,
+            json=lambda: {"status": "ok"}
+        )
+
+        client = APIClient()
+        response = client.fetch_status()
+
+        assert response["status"] == "ok"
+        mock_get.assert_called_once_with("https://api.example.com/status")
+```
+
+## Coverage Guidelines
+
+- **Minimum**: 80% line coverage for new code
+- **Focus**: Critical paths, error handling, edge cases
+- **Exclude**: Generated code, third-party integrations (use integration tests)
+
+Run coverage with:
+```bash
+pytest --cov=mypackage --cov-report=html
+```
+
+## Common Mistakes to Avoid
+
+- **Brittle tests**: Avoid testing implementation details (e.g., internal method calls)
+- **Flaky tests**: Avoid time-dependent or order-dependent tests
+- **Over-mocking**: Mock only external dependencies, not your own code
+- **Missing teardown**: Always clean up resources (use fixtures or context managers)
+
+## References
+
+For advanced patterns, see:
+- [examples/test_fixtures.py](examples/test_fixtures.py) - Fixture composition examples
+- [examples/test_async.py](examples/test_async.py) - Async/await testing patterns
+- [references/pytest-best-practices.md](references/pytest-best-practices.md) - Detailed guide
+```
+
+#### 3. Add Supporting Files
+
+**File: `skills/python-testing/examples/test_fixtures.py`**
+
+```python
+"""Fixture composition examples."""
+import pytest
+
+@pytest.fixture
+def database():
+    """Provide an in-memory database."""
+    db = InMemoryDB()
+    yield db
+    db.close()
+
+@pytest.fixture
+def user_repository(database):
+    """Provide a user repository backed by the database."""
+    return UserRepository(database)
+
+@pytest.fixture
+def authenticated_user(user_repository):
+    """Provide an authenticated user."""
+    user = user_repository.create(name="Test User", email="test@example.com")
+    user.authenticate()
+    return user
+
+def test_user_can_create_post(authenticated_user, user_repository):
+    """Demonstrates fixture composition."""
+    post = authenticated_user.create_post(title="Hello", body="World")
+    assert post.author == authenticated_user
+    assert user_repository.find_post(post.id) == post
+```
+
+**File: `skills/python-testing/references/pytest-best-practices.md`**
+
+```markdown
+# Pytest Best Practices
+
+## Fixture Scopes
+
+- `function`: Default, new instance per test
+- `class`: Shared across test class
+- `module`: Shared across module
+- `session`: Shared across entire test suite
+
+## Marks
+
+Use marks to organize tests:
+
+```python
+@pytest.mark.slow
+def test_expensive_computation():
+    ...
+
+@pytest.mark.integration
+def test_api_endpoint():
+    ...
+```
+
+Run specific marks:
+```bash
+pytest -m "not slow"  # Skip slow tests
+pytest -m integration # Only integration tests
+```
+
+## Temporary Files
+
+Use `tmp_path` fixture:
+
+```python
+def test_file_processing(tmp_path):
+    test_file = tmp_path / "data.txt"
+    test_file.write_text("Hello, World!")
+
+    result = process_file(test_file)
+
+    assert result == "HELLO, WORLD!"
+```
+
+## Plugins
+
+Essential plugins:
+- `pytest-cov`: Coverage reporting
+- `pytest-asyncio`: Async test support
+- `pytest-mock`: Mocking utilities
+- `pytest-xdist`: Parallel test execution
+```
+
+#### 4. Mount the Skill
+
+```python
+from pathlib import Path
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+from weakincentives.skills import SkillConfig, SkillMount
+
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        permission_mode="bypassPermissions",
+        isolation=IsolationConfig(
+            skills=SkillConfig(
+                skills=(
+                    SkillMount(Path("./skills/python-testing")),
+                )
+            ),
+        ),
+    ),
+)
+```
+
+Now when Claude Code encounters a testing task, it will:
+
+1. Recognize the match via the `description` field
+2. Load the full `SKILL.md` instructions
+3. Optionally read `examples/` or `references/` files as needed
+
+### Testing Skills
+
+Test skills the same way you test prompts—by evaluating agent behavior with and without the skill mounted.
+
+#### Testing Skill Discovery
+
+Verify that skills are correctly validated and mounted:
+
+```python
+from pathlib import Path
+import pytest
+from weakincentives.skills import SkillConfig, SkillMount, validate_skill
+
+def test_skill_validation_success():
+    """Valid skill passes validation."""
+    skill_path = Path("./skills/code-review")
+    validate_skill(skill_path)  # Should not raise
+
+def test_skill_validation_missing_frontmatter():
+    """Skill without frontmatter fails validation."""
+    skill_path = Path("./skills/invalid-skill")
+    with pytest.raises(SkillValidationError, match="frontmatter"):
+        validate_skill(skill_path)
+
+def test_skill_mount_duplicate_names():
+    """Mounting duplicate skill names raises error."""
+    with pytest.raises(SkillMountError, match="Duplicate skill"):
+        SkillConfig(
+            skills=(
+                SkillMount(Path("./skills/code-review")),
+                SkillMount(Path("./skills/code-review"), name="code-review"),
+            )
+        )
+```
+
+#### Testing Skill Impact on Agent Behavior
+
+Use session evaluators (see [Chapter 8: Evaluation](08-evaluation.md)) to measure skill effectiveness:
+
+```python
+from dataclasses import dataclass
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    IsolationConfig,
+)
+from weakincentives.evals import EvalLoop, SessionEvaluator, EvalResult
+from weakincentives.skills import SkillConfig, SkillMount
+from weakincentives.runtime import Session, InProcessDispatcher
+
+@dataclass(frozen=True)
+class CodeReviewQuality(SessionEvaluator):
+    """Evaluator for code review completeness."""
+
+    def evaluate(self, session: Session) -> EvalResult:
+        # Check if review covered security, performance, tests
+        events = session.bus.events
+        review_text = "".join(e.text for e in events if hasattr(e, "text"))
+
+        security_check = "security" in review_text.lower()
+        performance_check = "performance" in review_text.lower()
+        test_check = "test" in review_text.lower()
+
+        score = sum([security_check, performance_check, test_check]) / 3.0
+
+        return EvalResult(
+            passed=score >= 0.8,
+            score=score,
+            context={"security": security_check, "performance": performance_check, "tests": test_check}
+        )
+
+def test_code_review_skill_improves_coverage():
+    """Skill-equipped agent produces more comprehensive reviews."""
+    # Adapter WITHOUT skill
+    baseline_adapter = ClaudeAgentSDKAdapter()
+
+    # Adapter WITH skill
+    skilled_adapter = ClaudeAgentSDKAdapter(
+        client_config=ClaudeAgentSDKClientConfig(
+            isolation=IsolationConfig(
+                skills=SkillConfig(
+                    skills=(SkillMount(Path("./skills/code-review")),)
+                )
+            )
+        )
+    )
+
+    # Evaluate both on the same task
+    dataset = [...]  # Code review examples
+
+    baseline_score = EvalLoop(baseline_adapter).run(dataset, [CodeReviewQuality()])
+    skilled_score = EvalLoop(skilled_adapter).run(dataset, [CodeReviewQuality()])
+
+    # Skilled agent should score higher
+    assert skilled_score.mean_score > baseline_score.mean_score
+```
+
+### Best Practices
+
+#### 1. Skill Granularity
+
+**One skill per domain or workflow**:
+
+- ✅ Good: `code-review`, `python-testing`, `api-design`
+- ❌ Bad: `engineering` (too broad), `check-imports` (too narrow)
+
+Skills should be **cohesive** (single domain) but **comprehensive** (cover the domain well).
+
+#### 2. Description Quality
+
+Help Claude Code identify relevant tasks:
+
+```yaml
+# Good: Specific keywords and use cases
+description: Write comprehensive Python tests using pytest, including fixtures, parametrization, mocks, and coverage best practices. Use when writing or reviewing test code.
+
+# Bad: Too generic
+description: Helps with testing.
+```
+
+Include **trigger words** the agent might encounter ("pytest", "fixtures", "coverage").
+
+#### 3. Instruction Structure
+
+**Clear sections** help the agent navigate:
+
+```markdown
+## When to Use This Skill
+- Task identification
+
+## Core Concepts
+- Domain fundamentals
+
+## Common Patterns
+- Copy-paste examples
+
+## Common Mistakes
+- What to avoid
+
+## References
+- Links to detailed docs
+```
+
+#### 4. Size and Scope
+
+**Keep SKILL.md under 500 lines**:
+
+- If instructions exceed 500 lines, split into multiple skills or move details to `references/`
+- Remember: Full `SKILL.md` loads when activated—keep it focused
+
+**Example refactoring**:
+
+```
+Before:
+python-style/
+└── SKILL.md (1200 lines: PEP 8, type hints, docstrings, async, decorators...)
+
+After:
+python-style/
+├── SKILL.md (300 lines: core style + links to references)
+└── references/
+    ├── type-annotations.md
+    ├── async-patterns.md
+    └── decorator-best-practices.md
+```
+
+#### 5. Testing and Validation
+
+**Always validate skills before production**:
+
+```python
+from weakincentives.skills import validate_skill
+
+# Validate during CI
+validate_skill(Path("./skills/code-review"))
+```
+
+**Test skill impact with evaluators**:
+
+- Measure agent performance with/without the skill
+- Track token usage (skills should reduce trial-and-error)
+- Verify the agent activates skills appropriately
+
+#### 6. Versioning
+
+Use `metadata.version` for tracking:
+
+```yaml
+metadata:
+  version: "2.1"
+  changelog: "Added async testing patterns"
+```
+
+For breaking changes, create a new skill with a different name:
+
+```
+skills/
+├── code-review/       # v1
+└── code-review-v2/    # v2 (mount as "code-review" via name override)
+```
+
+#### 7. Security
+
+**Never include secrets in skills**:
+
+- ❌ API keys, credentials, tokens
+- ✅ Placeholders and references to environment variables
+
+**Example**:
+
+```markdown
+## Authentication
+
+To authenticate, set the API key in your environment:
+
+```bash
+export API_KEY="your-key-here"
+```
+
+Then use it in requests:
+```python
+headers = {"Authorization": f"Bearer {os.environ['API_KEY']}"}
+```
+```
+
+#### 8. Composability
+
+Design skills to work together:
+
+- **Layered skills**: `python-style` + `python-testing` + `code-review`
+- **Complementary skills**: `api-design` + `openapi-validation`
+- **Avoid overlap**: Each skill should add unique value
+
+Test skill combinations to ensure they don't conflict or duplicate instructions.
+
+### Cross-References
+
+- [Chapter 3: Prompts](03-prompts.md) - Prompt composition and resource lifecycle (skills are complementary to prompts)
+- [Chapter 6.4: Claude Agent SDK Adapter](06-adapters.md#claude-agent-sdk-adapter) - Adapter configuration and isolation
+- [Chapter 8: Evaluation](08-evaluation.md) - Testing skill effectiveness with session evaluators
+- [Chapter 10: Progressive Disclosure](10-progressive-disclosure.md) - Section visibility patterns (WINK's progressive disclosure)
+
+### Summary
+
+Agent Skills provide a declarative, version-controlled way to package domain knowledge for AI agents. Key takeaways:
+
+- **Skills are directories** containing `SKILL.md` with YAML frontmatter and Markdown instructions
+- **Progressive disclosure** loads only `name` + `description` initially, full content on activation
+- **WINK validates and mounts** skills into ephemeral `~/.claude/skills/` via `IsolationConfig`
+- **Combine with WINK's section visibility** for two-level progressive disclosure (skills + sections)
+- **Test skill impact** with session evaluators to measure effectiveness
+- **Best practices**: Keep skills focused, write clear descriptions, validate before production
+
+Skills excel at **reusable domain knowledge** while prompts excel at **task-specific orchestration**. Use both to build agents that are efficient, capable, and maintainable.
+
 ## Choosing an Adapter
 
 | Adapter | Use When | Pros | Cons |

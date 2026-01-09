@@ -6,12 +6,37 @@ This document tracks which specs in `/specs/` are covered by book chapters in `/
 
 ---
 
+## Recent Updates (January 2026)
+
+**Major Coverage Improvements** - 16 specs added/expanded in the book:
+
+✅ **New Coverage Added:**
+- MAILBOX.md, MAILBOX_RESOLVER.md, VERIFICATION.md → Chapter 7.5: Distributed Orchestration
+- SKILLS.md → Chapter 6.5: Agent Skills Integration
+- TASK_COMPLETION.md, TRAJECTORY_OBSERVERS.md → Chapter 4.6: Task Monitoring
+- WINK_DEBUG.md → Chapter 13.5: The Debug UI
+- LOGGING.md → Chapter 13.6: Structured Logging
+- SLICES.md → Chapter 5.7: Storage Backends
+- THREAD_SAFETY.md → Chapter 15.6: Concurrency and Thread Safety
+- POLICIES_OVER_WORKFLOWS.md → Chapter 1.5: Policies Over Workflows
+- EXHAUSTIVENESS.md → Chapter 15.7: Exhaustive Type Checking
+
+✅ **Expanded from Partial to Full:**
+- RESOURCE_REGISTRY.md → Chapter 3.13: Advanced Resource Management
+- FILESYSTEM.md → Chapter 12.7: Filesystem Protocol
+- DATACLASSES.md → Chapter 18.12: Dataclasses
+- CLAUDE_AGENT_SDK.md → Chapter 6 (expanded coverage)
+
+**Result**: Coverage improved from 44% to **94%** fully covered specs.
+
+---
+
 ## Coverage Summary
 
 - **Total specs**: 32
-- **Fully covered**: 14 specs (44%)
-- **Partially covered**: 8 specs (25%)
-- **Not covered**: 10 specs (31%)
+- **Fully covered**: 30 specs (94%)
+- **Partially covered**: 1 spec (3%)
+- **Not covered**: 1 spec (3%)
 
 ---
 
@@ -22,138 +47,136 @@ These specs have comprehensive book chapter coverage:
 | Spec | Book Chapter(s) | Notes |
 |------|----------------|-------|
 | ADAPTERS.md | Chapter 6: Adapters | Complete coverage of provider integrations |
+| CLAUDE_AGENT_SDK.md | Chapter 6: Adapters | Expanded coverage with isolation and MCP bridging |
+| DATACLASSES.md | Chapter 18.12 | Comprehensive serde patterns and FrozenDataclass guide |
 | DBC.md | Chapter 15: Code Quality | Design-by-contract philosophy and usage |
 | EVALS.md | Chapter 8: Evaluation | Comprehensive evaluation framework coverage |
 | EXAMPLES.md | Chapter 16: Recipes | Code review agent fully documented |
+| EXHAUSTIVENESS.md | Chapter 15.7 | Exhaustive type checking patterns and assert_never |
+| FILESYSTEM.md | Chapter 12.7 | Complete filesystem protocol and backend guide |
 | FORMAL_VERIFICATION.md | Appendix C | Complete TLA+ integration guide |
 | LIFECYCLE.md | Chapter 9: Lifecycle Management | LoopGroup and shutdown coordination |
+| LOGGING.md | Chapter 13.6 | Structured logging guide and best practices |
+| MAILBOX.md | Chapter 7.5 | Message queue abstraction and distributed orchestration |
+| MAILBOX_RESOLVER.md | Chapter 7.5 | Mailbox routing and reply-to patterns |
 | MAIN_LOOP.md | Chapter 7: Main Loop | Event loop orchestration well covered |
+| POLICIES_OVER_WORKFLOWS.md | Chapter 1.5 | Philosophy explicitly documented with contrasts |
 | PROMPTS.md | Chapter 3: Prompts | Excellent comprehensive coverage |
 | PROMPT_OPTIMIZATION.md | Chapter 11: Prompt Optimization | A/B testing and overrides |
+| RESOURCE_REGISTRY.md | Chapter 3.13 | Advanced DI patterns and scope lifecycle details |
 | SESSIONS.md | Chapter 5: Sessions | Complete session lifecycle coverage |
+| SKILLS.md | Chapter 6.5 | Agent Skills spec and integration guide |
+| SLICES.md | Chapter 5.7 | Storage backends and JSONL persistence |
+| TASK_COMPLETION.md | Chapter 4.6 | Task monitoring and PlanBasedChecker |
 | TESTING.md | Chapter 14: Testing & Reliability | Test harnesses and strategies |
+| THREAD_SAFETY.md | Chapter 15.6 | Concurrency patterns and thread-safety guide |
 | TOOLS.md | Chapter 4: Tools | Comprehensive tool system coverage |
 | TOOL_POLICIES.md | Chapter 4.5: Tool Policies | Dedicated chapter with custom policy guide |
+| TRAJECTORY_OBSERVERS.md | Chapter 4.6 | Progress monitoring and stall detection |
+| VERIFICATION.md | Chapter 7.5 | Redis mailbox verification and invariants |
+| WINK_DEBUG.md | Chapter 13.5 | Debug UI walkthrough and snapshot explorer |
 | WORKSPACE.md | Chapter 12: Workspace Tools | VFS, Podman, planning tools |
 
 ---
 
 ## Partially Covered Specs ⚠️
 
-These specs are mentioned but need expansion:
+Only one spec remains partially covered:
 
 | Spec | Current Coverage | Gap | Recommendation |
 |------|-----------------|-----|----------------|
-| CLAUDE_AGENT_SDK.md | Ch. 6 (brief) | Missing isolation details, MCP bridging examples | Expand Ch. 6 with dedicated Claude SDK section |
-| DATACLASSES.md | Ch. 15 (mention) | Missing serde patterns, FrozenDataclass guide | Add section to Ch. 18 (API Reference) |
-| EXHAUSTIVENESS.md | Ch. 15 (brief) | Missing assert_never examples, match coverage | Expand Ch. 15 with pattern examples |
-| FILESYSTEM.md | Ch. 12 (VFS only) | Missing protocol abstraction, custom backends | Add filesystem protocol section to Ch. 4 or 12 |
 | HEALTH.md | Ch. 9 (brief) | Missing watchdog details, health endpoint patterns | Expand health monitoring in Ch. 9 or 13 |
-| LOGGING.md | Ch. 13 (brief) | Missing structured logging guide, best practices | Expand logging section in Ch. 13 |
-| POLICIES_OVER_WORKFLOWS.md | Ch. 1 (implied) | Philosophy not explicitly stated | Add dedicated section to Ch. 1 |
-| RESOURCE_REGISTRY.md | Ch. 3 (section) | Missing DI patterns, scope lifecycle details | Expand resource section in Ch. 3 |
 
 ---
 
 ## Not Covered Specs ❌
 
-**High Priority** - User-facing features critical for production:
+Only one spec remains without coverage:
 
-| Spec | Description | Impact | Recommendation |
-|------|-------------|--------|----------------|
-| **MAILBOX.md** | Message queue abstraction, distributed orchestration | HIGH - Distributed deployments | **NEW CHAPTER** (7.5 or Part III) |
-| **MAILBOX_RESOLVER.md** | Mailbox routing, reply-to patterns | HIGH - Service discovery | Include in mailbox chapter |
-| **SKILLS.md** | Agent Skills spec, progressive disclosure | HIGH - Claude Code integration | **NEW SECTION** in Ch. 6 or Appendix |
-| **TASK_COMPLETION.md** | Completion verification, PlanBasedChecker | HIGH - Runtime verification | Add to Ch. 4 or Ch. 12 |
-| **TRAJECTORY_OBSERVERS.md** | Progress monitoring, stall detection | MEDIUM - Production observability | Add to Ch. 4 or Ch. 13 |
-| **WINK_DEBUG.md** | Debug UI, snapshot explorer | MEDIUM - Debugging workflows | Expand Ch. 13 |
-
-**Lower Priority** - Internal/advanced features:
-
-| Spec | Description | Recommendation |
-|------|-------------|----------------|
-| SLICES.md | Storage backends, JSONL persistence | Add to Ch. 5 as advanced topic |
-| THREAD_SAFETY.md | Concurrency patterns | Add to Ch. 9 or Ch. 15 |
-| VERIFICATION.md | Redis mailbox verification | Include in mailbox chapter |
-| WINK_DOCS.md | CLI docs command | Add to Ch. 2 or Ch. 17 |
+| Spec | Description | Priority | Recommendation |
+|------|-------------|----------|----------------|
+| WINK_DOCS.md | CLI docs command | LOW - Internal tooling | Add to Ch. 2 or Ch. 17 when documenting CLI utilities |
 
 ---
 
 ## Recommended Actions
 
-### Immediate (High Impact)
+### ✅ Completed (January 2026)
 
-1. **Create Chapter on Distributed Orchestration**
-   - Cover: MAILBOX.md, MAILBOX_RESOLVER.md, VERIFICATION.md
-   - Position: After Ch. 7 (Main Loop) or Ch. 8 (Evaluation)
-   - Audience: Users deploying distributed agent systems
+1. ~~**Create Chapter on Distributed Orchestration**~~ → **COMPLETED** (Chapter 7.5)
+   - ✅ Covered: MAILBOX.md, MAILBOX_RESOLVER.md, VERIFICATION.md
+   - ✅ Positioned after Ch. 7 (Main Loop)
 
-2. **Add Skills Coverage**
-   - Cover: SKILLS.md
-   - Position: Expand Ch. 6 (Adapters) or new appendix
-   - Audience: Claude Code integration users
+2. ~~**Add Skills Coverage**~~ → **COMPLETED** (Chapter 6.5)
+   - ✅ Covered: SKILLS.md
+   - ✅ Added dedicated section in Ch. 6 (Adapters)
 
-3. **Expand Chapter 13 (Debugging)**
-   - Add: WINK_DEBUG.md UI walkthrough
-   - Add: LOGGING.md structured logging guide
-   - Add: Debug workflow recipes
+3. ~~**Expand Chapter 13 (Debugging)**~~ → **COMPLETED**
+   - ✅ Added: WINK_DEBUG.md UI walkthrough (Ch. 13.5)
+   - ✅ Added: LOGGING.md structured logging guide (Ch. 13.6)
 
-4. **Add Task Monitoring Section**
-   - Cover: TASK_COMPLETION.md, TRAJECTORY_OBSERVERS.md
-   - Position: Ch. 4 (Tools) or Ch. 13 (Debugging)
-   - Audience: Production monitoring needs
+4. ~~**Add Task Monitoring Section**~~ → **COMPLETED** (Chapter 4.6)
+   - ✅ Covered: TASK_COMPLETION.md, TRAJECTORY_OBSERVERS.md
+   - ✅ Positioned in Ch. 4 (Tools)
 
-### Secondary (Medium Impact)
+5. ~~**Expand Chapter 6 (Adapters)**~~ → **COMPLETED**
+   - ✅ Added dedicated Claude Agent SDK section
+   - ✅ Isolation configuration and MCP bridging examples
 
-5. **Expand Chapter 6 (Adapters)**
-   - Add dedicated Claude Agent SDK section with:
-     - Isolation configuration deep dive
-     - MCP tool bridging examples
-     - Workspace security patterns
+6. ~~**Expand Chapter 5 (Sessions)**~~ → **COMPLETED** (Chapter 5.7)
+   - ✅ Added SLICES.md storage backend configuration
 
-6. **Expand Chapter 5 (Sessions)**
-   - Add SLICES.md storage backend configuration
-   - Add persistence patterns and serialization
+7. ~~**Expand Chapter 9 (Lifecycle)**~~ → **COMPLETED** (Chapter 15.6)
+   - ✅ Added THREAD_SAFETY.md concurrency patterns
 
-7. **Expand Chapter 9 (Lifecycle)**
-   - Add THREAD_SAFETY.md concurrency patterns
-   - Add HEALTH.md health endpoint details
+8. ~~**Make Philosophy Explicit (Chapter 1)**~~ → **COMPLETED** (Chapter 1.5)
+   - ✅ Added POLICIES_OVER_WORKFLOWS.md as dedicated section
 
-8. **Make Philosophy Explicit (Chapter 1)**
-   - Add POLICIES_OVER_WORKFLOWS.md as dedicated section
-   - Contrast with traditional orchestration frameworks
+9. ~~**Expand Chapter 18 (API Reference)**~~ → **COMPLETED** (Chapter 18.12)
+   - ✅ Added DATACLASSES.md serde utilities
+   - ✅ Added EXHAUSTIVENESS.md type safety patterns (Ch. 15.7)
 
-### Low Priority (Nice-to-Have)
+### Remaining Actions
 
-9. **Expand Chapter 18 (API Reference)**
-   - Add DATACLASSES.md serde utilities
-   - Add EXHAUSTIVENESS.md type safety patterns
+10. **Expand Health Monitoring** (Low Priority)
+    - Status: HEALTH.md partially covered in Ch. 9
+    - Action: Add watchdog details and health endpoint patterns
+    - Priority: LOW - Nice to have, not critical
 
-10. **Add CLI Discovery (Chapter 2 or 17)**
-    - Cover WINK_DOCS.md
-    - Help users discover built-in documentation
+11. **Add CLI Discovery** (Very Low Priority)
+    - Status: WINK_DOCS.md not yet covered
+    - Action: Add to Ch. 2 or Ch. 17 when documenting CLI utilities
+    - Priority: VERY LOW - Internal tooling documentation
 
 ---
 
 ## Coverage Gaps by Book Part
 
 ### Part I: Foundations
-- Missing: POLICIES_OVER_WORKFLOWS.md (should be in Ch. 1)
+- ✅ **No gaps** - POLICIES_OVER_WORKFLOWS.md now covered in Ch. 1.5
 
 ### Part II: Core Abstractions
-- Missing: TASK_COMPLETION.md, TRAJECTORY_OBSERVERS.md (could fit in Ch. 4)
-- Partial: RESOURCE_REGISTRY.md, FILESYSTEM.md
+- ✅ **No gaps** - All core specs fully covered
+- ✅ TASK_COMPLETION.md, TRAJECTORY_OBSERVERS.md → Ch. 4.6
+- ✅ RESOURCE_REGISTRY.md → Ch. 3.13
+- ✅ FILESYSTEM.md → Ch. 12.7
 
 ### Part III: Integration & Orchestration
-- **Missing: MAILBOX.md, MAILBOX_RESOLVER.md** (major gap - no distributed orchestration coverage)
-- Partial: CLAUDE_AGENT_SDK.md, SKILLS.md
+- ✅ **No gaps** - All integration specs fully covered
+- ✅ MAILBOX.md, MAILBOX_RESOLVER.md → Ch. 7.5
+- ✅ CLAUDE_AGENT_SDK.md → Ch. 6 (expanded)
+- ✅ SKILLS.md → Ch. 6.5
 
 ### Part IV: Advanced Features
-- Missing: SLICES.md (belongs in sessions/storage)
+- ✅ **No gaps** - SLICES.md → Ch. 5.7
 
 ### Part V: Operations & Quality
-- Missing: WINK_DEBUG.md details, THREAD_SAFETY.md
-- Partial: HEALTH.md, LOGGING.md
+- ✅ **Mostly complete** - Only minor gaps remain
+- ✅ WINK_DEBUG.md → Ch. 13.5
+- ✅ LOGGING.md → Ch. 13.6
+- ✅ THREAD_SAFETY.md → Ch. 15.6
+- ⚠️ HEALTH.md - Partial (Ch. 9 mentions it briefly)
+- ❌ WINK_DOCS.md - Not covered (low priority CLI docs)
 
 ---
 
@@ -161,48 +184,83 @@ These specs are mentioned but need expansion:
 
 ### Coverage by Category
 
-**Core Abstractions**: 85% coverage
-- Prompts: ✅ Full
-- Tools: ✅ Full
-- Sessions: ⚠️ Partial (missing SLICES.md)
-- Policies: ✅ Full
+**Core Abstractions**: 100% coverage ✅
+- Prompts: ✅ Full (PROMPTS.md)
+- Tools: ✅ Full (TOOLS.md, TOOL_POLICIES.md)
+- Sessions: ✅ Full (SESSIONS.md, SLICES.md)
+- Policies: ✅ Full (TOOL_POLICIES.md)
+- Resources: ✅ Full (RESOURCE_REGISTRY.md)
+- Filesystem: ✅ Full (FILESYSTEM.md)
 
-**Integration**: 60% coverage
-- Adapters: ⚠️ Partial (Claude SDK needs expansion)
-- Main Loop: ✅ Full
-- Evaluation: ✅ Full
-- Mailbox: ❌ Not covered
-- Skills: ❌ Not covered
+**Integration**: 100% coverage ✅
+- Adapters: ✅ Full (ADAPTERS.md, CLAUDE_AGENT_SDK.md)
+- Main Loop: ✅ Full (MAIN_LOOP.md)
+- Evaluation: ✅ Full (EVALS.md)
+- Mailbox: ✅ Full (MAILBOX.md, MAILBOX_RESOLVER.md, VERIFICATION.md)
+- Skills: ✅ Full (SKILLS.md)
 
-**Production Features**: 50% coverage
-- Lifecycle: ✅ Full
-- Testing: ✅ Full
-- Debugging: ⚠️ Partial (WINK_DEBUG, LOGGING need expansion)
-- Monitoring: ❌ Not covered (TRAJECTORY_OBSERVERS, TASK_COMPLETION)
-- Concurrency: ❌ Not covered (THREAD_SAFETY)
+**Production Features**: 92% coverage ✅
+- Lifecycle: ✅ Full (LIFECYCLE.md)
+- Testing: ✅ Full (TESTING.md)
+- Debugging: ✅ Full (WINK_DEBUG.md, LOGGING.md)
+- Monitoring: ✅ Full (TRAJECTORY_OBSERVERS.md, TASK_COMPLETION.md)
+- Concurrency: ✅ Full (THREAD_SAFETY.md)
+- Health: ⚠️ Partial (HEALTH.md - brief mention in Ch. 9)
 
-**Advanced**: 75% coverage
-- Optimization: ✅ Full
-- Workspace: ✅ Full
-- Formal Verification: ✅ Full
-- Progressive Disclosure: ✅ Full
+**Advanced**: 100% coverage ✅
+- Optimization: ✅ Full (PROMPT_OPTIMIZATION.md)
+- Workspace: ✅ Full (WORKSPACE.md)
+- Formal Verification: ✅ Full (FORMAL_VERIFICATION.md)
+- Progressive Disclosure: ✅ Full (various chapters)
+- Type Safety: ✅ Full (EXHAUSTIVENESS.md, DATACLASSES.md, DBC.md)
 
 ---
 
 ## Next Steps
 
-1. **Review this analysis** with maintainers
-2. **Prioritize** which specs need book coverage most urgently
-3. **Create issues** for each missing/partial spec
-4. **Plan chapters** for high-priority gaps (Mailbox, Skills, Monitoring)
-5. **Expand** existing chapters for partial coverage
-6. **Update this document** as coverage improves
+### Completed Work (January 2026) ✅
+
+1. ✅ **Reviewed coverage gaps** - All high-priority specs identified and addressed
+2. ✅ **Added critical chapters** - Mailbox, Skills, Monitoring all now fully covered
+3. ✅ **Expanded existing chapters** - 16 specs moved from partial/missing to full coverage
+4. ✅ **Updated this document** - Coverage improved from 44% to 94%
+
+### Remaining Work (Optional)
+
+1. **Expand HEALTH.md coverage** (Low Priority)
+   - Add watchdog details to Chapter 9
+   - Document health endpoint patterns
+   - Add Kubernetes probe configuration examples
+
+2. **Add WINK_DOCS.md** (Very Low Priority)
+   - Document CLI `wink docs` command
+   - Add to Chapter 2 or Chapter 17 (CLI Reference)
+   - Internal tooling documentation
+
+### Maintenance
+
+- **Monitor** for new specs added to `/specs/` directory
+- **Update** this document when new chapters are added
+- **Track** any spec changes that require book updates
 
 ---
 
 ## Notes
 
-- Some specs (like VERIFICATION.md) are internal implementation details and may not need user-facing book coverage
-- Others (like MAILBOX.md, SKILLS.md) are critical user-facing features that absolutely need comprehensive coverage
-- The 31% "not covered" figure is concerning but manageable with focused effort on high-priority specs
-- Consider whether some specs should be combined into single chapters (e.g., MAILBOX + MAILBOX_RESOLVER + VERIFICATION)
+### Success Metrics
+
+- **94% coverage achieved** - Up from 44% at start of restructuring
+- **All high-priority specs covered** - Mailbox, Skills, Monitoring, Debug UI
+- **All core abstractions documented** - Prompts, Tools, Sessions, Resources
+- **Production-ready documentation** - Only 2 specs remain incomplete (both low priority)
+
+### Coverage Philosophy
+
+- ✅ Critical user-facing features (MAILBOX.md, SKILLS.md) now have comprehensive coverage
+- ✅ Internal implementation details (VERIFICATION.md) appropriately covered within relevant chapters
+- ✅ Related specs successfully combined into unified chapters (e.g., MAILBOX + MAILBOX_RESOLVER + VERIFICATION)
+- ⚠️ Two remaining gaps (HEALTH.md partial, WINK_DOCS.md missing) are low-priority internal tooling
+
+### Achievement Summary
+
+The book now provides **comprehensive coverage** of the WINK framework. Users can rely on the book as the primary learning resource, with specs serving as implementation references for maintainers.
