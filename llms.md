@@ -965,11 +965,11 @@ from weakincentives.prompt import Prompt, PromptTemplate
 
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
     def __init__(
-        self, *, adapter: ProviderAdapter[ReviewResult], bus: Dispatcher
+        self, *, adapter: ProviderAdapter[ReviewResult], dispatcher: Dispatcher
     ) -> None:
         super().__init__(
             adapter=adapter,
-            bus=bus,
+            requests=dispatcher,
             config=MainLoopConfig(budget=Budget(max_total_tokens=50000)),
         )
         self._template = PromptTemplate[ReviewResult](
@@ -978,14 +978,14 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 
     def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-        session = Session(dispatcher=self._bus, tags={"loop": "code-review"})
+        session = Session(dispatcher=self._dispatcher, tags={"loop": "code-review"})
         return prompt, session
 ```
 
 ### Direct execution
 
 ```python
-loop = CodeReviewLoop(adapter=adapter, bus=bus)
+loop = CodeReviewLoop(adapter=adapter, dispatcher=dispatcher)
 response, session = loop.execute(ReviewRequest(...))
 ```
 

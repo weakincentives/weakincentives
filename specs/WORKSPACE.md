@@ -341,10 +341,10 @@ workspace = session[podman.PodmanWorkspace].latest()
 
 ## Cloning
 
-All workspace sections support `clone(session=..., bus=...)`:
+All workspace sections support `clone(session=..., dispatcher=...)`:
 
 - Re-registers reducers on new session
-- Binds telemetry to new event bus
+- Binds telemetry to new dispatcher
 - Reapplies host mount hydration
 - Fully decoupled from original section
 

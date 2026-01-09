@@ -1056,7 +1056,7 @@ config = MainLoopConfig(resources={
     Config: Binding(Config, lambda r: Config.from_env()),
     HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
 })
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
+loop = MyLoop(adapter=adapter, requests=dispatcher, config=config)
 
 # Resources are bound to prompt automatically
 response, session = loop.execute(request)
@@ -2293,7 +2293,7 @@ resources = ResourceRegistry.of(
 )
 
 config = MainLoopConfig(resources=resources)
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
+loop = MyLoop(adapter=adapter, requests=dispatcher, config=config)
 response, session = loop.execute(request)
 ```
 
@@ -3633,7 +3633,7 @@ ToolResult.error(message)               # failure case
 ### 18.3 weakincentives.runtime
 
 ```python
-Session(bus, tags=None, parent=None)
+Session(dispatcher, tags=None, parent=None)
 SessionView(session)                    # Read-only wrapper for reducer contexts
 session[Type].all() / latest() / where()
 session.dispatch(event)                 # All mutations go through dispatch
