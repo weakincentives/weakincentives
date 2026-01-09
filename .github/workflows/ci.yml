@@ -145,6 +145,8 @@ jobs:
         run: make ty
       - name: Run pyright
         run: make pyright
+      - name: Validate module boundaries
+        run: make validate-modules
 
   # Test job - always runs core tests, then targeted or full suite based on changes
   test:
