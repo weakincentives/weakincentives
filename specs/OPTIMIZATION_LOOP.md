@@ -36,8 +36,7 @@ worker deployments alongside MainLoop and EvalLoop.
 class OptimizeRequest(Generic[InputT, ExpectedT]):
     """Request to optimize a prompt."""
 
-    prompt_ns: str
-    prompt_key: str
+    descriptor: PromptDescriptor
     dataset: Dataset[InputT, ExpectedT]
     baseline_tag: str = "stable"
     eval_runs: int = 3  # Number of eval runs per candidate for reliability
@@ -261,14 +260,12 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         strategy: CompressStrategy,
         adapter: ProviderAdapter[object],
         overrides_store: PromptOverridesStore,
-        prompt_registry: PromptRegistry,
         eval_requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         requests: Mailbox[OptimizeRequest[InputT, ExpectedT], OptimizeResult],
     ) -> None:
         self._strategy = strategy
         self._adapter = adapter
         self._store = overrides_store
-        self._prompts = prompt_registry
         self._eval_requests = eval_requests
         self._requests = requests
         self._shutdown_event = threading.Event()
@@ -329,10 +326,9 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         self, request: OptimizeRequest[InputT, ExpectedT]
     ) -> OptimizeResult:
         """Process a single optimization request."""
-        prompt = self._prompts.get(request.prompt_ns, request.prompt_key)
         self._current_dataset = request.dataset  # For combined/greedy validation
         report = self._optimize(
-            prompt=prompt,
+            descriptor=request.descriptor,
             dataset=request.dataset,
             baseline_tag=request.baseline_tag,
             flags=request.flags,
@@ -342,7 +338,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
 
     def _optimize(
         self,
-        prompt: Prompt[InputT],
+        descriptor: PromptDescriptor,
         dataset: Dataset[InputT, ExpectedT],
         baseline_tag: str,
         flags: Mapping[str, bool],
@@ -350,7 +346,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
     ) -> OptimizationReport:
         """Core optimization logic."""
         experiment_id = generate_experiment_id()
-        descriptor = descriptor_for_prompt(prompt)
 
         # 1. Evaluate baseline via EvalLoop (multiple runs for reliability)
         baseline_exp = Experiment(
@@ -378,7 +373,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
 
             try:
                 self._store.store(
-                    prompt,
+                    descriptor,
                     SectionOverride(
                         path=edit.path,
                         expected_hash=edit.original_hash,
@@ -426,7 +421,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
         # 4. Test combined modifications for interaction effects
         if len(modifications) > 1:
             modifications = self._validate_combined(
-                prompt=prompt,
                 descriptor=descriptor,
                 experiment_id=experiment_id,
                 baseline_tag=baseline_tag,
@@ -473,7 +467,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
 
     def _validate_combined(
         self,
-        prompt: Prompt[InputT],
         descriptor: PromptDescriptor,
         experiment_id: str,
         baseline_tag: str,
@@ -495,7 +488,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
             # Write all modifications to combined tag
             for mod in modifications:
                 self._store.store(
-                    prompt,
+                    descriptor,
                     SectionOverride(
                         path=mod.section_path,
                         expected_hash=mod.original_hash,
@@ -525,7 +518,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
 
             # Combined fails - fall back to greedy selection
             return self._greedy_select(
-                prompt=prompt,
                 descriptor=descriptor,
                 experiment_id=experiment_id,
                 baseline_tag=baseline_tag,
@@ -542,7 +534,6 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
 
     def _greedy_select(
         self,
-        prompt: Prompt[InputT],
         descriptor: PromptDescriptor,
         experiment_id: str,
         baseline_tag: str,
@@ -566,7 +557,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
             for mod in sorted(candidates, key=lambda m: -m.token_reduction):
                 # Add candidate to greedy tag
                 self._store.store(
-                    prompt,
+                    descriptor,
                     SectionOverride(
                         path=mod.section_path,
                         expected_hash=mod.original_hash,
@@ -604,7 +595,7 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
                     )
                     for accepted_mod in accepted:
                         self._store.store(
-                            prompt,
+                            descriptor,
                             SectionOverride(
                                 path=accepted_mod.section_path,
                                 expected_hash=accepted_mod.original_hash,
@@ -676,8 +667,8 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
                 request_id=msg.body.request_id,
                 report=OptimizationReport(
                     experiment_id="failed",
-                    prompt_ns=msg.body.prompt_ns,
-                    prompt_key=msg.body.prompt_key,
+                    prompt_ns=msg.body.descriptor.ns,
+                    prompt_key=msg.body.descriptor.key,
                     baseline_pass_rate=0.0,
                     modifications=(),
                     rejected=(),
@@ -689,21 +680,12 @@ class OptimizeLoop(Generic[InputT, OutputT, ExpectedT]):
             msg.nack(visibility_timeout=min(60 * msg.delivery_count, 900))
 ```
 
-## Prompt Registry
-
-```python
-class PromptRegistry(Protocol):
-    """Resolves prompt references."""
-
-    def get(self, ns: str, key: str) -> Prompt[Any]: ...
-```
-
 ## Applying Modifications
 
 ```python
 def apply_modifications(
     store: PromptOverridesStore,
-    prompt: Prompt,
+    descriptor: PromptDescriptor,
     modifications: Sequence[Modification],
     *,
     tag: str = "stable",
@@ -711,7 +693,7 @@ def apply_modifications(
     """Apply validated modifications to the override store."""
     for mod in modifications:
         store.store(
-            prompt,
+            descriptor,
             SectionOverride(
                 path=mod.section_path,
                 expected_hash=mod.original_hash,
@@ -776,7 +758,6 @@ optimize_loop = OptimizeLoop(
     strategy=LLMCompressStrategy(...),
     adapter=adapter,
     overrides_store=store,
-    prompt_registry=prompts,
     eval_requests=eval_requests,
     requests=optimize_requests,
 )
@@ -790,6 +771,10 @@ group.run()
 
 ```python
 from weakincentives.evals import Dataset, Sample
+from weakincentives.prompt.overrides import PromptDescriptor
+
+# Get descriptor from prompt
+descriptor = PromptDescriptor.from_prompt(prompt)
 
 # Build dataset
 dataset = Dataset(samples=tuple(
@@ -805,8 +790,7 @@ my_replies: Mailbox[OptimizeResult, None] = RedisMailbox(
 # Submit request with reply mailbox
 optimize_requests.send(
     OptimizeRequest(
-        prompt_ns="agent",
-        prompt_key="code-review",
+        descriptor=descriptor,
         dataset=dataset,
         baseline_tag="stable",
     ),
@@ -817,7 +801,7 @@ optimize_requests.send(
 for msg in my_replies.receive(wait_time_seconds=300):
     result = msg.body
     if result.report.has_modifications:
-        apply_modifications(store, prompt, result.report.modifications)
+        apply_modifications(store, descriptor, result.report.modifications)
     msg.acknowledge()
 ```
 
