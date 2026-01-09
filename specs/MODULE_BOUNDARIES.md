@@ -63,6 +63,7 @@ The library is organized into four layers with strict dependency flow:
 dependencies on higher layers.
 
 **Packages**:
+
 - `types` - JSON types, adapter names, dataclass protocols
 - `errors` - Base exception hierarchy
 - `dataclasses` - `FrozenDataclass` utilities and serialization helpers
@@ -71,11 +72,13 @@ dependencies on higher layers.
 - `budget` - Resource envelope (time + token limits)
 
 **Rules**:
+
 - MUST NOT import from core, adapters, or high-level layers
 - SHOULD have minimal external dependencies (standard library preferred)
 - Public API should be stable (these types appear in many signatures)
 
 **Examples**:
+
 ```python
 # ✅ Good - foundation imports only from foundation or stdlib
 from weakincentives.types import JSONDict
@@ -91,6 +94,7 @@ from weakincentives.runtime import Session  # Layer violation
 tooling.
 
 **Packages**:
+
 - `runtime` - Session state, events, lifecycle, mailbox, transactions
 - `prompt` - Section/Prompt composition, overrides, tool protocols
 - `resources` - Dependency injection with scoped lifecycles
@@ -101,6 +105,7 @@ tooling.
 - `optimizers` - Optimizer framework and protocols
 
 **Rules**:
+
 - CAN import from foundation layer
 - CAN import between core packages (e.g., `runtime` ↔ `prompt`)
 - MUST NOT import from adapters or high-level layers (except via
@@ -108,6 +113,7 @@ tooling.
 - Private modules (`_foo.py`) should not be imported outside their package
 
 **Examples**:
+
 ```python
 # ✅ Good - core imports from foundation and other core
 from weakincentives.types import JSONDict
@@ -128,14 +134,17 @@ from weakincentives.adapters.core import ProviderAdapter
 **Purpose**: Bridge the prompt abstraction and external LLM providers.
 
 **Packages**:
+
 - `adapters` - Provider adapters (OpenAI, LiteLLM, Claude Agent SDK)
 
 **Rules**:
+
 - CAN import from foundation and core layers
 - MUST NOT import from high-level layer
 - Provider-specific logic stays within adapter modules
 
 **Examples**:
+
 ```python
 # ✅ Good - adapter imports from core
 from weakincentives.prompt import Prompt
@@ -150,16 +159,19 @@ from weakincentives.contrib.tools import PlanningToolsSection
 **Purpose**: Provide domain-specific tools, evaluation framework, and CLI.
 
 **Packages**:
+
 - `contrib` - Batteries for specific agent styles (planning, VFS, Podman)
 - `evals` - Evaluation framework (datasets, evaluators, loops)
 - `cli` - Command-line interface (`wink` entrypoints)
 
 **Rules**:
+
 - CAN import from any lower layer
 - Provides convenience APIs and domain-specific compositions
 - Allowed to have deeper dependency trees (this is the integration layer)
 
 **Examples**:
+
 ```python
 # ✅ Good - contrib imports from all lower layers
 from weakincentives.filesystem import Filesystem
@@ -177,6 +189,7 @@ from weakincentives.adapters.openai import OpenAIAdapter
 `foundation` → `core` → `adapters` → `high_level`.
 
 **Examples**:
+
 ```python
 # ❌ Bad - foundation importing from core
 # In: weakincentives/budget.py
@@ -197,6 +210,7 @@ their package.
 without notice.
 
 **Examples**:
+
 ```python
 # ❌ Bad - importing from private module outside package
 from weakincentives.prompt._rendering import render_section
@@ -215,6 +229,7 @@ from weakincentives.prompt._visibility import SectionVisibility  # Justified
 **Detection**: The validator detects import cycles like `A → B → A`.
 
 **Examples**:
+
 ```python
 # ❌ Bad - creates circular dependency
 # In: weakincentives/runtime/session.py
@@ -243,6 +258,7 @@ from that submodule.
 **Rationale**: Creates multiple import paths for the same symbol.
 
 **Examples**:
+
 ```python
 # ❌ Bad - redundant reexport
 from . import tools  # Imports submodule
@@ -271,6 +287,7 @@ Some patterns appear as violations but are acceptable with justification:
 **Justification**: Type hints don't create runtime dependencies.
 
 **Example**:
+
 ```python
 from typing import TYPE_CHECKING
 
@@ -294,6 +311,7 @@ are acceptable patterns.
 expose too much surface area.
 
 **Current Examples**:
+
 - `weakincentives.contrib.tools.digests` imports from
   `weakincentives.prompt._visibility` - needed for workspace digest
   optimization
@@ -301,6 +319,7 @@ expose too much surface area.
   `weakincentives.prompt._visibility` - session needs to manipulate visibility
 
 **Guidelines**:
+
 - Document why the import is necessary
 - Keep the import minimal (don't import the whole module)
 - Consider if the abstraction boundary is correct
@@ -312,6 +331,7 @@ expose too much surface area.
 **Justification**: Break import cycles or defer expensive imports.
 
 **Example**:
+
 ```python
 def get_podman_workspace():
     # Import only when needed (Podman is expensive)
@@ -326,6 +346,7 @@ def get_podman_workspace():
 **Justification**: Protocols define interfaces without creating dependencies.
 
 **Example**:
+
 ```python
 from weakincentives.filesystem import Filesystem  # Protocol
 
@@ -391,9 +412,9 @@ The validator has some false positives:
 
 1. **Syntax errors**: May flag Python 3.12+ syntax features as errors (the code
    still works)
-2. **TYPE_CHECKING imports**: Currently flagged as layer violations but are
+1. **TYPE_CHECKING imports**: Currently flagged as layer violations but are
    acceptable
-3. **String-based imports**: `importlib.import_module("foo")` not detected
+1. **String-based imports**: `importlib.import_module("foo")` not detected
 
 Always verify violations with the actual import and consider the context before
 fixing.
@@ -564,10 +585,10 @@ Configure IDE to highlight violations:
 Potential enhancements to the validation system:
 
 1. **Whitelist for TYPE_CHECKING**: Don't flag type-only imports as violations
-2. **Justification comments**: Allow `# boundary-exception: reason` comments
-3. **Dependency graph visualization**: Generate layer dependency diagrams
-4. **Import cost tracking**: Measure and report import load times by layer
-5. **Auto-fix suggestions**: Propose corrections for common violations
+1. **Justification comments**: Allow `# boundary-exception: reason` comments
+1. **Dependency graph visualization**: Generate layer dependency diagrams
+1. **Import cost tracking**: Measure and report import load times by layer
+1. **Auto-fix suggestions**: Propose corrections for common violations
 
 ## Related Specifications
 
