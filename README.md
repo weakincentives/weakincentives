@@ -1,45 +1,43 @@
 # Weak Incentives (Is All You Need)
 
-WINK is a Python library for building background agents—automated AI systems that
-run unattended. It provides typed, composable primitives designed for determinism,
-testability, and safe execution without heavy dependencies or hosted services.
+WINK is the agent-definition layer for building unattended/background agents.
+You define the prompt, tools, policies, and feedback that stay stable while
+runtimes change. The planning loop, sandboxing, retries, and orchestration live
+in the execution harness—often a vendor runtime. WINK keeps your agent
+definition portable.
 
 > **New to WINK?** Read the [WINK Guide](WINK_GUIDE.md) for a comprehensive
 > introduction—philosophy, quickstart, and practical patterns for building agents.
 
-## The Shift
+## Definition vs. Harness
 
-The reasoning loop is moving model-side. Complex nested workflows may work today,
-but they won't age well—models will absorb that scaffolding.
+A high-quality unattended agent has two parts:
 
-What remains: tools, retrieval, and **context engineering**.
+**Agent definition (you own):**
 
-Tools and retrieval draw on familiar software skills. Context engineering doesn't.
-It's a genuinely new discipline: what's relevant now, what to summarize versus
-preserve, how to structure information so models reason over it well. No clean
-precedent from traditional engineering. Builders who master it early win.
+- Prompt structure (context engineering)
+- Tools + typed I/O contracts (the side-effect boundary)
+- Policies (gates on tool use and state transitions)
+- Feedback ("done" criteria, drift detection)
 
-Some orchestration stays—for auditability, cost control, hard constraints. WINK
-focuses there: typed prompts as the primary artifact, observable session state,
-sandboxed tools. The framework handles the scaffolding that needs to remain; you
-focus on what you're feeding the model.
+**Execution harness (runtime-owned):**
 
-## What makes WINK different?
+- Planning/act loop and tool-call sequencing
+- Sandboxing/permissions (filesystem/shell/network)
+- Retries/backoff, throttling, and lifecycle management
+- Scheduling, budgets/deadlines, crash recovery
+- Multi-agent orchestration (when used)
+
+The harness will keep changing—and increasingly comes from vendor runtimes—but
+your agent definition should not. WINK makes the definition a first-class
+artifact you can version, review, test, and port across runtimes via adapters.
+
+## The Prompt is the Agent
 
 Most agent frameworks treat prompts as an afterthought—templates glued to
 separately registered tool lists. WINK inverts this: **the prompt _is_ the
 agent**. You define an agent as a single hierarchical document where each
 section bundles its own instructions and tools together.
-
-### One flexible reasoning loop
-
-A WINK `Prompt` isn't just a template—it's the entire brain of your agent. One
-modular object combines instructions, tool registration, and progressive
-disclosure into a single reasoning loop that adapts to context.
-
-Most frameworks scatter agent behavior across prompt templates, tool registries,
-and routing logic. WINK collapses all of this into a tree of typed `Section`
-objects:
 
 ```
 PromptTemplate[ReviewResponse]
@@ -53,17 +51,16 @@ PromptTemplate[ReviewResponse]
 └── MarkdownSection (user request)
 ```
 
-Each section can render instructions, contribute tools the LLM can invoke, nest
-child sections, and enable or disable itself based on runtime state. When a
-section disables, its entire subtree—tools included—vanishes from the prompt.
+Each section can render instructions, contribute tools, nest child sections, and
+enable or disable itself based on runtime state. When a section disables, its
+entire subtree—tools included—vanishes from the prompt.
 
 The result: **the prompt fully determines what the agent can think and do**.
 There's no separate tool registry to synchronize, no routing layer to maintain,
 no configuration that can drift from documentation. You define the agent's
-capabilities once, in one place, and the reasoning loop emerges from the
-structure itself.
+capabilities once, in one place, and the definition ports across runtimes.
 
-### Why this matters
+**Why this matters:**
 
 1. **Co-location.** Instructions and tools live together. The section that
    explains filesystem navigation is the same section that provides the
@@ -83,50 +80,59 @@ structure itself.
    and results. The framework catches mismatches before the request reaches
    an LLM.
 
-### Other key features
+## Key Capabilities
 
-- **Transactional tool execution.** Tool calls are atomic transactions. When a
-  tool fails, WINK automatically rolls back session state and filesystem changes
-  to their pre-call state. No more wrestling with partial failures that leave
-  your agent's state corrupted or your filesystem in an inconsistent state. This
-  happens by default—failed tools simply don't leave traces in mutable state.
-  See [Session State](specs/SESSIONS.md).
+### Prompts
 
-- **Event-driven state management.** Every state change flows through pure
-  functions called "reducers" that process published events. State is immutable;
-  changes produce new values rather than mutating in place. This makes state
-  predictable and inspectable—you can snapshot at any point and see exactly what
-  happened. See [Session State](specs/SESSIONS.md).
-
-- **Hash-based prompt overrides.** Prompt descriptors carry content hashes so
-  overrides apply only to the intended version. Teams iterate on prompts via
+- **Typed sections.** Build prompts from composable `Section` objects that
+  bundle instructions and tools together.
+- **Hash-based overrides.** Prompt descriptors carry content hashes so overrides
+  apply only to the intended version. Teams iterate on prompts via
   version-controlled JSON without risking stale edits.
   See [Prompt Optimization](specs/PROMPT_OPTIMIZATION.md).
 
-- **Sandboxed virtual filesystem.** Agents get an in-memory VFS tracked as session
-  state. Mount host directories read-only when needed; the sandbox prevents
-  accidental writes to the host. See [Workspace Tools](specs/WORKSPACE.md).
+### Tools
 
-- **Provider-agnostic adapters.** Swap between OpenAI, LiteLLM, Claude Agent SDK,
-  or other providers without touching agent logic. Adapters handle tool
-  negotiation, structured output schemas, and response normalization. The Claude
-  Agent SDK adapter provides full agentic capabilities with hermetic isolation.
-  See [Adapters](specs/ADAPTERS.md) and [Claude Agent SDK](specs/CLAUDE_AGENT_SDK.md).
+- **Transactional execution.** Tool calls are atomic transactions. When a tool
+  fails, WINK automatically rolls back session state and filesystem changes to
+  their pre-call state. Failed tools don't leave traces in mutable state.
+- **Sandboxed virtual filesystem.** Agents get an in-memory VFS tracked as
+  session state. Mount host directories read-only when needed; the sandbox
+  prevents accidental writes to the host.
+  See [Workspace Tools](specs/WORKSPACE.md).
 
-- **Minimal dependencies.** No Pydantic, no heavyweight stacks. Custom serde
-  modules provide validation without sprawling dependency trees.
+### Policies
 
-## Requirements
+- **Invariants over workflows.** Gate tool calls with explicit policies instead
+  of brittle orchestration graphs. Encode constraints like "don't write before
+  you've read" or "don't call tool B until tool A ran."
+  See [Policies Over Workflows](specs/POLICIES_OVER_WORKFLOWS.md).
 
-- Python 3.12+
-- [`uv`](https://github.com/astral-sh/uv) CLI
+### Feedback
 
-## Install
+- **Completion resistance.** Encode "done means X" checks that run during
+  execution to catch drift and premature termination.
+  See [Task Completion Checking](specs/TASK_COMPLETION.md) and
+  [Trajectory Observers](specs/TRAJECTORY_OBSERVERS.md) (design spec).
+
+### State and Adapters
+
+- **Event-driven state.** Every state change flows through pure reducers that
+  process published events. State is immutable and inspectable—you can snapshot
+  at any point. See [Session State](specs/SESSIONS.md).
+- **Harness-swappable adapters.** Keep the agent definition stable while
+  switching runtimes (OpenAI, LiteLLM, Claude Agent SDK). The Claude Agent SDK
+  adapter is an example of "renting the harness": native tools + OS-level
+  sandboxing, while WINK supplies the definition.
+  See [Adapters](specs/ADAPTERS.md).
+
+## Getting Started
+
+**Requirements:** Python 3.12+, [`uv`](https://github.com/astral-sh/uv)
 
 ```bash
 uv add weakincentives
 # optional extras
-uv add "weakincentives[asteval]"          # safe Python evaluation
 uv add "weakincentives[openai]"           # OpenAI adapter
 uv add "weakincentives[litellm]"          # LiteLLM adapter
 uv add "weakincentives[claude-agent-sdk]" # Claude Agent SDK adapter
@@ -136,28 +142,18 @@ uv add "weakincentives[wink]"             # debug UI
 
 ### Debug UI
 
-The `wink debug` command serves a FastAPI UI for exploring session snapshots:
-
 ```bash
 uv run --extra wink wink debug snapshots/session.jsonl --port 8000
 ```
-
-Features: slice browser with JSON viewer, session selector for multi-entry files,
-live reload, raw download. Exit codes: `2` for invalid input, `3` for server
-failures.
 
 ![Debug UI](debug_ui.png)
 
 ## Tutorial: Code Review Agent
 
-Build a code review assistant that browses files, answers questions, and creates
-review plans—all in a structured, observable, sandboxed way.
-
-Full source: [`code_reviewer_example.py`](code_reviewer_example.py)
+Build a code review assistant with structured output, sandboxed file access,
+and observable state. Full source: [`code_reviewer_example.py`](code_reviewer_example.py)
 
 ### 1. Define structured output
-
-Dataclasses enforce the shape of agent responses:
 
 ```python
 from dataclasses import dataclass
@@ -170,10 +166,6 @@ class ReviewResponse:
 ```
 
 ### 2. Compose the prompt
-
-Prompts assemble from typed sections—guidance, planning tools, filesystem tools,
-and user input. Create a reusable `PromptTemplate`, then bind runtime parameters
-via `Prompt`:
 
 ```python
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
@@ -192,13 +184,10 @@ template = PromptTemplate[ReviewResponse](
     ),
 )
 
-# Bind runtime parameters to create the final prompt
 prompt = Prompt(template).bind(ReviewTurnParams(request="Review main.py"))
 ```
 
 ### 3. Mount files safely
-
-Give agents file access without host risk:
 
 ```python
 from weakincentives.contrib.tools import HostMount, VfsPath, VfsToolsSection
@@ -207,24 +196,15 @@ mounts = (
     HostMount(
         host_path="repo",
         mount_path=VfsPath(("repo",)),
-        include_glob=("*.py", "*.md", "*.toml"),  # whitelist patterns
-        exclude_glob=("**/*.pickle",),            # blacklist patterns
-        max_bytes=600_000,                        # size limit
+        include_glob=("*.py", "*.md", "*.toml"),
+        exclude_glob=("**/*.pickle",),
+        max_bytes=600_000,
     ),
 )
-vfs_section = VfsToolsSection(
-    session=session,
-    mounts=mounts,
-    allowed_host_roots=(SAFE_ROOT,),
-)
+vfs_section = VfsToolsSection(session=session, mounts=mounts, allowed_host_roots=(SAFE_ROOT,))
 ```
 
-Agents use `ls` and `read_file` inside the sandbox.
-
 ### 4. Run and get typed results
-
-Use `MainLoop` for production agents—it manages sessions, handles tool
-invocations, and supports deadlines:
 
 ```python
 from dataclasses import dataclass
@@ -253,21 +233,16 @@ class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         self._template = build_task_prompt(session=self._session)
 
     def prepare(self, request: ReviewTurnParams) -> tuple[Prompt[ReviewResponse], Session]:
-        prompt = Prompt(self._template).bind(request)
-        return prompt, self._session
+        return Prompt(self._template).bind(request), self._session
 
 bus = InProcessDispatcher()
-adapter = OpenAIAdapter(model="gpt-5.2")
-loop = ReviewLoop(adapter, bus)
-
+loop = ReviewLoop(OpenAIAdapter(model="gpt-4o"), bus)
 response, _ = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
 if response.output is not None:
     review: ReviewResponse = response.output  # typed, validated
 ```
 
-### 5. Inspect agent state
-
-Every action is recorded. Query the session for plans, tool calls, or any slice:
+### 5. Inspect state
 
 ```python
 from weakincentives.contrib.tools.planning import Plan
@@ -280,8 +255,6 @@ if plan:
 
 ### 6. Iterate prompts without code changes
 
-Override prompt sections via version-controlled JSON:
-
 ```python
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 
@@ -290,36 +263,27 @@ prompt = Prompt(
     overrides_store=LocalPromptOverridesStore(),
     overrides_tag="assertive-feedback",
 ).bind(ReviewTurnParams(request="..."))
-rendered = prompt.render()
 ```
 
 Overrides live in `.weakincentives/prompts/overrides/` and match by namespace,
 key, and tag.
 
-### Result
+## Renting the Harness: Claude Agent SDK
 
-A code review agent with structured output, sandboxed file access, observable
-state, and tunable prompts—built as regular software, not ad-hoc scripts.
-
-### Using the Claude Agent SDK
-
-The code reviewer also supports running with the Claude Agent SDK adapter,
-which provides Claude's full agentic capabilities through native tools
-(Read, Write, Bash, Glob, Grep) rather than the VFS sandbox. This mode offers
-hermetic isolation with network restrictions while letting Claude use its
-native tooling.
+This is the "rent the harness" path: Claude's runtime drives the agent loop and
+native tools; WINK provides the portable agent definition and bridges custom
+tools where needed.
 
 ```bash
-# Run with Claude Agent SDK (requires ANTHROPIC_API_KEY)
 python code_reviewer_example.py --claude-agent
 ```
 
-Key differences in Claude Agent SDK mode:
+Key differences:
 
 - **Native tools**: Uses Claude Code's built-in tools instead of VFS
 - **Hermetic isolation**: Ephemeral home directory prevents access to host config
-- **Network policy**: Restricted to specific documentation domains (PEPs, Python docs)
-- **MCP bridging**: Custom WINK tools (planning, workspace digest) bridged via MCP
+- **Network policy**: Restricted to specific documentation domains
+- **MCP bridging**: Custom WINK tools bridged via MCP
 - **Sandbox**: OS-level sandboxing (bubblewrap on Linux, seatbelt on macOS)
 
 ```python
@@ -333,14 +297,12 @@ from weakincentives.adapters.claude_agent_sdk import (
     SandboxConfig,
 )
 
-# Create workspace with code mounted
 workspace = ClaudeAgentWorkspaceSection(
     session=session,
     mounts=(HostMount(host_path="src", mount_path="src"),),
     allowed_host_roots=("/path/to/project",),
 )
 
-# Configure hermetic isolation
 adapter = ClaudeAgentSDKAdapter(
     model="claude-sonnet-4-5-20250929",
     client_config=ClaudeAgentSDKClientConfig(
@@ -354,26 +316,10 @@ adapter = ClaudeAgentSDKAdapter(
 )
 
 response = adapter.evaluate(prompt, session=session)
-workspace.cleanup()  # Clean up temp directory
+workspace.cleanup()
 ```
 
-See [Claude Agent SDK Adapter](specs/CLAUDE_AGENT_SDK.md) for full configuration
-reference and isolation guarantees.
-
-## Logging
-
-WINK provides structured logging with contextual metadata:
-
-```python
-from weakincentives.runtime.logging import configure_logging, get_logger
-
-configure_logging(json_mode=True)
-logger = get_logger("demo").bind(component="cli")
-logger.info("boot", event="demo.start", context={"attempt": 1})
-```
-
-Use `force=True` to replace existing handlers. Each record includes `event` and
-`context` fields for downstream routing.
+See [Claude Agent SDK Adapter](specs/CLAUDE_AGENT_SDK.md) for full configuration.
 
 ## Development
 
@@ -387,24 +333,16 @@ Key targets:
 - `make test` (100% coverage enforced)
 - `make check` (all of the above plus Bandit, Deptry, pip-audit)
 
-### Approach to code quality
+**Quality gates:**
 
-WINK applies strict quality gates to keep the codebase predictable and safe:
-
-- **Strict type checking.** Pyright strict mode enforced; type annotations are the
-  source of truth.
-- **Design-by-contract.** Public APIs use `@require`, `@ensure`, and `@invariant`
-  decorators from `weakincentives.dbc`.
-- **100% test coverage.** Every line in `src/weakincentives/` must be covered.
-- **Security scanning.** Bandit, Deptry, and pip-audit run on every CI build.
-
-Run `make check` before committing to verify all gates pass.
-
-### Integration tests
+- Pyright strict mode enforced
+- Design-by-contract decorators (`@require`, `@ensure`, `@invariant`)
+- 100% test coverage required
+- Security scanning on every build
 
 ```bash
 export OPENAI_API_KEY="sk-..."
-make integration-tests  # skipped without credentials
+make integration-tests
 ```
 
 ## Documentation
