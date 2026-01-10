@@ -11,7 +11,7 @@ preserving them for inspection and remediation.
 main_loop = MainLoop(
     adapter=adapter,
     requests=requests,
-    dlq=DLQConfig(
+    dlq=DLQPolicy(
         mailbox=dead_letters,
         max_delivery_count=5,
     ),
@@ -28,14 +28,17 @@ throttling), validation errors (reject immediately).
 
 ## Core Types
 
-### DLQConfig
+### DLQPolicy
 
-Configuration for dead-letter behavior:
+Policy for dead-letter behavior:
 
 ```python
 @dataclass(slots=True, frozen=True)
-class DLQConfig[T, R]:
-    """Dead letter queue configuration.
+class DLQPolicy[T, R]:
+    """Dead letter queue policy.
+
+    Combines destination mailbox with decision logic for when to
+    dead-letter failed messages. Subclass to customize behavior.
 
     Type parameters:
         T: Original message body type.
@@ -65,6 +68,31 @@ class DLQConfig[T, R]:
     These exceptions always retry (respecting visibility backoff).
     Useful for transient network errors that should keep retrying.
     """
+
+    def should_dead_letter(self, message: Message[T, Any], error: Exception) -> bool:
+        """Determine if the message should be dead-lettered.
+
+        Override this method for custom dead-letter logic.
+
+        Args:
+            message: The failed message.
+            error: The exception that caused the failure.
+
+        Returns:
+            True to dead-letter, False to retry with backoff.
+        """
+        error_type = type(error)
+
+        # Excluded errors never dead-letter
+        if self.exclude_errors and error_type in self.exclude_errors:
+            return False
+
+        # Included errors always dead-letter immediately
+        if self.include_errors and error_type in self.include_errors:
+            return True
+
+        # Otherwise, check delivery count threshold
+        return message.delivery_count >= self.max_delivery_count
 ```
 
 ### DeadLetter
@@ -110,61 +138,6 @@ class DeadLetter[T]:
     """Trace ID for distributed tracing correlation."""
 ```
 
-### DLQPolicy
-
-Strategy for handling failures:
-
-```python
-class DLQPolicy[T](Protocol):
-    """Policy for deciding when to dead-letter messages."""
-
-    def should_dead_letter(
-        self,
-        message: Message[T, Any],
-        error: Exception,
-        config: DLQConfig[T, Any],
-    ) -> bool:
-        """Determine if the message should be dead-lettered.
-
-        Args:
-            message: The failed message.
-            error: The exception that caused the failure.
-            config: DLQ configuration.
-
-        Returns:
-            True to dead-letter, False to retry with backoff.
-        """
-        ...
-```
-
-### Default Policy
-
-The default policy implements the standard threshold logic:
-
-```python
-class DefaultDLQPolicy[T]:
-    """Default dead-letter policy based on delivery count and error types."""
-
-    def should_dead_letter(
-        self,
-        message: Message[T, Any],
-        error: Exception,
-        config: DLQConfig[T, Any],
-    ) -> bool:
-        error_type = type(error)
-
-        # Excluded errors never dead-letter
-        if config.exclude_errors and error_type in config.exclude_errors:
-            return False
-
-        # Included errors always dead-letter immediately
-        if config.include_errors and error_type in config.include_errors:
-            return True
-
-        # Otherwise, check delivery count threshold
-        return message.delivery_count >= config.max_delivery_count
-```
-
 ## MainLoop Integration
 
 ### Configuration
@@ -180,11 +153,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
         requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         resources: ResourceRegistry | None = None,
         config: MainLoopConfig | None = None,
-        dlq: DLQConfig[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]] | None = None,
-        dlq_policy: DLQPolicy[MainLoopRequest[UserRequestT]] | None = None,
+        dlq: DLQPolicy[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]] | None = None,
     ) -> None:
         self._dlq = dlq
-        self._dlq_policy = dlq_policy or DefaultDLQPolicy()
         ...
 ```
 
@@ -214,7 +185,7 @@ def _handle_failure(
 ) -> None:
     """Handle message processing failure."""
     # Check if DLQ is configured and policy triggers
-    if self._dlq and self._dlq_policy.should_dead_letter(msg, error, self._dlq):
+    if self._dlq and self._dlq.should_dead_letter(msg, error):
         self._dead_letter(msg, error)
         return
 
@@ -281,11 +252,9 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         loop: MainLoop[InputT, OutputT],
         evaluator: Evaluator[OutputT, ExpectedT] | SessionEvaluator[OutputT, ExpectedT],
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
-        dlq: DLQConfig[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
-        dlq_policy: DLQPolicy[EvalRequest[InputT, ExpectedT]] | None = None,
+        dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
     ) -> None:
         self._dlq = dlq
-        self._dlq_policy = dlq_policy or DefaultDLQPolicy()
         ...
 ```
 
@@ -296,7 +265,7 @@ The implementation mirrors MainLoop, wrapping `EvalRequest` in `DeadLetter`.
 ### Basic DLQ Setup
 
 ```python
-from weakincentives.runtime import RedisMailbox, DLQConfig, DeadLetter
+from weakincentives.runtime import RedisMailbox, DLQPolicy, DeadLetter
 from weakincentives.runtime.main_loop import MainLoop, MainLoopRequest, MainLoopResult
 
 # Create mailboxes
@@ -313,7 +282,7 @@ dead_letters: Mailbox[DeadLetter[MainLoopRequest[MyRequest]], None] = RedisMailb
 main_loop = MyMainLoop(
     adapter=adapter,
     requests=requests,
-    dlq=DLQConfig(
+    dlq=DLQPolicy(
         mailbox=dead_letters,
         max_delivery_count=5,  # Dead-letter after 5 attempts
     ),
@@ -327,7 +296,7 @@ from weakincentives.prompt import ValidationError
 from weakincentives.adapters import ContentPolicyViolation
 
 # Dead-letter validation and policy errors immediately (don't retry)
-dlq = DLQConfig(
+dlq = DLQPolicy(
     mailbox=dead_letters,
     max_delivery_count=5,
     include_errors=frozenset({
@@ -344,7 +313,7 @@ from weakincentives.runtime.mailbox import MailboxConnectionError
 from weakincentives.adapters import RateLimitError
 
 # Never dead-letter transient errors (always retry)
-dlq = DLQConfig(
+dlq = DLQPolicy(
     mailbox=dead_letters,
     max_delivery_count=5,
     exclude_errors=frozenset({
@@ -359,7 +328,7 @@ dlq = DLQConfig(
 
 ```python
 # Complex policy: immediate DLQ for some, never DLQ for others, threshold for rest
-dlq = DLQConfig(
+dlq = DLQPolicy(
     mailbox=dead_letters,
     max_delivery_count=5,
     include_errors=frozenset({ValidationError}),  # Immediate
@@ -369,36 +338,35 @@ dlq = DLQConfig(
 
 ### Custom DLQ Policy
 
-```python
-from weakincentives.runtime import DLQPolicy, DLQConfig, Message
+Subclass `DLQPolicy` to implement custom dead-letter logic:
 
-class ErrorBudgetPolicy(Generic[T]):
+```python
+from weakincentives.runtime import DLQPolicy, DeadLetter, Message
+
+@dataclass(slots=True, frozen=True)
+class ErrorBudgetPolicy[T, R](DLQPolicy[T, R]):
     """Dead-letter based on error rate, not just count."""
 
-    def __init__(self, error_budget: float = 0.5):
-        self._error_budget = error_budget
+    error_budget: float = 0.5
 
-    def should_dead_letter(
-        self,
-        message: Message[T, Any],
-        error: Exception,
-        config: DLQConfig[T, Any],
-    ) -> bool:
-        # Custom logic: dead-letter if error rate exceeds budget
-        # (simplified - real implementation would track window)
-        if message.delivery_count >= config.max_delivery_count:
+    def should_dead_letter(self, message: Message[T, Any], error: Exception) -> bool:
+        # Fall back to default behavior for threshold
+        if message.delivery_count >= self.max_delivery_count:
             return True
 
-        # Check error budget from external metrics
+        # Custom logic: dead-letter if error rate exceeds budget
         error_rate = get_error_rate(message.body)
-        return error_rate > self._error_budget
+        return error_rate > self.error_budget
 
 
 main_loop = MyMainLoop(
     adapter=adapter,
     requests=requests,
-    dlq=DLQConfig(mailbox=dead_letters, max_delivery_count=10),
-    dlq_policy=ErrorBudgetPolicy(error_budget=0.3),
+    dlq=ErrorBudgetPolicy(
+        mailbox=dead_letters,
+        max_delivery_count=10,
+        error_budget=0.3,
+    ),
 )
 ```
 

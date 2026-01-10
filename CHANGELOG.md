@@ -9,9 +9,8 @@ Release highlights for weakincentives.
 Added `specs/DLQ.md` covering dead letter queue configuration for MainLoop and
 EvalLoop. The spec documents:
 
-- `DLQConfig` for configuring max delivery count and error classification
+- `DLQPolicy` combining destination mailbox with decision logic (subclass for custom behavior)
 - `DeadLetter` envelope preserving original message with failure metadata
-- `DLQPolicy` protocol for custom dead-lettering decisions
 - `DLQConsumer` runnable for LoopGroup integration
 - Replay, alerting, and observability patterns
 
