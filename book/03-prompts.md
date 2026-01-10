@@ -1,6 +1,6 @@
 # Chapter 3: Prompts
 
-> **Canonical Reference**: See [specs/PROMPTS.md](/specs/PROMPTS.md) for the complete specification.
+> **Canonical Reference**: See [specs/PROMPTS.md](../specs/PROMPTS.md) for the complete specification.
 
 ## Introduction
 
@@ -1126,7 +1126,7 @@ def test_expanded_rendering():
 
 ## 3.13 Advanced Resource Management
 
-> **Canonical Reference**: See [specs/RESOURCE_REGISTRY.md](/specs/RESOURCE_REGISTRY.md) for the complete specification.
+> **Canonical Reference**: See [specs/RESOURCE_REGISTRY.md](../specs/RESOURCE_REGISTRY.md) for the complete specification.
 
 The resource registry provides dependency injection with scope-aware lifecycle management for complex agent architectures. Resources can depend on each other, have different lifetimes, and support transactional rollback—all through a clean, immutable API.
 
@@ -1859,7 +1859,7 @@ For multiple pre-constructed instances:
 
 ```python
 from weakincentives.resources import ResourceRegistry
-from weakincentives.runtime import BudgetTracker, Budget
+from weakincentives.runtime.session import BudgetTracker, Budget
 
 fs = InMemoryFilesystem()
 tracker = BudgetTracker(budget=Budget(max_tokens=1000))
@@ -1927,7 +1927,7 @@ flowchart TB
 
 ```python
 from weakincentives.resources import ResourceRegistry, Binding
-from weakincentives import PromptTemplate, MarkdownSection
+from weakincentives.prompt import PromptTemplate, MarkdownSection
 
 # 1. Template-level resources
 template = PromptTemplate(
@@ -2256,9 +2256,9 @@ Advanced resource management in WINK provides:
 - [Chapter 4: Tools](04-tools.md) - ToolContext resource access
 - [Chapter 5: Sessions](05-sessions.md) - Session snapshot/restore
 - [Chapter 12: Workspace Tools](12-workspace-tools.md) - Filesystem snapshots
-- [specs/RESOURCE_REGISTRY.md](/specs/RESOURCE_REGISTRY.md) - Complete specification
-- [specs/SESSIONS.md](/specs/SESSIONS.md) - Session lifecycle and snapshots
-- [specs/FILESYSTEM.md](/specs/FILESYSTEM.md) - Filesystem snapshot protocol
+- [specs/RESOURCE_REGISTRY.md](../specs/RESOURCE_REGISTRY.md) - Complete specification
+- [specs/SESSIONS.md](../specs/SESSIONS.md) - Session lifecycle and snapshots
+- [specs/FILESYSTEM.md](../specs/FILESYSTEM.md) - Filesystem snapshot protocol
 
 ## Summary
 
@@ -2284,4 +2284,4 @@ The prompt system is intentionally constrained—simple templating, explicit com
 
 ---
 
-**Canonical Reference**: See [specs/PROMPTS.md](/specs/PROMPTS.md) for the complete specification, including resource lifecycle details, transactional tool execution, and advanced patterns.
+**Canonical Reference**: See [specs/PROMPTS.md](../specs/PROMPTS.md) for the complete specification, including resource lifecycle details, transactional tool execution, and advanced patterns.

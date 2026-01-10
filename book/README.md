@@ -100,8 +100,8 @@ Use the table of contents to navigate directly to the relevant chapter. Each cha
 
 ## Getting Help
 
-- **Source code**: [github.com/anthropics/weakincentives](https://github.com/anthropics/weakincentives)
-- **Issues**: [github.com/anthropics/weakincentives/issues](https://github.com/anthropics/weakincentives/issues)
+- **Source code**: [github.com/weakincentives/weakincentives](https://github.com/weakincentives/weakincentives)
+- **Issues**: [github.com/weakincentives/weakincentives/issues](https://github.com/weakincentives/weakincentives/issues)
 - **Specs**: See the `/specs` directory for detailed design documents
 
 ---

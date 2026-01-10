@@ -872,6 +872,7 @@ def apply_patch_with_review(patch: Patch, repo_path: Path) -> None:
     # Show diffs
     # Request approval
     # Apply only if approved
+    pass
 ```
 
 ---

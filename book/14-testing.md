@@ -1,6 +1,6 @@
 # Chapter 14: Testing & Reliability
 
-> **Canonical Reference**: See [specs/TESTING.md](/specs/TESTING.md) and [specs/EVALS.md](/specs/EVALS.md) for complete specifications.
+> **Canonical Reference**: See [specs/TESTING.md](../specs/TESTING.md) and [specs/EVALS.md](../specs/EVALS.md) for complete specifications.
 
 ## Introduction
 
@@ -271,7 +271,7 @@ def test_handler_with_multiple_resources() -> None:
         assert result.is_success
 ```
 
-See [Chapter 4](04-tools.md) for tool design patterns and [specs/FILESYSTEM.md](/specs/FILESYSTEM.md) for filesystem testing.
+See [Chapter 4](04-tools.md) for tool design patterns and [specs/FILESYSTEM.md](../specs/FILESYSTEM.md) for filesystem testing.
 
 ## 14.3 Reducer Tests
 
@@ -432,7 +432,7 @@ def test_code_review_integration() -> None:
 ### Recording Sessions for Later Analysis
 
 ```python nocheck
-from weakincentives.debug import dump_session
+from weakincentives.runtime.debug import dump_session
 
 
 @pytest.mark.integration
@@ -547,7 +547,7 @@ If you encounter code that "can't be tested":
 3. **Test it**: Prove the branch can be reached
 4. **Document it**: Use `pragma: no cover` only for genuine impossibilities
 
-See [specs/TESTING.md](/specs/TESTING.md) for complete coverage policies.
+See [specs/TESTING.md](../specs/TESTING.md) for complete coverage policies.
 
 ## 14.6 Test Organization
 
@@ -750,8 +750,8 @@ When adding new functionality:
 - [Chapter 8: Evaluation](08-evaluation.md) - Evaluation loops and session evaluators
 - [Chapter 13: Debugging](13-debugging.md) - Session snapshots and debug UI
 - [Chapter 15: Code Quality](15-code-quality.md) - Type checking and DbC
-- [specs/TESTING.md](/specs/TESTING.md) - Testing specification
-- [specs/EVALS.md](/specs/EVALS.md) - Evaluation framework
+- [specs/TESTING.md](../specs/TESTING.md) - Testing specification
+- [specs/EVALS.md](../specs/EVALS.md) - Evaluation framework
 
 ## Summary
 

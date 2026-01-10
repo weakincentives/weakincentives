@@ -201,7 +201,7 @@ workflow.add_edge("tools", "agent")
 **WINK version:**
 
 ```python
-from weakincentives import Prompt, PromptTemplate, MarkdownSection, Tool, ToolResult
+from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection, Tool, ToolResult
 from dataclasses import dataclass
 
 @dataclass(frozen=True)

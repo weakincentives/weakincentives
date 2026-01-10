@@ -1,6 +1,6 @@
 # Chapter 15: Code Quality
 
-> **Canonical References**: See [specs/DBC.md](/specs/DBC.md), [specs/TESTING.md](/specs/TESTING.md), and [specs/EXHAUSTIVENESS.md](/specs/EXHAUSTIVENESS.md) for complete specifications.
+> **Canonical References**: See [specs/DBC.md](../specs/DBC.md), [specs/TESTING.md](../specs/TESTING.md), and [specs/EXHAUSTIVENESS.md](../specs/EXHAUSTIVENESS.md) for complete specifications.
 
 ## Introduction
 
@@ -234,7 +234,7 @@ def get_latest(session: Session) -> Step | None:
     return session[Step].latest()
 ```
 
-See [Chapter 5](05-sessions.md) for session type patterns and [specs/EXHAUSTIVENESS.md](/specs/EXHAUSTIVENESS.md) for exhaustive union handling.
+See [Chapter 5](05-sessions.md) for session type patterns and [specs/EXHAUSTIVENESS.md](../specs/EXHAUSTIVENESS.md) for exhaustive union handling.
 
 ## 15.2 Design-by-Contract
 
@@ -402,7 +402,7 @@ with enable_dbc():
     result = my_function(params)
 ```
 
-See [specs/DBC.md](/specs/DBC.md) for the complete DbC specification.
+See [specs/DBC.md](../specs/DBC.md) for the complete DbC specification.
 
 ## 15.3 Coverage Requirements
 
@@ -517,7 +517,7 @@ def impossible_case(value: Literal["a", "b"]) -> str:
         assert False, "unreachable"
 ```
 
-See [Chapter 14](14-testing.md) for testing strategies and [specs/TESTING.md](/specs/TESTING.md) for coverage policies.
+See [Chapter 14](14-testing.md) for testing strategies and [specs/TESTING.md](../specs/TESTING.md) for coverage policies.
 
 ## 15.4 Security Scanning
 
@@ -870,7 +870,7 @@ make check
 
 ## 15.6 Concurrency and Thread Safety
 
-> **Canonical Reference**: See [specs/THREAD_SAFETY.md](/specs/THREAD_SAFETY.md) for the complete thread safety specification.
+> **Canonical Reference**: See [specs/THREAD_SAFETY.md](../specs/THREAD_SAFETY.md) for the complete thread safety specification.
 
 ### Introduction
 
@@ -1495,7 +1495,7 @@ For most use cases, relying on session state and frozen dataclasses provides suf
 
 ## 15.7 Exhaustive Type Checking
 
-> **Canonical Reference**: See [specs/EXHAUSTIVENESS.md](/specs/EXHAUSTIVENESS.md) for the complete specification.
+> **Canonical Reference**: See [specs/EXHAUSTIVENESS.md](../specs/EXHAUSTIVENESS.md) for the complete specification.
 
 When you add a new variant to a union type, every match statement handling that union must be updated. Without exhaustiveness checking, missing handlers are discovered at runtime—often after expensive model calls or in production. The `assert_never` pattern catches them at type-check time, **before any code runs**.
 
@@ -2088,9 +2088,9 @@ Before every commit:
 - [Chapter 5: Sessions](05-sessions.md) - Type-safe state management
 - [Chapter 12: Workspace Tools](12-workspace-tools.md) - Sandboxed execution
 - [Chapter 14: Testing](14-testing.md) - Testing strategies and coverage
-- [specs/DBC.md](/specs/DBC.md) - Design-by-contract specification
-- [specs/TESTING.md](/specs/TESTING.md) - Testing and coverage requirements
-- [specs/EXHAUSTIVENESS.md](/specs/EXHAUSTIVENESS.md) - Exhaustive union handling
+- [specs/DBC.md](../specs/DBC.md) - Design-by-contract specification
+- [specs/TESTING.md](../specs/TESTING.md) - Testing and coverage requirements
+- [specs/EXHAUSTIVENESS.md](../specs/EXHAUSTIVENESS.md) - Exhaustive union handling
 
 ## Summary
 

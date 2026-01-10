@@ -1,6 +1,6 @@
 # Chapter 9: Lifecycle Management
 
-> **Canonical Reference**: See [specs/HEALTH.md](/specs/HEALTH.md) and [specs/LIFECYCLE.md](/specs/LIFECYCLE.md) for complete specifications.
+> **Canonical Reference**: See [specs/HEALTH.md](../specs/HEALTH.md) and [specs/LIFECYCLE.md](../specs/LIFECYCLE.md) for complete specifications.
 
 ## Introduction
 
@@ -249,7 +249,7 @@ Use `LoopGroup` when:
 - You need health endpoints and watchdog monitoring
 - You're deploying to Kubernetes
 
-See [specs/LIFECYCLE.md](/specs/LIFECYCLE.md) for detailed shutdown semantics.
+See [specs/LIFECYCLE.md](../specs/LIFECYCLE.md) for detailed shutdown semantics.
 
 ## 9.3 The Runnable Protocol
 
@@ -568,7 +568,7 @@ def test_health_endpoints() -> None:
 
 ### Testing Watchdog
 
-Testing watchdog behavior requires simulating a stuck loop. See [specs/HEALTH.md](/specs/HEALTH.md) for detailed testing strategies.
+Testing watchdog behavior requires simulating a stuck loop. See [specs/HEALTH.md](../specs/HEALTH.md) for detailed testing strategies.
 
 ## Common Patterns
 

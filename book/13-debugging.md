@@ -1,6 +1,6 @@
 # Chapter 13: Debugging & Observability
 
-> **Canonical References**: See [specs/LOGGING.md](/specs/LOGGING.md) and [specs/WINK_DEBUG.md](/specs/WINK_DEBUG.md) for complete specifications.
+> **Canonical References**: See [specs/LOGGING.md](../specs/LOGGING.md) and [specs/WINK_DEBUG.md](../specs/WINK_DEBUG.md) for complete specifications.
 
 ## Introduction
 
@@ -122,7 +122,7 @@ logger = get_logger(__name__)
 logger.addHandler(EventRouter())
 ```
 
-See [specs/LOGGING.md](/specs/LOGGING.md) for the full logging surface specification.
+See [specs/LOGGING.md](../specs/LOGGING.md) for the full logging surface specification.
 
 ## 13.2 Session Events
 
@@ -252,7 +252,7 @@ Session snapshots let you persist complete execution traces to disk. Each snapsh
 ### Creating Snapshots
 
 ```python
-from weakincentives.debug import dump_session
+from weakincentives.runtime.debug import dump_session
 
 # Dump session to JSONL file
 path = dump_session(session, target="snapshots/")
@@ -305,7 +305,7 @@ graph TB
 ### Restoring from Snapshots
 
 ```python
-from weakincentives.debug import load_session
+from weakincentives.runtime.debug import load_session
 
 # Load session from JSONL
 session = load_session("snapshots/123e4567-e89b-12d3-a456-426614174000.jsonl")
@@ -420,7 +420,7 @@ When debugging an agent failure:
 
 The debug UI makes it easy to see what the model "thought" it was doing and why it made specific choices.
 
-See [specs/WINK_DEBUG.md](/specs/WINK_DEBUG.md) for the complete debug UI specification.
+See [specs/WINK_DEBUG.md](../specs/WINK_DEBUG.md) for the complete debug UI specification.
 
 ## 13.5 The Debug UI
 
@@ -837,7 +837,7 @@ When an agent fails in production:
 
 1. **Capture the snapshot** in your error handler:
    ```python
-   from weakincentives.debug import dump_session
+   from weakincentives.runtime.debug import dump_session
 
    try:
        result = agent.run()
@@ -1000,8 +1000,8 @@ Download the artifact and use `wink debug` to inspect failures without local rep
 
 - [Chapter 5: Sessions](05-sessions.md) - Event dispatching and snapshot creation
 - [Chapter 8: Evaluation](08-evaluation.md) - Using snapshots for evaluation
-- [specs/WINK_DEBUG.md](/specs/WINK_DEBUG.md) - Complete debug UI specification
-- [specs/SLICES.md](/specs/SLICES.md) - Slice storage and JSONL format
+- [specs/WINK_DEBUG.md](../specs/WINK_DEBUG.md) - Complete debug UI specification
+- [specs/SLICES.md](../specs/SLICES.md) - Slice storage and JSONL format
 
 ---
 
@@ -1635,8 +1635,8 @@ def test_logging():
 
 - [Chapter 5: Sessions](05-sessions.md) - Session events and dispatching
 - [Chapter 9: Lifecycle Management](09-lifecycle.md) - Production logging patterns
-- [specs/LOGGING.md](/specs/LOGGING.md) - Complete logging specification
-- [specs/HEALTH.md](/specs/HEALTH.md) - Health check logging
+- [specs/LOGGING.md](../specs/LOGGING.md) - Complete logging specification
+- [specs/HEALTH.md](../specs/HEALTH.md) - Health check logging
 
 ---
 
@@ -1652,7 +1652,7 @@ from weakincentives.runtime import (
     LoopGroup,
 )
 from weakincentives.runtime.events import ToolInvoked, TokenUsage, PromptExecuted
-from weakincentives.debug import dump_session
+from weakincentives.runtime.debug import dump_session
 
 # 1. Configure structured logging
 configure_logging(level="INFO", json_mode=True)
@@ -1717,9 +1717,9 @@ When an agent misbehaves:
 - [Chapter 7: Main Loop](07-main-loop.md) - Event loop integration
 - [Chapter 8: Evaluation](08-evaluation.md) - Using snapshots for testing
 - [Chapter 9: Lifecycle Management](09-lifecycle.md) - Production deployment and health checks
-- [specs/LOGGING.md](/specs/LOGGING.md) - Logging surface specification
-- [specs/WINK_DEBUG.md](/specs/WINK_DEBUG.md) - Debug UI specification
-- [specs/HEALTH.md](/specs/HEALTH.md) - Health check endpoints
+- [specs/LOGGING.md](../specs/LOGGING.md) - Logging surface specification
+- [specs/WINK_DEBUG.md](../specs/WINK_DEBUG.md) - Debug UI specification
+- [specs/HEALTH.md](../specs/HEALTH.md) - Health check endpoints
 
 ## Summary
 

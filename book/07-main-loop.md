@@ -1,6 +1,6 @@
 # Chapter 7: Main Loop Orchestration
 
-> **Canonical Reference**: See [specs/MAIN_LOOP.md](/specs/MAIN_LOOP.md) for the complete specification.
+> **Canonical Reference**: See [specs/MAIN_LOOP.md](../specs/MAIN_LOOP.md) for the complete specification.
 
 ## Introduction
 
@@ -274,7 +274,7 @@ A `Deadline` is a wall-clock deadline—an absolute point in time when execution
 
 ```python
 from datetime import timedelta
-from weakincentives import Deadline
+from weakincentives.runtime.session import Deadline
 
 # Create deadline from timeout
 deadline = Deadline.from_timeout(timedelta(seconds=30))
@@ -318,7 +318,7 @@ If the deadline is exceeded, `DeadlineExceeded` is raised and execution halts im
 A `Budget` can include token limits and/or a deadline. `BudgetTracker` accumulates usage across retries:
 
 ```python
-from weakincentives import Budget
+from weakincentives.runtime.session import Budget
 
 # Token-only budget
 budget = Budget(max_total_tokens=20_000)
@@ -382,7 +382,7 @@ flowchart TB
 
 ```python
 from datetime import timedelta
-from weakincentives import Deadline, Budget
+from weakincentives.runtime.session import Deadline, Budget
 
 # Create both constraints
 deadline = Deadline.from_timeout(timedelta(seconds=30))
@@ -414,7 +414,7 @@ As discussed above, `VisibilityExpansionRequired` is caught and retried automati
 ### Deadline and Budget Exceptions
 
 ```python
-from weakincentives import DeadlineExceededError, BudgetExceededError
+from weakincentives.runtime.session import DeadlineExceededError, BudgetExceededError
 
 try:
     response, session = loop.execute(request, deadline=deadline, budget=budget)
@@ -713,4 +713,4 @@ The main loop is the orchestration layer that connects your prompts, sessions, a
 
 ---
 
-**Canonical Reference**: See [specs/MAIN_LOOP.md](/specs/MAIN_LOOP.md) for the complete specification, including visibility handling semantics, deadline checking algorithm, budget tracker implementation, and resource lifecycle details.
+**Canonical Reference**: See [specs/MAIN_LOOP.md](../specs/MAIN_LOOP.md) for the complete specification, including visibility handling semantics, deadline checking algorithm, budget tracker implementation, and resource lifecycle details.

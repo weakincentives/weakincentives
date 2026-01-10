@@ -901,7 +901,7 @@ For complex debugging, use the WINK debug UI:
 pip install "weakincentives[wink]"
 
 # Save session snapshot
-from weakincentives.debug import dump_session
+from weakincentives.runtime.debug import dump_session
 
 dump_session(session, path="snapshots/debug.jsonl")
 
@@ -1011,7 +1011,7 @@ See [specs/LOGGING.md](../specs/LOGGING.md) for logging configuration.
 Save and inspect session state:
 
 ```python
-from weakincentives.debug import dump_session, load_session
+from weakincentives.runtime.debug import dump_session, load_session
 
 # Save
 dump_session(session, "debug.jsonl")

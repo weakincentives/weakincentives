@@ -1,6 +1,6 @@
 # Chapter 12: Workspace Tools
 
-> **Canonical Reference**: See [specs/WORKSPACE.md](/specs/WORKSPACE.md) for the complete specification.
+> **Canonical Reference**: See [specs/WORKSPACE.md](../specs/WORKSPACE.md) for the complete specification.
 
 ## Introduction
 
@@ -259,7 +259,7 @@ flowchart TB
 ### Configuration
 
 ```python
-from weakincentives.contrib.tools import VfsToolsSection, VfsConfig, HostMount
+from weakincentives.contrib.tools.vfs import VfsToolsSection, VfsConfig, HostMount
 
 # Define what to mount from host
 mounts = (
@@ -313,7 +313,7 @@ Always set `allowed_host_roots` to the narrowest path that contains your mounts.
 ### Usage Example
 
 ```python
-from weakincentives.contrib.tools import VirtualFileSystem
+from weakincentives.contrib.tools.vfs import VirtualFilesystem
 
 # Model calls write_file
 # → Dispatch WriteFile event
@@ -373,7 +373,7 @@ This isolation is critical for safety: agents can freely experiment with code ch
 - No `..` traversal allowed
 - No absolute host paths
 
-See [specs/WORKSPACE.md](/specs/WORKSPACE.md#vfs-limits) for complete limits.
+See [specs/WORKSPACE.md](../specs/WORKSPACE.md#vfs-limits) for complete limits.
 
 ## 12.3 WorkspaceDigestSection
 
@@ -743,7 +743,7 @@ For better performance:
 - Pre-pull images before session starts
 - Keep containers warm across sessions (advanced)
 
-See [specs/WORKSPACE.md](/specs/WORKSPACE.md#podman-performance) for optimization strategies.
+See [specs/WORKSPACE.md](../specs/WORKSPACE.md#podman-performance) for optimization strategies.
 
 ## 12.6 Wiring a Workspace into a Prompt
 
@@ -1050,11 +1050,11 @@ Tool handlers are pure functions—easy to test:
 
 ```python
 from weakincentives.contrib.tools.vfs_handlers import read_file_handler
-from weakincentives.contrib.tools import VirtualFileSystem, VfsFile, VfsPath
+from weakincentives.contrib.tools.vfs import VirtualFilesystem, VfsFile, VfsPath
 from weakincentives.prompt import ToolContext
 
 # Create fake VFS state
-vfs = VirtualFileSystem(
+vfs = VirtualFilesystem(
     files=(
         VfsFile(
             path=VfsPath.from_string("/test.txt"),
@@ -1081,7 +1081,7 @@ No model needed—test business logic in isolation.
 
 ## 12.7 Filesystem Protocol and Custom Backends
 
-> **Canonical Reference**: See [specs/FILESYSTEM.md](/specs/FILESYSTEM.md) for the complete filesystem protocol specification.
+> **Canonical Reference**: See [specs/FILESYSTEM.md](../specs/FILESYSTEM.md) for the complete filesystem protocol specification.
 
 ### Introduction
 
@@ -1827,7 +1827,7 @@ WINK's workspace tools provide:
 
 The key insight: **sandbox first, host writes opt-in**. Default to safe operations (VFS, Asteval), use strong isolation (Podman) when needed, never grant unrestricted host access.
 
-Next, explore debugging and observability in [Chapter 13: Debugging and Observability](/book/13-debugging-observability.md).
+Next, explore debugging and observability in [Chapter 13: Debugging](/book/13-debugging.md).
 
 ## Further Reading
 
