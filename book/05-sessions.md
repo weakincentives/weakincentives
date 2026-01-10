@@ -1,6 +1,6 @@
 # Chapter 5: Sessions
 
-> **Canonical Reference**: See [specs/SESSIONS.md](/specs/SESSIONS.md) for the complete specification.
+> **Canonical Reference**: See [specs/SESSIONS.md](../specs/SESSIONS.md) for the complete specification.
 
 ## Introduction
 
@@ -1421,7 +1421,7 @@ session[LogEntry].clear(lambda e: e.timestamp < cutoff)
 
 ## 5.7 Storage Backends and Persistence
 
-> **Canonical Reference**: See [specs/SLICES.md](/specs/SLICES.md) for the complete slice storage specification.
+> **Canonical Reference**: See [specs/SLICES.md](../specs/SLICES.md) for the complete slice storage specification.
 
 ### Introduction
 
@@ -2023,4 +2023,4 @@ The session is the foundation of WINK's deterministic architecture. Every state 
 
 ---
 
-**Canonical Reference**: See [specs/SESSIONS.md](/specs/SESSIONS.md) for the complete specification, including event system details, deadline enforcement, budget tracking, and snapshot serialization format.
+**Canonical Reference**: See [specs/SESSIONS.md](../specs/SESSIONS.md) for the complete specification, including event system details, deadline enforcement, budget tracking, and snapshot serialization format.

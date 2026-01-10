@@ -1,6 +1,6 @@
 # Chapter 11: Prompt Optimization
 
-> **Canonical Reference**: See [specs/PROMPT_OPTIMIZATION.md](/specs/PROMPT_OPTIMIZATION.md) for the complete specification.
+> **Canonical Reference**: See [specs/PROMPT_OPTIMIZATION.md](../specs/PROMPT_OPTIMIZATION.md) for the complete specification.
 
 ## Introduction
 
@@ -318,14 +318,14 @@ The override JSON format is intentionally simple and human-editable:
 
 ```python
 # Flat section
-"instructions" → "instructions"
+# "instructions" -> "instructions"
 
 # Nested section (one level)
-"examples" → section with key "examples"
-  child section 0 → "examples.0"
+# "examples" -> section with key "examples"
+#   child section 0 -> "examples.0"
 
 # Deeply nested
-"context.user.profile" → ["context", "user", "profile"]
+# "context.user.profile" -> ["context", "user", "profile"]
 ```
 
 ### What You Can Override
@@ -646,7 +646,7 @@ The optimizer:
 4. Keeps the best-performing variant
 5. Returns a `PromptOverride` ready to save
 
-See [specs/PROMPT_OPTIMIZATION.md](/specs/PROMPT_OPTIMIZATION.md#optimizer-integration) for optimizer API details.
+See [specs/PROMPT_OPTIMIZATION.md](../specs/PROMPT_OPTIMIZATION.md#optimizer-integration) for optimizer API details.
 
 ## Summary
 

@@ -1,6 +1,6 @@
 # Chapter 10: Progressive Disclosure
 
-> **Canonical Reference**: See [specs/PROMPTS.md](/specs/PROMPTS.md) (Progressive Disclosure section) for the complete specification.
+> **Canonical Reference**: See [specs/PROMPTS.md](../specs/PROMPTS.md) (Progressive Disclosure section) for the complete specification.
 
 ## Introduction
 
@@ -488,28 +488,28 @@ basic_examples = """
 # Basic Examples
 
 ## Create User
-```python
+````python
 client.create_user(name="Alice", email="alice@example.com")
-```
+````
 """
 
 advanced_examples = """
 # Advanced Examples
 
 ## Batch Operations
-```python
+````python
 with client.batch() as batch:
     for user in users:
         batch.create_user(**user)
-```
+````
 
 ## Error Handling
-```python
+````python
 try:
     client.create_user(...)
 except ValidationError as e:
     handle_validation_error(e)
-```
+````
 
 [... 2000 tokens of advanced examples ...]
 """

@@ -56,9 +56,9 @@ ToolResult.error(message)               # failure case
 - `VisibilityExpansionRequired`
 
 For detailed explanations of prompt composition and overrides, see:
-- [Chapter 2: Prompts](02-prompts.md)
-- [Chapter 3: Tools](03-tools.md)
-- [Chapter 15: Prompt Optimization](15-prompt-optimization.md)
+- [Chapter 3: Prompts](03-prompts.md)
+- [Chapter 4: Tools](04-tools.md)
+- [Chapter 11: Prompt Optimization](11-prompt-optimization.md)
 
 ## 18.3 weakincentives.runtime
 
@@ -111,9 +111,9 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 - `wait_until(predicate, timeout=...)`: Poll predicate with timeout
 
 For detailed explanations of sessions and state management, see:
-- [Chapter 4: Sessions](04-sessions.md)
+- [Chapter 5: Sessions](05-sessions.md)
 - [Chapter 7: MainLoop](07-main-loop.md)
-- [Chapter 12: Lifecycle Management](12-lifecycle.md)
+- [Chapter 9: Lifecycle Management](09-lifecycle.md)
 
 ## 18.4 weakincentives.adapters
 
@@ -146,8 +146,8 @@ PromptEvaluationError
 - `ThrottlePolicy`, `new_throttle_policy`, `ThrottleError`
 
 For detailed explanations of adapters and resources, see:
-- [Chapter 5: Provider Adapters](05-adapters.md)
-- [Chapter 6: Resource Registry](06-resources.md)
+- [Chapter 6: Provider Adapters](06-adapters.md)
+- [Chapter 16: Recipes](16-recipes.md)
 
 ## 18.5 weakincentives.contrib.tools
 
@@ -167,8 +167,7 @@ For detailed explanations of adapters and resources, see:
 - `PodmanSandboxSection(session, config=PodmanSandboxConfig(...))` (extra)
 
 For detailed explanations of tools, see:
-- [Chapter 8: Workspace Tools](08-workspace.md)
-- [Chapter 9: Planning Tools](09-planning.md)
+- [Chapter 12: Workspace Tools](12-workspace-tools.md)
 
 ## 18.6 weakincentives.optimizers
 
@@ -180,7 +179,7 @@ For detailed explanations of tools, see:
 - `WorkspaceDigestOptimizer`
 
 For detailed explanations of optimization, see:
-- [Chapter 15: Prompt Optimization](15-prompt-optimization.md)
+- [Chapter 11: Prompt Optimization](11-prompt-optimization.md)
 
 ## 18.7 weakincentives.serde
 
@@ -210,7 +209,7 @@ copy = clone(my_dataclass)
 - `schema()` produces OpenAI-compatible JSON schemas for structured output
 
 For detailed explanations, see:
-- [Chapter 2: Prompts](02-prompts.md) (structured output section)
+- [Chapter 3: Prompts](03-prompts.md) (structured output section)
 
 ## 18.8 weakincentives.evals
 
@@ -260,7 +259,7 @@ collect_results(results, expected_count, timeout_seconds=300)
 ```
 
 For detailed explanations of evaluation, see:
-- [Chapter 10: Evaluation Framework](10-evals.md)
+- [Chapter 8: Evaluation Framework](08-evaluation.md)
 
 ## 18.9 weakincentives.skills
 
@@ -296,8 +295,7 @@ name = resolve_skill_name(mount)           # Derive name from path
 
 - `SkillError` (base), `SkillValidationError`, `SkillNotFoundError`, `SkillMountError`
 
-For detailed explanations of skills, see:
-- [Chapter 11: Agent Skills](11-skills.md)
+For detailed explanations of skills, see the Agent Skills specification at https://agentskills.io and [specs/SKILLS.md](../specs/SKILLS.md).
 
 ## 18.10 weakincentives.filesystem
 
@@ -334,7 +332,7 @@ grep_result = fs.grep("TODO", path="src/", glob="*.py")
 - UTF-8 paths are now allowed (ASCII-only restriction removed)
 
 For detailed explanations, see:
-- [Chapter 8: Workspace Tools](08-workspace.md)
+- [Chapter 12: Workspace Tools](12-workspace-tools.md)
 
 ## 18.11 CLI
 
@@ -380,7 +378,7 @@ For detailed explanations of debugging, see:
 
 ## 18.12 Dataclass Utilities and Serialization
 
-> **Canonical Reference**: See [specs/DATACLASSES.md](/specs/DATACLASSES.md) for the complete specification.
+> **Canonical Reference**: See [specs/DATACLASSES.md](../specs/DATACLASSES.md) for the complete specification.
 
 WINK provides dependency-free dataclass utilities for serialization, validation, and immutable patterns. These utilities bridge stdlib `dataclasses` with validation without runtime decorators or third-party packages like Pydantic.
 
@@ -969,7 +967,7 @@ review = parse_structured_output(CodeReview, response.output)
 - [Chapter 3: Prompts](03-prompts.md) - Structured output with prompts
 - [Chapter 4: Tools](04-tools.md) - Tool parameter validation
 - [Chapter 5: Sessions](05-sessions.md) - Immutable state patterns
-- [specs/DATACLASSES.md](/specs/DATACLASSES.md) - Complete specification
+- [specs/DATACLASSES.md](../specs/DATACLASSES.md) - Complete specification
 
 ---
 

@@ -1,6 +1,6 @@
 # Chapter 6: Adapters
 
-> **Canonical Reference**: See [specs/ADAPTERS.md](/specs/ADAPTERS.md) and [specs/CLAUDE_AGENT_SDK.md](/specs/CLAUDE_AGENT_SDK.md) for the complete specifications.
+> **Canonical Reference**: See [specs/ADAPTERS.md](../specs/ADAPTERS.md) and [specs/CLAUDE_AGENT_SDK.md](../specs/CLAUDE_AGENT_SDK.md) for the complete specifications.
 
 ## Introduction
 
@@ -104,7 +104,7 @@ All adapters implement the `ProviderAdapter` protocol:
 from weakincentives.adapters import ProviderAdapter
 from weakincentives.prompt import Prompt
 from weakincentives.runtime import Session
-from weakincentives import Deadline, Budget, BudgetTracker
+from weakincentives.runtime.session import Deadline, Budget, BudgetTracker
 
 # Generic adapter interface
 response = adapter.evaluate(
@@ -156,7 +156,7 @@ if response.output:
 Enforces a wall-clock deadline for the entire evaluation. The adapter checks the deadline before each API call and raises `DeadlineExceededError` if time has run out.
 
 ```python
-from weakincentives import Deadline
+from weakincentives.runtime.session import Deadline
 import datetime
 
 # Give the evaluation 30 seconds
@@ -172,7 +172,7 @@ response = adapter.evaluate(prompt, session=session, deadline=deadline)
 Limits token consumption or cost for this evaluation. The adapter tracks usage and raises `BudgetExceededError` when limits are hit.
 
 ```python
-from weakincentives import Budget
+from weakincentives.runtime.session import Budget
 
 # Limit to 1000 tokens total
 budget = Budget(max_tokens=1000)
@@ -185,7 +185,7 @@ response = adapter.evaluate(prompt, session=session, budget=budget)
 Shares budget tracking across multiple evaluations. This is essential for multi-turn agents or evaluation loops.
 
 ```python
-from weakincentives import BudgetTracker, Budget
+from weakincentives.runtime.session import BudgetTracker, Budget
 
 tracker = BudgetTracker(budget=Budget(max_tokens=5000))
 
@@ -1153,7 +1153,7 @@ Tools can now access `docs.python.org` and `pypi.org` but no other domains. This
 Pass a `BudgetTracker` to `evaluate(..., budget_tracker=...)` to track usage across multiple evaluations:
 
 ```python
-from weakincentives import BudgetTracker, Budget
+from weakincentives.runtime.session import BudgetTracker, Budget
 
 tracker = BudgetTracker(budget=Budget(max_tokens=10000))
 

@@ -1,6 +1,6 @@
 # Chapter 8: Evaluation
 
-> **Canonical Reference**: See [specs/EVALS.md](/specs/EVALS.md) for the complete specification.
+> **Canonical Reference**: See [specs/EVALS.md](../specs/EVALS.md) for the complete specification.
 
 ## Introduction
 
@@ -1097,4 +1097,4 @@ Evaluation is not a separate framework—it's a natural extension of your agent'
 
 ---
 
-**Canonical Reference**: See [specs/EVALS.md](/specs/EVALS.md) for the complete specification, including evaluator composition semantics, session evaluator protocols, report aggregation algorithms, and mailbox routing details.
+**Canonical Reference**: See [specs/EVALS.md](../specs/EVALS.md) for the complete specification, including evaluator composition semantics, session evaluator protocols, report aggregation algorithms, and mailbox routing details.

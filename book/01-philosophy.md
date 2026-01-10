@@ -99,7 +99,7 @@ Hash-validated prompt overrides prevent accidental drift between "tested" and
 "running" versions. When you override a section's text, the system validates
 that you're overriding the version you think you're overriding.
 
-The override system is explained in [Chapter 11](11-prompt-overrides.md).
+The override system is explained in [Chapter 11](11-prompt-optimization.md).
 
 ### The Goal: Clarity, Not Constraint
 
@@ -114,7 +114,7 @@ actions. We'll explore this in depth next.
 
 ## 2. Policies Over Workflows
 
-> **Canonical Reference**: See [specs/POLICIES_OVER_WORKFLOWS.md](../src/weakincentives/docs/specs/POLICIES_OVER_WORKFLOWS.md) for the complete specification.
+> **Canonical Reference**: See [specs/POLICIES_OVER_WORKFLOWS.md](../specs/POLICIES_OVER_WORKFLOWS.md) for the complete specification.
 
 The weak incentives philosophy has a direct, practical implication for how you
 design agents: **prefer declarative policies over prescriptive workflows**.
@@ -299,7 +299,7 @@ def deploy():
     push()
 
 # ✅ Declarative (policy)
-from weakincentives.contrib.tools import SequentialDependencyPolicy
+from weakincentives.contrib.tools.policies import SequentialDependencyPolicy
 
 policy = SequentialDependencyPolicy(
     dependencies={"deploy": frozenset({"test", "build"})}
@@ -316,7 +316,7 @@ Each policy evaluates in isolation. Policies compose through conjunction: all
 must allow, any may deny:
 
 ```python
-from weakincentives.contrib.tools import (
+from weakincentives.contrib.tools.policies import (
     ReadBeforeWritePolicy,
     BudgetLimitPolicy,
 )
@@ -377,7 +377,7 @@ WINK implements policy-driven design through several mechanisms:
 Gate individual tool invocations based on session state. See [Chapter 4.5: Tool Policies](04.5-tool-policies.md) for comprehensive coverage.
 
 ```python
-from weakincentives.contrib.tools import (
+from weakincentives.contrib.tools.policies import (
     ReadBeforeWritePolicy,
     SequentialDependencyPolicy,
 )
@@ -406,7 +406,7 @@ blocked and the agent receives feedback explaining why.
 Hard limits on resource consumption. See [Chapter 5: Sessions](05-sessions.md).
 
 ```python
-from weakincentives.runtime import Budget, Deadline
+from weakincentives.runtime.session import Budget, Deadline
 from datetime import datetime, timedelta, UTC
 
 budget = Budget(
@@ -544,7 +544,7 @@ def deploy_code():
 #### Policy Approach
 
 ```python
-from weakincentives.contrib.tools import SequentialDependencyPolicy
+from weakincentives.contrib.tools.policies import SequentialDependencyPolicy
 
 # Declarative constraints
 policy = SequentialDependencyPolicy(
@@ -556,10 +556,10 @@ policy = SequentialDependencyPolicy(
 
 # Agent receives tools with policy attached
 tools = (
-    Tool(name="create_config", ...),
-    Tool(name="run_tests", ...),
-    Tool(name="build", ...),
-    Tool(name="deploy", ...),
+    Tool(name="create_config"),
+    Tool(name="run_tests"),
+    Tool(name="build"),
+    Tool(name="deploy"),
 )
 
 # Agent can:
@@ -662,10 +662,10 @@ discipline:
 - **Safety** is enforced at tool boundaries where side effects happen
 
 For the formal specification of these behaviors, see:
-- [specs/PROMPTS.md](../src/weakincentives/docs/specs/PROMPTS.md)
-- [specs/TOOLS.md](../src/weakincentives/docs/specs/TOOLS.md)
-- [specs/SESSIONS.md](../src/weakincentives/docs/specs/SESSIONS.md)
-- [specs/MAIN_LOOP.md](../src/weakincentives/docs/specs/MAIN_LOOP.md)
+- [specs/PROMPTS.md](../specs/PROMPTS.md)
+- [specs/TOOLS.md](../specs/TOOLS.md)
+- [specs/SESSIONS.md](../specs/SESSIONS.md)
+- [specs/MAIN_LOOP.md](../specs/MAIN_LOOP.md)
 
 ## 4. Prompts as First-Class, Typed Programs
 

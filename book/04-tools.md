@@ -1553,7 +1553,7 @@ If a tool call fails:
 
 ## Example Recovery Flow
 
-```
+````
 # Initial attempt
 write_file(path="output.txt", content="data")
 # Error: "File exists - use overwrite=true to replace"
@@ -1565,7 +1565,7 @@ read_file(path="output.txt")
 # Retry with overwrite
 write_file(path="output.txt", content="data", overwrite=true)
 # Success: "Wrote 4 bytes to output.txt"
-```
+````
     """.strip(),
     tools=(read_file, write_file, list_directory),
 )

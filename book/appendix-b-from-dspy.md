@@ -22,7 +22,7 @@ Here's how core DSPy concepts translate to WINK:
 | **Optimizer / Teleprompter** | Prompt overrides + manual iteration | Manual vs. automatic |
 | **Compilation** | No equivalent | Prompts are explicit |
 | **`dspy.ReAct`** | `PlanningToolsSection` + tool sections | Tool-using agents |
-| **Metric** | Evaluation framework | See [Chapter 10](10-evals.md) |
+| **Metric** | Evaluation framework | See [Chapter 8: Evaluation](08-evaluation.md) |
 | **Trace** | Session events + debug UI | Execution telemetry |
 
 ## What's familiar
