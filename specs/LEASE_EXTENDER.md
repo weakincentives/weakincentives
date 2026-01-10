@@ -438,7 +438,7 @@ def _handle_message(
     self._reply_and_ack(msg, result)
 ```
 
-### Heartbeat Propagation in _execute
+### Heartbeat Propagation in \_execute
 
 ```python
 def _execute(
@@ -515,13 +515,13 @@ class InnerLoop:
 This ensures:
 
 1. Heartbeat occurs at each LLM call boundary
-2. Heartbeat occurs before/after each tool execution
-3. Long-running tools can add additional beats as needed
+1. Heartbeat occurs before/after each tool execution
+1. Long-running tools can add additional beats as needed
 
 ## Error Handling
 
 | Error | Behavior |
-| -------------------------- | ------------------------------------------ |
+| --------------------------- | ------------------------------------- |
 | `ReceiptHandleExpiredError` | Log warning; processing continues |
 | Network/transient errors | Log exception; skip this extension |
 | Callback chain failure | Original callback still invoked first |
@@ -540,7 +540,7 @@ and be processed again - the system handles this via idempotent processing.
 ## Comparison: Heartbeat-Based vs Daemon Thread
 
 | Aspect | Daemon Thread | Heartbeat-Based |
-| --------------------- | ---------------------- | --------------------------- |
+| --------------------- | --------------------- | --------------------------- |
 | Extension trigger | Fixed interval timer | Tool execution beats |
 | Stuck worker behavior | Keeps extending | Lease expires (correct!) |
 | Thread overhead | Extra daemon thread | No additional threads |
@@ -693,9 +693,9 @@ during long operations, lease extension becomes more granular.
 Priority for adding `context.beat()` calls:
 
 1. Podman container execution (can run for minutes)
-2. External API calls (network latency)
-3. Large file operations (I/O bound)
-4. Computation-heavy tools (CPU bound)
+1. External API calls (network latency)
+1. Large file operations (I/O bound)
+1. Computation-heavy tools (CPU bound)
 
 ## Future Work
 
