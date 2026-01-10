@@ -148,7 +148,6 @@ class LeaseExtender:
         self._msg: Message[Any, Any] | None = None
         self._heartbeat: Heartbeat | None = None
         self._last_extension: float = 0.0
-        self._original_callback: Callable[[], None] | None = None
 
     @contextmanager
     def attach(
@@ -188,27 +187,22 @@ class LeaseExtender:
             self._heartbeat = heartbeat
             self._last_extension = time.monotonic()
 
-            # Chain our callback with any existing one
-            self._original_callback = heartbeat.on_beat
-            heartbeat.on_beat = self._on_beat
+        # Register callback (outside lock - add_callback has its own lock)
+        heartbeat.add_callback(self._on_beat)
 
     def _detach(self) -> None:
         """Detach lease extension callback from heartbeat."""
         with self._lock:
-            if self._heartbeat is not None:
-                # Restore original callback
-                self._heartbeat.on_beat = self._original_callback
-                self._original_callback = None
-
+            heartbeat = self._heartbeat
             self._msg = None
             self._heartbeat = None
 
+        # Unregister callback (outside lock - remove_callback has its own lock)
+        if heartbeat is not None:
+            heartbeat.remove_callback(self._on_beat)
+
     def _on_beat(self) -> None:
         """Called when heartbeat.beat() is invoked."""
-        # Chain to original callback first
-        if self._original_callback is not None:
-            self._original_callback()
-
         with self._lock:
             if self._msg is None:
                 return
@@ -242,35 +236,59 @@ class LeaseExtender:
 
 ### Heartbeat Extension
 
-The `Heartbeat` class is extended to support an optional callback:
+The `Heartbeat` class is extended to support multiple callbacks via an
+observer pattern:
 
 ```python
 @dataclass(slots=True)
 class Heartbeat:
-    """Thread-safe heartbeat tracker with optional beat callback.
+    """Thread-safe heartbeat tracker with observer callbacks.
 
     Workers call ``beat()`` at regular intervals to prove liveness.
-    The watchdog calls ``elapsed()`` to check for stalls. An optional
-    ``on_beat`` callback enables side effects like lease extension.
+    The watchdog calls ``elapsed()`` to check for stalls. Multiple
+    callbacks can be registered to observe beats (lease extension,
+    metrics, logging, etc.).
     """
 
     _last_beat: float = field(default_factory=time.monotonic)
     _lock: threading.Lock = field(default_factory=threading.Lock)
-    on_beat: Callable[[], None] | None = None
+    _callbacks: list[Callable[[], None]] = field(default_factory=list)
 
     def beat(self) -> None:
-        """Record a heartbeat and invoke callback if set."""
+        """Record a heartbeat and invoke all registered callbacks."""
         with self._lock:
             self._last_beat = time.monotonic()
+            callbacks = list(self._callbacks)  # Snapshot under lock
 
-        # Invoke callback outside lock to avoid deadlock
-        if self.on_beat is not None:
-            self.on_beat()
+        # Invoke outside lock to avoid deadlock
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                _logger.exception("Heartbeat callback failed")
 
     def elapsed(self) -> float:
         """Seconds since last heartbeat."""
         with self._lock:
             return time.monotonic() - self._last_beat
+
+    def add_callback(self, callback: Callable[[], None]) -> None:
+        """Add a callback to be invoked on each beat.
+
+        Callbacks are invoked outside the lock in registration order.
+        Exceptions in callbacks are logged but do not prevent other
+        callbacks from running.
+        """
+        with self._lock:
+            self._callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a previously added callback.
+
+        Raises ValueError if callback was not registered.
+        """
+        with self._lock:
+            self._callbacks.remove(callback)
 ```
 
 ## Heartbeat Propagation
@@ -521,10 +539,10 @@ This ensures:
 ## Error Handling
 
 | Error | Behavior |
-| --------------------------- | ------------------------------------- |
+| --------------------------- | ----------------------------------------- |
 | `ReceiptHandleExpiredError` | Log warning; processing continues |
 | Network/transient errors | Log exception; skip this extension |
-| Callback chain failure | Original callback still invoked first |
+| Callback exception | Logged; other callbacks still run |
 
 **Design rationale:** Extension is a reliability optimization, not a
 correctness requirement. If extension fails, the message may become visible
@@ -532,9 +550,10 @@ and be processed again - the system handles this via idempotent processing.
 
 ## Thread Safety
 
-- `LeaseExtender` uses internal `threading.Lock` for state protection
-- Heartbeat callback invoked outside lock to avoid deadlock
-- `Heartbeat.on_beat` assignment is atomic (single reference)
+- `Heartbeat` uses internal lock for callback list mutations
+- Callbacks snapshot under lock, invoked outside lock (avoids deadlock)
+- `LeaseExtender` uses separate lock for its own state
+- Multiple observers can safely register/unregister concurrently
 - Rate limiting uses monotonic clock (no wall-clock issues)
 
 ## Comparison: Heartbeat-Based vs Daemon Thread
@@ -601,11 +620,11 @@ def test_lease_extender_disabled() -> None:
     assert msg.extend_visibility_calls == 0
 
 
-def test_heartbeat_callback_chaining() -> None:
-    """Verify original callback is preserved."""
+def test_heartbeat_multiple_callbacks() -> None:
+    """Verify multiple callbacks can coexist."""
     calls: list[str] = []
     heartbeat = Heartbeat()
-    heartbeat.on_beat = lambda: calls.append("original")
+    heartbeat.add_callback(lambda: calls.append("metrics"))
 
     msg = create_test_message()
     extender = LeaseExtender(LeaseExtenderConfig(interval=0.0))
@@ -613,7 +632,8 @@ def test_heartbeat_callback_chaining() -> None:
     with extender.attach(msg, heartbeat):
         heartbeat.beat()
 
-    assert calls == ["original"]
+    # Both callbacks invoked
+    assert calls == ["metrics"]
     assert msg.extend_visibility_calls == 1
 
 
