@@ -27,23 +27,27 @@ from weakincentives.prompt.overrides import (
 
 
 def test_resolve_overrides_root_uses_store_rules(tmp_path: Path) -> None:
+    # When root_path is explicit, it is used directly as the overrides directory
     overrides_root = resolve_overrides_root(root_path=tmp_path)
-    expected = tmp_path / ".weakincentives" / "prompts" / "overrides"
-    assert overrides_root == expected
+    assert overrides_root == tmp_path
 
 
-def test_resolve_overrides_root_accepts_custom_relative_path(tmp_path: Path) -> None:
+def test_resolve_overrides_root_ignores_relative_path_when_explicit_root(
+    tmp_path: Path,
+) -> None:
+    # When root_path is explicit, it is used directly and overrides_relative_path
+    # is ignored. Users should pass the full desired path as root_path.
     overrides_root = resolve_overrides_root(
         root_path=tmp_path,
         overrides_relative_path=Path("custom") / "path",
     )
-    assert overrides_root == tmp_path / "custom" / "path"
+    assert overrides_root == tmp_path
 
 
 def test_iter_override_files_yields_metadata(tmp_path: Path) -> None:
     overrides_root = resolve_overrides_root(root_path=tmp_path)
     target_dir = overrides_root / "example" / "prompt"
-    target_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
     override_path = target_dir / "latest.json"
     section_hash = "a" * 64
     tool_hash = "b" * 64
@@ -88,8 +92,8 @@ def test_iter_override_files_handles_missing_directory(tmp_path: Path) -> None:
 
 
 def test_iter_override_files_raises_on_invalid_json(tmp_path: Path) -> None:
+    # overrides_root is tmp_path (already exists) when root_path is explicit
     overrides_root = resolve_overrides_root(root_path=tmp_path)
-    overrides_root.mkdir(parents=True)
     override_path = overrides_root / "broken.json"
     override_path.write_text("not json", encoding="utf-8")
 
@@ -98,8 +102,8 @@ def test_iter_override_files_raises_on_invalid_json(tmp_path: Path) -> None:
 
 
 def test_iter_override_files_raises_on_invalid_sections(tmp_path: Path) -> None:
+    # overrides_root is tmp_path (already exists) when root_path is explicit
     overrides_root = resolve_overrides_root(root_path=tmp_path)
-    overrides_root.mkdir(parents=True)
     override_path = overrides_root / "invalid.json"
     payload = {
         "version": 2,
@@ -116,8 +120,8 @@ def test_iter_override_files_raises_on_invalid_sections(tmp_path: Path) -> None:
 
 
 def test_iter_override_files_raises_on_invalid_tools(tmp_path: Path) -> None:
+    # overrides_root is tmp_path (already exists) when root_path is explicit
     overrides_root = resolve_overrides_root(root_path=tmp_path)
-    overrides_root.mkdir(parents=True)
     override_path = overrides_root / "invalid_tools.json"
     payload = {
         "version": 2,
@@ -136,9 +140,9 @@ def test_iter_override_files_raises_on_invalid_tools(tmp_path: Path) -> None:
 def test_iter_override_files_skips_non_file_matches(tmp_path: Path) -> None:
     overrides_root = resolve_overrides_root(root_path=tmp_path)
     nested_dir = overrides_root / "dir.json"
-    nested_dir.mkdir(parents=True)
+    nested_dir.mkdir(parents=True, exist_ok=True)
     target_dir = overrides_root / "example" / "prompt"
-    target_dir.mkdir(parents=True)
+    target_dir.mkdir(parents=True, exist_ok=True)
     override_path = target_dir / "latest.json"
     payload = {
         "version": 2,
@@ -156,8 +160,8 @@ def test_iter_override_files_skips_non_file_matches(tmp_path: Path) -> None:
 
 
 def test_iter_override_files_raises_when_payload_not_object(tmp_path: Path) -> None:
+    # overrides_root is tmp_path (already exists) when root_path is explicit
     overrides_root = resolve_overrides_root(root_path=tmp_path)
-    overrides_root.mkdir(parents=True)
     override_path = overrides_root / "invalid_payload.json"
     override_path.write_text(json.dumps(["unexpected"]), encoding="utf-8")
 

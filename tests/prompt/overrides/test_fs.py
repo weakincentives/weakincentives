@@ -29,6 +29,8 @@ def _build_filesystem(tmp_path: Path) -> OverrideFilesystem:
 
 
 def test_override_filesystem_builds_paths(tmp_path: Path) -> None:
+    # When explicit_root is provided, it is used directly as the overrides
+    # directory (overrides_relative_path is ignored)
     filesystem = _build_filesystem(tmp_path)
 
     file_path = filesystem.override_file_path(
@@ -37,7 +39,7 @@ def test_override_filesystem_builds_paths(tmp_path: Path) -> None:
         tag="latest",
     )
 
-    expected = tmp_path / "overrides" / "demo" / "example" / "intro" / "latest.json"
+    expected = tmp_path / "demo" / "example" / "intro" / "latest.json"
     assert file_path == expected
 
 

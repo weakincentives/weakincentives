@@ -31,7 +31,13 @@ _IDENTIFIER_PATTERN = r"^[a-z0-9][a-z0-9._-]{0,63}$"
 
 
 class OverrideFilesystem:
-    """Handle filesystem interactions for prompt overrides."""
+    """Handle filesystem interactions for prompt overrides.
+
+    When an explicit root path is provided, it is used directly as the
+    overrides directory (no subdirectory prefix). When using automatic
+    discovery (git), the relative path prefix is appended to the discovered
+    repository root.
+    """
 
     def __init__(
         self,
@@ -43,35 +49,39 @@ class OverrideFilesystem:
         self._explicit_root = explicit_root
         self._overrides_relative_path = overrides_relative_path
         self._root_lock = RLock()
-        self._root: Path | None = None
+        self._resolved_overrides_dir: Path | None = None
         self._path_locks: dict[Path, RLock] = {}
         self._path_locks_lock = RLock()
 
-    def resolve_root(self) -> Path:
-        """Resolve the repository root for overrides operations."""
+    def overrides_dir(self) -> Path:
+        """Return the resolved overrides directory.
 
+        When an explicit root is provided, it is used directly as the
+        overrides directory. When using automatic discovery, the relative
+        path prefix is appended to the discovered repository root.
+        """
         with self._root_lock:
-            if self._root is not None:
-                return self._root
+            if self._resolved_overrides_dir is not None:
+                return self._resolved_overrides_dir
+
             if self._explicit_root is not None:
-                self._root = self._explicit_root
-                return self._root
+                self._resolved_overrides_dir = self._explicit_root
+                return self._resolved_overrides_dir
 
             git_root = self._git_toplevel()
             if git_root is not None:
-                self._root = git_root
-                return self._root
+                self._resolved_overrides_dir = git_root / self._overrides_relative_path
+                return self._resolved_overrides_dir
 
             traversal_root = self._walk_to_git_root()
             if traversal_root is None:
                 raise PromptOverridesError(
                     "Failed to locate repository root. Provide root_path explicitly."
                 )
-            self._root = traversal_root
-            return self._root
-
-    def overrides_dir(self) -> Path:
-        return self.resolve_root() / self._overrides_relative_path
+            self._resolved_overrides_dir = (
+                traversal_root / self._overrides_relative_path
+            )
+            return self._resolved_overrides_dir
 
     def override_file_path(
         self,
