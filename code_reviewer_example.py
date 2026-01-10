@@ -56,9 +56,10 @@ from weakincentives.contrib.tools import (
     VfsToolsSection,
     WorkspaceDigest,
     WorkspaceDigestSection,
+    WorkspaceSection,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.debug import dump_session as dump_session_tree
+from weakincentives.debug import archive_filesystem, dump_session as dump_session_tree
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
@@ -468,6 +469,7 @@ class CodeReviewApp:
 
         print("Goodbye.")
         dump_session_tree(self._loop.session, SNAPSHOT_DIR)
+        self._archive_workspace()
 
     def _cleanup(self) -> None:
         """Clean up resources."""
@@ -488,6 +490,33 @@ class CodeReviewApp:
         if self._workspace_section is not None:
             self._workspace_section.cleanup()
             _LOGGER.info("Cleaned up Claude Agent workspace.")
+
+    def _archive_workspace(self) -> None:
+        """Archive the workspace filesystem to a zip file."""
+        workspace = self._find_workspace_section()
+        if workspace is None:
+            return
+        archive_path = archive_filesystem(
+            workspace.filesystem,
+            SNAPSHOT_DIR,
+            archive_id=self._loop.session.session_id,
+        )
+        if archive_path is not None:
+            _LOGGER.info("Workspace archived to %s", archive_path)
+
+    def _find_workspace_section(self) -> WorkspaceSection | None:
+        """Find the workspace section from the template or stored reference."""
+        # Claude Agent mode: use stored workspace section
+        if self._workspace_section is not None:
+            return self._workspace_section
+
+        # Standard mode: search template sections for WorkspaceSection
+        for section in self._loop._template.sections:
+            # SectionNode wraps the section, access via .section attribute
+            actual_section = getattr(section, "section", section)
+            if isinstance(actual_section, WorkspaceSection):
+                return actual_section
+        return None
 
 
 def parse_args() -> argparse.Namespace:

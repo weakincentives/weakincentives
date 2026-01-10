@@ -15,10 +15,13 @@
 from __future__ import annotations
 
 import logging
+import zipfile
 from collections.abc import Iterable
 from pathlib import Path
+from uuid import UUID, uuid4
 
 from .dbc import dbc_enabled
+from .filesystem import Filesystem
 from .runtime.session import Session, iter_sessions_bottom_up
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -60,6 +63,89 @@ def dump_session(root_session: Session, target: str | Path) -> Path | None:
             },
         )
         return target_path
+
+
+def archive_filesystem(
+    fs: Filesystem,
+    target: str | Path,
+    *,
+    archive_id: UUID | None = None,
+) -> Path | None:
+    """Archive filesystem contents to a zip file.
+
+    Creates a zip archive containing all files from the given filesystem.
+    The archive is named ``<archive_id>.zip`` and written to the target
+    directory.
+
+    Args:
+        fs: Filesystem instance to archive.
+        target: Target directory for the archive file.
+        archive_id: Unique identifier for the archive. If not provided,
+            a new UUID is generated.
+
+    Returns:
+        Path to the created archive file, or None if the filesystem is empty.
+    """
+    with dbc_enabled(False):
+        archive_id = archive_id or uuid4()
+        target_path = Path(target).expanduser()
+        if target_path.is_file():
+            target_path = target_path.parent
+        archive_path = target_path / f"{archive_id}.zip"
+
+        # Collect all files recursively from the filesystem
+        files = _collect_files_recursive(fs, ".")
+
+        if not files:
+            logger.info(
+                "Filesystem archive skipped; no files to archive.",
+                extra={
+                    "archive_id": str(archive_id),
+                    "archive_path": str(archive_path),
+                },
+            )
+            return None
+
+        target_path.mkdir(parents=True, exist_ok=True)
+
+        with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for file_path in files:
+                try:
+                    result = fs.read_bytes(file_path)
+                    zf.writestr(file_path, result.content)
+                except (PermissionError, ValueError) as exc:
+                    logger.warning(
+                        "Skipping file due to read error: %s",
+                        file_path,
+                        extra={"error": str(exc)},
+                    )
+                    continue
+
+        logger.info(
+            "Filesystem archived.",
+            extra={
+                "archive_id": str(archive_id),
+                "archive_path": str(archive_path),
+                "file_count": len(files),
+            },
+        )
+        return archive_path
+
+
+def _collect_files_recursive(fs: Filesystem, path: str) -> list[str]:
+    """Recursively collect all file paths from the filesystem."""
+    files: list[str] = []
+    try:
+        entries = fs.list(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return files
+
+    for entry in entries:
+        if entry.is_file:
+            files.append(entry.path)
+        elif entry.is_directory:
+            files.extend(_collect_files_recursive(fs, entry.path))
+    return files
 
 
 def _collect_snapshots(root_session: Session) -> list[str]:

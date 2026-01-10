@@ -15,10 +15,13 @@
 from __future__ import annotations
 
 import json
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
-from weakincentives.debug import dump_session
+from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
+from weakincentives.debug import archive_filesystem, dump_session
 from weakincentives.runtime.session import Session
 
 
@@ -56,3 +59,140 @@ def test_dump_session_normalizes_target(tmp_path: Path) -> None:
     renamed = dump_session(session, tmp_path / "custom.jsonl")
     assert renamed is not None
     assert renamed.name == f"{session.session_id}.jsonl"
+
+
+def test_archive_filesystem_creates_zip(tmp_path: Path) -> None:
+    fs = InMemoryFilesystem()
+    fs.write("src/main.py", "print('hello')")
+    fs.write("src/utils.py", "def helper(): pass")
+    fs.write("README.md", "# Project")
+
+    archive_id = uuid4()
+    output_path = archive_filesystem(fs, tmp_path, archive_id=archive_id)
+
+    assert output_path is not None
+    assert output_path == tmp_path / f"{archive_id}.zip"
+    assert output_path.exists()
+
+    with zipfile.ZipFile(output_path, "r") as zf:
+        names = set(zf.namelist())
+        assert names == {"src/main.py", "src/utils.py", "README.md"}
+        assert zf.read("src/main.py") == b"print('hello')"
+        assert zf.read("README.md") == b"# Project"
+
+
+def test_archive_filesystem_returns_none_for_empty(tmp_path: Path) -> None:
+    fs = InMemoryFilesystem()
+
+    output_path = archive_filesystem(fs, tmp_path)
+
+    assert output_path is None
+
+
+def test_archive_filesystem_generates_uuid_if_not_provided(tmp_path: Path) -> None:
+    fs = InMemoryFilesystem()
+    fs.write("file.txt", "content")
+
+    output_path = archive_filesystem(fs, tmp_path)
+
+    assert output_path is not None
+    assert output_path.suffix == ".zip"
+    assert output_path.parent == tmp_path
+
+
+def test_archive_filesystem_creates_target_directory(tmp_path: Path) -> None:
+    fs = InMemoryFilesystem()
+    fs.write("file.txt", "content")
+    nested_target = tmp_path / "nested" / "dir"
+
+    output_path = archive_filesystem(fs, nested_target)
+
+    assert output_path is not None
+    assert output_path.parent == nested_target
+    assert output_path.exists()
+
+
+def test_archive_filesystem_with_file_target(tmp_path: Path) -> None:
+    """When target is a file path, use its parent directory."""
+    fs = InMemoryFilesystem()
+    fs.write("file.txt", "content")
+    file_target = tmp_path / "some_file.txt"
+    file_target.touch()  # Create the file
+
+    output_path = archive_filesystem(fs, file_target)
+
+    assert output_path is not None
+    # Should use parent directory of the file
+    assert output_path.parent == tmp_path
+    assert output_path.suffix == ".zip"
+
+
+def test_archive_filesystem_skips_unreadable_files(tmp_path: Path) -> None:
+    """Files that raise errors during read are skipped."""
+    from unittest.mock import Mock
+
+    # Create a mock filesystem that raises on one file
+    fs = Mock()
+    fs.list.return_value = [
+        Mock(name="good.txt", path="good.txt", is_file=True, is_directory=False),
+        Mock(name="bad.txt", path="bad.txt", is_file=True, is_directory=False),
+    ]
+
+    def mock_read_bytes(path: str) -> Mock:
+        if path == "bad.txt":
+            raise PermissionError("Access denied")
+        result = Mock()
+        result.content = b"good content"
+        return result
+
+    fs.read_bytes.side_effect = mock_read_bytes
+
+    archive_id = uuid4()
+    output_path = archive_filesystem(fs, tmp_path, archive_id=archive_id)
+
+    assert output_path is not None
+    with zipfile.ZipFile(output_path, "r") as zf:
+        # Only the good file should be in the archive
+        assert zf.namelist() == ["good.txt"]
+        assert zf.read("good.txt") == b"good content"
+
+
+def test_archive_filesystem_handles_list_errors(tmp_path: Path) -> None:
+    """FileNotFoundError during directory listing is handled gracefully."""
+    from unittest.mock import Mock
+
+    # Create a mock filesystem that raises on list
+    fs = Mock()
+    fs.list.side_effect = FileNotFoundError("Directory not found")
+
+    output_path = archive_filesystem(fs, tmp_path)
+
+    # Should return None since no files could be collected
+    assert output_path is None
+
+
+def test_archive_filesystem_skips_non_file_non_directory(tmp_path: Path) -> None:
+    """Entries that are neither file nor directory are skipped."""
+    from unittest.mock import Mock
+
+    # Create a mock filesystem with a mixed entry list
+    fs = Mock()
+    fs.list.return_value = [
+        Mock(name="file.txt", path="file.txt", is_file=True, is_directory=False),
+        Mock(name="symlink", path="symlink", is_file=False, is_directory=False),
+    ]
+
+    def mock_read_bytes(path: str) -> Mock:
+        result = Mock()
+        result.content = b"content"
+        return result
+
+    fs.read_bytes.side_effect = mock_read_bytes
+
+    archive_id = uuid4()
+    output_path = archive_filesystem(fs, tmp_path, archive_id=archive_id)
+
+    assert output_path is not None
+    with zipfile.ZipFile(output_path, "r") as zf:
+        # Only the file should be in the archive
+        assert zf.namelist() == ["file.txt"]
