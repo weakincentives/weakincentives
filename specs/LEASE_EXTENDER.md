@@ -74,9 +74,9 @@ flowchart TB
     Execute --> Loop
     Loop --> ToolExec
     ToolExec --> Handler
-    Handler -->|beat()| Check
-    Check -->|yes| Extend
-    Check -->|no| Skip
+    Handler -->|"beat()"| Check
+    Check -->|"yes"| Extend
+    Check -->|"no"| Skip
     Execute --> Detach
     Detach --> Reply
 ```
