@@ -402,7 +402,7 @@ Policy state lives in the session's `PolicyState` slice:
 
 ```python
 # State is automatically managed via session
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 
 # After tool calls, state is recorded
 # read_file(path="foo.txt") → PolicyState.invoked_keys includes ("read_file", "foo.txt")

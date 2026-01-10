@@ -124,12 +124,12 @@ def configure_logging(*, log_file: str | None = "demo.log") -> None:
     console_handler.setLevel(logging.INFO)
 
 
-def attach_logging_subscribers(bus: Dispatcher) -> None:
+def attach_logging_subscribers(dispatcher: Dispatcher) -> None:
     """Subscribe to prompt lifecycle events for structured logging."""
 
-    bus.subscribe(PromptRendered, _print_rendered_prompt)
-    bus.subscribe(ToolInvoked, _log_tool_invocation)
-    bus.subscribe(PromptExecuted, _log_prompt_executed)
+    dispatcher.subscribe(PromptRendered, _print_rendered_prompt)
+    dispatcher.subscribe(ToolInvoked, _log_tool_invocation)
+    dispatcher.subscribe(PromptExecuted, _log_prompt_executed)
 
 
 def _print_rendered_prompt(event: object) -> None:

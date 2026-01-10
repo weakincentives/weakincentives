@@ -144,8 +144,8 @@ def test_raise_tool_deadline_error() -> None:
 def test_inner_loop_raise_deadline_error() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessDispatcher()
-    session: SessionProtocol = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session: SessionProtocol = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
@@ -178,8 +178,8 @@ def test_inner_loop_detects_expired_deadline(
 ) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessDispatcher()
-    session: SessionProtocol = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session: SessionProtocol = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     frozen_utcnow.set(anchor)
@@ -217,8 +217,8 @@ def test_execute_tool_call_raises_when_deadline_expired(
 ) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessDispatcher()
-    session: SessionProtocol = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session: SessionProtocol = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
 
     def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
@@ -261,8 +261,8 @@ def test_execute_tool_call_raises_when_deadline_expired(
 def test_execute_tool_call_publishes_invocation() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessDispatcher()
-    session: SessionProtocol = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session: SessionProtocol = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
 
     events: list[ToolInvoked] = []
@@ -271,7 +271,7 @@ def test_execute_tool_call_publishes_invocation() -> None:
         assert isinstance(event, ToolInvoked)
         events.append(event)
 
-    bus.subscribe(ToolInvoked, record_event)
+    dispatcher.subscribe(ToolInvoked, record_event)
 
     def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
         del context
@@ -311,8 +311,8 @@ def test_execute_tool_call_publishes_invocation() -> None:
 def test_run_inner_loop_replaces_rendered_deadline() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 

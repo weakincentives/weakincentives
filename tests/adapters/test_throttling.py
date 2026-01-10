@@ -18,7 +18,10 @@ from typing import Any, cast
 import pytest
 
 from tests.adapters._test_stubs import DummyChoice, DummyMessage, DummyResponse
-from tests.adapters.test_conversation_runner import RecordingBus, build_inner_loop
+from tests.adapters.test_conversation_runner import (
+    RecordingDispatcher,
+    build_inner_loop,
+)
 from weakincentives.adapters import litellm, openai
 from weakincentives.adapters.core import PROMPT_EVALUATION_PHASE_REQUEST
 from weakincentives.adapters.throttle import (
@@ -36,8 +39,8 @@ from weakincentives.runtime.session import Session
 
 def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
     rendered = RenderedPrompt(text="system")
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
     response = DummyResponse([DummyChoice(DummyMessage(content="ok"))])
     delays: list[timedelta] = []
     calls = 0
@@ -88,8 +91,8 @@ def test_runner_bubbles_throttle_when_budget_exhausted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     rendered = RenderedPrompt(text="system")
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     monkeypatch.setattr(
         "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
@@ -156,8 +159,8 @@ def test_throttle_policy_validation() -> None:
 
 def test_runner_raises_on_non_retryable_throttle() -> None:
     rendered = RenderedPrompt(text="system")
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     def provider(
         messages: list[dict[str, Any]],
@@ -186,8 +189,8 @@ def test_runner_raises_on_non_retryable_throttle() -> None:
 
 def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
     rendered = RenderedPrompt(text="system")
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
     monkeypatch.setattr(
         "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
@@ -223,8 +226,8 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None:
     rendered = RenderedPrompt(text="system")
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingDispatcher()
+    session = Session(dispatcher=dispatcher)
     monkeypatch.setattr(
         "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )

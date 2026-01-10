@@ -109,8 +109,8 @@ no_handler_tool = Tool[SearchParams, SearchResult](
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessDispatcher()
-    return Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    return Session(dispatcher=dispatcher)
 
 
 @pytest.fixture

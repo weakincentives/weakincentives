@@ -62,8 +62,8 @@ def test_visibility_requires_positional_argument_branches() -> None:
 
 
 def test_normalize_visibility_selector_with_session_kwarg() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     received_session: list[SessionProtocol | None] = []
 
@@ -81,8 +81,8 @@ def test_normalize_visibility_selector_with_session_kwarg() -> None:
 
 
 def test_normalize_visibility_selector_with_params_and_session() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     received: list[tuple[_VisibilityParams, SessionProtocol | None]] = []
 
@@ -108,8 +108,8 @@ def test_normalize_visibility_selector_constant() -> None:
         SectionVisibility.SUMMARY, params_type=None
     )
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     assert selector(None, None) == SectionVisibility.SUMMARY
     assert selector(None, session) == SectionVisibility.SUMMARY

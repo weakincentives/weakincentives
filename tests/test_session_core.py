@@ -34,14 +34,14 @@ pytestmark = pytest.mark.core
 
 
 def test_session_requires_timezone_aware_created_at() -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
     naive_timestamp = datetime.now()
 
     with pytest.raises(ValueError):
-        Session(bus=bus, created_at=naive_timestamp)
+        Session(dispatcher=dispatcher, created_at=naive_timestamp)
 
 
-def test_session_instantiates_default_bus_when_none_provided() -> None:
+def test_session_instantiates_default_dispatcher_when_none_provided() -> None:
     session = Session()
     assert isinstance(session.dispatcher, InProcessDispatcher)
 
@@ -49,11 +49,11 @@ def test_session_instantiates_default_bus_when_none_provided() -> None:
 def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None:
     from weakincentives.runtime.session import append_all
 
-    session, bus = session_factory()
+    session, dispatcher = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
-    first_result = bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    first_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
     assert first_result.ok
     assert session[ExampleOutput].all()
 
@@ -61,7 +61,7 @@ def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None
 
     assert session[ExampleOutput].all() == ()
 
-    second_result = bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    second_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
     assert second_result.ok
     assert session[ExampleOutput].all() == (ExampleOutput(text="second"),)
 
@@ -71,17 +71,17 @@ def test_clone_preserves_state_and_reducer_registration(
 ) -> None:
     provided_session_id = uuid4()
     provided_created_at = datetime.now(UTC)
-    session, bus = session_factory(
+    session, dispatcher = session_factory(
         session_id=provided_session_id, created_at=provided_created_at
     )
 
     session[ExampleOutput].register(ExampleOutput, replace_latest)
 
-    result = bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
     assert result.ok
 
-    clone_bus = InProcessDispatcher()
-    clone = session.clone(bus=clone_bus)
+    clone_dispatcher = InProcessDispatcher()
+    clone = session.clone(dispatcher=clone_dispatcher)
 
     assert clone.session_id == provided_session_id
     assert clone.created_at == provided_created_at
@@ -89,40 +89,42 @@ def test_clone_preserves_state_and_reducer_registration(
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert clone._reducers.keys() == session._reducers.keys()
 
-    clone_bus.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    clone_dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
 
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="second")
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
 
-    bus.dispatch(make_prompt_event(ExampleOutput(text="third")))
+    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="third")))
 
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="third")
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="second")
 
 
-def test_clone_attaches_to_new_bus_when_provided(
+def test_clone_attaches_to_new_dispatcher_when_provided(
     session_factory: SessionFactory,
 ) -> None:
-    session, source_bus = session_factory()
+    session, source_dispatcher = session_factory()
 
-    source_bus.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    source_dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
 
-    target_bus = InProcessDispatcher()
+    target_dispatcher = InProcessDispatcher()
     clone_session_id = uuid4()
     clone_created_at = datetime.now(UTC)
     clone = session.clone(
-        bus=target_bus, session_id=clone_session_id, created_at=clone_created_at
+        dispatcher=target_dispatcher,
+        session_id=clone_session_id,
+        created_at=clone_created_at,
     )
 
     assert clone.session_id == clone_session_id
     assert clone.created_at == clone_created_at
     assert clone[ExampleOutput].all() == session[ExampleOutput].all()
 
-    target_bus.dispatch(make_prompt_event(ExampleOutput(text="from clone")))
+    target_dispatcher.dispatch(make_prompt_event(ExampleOutput(text="from clone")))
 
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="from clone")
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="first")
 
-    source_bus.dispatch(make_prompt_event(ExampleOutput(text="original")))
+    source_dispatcher.dispatch(make_prompt_event(ExampleOutput(text="original")))
 
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="original")

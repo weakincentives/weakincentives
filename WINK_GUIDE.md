@@ -464,8 +464,8 @@ prompt = Prompt(template).bind(SummarizeRequest(
          "typed programs. Tools are explicit. State is inspectable."
 ))
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # To actually run this, you need an adapter and API key:
 #
@@ -1056,7 +1056,7 @@ config = MainLoopConfig(resources={
     Config: Binding(Config, lambda r: Config.from_env()),
     HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
 })
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
+loop = MyLoop(adapter=adapter, requests=dispatcher, config=config)
 
 # Resources are bound to prompt automatically
 response, session = loop.execute(request)
@@ -1690,7 +1690,7 @@ class Hello:
     message: str
 
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[Hello](
     ns="demo",
@@ -1779,7 +1779,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 from weakincentives.runtime import InProcessDispatcher, Session
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 workspace = ClaudeAgentWorkspaceSection(
     session=session,
@@ -2080,7 +2080,7 @@ mcp_search_tool = Tool[MCPSearchParams, MCPSearchResult](
     handler=mcp_search,
 )
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[None](
     ns="demo",
@@ -2144,7 +2144,7 @@ class Review:
     findings: list[str]
 
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 # Create workspace with mounted repository
 workspace = ClaudeAgentWorkspaceSection(
@@ -2293,7 +2293,7 @@ resources = ResourceRegistry.of(
 )
 
 config = MainLoopConfig(resources=resources)
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
+loop = MyLoop(adapter=adapter, requests=dispatcher, config=config)
 response, session = loop.execute(request)
 ```
 
@@ -3633,7 +3633,7 @@ ToolResult.error(message)               # failure case
 ### 18.3 weakincentives.runtime
 
 ```python
-Session(bus, tags=None, parent=None)
+Session(dispatcher, tags=None, parent=None)
 SessionView(session)                    # Read-only wrapper for reducer contexts
 session[Type].all() / latest() / where()
 session.dispatch(event)                 # All mutations go through dispatch

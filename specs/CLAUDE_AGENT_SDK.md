@@ -103,7 +103,7 @@ class Hello:
     message: str
 
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[Hello](
     ns="demo",
@@ -149,7 +149,7 @@ class Review:
     findings: list[str]
 
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 workspace = ClaudeAgentWorkspaceSection(
     session=session,
@@ -273,7 +273,7 @@ search_tool = Tool[SearchParams, SearchResult](
     handler=search,
 )
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[None](
     ns="demo",

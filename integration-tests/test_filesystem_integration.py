@@ -65,7 +65,7 @@ from weakincentives.runtime.session import Session
 @pytest.fixture
 def session() -> Session:
     """Create a fresh session for each test."""
-    return Session(bus=InProcessDispatcher())
+    return Session(dispatcher=InProcessDispatcher())
 
 
 @pytest.fixture

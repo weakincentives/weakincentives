@@ -50,9 +50,9 @@ from weakincentives.runtime.session import Session
 
 
 def test_section_registers_shell_tool(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
 
@@ -61,9 +61,9 @@ def test_section_registers_shell_tool(
 
 
 def test_section_registers_eval_tool(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
 
@@ -81,10 +81,10 @@ def test_truncate_eval_stream_limits_length() -> None:
 
 
 def test_shell_execute_runs_commands_and_stores_workspace(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner(
         [ExecResponse(exit_code=0, stdout="hello world\n", stderr="")]
@@ -114,10 +114,10 @@ def test_shell_execute_runs_commands_and_stores_workspace(
 
 
 def test_shell_execute_validates_command(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(
         session=session, client=client, cache_dir=tmp_path, runner=FakeCliRunner()
@@ -134,10 +134,10 @@ def test_shell_execute_validates_command(
 
 
 def test_shell_execute_merges_environment(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -156,10 +156,10 @@ def test_shell_execute_merges_environment(
 
 
 def test_shell_execute_respects_capture_flag(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner(
         [ExecResponse(exit_code=0, stdout="x" * 40_000, stderr="")]
@@ -182,10 +182,10 @@ def test_shell_execute_respects_capture_flag(
 
 
 def test_shell_execute_captures_output_by_default(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner(
         [ExecResponse(exit_code=0, stdout="normal output", stderr="")]
@@ -208,10 +208,10 @@ def test_shell_execute_captures_output_by_default(
 
 
 def test_shell_execute_normalizes_cwd(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -230,10 +230,10 @@ def test_shell_execute_normalizes_cwd(
 
 
 def test_shell_execute_rejects_non_ascii_stdin(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(
         session=session, client=client, cache_dir=tmp_path, runner=FakeCliRunner()
@@ -250,10 +250,10 @@ def test_shell_execute_rejects_non_ascii_stdin(
 
 
 def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
-    other_bus = InProcessDispatcher()
-    other_session = Session(bus=other_bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    other_dispatcher = InProcessDispatcher()
+    other_session = Session(dispatcher=other_dispatcher)
     client = FakePodmanClient()
     section = make_section(
         session=session, client=client, cache_dir=tmp_path, runner=FakeCliRunner()
@@ -270,10 +270,10 @@ def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
 
 
 def test_shell_execute_cli_fallback(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner([ExecResponse(exit_code=0, stdout="cli output")])
     section = make_section(
@@ -301,10 +301,10 @@ def test_shell_execute_cli_fallback(
 
 
 def test_shell_execute_cli_capture_disabled(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner(
         [ExecResponse(exit_code=0, stdout="cli output", stderr="cli err")]
@@ -331,10 +331,10 @@ def test_shell_execute_cli_capture_disabled(
 
 
 def test_shell_execute_cli_timeout(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
 
     def _timeout_runner(
@@ -372,10 +372,10 @@ def test_shell_execute_cli_timeout(
 
 
 def test_shell_execute_cli_missing_binary(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
 
     def _missing_runner(
@@ -407,10 +407,10 @@ def test_shell_execute_cli_missing_binary(
 
 
 def test_shell_execute_truncates_output(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner(
         [
@@ -540,9 +540,9 @@ def test_default_exec_runner_invokes_subprocess(
 
 
 def test_run_python_script_delegates_to_run_cli_exec(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -570,11 +570,11 @@ def test_run_python_script_delegates_to_run_cli_exec(
 
 
 def test_evaluate_python_runs_script_passthrough(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -622,11 +622,11 @@ def test_evaluate_python_runs_script_passthrough(
 
 
 def test_evaluate_python_accepts_large_scripts(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -661,10 +661,10 @@ def test_evaluate_python_accepts_large_scripts(
 
 
 def test_evaluate_python_rejects_control_characters(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -678,11 +678,11 @@ def test_evaluate_python_rejects_control_characters(
 
 
 def test_evaluate_python_marks_failure_on_nonzero_exit(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -713,11 +713,11 @@ def test_evaluate_python_marks_failure_on_nonzero_exit(
 
 
 def test_evaluate_python_reports_timeout(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -748,11 +748,11 @@ def test_evaluate_python_reports_timeout(
 
 
 def test_evaluate_python_missing_cli_raises(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -767,11 +767,11 @@ def test_evaluate_python_missing_cli_raises(
 
 
 def test_evaluate_python_truncates_streams(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -806,10 +806,10 @@ def test_evaluate_python_truncates_streams(
 
 
 def test_evaluate_python_rejects_reads_writes_and_globals(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))

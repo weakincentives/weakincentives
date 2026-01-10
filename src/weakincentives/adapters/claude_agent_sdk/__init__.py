@@ -27,8 +27,8 @@ Example:
     ...     HostMount,
     ... )
     >>>
-    >>> bus = InProcessDispatcher()
-    >>> session = Session(bus=bus)
+    >>> dispatcher = InProcessDispatcher()
+    >>> session = Session(dispatcher=dispatcher)
     >>>
     >>> # Create workspace section with host files
     >>> workspace = ClaudeAgentWorkspaceSection(

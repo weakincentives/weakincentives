@@ -281,7 +281,7 @@ class ReadPlan:
 ### Session Integration
 
 ```python
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 section = PlanningToolsSection(session=session, accepts_overrides=False)
 # ... after tool calls ...
 plan = session[Plan].latest()

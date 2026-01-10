@@ -161,14 +161,14 @@ def _evaluate_prompt(
     return adapter.evaluate(bound_prompt, **kwargs)
 
 
-def _record_tool_events(bus: InProcessDispatcher) -> list[ToolInvoked]:
+def _record_tool_events(dispatcher: InProcessDispatcher) -> list[ToolInvoked]:
     events: list[ToolInvoked] = []
 
     def capture(event: object) -> None:
         assert isinstance(event, ToolInvoked)
         events.append(event)
 
-    bus.subscribe(ToolInvoked, capture)
+    dispatcher.subscribe(ToolInvoked, capture)
     return events
 
 
@@ -214,9 +214,9 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
-    events = _record_tool_events(bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
@@ -265,8 +265,8 @@ def test_adapter_tool_context_receives_deadline(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
@@ -305,8 +305,8 @@ def test_adapter_tool_deadline_exceeded(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
@@ -350,8 +350,8 @@ def test_adapter_deadline_preflight_rejection(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
     frozen_utcnow.set(anchor)
     deadline = Deadline(anchor + timedelta(seconds=5))
@@ -401,9 +401,9 @@ def test_adapter_tool_execution_validation_error(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
-    events = _record_tool_events(bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="invalid"))
 
@@ -456,9 +456,9 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
-    events = _record_tool_events(bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
@@ -512,9 +512,9 @@ def test_adapter_tool_execution_rejects_type_errors(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
-    events = _record_tool_events(bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
@@ -565,9 +565,9 @@ def test_adapter_tool_execution_unexpected_exception(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
-    events = _record_tool_events(bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
@@ -618,8 +618,8 @@ def test_adapter_tool_execution_rolls_back_session(
     )
     adapter, requests = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session[ToolPayload].register(ToolPayload, replace_latest)
     session[ToolPayload].seed((ToolPayload(answer="baseline"),))
 
@@ -642,7 +642,7 @@ def test_adapter_tool_execution_rolls_back_session(
         MethodType(failing_dispatch, session),
     )
 
-    events = _record_tool_events(bus)
+    events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
@@ -702,8 +702,8 @@ def test_adapter_tool_visibility_expansion_propagates(
     )
     adapter, _ = adapter_harness.build(responses)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="docs"))
 
@@ -744,8 +744,8 @@ def test_tool_receives_filesystem_from_workspace_section(
         handler=tool_handler,
     )
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Create a workspace section with VFS filesystem
     workspace_section = VfsToolsSection(session=session)
@@ -810,8 +810,8 @@ def test_budget_tracker_passed_to_tool_context_via_resources(
         handler=tool_handler,
     )
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     prompt_template = PromptTemplate(
         ns=f"test/{adapter_harness.name}",

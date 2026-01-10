@@ -27,8 +27,8 @@ def _make_section(
     strategy: PlanningStrategy | None = None,
     accepts_overrides: bool = False,
 ) -> PlanningToolsSection:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     if strategy is None:
         return PlanningToolsSection(
             session=session, accepts_overrides=accepts_overrides

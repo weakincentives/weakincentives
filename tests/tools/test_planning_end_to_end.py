@@ -31,8 +31,8 @@ from weakincentives.runtime.session import Session
 
 
 def test_planning_end_to_end_flow() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     tools = {tool.name: tool for tool in section.tools()}
 

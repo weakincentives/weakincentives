@@ -69,8 +69,8 @@ def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessDispatcher()
-    return Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    return Session(dispatcher=dispatcher)
 
 
 @pytest.fixture

@@ -144,7 +144,7 @@ def register_visibility_reducers(session: SessionProtocol) -> None:
 
     Usage::
 
-        session = Session(bus=bus)
+        session = Session(dispatcher=dispatcher)
 
         # Reducers are already registered - just dispatch events
         session.dispatch(

@@ -559,9 +559,12 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
         if not isinstance(session_obj, Session):
             msg = "session is required to clone VfsToolsSection."
             raise TypeError(msg)
-        provided_bus = kwargs.get("bus")
-        if provided_bus is not None and provided_bus is not session_obj.dispatcher:
-            msg = "Provided bus must match the target session's dispatcher."
+        provided_dispatcher = kwargs.get("dispatcher")
+        if (
+            provided_dispatcher is not None
+            and provided_dispatcher is not session_obj.dispatcher
+        ):
+            msg = "Provided dispatcher must match the target session's dispatcher."
             raise TypeError(msg)
         return VfsToolsSection(
             session=session_obj,

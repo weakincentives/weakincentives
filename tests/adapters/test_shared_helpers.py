@@ -92,7 +92,7 @@ def test_mapping_to_str_dict_rejects_non_string_keys() -> None:
 
 def test_run_inner_loop_requires_message_payload() -> None:
     rendered = RenderedPrompt(text="system")
-    bus = NullDispatcher()
+    dispatcher = NullDispatcher()
 
     class DummyChoice:
         def __init__(self) -> None:
@@ -123,7 +123,7 @@ def test_run_inner_loop_requires_message_payload() -> None:
             self,
             prompt: Prompt[object],
             *,
-            bus: Dispatcher,
+            dispatcher: Dispatcher,
             session: SessionProtocol,
             deadline: Deadline | None = None,
         ) -> PromptResponse[object]:
@@ -131,7 +131,7 @@ def test_run_inner_loop_requires_message_payload() -> None:
 
     adapter = DummyAdapter()
     prompt = Prompt(PromptTemplate(ns="tests", key="example"))
-    session = Session(bus=bus)
+    session = Session(dispatcher=dispatcher)
 
     config = InnerLoopConfig(
         session=session,

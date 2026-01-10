@@ -371,8 +371,8 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
 
     # With SUMMARY visibility via session state, the section's own tools are excluded,
     # but the open_sections tool is injected for progressive disclosure
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session.dispatch(
         SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.SUMMARY)
     )
@@ -422,8 +422,8 @@ def test_summary_visibility_skips_child_sections() -> None:
     assert "Child content: Child Detail" in rendered_full.text
 
     # With SUMMARY visibility on parent via session state, child is skipped
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
@@ -481,8 +481,8 @@ def test_summary_visibility_skips_child_tools() -> None:
 
     # With SUMMARY visibility on parent via session state, child (and its tools) are skipped.
     # The open_sections tool is injected for progressive disclosure.
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
@@ -528,8 +528,8 @@ def test_summary_visibility_default_excludes_tools() -> None:
     assert "Summary: Test" in rendered.text
 
     # Override to FULL via session state includes tools
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session.dispatch(
         SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.FULL)
     )
@@ -591,8 +591,8 @@ def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
     )
 
     # With SUMMARY visibility on parent via session state, child is skipped but sibling is rendered
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )

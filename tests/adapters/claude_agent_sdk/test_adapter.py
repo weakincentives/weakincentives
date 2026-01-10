@@ -154,8 +154,8 @@ class SimpleOutput:
 
 @pytest.fixture
 def session() -> Session:
-    bus = InProcessDispatcher()
-    return Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    return Session(dispatcher=dispatcher)
 
 
 @pytest.fixture
@@ -1339,7 +1339,7 @@ class TestVerifyTaskCompletion:
 
     @pytest.fixture
     def session(self) -> Session:
-        return Session(bus=InProcessDispatcher())
+        return Session(dispatcher=InProcessDispatcher())
 
     @pytest.fixture
     def adapter(self) -> ClaudeAgentSDKAdapter:

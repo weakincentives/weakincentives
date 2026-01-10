@@ -851,9 +851,12 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         if not isinstance(session, Session):
             msg = "session is required to clone PodmanSandboxSection."
             raise TypeError(msg)
-        provided_bus = kwargs.get("bus")
-        if provided_bus is not None and provided_bus is not session.dispatcher:
-            msg = "Provided bus must match the target session's dispatcher."
+        provided_dispatcher = kwargs.get("dispatcher")
+        if (
+            provided_dispatcher is not None
+            and provided_dispatcher is not session.dispatcher
+        ):
+            msg = "Provided dispatcher must match the target session's dispatcher."
             raise TypeError(msg)
         return PodmanSandboxSection(
             session=session,

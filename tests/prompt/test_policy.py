@@ -208,8 +208,8 @@ class TestSequentialDependencyPolicy:
         policy = SequentialDependencyPolicy(
             dependencies={"deploy": frozenset({"build"})}
         )
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = self._make_tool("unrelated_tool")
 
@@ -220,8 +220,8 @@ class TestSequentialDependencyPolicy:
         policy = SequentialDependencyPolicy(
             dependencies={"deploy": frozenset({"build", "test"})}
         )
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = self._make_tool("deploy")
 
@@ -235,8 +235,8 @@ class TestSequentialDependencyPolicy:
         policy = SequentialDependencyPolicy(
             dependencies={"deploy": frozenset({"build"})}
         )
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         # Seed state with build invoked
         session[PolicyState].seed(
             PolicyState(policy_name="test", invoked_tools=frozenset({"build"}))
@@ -249,8 +249,8 @@ class TestSequentialDependencyPolicy:
 
     def test_on_result_records_successful_invocation(self) -> None:
         policy = SequentialDependencyPolicy(dependencies={})
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = self._make_tool("build")
         result: ToolResult[None] = ToolResult.ok(None, message="success")
@@ -263,8 +263,8 @@ class TestSequentialDependencyPolicy:
 
     def test_on_result_does_not_record_failed_invocation(self) -> None:
         policy = SequentialDependencyPolicy(dependencies={})
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = self._make_tool("build")
         result: ToolResult[None] = ToolResult.error("failed")
@@ -276,8 +276,8 @@ class TestSequentialDependencyPolicy:
 
     def test_on_result_preserves_existing_state(self) -> None:
         policy = SequentialDependencyPolicy(dependencies={})
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         session[PolicyState].seed(
             PolicyState(
                 policy_name="test",
@@ -348,8 +348,8 @@ class TestReadBeforeWritePolicy:
 
     def test_allows_non_write_tool(self) -> None:
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = self._make_tool("list_files")
 
@@ -358,8 +358,8 @@ class TestReadBeforeWritePolicy:
 
     def test_allows_write_when_no_path(self) -> None:
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = Tool[NoPathParams, None](
             name="write_file",
@@ -372,8 +372,8 @@ class TestReadBeforeWritePolicy:
 
     def test_allows_write_when_no_filesystem(self) -> None:
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session, filesystem=None)
         tool = self._make_tool("write_file")
 
@@ -384,8 +384,8 @@ class TestReadBeforeWritePolicy:
         fs = InMemoryFilesystem()
         # File does not exist
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session, filesystem=fs)
         tool = self._make_tool("write_file")
 
@@ -397,8 +397,8 @@ class TestReadBeforeWritePolicy:
         fs.write("/existing.txt", "content")
 
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session, filesystem=fs)
         tool = self._make_tool("write_file")
 
@@ -413,8 +413,8 @@ class TestReadBeforeWritePolicy:
         fs.write("existing.txt", "content")
 
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         # Record that file was read (path stored in normalized form)
         session[PolicyState].seed(
             PolicyState(
@@ -430,8 +430,8 @@ class TestReadBeforeWritePolicy:
 
     def test_on_result_records_read_operation(self) -> None:
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = self._make_tool("read_file")
         result: ToolResult[None] = ToolResult.ok(None)
@@ -445,8 +445,8 @@ class TestReadBeforeWritePolicy:
 
     def test_on_result_does_not_record_failed_read(self) -> None:
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = self._make_tool("read_file")
         result: ToolResult[None] = ToolResult.error("failed")
@@ -458,8 +458,8 @@ class TestReadBeforeWritePolicy:
 
     def test_on_result_does_not_record_non_read_tool(self) -> None:
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = self._make_tool("write_file")
         result: ToolResult[None] = ToolResult.ok(None)
@@ -471,8 +471,8 @@ class TestReadBeforeWritePolicy:
 
     def test_on_result_does_not_record_when_no_path(self) -> None:
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = Tool[NoPathParams, None](
             name="read_file",
@@ -488,8 +488,8 @@ class TestReadBeforeWritePolicy:
 
     def test_on_result_preserves_existing_state(self) -> None:
         policy = ReadBeforeWritePolicy()
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         # Use normalized paths (no leading slashes) as that's how policy stores them
         session[PolicyState].seed(
             PolicyState(
@@ -518,8 +518,8 @@ class TestReadBeforeWritePolicy:
         fs = InMemoryFilesystem()
         fs.write("data.json", "{}")  # Use normalized path for filesystem
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session, filesystem=fs)
 
         # Standard write_file should be allowed (not in our write_tools)
@@ -554,8 +554,8 @@ class TestReadBeforeWritePolicy:
         fs = InMemoryFilesystem()
         fs.write("config.yaml", "existing content")  # Relative path in fs
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session, filesystem=fs)
 
         # Tool passes /workspace/config.yaml (absolute with mount point)
@@ -574,8 +574,8 @@ class TestReadBeforeWritePolicy:
         fs = InMemoryFilesystem()
         fs.write("config.yaml", "content")
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session, filesystem=fs)
 
         # Record a read with mount-prefixed path
@@ -602,8 +602,8 @@ class TestReadBeforeWritePolicy:
         fs = InMemoryFilesystem()
         fs.write("config.yaml", "content")
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session, filesystem=fs)
 
         # First: write should be denied (file not read)
@@ -635,8 +635,8 @@ class TestReadBeforeWritePolicy:
         fs = InMemoryFilesystem()
         fs.write("workspace/config.yaml", "content")
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session, filesystem=fs)
 
         # /workspace/config.yaml becomes workspace/config.yaml
@@ -682,8 +682,8 @@ class TestToolExecutorPolicyHelpers:
     def test_check_policies_returns_allow_for_empty_policies(self) -> None:
         from weakincentives.adapters.tool_executor import _check_policies
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = Tool[FileParams, None](
             name="test_tool", description="Test", handler=None
@@ -702,8 +702,8 @@ class TestToolExecutorPolicyHelpers:
     def test_check_policies_returns_deny_from_first_denying_policy(self) -> None:
         from weakincentives.adapters.tool_executor import _check_policies
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = Tool[FileParams, None](name="deploy", description="Deploy", handler=None)
         log = self._make_logger()
@@ -726,8 +726,8 @@ class TestToolExecutorPolicyHelpers:
     def test_check_policies_iterates_through_all_policies(self) -> None:
         from weakincentives.adapters.tool_executor import _check_policies
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = Tool[FileParams, None](
             name="unrelated", description="Unrelated tool", handler=None
@@ -755,8 +755,8 @@ class TestToolExecutorPolicyHelpers:
     def test_notify_policies_of_result_skips_failed_results(self) -> None:
         from weakincentives.adapters.tool_executor import _notify_policies_of_result
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = Tool[FileParams, None](
             name="read_file", description="Read", handler=None
@@ -779,8 +779,8 @@ class TestToolExecutorPolicyHelpers:
     def test_notify_policies_of_result_calls_on_result_for_success(self) -> None:
         from weakincentives.adapters.tool_executor import _notify_policies_of_result
 
-        bus = InProcessDispatcher()
-        session = Session(bus=bus)
+        dispatcher = InProcessDispatcher()
+        session = Session(dispatcher=dispatcher)
         context = self._make_context(session)
         tool = Tool[FileParams, None](
             name="read_file", description="Read", handler=None

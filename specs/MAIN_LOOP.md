@@ -149,7 +149,7 @@ loop = MyMainLoop(adapter=adapter, bus=bus)
 # MainLoop subscribes to MainLoopRequest in __init__
 
 # With request-specific constraints
-bus.dispatch(MainLoopRequest(
+dispatcher.dispatch(MainLoopRequest(
     request=MyRequest(...),
     budget=Budget(max_total_tokens=10000),
 ))
@@ -180,7 +180,7 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 
     def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        session = Session(dispatcher=self._bus, tags={"loop": "code-review"})
         return prompt, session
 
     def finalize(self, prompt: Prompt[ReviewResult], session: Session) -> None:
@@ -200,7 +200,7 @@ def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session
         ReviewParams.from_request(request),
         resources={GitClient: GitClient(repo=request.repo_path)},
     )
-    session = Session(bus=self._bus)
+    session = Session(dispatcher=self._bus)
     return prompt, session
 ```
 
@@ -209,7 +209,7 @@ def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session
 ```python
 def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
     prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-    session = Session(bus=self._bus)
+    session = Session(dispatcher=self._bus)
     session[Plan].register(SetupPlan, plan_reducer)
     return prompt, session
 ```
@@ -231,7 +231,7 @@ def prepare(self, request: Request) -> tuple[Prompt[Output], Session]:
             ),
         ],
     )).bind(Params.from_request(request))
-    session = Session(bus=self._bus)
+    session = Session(dispatcher=self._bus)
     return prompt, session
 ```
 

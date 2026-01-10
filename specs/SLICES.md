@@ -859,7 +859,7 @@ existing = self._get_or_create_slice(slice_type).all()
 from weakincentives.runtime.session import Session
 
 # All slices use in-memory storage (current behavior)
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 ```
 
 ### Temporary Logs for Debugging
@@ -879,7 +879,7 @@ config = SliceFactoryConfig(
     log_factory=log_factory,
 )
 
-session = Session(bus=bus, slice_config=config)
+session = Session(dispatcher=bus, slice_config=config)
 
 # Logs written to temp directory (e.g., /tmp/wink_slices_abc123/)
 print(f"Logs at: {log_factory.directory}")
@@ -901,7 +901,7 @@ config = SliceFactoryConfig(
     log_factory=JsonlSliceFactory(base_dir=Path("./session_logs")),
 )
 
-session = Session(bus=bus, slice_config=config)
+session = Session(dispatcher=bus, slice_config=config)
 
 # ToolInvoked, PromptRendered, PromptExecuted write to JSONL files
 # Plan, custom state slices stay in memory
@@ -917,7 +917,7 @@ config = SliceFactoryConfig(
     log_factory=jsonl_factory,
 )
 
-session = Session(bus=bus, slice_config=config)
+session = Session(dispatcher=bus, slice_config=config)
 ```
 
 ### Custom Factory per Slice Type

@@ -704,7 +704,7 @@ def test_snapshot_restore():
 
     fs = InMemoryFilesystem()
     registry = ResourceRegistry.build({Filesystem: fs})
-    session = Session(bus=InProcessDispatcher())
+    session = Session(dispatcher=InProcessDispatcher())
     prompt = Prompt(template).bind(resources=registry)
 
     with prompt.resources:

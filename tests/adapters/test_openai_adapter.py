@@ -169,7 +169,7 @@ def _evaluate_with_session(
     target_session = (
         session
         if session is not None
-        else cast(SessionProtocol, Session(bus=NullDispatcher()))
+        else cast(SessionProtocol, Session(dispatcher=NullDispatcher()))
     )
     return _evaluate(adapter, prompt, *params, session=target_session)
 
@@ -393,10 +393,10 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     tool_events: list[ToolInvoked] = []
-    bus.subscribe(
+    dispatcher.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
     )
     result = _evaluate_with_session(
@@ -472,8 +472,8 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session[ToolPayload].register(ToolPayload, replace_latest)
     session[ToolPayload].seed((ToolPayload(answer="baseline"),))
 
@@ -488,8 +488,8 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
         assert isinstance(event, PromptExecuted)
         prompt_events.append(event)
 
-    bus.subscribe(ToolInvoked, record_tool_event)
-    bus.subscribe(PromptExecuted, record_prompt_event)
+    dispatcher.subscribe(ToolInvoked, record_tool_event)
+    dispatcher.subscribe(PromptExecuted, record_prompt_event)
 
     original_dispatch = session._dispatch_data_event
 
@@ -584,15 +584,15 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     tool_events: list[ToolInvoked] = []
 
     def record_tool_event(event: object) -> None:
         assert isinstance(event, ToolInvoked)
         tool_events.append(event)
 
-    bus.subscribe(ToolInvoked, record_tool_event)
+    dispatcher.subscribe(ToolInvoked, record_tool_event)
 
     result = _evaluate(
         adapter,
@@ -672,15 +672,15 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     tool_events: list[ToolInvoked] = []
 
     def record_tool_event(event: object) -> None:
         assert isinstance(event, ToolInvoked)
         tool_events.append(event)
 
-    bus.subscribe(ToolInvoked, record_tool_event)
+    dispatcher.subscribe(ToolInvoked, record_tool_event)
 
     result = _evaluate(
         adapter,
@@ -854,8 +854,8 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
 
@@ -867,8 +867,8 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
         assert isinstance(event, PromptExecuted)
         prompt_events.append(event)
 
-    bus.subscribe(ToolInvoked, record_tool_event)
-    bus.subscribe(PromptExecuted, record_prompt_event)
+    dispatcher.subscribe(ToolInvoked, record_tool_event)
+    dispatcher.subscribe(PromptExecuted, record_prompt_event)
     result = _evaluate_with_session(
         adapter,
         prompt,
@@ -980,10 +980,10 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
     client = DummyOpenAIClient([response_with_tool, final_response])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     tool_events: list[ToolInvoked] = []
-    bus.subscribe(
+    dispatcher.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
     )
     result = _evaluate_with_session(
@@ -1343,10 +1343,10 @@ def test_openai_adapter_handles_invalid_tool_params() -> None:
     client = DummyOpenAIClient(responses)
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     tool_events: list[ToolInvoked] = []
-    bus.subscribe(
+    dispatcher.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
     )
     result = _evaluate_with_session(
@@ -1415,15 +1415,15 @@ def test_openai_adapter_records_handler_failures() -> None:
     client = DummyOpenAIClient([first, second])
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     tool_events: list[ToolInvoked] = []
 
     def record(event: object) -> None:
         assert isinstance(event, ToolInvoked)
         tool_events.append(event)
 
-    bus.subscribe(ToolInvoked, record)
+    dispatcher.subscribe(ToolInvoked, record)
 
     result = _evaluate(
         adapter,
@@ -1951,8 +1951,8 @@ def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     budget = Budget(max_total_tokens=1000)
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     result = adapter.evaluate(
         Prompt(prompt).bind(GreetingParams(user="Test")),

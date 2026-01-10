@@ -450,15 +450,18 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             New ClaudeAgentWorkspaceSection with the same workspace config.
 
         Raises:
-            TypeError: If session is not provided or bus doesn't match.
+            TypeError: If session is not provided or dispatcher doesn't match.
         """
         session_obj = kwargs.get("session")
         if not isinstance(session_obj, Session):
             msg = "session is required to clone ClaudeAgentWorkspaceSection."
             raise TypeError(msg)
-        provided_bus = kwargs.get("bus")
-        if provided_bus is not None and provided_bus is not session_obj.dispatcher:
-            msg = "Provided bus must match the target session's dispatcher."
+        provided_dispatcher = kwargs.get("dispatcher")
+        if (
+            provided_dispatcher is not None
+            and provided_dispatcher is not session_obj.dispatcher
+        ):
+            msg = "Provided dispatcher must match the target session's dispatcher."
             raise TypeError(msg)
         return ClaudeAgentWorkspaceSection(
             session=session_obj,
