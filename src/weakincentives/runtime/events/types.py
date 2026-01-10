@@ -22,6 +22,7 @@ from uuid import UUID, uuid4
 
 from ...dataclasses import FrozenDataclass
 from ...types import AdapterName
+from ..run_context import RunContext
 
 EventHandler = Callable[[object], None]
 
@@ -137,6 +138,7 @@ class ToolInvoked:
     usage: TokenUsage | None = None
     rendered_output: str = ""
     call_id: str | None = None
+    run_context: RunContext | None = None
     event_id: UUID = field(default_factory=uuid4)
 
 

@@ -59,6 +59,7 @@ from ..prompt.errors import VisibilityExpansionRequired
 from .lease_extender import LeaseExtender, LeaseExtenderConfig
 from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError, ReplyNotAvailableError
+from .run_context import RunContext
 from .session import Session
 from .session.visibility_overrides import SetVisibilityOverride
 from .watchdog import Heartbeat
@@ -89,6 +90,9 @@ class MainLoopResult[OutputT]:
 
     session_id: UUID | None = None
     """Session that processed the request (if available)."""
+
+    run_context: RunContext | None = None
+    """Execution context with correlation identifiers and metadata."""
 
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     """Timestamp when processing completed."""
@@ -129,6 +133,8 @@ class MainLoopRequest[UserRequestT]:
     resources: Mapping[type[object], object] | None = None
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    run_context: RunContext | None = None
+    """Optional execution context. If not provided, MainLoop creates one."""
 
 
 class MainLoop[UserRequestT, OutputT](ABC):
@@ -175,6 +181,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
     _lock: threading.Lock
     _heartbeat: Heartbeat
     _lease_extender: LeaseExtender
+    _worker_id: str
 
     def __init__(
         self,
@@ -182,6 +189,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         adapter: ProviderAdapter[OutputT],
         requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         config: MainLoopConfig | None = None,
+        worker_id: str = "",
     ) -> None:
         """Initialize the MainLoop.
 
@@ -190,6 +198,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             requests: Mailbox to receive MainLoopRequest messages from.
                 Response routing derives from each message's reply_to field.
             config: Optional configuration for default deadline/budget.
+            worker_id: Identifier for this worker instance.
         """
         super().__init__()
         self._adapter = adapter
@@ -206,6 +215,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             else LeaseExtenderConfig()
         )
         self._lease_extender = LeaseExtender(config=lease_config)
+        self._worker_id = worker_id
 
     @property
     def heartbeat(self) -> Heartbeat:
@@ -215,6 +225,11 @@ class MainLoop[UserRequestT, OutputT](ABC):
         message, enabling the watchdog to detect stuck workers.
         """
         return self._heartbeat
+
+    @property
+    def worker_id(self) -> str:
+        """Identifier for this worker instance."""
+        return self._worker_id
 
     @abstractmethod
     def prepare(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]:
@@ -342,6 +357,32 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 self.finalize(prompt, session)
                 return response, session
 
+    def _build_run_context(
+        self,
+        request_event: MainLoopRequest[UserRequestT],
+        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
+        session_id: UUID | None = None,
+    ) -> RunContext:
+        """Build or update RunContext for this execution."""
+        if request_event.run_context is not None:
+            # Update with execution-specific values
+            return RunContext(
+                run_id=uuid4(),
+                request_id=request_event.run_context.request_id,
+                session_id=session_id,
+                attempt=msg.delivery_count,
+                worker_id=self._worker_id,
+                trace_id=request_event.run_context.trace_id,
+                span_id=request_event.run_context.span_id,
+            )
+        return RunContext(
+            run_id=uuid4(),
+            request_id=request_event.request_id,
+            session_id=session_id,
+            attempt=msg.delivery_count,
+            worker_id=self._worker_id,
+        )
+
     def _handle_message(
         self, msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
     ) -> None:
@@ -353,16 +394,24 @@ class MainLoop[UserRequestT, OutputT](ABC):
             try:
                 response, session = self._execute(request_event)
 
+                run_context = self._build_run_context(
+                    request_event, msg, session_id=session.session_id
+                )
+
                 result = MainLoopResult[OutputT](
                     request_id=request_event.request_id,
                     output=response.output,
                     session_id=session.session_id,
+                    run_context=run_context,
                 )
 
             except Exception as exc:
+                run_context = self._build_run_context(request_event, msg)
+
                 result = MainLoopResult[OutputT](
                     request_id=request_event.request_id,
                     error=str(exc),
+                    run_context=run_context,
                 )
 
         self._reply_and_ack(msg, result)
