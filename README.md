@@ -1,14 +1,10 @@
 # Weak Incentives (Is All You Need)
 
-WINK is the agent-definition layer: prompts, tools, policies, and feedback that
-stay stable while runtimes change.
-
-WINK is a Python library for building unattended/background agents. You define
-the prompt, tools, and policies, and you add feedback that prevents the agent
-from declaring success too early. The planning loop, sandboxing,
-retries, scheduling, and orchestration live in the execution harness—often a
-vendor runtime. WINK keeps your agent definition portable so you can swap
-harnesses without rewriting the core logic.
+WINK is the agent-definition layer for building unattended/background agents.
+You define the prompt, tools, policies, and feedback that stay stable while
+runtimes change. The planning loop, sandboxing, retries, and orchestration live
+in the execution harness—often a vendor runtime. WINK keeps your agent
+definition portable.
 
 > **New to WINK?** Read the [WINK Guide](WINK_GUIDE.md) for a comprehensive
 > introduction—philosophy, quickstart, and practical patterns for building agents.
