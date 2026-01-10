@@ -1,0 +1,39 @@
+WINK: the agent-definition layer for unattended agents
+
+WINK is the agent-definition layer: prompts, tools, policies, and trajectory feedback that stay stable while runtimes change.
+
+Unattended agents have two parts.
+
+1) The agent definition (what you own and iterate)
+- Prompt: a structured decision procedure, not a loose string.
+- Tools: the capability surface; the only sanctioned place where side effects occur.
+- Policies: enforceable invariants that constrain tool use and state transitions.
+- Trajectory feedback: "are we actually done?" checks that prevent premature success and steer recovery when the agent drifts.
+
+2) The execution harness (what the runtime provides)
+- The planning/act loop that drives tool calls across turns.
+- Sandboxing and permissions for side-effectful work (filesystem, shell, network).
+- Tool-call orchestration (invocation lifecycle, retries/backoff, throttling).
+- Scheduling, crash recovery, and operational guardrails (deadlines/budgets).
+- Multi-agent orchestration (when you run in a multi-agent harness).
+
+WINK's thesis is simple: the harness will keep changing (and increasingly comes from vendor runtimes), but your agent definition should not. WINK makes the definition a first-class artifact you can version, review, test, and port across runtimes via adapters.
+
+What WINK gives you today
+- A prompt system built from typed Sections (instructions + tools + progressive disclosure in one tree).
+- Typed tools with a controlled execution boundary; transactional behavior so failures don't leak partial state.
+- Session/state primitives designed for inspectability and regression testing.
+- Policy primitives for gating tool calls (e.g., sequencing dependencies, read-before-write).
+- Trajectory feedback primitives in the harness layer where needed (e.g., task-completion checking for Claude Agent SDK), with specs that generalize this pattern further.
+
+How this changes how you build
+Instead of spending your complexity budget on bespoke orchestration graphs, you invest in durable definition assets:
+- a prompt that reliably shapes reasoning,
+- a tool surface that is narrow and intentional,
+- policies that encode "never do X before Y" constraints,
+- and trajectory feedback that encodes "done means Z".
+
+Then you can swap harnesses—local loop vs provider runtime—without rewriting the core agent logic.
+
+One sentence you can reuse
+"You write the agent definition (prompt, tools, policies, trajectory feedback); the runtime owns the harness (planning loop, sandboxing, orchestration). WINK keeps the definition portable while runtimes evolve."
