@@ -223,18 +223,18 @@ policy = SequentialDependencyPolicy(
 )
 ```
 
-### Trajectory Observers
+### Feedback Providers
 
 Provide soft guidance based on patterns over time. See
-[TRAJECTORY_OBSERVERS.md](./TRAJECTORY_OBSERVERS.md).
+[FEEDBACK_PROVIDERS.md](./FEEDBACK_PROVIDERS.md).
 
 ```python
-# Deadline observer: reminds agent of time constraints
-observer = DeadlineObserver(warning_threshold_seconds=120)
+# Deadline feedback: reminds agent of time constraints
+provider = DeadlineFeedback(warning_threshold_seconds=120)
 ```
 
-Observers inject feedback rather than blocking actions, preserving agent
-autonomy while surfacing concerns.
+Feedback providers inject context rather than blocking actions, preserving
+agent autonomy while surfacing concerns.
 
 ### Budget Constraints
 

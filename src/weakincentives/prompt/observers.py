@@ -10,14 +10,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Built-in trajectory observers for common progress assessment patterns."""
+"""Built-in feedback providers for common progress feedback patterns."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from .observer import Assessment, ObserverContext
+from .observer import Feedback, FeedbackContext
 
 if TYPE_CHECKING:
     from ..runtime.session.protocols import SessionProtocol
@@ -38,24 +38,24 @@ def _format_duration(seconds: float) -> str:
 
 
 @dataclass(frozen=True)
-class DeadlineObserver:
+class DeadlineFeedback:
     """Report remaining time until deadline.
 
-    This observer produces assessments about time remaining until the deadline,
-    helping agents manage their time during unattended execution.
+    This feedback provider produces feedback about time remaining until the
+    deadline, helping agents manage their time during unattended execution.
 
-    Default trigger: every 30 seconds (configured separately via ObserverTrigger).
+    Default trigger: every 30 seconds (configured separately via FeedbackTrigger).
 
     Example:
         >>> from weakincentives.prompt import (
-        ...     DeadlineObserver,
-        ...     ObserverConfig,
-        ...     ObserverTrigger,
+        ...     DeadlineFeedback,
+        ...     FeedbackProviderConfig,
+        ...     FeedbackTrigger,
         ... )
         >>>
-        >>> config = ObserverConfig(
-        ...     observer=DeadlineObserver(),
-        ...     trigger=ObserverTrigger(every_n_seconds=30),
+        >>> config = FeedbackProviderConfig(
+        ...     provider=DeadlineFeedback(),
+        ...     trigger=FeedbackTrigger(every_n_seconds=30),
         ... )
     """
 
@@ -63,29 +63,29 @@ class DeadlineObserver:
 
     @property
     def name(self) -> str:
-        """Return the observer name."""
+        """Return the provider name."""
         return "Deadline"
 
-    def should_run(  # noqa: PLR6301 - required by TrajectoryObserver protocol
+    def should_run(  # noqa: PLR6301 - required by FeedbackProvider protocol
         self,
         session: SessionProtocol,
         *,
-        context: ObserverContext,
+        context: FeedbackContext,
     ) -> bool:
         """Only run if a deadline is set."""
         return context.deadline is not None
 
-    def observe(
+    def provide(
         self,
         session: SessionProtocol,
         *,
-        context: ObserverContext,
-    ) -> Assessment:
+        context: FeedbackContext,
+    ) -> Feedback:
         """Analyze time remaining and produce appropriate feedback."""
         if context.deadline is None:
             # Shouldn't happen if should_run is called first, but defensive
-            return Assessment(
-                observer_name=self.name,
+            return Feedback(
+                provider_name=self.name,
                 summary="No deadline configured.",
                 severity="info",
             )
@@ -93,8 +93,8 @@ class DeadlineObserver:
         remaining = context.deadline.remaining().total_seconds()
 
         if remaining <= 0:
-            return Assessment(
-                observer_name=self.name,
+            return Feedback(
+                provider_name=self.name,
                 summary="You have reached the time deadline.",
                 suggestions=("Wrap up immediately.",),
                 severity="warning",
@@ -111,8 +111,8 @@ class DeadlineObserver:
                 "Consider summarizing progress and remaining tasks.",
             )
 
-        return Assessment(
-            observer_name=self.name,
+        return Feedback(
+            provider_name=self.name,
             summary=summary,
             suggestions=suggestions,
             severity=severity,
@@ -120,5 +120,5 @@ class DeadlineObserver:
 
 
 __all__ = [
-    "DeadlineObserver",
+    "DeadlineFeedback",
 ]

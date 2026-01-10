@@ -10,11 +10,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Trajectory observer types for ongoing assessment of agent progress.
+"""Feedback provider types for ongoing agent progress feedback.
 
-Trajectory observers provide ongoing assessment of agent progress during
+Feedback providers deliver ongoing feedback about agent progress during
 unattended execution. Unlike tool policies that gate individual calls,
-observers analyze patterns over time and inject feedback into the agent's
+providers analyze patterns over time and inject feedback into the agent's
 context. This enables soft course-correction without hard intervention.
 """
 
@@ -43,7 +43,7 @@ def _utcnow() -> datetime:
 
 @FrozenDataclass()
 class Observation:
-    """Single observation about the trajectory."""
+    """Single observation about the agent's trajectory."""
 
     category: str
     description: str
@@ -51,15 +51,15 @@ class Observation:
 
 
 @FrozenDataclass()
-class Assessment:
-    """Structured output from trajectory observation.
+class Feedback:
+    """Structured feedback from a feedback provider.
 
-    Assessments are produced by trajectory observers and delivered immediately
-    to the agent via hook response. They are also stored in the session's
-    Assessment slice for trigger calculations and debugging.
+    Feedback is produced by feedback providers and delivered immediately
+    to the agent via hook response. It is also stored in the session's
+    Feedback slice for trigger calculations and debugging.
     """
 
-    observer_name: str
+    provider_name: str
     summary: str
     observations: tuple[Observation, ...] = ()
     suggestions: tuple[str, ...] = ()
@@ -70,7 +70,7 @@ class Assessment:
     def render(self) -> str:
         """Render as concise text for context injection."""
         lines = [
-            f"[Trajectory Assessment - {self.observer_name}]",
+            f"[Feedback - {self.provider_name}]",
             "",
             self.summary,
         ]
@@ -89,15 +89,15 @@ class Assessment:
 
 
 @FrozenDataclass()
-class RecordAssessment:
-    """Event dispatched when an observer produces an assessment."""
+class RecordFeedback:
+    """Event dispatched when a provider produces feedback."""
 
-    assessment: Assessment
+    feedback: Feedback
 
 
 @dataclass(slots=True, frozen=True)
-class ObserverContext:
-    """Context provided to observers during assessment.
+class FeedbackContext:
+    """Context provided to feedback providers.
 
     Provides access to session state and prompt resources, mirroring the
     ToolContext interface for consistency.
@@ -121,9 +121,9 @@ class ObserverContext:
         return self.resources.get_optional(Filesystem)
 
     @property
-    def last_assessment(self) -> Assessment | None:
-        """Most recent assessment, if any."""
-        return self.session[Assessment].latest()
+    def last_feedback(self) -> Feedback | None:
+        """Most recent feedback, if any."""
+        return self.session[Feedback].latest()
 
     @property
     def tool_call_count(self) -> int:
@@ -132,9 +132,9 @@ class ObserverContext:
 
         return len(self.session[ToolInvoked].all())
 
-    def tool_calls_since_last_assessment(self) -> int:
-        """Number of tool calls since last assessment."""
-        last = self.last_assessment
+    def tool_calls_since_last_feedback(self) -> int:
+        """Number of tool calls since last feedback."""
+        last = self.last_feedback
         if last is None:
             return self.tool_call_count
         return self.tool_call_count - last.call_index
@@ -147,53 +147,53 @@ class ObserverContext:
         return records[-n:] if len(records) >= n else records
 
 
-class TrajectoryObserver(Protocol):
-    """Protocol for programmatic assessment of agent trajectory.
+class FeedbackProvider(Protocol):
+    """Protocol for programmatic feedback about agent progress.
 
-    Observers analyze patterns over time and produce feedback for course
-    correction. They run after tool execution and their assessments are
+    Providers analyze patterns over time and produce feedback for course
+    correction. They run after tool execution and their feedback is
     injected into the agent's context.
     """
 
     @property
     def name(self) -> str:
-        """Unique identifier for this observer."""
+        """Unique identifier for this provider."""
         ...
 
     def should_run(
         self,
         session: SessionProtocol,
         *,
-        context: ObserverContext,
+        context: FeedbackContext,
     ) -> bool:
-        """Determine if observer should produce an assessment.
+        """Determine if provider should produce feedback.
 
-        Called after trigger conditions are met to check if the observer
+        Called after trigger conditions are met to check if the provider
         should actually run. Use this for additional filtering beyond
         trigger conditions.
         """
         ...
 
-    def observe(
+    def provide(
         self,
         session: SessionProtocol,
         *,
-        context: ObserverContext,
-    ) -> Assessment:
+        context: FeedbackContext,
+    ) -> Feedback:
         """Analyze trajectory and produce feedback.
 
         Called when trigger conditions are met and should_run returns True.
-        Returns an Assessment that will be rendered and injected into the
+        Returns Feedback that will be rendered and injected into the
         agent's context.
         """
         ...
 
 
 @FrozenDataclass()
-class ObserverTrigger:
-    """Conditions that trigger observer execution.
+class FeedbackTrigger:
+    """Conditions that trigger feedback provider execution.
 
-    Triggers are OR'd together: if either condition is met, the observer runs.
+    Triggers are OR'd together: if either condition is met, the provider runs.
     """
 
     every_n_calls: int | None = None
@@ -201,68 +201,68 @@ class ObserverTrigger:
 
 
 @FrozenDataclass()
-class ObserverConfig:
-    """Configuration for a trajectory observer."""
+class FeedbackProviderConfig:
+    """Configuration for a feedback provider."""
 
-    observer: TrajectoryObserver
-    trigger: ObserverTrigger
+    provider: FeedbackProvider
+    trigger: FeedbackTrigger
 
 
-def _should_trigger(trigger: ObserverTrigger, context: ObserverContext) -> bool:
+def _should_trigger(trigger: FeedbackTrigger, context: FeedbackContext) -> bool:
     """Check if any trigger condition is met."""
     if (
         trigger.every_n_calls is not None
-        and context.tool_calls_since_last_assessment() >= trigger.every_n_calls
+        and context.tool_calls_since_last_feedback() >= trigger.every_n_calls
     ):
         return True
 
     if trigger.every_n_seconds is not None:
-        last = context.last_assessment
+        last = context.last_feedback
         if last is not None:
             elapsed = (_utcnow() - last.timestamp).total_seconds()
             if elapsed >= trigger.every_n_seconds:
                 return True
         else:
-            # No previous assessment - trigger
+            # No previous feedback - trigger
             return True
 
     return False
 
 
-def run_observers(
+def run_feedback_providers(
     *,
-    observers: Sequence[ObserverConfig],
-    context: ObserverContext,
+    providers: Sequence[FeedbackProviderConfig],
+    context: FeedbackContext,
     session: SessionProtocol,
 ) -> str | None:
-    """Run observers and return rendered assessment if triggered.
+    """Run feedback providers and return rendered feedback if triggered.
 
-    Iterates through configured observers, checks trigger conditions, and
-    runs the first matching observer. The assessment is recorded in the
+    Iterates through configured providers, checks trigger conditions, and
+    runs the first matching provider. The feedback is recorded in the
     session and returned as rendered text for context injection.
 
-    Returns None if no observer triggered or produced an assessment.
+    Returns None if no provider triggered or produced feedback.
     """
-    for config in observers:
-        if _should_trigger(config.trigger, context) and config.observer.should_run(
+    for config in providers:
+        if _should_trigger(config.trigger, context) and config.provider.should_run(
             session, context=context
         ):
-            assessment = config.observer.observe(session, context=context)
-            assessment = replace(assessment, call_index=context.tool_call_count)
-            # Store assessment in session slice for history and trigger calculations
-            session[Assessment].append(assessment)
-            return assessment.render()
+            feedback = config.provider.provide(session, context=context)
+            feedback = replace(feedback, call_index=context.tool_call_count)
+            # Store feedback in session slice for history and trigger calculations
+            session[Feedback].append(feedback)
+            return feedback.render()
 
     return None
 
 
 __all__ = [
-    "Assessment",
+    "Feedback",
+    "FeedbackContext",
+    "FeedbackProvider",
+    "FeedbackProviderConfig",
+    "FeedbackTrigger",
     "Observation",
-    "ObserverConfig",
-    "ObserverContext",
-    "ObserverTrigger",
-    "RecordAssessment",
-    "TrajectoryObserver",
-    "run_observers",
+    "RecordFeedback",
+    "run_feedback_providers",
 ]

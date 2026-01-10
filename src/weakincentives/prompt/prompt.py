@@ -31,7 +31,7 @@ from ._overrides_protocols import PromptOverridesStore
 from ._prompt_resources import PromptResources
 from ._types import SupportsDataclass
 from .errors import PromptValidationError, SectionPath
-from .observer import ObserverConfig
+from .observer import FeedbackProviderConfig
 from .overrides import PromptDescriptor
 from .policy import ToolPolicy
 from .registry import PromptRegistry, SectionNode
@@ -114,7 +114,7 @@ class PromptTemplate[OutputT]:
         | tuple[SectionNode[SupportsDataclass], ...]
     ) = ()
     policies: Sequence[ToolPolicy] = ()
-    observers: Sequence[ObserverConfig] = ()
+    feedback_providers: Sequence[FeedbackProviderConfig] = ()
     allow_extra_keys: bool = False
     resources: ResourceRegistry = field(default_factory=ResourceRegistry)
     _snapshot: RegistrySnapshot | None = field(init=False, default=None)
@@ -159,7 +159,7 @@ class PromptTemplate[OutputT]:
         | object
         | None = MISSING,
         policies: Sequence[ToolPolicy] | object = MISSING,
-        observers: Sequence[ObserverConfig] | object = MISSING,
+        feedback_providers: Sequence[FeedbackProviderConfig] | object = MISSING,
         allow_extra_keys: bool | object = MISSING,
         resources: ResourceRegistry | object = MISSING,
     ) -> dict[str, Any]:
@@ -181,9 +181,9 @@ class PromptTemplate[OutputT]:
         policies_input: Sequence[ToolPolicy] = (
             cast(Sequence[ToolPolicy], policies) if policies is not MISSING else ()
         )
-        observers_input: Sequence[ObserverConfig] = (
-            cast(Sequence[ObserverConfig], observers)
-            if observers is not MISSING
+        feedback_providers_input: Sequence[FeedbackProviderConfig] = (
+            cast(Sequence[FeedbackProviderConfig], feedback_providers)
+            if feedback_providers is not MISSING
             else ()
         )
         allow_extra = (
@@ -218,7 +218,7 @@ class PromptTemplate[OutputT]:
             "name": name_val,
             "sections": snapshot.sections,
             "policies": tuple(policies_input),
-            "observers": tuple(observers_input),
+            "feedback_providers": tuple(feedback_providers_input),
             "allow_extra_keys": allow_extra,
             "resources": resources_val,
             "_snapshot": snapshot,
@@ -331,9 +331,9 @@ class Prompt[OutputT]:
         return self.template.structured_output
 
     @property
-    def observers(self) -> tuple[ObserverConfig, ...]:
-        """Return trajectory observers configured on this prompt."""
-        return tuple(self.template.observers)
+    def feedback_providers(self) -> tuple[FeedbackProviderConfig, ...]:
+        """Return feedback providers configured on this prompt."""
+        return tuple(self.template.feedback_providers)
 
     def policies_for_tool(self, tool_name: str) -> tuple[ToolPolicy, ...]:
         """Collect policies that apply to a tool from sections and template.
@@ -553,7 +553,7 @@ class Prompt[OutputT]:
 
 
 __all__ = [
-    "ObserverConfig",
+    "FeedbackProviderConfig",
     "Prompt",
     "PromptResources",
     "PromptTemplate",

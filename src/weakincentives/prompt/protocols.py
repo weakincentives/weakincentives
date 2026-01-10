@@ -134,8 +134,8 @@ class PromptProtocol[PromptOutputT](Protocol):
         ...
 
     @property
-    def observers(self) -> tuple[Any, ...]:
-        """Return trajectory observers configured on this prompt."""
+    def feedback_providers(self) -> tuple[Any, ...]:
+        """Return feedback providers configured on this prompt."""
         ...
 
     def bind(

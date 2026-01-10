@@ -26,7 +26,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
-from ..prompt.observer import ObserverContext, run_observers
+from ..prompt.observer import FeedbackContext, run_feedback_providers
 from ..prompt.policy import PolicyDecision, ToolPolicy
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
@@ -695,24 +695,24 @@ def execute_tool_call(
             outcome=outcome,
         )
 
-    # Run trajectory observers after tool completion
-    observer_context = ObserverContext(
+    # Run feedback providers after tool completion
+    feedback_context = FeedbackContext(
         session=context.session,
         prompt=cast(PromptProtocol[Any], context.prompt),
         deadline=context.deadline,
     )
-    assessment_text = run_observers(
-        observers=context.prompt.observers,
-        context=observer_context,
+    feedback_text = run_feedback_providers(
+        providers=context.prompt.feedback_providers,
+        context=feedback_context,
         session=context.session,
     )
 
-    if assessment_text and outcome.result.message:  # pragma: no cover - integration
+    if feedback_text and outcome.result.message:  # pragma: no cover - integration
         from dataclasses import replace
 
         outcome.result = replace(
             outcome.result,
-            message=f"{outcome.result.message}\n\n{assessment_text}",
+            message=f"{outcome.result.message}\n\n{feedback_text}",
         )
 
     return invocation, outcome.result

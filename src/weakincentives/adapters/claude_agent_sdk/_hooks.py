@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING, Any
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...filesystem import Filesystem
-from ...prompt.observer import ObserverContext, run_observers
+from ...prompt.observer import FeedbackContext, run_feedback_providers
 from ...prompt.protocols import PromptProtocol
 from ...runtime.events._types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
@@ -531,35 +531,35 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         )
         return task_completion_checker.check(context)  # type: ignore[union-attr]
 
-    def _run_trajectory_observers(  # pragma: no cover - integration tested
+    def _run_feedback_providers(  # pragma: no cover - integration tested
         data: _ParsedToolData,
     ) -> dict[str, Any] | None:
-        """Run trajectory observers and return hook response if triggered."""
-        observer_context = ObserverContext(
+        """Run feedback providers and return hook response if triggered."""
+        feedback_context = FeedbackContext(
             session=hook_context.session,
             prompt=hook_context._prompt,
             deadline=hook_context.deadline,
         )
-        assessment_text = run_observers(
-            observers=hook_context._prompt.observers,
-            context=observer_context,
+        feedback_text = run_feedback_providers(
+            providers=hook_context._prompt.feedback_providers,
+            context=feedback_context,
             session=hook_context.session,
         )
 
-        if assessment_text:
+        if feedback_text:
             logger.debug(
-                "claude_agent_sdk.hook.trajectory_assessment",
-                event="hook.trajectory_assessment",
+                "claude_agent_sdk.hook.feedback_provided",
+                event="hook.feedback_provided",
                 context={
                     "tool_name": data.tool_name,
-                    "assessment_length": len(assessment_text),
+                    "feedback_length": len(feedback_text),
                     "elapsed_ms": hook_context.elapsed_ms,
                 },
             )
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "PostToolUse",
-                    "additionalContext": assessment_text,
+                    "additionalContext": feedback_text,
                 }
             }
         return None
@@ -636,10 +636,10 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                     },
                 )
 
-        # Run trajectory observers after tool completion
-        observer_response = _run_trajectory_observers(data)
-        if observer_response is not None:  # pragma: no cover - integration tested
-            return observer_response
+        # Run feedback providers after tool completion
+        feedback_response = _run_feedback_providers(data)
+        if feedback_response is not None:  # pragma: no cover - integration tested
+            return feedback_response
 
         # Handle StructuredOutput with task completion checking
         if data.tool_name == "StructuredOutput":

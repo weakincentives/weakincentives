@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for trajectory observers."""
+"""Tests for feedback providers."""
 
 from __future__ import annotations
 
@@ -22,16 +22,16 @@ import pytest
 
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
-    Assessment,
-    DeadlineObserver,
+    DeadlineFeedback,
+    Feedback,
+    FeedbackContext,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
     Observation,
-    ObserverConfig,
-    ObserverContext,
-    ObserverTrigger,
     Prompt,
     PromptTemplate,
-    RecordAssessment,
-    run_observers,
+    RecordFeedback,
+    run_feedback_providers,
 )
 from weakincentives.prompt.observer import _should_trigger
 from weakincentives.runtime import InProcessDispatcher, Session
@@ -65,98 +65,98 @@ class TestObservation:
             obs.category = "Changed"  # type: ignore[misc]
 
 
-# --- Assessment Tests ---
+# --- Feedback Tests ---
 
 
-class TestAssessment:
-    def test_creates_basic_assessment(self) -> None:
-        assessment = Assessment(observer_name="Test", summary="All good")
-        assert assessment.observer_name == "Test"
-        assert assessment.summary == "All good"
-        assert assessment.observations == ()
-        assert assessment.suggestions == ()
-        assert assessment.severity == "info"
-        assert assessment.call_index == 0
+class TestFeedback:
+    def test_creates_basic_feedback(self) -> None:
+        feedback = Feedback(provider_name="Test", summary="All good")
+        assert feedback.provider_name == "Test"
+        assert feedback.summary == "All good"
+        assert feedback.observations == ()
+        assert feedback.suggestions == ()
+        assert feedback.severity == "info"
+        assert feedback.call_index == 0
 
-    def test_creates_assessment_with_observations(self) -> None:
+    def test_creates_feedback_with_observations(self) -> None:
         obs = Observation(category="Pattern", description="Loop detected")
-        assessment = Assessment(
-            observer_name="Loop",
+        feedback = Feedback(
+            provider_name="Loop",
             summary="Possible loop",
             observations=(obs,),
         )
-        assert len(assessment.observations) == 1
-        assert assessment.observations[0].category == "Pattern"
+        assert len(feedback.observations) == 1
+        assert feedback.observations[0].category == "Pattern"
 
-    def test_creates_assessment_with_suggestions(self) -> None:
-        assessment = Assessment(
-            observer_name="Time",
+    def test_creates_feedback_with_suggestions(self) -> None:
+        feedback = Feedback(
+            provider_name="Time",
             summary="Running low on time",
             suggestions=("Wrap up soon", "Summarize progress"),
         )
-        assert len(assessment.suggestions) == 2
+        assert len(feedback.suggestions) == 2
 
-    def test_assessment_severity_levels(self) -> None:
-        info = Assessment(observer_name="A", summary="Info", severity="info")
-        caution = Assessment(observer_name="B", summary="Caution", severity="caution")
-        warning = Assessment(observer_name="C", summary="Warning", severity="warning")
+    def test_feedback_severity_levels(self) -> None:
+        info = Feedback(provider_name="A", summary="Info", severity="info")
+        caution = Feedback(provider_name="B", summary="Caution", severity="caution")
+        warning = Feedback(provider_name="C", summary="Warning", severity="warning")
 
         assert info.severity == "info"
         assert caution.severity == "caution"
         assert warning.severity == "warning"
 
-    def test_render_basic_assessment(self) -> None:
-        assessment = Assessment(observer_name="Test", summary="Status check")
-        rendered = assessment.render()
+    def test_render_basic_feedback(self) -> None:
+        feedback = Feedback(provider_name="Test", summary="Status check")
+        rendered = feedback.render()
 
-        assert "[Trajectory Assessment - Test]" in rendered
+        assert "[Feedback - Test]" in rendered
         assert "Status check" in rendered
 
-    def test_render_assessment_with_observations(self) -> None:
+    def test_render_feedback_with_observations(self) -> None:
         obs = Observation(category="Pattern", description="Loop detected")
-        assessment = Assessment(
-            observer_name="Loop",
+        feedback = Feedback(
+            provider_name="Loop",
             summary="Possible loop",
             observations=(obs,),
         )
-        rendered = assessment.render()
+        rendered = feedback.render()
 
         assert "• Pattern: Loop detected" in rendered
 
-    def test_render_assessment_with_suggestions(self) -> None:
-        assessment = Assessment(
-            observer_name="Time",
+    def test_render_feedback_with_suggestions(self) -> None:
+        feedback = Feedback(
+            provider_name="Time",
             summary="Low time",
             suggestions=("Wrap up", "Summarize"),
         )
-        rendered = assessment.render()
+        rendered = feedback.render()
 
         assert "→ Wrap up" in rendered
         assert "→ Summarize" in rendered
 
-    def test_render_full_assessment(self) -> None:
+    def test_render_full_feedback(self) -> None:
         obs1 = Observation(category="Files", description="10 files read")
         obs2 = Observation(category="Time", description="5 minutes elapsed")
-        assessment = Assessment(
-            observer_name="Progress",
+        feedback = Feedback(
+            provider_name="Progress",
             summary="Making progress",
             observations=(obs1, obs2),
             suggestions=("Continue current approach",),
             severity="info",
         )
-        rendered = assessment.render()
+        rendered = feedback.render()
 
-        assert "[Trajectory Assessment - Progress]" in rendered
+        assert "[Feedback - Progress]" in rendered
         assert "Making progress" in rendered
         assert "• Files: 10 files read" in rendered
         assert "• Time: 5 minutes elapsed" in rendered
         assert "→ Continue current approach" in rendered
 
 
-# --- ObserverContext Tests ---
+# --- FeedbackContext Tests ---
 
 
-class TestObserverContext:
+class TestFeedbackContext:
     def _make_session(self) -> Session:
         bus = InProcessDispatcher()
         return Session(bus=bus)
@@ -171,7 +171,7 @@ class TestObserverContext:
         session = self._make_session()
         prompt = self._make_prompt()
 
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
         assert context.session is session
         assert context.prompt is prompt
@@ -182,7 +182,7 @@ class TestObserverContext:
         prompt = self._make_prompt()
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1))
 
-        context = ObserverContext(session=session, prompt=prompt, deadline=deadline)
+        context = FeedbackContext(session=session, prompt=prompt, deadline=deadline)
 
         assert context.deadline is deadline
 
@@ -191,7 +191,7 @@ class TestObserverContext:
 
         session = self._make_session()
         prompt = self._make_prompt()
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
         # Resources should be accessible and of the right type
         assert isinstance(context.resources, PromptResources)
@@ -199,40 +199,40 @@ class TestObserverContext:
     def test_filesystem_returns_none_when_not_registered(self) -> None:
         session = self._make_session()
         prompt = self._make_prompt()
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
         # Need to enter resource context to access filesystem
         with prompt.resources:
             # No filesystem registered, should return None
             assert context.filesystem is None
 
-    def test_last_assessment_returns_none_when_empty(self) -> None:
+    def test_last_feedback_returns_none_when_empty(self) -> None:
         session = self._make_session()
         prompt = self._make_prompt()
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
-        assert context.last_assessment is None
+        assert context.last_feedback is None
 
-    def test_last_assessment_returns_most_recent(self) -> None:
+    def test_last_feedback_returns_most_recent(self) -> None:
         session = self._make_session()
         prompt = self._make_prompt()
 
-        # Add assessments to session
-        assessment1 = Assessment(observer_name="A", summary="First", call_index=1)
-        assessment2 = Assessment(observer_name="B", summary="Second", call_index=2)
-        session[Assessment].append(assessment1)
-        session[Assessment].append(assessment2)
+        # Add feedback to session
+        feedback1 = Feedback(provider_name="A", summary="First", call_index=1)
+        feedback2 = Feedback(provider_name="B", summary="Second", call_index=2)
+        session[Feedback].append(feedback1)
+        session[Feedback].append(feedback2)
 
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
-        last = context.last_assessment
+        last = context.last_feedback
         assert last is not None
         assert last.summary == "Second"
 
     def test_tool_call_count_returns_zero_when_empty(self) -> None:
         session = self._make_session()
         prompt = self._make_prompt()
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
         assert context.tool_call_count == 0
 
@@ -253,11 +253,11 @@ class TestObserverContext:
             )
             session.dispatcher.dispatch(event)
 
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
         assert context.tool_call_count == 3
 
-    def test_tool_calls_since_last_assessment_all_when_no_assessment(self) -> None:
+    def test_tool_calls_since_last_feedback_all_when_no_feedback(self) -> None:
         session = self._make_session()
         prompt = self._make_prompt()
 
@@ -274,11 +274,11 @@ class TestObserverContext:
             )
             session.dispatcher.dispatch(event)
 
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
-        assert context.tool_calls_since_last_assessment() == 5
+        assert context.tool_calls_since_last_feedback() == 5
 
-    def test_tool_calls_since_last_assessment_counts_after_last(self) -> None:
+    def test_tool_calls_since_last_feedback_counts_after_last(self) -> None:
         session = self._make_session()
         prompt = self._make_prompt()
 
@@ -295,9 +295,9 @@ class TestObserverContext:
             )
             session.dispatcher.dispatch(event)
 
-        # Add assessment at call_index=3
-        assessment = Assessment(observer_name="A", summary="Test", call_index=3)
-        session[Assessment].append(assessment)
+        # Add feedback at call_index=3
+        feedback = Feedback(provider_name="A", summary="Test", call_index=3)
+        session[Feedback].append(feedback)
 
         # Add 2 more tool invocations
         for i in range(2):
@@ -312,10 +312,10 @@ class TestObserverContext:
             )
             session.dispatcher.dispatch(event)
 
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
-        # Total is 5, last assessment at 3, so 2 since
-        assert context.tool_calls_since_last_assessment() == 2
+        # Total is 5, last feedback at 3, so 2 since
+        assert context.tool_calls_since_last_feedback() == 2
 
     def test_recent_tool_calls_returns_last_n(self) -> None:
         session = self._make_session()
@@ -334,7 +334,7 @@ class TestObserverContext:
             )
             session.dispatcher.dispatch(event)
 
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
         recent = context.recent_tool_calls(3)
         assert len(recent) == 3
@@ -359,28 +359,28 @@ class TestObserverContext:
             )
             session.dispatcher.dispatch(event)
 
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
 
         recent = context.recent_tool_calls(5)
         assert len(recent) == 2
 
 
-# --- ObserverTrigger Tests ---
+# --- FeedbackTrigger Tests ---
 
 
-class TestObserverTrigger:
+class TestFeedbackTrigger:
     def test_creates_trigger_with_call_count(self) -> None:
-        trigger = ObserverTrigger(every_n_calls=10)
+        trigger = FeedbackTrigger(every_n_calls=10)
         assert trigger.every_n_calls == 10
         assert trigger.every_n_seconds is None
 
     def test_creates_trigger_with_time_interval(self) -> None:
-        trigger = ObserverTrigger(every_n_seconds=30.0)
+        trigger = FeedbackTrigger(every_n_seconds=30.0)
         assert trigger.every_n_calls is None
         assert trigger.every_n_seconds == 30.0
 
     def test_creates_trigger_with_both_conditions(self) -> None:
-        trigger = ObserverTrigger(every_n_calls=10, every_n_seconds=60.0)
+        trigger = FeedbackTrigger(every_n_calls=10, every_n_seconds=60.0)
         assert trigger.every_n_calls == 10
         assert trigger.every_n_seconds == 60.0
 
@@ -392,9 +392,9 @@ class TestShouldTrigger:
     def _make_context(
         self,
         tool_calls: int = 0,
-        last_assessment_call_index: int | None = None,
-        last_assessment_timestamp: datetime | None = None,
-    ) -> ObserverContext:
+        last_feedback_call_index: int | None = None,
+        last_feedback_timestamp: datetime | None = None,
+    ) -> FeedbackContext:
         bus = InProcessDispatcher()
         session = Session(bus=bus)
         template: PromptTemplate[None] = PromptTemplate(
@@ -415,119 +415,119 @@ class TestShouldTrigger:
             )
             session.dispatcher.dispatch(event)
 
-        # Add assessment if specified
-        if last_assessment_call_index is not None:
-            ts = last_assessment_timestamp or datetime.now(UTC)
-            assessment = Assessment(
-                observer_name="A",
+        # Add feedback if specified
+        if last_feedback_call_index is not None:
+            ts = last_feedback_timestamp or datetime.now(UTC)
+            feedback = Feedback(
+                provider_name="A",
                 summary="Test",
-                call_index=last_assessment_call_index,
+                call_index=last_feedback_call_index,
                 timestamp=ts,
             )
-            session[Assessment].append(assessment)
+            session[Feedback].append(feedback)
 
-        return ObserverContext(session=session, prompt=prompt)
+        return FeedbackContext(session=session, prompt=prompt)
 
     def test_returns_false_for_empty_trigger(self) -> None:
-        trigger = ObserverTrigger()
+        trigger = FeedbackTrigger()
         context = self._make_context(tool_calls=10)
 
         assert _should_trigger(trigger, context) is False
 
     def test_call_count_trigger_fires_when_threshold_met(self) -> None:
-        trigger = ObserverTrigger(every_n_calls=5)
+        trigger = FeedbackTrigger(every_n_calls=5)
         context = self._make_context(tool_calls=5)
 
         assert _should_trigger(trigger, context) is True
 
     def test_call_count_trigger_does_not_fire_below_threshold(self) -> None:
-        trigger = ObserverTrigger(every_n_calls=5)
+        trigger = FeedbackTrigger(every_n_calls=5)
         context = self._make_context(tool_calls=3)
 
         assert _should_trigger(trigger, context) is False
 
-    def test_call_count_trigger_counts_since_last_assessment(self) -> None:
-        trigger = ObserverTrigger(every_n_calls=3)
-        # 5 total calls, last assessment at index 3, so 2 calls since
-        context = self._make_context(tool_calls=5, last_assessment_call_index=3)
+    def test_call_count_trigger_counts_since_last_feedback(self) -> None:
+        trigger = FeedbackTrigger(every_n_calls=3)
+        # 5 total calls, last feedback at index 3, so 2 calls since
+        context = self._make_context(tool_calls=5, last_feedback_call_index=3)
 
         assert _should_trigger(trigger, context) is False
 
-    def test_time_trigger_fires_when_no_previous_assessment(self) -> None:
-        trigger = ObserverTrigger(every_n_seconds=30)
+    def test_time_trigger_fires_when_no_previous_feedback(self) -> None:
+        trigger = FeedbackTrigger(every_n_seconds=30)
         context = self._make_context(tool_calls=1)
 
         assert _should_trigger(trigger, context) is True
 
     def test_time_trigger_fires_when_time_elapsed(self) -> None:
-        trigger = ObserverTrigger(every_n_seconds=30)
+        trigger = FeedbackTrigger(every_n_seconds=30)
         old_time = datetime.now(UTC) - timedelta(seconds=60)
         context = self._make_context(
             tool_calls=1,
-            last_assessment_call_index=0,
-            last_assessment_timestamp=old_time,
+            last_feedback_call_index=0,
+            last_feedback_timestamp=old_time,
         )
 
         assert _should_trigger(trigger, context) is True
 
     def test_time_trigger_does_not_fire_when_too_recent(self) -> None:
-        trigger = ObserverTrigger(every_n_seconds=30)
+        trigger = FeedbackTrigger(every_n_seconds=30)
         recent_time = datetime.now(UTC) - timedelta(seconds=10)
         context = self._make_context(
             tool_calls=1,
-            last_assessment_call_index=0,
-            last_assessment_timestamp=recent_time,
+            last_feedback_call_index=0,
+            last_feedback_timestamp=recent_time,
         )
 
         assert _should_trigger(trigger, context) is False
 
     def test_or_logic_fires_on_call_count_when_time_not_met(self) -> None:
-        trigger = ObserverTrigger(every_n_calls=3, every_n_seconds=300)
+        trigger = FeedbackTrigger(every_n_calls=3, every_n_seconds=300)
         recent_time = datetime.now(UTC) - timedelta(seconds=10)
         context = self._make_context(
             tool_calls=5,
-            last_assessment_call_index=1,
-            last_assessment_timestamp=recent_time,
+            last_feedback_call_index=1,
+            last_feedback_timestamp=recent_time,
         )
-        # 5 - 1 = 4 calls since last assessment >= 3
+        # 5 - 1 = 4 calls since last feedback >= 3
 
         assert _should_trigger(trigger, context) is True
 
     def test_or_logic_fires_on_time_when_calls_not_met(self) -> None:
-        trigger = ObserverTrigger(every_n_calls=10, every_n_seconds=30)
+        trigger = FeedbackTrigger(every_n_calls=10, every_n_seconds=30)
         old_time = datetime.now(UTC) - timedelta(seconds=60)
         context = self._make_context(
             tool_calls=3,
-            last_assessment_call_index=2,
-            last_assessment_timestamp=old_time,
+            last_feedback_call_index=2,
+            last_feedback_timestamp=old_time,
         )
-        # Only 1 call since last assessment, but time elapsed
+        # Only 1 call since last feedback, but time elapsed
 
         assert _should_trigger(trigger, context) is True
 
 
-# --- ObserverConfig Tests ---
+# --- FeedbackProviderConfig Tests ---
 
 
-class TestObserverConfig:
-    def test_creates_config_with_observer_and_trigger(self) -> None:
-        observer = DeadlineObserver()
-        trigger = ObserverTrigger(every_n_seconds=30)
+class TestFeedbackProviderConfig:
+    def test_creates_config_with_provider_and_trigger(self) -> None:
+        provider = DeadlineFeedback()
+        trigger = FeedbackTrigger(every_n_seconds=30)
 
-        config = ObserverConfig(observer=observer, trigger=trigger)
+        config = FeedbackProviderConfig(provider=provider, trigger=trigger)
 
-        assert config.observer is observer
+        assert config.provider is provider
         assert config.trigger is trigger
 
 
-# --- DeadlineObserver Tests ---
+# --- DeadlineFeedback Tests ---
 
 
-class TestDeadlineObserver:
+class TestDeadlineFeedback:
     def _make_context(
         self,
         deadline: Deadline | None = None,
-    ) -> tuple[Session, ObserverContext]:
+    ) -> tuple[Session, FeedbackContext]:
         bus = InProcessDispatcher()
         session = Session(bus=bus)
         template: PromptTemplate[None] = PromptTemplate(
@@ -535,53 +535,53 @@ class TestDeadlineObserver:
         )
         prompt: Prompt[None] = Prompt(template)
 
-        context = ObserverContext(session=session, prompt=prompt, deadline=deadline)
+        context = FeedbackContext(session=session, prompt=prompt, deadline=deadline)
         return session, context
 
     def test_name_property(self) -> None:
-        observer = DeadlineObserver()
-        assert observer.name == "Deadline"
+        provider = DeadlineFeedback()
+        assert provider.name == "Deadline"
 
     def test_should_run_returns_false_without_deadline(self) -> None:
-        observer = DeadlineObserver()
+        provider = DeadlineFeedback()
         session, context = self._make_context(deadline=None)
 
-        assert observer.should_run(session, context=context) is False
+        assert provider.should_run(session, context=context) is False
 
     def test_should_run_returns_true_with_deadline(self) -> None:
-        observer = DeadlineObserver()
+        provider = DeadlineFeedback()
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1))
         session, context = self._make_context(deadline=deadline)
 
-        assert observer.should_run(session, context=context) is True
+        assert provider.should_run(session, context=context) is True
 
-    def test_observe_returns_info_when_plenty_of_time(self) -> None:
-        observer = DeadlineObserver(warning_threshold_seconds=120)
+    def test_provide_returns_info_when_plenty_of_time(self) -> None:
+        provider = DeadlineFeedback(warning_threshold_seconds=120)
         # Use hours=2 to ensure we always get "hour" in the output
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=2))
         session, context = self._make_context(deadline=deadline)
 
-        assessment = observer.observe(session, context=context)
+        feedback = provider.provide(session, context=context)
 
-        assert assessment.observer_name == "Deadline"
-        assert assessment.severity == "info"
-        assert assessment.suggestions == ()
-        assert "hour" in assessment.summary.lower()
+        assert feedback.provider_name == "Deadline"
+        assert feedback.severity == "info"
+        assert feedback.suggestions == ()
+        assert "hour" in feedback.summary.lower()
 
-    def test_observe_returns_warning_when_low_time(self) -> None:
-        observer = DeadlineObserver(warning_threshold_seconds=120)
+    def test_provide_returns_warning_when_low_time(self) -> None:
+        provider = DeadlineFeedback(warning_threshold_seconds=120)
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=90))
         session, context = self._make_context(deadline=deadline)
 
-        assessment = observer.observe(session, context=context)
+        feedback = provider.provide(session, context=context)
 
-        assert assessment.severity == "warning"
-        assert len(assessment.suggestions) > 0
-        assert "remaining" in assessment.summary.lower()
+        assert feedback.severity == "warning"
+        assert len(feedback.suggestions) > 0
+        assert "remaining" in feedback.summary.lower()
 
-    def test_observe_returns_warning_when_deadline_passed(self) -> None:
+    def test_provide_returns_warning_when_deadline_passed(self) -> None:
         # Test the case where deadline has passed (remaining <= 0)
-        observer = DeadlineObserver()
+        provider = DeadlineFeedback()
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=2))
         session, context = self._make_context(deadline=deadline)
 
@@ -591,28 +591,28 @@ class TestDeadlineObserver:
         )()
 
         # Create a new context with the mock deadline
-        mock_context = ObserverContext(
+        mock_context = FeedbackContext(
             session=context.session,
             prompt=context.prompt,
             deadline=mock_deadline,  # type: ignore[arg-type]
         )
 
-        assessment = observer.observe(session, context=mock_context)
+        feedback = provider.provide(session, context=mock_context)
 
-        assert assessment.severity == "warning"
+        assert feedback.severity == "warning"
         assert (
-            "reached" in assessment.summary.lower()
-            or "deadline" in assessment.summary.lower()
+            "reached" in feedback.summary.lower()
+            or "deadline" in feedback.summary.lower()
         )
 
-    def test_observe_without_deadline_returns_info(self) -> None:
-        observer = DeadlineObserver()
+    def test_provide_without_deadline_returns_info(self) -> None:
+        provider = DeadlineFeedback()
         session, context = self._make_context(deadline=None)
 
-        assessment = observer.observe(session, context=context)
+        feedback = provider.provide(session, context=context)
 
-        assert assessment.severity == "info"
-        assert "no deadline" in assessment.summary.lower()
+        assert feedback.severity == "info"
+        assert "no deadline" in feedback.summary.lower()
 
     def test_format_duration_seconds(self) -> None:
         from weakincentives.prompt.observers import _format_duration
@@ -635,41 +635,41 @@ class TestDeadlineObserver:
         assert "hour" in _format_duration(7200)
 
     def test_custom_warning_threshold(self) -> None:
-        observer = DeadlineObserver(warning_threshold_seconds=300)  # 5 minutes
+        provider = DeadlineFeedback(warning_threshold_seconds=300)  # 5 minutes
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=240))
         session, context = self._make_context(deadline=deadline)
 
-        assessment = observer.observe(session, context=context)
+        feedback = provider.provide(session, context=context)
 
-        assert assessment.severity == "warning"
+        assert feedback.severity == "warning"
 
 
-# --- run_observers Tests ---
+# --- run_feedback_providers Tests ---
 
 
 @dataclass(frozen=True)
-class MockObserver:
-    """Test observer that always runs and returns a fixed assessment."""
+class MockFeedbackProvider:
+    """Test provider that always runs and returns fixed feedback."""
 
     should_run_return: bool = True
-    assessment_summary: str = "Mock assessment"
+    feedback_summary: str = "Mock feedback"
 
     @property
     def name(self) -> str:
         return "Mock"
 
-    def should_run(self, session: Session, *, context: ObserverContext) -> bool:
+    def should_run(self, session: Session, *, context: FeedbackContext) -> bool:
         return self.should_run_return
 
-    def observe(self, session: Session, *, context: ObserverContext) -> Assessment:
-        return Assessment(
-            observer_name=self.name,
-            summary=self.assessment_summary,
+    def provide(self, session: Session, *, context: FeedbackContext) -> Feedback:
+        return Feedback(
+            provider_name=self.name,
+            summary=self.feedback_summary,
         )
 
 
-class TestRunObservers:
-    def _make_context(self, tool_calls: int = 0) -> tuple[Session, ObserverContext]:
+class TestRunFeedbackProviders:
+    def _make_context(self, tool_calls: int = 0) -> tuple[Session, FeedbackContext]:
         bus = InProcessDispatcher()
         session = Session(bus=bus)
         template: PromptTemplate[None] = PromptTemplate(
@@ -690,186 +690,194 @@ class TestRunObservers:
             )
             session.dispatcher.dispatch(event)
 
-        context = ObserverContext(session=session, prompt=prompt)
+        context = FeedbackContext(session=session, prompt=prompt)
         return session, context
 
-    def test_returns_none_when_no_observers(self) -> None:
+    def test_returns_none_when_no_providers(self) -> None:
         session, context = self._make_context(tool_calls=5)
 
-        result = run_observers(observers=(), context=context, session=session)
+        result = run_feedback_providers(providers=(), context=context, session=session)
 
         assert result is None
 
     def test_returns_none_when_trigger_not_met(self) -> None:
         session, context = self._make_context(tool_calls=2)
-        observer = MockObserver()
-        config = ObserverConfig(
-            observer=observer, trigger=ObserverTrigger(every_n_calls=10)
+        provider = MockFeedbackProvider()
+        config = FeedbackProviderConfig(
+            provider=provider, trigger=FeedbackTrigger(every_n_calls=10)
         )
 
-        result = run_observers(observers=(config,), context=context, session=session)
+        result = run_feedback_providers(
+            providers=(config,), context=context, session=session
+        )
 
         assert result is None
 
     def test_returns_none_when_should_run_false(self) -> None:
         session, context = self._make_context(tool_calls=5)
-        observer = MockObserver(should_run_return=False)
-        config = ObserverConfig(
-            observer=observer, trigger=ObserverTrigger(every_n_calls=3)
+        provider = MockFeedbackProvider(should_run_return=False)
+        config = FeedbackProviderConfig(
+            provider=provider, trigger=FeedbackTrigger(every_n_calls=3)
         )
 
-        result = run_observers(observers=(config,), context=context, session=session)
+        result = run_feedback_providers(
+            providers=(config,), context=context, session=session
+        )
 
         assert result is None
 
-    def test_returns_rendered_assessment_when_triggered(self) -> None:
+    def test_returns_rendered_feedback_when_triggered(self) -> None:
         session, context = self._make_context(tool_calls=5)
-        observer = MockObserver(assessment_summary="Test feedback")
-        config = ObserverConfig(
-            observer=observer, trigger=ObserverTrigger(every_n_calls=3)
+        provider = MockFeedbackProvider(feedback_summary="Test feedback")
+        config = FeedbackProviderConfig(
+            provider=provider, trigger=FeedbackTrigger(every_n_calls=3)
         )
 
-        result = run_observers(observers=(config,), context=context, session=session)
+        result = run_feedback_providers(
+            providers=(config,), context=context, session=session
+        )
 
         assert result is not None
         assert "Test feedback" in result
-        assert "[Trajectory Assessment - Mock]" in result
+        assert "[Feedback - Mock]" in result
 
-    def test_dispatches_record_assessment_event(self) -> None:
+    def test_stores_feedback_in_session(self) -> None:
         session, context = self._make_context(tool_calls=5)
-        observer = MockObserver()
-        config = ObserverConfig(
-            observer=observer, trigger=ObserverTrigger(every_n_calls=3)
+        provider = MockFeedbackProvider()
+        config = FeedbackProviderConfig(
+            provider=provider, trigger=FeedbackTrigger(every_n_calls=3)
         )
 
-        run_observers(observers=(config,), context=context, session=session)
+        run_feedback_providers(providers=(config,), context=context, session=session)
 
-        # Check that assessment was recorded in session
-        latest = session[Assessment].latest()
+        # Check that feedback was recorded in session
+        latest = session[Feedback].latest()
         assert latest is not None
-        assert latest.observer_name == "Mock"
+        assert latest.provider_name == "Mock"
         assert latest.call_index == 5  # Updated to current tool call count
 
-    def test_first_matching_observer_wins(self) -> None:
+    def test_first_matching_provider_wins(self) -> None:
         session, context = self._make_context(tool_calls=5)
 
-        observer1 = MockObserver(assessment_summary="First")
-        observer2 = MockObserver(assessment_summary="Second")
+        provider1 = MockFeedbackProvider(feedback_summary="First")
+        provider2 = MockFeedbackProvider(feedback_summary="Second")
 
         configs = (
-            ObserverConfig(
-                observer=observer1, trigger=ObserverTrigger(every_n_calls=3)
+            FeedbackProviderConfig(
+                provider=provider1, trigger=FeedbackTrigger(every_n_calls=3)
             ),
-            ObserverConfig(
-                observer=observer2, trigger=ObserverTrigger(every_n_calls=3)
+            FeedbackProviderConfig(
+                provider=provider2, trigger=FeedbackTrigger(every_n_calls=3)
             ),
         )
 
-        result = run_observers(observers=configs, context=context, session=session)
+        result = run_feedback_providers(
+            providers=configs, context=context, session=session
+        )
 
         assert result is not None
         assert "First" in result
         assert "Second" not in result
 
 
-# --- PromptTemplate Observer Integration Tests ---
+# --- PromptTemplate FeedbackProvider Integration Tests ---
 
 
-class TestPromptTemplateObservers:
-    def test_creates_template_without_observers(self) -> None:
+class TestPromptTemplateFeedbackProviders:
+    def test_creates_template_without_providers(self) -> None:
         template: PromptTemplate[None] = PromptTemplate(
             ns="test", key="test", name="test"
         )
-        assert template.observers == ()
+        assert template.feedback_providers == ()
 
-    def test_creates_template_with_observers(self) -> None:
-        observer = DeadlineObserver()
-        config = ObserverConfig(
-            observer=observer, trigger=ObserverTrigger(every_n_seconds=30)
+    def test_creates_template_with_providers(self) -> None:
+        provider = DeadlineFeedback()
+        config = FeedbackProviderConfig(
+            provider=provider, trigger=FeedbackTrigger(every_n_seconds=30)
         )
 
         template: PromptTemplate[None] = PromptTemplate(
-            ns="test", key="test", name="test", observers=[config]
+            ns="test", key="test", name="test", feedback_providers=[config]
         )
 
-        assert len(template.observers) == 1
-        assert template.observers[0].observer is observer
+        assert len(template.feedback_providers) == 1
+        assert template.feedback_providers[0].provider is provider
 
-    def test_observers_converted_to_tuple(self) -> None:
+    def test_providers_converted_to_tuple(self) -> None:
         configs = [
-            ObserverConfig(
-                observer=DeadlineObserver(),
-                trigger=ObserverTrigger(every_n_seconds=30),
+            FeedbackProviderConfig(
+                provider=DeadlineFeedback(),
+                trigger=FeedbackTrigger(every_n_seconds=30),
             ),
-            ObserverConfig(
-                observer=MockObserver(),
-                trigger=ObserverTrigger(every_n_calls=10),
+            FeedbackProviderConfig(
+                provider=MockFeedbackProvider(),
+                trigger=FeedbackTrigger(every_n_calls=10),
             ),
         ]
 
         template: PromptTemplate[None] = PromptTemplate(
-            ns="test", key="test", name="test", observers=configs
+            ns="test", key="test", name="test", feedback_providers=configs
         )
 
-        assert isinstance(template.observers, tuple)
-        assert len(template.observers) == 2
+        assert isinstance(template.feedback_providers, tuple)
+        assert len(template.feedback_providers) == 2
 
 
-class TestPromptObservers:
-    def test_prompt_exposes_template_observers(self) -> None:
-        observer = DeadlineObserver()
-        config = ObserverConfig(
-            observer=observer, trigger=ObserverTrigger(every_n_seconds=30)
+class TestPromptFeedbackProviders:
+    def test_prompt_exposes_template_providers(self) -> None:
+        provider = DeadlineFeedback()
+        config = FeedbackProviderConfig(
+            provider=provider, trigger=FeedbackTrigger(every_n_seconds=30)
         )
 
         template: PromptTemplate[None] = PromptTemplate(
-            ns="test", key="test", name="test", observers=[config]
+            ns="test", key="test", name="test", feedback_providers=[config]
         )
         prompt: Prompt[None] = Prompt(template)
 
-        assert len(prompt.observers) == 1
-        assert prompt.observers[0].observer is observer
+        assert len(prompt.feedback_providers) == 1
+        assert prompt.feedback_providers[0].provider is provider
 
-    def test_prompt_observers_returns_tuple(self) -> None:
+    def test_prompt_providers_returns_tuple(self) -> None:
         template: PromptTemplate[None] = PromptTemplate(
             ns="test", key="test", name="test"
         )
         prompt: Prompt[None] = Prompt(template)
 
-        assert isinstance(prompt.observers, tuple)
+        assert isinstance(prompt.feedback_providers, tuple)
 
 
-# --- RecordAssessment Event Tests ---
+# --- RecordFeedback Event Tests ---
 
 
-class TestRecordAssessment:
-    def test_creates_record_assessment_event(self) -> None:
-        assessment = Assessment(observer_name="Test", summary="Test summary")
-        event = RecordAssessment(assessment=assessment)
+class TestRecordFeedback:
+    def test_creates_record_feedback_event(self) -> None:
+        feedback = Feedback(provider_name="Test", summary="Test summary")
+        event = RecordFeedback(feedback=feedback)
 
-        assert event.assessment is assessment
-        assert event.assessment.observer_name == "Test"
+        assert event.feedback is feedback
+        assert event.feedback.provider_name == "Test"
 
-    def test_assessment_stored_in_session_slice(self) -> None:
+    def test_feedback_stored_in_session_slice(self) -> None:
         bus = InProcessDispatcher()
         session = Session(bus=bus)
 
-        assessment = Assessment(observer_name="A", summary="First")
-        session[Assessment].append(assessment)
+        feedback = Feedback(provider_name="A", summary="First")
+        session[Feedback].append(feedback)
 
-        stored = session[Assessment].latest()
+        stored = session[Feedback].latest()
         assert stored is not None
-        assert stored.observer_name == "A"
+        assert stored.provider_name == "A"
 
-    def test_multiple_assessments_stored(self) -> None:
+    def test_multiple_feedback_stored(self) -> None:
         bus = InProcessDispatcher()
         session = Session(bus=bus)
 
-        assessment1 = Assessment(observer_name="A", summary="First")
-        assessment2 = Assessment(observer_name="B", summary="Second")
+        feedback1 = Feedback(provider_name="A", summary="First")
+        feedback2 = Feedback(provider_name="B", summary="Second")
 
-        session[Assessment].append(assessment1)
-        session[Assessment].append(assessment2)
+        session[Feedback].append(feedback1)
+        session[Feedback].append(feedback2)
 
-        all_assessments = session[Assessment].all()
-        assert len(all_assessments) == 2
+        all_feedback = session[Feedback].all()
+        assert len(all_feedback) == 2

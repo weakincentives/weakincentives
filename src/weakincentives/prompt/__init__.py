@@ -25,16 +25,16 @@ from .errors import (
 )
 from .markdown import MarkdownSection
 from .observer import (
-    Assessment,
+    Feedback,
+    FeedbackContext,
+    FeedbackProvider,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
     Observation,
-    ObserverConfig,
-    ObserverContext,
-    ObserverTrigger,
-    RecordAssessment,
-    TrajectoryObserver,
-    run_observers,
+    RecordFeedback,
+    run_feedback_providers,
 )
-from .observers import DeadlineObserver
+from .observers import DeadlineFeedback
 from .overrides import (
     LocalPromptOverridesStore,
     PromptDescriptor,
@@ -82,14 +82,15 @@ from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
-    "Assessment",
-    "DeadlineObserver",
+    "DeadlineFeedback",
+    "Feedback",
+    "FeedbackContext",
+    "FeedbackProvider",
+    "FeedbackProviderConfig",
+    "FeedbackTrigger",
     "LocalPromptOverridesStore",
     "MarkdownSection",
     "Observation",
-    "ObserverConfig",
-    "ObserverContext",
-    "ObserverTrigger",
     "OpenSectionsParams",
     "OutputParseError",
     "PolicyDecision",
@@ -111,7 +112,7 @@ __all__ = [
     "ReadBeforeWritePolicy",
     "ReadSectionParams",
     "ReadSectionResult",
-    "RecordAssessment",
+    "RecordFeedback",
     "RenderedPrompt",
     "RenderedPromptProtocol",
     "Section",
@@ -135,13 +136,12 @@ __all__ = [
     "ToolRenderableResult",
     "ToolResult",
     "ToolSuiteSection",
-    "TrajectoryObserver",
     "VisibilityExpansionRequired",
     "WorkspaceSection",
     "hash_json",
     "hash_text",
     "parse_structured_output",
-    "run_observers",
+    "run_feedback_providers",
 ]
 
 
