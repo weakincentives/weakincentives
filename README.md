@@ -63,11 +63,11 @@ constraints ("don't write before you've read", "don't call tool B until tool A
 ran"), and feedback encodes completion criteria so unattended runs don't stop
 early just because a model says "done."
 
-### One flexible reasoning loop
+### One portable definition
 
-A WINK `Prompt` isn't just a template—it's the entire brain of your agent. One
+A WINK `Prompt` isn't just a template—it's the entire agent definition. One
 modular object combines instructions, tool registration, and progressive
-disclosure into a single reasoning loop that adapts to context.
+disclosure into a single portable artifact.
 
 Most frameworks scatter agent behavior across prompt templates, tool registries,
 and routing logic. WINK collapses all of this into a tree of typed `Section`
@@ -92,8 +92,7 @@ section disables, its entire subtree—tools included—vanishes from the prompt
 The result: **the prompt fully determines what the agent can think and do**.
 There's no separate tool registry to synchronize, no routing layer to maintain,
 no configuration that can drift from documentation. You define the agent's
-capabilities once, in one place, and the reasoning loop emerges from the
-structure itself.
+capabilities once, in one place, and the definition ports across runtimes.
 
 ### Why this matters
 
