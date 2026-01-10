@@ -278,3 +278,10 @@ config = MainLoopConfig(
 - One adapter per loop instance
 - No mid-execution cancellation
 - Events local to process
+
+## Related Specifications
+
+- `specs/DLQ.md` - Dead letter queue configuration for failed messages
+- `specs/MAILBOX.md` - Mailbox protocol and message lifecycle
+- `specs/LIFECYCLE.md` - LoopGroup coordination and graceful shutdown
+- `specs/EVALS.md` - EvalLoop wrapping MainLoop for evaluations

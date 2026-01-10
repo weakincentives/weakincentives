@@ -390,12 +390,13 @@ def test_reply_after_finalization_raises():
 
 - **At-least-once only.** No exactly-once. Consumers must be idempotent.
 - **Ordering varies.** SQS Standard is best-effort. Use FIFO or Redis for strict.
-- **No built-in DLQ.** Implement via `delivery_count` threshold.
+- **No built-in DLQ.** Configure via `DLQConfig` on MainLoop/EvalLoop. See `specs/DLQ.md`.
 - **No deduplication.** Handle at application level if needed.
 - **No transactions.** Send and receive are independent operations.
 
 ## Related Specifications
 
+- `specs/DLQ.md` - Dead letter queue configuration and processing
 - `specs/MAILBOX_RESOLVER.md` - Service discovery for mailbox instances
 - `specs/MAIN_LOOP.md` - MainLoop orchestration using mailboxes
 - `specs/RESOURCE_REGISTRY.md` - DI container for lifecycle-scoped resources
