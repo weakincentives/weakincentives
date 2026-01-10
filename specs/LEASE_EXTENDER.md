@@ -3,67 +3,82 @@
 ## Purpose
 
 `LeaseExtender` prevents message visibility timeout during long-running request
-processing. Unlike trajectory observers (which run between tool calls), the
-lease extender operates as a background daemon thread that periodically extends
-message visibility while the main thread processes the request.
+processing by extending the lease whenever a heartbeat occurs. Unlike a
+background daemon thread, this approach ties lease extension directly to
+proof-of-work: if the worker is actively processing (beating), the lease
+extends; if the worker is stuck (no beats), the lease expires naturally and
+the message becomes visible for another worker.
 
-This ensures that messages remain invisible to other workers throughout
-processing, preventing duplicate execution without requiring excessively long
-initial visibility timeouts.
+This design unifies two concerns:
+
+- **Watchdog liveness**: Heartbeats prove the worker isn't stuck
+- **Message visibility**: Lease extension keeps the message invisible
+
+Both benefit from the same signal: active tool execution.
 
 ## Guiding Principles
 
-- **Automatic**: Integrated into `MainLoop._handle_message` with no user action
-- **Non-blocking**: Runs in daemon thread, never blocks request processing
-- **Fail-safe**: Extension failures are logged but do not abort processing
-- **Configurable**: Interval and extension amount are tunable per loop
+- **Proof-of-work**: Lease extends only when actual work happens (heartbeats)
+- **No separate thread**: Extension piggybacks on existing heartbeat calls
+- **Fail-safe**: If worker stalls, lease expires naturally (correct behavior)
+- **Tool-aware**: Heartbeats must propagate through adapter to tool execution
 
 ## Architecture
 
 ```mermaid
 sequenceDiagram
     participant ML as MainLoop
+    participant HB as Heartbeat
     participant LE as LeaseExtender
+    participant Adapter as ProviderAdapter
+    participant Tool as Tool Handler
     participant Msg as Message
 
-    ML->>LE: start(msg)
-    activate LE
-    Note over LE: Daemon thread running
-    LE->>LE: wait(interval)
-    LE->>Msg: extend_visibility(timeout)
-    LE->>LE: wait(interval)
-    LE->>Msg: extend_visibility(timeout)
-    ML->>LE: stop()
-    deactivate LE
-    ML->>Msg: acknowledge()
+    ML->>LE: attach(msg, heartbeat)
+    ML->>Adapter: evaluate(heartbeat=hb)
+    Adapter->>Tool: execute(context with heartbeat)
+    Tool->>HB: beat()
+    HB->>LE: on_beat()
+    LE->>Msg: extend_visibility()
+    Tool->>HB: beat()
+    Note over LE: Interval not elapsed, skip
+    Tool-->>Adapter: result
+    Adapter-->>ML: response
+    ML->>LE: detach()
 ```
 
 ```mermaid
 flowchart TB
     subgraph MainLoop["MainLoop._handle_message"]
         Receive["Receive message"]
-        Start["LeaseExtender.start(msg)"]
-        Execute["_execute(request)"]
-        Stop["LeaseExtender.stop()"]
+        Attach["lease_extender.attach(msg, heartbeat)"]
+        Execute["adapter.evaluate(heartbeat=hb)"]
+        Detach["lease_extender.detach()"]
         Reply["_reply_and_ack()"]
     end
 
-    subgraph Extender["LeaseExtender Thread"]
-        Wait["Wait interval seconds"]
-        Extend["msg.extend_visibility()"]
-        Check["Stop event set?"]
+    subgraph Adapter["ProviderAdapter.evaluate"]
+        Loop["InnerLoop.run()"]
+        ToolExec["ToolExecutor.execute()"]
+        Handler["tool_handler(context)"]
     end
 
-    Receive --> Start
-    Start --> Execute
-    Execute --> Stop
-    Stop --> Reply
+    subgraph Beat["On heartbeat.beat()"]
+        Check["interval elapsed?"]
+        Extend["msg.extend_visibility()"]
+        Skip["no-op"]
+    end
 
-    Start -.->|spawn| Wait
-    Wait --> Extend
-    Extend --> Check
-    Check -->|no| Wait
-    Check -->|yes| Exit["Exit thread"]
+    Receive --> Attach
+    Attach --> Execute
+    Execute --> Loop
+    Loop --> ToolExec
+    ToolExec --> Handler
+    Handler -->|beat()| Check
+    Check -->|yes| Extend
+    Check -->|no| Skip
+    Execute --> Detach
+    Detach --> Reply
 ```
 
 ## Core Types
@@ -73,12 +88,11 @@ flowchart TB
 ```python
 @dataclass(frozen=True, slots=True)
 class LeaseExtenderConfig:
-    """Configuration for automatic lease extension.
+    """Configuration for heartbeat-triggered lease extension.
 
     Attributes:
-        interval: Seconds between extension attempts. Should be less than
-            half the visibility timeout to provide margin for clock skew
-            and network latency.
+        interval: Minimum seconds between extensions. Extensions are triggered
+            by heartbeats but rate-limited to avoid excessive API calls.
         extension: Visibility timeout to request on each extension (seconds).
             Relative to current time, not original receive time.
         enabled: Whether to enable automatic extension. Defaults to True.
@@ -91,8 +105,8 @@ class LeaseExtenderConfig:
 
 **Default rationale:**
 
-- `interval=60`: Extends every minute, providing multiple extension attempts
-  before a 5-minute visibility timeout expires
+- `interval=60`: Rate-limits extensions to once per minute even if tools
+  beat more frequently
 - `extension=300`: Requests 5 more minutes on each extension, matching the
   default `visibility_timeout` in `MainLoop.run()`
 - `enabled=True`: Automatic extension is the safe default for production
@@ -101,21 +115,26 @@ class LeaseExtenderConfig:
 
 ```python
 class LeaseExtender:
-    """Background thread that extends message visibility during processing.
+    """Extends message visibility when heartbeats occur.
 
-    Implements context manager protocol for use with `with` statement.
-    The extender thread starts on context entry and stops on exit.
+    Attaches to a heartbeat for the duration of message processing. When
+    the heartbeat's ``beat()`` is called, checks if enough time has elapsed
+    since the last extension and extends the message visibility if so.
+
+    This approach ensures lease extension only happens when actual work is
+    being done. If the worker stalls (no heartbeats), the lease expires
+    naturally and the message becomes visible for reprocessing.
 
     Example::
 
         extender = LeaseExtender(config=LeaseExtenderConfig(interval=30))
+        heartbeat = Heartbeat()
 
-        with extender.extend(msg):
-            # Long-running processing
-            # Visibility extended every 30 seconds automatically
-            process_request(msg.body)
-        # Thread stopped, safe to acknowledge
-        msg.acknowledge()
+        with extender.attach(msg, heartbeat):
+            # Pass heartbeat through adapter to tools
+            adapter.evaluate(prompt, session=session, heartbeat=heartbeat)
+            # Tools call heartbeat.beat() during execution
+            # Each beat potentially extends the message lease
     """
 
     def __init__(self, config: LeaseExtenderConfig | None = None) -> None:
@@ -125,92 +144,244 @@ class LeaseExtender:
             config: Extension configuration. Uses defaults if None.
         """
         self._config = config if config is not None else LeaseExtenderConfig()
-        self._stop_event: threading.Event | None = None
-        self._thread: threading.Thread | None = None
         self._lock = threading.Lock()
+        self._msg: Message[Any, Any] | None = None
+        self._heartbeat: Heartbeat | None = None
+        self._last_extension: float = 0.0
+        self._original_callback: Callable[[], None] | None = None
 
     @contextmanager
-    def extend(
-        self, msg: Message[Any, Any]
+    def attach(
+        self,
+        msg: Message[Any, Any],
+        heartbeat: Heartbeat,
     ) -> Generator[None, None, None]:
-        """Context manager that extends message visibility during the block.
+        """Attach to a heartbeat for message lease extension.
+
+        While attached, each ``heartbeat.beat()`` call may trigger a lease
+        extension if the configured interval has elapsed.
 
         Args:
             msg: The message to extend visibility for.
+            heartbeat: The heartbeat to observe for beats.
 
         Yields:
-            Control to the caller while extension thread runs.
+            Control to the caller while attached.
         """
         if not self._config.enabled:
             yield
             return
 
-        self._start(msg)
+        self._attach(msg, heartbeat)
         try:
             yield
         finally:
-            self._stop()
+            self._detach()
 
-    def _start(self, msg: Message[Any, Any]) -> None:
-        """Start the extender thread for a message."""
+    def _attach(self, msg: Message[Any, Any], heartbeat: Heartbeat) -> None:
+        """Attach lease extension callback to heartbeat."""
         with self._lock:
-            if self._thread is not None:
-                raise RuntimeError("LeaseExtender already running")
+            if self._msg is not None:
+                raise RuntimeError("LeaseExtender already attached")
 
-            self._stop_event = threading.Event()
-            self._thread = threading.Thread(
-                target=self._run,
-                args=(msg,),
-                name="lease-extender",
-                daemon=True,
-            )
-            self._thread.start()
+            self._msg = msg
+            self._heartbeat = heartbeat
+            self._last_extension = time.monotonic()
 
-    def _stop(self) -> None:
-        """Stop the extender thread."""
+            # Chain our callback with any existing one
+            self._original_callback = heartbeat.on_beat
+            heartbeat.on_beat = self._on_beat
+
+    def _detach(self) -> None:
+        """Detach lease extension callback from heartbeat."""
         with self._lock:
-            if self._stop_event is not None:
-                self._stop_event.set()
+            if self._heartbeat is not None:
+                # Restore original callback
+                self._heartbeat.on_beat = self._original_callback
+                self._original_callback = None
 
-            if self._thread is not None:
-                # Wait up to 2x interval for clean exit
-                self._thread.join(timeout=self._config.interval * 2)
-                self._thread = None
-                self._stop_event = None
+            self._msg = None
+            self._heartbeat = None
 
-    def _run(self, msg: Message[Any, Any]) -> None:
-        """Extension loop: wait, extend, repeat until stopped."""
-        assert self._stop_event is not None
+    def _on_beat(self) -> None:
+        """Called when heartbeat.beat() is invoked."""
+        # Chain to original callback first
+        if self._original_callback is not None:
+            self._original_callback()
 
-        while not self._stop_event.wait(timeout=self._config.interval):
+        with self._lock:
+            if self._msg is None:
+                return
+
+            now = time.monotonic()
+            elapsed = now - self._last_extension
+
+            if elapsed < self._config.interval:
+                return  # Rate limit
+
             try:
-                msg.extend_visibility(self._config.extension)
+                self._msg.extend_visibility(self._config.extension)
+                self._last_extension = now
                 _logger.debug(
                     "Extended visibility for message %s by %d seconds",
-                    msg.id,
+                    self._msg.id,
                     self._config.extension,
                 )
             except ReceiptHandleExpiredError:
-                # Handle expired - message was requeued by reaper.
-                # Stop extending; main thread will handle gracefully.
                 _logger.warning(
                     "Lease extension failed for message %s: receipt handle expired",
-                    msg.id,
+                    self._msg.id,
                 )
-                break
+                # Don't detach - let processing continue, it will handle gracefully
             except Exception:
-                # Log but continue - transient failures shouldn't stop extensions
                 _logger.exception(
                     "Lease extension failed for message %s",
-                    msg.id,
+                    self._msg.id,
                 )
+```
+
+### Heartbeat Extension
+
+The `Heartbeat` class is extended to support an optional callback:
+
+```python
+@dataclass(slots=True)
+class Heartbeat:
+    """Thread-safe heartbeat tracker with optional beat callback.
+
+    Workers call ``beat()`` at regular intervals to prove liveness.
+    The watchdog calls ``elapsed()`` to check for stalls. An optional
+    ``on_beat`` callback enables side effects like lease extension.
+    """
+
+    _last_beat: float = field(default_factory=time.monotonic)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
+    on_beat: Callable[[], None] | None = None
+
+    def beat(self) -> None:
+        """Record a heartbeat and invoke callback if set."""
+        with self._lock:
+            self._last_beat = time.monotonic()
+
+        # Invoke callback outside lock to avoid deadlock
+        if self.on_beat is not None:
+            self.on_beat()
+
+    def elapsed(self) -> float:
+        """Seconds since last heartbeat."""
+        with self._lock:
+            return time.monotonic() - self._last_beat
+```
+
+## Heartbeat Propagation
+
+For lease extension to work during tool execution, the heartbeat must be
+passed through the adapter to tool handlers.
+
+### ProviderAdapter Interface
+
+```python
+class ProviderAdapter(ABC, Generic[OutputT]):
+    @abstractmethod
+    def evaluate(
+        self,
+        prompt: Prompt[OutputT],
+        *,
+        session: Session,
+        deadline: Deadline | None = None,
+        budget_tracker: BudgetTracker | None = None,
+        heartbeat: Heartbeat | None = None,  # NEW
+    ) -> PromptResponse[OutputT]:
+        """Evaluate a prompt and return the response."""
+        ...
+```
+
+### ToolContext Extension
+
+```python
+@dataclass(frozen=True, slots=True)
+class ToolContext:
+    """Context passed to tool handlers during execution."""
+
+    prompt: Prompt[Any]
+    session: Session
+    deadline: Deadline | None = None
+    heartbeat: Heartbeat | None = None  # NEW
+
+    def beat(self) -> None:
+        """Record a heartbeat if available.
+
+        Tool handlers should call this during long-running operations
+        to prove liveness and extend message visibility.
+        """
+        if self.heartbeat is not None:
+            self.heartbeat.beat()
+```
+
+### Tool Handler Pattern
+
+Tool handlers should beat during long-running operations:
+
+```python
+def filesystem_read_handler(
+    params: ReadParams,
+    *,
+    context: ToolContext,
+) -> ToolResult[ReadResult]:
+    """Read a file from the filesystem."""
+    # Beat before potentially slow I/O
+    context.beat()
+
+    content = context.resources.get(Filesystem).read(params.path)
+
+    return ToolResult.ok(ReadResult(content=content))
+
+
+def podman_exec_handler(
+    params: ExecParams,
+    *,
+    context: ToolContext,
+) -> ToolResult[ExecResult]:
+    """Execute a command in a container."""
+    container = context.resources.get(PodmanContainer)
+
+    # Beat periodically during long-running command
+    for chunk in container.exec_stream(params.command):
+        context.beat()
+        output.append(chunk)
+
+    return ToolResult.ok(ExecResult(output="".join(output)))
+```
+
+### Adapter Threading
+
+The heartbeat flows through the adapter internals:
+
+```python
+# MainLoop._execute
+response = self._adapter.evaluate(
+    prompt,
+    session=session,
+    deadline=effective_deadline,
+    budget_tracker=budget_tracker,
+    heartbeat=self._heartbeat,  # Pass heartbeat
+)
+
+# InnerLoopConfig
+@dataclass(frozen=True, slots=True)
+class InnerLoopConfig:
+    deadline: Deadline | None = None
+    budget_tracker: BudgetTracker | None = None
+    heartbeat: Heartbeat | None = None  # NEW
+
+# ToolExecutor receives heartbeat via config
+# Creates ToolContext with heartbeat
+# Tool handler receives context and can beat
 ```
 
 ## MainLoop Integration
 
 ### Configuration
-
-`LeaseExtenderConfig` is added to `MainLoopConfig`:
 
 ```python
 @FrozenDataclass()
@@ -227,15 +398,13 @@ class MainLoopConfig:
 
 ### Constructor
 
-`MainLoop` creates a `LeaseExtender` instance from config:
-
 ```python
 class MainLoop[UserRequestT, OutputT](ABC):
     def __init__(
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
+        requests: Mailbox[...],
         config: MainLoopConfig | None = None,
     ) -> None:
         # ... existing initialization ...
@@ -244,8 +413,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
 ### Message Handling
 
-`_handle_message` wraps execution with the lease extender context:
-
 ```python
 def _handle_message(
     self, msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
@@ -253,96 +420,259 @@ def _handle_message(
     """Process a single message from the requests mailbox."""
     request_event = msg.body
 
-    with self._lease_extender.extend(msg):
+    # Attach lease extender to heartbeat for this message
+    with self._lease_extender.attach(msg, self._heartbeat):
         try:
             response, session = self._execute(request_event)
-
             result = MainLoopResult[OutputT](
                 request_id=request_event.request_id,
                 output=response.output,
                 session_id=session.session_id,
             )
-
         except Exception as exc:
             result = MainLoopResult[OutputT](
                 request_id=request_event.request_id,
                 error=str(exc),
             )
 
-    # Extension stopped before reply/ack
     self._reply_and_ack(msg, result)
 ```
 
-**Key changes:**
+### Heartbeat Propagation in _execute
 
-1. The entire `_execute()` call is wrapped in the extension context
-2. Extension stops before `_reply_and_ack()` to avoid extending after ack
-3. Both success and error paths are covered by the same context
+```python
+def _execute(
+    self,
+    request_event: MainLoopRequest[UserRequestT],
+) -> tuple[PromptResponse[OutputT], Session]:
+    """Execute with heartbeat propagation."""
+    prompt, session = self.prepare(request_event.request)
+    # ... budget/deadline setup ...
+
+    while True:
+        try:
+            response = self._adapter.evaluate(
+                prompt,
+                session=session,
+                deadline=effective_deadline,
+                budget_tracker=budget_tracker,
+                heartbeat=self._heartbeat,  # Pass heartbeat to adapter
+            )
+        except VisibilityExpansionRequired as e:
+            # ... handle visibility expansion ...
+        else:
+            self.finalize(prompt, session)
+            return response, session
+```
+
+## Automatic Beating in Adapters
+
+To ensure consistent heartbeating without requiring every tool to manually
+call `context.beat()`, adapters should beat automatically at key points:
+
+### ToolExecutor Auto-Beat
+
+```python
+class ToolExecutor:
+    def execute(
+        self,
+        tool_call: ToolCall,
+        *,
+        context: ToolExecutionContext,
+    ) -> ToolResult[Any]:
+        """Execute a tool with automatic heartbeat."""
+        # Beat before tool execution
+        if context.heartbeat is not None:
+            context.heartbeat.beat()
+
+        with tool_execution(context, tool_call):
+            result = self._execute_tool_with_snapshot(tool_call, context)
+
+        # Beat after tool execution
+        if context.heartbeat is not None:
+            context.heartbeat.beat()
+
+        return result
+```
+
+### InnerLoop Auto-Beat
+
+```python
+class InnerLoop:
+    def run(self) -> PromptResponse[OutputT]:
+        """Run the inner loop with automatic heartbeat."""
+        while not self._should_stop():
+            # Beat at start of each iteration
+            if self._config.heartbeat is not None:
+                self._config.heartbeat.beat()
+
+            response = self._get_completion()
+            # ... process response, execute tools ...
+
+        return self._build_response()
+```
+
+This ensures:
+
+1. Heartbeat occurs at each LLM call boundary
+2. Heartbeat occurs before/after each tool execution
+3. Long-running tools can add additional beats as needed
 
 ## Error Handling
 
 | Error | Behavior |
-| -------------------------- | ------------------------------------------------ |
-| `ReceiptHandleExpiredError` | Stop extending; processing continues |
-| Network/transient errors | Log warning; continue extending |
-| Extension thread crash | Daemon thread dies; processing continues |
+| -------------------------- | ------------------------------------------ |
+| `ReceiptHandleExpiredError` | Log warning; processing continues |
+| Network/transient errors | Log exception; skip this extension |
+| Callback chain failure | Original callback still invoked first |
 
 **Design rationale:** Extension is a reliability optimization, not a
 correctness requirement. If extension fails, the message may become visible
-and be processed again - the system already handles this via idempotent
-processing or deduplication at a higher layer.
+and be processed again - the system handles this via idempotent processing.
 
 ## Thread Safety
 
-- `LeaseExtender` uses internal `threading.Lock` for start/stop coordination
-- Only one message can be extended at a time per `LeaseExtender` instance
-- `MainLoop` uses one `LeaseExtender` instance for all messages (sequential)
-- Extension thread accesses `Message.extend_visibility()` which is thread-safe
-  (delegates to mailbox implementation with its own synchronization)
+- `LeaseExtender` uses internal `threading.Lock` for state protection
+- Heartbeat callback invoked outside lock to avoid deadlock
+- `Heartbeat.on_beat` assignment is atomic (single reference)
+- Rate limiting uses monotonic clock (no wall-clock issues)
 
-## Timing Considerations
+## Comparison: Heartbeat-Based vs Daemon Thread
 
-### Clock Skew
+| Aspect | Daemon Thread | Heartbeat-Based |
+| --------------------- | ---------------------- | --------------------------- |
+| Extension trigger | Fixed interval timer | Tool execution beats |
+| Stuck worker behavior | Keeps extending | Lease expires (correct!) |
+| Thread overhead | Extra daemon thread | No additional threads |
+| Timing accuracy | Precise intervals | Rate-limited, opportunistic |
+| Proof-of-work | None (always extends) | Only extends on activity |
 
-The extension interval should be significantly less than the visibility
-timeout to account for:
+The heartbeat-based approach is superior because it correctly handles the
+stuck worker case: if no work is happening, the lease should expire so the
+message can be reprocessed by a healthy worker.
 
-- Clock drift between client and server
-- Network latency for extension requests
-- Processing time for extension logic
+## Testing
 
-**Recommendation:** Set `interval` to at most 40% of `visibility_timeout`:
+### Unit Tests
 
 ```python
-# visibility_timeout=300 (5 minutes)
-config = LeaseExtenderConfig(
-    interval=60,      # Extend every 1 minute
-    extension=300,    # Request 5 more minutes
-)
+def test_lease_extender_extends_on_beat() -> None:
+    """Verify extension happens when heartbeat fires."""
+    msg = create_test_message()
+    heartbeat = Heartbeat()
+    config = LeaseExtenderConfig(interval=0.0)  # No rate limit
+    extender = LeaseExtender(config)
+
+    with extender.attach(msg, heartbeat):
+        heartbeat.beat()
+        heartbeat.beat()
+        heartbeat.beat()
+
+    assert msg.extend_visibility_calls == 3
+
+
+def test_lease_extender_rate_limits() -> None:
+    """Verify extension is rate-limited by interval."""
+    msg = create_test_message()
+    heartbeat = Heartbeat()
+    config = LeaseExtenderConfig(interval=1.0)  # 1 second limit
+    extender = LeaseExtender(config)
+
+    with extender.attach(msg, heartbeat):
+        heartbeat.beat()  # Extends
+        heartbeat.beat()  # Skipped (interval not elapsed)
+        heartbeat.beat()  # Skipped
+        time.sleep(1.1)
+        heartbeat.beat()  # Extends (interval elapsed)
+
+    assert msg.extend_visibility_calls == 2
+
+
+def test_lease_extender_disabled() -> None:
+    """Verify no extension when disabled."""
+    msg = create_test_message()
+    heartbeat = Heartbeat()
+    config = LeaseExtenderConfig(enabled=False)
+    extender = LeaseExtender(config)
+
+    with extender.attach(msg, heartbeat):
+        heartbeat.beat()
+
+    assert msg.extend_visibility_calls == 0
+
+
+def test_heartbeat_callback_chaining() -> None:
+    """Verify original callback is preserved."""
+    calls: list[str] = []
+    heartbeat = Heartbeat()
+    heartbeat.on_beat = lambda: calls.append("original")
+
+    msg = create_test_message()
+    extender = LeaseExtender(LeaseExtenderConfig(interval=0.0))
+
+    with extender.attach(msg, heartbeat):
+        heartbeat.beat()
+
+    assert calls == ["original"]
+    assert msg.extend_visibility_calls == 1
+
+
+def test_tool_context_beat() -> None:
+    """Verify ToolContext.beat() propagates to heartbeat."""
+    heartbeat = Heartbeat()
+    context = ToolContext(
+        prompt=mock_prompt,
+        session=mock_session,
+        heartbeat=heartbeat,
+    )
+
+    initial = heartbeat.elapsed()
+    time.sleep(0.1)
+    context.beat()
+
+    assert heartbeat.elapsed() < 0.05  # Just beat, should be fresh
 ```
 
-This provides 4+ extension opportunities before timeout.
-
-### Long Tool Calls
-
-Unlike trajectory observers that run between tool calls, `LeaseExtender`
-operates independently. Even if a single tool call takes 10 minutes, the
-lease will be extended every `interval` seconds throughout.
-
-## Disabling Extension
-
-For short-running requests or test scenarios, disable extension:
+### Integration Tests
 
 ```python
-config = MainLoopConfig(
-    lease_extender=LeaseExtenderConfig(enabled=False),
-)
-loop = MyMainLoop(adapter=adapter, requests=requests, config=config)
+def test_mainloop_extends_during_tool_execution(
+    mailbox: InMemoryMailbox[...],
+) -> None:
+    """Verify MainLoop extends visibility when tools beat."""
+    loop = ToolHeavyLoop(
+        adapter=adapter_with_beating_tools,
+        requests=mailbox,
+        config=MainLoopConfig(
+            lease_extender=LeaseExtenderConfig(interval=0.1),
+        ),
+    )
+
+    mailbox.send(MainLoopRequest(request=TestRequest()))
+    loop.run(max_iterations=1, visibility_timeout=2)
+
+    # Extensions happened during tool execution
+    assert mailbox.extend_visibility_call_count > 0
+
+
+def test_stuck_worker_lease_expires() -> None:
+    """Verify lease expires when no heartbeats occur."""
+    msg = create_test_message(visibility_timeout=1)
+    heartbeat = Heartbeat()
+    extender = LeaseExtender(LeaseExtenderConfig(interval=0.1))
+
+    with extender.attach(msg, heartbeat):
+        # Simulate stuck worker - no beats
+        time.sleep(1.5)
+
+    # No extensions because no beats
+    assert msg.extend_visibility_calls == 0
+    # Message should have become visible (expired)
 ```
 
 ## Observability
 
-Extension events are logged at DEBUG level for normal operation:
+Extension events are logged at DEBUG level:
 
 ```
 DEBUG:weakincentives.runtime.main_loop:Extended visibility for message abc-123 by 300 seconds
@@ -354,111 +684,21 @@ Failures are logged at WARNING level:
 WARNING:weakincentives.runtime.main_loop:Lease extension failed for message abc-123: receipt handle expired
 ```
 
-## Comparison with Trajectory Observers
+## Migration Path
 
-| Aspect | TrajectoryObserver | LeaseExtender |
-| ----------------- | -------------------------- | ----------------------- |
-| Execution model | Synchronous, between calls | Async daemon thread |
-| Trigger | Tool invocation count/time | Fixed interval |
-| Purpose | Agent feedback | Infrastructure reliability |
-| Failure handling | Assessment not delivered | Log and continue |
-| Thread | Main thread | Daemon thread |
-| Lifetime | Per tool call | Per message |
+For tools that don't yet call `context.beat()`, the automatic beating in
+`ToolExecutor` provides baseline coverage. As tools are updated to beat
+during long operations, lease extension becomes more granular.
 
-## Implementation Notes
+Priority for adding `context.beat()` calls:
 
-### Module Location
-
-`LeaseExtender` lives in `weakincentives.runtime.main_loop` alongside
-`MainLoop` since it's tightly coupled to message handling.
-
-Alternatively, if reuse is desired for non-MainLoop message processing:
-
-```
-weakincentives/runtime/
-├── main_loop.py
-└── lease_extender.py  # Standalone module
-```
-
-### Imports
-
-```python
-from weakincentives.runtime.main_loop import (
-    LeaseExtender,
-    LeaseExtenderConfig,
-    MainLoop,
-    MainLoopConfig,
-)
-```
-
-## Testing
-
-### Unit Tests
-
-```python
-def test_lease_extender_extends_visibility() -> None:
-    """Verify extension is called at configured interval."""
-    msg = create_test_message()
-    config = LeaseExtenderConfig(interval=0.1, extension=60)
-    extender = LeaseExtender(config)
-
-    with extender.extend(msg):
-        time.sleep(0.25)  # Wait for 2+ extensions
-
-    assert msg.extend_visibility_calls >= 2
-
-
-def test_lease_extender_disabled() -> None:
-    """Verify no extension when disabled."""
-    msg = create_test_message()
-    config = LeaseExtenderConfig(enabled=False)
-    extender = LeaseExtender(config)
-
-    with extender.extend(msg):
-        time.sleep(0.1)
-
-    assert msg.extend_visibility_calls == 0
-
-
-def test_lease_extender_stops_on_expired_handle() -> None:
-    """Verify extension stops when handle expires."""
-    msg = create_expiring_message()  # Raises ReceiptHandleExpiredError
-    extender = LeaseExtender(LeaseExtenderConfig(interval=0.05))
-
-    with extender.extend(msg):
-        time.sleep(0.2)
-
-    # Should have stopped after first failure, no crash
-```
-
-### Integration Tests
-
-```python
-def test_mainloop_extends_during_slow_request(
-    mailbox: InMemoryMailbox[...],
-) -> None:
-    """Verify MainLoop extends visibility during processing."""
-    # Configure short visibility timeout and extension interval
-    loop = SlowProcessingLoop(
-        adapter=slow_adapter,  # Takes 5 seconds
-        requests=mailbox,
-        config=MainLoopConfig(
-            lease_extender=LeaseExtenderConfig(
-                interval=0.5,
-                extension=10,
-            ),
-        ),
-    )
-
-    mailbox.send(MainLoopRequest(request=TestRequest()))
-    loop.run(max_iterations=1, visibility_timeout=2)
-
-    # Message processed successfully despite 2-second visibility timeout
-    # because lease was extended multiple times during 5-second processing
-```
+1. Podman container execution (can run for minutes)
+2. External API calls (network latency)
+3. Large file operations (I/O bound)
+4. Computation-heavy tools (CPU bound)
 
 ## Future Work
 
-- **Metrics**: Emit counters for extension attempts/failures
-- **Adaptive interval**: Adjust based on observed processing times
-- **Per-request override**: Allow `MainLoopRequest` to specify extension config
+- **Metrics**: Emit counters for extension attempts/failures per tool
+- **Adaptive interval**: Adjust based on observed tool durations
+- **Per-tool beating frequency**: Some tools may need more frequent beats
