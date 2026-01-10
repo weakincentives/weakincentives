@@ -1,11 +1,11 @@
 # Weak Incentives (Is All You Need)
 
-WINK is the agent-definition layer: prompts, tools, policies, and trajectory
-feedback that stay stable while runtimes change.
+WINK is the agent-definition layer: prompts, tools, policies, and feedback that
+stay stable while runtimes change.
 
 WINK is a Python library for building unattended/background agents. You define
-the prompt, tools, and policies, and you add trajectory feedback that prevents
-the agent from declaring success too early. The planning loop, sandboxing,
+the prompt, tools, and policies, and you add feedback that prevents the agent
+from declaring success too early. The planning loop, sandboxing,
 retries, scheduling, and orchestration live in the execution harness—often a
 vendor runtime. WINK keeps your agent definition portable so you can swap
 harnesses without rewriting the core logic.
@@ -27,8 +27,8 @@ precedent from traditional engineering. Builders who master it early win.
 
 Some orchestration stays—for auditability, cost control, and hard constraints—but
 it should live in a harness you can swap. WINK focuses on the agent definition:
-typed prompts, tool contracts, policies that encode invariants, and trajectory
-feedback that resists premature "done." Run that definition on WINK's minimal
+typed prompts, tool contracts, policies that encode invariants, and feedback
+that resists premature "done." Run that definition on WINK's minimal
 loop when you want simplicity, or on a provider harness when you want stronger
 sandboxing and native tooling.
 
@@ -40,7 +40,7 @@ A high-quality unattended agent has two parts:
 - Prompt structure (context engineering)
 - Tools + typed I/O contracts (the side-effect boundary)
 - Policies (gates on tool use and state transitions)
-- Trajectory feedback ("done" criteria, drift detection)
+- Feedback ("done" criteria, drift detection)
 
 **Execution harness (runtime-owned):**
 - Planning/act loop and tool-call sequencing
@@ -60,8 +60,8 @@ section bundles its own instructions and tools together.
 
 WINK treats reliability as part of the definition. Policies encode hard
 constraints ("don't write before you've read", "don't call tool B until tool A
-ran"), and trajectory feedback encodes completion criteria so unattended runs
-don't stop early just because a model says "done."
+ran"), and feedback encodes completion criteria so unattended runs don't stop
+early just because a model says "done."
 
 ### One flexible reasoning loop
 
@@ -153,8 +153,8 @@ structure itself.
   policies instead of brittle orchestration graphs.
   See [Policies Over Workflows](specs/POLICIES_OVER_WORKFLOWS.md).
 
-- **Trajectory feedback (completion resistance).** Encode "done means X" checks
-  that run during execution to catch drift and premature termination.
+- **Feedback (completion resistance).** Encode "done means X" checks that run
+  during execution to catch drift and premature termination.
   See [Task Completion Checking](specs/TASK_COMPLETION.md) and
   [Trajectory Observers](specs/TRAJECTORY_OBSERVERS.md) (design spec).
 
