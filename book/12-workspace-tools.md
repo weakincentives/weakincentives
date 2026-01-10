@@ -23,6 +23,11 @@ These tools share common patterns:
 
 The result: agents can safely explore and modify code without risking production systems.
 
+**Own the definition; rent the harness.** These workspace tools are part of the
+agent definition—they define what capabilities your agent has. Whether you run
+on WINK's `MainLoop` or delegate to a provider runtime, the same tools work the
+same way.
+
 ## Architecture Overview
 
 ```mermaid

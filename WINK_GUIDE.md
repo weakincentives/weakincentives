@@ -25,6 +25,25 @@ This guide is written for engineers who want to:
 
 **If you only read one thing**: in WINK, the prompt is the agent.
 
+More precisely: a high-quality unattended agent has two parts.
+
+1. The **agent definition** (what you own):
+
+   - PromptTemplate + overrides (the decision procedure and context shape)
+   - Tools + handlers (the only place side effects happen)
+   - Policies (invariants that constrain tool use and state transitions)
+   - Trajectory feedback (checks that prevent premature "done" and correct drift)
+
+1. The **execution harness** (what you rent from a runtime):
+
+   - The plan/act loop (how the model is driven across tool calls)
+   - Tool call orchestration, retries, and backoff
+   - Sandboxing/permissions for side-effectful tools
+   - Multi-agent scheduling and message routing (when needed)
+   - Budgets, deadlines, telemetry, and crash recovery
+
+WINK's job is to make the agent definition portable across harnesses.
+
 **Status**: Alpha. Expect some APIs to evolve as the library matures.
 
 ______________________________________________________________________
@@ -39,7 +58,19 @@ WINK is built around a specific bet about where durable value lives in agent sys
 
 **Keep product semantics out of prompts.** Encode domain meaning and safety in stable tools and structured context, not provider-specific prompt glue. When your business logic lives in typed tool handlers and well-defined state, it survives model upgrades.
 
-**Use provider runtimes; own the tools.** Let vendors handle planning, orchestration, and retries. Invest in high-quality tools that expose your system-of-record capabilities. The Claude Agent SDK adapter is an example: it delegates execution to Claude Code's native runtime while WINK owns the tool definitions and session state.
+**Own the agent definition; rent the harness.**
+
+For unattended agents, your durable advantage is the agent definition: prompt structure, tool contracts, policies, and trajectory feedback. The execution harness (planning loop, sandboxing, orchestration, retries) should be treated as a commodity runtime that you can swap.
+
+WINK is intentionally designed so your core artifacts stay stable while you change harnesses (e.g. a minimal local loop vs a provider runtime). You should not have to rewrite "what the agent is" just because you changed "how it runs".
+
+| You own (WINK artifacts) | Harness owns (runtime responsibilities) |
+| ------------------------------------- | -------------------------------------------- |
+| PromptTemplate + overrides | plan/act loop + tool call sequencing |
+| Tools + typed I/O contracts | tool call orchestration (invocation + retries) |
+| Tool/state policies | sandboxing + permissions |
+| Trajectory feedback (checkers/evals) | budgets/deadlines + operational limits |
+| Eval datasets + regression gates | scheduling + multi-agent routing (if used) |
 
 **Build evaluation as your control plane.** Make model and runtime upgrades safe via scenario tests and structured output validation. When you can verify behavior programmatically, you can improve without rewrites.
 
@@ -207,7 +238,7 @@ ______________________________________________________________________
 
 Provider adapters implement the `ProviderAdapter` protocol: they take a `Prompt`, execute tools, and return typed results. Adapters abstract away provider-specific details—OpenAI vs Anthropic vs LiteLLM—so your agent code stays portable. All adapters support structured output (via function calling or response schemas), tool execution, throttling, and token tracking.
 
-WINK ships with three adapters: `OpenAIAdapter` (for OpenAI and compatible APIs), `LiteLLMAdapter` (for 100+ providers via LiteLLM), and `ClaudeAgentSdkAdapter` (for Claude Code's native execution runtime with sophisticated sandboxing). The Claude Agent SDK adapter bridges WINK tools to MCP tools, supports workspace management, and delegates planning/orchestration to Claude's runtime while WINK owns tool definitions and session state.
+WINK ships with three adapters: `OpenAIAdapter` (for OpenAI and compatible APIs), `LiteLLMAdapter` (for 100+ providers via LiteLLM), and `ClaudeAgentSDKAdapter` (for Claude Code's native execution runtime with sophisticated sandboxing). The Claude Agent SDK adapter bridges WINK tools to MCP tools, supports workspace management, and delegates planning/orchestration to Claude's runtime while WINK owns tool definitions and session state.
 
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter

@@ -16,6 +16,11 @@ The adapter layer handles everything you don't want to think about:
 
 Most importantly, adapters enforce **consistent semantics across providers**. Whether you're using OpenAI, LiteLLM, or Claude Code, the same prompt produces the same logical behavior. Provider differences—API quirks, schema formats, tool execution models—stay encapsulated in the adapter.
 
+**WINK makes the agent definition portable across execution harnesses.** Adapters
+are the mechanism: they let you swap from a lightweight OpenAI adapter to a
+hardened provider runtime (like Claude Agent SDK) without rewriting your prompts,
+tools, or policies.
+
 ### Why Adapters Matter
 
 Without adapters, you'd write code like this:
