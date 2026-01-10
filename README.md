@@ -37,12 +37,14 @@ sandboxing and native tooling.
 A high-quality unattended agent has two parts:
 
 **Agent definition (you own):**
+
 - Prompt structure (context engineering)
 - Tools + typed I/O contracts (the side-effect boundary)
 - Policies (gates on tool use and state transitions)
 - Feedback ("done" criteria, drift detection)
 
 **Execution harness (runtime-owned):**
+
 - Planning/act loop and tool-call sequencing
 - Sandboxing/permissions (filesystem/shell/network)
 - Retries/backoff, throttling, and lifecycle management
