@@ -149,6 +149,7 @@ Consult these specs before modifying related code:
 | ------------------------------ | --------------------------------------------------------------------- |
 | `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging, skill mounting |
+| `specs/CORRELATION_CONTEXT.md` | Run-level correlation context, trace propagation across logs/events/mailbox |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, session evaluators |
