@@ -34,7 +34,7 @@ Configuration for dead-letter behavior:
 
 ```python
 @dataclass(slots=True, frozen=True)
-class DLQConfig(Generic[T, R]):
+class DLQConfig[T, R]:
     """Dead letter queue configuration.
 
     Type parameters:
@@ -73,7 +73,7 @@ Envelope preserving the original message with failure context:
 
 ```python
 @dataclass(slots=True, frozen=True)
-class DeadLetter(Generic[T]):
+class DeadLetter[T]:
     """Dead-lettered message with failure metadata."""
 
     message_id: str
@@ -115,7 +115,7 @@ class DeadLetter(Generic[T]):
 Strategy for handling failures:
 
 ```python
-class DLQPolicy(Protocol[T]):
+class DLQPolicy[T](Protocol):
     """Policy for deciding when to dead-letter messages."""
 
     def should_dead_letter(
@@ -142,7 +142,7 @@ class DLQPolicy(Protocol[T]):
 The default policy implements the standard threshold logic:
 
 ```python
-class DefaultDLQPolicy(Generic[T]):
+class DefaultDLQPolicy[T]:
     """Default dead-letter policy based on delivery count and error types."""
 
     def should_dead_letter(
@@ -172,7 +172,7 @@ class DefaultDLQPolicy(Generic[T]):
 MainLoop accepts an optional DLQ configuration:
 
 ```python
-class MainLoop(ABC, Generic[UserRequestT, OutputT]):
+class MainLoop[UserRequestT, OutputT](ABC):
     def __init__(
         self,
         *,
@@ -218,17 +218,9 @@ def _handle_failure(
         self._dead_letter(msg, error)
         return
 
-    # Standard backoff retry
-    try:
-        # Send error result if reply_to available
-        if msg.reply_to:
-            msg.reply(MainLoopResult(
-                request_id=msg.body.request_id,
-                error=str(error),
-            ))
-    except (ReplyNotAvailableError, MessageFinalizedError):
-        pass
-
+    # Retry with backoff - do NOT send error reply here.
+    # The message will be redelivered and may succeed on retry.
+    # Only send error replies on terminal outcomes (DLQ or final failure).
     backoff = min(60 * msg.delivery_count, 900)
     msg.nack(visibility_timeout=backoff)
 
@@ -254,6 +246,16 @@ def _dead_letter(
         reply_to=msg.reply_to.name if msg.reply_to else None,
     )
 
+    # Send error reply - this is a terminal outcome
+    try:
+        if msg.reply_to:
+            msg.reply(MainLoopResult(
+                request_id=msg.body.request_id,
+                error=f"Dead-lettered after {msg.delivery_count} attempts: {error}",
+            ))
+    except (ReplyNotAvailableError, MessageFinalizedError):
+        pass
+
     self._dlq.mailbox.send(dead_letter)
     log.warning(
         "Message dead-lettered",
@@ -272,7 +274,7 @@ def _dead_letter(
 EvalLoop follows the same pattern:
 
 ```python
-class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
+class EvalLoop[InputT, OutputT, ExpectedT]:
     def __init__(
         self,
         *,
@@ -604,7 +606,7 @@ group.run()
 ### DLQConsumer
 
 ```python
-class DLQConsumer(Generic[T]):
+class DLQConsumer[T]:
     """Runnable consumer for dead letter queues."""
 
     def __init__(

@@ -4,6 +4,17 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Documentation: Dead Letter Queue Specification
+
+Added `specs/DLQ.md` covering dead letter queue configuration for MainLoop and
+EvalLoop. The spec documents:
+
+- `DLQConfig` for configuring max delivery count and error classification
+- `DeadLetter` envelope preserving original message with failure metadata
+- `DLQPolicy` protocol for custom dead-lettering decisions
+- `DLQConsumer` runnable for LoopGroup integration
+- Replay, alerting, and observability patterns
+
 ### RedisMailbox: Default TTL for Redis Keys
 
 RedisMailbox now applies a default 3-day TTL to all Redis keys, preventing
