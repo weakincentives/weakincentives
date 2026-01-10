@@ -207,12 +207,27 @@ vfs_section = VfsToolsSection(session=session, mounts=mounts, allowed_host_roots
 ### 4. Run and get typed results
 
 ```python
+from dataclasses import dataclass
+from typing import Any
 from weakincentives.runtime import MainLoop, Session
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.prompt import Prompt, PromptTemplate
+
+# Type stubs for example (defined in your application)
+@dataclass(frozen=True)
+class ReviewTurnParams:
+    request: str
+
+@dataclass(frozen=True)
+class ReviewResponse:
+    summary: str
+
+def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:  # type: ignore[type-arg]
+    ...  # type: ignore[empty-body]
 
 class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
-    def __init__(self, adapter, bus):
+    def __init__(self, adapter: Any, bus: Any) -> None:
         super().__init__(adapter=adapter, bus=bus)
         self._session = Session(bus=bus)
         self._template = build_task_prompt(session=self._session)
@@ -223,7 +238,8 @@ class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 bus = InProcessDispatcher()
 loop = ReviewLoop(OpenAIAdapter(model="gpt-4o"), bus)
 response, _ = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
-review: ReviewResponse = response.output  # typed, validated
+if response.output is not None:
+    review: ReviewResponse = response.output  # typed, validated
 ```
 
 ### 5. Inspect state
