@@ -1532,7 +1532,7 @@ class TestVerifyTaskCompletion:
         budget = Budget(max_total_tokens=100)
         tracker = BudgetTracker(budget)
         # Consume all budget
-        from weakincentives.runtime.events._types import TokenUsage
+        from weakincentives.runtime.events.types import TokenUsage
 
         tracker.record_cumulative("test", TokenUsage(input_tokens=50, output_tokens=50))
 
@@ -1666,7 +1666,7 @@ class TestVerifyTaskCompletion:
         budget = Budget(max_total_tokens=1000)
         tracker = BudgetTracker(budget)
         # Only consume 10% of budget
-        from weakincentives.runtime.events._types import TokenUsage
+        from weakincentives.runtime.events.types import TokenUsage
 
         tracker.record_cumulative("test", TokenUsage(input_tokens=50, output_tokens=50))
 

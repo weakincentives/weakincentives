@@ -26,7 +26,6 @@ import weakincentives.contrib.tools.vfs_types as vfs_types_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from weakincentives import ToolValidationError
 from weakincentives.contrib.tools import (
-    READ_ENTIRE_FILE,
     DeleteEntry,
     EditFileParams,
     FileInfo,
@@ -47,6 +46,7 @@ from weakincentives.contrib.tools import (
     WriteFileParams,
 )
 from weakincentives.contrib.tools.vfs import format_timestamp, path_from_string
+from weakincentives.filesystem import READ_ENTIRE_FILE
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session

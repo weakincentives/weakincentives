@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from typing import Any, override
 
 from ...types.dataclass import SupportsDataclass
-from ..events._types import DispatchResult, TelemetryDispatcher
+from ..events.types import DispatchResult, TelemetryDispatcher
 from .protocols import SessionProtocol, SessionViewProtocol, SnapshotProtocol
 from .slice_accessor import ReadOnlySliceAccessor
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy

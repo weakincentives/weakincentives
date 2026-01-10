@@ -231,16 +231,6 @@ class TestProtocolExports:
         assert ExportedToolSuite is ToolSuiteSection
         assert ExportedWorkspace is WorkspaceSection
 
-    def test_protocols_exported_from_contrib_tools(self) -> None:
-        """Protocols re-exported from contrib.tools for convenience."""
-        from weakincentives.contrib.tools import (
-            ToolSuiteSection as ContribToolSuite,
-            WorkspaceSection as ContribWorkspace,
-        )
-
-        assert ContribToolSuite is ToolSuiteSection
-        assert ContribWorkspace is WorkspaceSection
-
     def test_protocols_in_module_all(self) -> None:
         """Protocols listed in __all__ exports."""
         from weakincentives import prompt

@@ -57,8 +57,6 @@ from weakincentives.runtime.mailbox import (
     Message,
     ReceiptHandleExpiredError,
     SerializationError,
-)
-from weakincentives.runtime.mailbox._types import (
     validate_visibility_timeout,
     validate_wait_time,
 )

@@ -12,8 +12,17 @@
 
 """Stdlib dataclass serde utilities."""
 
+from ._utils import TYPE_REF_KEY, resolve_type_identifier, type_identifier
 from .dump import clone, dump
 from .parse import parse
 from .schema import schema
 
-__all__ = ["clone", "dump", "parse", "schema"]
+__all__ = [
+    "TYPE_REF_KEY",
+    "clone",
+    "dump",
+    "parse",
+    "resolve_type_identifier",
+    "schema",
+    "type_identifier",
+]

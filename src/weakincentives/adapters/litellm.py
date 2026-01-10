@@ -24,7 +24,7 @@ from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
 from ..runtime.logging import StructuredLogger, get_logger
-from ._names import LITELLM_ADAPTER_NAME
+from ..types import LITELLM_ADAPTER_NAME
 from ._provider_protocols import (
     ProviderChoice,
     ProviderCompletionCallable,

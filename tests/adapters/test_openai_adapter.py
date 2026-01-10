@@ -22,7 +22,6 @@ from typing import Any, Literal, TypeVar, cast
 import pytest
 
 from weakincentives.adapters import OpenAIClientConfig, OpenAIModelConfig
-from weakincentives.adapters._names import OPENAI_ADAPTER_NAME
 from weakincentives.adapters._tool_messages import serialize_tool_message
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_RESPONSE,
@@ -45,6 +44,7 @@ from weakincentives.prompt.structured_output import (
     StructuredOutputConfig,
 )
 from weakincentives.runtime.session import SessionProtocol
+from weakincentives.types import OPENAI_ADAPTER_NAME
 
 try:
     from tests.adapters._test_stubs import (

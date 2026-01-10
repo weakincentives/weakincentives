@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from ._names import (
+from ..types import (
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
     LITELLM_ADAPTER_NAME,
     OPENAI_ADAPTER_NAME,

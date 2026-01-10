@@ -18,7 +18,6 @@ from typing import Any, cast, override
 
 import pytest
 
-from weakincentives.adapters._names import OPENAI_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PromptEvaluationError,
     PromptResponse,
@@ -52,6 +51,7 @@ from weakincentives.prompt.overrides import (
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session, SessionProtocol
+from weakincentives.types import OPENAI_ADAPTER_NAME
 
 
 @dataclass(slots=True, frozen=True)

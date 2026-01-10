@@ -18,6 +18,7 @@ import textwrap
 from typing import override
 
 from ...dataclasses import FrozenDataclass
+from ...prompt._normalization import normalize_component_key
 from ...prompt._visibility import SectionVisibility
 from ...prompt.section import Section
 from ...runtime.logging import StructuredLogger, get_logger
@@ -41,8 +42,6 @@ class WorkspaceDigest(SupportsDataclass):
 
 
 def _normalized_key(section_key: str) -> str:
-    from ...prompt._normalization import normalize_component_key
-
     return normalize_component_key(section_key, owner="WorkspaceDigest")
 
 

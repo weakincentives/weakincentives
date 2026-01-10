@@ -38,12 +38,12 @@ from ..runtime.transactions import (
     tool_transaction,
 )
 from ..serde import parse
+from ..types import AdapterName
 from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,
 )
-from ._names import AdapterName
 from ._provider_protocols import ProviderToolCall
 from .core import (
     PROMPT_EVALUATION_PHASE_TOOL,

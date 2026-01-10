@@ -27,9 +27,9 @@ from ...adapters.core import (
     PromptEvaluationError,
     PromptResponse,
 )
-from ...optimizers._base import BasePromptOptimizer, OptimizerConfig
-from ...optimizers._context import OptimizationContext
-from ...optimizers._results import PersistenceScope, WorkspaceDigestResult
+from ...optimizers.base import BasePromptOptimizer, OptimizerConfig
+from ...optimizers.context import OptimizationContext
+from ...optimizers.results import PersistenceScope, WorkspaceDigestResult
 from ...prompt import MarkdownSection, Prompt, PromptTemplate
 from ...prompt.overrides import (
     HexDigest,

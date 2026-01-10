@@ -21,8 +21,8 @@ from typing import Final, Literal, cast, override
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
-from ...prompt._visibility import SectionVisibility
 from ...prompt.errors import PromptRenderError
+from ...prompt.section import SectionVisibility
 from ...prompt.markdown import MarkdownSection
 from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.session import Replace, Session, reducer, replace_latest

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from weakincentives.adapters._names import AdapterName
+from weakincentives.types import AdapterName
 
 GENERIC_ADAPTER_NAME = cast(AdapterName, "adapter")
 """Adapter name placeholder used in tests that inspect stored events."""

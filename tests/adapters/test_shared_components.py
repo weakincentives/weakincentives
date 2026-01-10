@@ -66,7 +66,7 @@ from weakincentives.runtime.events import (
     HandlerFailure,
     ToolInvoked,
 )
-from weakincentives.runtime.events._types import EventHandler
+from weakincentives.runtime.events.types import EventHandler
 from weakincentives.runtime.logging import get_logger
 from weakincentives.runtime.session.session import Session
 from weakincentives.runtime.transactions import create_snapshot

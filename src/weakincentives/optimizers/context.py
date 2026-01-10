@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 from ..deadlines import Deadline
 from ..prompt.overrides import PromptOverridesStore
-from ..runtime.events._types import Dispatcher
+from ..runtime.events.types import Dispatcher
 from ..runtime.session import Session
 
 if TYPE_CHECKING:

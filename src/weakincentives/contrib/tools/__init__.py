@@ -34,21 +34,6 @@ from __future__ import annotations
 from importlib import import_module
 from typing import Any
 
-from weakincentives.filesystem import (
-    READ_ENTIRE_FILE,
-    FileEncoding,
-    FileEntry,
-    FileStat,
-    Filesystem,
-    FilesystemSnapshot,
-    GlobMatch as FilesystemGlobMatch,
-    GrepMatch as FilesystemGrepMatch,
-    ReadResult,
-    SnapshotableFilesystem,
-    WriteMode,
-    WriteResult,
-)
-
 from .asteval import (
     AstevalConfig,
     AstevalSection,
@@ -101,8 +86,6 @@ from .vfs import (
     WriteFile,
     WriteFileParams,
 )
-from weakincentives.prompt.protocols import ToolSuiteSection, WorkspaceSection
-
 PodmanSandboxConfig: Any
 PodmanSandboxSection: Any
 PodmanShellParams: Any
@@ -110,7 +93,6 @@ PodmanShellResult: Any
 PodmanWorkspace: Any
 
 __all__ = [
-    "READ_ENTIRE_FILE",
     "AddStep",
     "AstevalConfig",
     "AstevalSection",
@@ -120,14 +102,7 @@ __all__ = [
     "EvalFileWrite",
     "EvalParams",
     "EvalResult",
-    "FileEncoding",
-    "FileEntry",
     "FileInfo",
-    "FileStat",
-    "Filesystem",
-    "FilesystemGlobMatch",
-    "FilesystemGrepMatch",
-    "FilesystemSnapshot",
     "GlobMatch",
     "GlobParams",
     "GrepMatch",
@@ -152,12 +127,9 @@ __all__ = [
     "ReadFileParams",
     "ReadFileResult",
     "ReadPlan",
-    "ReadResult",
     "RemoveParams",
     "SetupPlan",
-    "SnapshotableFilesystem",
     "StepStatus",
-    "ToolSuiteSection",
     "UpdateStep",
     "VfsConfig",
     "VfsFile",
@@ -165,11 +137,8 @@ __all__ = [
     "VfsToolsSection",
     "WorkspaceDigest",
     "WorkspaceDigestSection",
-    "WorkspaceSection",
     "WriteFile",
     "WriteFileParams",
-    "WriteMode",
-    "WriteResult",
     "clear_workspace_digest",
     "latest_workspace_digest",
     "set_workspace_digest",

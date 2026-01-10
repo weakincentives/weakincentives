@@ -48,7 +48,7 @@ from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.runtime.events import InProcessDispatcher
-from weakincentives.runtime.events._types import TokenUsage, ToolInvoked
+from weakincentives.runtime.events.types import TokenUsage, ToolInvoked
 from weakincentives.runtime.session import Session, append_all
 
 
