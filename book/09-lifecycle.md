@@ -67,9 +67,9 @@ flowchart TB
 **Key components:**
 
 1. **LoopGroup** manages multiple loops in separate threads
-2. **ShutdownCoordinator** installs signal handlers and triggers graceful shutdown
-3. **Health Server** exposes HTTP endpoints for Kubernetes probes
-4. **Watchdog Monitor** detects stuck workers via heartbeat timeout
+1. **ShutdownCoordinator** installs signal handlers and triggers graceful shutdown
+1. **Health Server** exposes HTTP endpoints for Kubernetes probes
+1. **Watchdog Monitor** detects stuck workers via heartbeat timeout
 
 ## 9.1 LoopGroup: Running Multiple Loops
 
@@ -90,9 +90,9 @@ group.run()  # Blocks until SIGTERM or SIGINT
 When the process receives SIGTERM or SIGINT:
 
 1. ShutdownCoordinator invokes `shutdown()` on each loop
-2. Each loop completes its current iteration
-3. Threads join within the configured timeout
-4. Process exits gracefully
+1. Each loop completes its current iteration
+1. Threads join within the configured timeout
+1. Process exits gracefully
 
 ### Production Configuration
 
@@ -142,6 +142,7 @@ $ curl http://localhost:8080/health/ready
 ```
 
 A loop is "ready" when:
+
 - Its `running` property is True
 - Its `heartbeat` was updated within the threshold
 
@@ -152,8 +153,8 @@ See [Chapter 7](07-main-loop.md) for MainLoop configuration and [Chapter 8](08-e
 The watchdog monitors each loop's heartbeat timestamp. If any loop exceeds `watchdog_threshold` without updating its heartbeat:
 
 1. Watchdog logs a fatal error
-2. Watchdog sends SIGKILL to the current process
-3. The container orchestrator restarts the pod
+1. Watchdog sends SIGKILL to the current process
+1. The container orchestrator restarts the pod
 
 ```mermaid
 sequenceDiagram
@@ -245,6 +246,7 @@ Use `ShutdownCoordinator` directly when:
 - You want explicit control over callback ordering
 
 Use `LoopGroup` when:
+
 - You want automatic thread management
 - You need health endpoints and watchdog monitoring
 - You're deploying to Kubernetes
@@ -366,8 +368,8 @@ This enables LoopGroup to manage any compliant loop implementation alongside WIN
 The most common configuration mistake is misaligned timeouts. Follow these guidelines:
 
 1. **Prompt evaluation timeout**: Maximum time a single prompt evaluation can take (e.g., 600 seconds for complex prompts)
-2. **Watchdog threshold**: Must exceed prompt timeout plus buffer (e.g., 720 seconds = 600s + 120s buffer)
-3. **Visibility timeout**: SQS/Redis message visibility must exceed watchdog threshold (e.g., 900 seconds)
+1. **Watchdog threshold**: Must exceed prompt timeout plus buffer (e.g., 720 seconds = 600s + 120s buffer)
+1. **Visibility timeout**: SQS/Redis message visibility must exceed watchdog threshold (e.g., 900 seconds)
 
 ```python
 # Correct configuration
@@ -709,14 +711,15 @@ This chapter covered WINK's lifecycle management system:
 Key takeaways:
 
 1. Use `LoopGroup` for production deployments to Kubernetes
-2. Configure `watchdog_threshold` > prompt timeout
-3. Configure `visibility_timeout` > `watchdog_threshold`
-4. Test graceful shutdown with `max_iterations`
-5. Implement `Runnable` protocol for custom loops
+1. Configure `watchdog_threshold` > prompt timeout
+1. Configure `visibility_timeout` > `watchdog_threshold`
+1. Test graceful shutdown with `max_iterations`
+1. Implement `Runnable` protocol for custom loops
 
 **Next**: [Chapter 10](10-progressive-disclosure.md) covers progressive disclosure for cost optimization through selective context expansion.
 
 **Related chapters:**
+
 - [Chapter 7: Main Loop](07-main-loop.md) - MainLoop configuration and message processing
 - [Chapter 8: Evaluation](08-evaluation.md) - EvalLoop and continuous evaluation
 - [Chapter 13: Debugging & Observability](13-debugging.md) - Instrumentation and troubleshooting

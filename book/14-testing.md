@@ -14,9 +14,9 @@ Testing agent systems presents unique challenges. Traditional unit tests verify 
 WINK's architecture makes most agent logic testable **without calling a model**. By separating deterministic components (prompts, reducers, tool handlers) from non-deterministic ones (model evaluation), you can:
 
 1. Test prompt rendering as pure string transformation
-2. Test tool handlers in isolation with fake resources
-3. Test state transitions as pure functions
-4. Reserve expensive integration tests for end-to-end validation
+1. Test tool handlers in isolation with fake resources
+1. Test state transitions as pure functions
+1. Reserve expensive integration tests for end-to-end validation
 
 This chapter covers WINK's testing philosophy and practical strategies for building reliable agent systems.
 
@@ -25,8 +25,8 @@ This chapter covers WINK's testing philosophy and practical strategies for build
 WINK's testing approach follows three principles:
 
 1. **Determinism first**: Most code should be pure functions testable without mocks
-2. **Fast feedback**: Unit tests run in milliseconds; integration tests are opt-in
-3. **100% coverage**: Every line and branch must be tested—no exceptions
+1. **Fast feedback**: Unit tests run in milliseconds; integration tests are opt-in
+1. **100% coverage**: Every line and branch must be tested—no exceptions
 
 ```mermaid
 graph TB
@@ -64,7 +64,7 @@ Prompts in WINK are deterministic templates. Given fixed parameters, they always
 
 ### Basic Rendering Test
 
-```python nocheck
+````python nocheck
 from dataclasses import dataclass
 from typing import Any
 from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
@@ -111,7 +111,7 @@ def test_prompt_renders_correctly() -> None:
     assert "Review changes to src/main.py" in rendered.text
     assert "```diff" in rendered.text
     assert "+ print('hello')" in rendered.text
-```
+````
 
 ### Testing Tool Inclusion
 
@@ -181,6 +181,7 @@ See [Chapter 3](03-prompts.md) for more on prompt design and [Chapter 11](11-pro
 ## 14.2 Tool Handler Tests
 
 Tool handlers contain your business logic. They're pure functions that:
+
 - Take typed params and a `ToolContext`
 - Return a `ToolResult[T]`
 - May access resources through the context
@@ -485,6 +486,7 @@ graph TB
 ```
 
 Run integration tests selectively:
+
 - **Locally**: Behind a flag or environment variable
 - **CI (PRs)**: Optional or on-demand
 - **CI (main branch)**: Always run to catch regressions
@@ -498,11 +500,12 @@ WINK enforces **100% line and branch coverage** for `src/weakincentives/`. This 
 ### Why 100%?
 
 Agent systems have cascading failures. A single untested branch can cause:
+
 1. Type mismatch in a tool param
-2. Serialization error
-3. Model confusion
-4. Cascade of bad tool calls
-5. Wasted tokens and incorrect behavior
+1. Serialization error
+1. Model confusion
+1. Cascade of bad tool calls
+1. Wasted tokens and incorrect behavior
 
 100% coverage ensures every code path has a reason to exist and that reason is testable.
 
@@ -543,9 +546,9 @@ exclude_lines = [
 If you encounter code that "can't be tested":
 
 1. **Remove it**: Trust type annotations and upstream validation
-2. **Simplify it**: Refactor to eliminate the branch
-3. **Test it**: Prove the branch can be reached
-4. **Document it**: Use `pragma: no cover` only for genuine impossibilities
+1. **Simplify it**: Refactor to eliminate the branch
+1. **Test it**: Prove the branch can be reached
+1. **Document it**: Use `pragma: no cover` only for genuine impossibilities
 
 See [specs/TESTING.md](../specs/TESTING.md) for complete coverage policies.
 
@@ -619,8 +622,8 @@ uv run pytest -m "not integration"
 Every bug fix requires a regression test:
 
 1. Test MUST fail before the fix, pass after
-2. Test MUST be named `test_regression_<issue>_<description>`
-3. Test MUST include docstring linking to the issue
+1. Test MUST be named `test_regression_<issue>_<description>`
+1. Test MUST include docstring linking to the issue
 
 ```python nocheck
 def test_regression_42_session_deadlock() -> None:
@@ -758,10 +761,10 @@ When adding new functionality:
 WINK makes agent logic testable by design:
 
 1. **Prompt rendering tests** verify templates without calling models
-2. **Tool handler tests** use fake resources for isolation
-3. **Reducer tests** validate state transitions as pure functions
-4. **Integration tests** provide end-to-end validation (use sparingly)
-5. **100% coverage** ensures every code path is tested
+1. **Tool handler tests** use fake resources for isolation
+1. **Reducer tests** validate state transitions as pure functions
+1. **Integration tests** provide end-to-end validation (use sparingly)
+1. **100% coverage** ensures every code path is tested
 
 The testing pyramid is inverted from typical systems: most tests are fast, deterministic unit tests. Integration tests are rare and expensive.
 

@@ -2,7 +2,7 @@
 
 **Get your first WINK agent running in 10 minutes**
 
----
+______________________________________________________________________
 
 ## Introduction
 
@@ -10,7 +10,7 @@ This chapter will guide you from installation to running your first complete age
 
 WINK's philosophy is to make agent behavior predictable and auditable through typed interfaces and immutable state. Every example here demonstrates this principle in practice.
 
----
+______________________________________________________________________
 
 ## Installation
 
@@ -52,7 +52,7 @@ Make sure you have an `OPENAI_API_KEY` environment variable set:
 export OPENAI_API_KEY="sk-..."
 ```
 
----
+______________________________________________________________________
 
 ## Your First Agent: Structured Summarization
 
@@ -168,6 +168,7 @@ template = PromptTemplate[Summary](...)
 ```
 
 The generic parameter `[Summary]` tells WINK that this prompt must return a `Summary` dataclass. The adapter automatically:
+
 - Generates a JSON schema from the dataclass
 - Includes it in the API request
 - Parses and validates the response
@@ -183,6 +184,7 @@ class Summary:
 ```
 
 The `slots=True, frozen=True` pattern is used throughout WINK. This makes instances:
+
 - **Immutable**: Can't be accidentally modified
 - **Memory efficient**: No instance dictionary overhead
 - **Session-friendly**: Work perfectly with event-driven state management
@@ -197,7 +199,7 @@ session = Session(bus=bus)
 
 The session receives events for every significant operation: prompt rendering, tool calls, adapter responses. This creates an auditable trace of agent behavior. We'll explore sessions in depth in [Chapter 5: Sessions](05-sessions.md).
 
----
+______________________________________________________________________
 
 ## Adding Tools: Making Agents Interactive
 
@@ -294,6 +296,7 @@ Every tool has explicit input and output types. This makes tools self-documentin
 **2. Immutable ToolContext**
 
 The `ToolContext` provides access to:
+
 - The current session (for reading state)
 - The resource registry (for accessing filesystem, HTTP clients, etc.)
 - The tool call metadata
@@ -324,7 +327,7 @@ Tool examples are first-class metadata. They can be included in prompts to show 
 
 For a deep dive into tool design, see [Chapter 4: Tools](04-tools.md).
 
----
+______________________________________________________________________
 
 ## Your First Complete Agent
 
@@ -524,6 +527,7 @@ Plus the tool definitions in the API's tool-calling format.
 **3. Model Invocation**
 
 The adapter sends:
+
 - The rendered prompt
 - Tool definitions for `search`
 - A JSON schema for the `Answer` output type
@@ -531,6 +535,7 @@ The adapter sends:
 **4. Tool Execution**
 
 The model decides to call `search(query="capital of France")`. The adapter:
+
 - Parses the call into `SearchParams`
 - Creates a `ToolContext` with session access
 - Invokes `search_handler(params, context=ctx)`
@@ -554,7 +559,7 @@ The adapter parses and validates this into an `Answer` dataclass.
 
 You get back a typed `AdapterResponse[Answer]` with the parsed output.
 
----
+______________________________________________________________________
 
 ## What You've Learned
 
@@ -563,6 +568,7 @@ You now understand WINK's core building blocks:
 ### Prompts Are Programs
 
 Prompts are not strings—they're typed templates with:
+
 - **Sections** for organization
 - **Parameter bindings** for inputs
 - **Output schemas** for structured results
@@ -573,6 +579,7 @@ See [Chapter 3: Prompts](03-prompts.md) for advanced composition patterns.
 ### Tools Are Explicit
 
 Tools are not magic decorators. They're explicit registrations with:
+
 - Typed input parameters
 - Typed output results
 - Handlers that receive immutable context
@@ -583,6 +590,7 @@ Explore tool policies and sandboxing in [Chapter 4: Tools](04-tools.md).
 ### Sessions Track Everything
 
 Sessions create an auditable event log:
+
 - Prompt renderings
 - Tool calls and results
 - Adapter requests and responses
@@ -593,6 +601,7 @@ Learn how to query and manipulate session state in [Chapter 5: Sessions](05-sess
 ### Adapters Are Bridges
 
 Adapters translate between WINK's abstractions and provider APIs:
+
 - Render prompts to API formats
 - Execute tool calls synchronously
 - Parse responses into typed outputs
@@ -600,7 +609,7 @@ Adapters translate between WINK's abstractions and provider APIs:
 
 See [Chapter 6: Adapters](06-adapters.md) for provider-specific features.
 
----
+______________________________________________________________________
 
 ## Next Steps
 
@@ -609,6 +618,7 @@ You have a working foundation. Here's where to go from here:
 ### Build Something Real
 
 Replace the mock search tool with a real API:
+
 - Use `httpx` or `requests` in your handler
 - Add the HTTP client to a resource registry
 - Access it via `context.resources.get(HTTPClient)`
@@ -618,6 +628,7 @@ Resource management is covered in [Chapter 5: Sessions](05-sessions.md).
 ### Add More Tools
 
 Agents become powerful with the right tools:
+
 - **Filesystem tools**: Read and write files (with sandboxing)
 - **Code execution**: Run Python safely via `asteval`
 - **Container orchestration**: Spin up isolated environments with Podman
@@ -627,6 +638,7 @@ WINK's contrib tools are documented in [Chapter 12: Workspace Tools](12-workspac
 ### Make It Production-Ready
 
 Real agents need:
+
 - **Evaluation loops**: Test against real execution traces
 - **Lifecycle management**: Graceful shutdown and health checks
 - **Prompt optimization**: Version control and A/B testing
@@ -636,6 +648,7 @@ These topics are covered in Part III (Integration & Orchestration) and Part IV (
 ### Explore the Examples
 
 The `code_reviewer_example.py` in the repository shows a complete production agent with:
+
 - Multi-turn conversations
 - Stateful session management
 - Real filesystem tools
@@ -643,7 +656,7 @@ The `code_reviewer_example.py` in the repository shows a complete production age
 
 It's a great reference for building your own agents.
 
----
+______________________________________________________________________
 
 ## Troubleshooting
 
@@ -680,11 +693,12 @@ python --version  # Should be 3.12 or higher
 ### "Expected Summary, got dict"
 
 The model returned JSON that doesn't match your output schema. Check:
+
 - Are all fields in your dataclass present in the prompt instructions?
 - Did you include the JSON schema in the API call? (Adapters do this automatically)
 - Is the model capable of structured output? (GPT-4 and later, Claude 3+)
 
----
+______________________________________________________________________
 
 **You're now ready to build with WINK.** The next chapters dive deep into each abstraction, showing you how to compose complex prompts, manage session state, and deploy agents to production.
 

@@ -533,7 +533,7 @@ result: TaskResponse = response.output
 
 ### Defining a tool handler
 
-```python
+```python nocheck
 from weakincentives import Tool, ToolContext, ToolResult
 
 @dataclass(slots=True, frozen=True)
@@ -621,7 +621,7 @@ section = MarkdownSection[TaskParams](
 
 Creates a Tool using the function's `__name__` and docstring:
 
-```python
+```python nocheck
 def search(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
     """Search for content."""  # Becomes tool description
     return ToolResult.ok(SearchResult(...), message="Done")
@@ -642,7 +642,7 @@ Available in tool handlers via `context`:
 
 ### ToolResult convenience constructors
 
-```python
+```python nocheck
 # Success with typed value
 ToolResult.ok(MyResult(...), message="Done")  # success=True
 
@@ -1029,7 +1029,7 @@ accumulating visibility overrides and retrying evaluation. A shared
 
 ## Event Subscription
 
-```python
+```python nocheck
 from weakincentives.runtime import (
     PromptRendered,
     PromptExecuted,
@@ -1225,7 +1225,7 @@ result = optimizer.optimize(prompt, session=session)
 Pass custom runtime resources to prompts and MainLoop for cleaner, more
 testable tool handlers:
 
-```python
+```python nocheck
 from weakincentives.resources import Binding, Scope
 from myapp.http import HTTPClient, Config
 

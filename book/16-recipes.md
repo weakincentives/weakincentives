@@ -4,30 +4,32 @@ This chapter provides opinionated, production-ready patterns for building common
 
 These recipes reflect the "weak incentives" philosophy: reduce surprise, keep state explicit, and make side effects auditable. They're meant to be adapted to your specific needs rather than used as rigid templates.
 
----
+______________________________________________________________________
 
 ## Overview: Four Agent Patterns
 
 This chapter covers four distinct agent patterns:
 
 1. **Code Review Agent** - Comprehensive example combining workspace digest, planning, sandboxing, and structured output
-2. **Repository Q&A Agent** - Efficient knowledge extraction with progressive disclosure
-3. **Safe Patch Agent** - Experimental editing with VFS isolation and human-in-the-loop approval
-4. **Research Agent** - Deep investigation with progressive source disclosure
+1. **Repository Q&A Agent** - Efficient knowledge extraction with progressive disclosure
+1. **Safe Patch Agent** - Experimental editing with VFS isolation and human-in-the-loop approval
+1. **Research Agent** - Deep investigation with progressive source disclosure
 
 Each recipe includes:
+
 - Architecture diagrams showing data flow
 - Complete working code examples
 - Best practices and pitfalls to avoid
 - Cross-references to relevant chapters for deeper learning
 
----
+______________________________________________________________________
 
 ## 16.1 Code Review Agent
 
 **Goal**: Automatically review code changes in a pull request, providing structured feedback with safety guarantees.
 
 **Key Features**:
+
 - Workspace digest for efficient codebase context
 - Planning tools for multi-step review workflow
 - Sandbox execution for safe exploration
@@ -323,13 +325,14 @@ Use typed output schemas to ensure consistent review format:
 template = PromptTemplate[CodeReview](...)  # Enforces structure
 ```
 
----
+______________________________________________________________________
 
 ## 16.2 Repository Q&A Agent
 
 **Goal**: Answer questions about a codebase quickly and accurately without loading the entire repository.
 
 **Key Features**:
+
 - Workspace digest with automatic summarization
 - Progressive section expansion
 - VFS tools for verification
@@ -577,13 +580,14 @@ sequenceDiagram
 
 For more on progressive disclosure patterns, see [Chapter 10](10-progressive-disclosure.md).
 
----
+______________________________________________________________________
 
 ## 16.3 Safe Patch Agent
 
 **Goal**: Generate code patches without risk of uncontrolled writes to the host filesystem.
 
 **Key Features**:
+
 - VFS for isolated experimentation
 - Diff generation as structured output
 - Optional sandbox testing before approval
@@ -875,13 +879,14 @@ def apply_patch_with_review(patch: Patch, repo_path: Path) -> None:
     pass
 ```
 
----
+______________________________________________________________________
 
 ## 16.4 Research Agent with Progressive Disclosure
 
 **Goal**: Answer deep questions by progressively exploring sources without overwhelming the context window.
 
 **Key Features**:
+
 - Sources stored as summarized sections
 - On-demand expansion via `read_section`
 - Automatic citation tracking
@@ -1188,7 +1193,7 @@ class SourceCitation:
 
 For more on progressive disclosure patterns, see [Chapter 10](10-progressive-disclosure.md).
 
----
+______________________________________________________________________
 
 ## Summary
 
@@ -1211,6 +1216,6 @@ All recipes share these principles:
 
 Adapt these patterns to your specific needs. The goal is to demonstrate composable building blocks, not rigid templates.
 
----
+______________________________________________________________________
 
 **Next**, [Chapter 17: Troubleshooting](17-troubleshooting.md) covers common errors and how to diagnose them systematically.

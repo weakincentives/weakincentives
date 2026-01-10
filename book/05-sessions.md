@@ -77,9 +77,9 @@ flowchart LR
 **Key concepts:**
 
 1. **Events** are dispatched through `session.dispatch(event)`
-2. **Reducers** transform events into new slice values
-3. **Slices** are immutable tuples stored by type
-4. **Queries** read slice contents without mutation
+1. **Reducers** transform events into new slice values
+1. **Slices** are immutable tuples stored by type
+1. **Queries** read slice contents without mutation
 
 The session never mutates state in place. Reducers return new tuples. This makes snapshots trivial (just serialize the current tuples) and restoration straightforward.
 
@@ -392,10 +392,10 @@ sequenceDiagram
 **Key points:**
 
 1. Events are dispatched to **all registered reducers** for that event type
-2. Reducers run synchronously on the dispatcher thread (keep them lightweight)
-3. Each reducer receives a read-only view of current state
-4. Reducer results are applied immediately to the slice
-5. Queries see the updated state after dispatch completes
+1. Reducers run synchronously on the dispatcher thread (keep them lightweight)
+1. Each reducer receives a read-only view of current state
+1. Reducer results are applied immediately to the slice
+1. Queries see the updated state after dispatch completes
 
 ## Declarative Reducers with @reducer
 
@@ -959,8 +959,8 @@ session[AuditEvent].register(AuditEvent, append_all)
 When debugging, you often want to:
 
 1. **Preserve the full event log** even when rolling back working state
-2. **Restore working state** to a known-good checkpoint
-3. **Keep audit trails intact** for compliance and debugging
+1. **Restore working state** to a known-good checkpoint
+1. **Keep audit trails intact** for compliance and debugging
 
 Example:
 
@@ -988,12 +988,14 @@ session.restore(checkpoint)
 ### Best Practices
 
 **Use `STATE` policy for:**
+
 - Plans and task lists
 - Configuration settings
 - File system state
 - Model outputs and intermediate results
 
 **Use `LOG` policy for:**
+
 - Audit events
 - Telemetry metrics
 - Debug log entries
@@ -1437,10 +1439,10 @@ WINK solves this through the **Slice protocol**—an abstraction that decouples 
 This section covers:
 
 1. The Slice protocol and storage abstraction
-2. Built-in backends (MemorySlice, JsonlSlice)
-3. Configuring storage per slice policy
-4. Performance characteristics and trade-offs
-5. Implementing custom backends
+1. Built-in backends (MemorySlice, JsonlSlice)
+1. Configuring storage per slice policy
+1. Performance characteristics and trade-offs
+1. Implementing custom backends
 
 ### The Slice Protocol
 
@@ -1705,6 +1707,7 @@ The `__type__` field enables polymorphic deserialization when slice types use un
 - **Exclusive locks** (`LOCK_EX`) for writes
 
 Combined with Session's `RLock`, this provides:
+
 - Session-level atomicity for reducer execution
 - File-level atomicity for disk operations
 
@@ -1960,19 +1963,19 @@ except (json.JSONDecodeError, TypeError, ValueError) as e:
 
 | Scenario | Recommendation |
 |----------|----------------|
-| Short-lived sessions (&lt; 1 hour) | `MemorySliceFactory` for everything |
+| Short-lived sessions (< 1 hour) | `MemorySliceFactory` for everything |
 | Debugging/audit needs | `JsonlSliceFactory` for LOG slices only |
 | Crash recovery required | `JsonlSliceFactory` for both STATE and LOG |
-| Large slices (&gt; 10,000 items) | Consider custom backend (SQLite, Redis) |
+| Large slices (> 10,000 items) | Consider custom backend (SQLite, Redis) |
 | Distributed agents | Custom backend with shared storage |
 
 #### Performance Tips
 
 1. **Use append-only reducers** when possible—they're O(1) for file-backed slices
-2. **Enable caching** by reading `all()` once and reusing the result
-3. **Batch operations** with `extend()` instead of multiple `append()` calls
-4. **Clear old data** periodically to prevent unbounded growth
-5. **Use memory for working state**, files for logs
+1. **Enable caching** by reading `all()` once and reusing the result
+1. **Batch operations** with `extend()` instead of multiple `append()` calls
+1. **Clear old data** periodically to prevent unbounded growth
+1. **Use memory for working state**, files for logs
 
 #### Limitations
 
@@ -2021,6 +2024,6 @@ The session is the foundation of WINK's deterministic architecture. Every state 
 - **[Chapter 11: Prompt Optimization](11-prompt-optimization.md)** - Use sessions for A/B testing prompts
 - **[Chapter 13: Debugging](13-debugging.md)** - Inspect snapshots in the debug UI
 
----
+______________________________________________________________________
 
 **Canonical Reference**: See [specs/SESSIONS.md](../specs/SESSIONS.md) for the complete specification, including event system details, deadline enforcement, budget tracking, and snapshot serialization format.

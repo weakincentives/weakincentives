@@ -56,6 +56,7 @@ ToolResult.error(message)               # failure case
 - `VisibilityExpansionRequired`
 
 For detailed explanations of prompt composition and overrides, see:
+
 - [Chapter 3: Prompts](03-prompts.md)
 - [Chapter 4: Tools](04-tools.md)
 - [Chapter 11: Prompt Optimization](11-prompt-optimization.md)
@@ -111,6 +112,7 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 - `wait_until(predicate, timeout=...)`: Poll predicate with timeout
 
 For detailed explanations of sessions and state management, see:
+
 - [Chapter 5: Sessions](05-sessions.md)
 - [Chapter 7: MainLoop](07-main-loop.md)
 - [Chapter 9: Lifecycle Management](09-lifecycle.md)
@@ -146,6 +148,7 @@ PromptEvaluationError
 - `ThrottlePolicy`, `new_throttle_policy`, `ThrottleError`
 
 For detailed explanations of adapters and resources, see:
+
 - [Chapter 6: Provider Adapters](06-adapters.md)
 - [Chapter 16: Recipes](16-recipes.md)
 
@@ -167,6 +170,7 @@ For detailed explanations of adapters and resources, see:
 - `PodmanSandboxSection(session, config=PodmanSandboxConfig(...))` (extra)
 
 For detailed explanations of tools, see:
+
 - [Chapter 12: Workspace Tools](12-workspace-tools.md)
 
 ## 18.6 weakincentives.optimizers
@@ -179,6 +183,7 @@ For detailed explanations of tools, see:
 - `WorkspaceDigestOptimizer`
 
 For detailed explanations of optimization, see:
+
 - [Chapter 11: Prompt Optimization](11-prompt-optimization.md)
 
 ## 18.7 weakincentives.serde
@@ -209,6 +214,7 @@ copy = clone(my_dataclass)
 - `schema()` produces OpenAI-compatible JSON schemas for structured output
 
 For detailed explanations, see:
+
 - [Chapter 3: Prompts](03-prompts.md) (structured output section)
 
 ## 18.8 weakincentives.evals
@@ -259,6 +265,7 @@ collect_results(results, expected_count, timeout_seconds=300)
 ```
 
 For detailed explanations of evaluation, see:
+
 - [Chapter 8: Evaluation Framework](08-evaluation.md)
 
 ## 18.9 weakincentives.skills
@@ -332,6 +339,7 @@ grep_result = fs.grep("TODO", path="src/", glob="*.py")
 - UTF-8 paths are now allowed (ASCII-only restriction removed)
 
 For detailed explanations, see:
+
 - [Chapter 12: Workspace Tools](12-workspace-tools.md)
 
 ## 18.11 CLI
@@ -374,6 +382,7 @@ wink docs --changelog   # Print CHANGELOG.md
 - `3`: Server failed to start
 
 For detailed explanations of debugging, see:
+
 - [Chapter 13: Debugging](13-debugging.md)
 
 ## 18.12 Dataclass Utilities and Serialization
@@ -387,8 +396,8 @@ WINK provides dependency-free dataclass utilities for serialization, validation,
 The dataclass utilities provide three core capabilities:
 
 1. **Serde API** (`parse`, `dump`, `clone`, `schema`) - Serialization and deserialization with validation
-2. **FrozenDataclass decorator** - Lightweight immutable dataclasses with pre-construction hooks
-3. **Constraint metadata** - Field-level validation via `Annotated` and `field(metadata=...)`
+1. **FrozenDataclass decorator** - Lightweight immutable dataclasses with pre-construction hooks
+1. **Constraint metadata** - Field-level validation via `Annotated` and `field(metadata=...)`
 
 ```mermaid
 flowchart TB
@@ -465,7 +474,7 @@ user = parse(
 
 **Signature:**
 
-```python
+```python nocheck
 parse(
     cls: type[T] | None,
     data: dict[str, Any] | object,
@@ -533,7 +542,7 @@ data = dump(user)
 
 **Signature:**
 
-```python
+```python nocheck
 dump(
     obj: object,
     *,
@@ -683,13 +692,13 @@ class Order:
 **Hook execution order:**
 
 1. Field normalization (strip, lower, upper)
-2. Field coercion (str → int, UUID, etc.)
-3. Field validation (bounds, length, pattern)
-4. Field transforms (convert/transform)
-5. `__pre_init__` (if using `FrozenDataclass`)
-6. `__init__`
-7. `__validate__` (if defined)
-8. `__post_validate__` (if defined by `parse`)
+1. Field coercion (str → int, UUID, etc.)
+1. Field validation (bounds, length, pattern)
+1. Field transforms (convert/transform)
+1. `__pre_init__` (if using `FrozenDataclass`)
+1. `__init__`
+1. `__validate__` (if defined)
+1. `__post_validate__` (if defined by `parse`)
 
 ### FrozenDataclass Decorator
 
@@ -969,7 +978,7 @@ review = parse_structured_output(CodeReview, response.output)
 - [Chapter 5: Sessions](05-sessions.md) - Immutable state patterns
 - [specs/DATACLASSES.md](../specs/DATACLASSES.md) - Complete specification
 
----
+______________________________________________________________________
 
 ## Where to go deeper
 

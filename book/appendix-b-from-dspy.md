@@ -32,6 +32,7 @@ Here's how core DSPy concepts translate to WINK:
 DSPy signatures declare input/output fields; WINK uses frozen dataclasses for the same purpose. Both catch type mismatches early.
 
 **DSPy:**
+
 ```python
 class QA(dspy.Signature):
     """Answer questions with short factoid answers."""
@@ -40,6 +41,7 @@ class QA(dspy.Signature):
 ```
 
 **WINK:**
+
 ```python
 @dataclass(frozen=True)
 class QuestionParams:
@@ -55,6 +57,7 @@ class Answer:
 DSPy composes modules into programs; WINK composes sections into prompt templates. Both encourage modular, reusable components.
 
 **DSPy:**
+
 ```python
 class RAG(dspy.Module):
     def __init__(self):
@@ -63,6 +66,7 @@ class RAG(dspy.Module):
 ```
 
 **WINK:**
+
 ```python
 template = PromptTemplate[Answer](
     ns="rag",
@@ -79,6 +83,7 @@ template = PromptTemplate[Answer](
 DSPy modules like `ReAct` handle tool calling; WINK sections register tools alongside their instructions.
 
 **Both support:**
+
 - Typed tool parameters
 - Multiple tools per agent
 - Tool result handling
@@ -90,6 +95,7 @@ DSPy modules like `ReAct` handle tool calling; WINK sections register tools alon
 In DSPy, prompts are generated artifacts—you don't typically read or edit them directly. In WINK, `prompt.render()` returns the exact markdown sent to the model. You can inspect, test, and version it.
 
 **DSPy:**
+
 ```python
 # Generated prompt is opaque
 predictor = dspy.ChainOfThought("question -> answer")
@@ -98,6 +104,7 @@ result = predictor(question="What is Python?")
 ```
 
 **WINK:**
+
 ```python
 # Prompt is explicit and inspectable
 prompt = Prompt(template).bind(QuestionParams(question="What is Python?"))
@@ -110,6 +117,7 @@ print(rendered.text)  # See exact markdown sent to model
 DSPy's optimizers (BootstrapFewShot, MIPROv2, etc.) generate prompts automatically. WINK uses hash-validated overrides for manual iteration. You can build optimization workflows on top, but the framework doesn't assume you want automated prompt generation.
 
 **DSPy workflow:**
+
 ```python
 # Define metric
 def validate_answer(example, pred, trace=None):
@@ -121,6 +129,7 @@ compiled_qa = optimizer.compile(QA(), trainset=train_examples)
 ```
 
 **WINK workflow:**
+
 ```python
 # Manual iteration with overrides
 store = PromptOverridesStore()
@@ -139,6 +148,7 @@ prompt = Prompt(template, overrides_store=store, overrides_tag="v2")
 DSPy traces execution but doesn't expose a structured state model. WINK sessions are typed, reducer-managed state containers. Every state change is an event you can query, snapshot, and restore.
 
 **WINK state management:**
+
 ```python
 # Explicit state slices
 session = Session(bus=InProcessDispatcher())
@@ -158,6 +168,7 @@ session.restore(snapshot)
 In DSPy, tool definitions are separate from module logic. In WINK, the section that explains "use this tool for X" is the same section that registers the tool. They can't drift apart.
 
 **DSPy:**
+
 ```python
 @dspy.tool
 def search(query: str) -> str:
@@ -169,6 +180,7 @@ react = dspy.ReAct("question -> answer", tools=[search])
 ```
 
 **WINK:**
+
 ```python
 # Tool and instructions in same section
 search_section = MarkdownSection(
@@ -184,6 +196,7 @@ search_section = MarkdownSection(
 WINK prompt rendering is pure—same inputs produce same outputs. You can write tests that assert on exact prompt text. DSPy's compiled prompts depend on optimizer state and training data.
 
 **Implications:**
+
 - WINK prompts are reproducible across environments
 - Version control diffs show exact prompt changes
 - No hidden optimizer state affecting behavior
@@ -217,6 +230,7 @@ If you're moving from DSPy to WINK:
 ### 1. Convert signatures to dataclasses
 
 **DSPy:**
+
 ```python
 class QA(dspy.Signature):
     """Answer questions with short factoid answers."""
@@ -225,6 +239,7 @@ class QA(dspy.Signature):
 ```
 
 **WINK:**
+
 ```python
 @dataclass(slots=True, frozen=True)
 class QuestionParams:
@@ -239,11 +254,13 @@ class Answer:
 ### 2. Convert modules to sections
 
 **DSPy:**
+
 ```python
 qa = dspy.ChainOfThought(QA)
 ```
 
 **WINK:**
+
 ```python
 qa_section = MarkdownSection(
     title="Question Answering",
@@ -255,6 +272,7 @@ qa_section = MarkdownSection(
 ### 3. Convert programs to templates
 
 **DSPy:**
+
 ```python
 class MultiHop(dspy.Module):
     def __init__(self):
@@ -269,6 +287,7 @@ class MultiHop(dspy.Module):
 ```
 
 **WINK:**
+
 ```python
 template = PromptTemplate[Answer](
     ns="multihop",
@@ -291,12 +310,14 @@ template = PromptTemplate[Answer](
 ### 4. Replace optimizers with overrides
 
 **Instead of compiled prompts:**
+
 ```python
 # DSPy: optimizer generates prompts
 compiled_qa = optimizer.compile(QA(), trainset=examples)
 ```
 
 **Use WINK's override system:**
+
 ```python
 # WINK: manual iteration with version control
 store = PromptOverridesStore()
@@ -313,13 +334,15 @@ prompt = Prompt(template, overrides_store=store, overrides_tag="v2")
 ### 5. Add tools explicitly
 
 **DSPy:**
+
 ```python
 # Tools implicit in ReAct
 react = dspy.ReAct("question -> answer", tools=[search, calculator])
 ```
 
 **WINK:**
-```python
+
+```python nocheck
 # Tools explicit on sections
 template = PromptTemplate[Answer](
     ns="agent",
@@ -357,13 +380,15 @@ If you've been frustrated by not knowing what DSPy is actually sending to the mo
 ## Can you use both?
 
 Yes! You could:
+
 - Use DSPy to bootstrap initial prompts via optimization
 - Export compiled prompts as WINK templates
 - Use WINK for production serving with explicit prompts
 - Use DSPy's metrics framework with WINK's evaluation system
 
 Example integration:
-```python
+
+```python nocheck
 # Use DSPy to optimize
 compiled = optimizer.compile(MyModule(), trainset=examples)
 

@@ -23,8 +23,8 @@ This chapter explains WINK's approach to code quality and how to apply these sta
 WINK's quality gates follow three principles:
 
 1. **Fail fast**: Catch errors at the earliest possible stage (type check > test > runtime)
-2. **Make correctness easy**: Tools should guide you toward correct code, not just flag errors
-3. **Prevent cascading failures**: One small error shouldn't cascade into expensive model failures
+1. **Make correctness easy**: Tools should guide you toward correct code, not just flag errors
+1. **Prevent cascading failures**: One small error shouldn't cascade into expensive model failures
 
 ```mermaid
 flowchart TB
@@ -321,6 +321,7 @@ class Plan:
 ```
 
 Invariants are checked:
+
 - After `__init__`
 - After each public method
 - Not after private methods (those starting with `_`)
@@ -340,6 +341,7 @@ def render_template(template: str, params: dict[str, object]) -> str:
 ```
 
 The `@pure` decorator:
+
 - Documents that the function has no side effects
 - Can verify purity in tests (future feature)
 - Helps identify what can be snapshotted/replayed
@@ -349,11 +351,12 @@ The `@pure` decorator:
 Use contracts at:
 
 1. **Public API boundaries**: Validate assumptions about external callers
-2. **Tool handlers**: Validate params beyond type checking
-3. **Reducers**: Enforce invariants on state transitions
-4. **Critical paths**: Anywhere a comment would say "assumes X" or "requires Y"
+1. **Tool handlers**: Validate params beyond type checking
+1. **Reducers**: Enforce invariants on state transitions
+1. **Critical paths**: Anywhere a comment would say "assumes X" or "requires Y"
 
 Don't overuse contracts:
+
 - Types already enforce most constraints
 - Contracts add runtime overhead in tests
 - Focus on invariants that types can't express
@@ -415,9 +418,10 @@ The 100% requirement isn't arbitrary. It enforces a discipline:
 > **Every line of code should have a reason to exist, and that reason should be testable.**
 
 If a line can't be tested, ask:
+
 1. Is it defensive code that "should never happen"? Remove it and trust types.
-2. Is it a complex branch? Simplify the code.
-3. Is it genuinely reachable? Write a test that proves it.
+1. Is it a complex branch? Simplify the code.
+1. Is it genuinely reachable? Write a test that proves it.
 
 ### Coverage Configuration
 
@@ -610,6 +614,7 @@ api_key = os.environ["API_KEY"]
 #### Deptry: Dependency Hygiene
 
 Deptry finds:
+
 - **Unused dependencies**: Declared in `pyproject.toml` but not imported
 - **Missing dependencies**: Imported but not declared
 - **Misplaced dependencies**: Dev dependencies used in production code
@@ -790,13 +795,13 @@ git commit -m "Add feature"
 **Before every commit:**
 
 1. **Write code** with type annotations
-2. **Run `make check`** to validate all gates
-3. **Fix any failures**:
+1. **Run `make check`** to validate all gates
+1. **Fix any failures**:
    - Type errors: Add/fix type annotations
    - Test failures: Fix logic or tests
    - Coverage gaps: Add missing tests
    - Security issues: Fix vulnerabilities
-4. **Commit only when clean**
+1. **Commit only when clean**
 
 **Why the gates are strict:**
 
@@ -889,8 +894,8 @@ WINK provides **thread-safe core components** with clear guarantees and non-guar
 WINK's thread safety follows three principles:
 
 1. **Prefer deterministic delivery over opportunistic concurrency**: Keep locks localized so handler ordering is stable and testable
-2. **Copy-on-write for state transitions**: Avoid leaking partially-mutated objects across reducer boundaries
-3. **Single synchronization primitive per structure**: One lock per shared component (event bus, session, override store)
+1. **Copy-on-write for state transitions**: Avoid leaking partially-mutated objects across reducer boundaries
+1. **Single synchronization primitive per structure**: One lock per shared component (event bus, session, override store)
 
 ```mermaid
 flowchart TB
@@ -1019,6 +1024,7 @@ store.delete_override(descriptor)       # Per-file lock
 ```
 
 **Guarantee**:
+
 - Git root discovery is protected by a lock (runs once)
 - Per-file locks serialize operations on the same override
 - Atomic writes use temporary files with rename for consistency
@@ -1487,9 +1493,9 @@ WINK provides thread-safe core components with clear contracts:
 **Key principles**:
 
 1. Immutability by default (frozen dataclasses, tuples)
-2. Session state synchronized automatically
-3. User code must add locks when maintaining its own state
-4. Test with threadstress plugin
+1. Session state synchronized automatically
+1. User code must add locks when maintaining its own state
+1. Test with threadstress plugin
 
 For most use cases, relying on session state and frozen dataclasses provides sufficient thread safety without explicit locks. When you need more, WINK's patterns (copy-on-write, atomic file writes) are proven and battle-tested.
 
@@ -1675,7 +1681,7 @@ If you later add `ToolCancelled`, pyright forces you to handle it.
 
 The sentinel is intentionally unreachable when all cases are covered. Suppress the strict mode warnings with inline comments:
 
-```python
+```python nocheck
 case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
     assert_never(unreachable)  # pyright: ignore[reportUnreachable]
 ```
@@ -1683,7 +1689,7 @@ case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
 **Why these comments?**
 
 1. **`# pragma: no cover`**: Excludes from coverage requirements (since it's unreachable when exhaustive)
-2. **`# pyright: ignore[reportUnreachable]`**: Suppresses pyright's "unreachable code" error (since we want it to be unreachable)
+1. **`# pyright: ignore[reportUnreachable]`**: Suppresses pyright's "unreachable code" error (since we want it to be unreachable)
 
 ### When to Use `assert_never`
 
@@ -1691,7 +1697,7 @@ case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
 
 ✅ **Match statements on union types**
 
-```python
+```python nocheck
 match event:
     case ToolInvoked(...): ...
     case PromptExecuted(...): ...
@@ -1701,7 +1707,7 @@ match event:
 
 ✅ **If-elif chains on Literal types**
 
-```python
+```python nocheck
 if status == "pending": ...
 elif status == "running": ...
 else:
@@ -1710,7 +1716,7 @@ else:
 
 ✅ **Algebraic data type handlers**
 
-```python
+```python nocheck
 match op:
     case Append(...): ...
     case Replace(...): ...
@@ -1909,28 +1915,28 @@ Strict mode ensures:
 
 **Pitfall 1: Forgetting `# pragma: no cover`**
 
-```python
+```python nocheck
 else:
     assert_never(status)  # Coverage complains: line not covered
 ```
 
 **Fix:** Add `# pragma: no cover` to exclude from coverage (it's intentionally unreachable):
 
-```python
+```python nocheck
 else:  # pragma: no cover
     assert_never(status)
 ```
 
 **Pitfall 2: Forgetting `# pyright: ignore[reportUnreachable]`**
 
-```python
+```python nocheck
 else:  # pragma: no cover
     assert_never(status)  # Pyright complains: code is unreachable
 ```
 
 **Fix:** Add `# pyright: ignore[reportUnreachable]` to suppress the error:
 
-```python
+```python nocheck
 else:  # pragma: no cover
     assert_never(status)  # pyright: ignore[reportUnreachable]
 ```
@@ -1949,7 +1955,7 @@ else:
 
 **Pitfall 4: Not binding the unreachable value**
 
-```python
+```python nocheck
 match status:
     case "pending": ...
     case "running": ...
@@ -2042,13 +2048,13 @@ def test_render_status_pending():
 Exhaustive type checking with `assert_never`:
 
 1. **Forces explicit handling** of all union variants
-2. **Catches missing handlers at type-check time**, before any code runs
-3. **Enables safe refactoring** of union types
-4. **Documents completeness** in code
+1. **Catches missing handlers at type-check time**, before any code runs
+1. **Enables safe refactoring** of union types
+1. **Documents completeness** in code
 
 **The pattern:**
 
-```python
+```python nocheck
 from typing import assert_never
 
 match value:
@@ -2097,10 +2103,10 @@ Before every commit:
 WINK's quality gates ensure reliable agent systems:
 
 1. **Strict type checking** catches errors at construction time (pyright strict)
-2. **Design-by-contract** documents and enforces invariants beyond types
-3. **100% coverage** ensures every code path is tested
-4. **Security scanning** prevents vulnerabilities (Bandit, pip-audit, deptry)
-5. **Quality gates** (`make check`) enforce all standards before commits
+1. **Design-by-contract** documents and enforces invariants beyond types
+1. **100% coverage** ensures every code path is tested
+1. **Security scanning** prevents vulnerabilities (Bandit, pip-audit, deptry)
+1. **Quality gates** (`make check`) enforce all standards before commits
 
 The philosophy: make correct code easy and incorrect code hard. Types guide you toward valid structures. Contracts document expectations. Coverage ensures tests exist. Security scanners catch vulnerabilities.
 

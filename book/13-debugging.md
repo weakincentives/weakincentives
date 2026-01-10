@@ -21,9 +21,9 @@ WINK's observability is built on three principles:
 
 1. **Event-driven capture**: Everything goes through the event bus. Logging, metrics, and tracing all subscribe to the same stream.
 
-2. **Deterministic replay**: Session snapshots include everything needed to reconstruct what happened—events, state transitions, tool calls, and model responses.
+1. **Deterministic replay**: Session snapshots include everything needed to reconstruct what happened—events, state transitions, tool calls, and model responses.
 
-3. **Separation of concerns**: Logging happens at the infrastructure level. Your agent code stays clean and focused on business logic.
+1. **Separation of concerns**: Logging happens at the infrastructure level. Your agent code stays clean and focused on business logic.
 
 ```mermaid
 flowchart TB
@@ -260,6 +260,7 @@ path = dump_session(session, target="snapshots/")
 ```
 
 The `target` parameter can be:
+
 - A directory path (filename will be `<session_id>.jsonl`)
 - A file path (used as-is)
 
@@ -272,9 +273,10 @@ Each line in the JSONL file is one serialized session:
 ```
 
 The format is:
+
 1. **Human-readable**: You can inspect snapshots with `jq` or text editors
-2. **Stable**: Field order and structure are versioned
-3. **Complete**: Everything needed to restore the session
+1. **Stable**: Field order and structure are versioned
+1. **Complete**: Everything needed to restore the session
 
 ### Snapshot Contents
 
@@ -316,6 +318,7 @@ facts = session[Fact].all()
 ```
 
 Restored sessions are fully functional. You can:
+
 - Continue execution from the snapshot
 - Re-run reducers to test changes
 - Feed the session to evaluators
@@ -376,8 +379,8 @@ graph LR
 The timeline shows every event in chronological order:
 
 1. **Prompt renders**: See exactly what was sent to the model, including all sections and tool definitions
-2. **Tool invocations**: Expand to see params, results, and execution time
-3. **State changes**: See which reducers fired and how slices changed
+1. **Tool invocations**: Expand to see params, results, and execution time
+1. **State changes**: See which reducers fired and how slices changed
 
 #### Detail Inspector
 
@@ -390,6 +393,7 @@ Click any event to see full details:
 #### Search & Filter
 
 Filter the timeline by:
+
 - Event type (`PromptRendered`, `ToolInvoked`, etc.)
 - Tool name
 - Time range
@@ -400,23 +404,26 @@ Filter the timeline by:
 When debugging an agent failure:
 
 1. **Capture the snapshot** during or after the run:
+
    ```python
    dump_session(session, target="snapshots/")
    ```
 
-2. **Open the debug UI**:
+1. **Open the debug UI**:
+
    ```bash
    wink debug snapshots/<session_id>.jsonl
    ```
 
-3. **Navigate the timeline** to find where things went wrong:
+1. **Navigate the timeline** to find where things went wrong:
+
    - Did the prompt include the right context?
    - Did the model call the expected tools?
    - Did reducers update state correctly?
 
-4. **Iterate** on prompts, tools, or reducers based on findings
+1. **Iterate** on prompts, tools, or reducers based on findings
 
-5. **Re-run** with fixes and compare new snapshots
+1. **Re-run** with fixes and compare new snapshots
 
 The debug UI makes it easy to see what the model "thought" it was doing and why it made specific choices.
 
@@ -429,6 +436,7 @@ The WINK debug UI is a browser-based snapshot explorer that provides visual insp
 ### Why Visual Inspection Matters
 
 Agent failures are often semantic rather than syntactic. The model might:
+
 - Call the right tool with subtly wrong parameters
 - Misinterpret context and make a reasonable but incorrect decision
 - Drift off task after several successful turns
@@ -515,13 +523,13 @@ wink debug snapshots/ --log-level DEBUG --json-logs
 
 1. **Path resolution**: If you provide a directory, the server globs for `*.jsonl` and `*.json` files, sorts by modification time (newest first), and loads the most recent one.
 
-2. **JSONL parsing**: Each line is parsed as JSON. Empty lines are skipped. Each non-empty line should be a complete session snapshot.
+1. **JSONL parsing**: Each line is parsed as JSON. Empty lines are skipped. Each non-empty line should be a complete session snapshot.
 
-3. **Validation**: The loader validates the `SnapshotPayload` structure. If full restoration fails (e.g., missing dataclass types), the server logs a warning but continues—you can still inspect the raw payload.
+1. **Validation**: The loader validates the `SnapshotPayload` structure. If full restoration fails (e.g., missing dataclass types), the server logs a warning but continues—you can still inspect the raw payload.
 
-4. **Server binding**: FastAPI binds to the specified host/port (default: `127.0.0.1:8000`).
+1. **Server binding**: FastAPI binds to the specified host/port (default: `127.0.0.1:8000`).
 
-5. **Browser launch**: After a 0.2-second delay (to avoid blocking server startup), the default browser opens to `http://localhost:8000`.
+1. **Browser launch**: After a 0.2-second delay (to avoid blocking server startup), the default browser opens to `http://localhost:8000`.
 
 **Exit codes:**
 
@@ -580,6 +588,7 @@ flowchart LR
 **Multi-entry snapshots:**
 
 Each line in a JSONL file is a separate snapshot entry. You might have:
+
 - Multiple sessions in one file (batch processing outputs)
 - Checkpoints from a long-running session
 - Before/after comparisons for A/B testing
@@ -591,6 +600,7 @@ The UI lets you switch between entries using the `/api/select` endpoint or the e
 When you open the debug UI in your browser, you see three main areas:
 
 **Screenshot description:**
+
 > The UI has a dark header with "WINK Debug" on the left and session metadata (ID, created_at, tags) on the right. Below is a three-column layout: a narrow left sidebar with filters, a wide center timeline showing events chronologically, and a right detail pane that expands when you click an event.
 
 #### Event Timeline (Center Pane)
@@ -598,22 +608,26 @@ When you open the debug UI in your browser, you see three main areas:
 The timeline shows every event in chronological order:
 
 1. **Prompt renders** (`PromptRendered`):
+
    - Full prompt text with syntax-highlighted markdown
    - Tool definitions and schemas
    - Timestamp and prompt key
 
-2. **Tool invocations** (`ToolInvoked`):
+1. **Tool invocations** (`ToolInvoked`):
+
    - Tool name and call ID
    - Input parameters (JSON-formatted)
    - Output result (success/error)
    - Execution duration in milliseconds
 
-3. **State changes** (`StateChanged`):
+1. **State changes** (`StateChanged`):
+
    - Which reducer fired
    - Slice type and operation (Append, Replace, Remove)
    - Before/after state comparison
 
-4. **Token usage** (`TokenUsage`):
+1. **Token usage** (`TokenUsage`):
+
    - Input tokens
    - Output tokens
    - Cached tokens (if applicable)
@@ -626,18 +640,21 @@ Each event is a collapsible card. Click to expand and see full details in the ri
 When you click an event, the detail inspector shows:
 
 **For prompts:**
+
 - Full rendered markdown with syntax highlighting
 - Section-by-section breakdown (if the prompt uses multiple sections)
 - Tool definitions with JSON schemas
 - Any overrides that were applied
 
 **For tool calls:**
+
 - Input parameters formatted as JSON
 - Full result object (including `ToolResult.value` and `ToolResult.message`)
 - Success/failure status
 - Execution time with millisecond precision
 
 **For state changes:**
+
 - Current slice contents at that point in time
 - The specific items that were added/removed/replaced
 - Reducer name and policy (if registered)
@@ -647,6 +664,7 @@ When you click an event, the detail inspector shows:
 String values that look like markdown (headers, lists, code blocks, links) are automatically detected and rendered as HTML. This makes it easy to read plan steps, documentation, or agent-generated summaries without squinting at raw text.
 
 The detection heuristic checks for:
+
 - Headers (`#`, `##`, etc.)
 - Lists (`-`, `*`, `+`, `1.`)
 - Code spans (`` `code` ``)
@@ -661,6 +679,7 @@ Minimum length for detection: 16 characters.
 Filter the timeline by:
 
 **Event type:**
+
 - All events
 - Prompts only
 - Tools only
@@ -668,18 +687,22 @@ Filter the timeline by:
 - Token usage only
 
 **Tool name:**
+
 - Dropdown showing all tools used in the session
 - Select one to see only calls to that tool
 
 **Time range:**
+
 - Slider to narrow the timeline to a specific window
 - Useful for long sessions with hundreds of events
 
 **Session tags:**
+
 - Filter by custom tags you added when creating the session
 - Example: `env=prod`, `user=alice`, `experiment=v2`
 
 **Search box:**
+
 - Full-text search across event names, tool names, and result messages
 - Case-insensitive
 - Updates the timeline in real-time as you type
@@ -836,6 +859,7 @@ Use this for exporting to other tools or when validation errors prevent full res
 When an agent fails in production:
 
 1. **Capture the snapshot** in your error handler:
+
    ```python
    from weakincentives.runtime.debug import dump_session
 
@@ -847,30 +871,36 @@ When an agent fails in production:
        raise
    ```
 
-2. **Start the debug UI**:
+1. **Start the debug UI**:
+
    ```bash
    wink debug failures/
    ```
 
-3. **Navigate the timeline** to find the failure point:
+1. **Navigate the timeline** to find the failure point:
+
    - Use the search box to find error messages
    - Filter by tool name if you suspect a specific tool
    - Expand events to see full context
 
-4. **Inspect the prompt** that triggered the failure:
+1. **Inspect the prompt** that triggered the failure:
+
    - Was the right context included?
    - Were tool definitions clear?
    - Did the model have enough information to succeed?
 
-5. **Check tool results** leading up to the failure:
+1. **Check tool results** leading up to the failure:
+
    - Were there earlier errors that the agent ignored?
    - Did a tool return unexpected data that confused the model?
 
-6. **Trace state evolution**:
+1. **Trace state evolution**:
+
    - Review state changes to see if reducers updated correctly
    - Look for missing data or incorrect transformations
 
-7. **Compare with successful runs**:
+1. **Compare with successful runs**:
+
    - Load a working snapshot
    - Diff the prompts and tool sequences
    - Identify where the failed run diverged
@@ -880,27 +910,32 @@ When an agent fails in production:
 When refining prompts:
 
 1. **Dump snapshots for each experiment**:
+
    ```python
    session = Session(tags={"experiment": "v2", "prompt": "clarified-instructions"})
    # ... run agent ...
    dump_session(session, target=f"experiments/experiment-v2-{session.session_id}.jsonl")
    ```
 
-2. **Load the snapshot in the debug UI**:
+1. **Load the snapshot in the debug UI**:
+
    ```bash
    wink debug experiments/ --no-open-browser
    ```
 
-3. **Use `/api/meta` to check slice counts**:
+1. **Use `/api/meta` to check slice counts**:
+
    - Did the agent produce more facts than the baseline?
    - Did it call tools more or fewer times?
 
-4. **Compare prompts** across experiments:
+1. **Compare prompts** across experiments:
+
    - Load experiment-v1 snapshot
    - Open experiment-v2 snapshot in a new browser tab
    - Use the detail inspector to diff the rendered prompts side-by-side
 
-5. **Measure improvement**:
+1. **Measure improvement**:
+
    - Count successful tool calls
    - Check if the agent completed the plan
    - Look at token usage to ensure efficiency
@@ -910,6 +945,7 @@ When refining prompts:
 When developing locally:
 
 1. **Run the agent with periodic snapshots**:
+
    ```python
    for turn in range(max_turns):
        response = adapter.evaluate(prompt, session=session)
@@ -917,17 +953,20 @@ When developing locally:
            dump_session(session, target=f"dev/checkpoint-{turn}.jsonl")
    ```
 
-2. **Start the debug UI in a terminal pane**:
+1. **Start the debug UI in a terminal pane**:
+
    ```bash
    wink debug dev/
    ```
 
-3. **As the agent runs**, hit `/api/reload` to see new checkpoints:
+1. **As the agent runs**, hit `/api/reload` to see new checkpoints:
+
    ```bash
    watch -n 5 'curl -X POST http://localhost:8000/api/reload'
    ```
 
-4. **Monitor progress** in the browser:
+1. **Monitor progress** in the browser:
+
    - Refresh to see new events
    - Check if the agent is on track
    - Stop early if you see it diverging
@@ -967,6 +1006,7 @@ Tags appear in the UI and let you filter/search across many snapshots.
 **Use validation errors as hints:**
 
 If a snapshot fails full validation, check `/api/meta` for the `validation_error` field. This often means:
+
 - You changed a dataclass definition but kept old snapshots
 - A custom serde handler is missing
 - A reducer produced invalid data
@@ -1003,7 +1043,7 @@ Download the artifact and use `wink debug` to inspect failures without local rep
 - [specs/WINK_DEBUG.md](../specs/WINK_DEBUG.md) - Complete debug UI specification
 - [specs/SLICES.md](../specs/SLICES.md) - Slice storage and JSONL format
 
----
+______________________________________________________________________
 
 ## 13.6 Structured Logging
 
@@ -1638,7 +1678,7 @@ def test_logging():
 - [specs/LOGGING.md](../specs/LOGGING.md) - Complete logging specification
 - [specs/HEALTH.md](../specs/HEALTH.md) - Health check logging
 
----
+______________________________________________________________________
 
 ## Observability in Production
 
@@ -1692,12 +1732,13 @@ group.run()
 ```
 
 This gives you:
+
 - **Structured logs** for grep/log aggregators
 - **Real-time metrics** for dashboards
 - **Automatic snapshots** on failures
 - **Health endpoints** for orchestrators
 
-See [Chapter 9](09-lifecycle.md) for production deployment patterns and [specs/HEALTH.md](/specs/HEALTH.md) for health check configuration.
+See [Chapter 9](09-lifecycle.md) for production deployment patterns and [specs/HEALTH.md](../specs/HEALTH.md) for health check configuration.
 
 ## Debugging Checklist
 
@@ -1726,9 +1767,9 @@ When an agent misbehaves:
 WINK's observability tools are designed for the unique challenges of debugging agent systems:
 
 1. **Structured logging** provides machine-parseable event streams
-2. **Session events** capture every model interaction and tool call
-3. **JSONL snapshots** enable deterministic replay and inspection
-4. **Debug UI** visualizes execution timelines for human understanding
+1. **Session events** capture every model interaction and tool call
+1. **JSONL snapshots** enable deterministic replay and inspection
+1. **Debug UI** visualizes execution timelines for human understanding
 
 Together, these tools let you instrument agents for production and diagnose issues when they arise. The key insight is that observability is built into the runtime—your agent code stays clean while the infrastructure handles capture and routing.
 

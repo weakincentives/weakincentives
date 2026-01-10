@@ -7,7 +7,7 @@
 Prompt optimization is one of the hardest problems in production LLM systems. You iterate on prompts constantly, A/B test variants, and need to roll back when experiments fail. But most frameworks force you to choose between two bad options:
 
 1. **Edit code directly** - Requires deploys, breaks A/B testing, couples iteration to release cycles
-2. **Use external config** - No validation, silent failures when prompts change, version drift between code and config
+1. **Use external config** - No validation, silent failures when prompts change, version drift between code and config
 
 WINK's override system gives you a third path: **configuration-driven iteration with code-level safety guarantees**.
 
@@ -74,11 +74,11 @@ flowchart TB
 **Key concepts:**
 
 1. **PromptDescriptor** - A complete manifest of all overridable content with hashes
-2. **PromptOverride** - Tagged variants stored as JSON files with expected hashes
-3. **Hash validation** - Overrides only apply when hashes match (fail closed)
-4. **Tag-based routing** - Multiple override variants can coexist (A/B testing)
+1. **PromptOverride** - Tagged variants stored as JSON files with expected hashes
+1. **Hash validation** - Overrides only apply when hashes match (fail closed)
+1. **Tag-based routing** - Multiple override variants can coexist (A/B testing)
 
-See [Chapter 3: Prompts](/book/03-prompts.md) for the underlying prompt system.
+See [Chapter 3: Prompts](03-prompts.md) for the underlying prompt system.
 
 ## 11.1 Hash-Based Safety: Override Only What You Intended
 
@@ -152,9 +152,9 @@ sequenceDiagram
 This prevents the catastrophic case where:
 
 1. You edit a section in code (`"Answer briefly"` → `"Answer in detail"`)
-2. An old override expects `"Answer briefly"` and patches it
-3. The override applies to different content than you tested
-4. **Result**: Silent corruption, unpredictable behavior
+1. An old override expects `"Answer briefly"` and patches it
+1. The override applies to different content than you tested
+1. **Result**: Silent corruption, unpredictable behavior
 
 With hash validation, step 3 fails loudly instead of silently corrupting output.
 
@@ -172,12 +172,13 @@ MarkdownSection(
 ```
 
 This is especially important for:
+
 - Authorization policies
 - Rate limiting instructions
 - PII handling rules
 - Safety guardrails
 
-See [Chapter 4: Tools](/book/04-tools.md) for tool-specific override patterns.
+See [Chapter 4: Tools](04-tools.md) for tool-specific override patterns.
 
 ## 11.2 LocalPromptOverridesStore
 
@@ -261,7 +262,7 @@ with registry.open() as ctx:
     prompt = Prompt(template, overrides_store=store, overrides_tag="stable")
 ```
 
-See [Chapter 3: Prompts](/book/03-prompts.md#resource-lifecycle) for resource management patterns.
+See [Chapter 3: Prompts](03-prompts.md#resource-lifecycle) for resource management patterns.
 
 ## 11.3 Override File Format
 
@@ -299,16 +300,19 @@ The override JSON format is intentionally simple and human-editable:
 ### Field Breakdown
 
 **Top-level metadata:**
+
 - `version` - Override format version (always `1`)
 - `ns`, `prompt_key` - Identifies the target prompt
 - `tag` - Variant name for A/B testing
 
 **Section overrides (`sections`):**
+
 - Keys are section paths (dot-encoded for nested sections)
 - `expected_hash` - SHA-256 of original template text
 - `body` - Replacement template text
 
 **Tool overrides (`tools`):**
+
 - Keys are tool names
 - `expected_contract_hash` - Hash of tool contract (description + schema)
 - `description` - Replacement tool description (1-200 chars)
@@ -331,6 +335,7 @@ The override JSON format is intentionally simple and human-editable:
 ### What You Can Override
 
 ✅ **Allowed:**
+
 - Section template bodies
 - Section summaries
 - Tool descriptions
@@ -339,6 +344,7 @@ The override JSON format is intentionally simple and human-editable:
 - Task examples (add/modify/remove)
 
 ❌ **Not Allowed:**
+
 - Tool names (breaks schema contracts)
 - Tool parameter types (breaks type safety)
 - Section structure (add/remove sections)
@@ -348,10 +354,10 @@ The override JSON format is intentionally simple and human-editable:
 ### Manual Editing Tips
 
 1. **Get hashes first** - Run `store.seed()` to generate a file with correct hashes
-2. **Edit bodies only** - Don't modify `expected_hash` fields
-3. **Validate JSON** - Use a linter to catch syntax errors
-4. **Test incrementally** - Change one section at a time
-5. **Version control** - Commit override files alongside code
+1. **Edit bodies only** - Don't modify `expected_hash` fields
+1. **Validate JSON** - Use a linter to catch syntax errors
+1. **Test incrementally** - Change one section at a time
+1. **Version control** - Commit override files alongside code
 
 ## 11.4 A Practical Override Workflow
 
@@ -432,7 +438,7 @@ eval_loop = EvalLoop(
 baseline_metrics = eval_loop.run(baseline_prompt)
 ```
 
-See [Chapter 8: Evaluation](/book/08-evaluation.md) for eval loop patterns.
+See [Chapter 8: Evaluation](08-evaluation.md) for eval loop patterns.
 
 #### 3. Edit Override Content
 
@@ -553,13 +559,13 @@ git commit -m "Archive experiment-a (no improvement over baseline)"
 ### Production Best Practices
 
 1. **Version control overrides** - Commit override files alongside code
-2. **Document changes** - Include metrics in commit messages
-3. **Tag conventions** - Use semantic names (`stable`, `experiment-{name}`, `rollback-{date}`)
-4. **Hash validation** - Never edit `expected_hash` fields manually
-5. **Gradual rollout** - Start with 5% traffic, scale to 50% if metrics look good
-6. **Rollback plan** - Always have a known-good `stable` variant
-7. **Review process** - Treat override changes like code changes (PR review)
-8. **Monitoring** - Track metrics by override tag in production
+1. **Document changes** - Include metrics in commit messages
+1. **Tag conventions** - Use semantic names (`stable`, `experiment-{name}`, `rollback-{date}`)
+1. **Hash validation** - Never edit `expected_hash` fields manually
+1. **Gradual rollout** - Start with 5% traffic, scale to 50% if metrics look good
+1. **Rollback plan** - Always have a known-good `stable` variant
+1. **Review process** - Treat override changes like code changes (PR review)
+1. **Monitoring** - Track metrics by override tag in production
 
 ### Multi-Environment Setup
 
@@ -640,11 +646,12 @@ else:
 ```
 
 The optimizer:
+
 1. Runs baseline eval with original prompt
-2. Generates candidate override patches
-3. Tests each candidate against the dataset
-4. Keeps the best-performing variant
-5. Returns a `PromptOverride` ready to save
+1. Generates candidate override patches
+1. Tests each candidate against the dataset
+1. Keeps the best-performing variant
+1. Returns a `PromptOverride` ready to save
 
 See [specs/PROMPT_OPTIMIZATION.md](../specs/PROMPT_OPTIMIZATION.md#optimizer-integration) for optimizer API details.
 
@@ -660,11 +667,11 @@ Prompt optimization in WINK gives you:
 
 The key insight: **prompts are code, overrides are configuration**. Keep the source of truth in versioned templates, but enable rapid iteration via validated patches.
 
-Next, explore workspace tools for file operations and sandboxed execution in [Chapter 12: Workspace Tools](/book/12-workspace-tools.md).
+Next, explore workspace tools for file operations and sandboxed execution in [Chapter 12: Workspace Tools](12-workspace-tools.md).
 
 ## Further Reading
 
-- [specs/PROMPT_OPTIMIZATION.md](/specs/PROMPT_OPTIMIZATION.md) - Complete override specification
-- [Chapter 3: Prompts](/book/03-prompts.md) - Prompt system fundamentals
-- [Chapter 4: Tools](/book/04-tools.md) - Tool override patterns
-- [Chapter 8: Evaluation](/book/08-evaluation.md) - Eval loop for testing overrides
+- [specs/PROMPT_OPTIMIZATION.md](../specs/PROMPT_OPTIMIZATION.md) - Complete override specification
+- [Chapter 3: Prompts](03-prompts.md) - Prompt system fundamentals
+- [Chapter 4: Tools](04-tools.md) - Tool override patterns
+- [Chapter 8: Evaluation](08-evaluation.md) - Eval loop for testing overrides

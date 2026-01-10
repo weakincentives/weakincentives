@@ -2,7 +2,7 @@
 
 **Sandboxed, deterministic tool execution**
 
----
+______________________________________________________________________
 
 ## Overview
 
@@ -20,21 +20,21 @@ This chapter covers the complete tool lifecycle, from defining simple handlers t
 
 > **Canonical spec**: [specs/TOOLS.md](../specs/TOOLS.md)
 
----
+______________________________________________________________________
 
 ## Table of Contents
 
 1. [Tool Contracts](#tool-contracts)
-2. [ToolContext and Resources](#toolcontext-and-resources)
-3. [ToolResult Semantics](#toolresult-semantics)
-4. [Tool Examples](#tool-examples)
-5. [Validation and Error Handling](#validation-and-error-handling)
-6. [Tool Suites as Sections](#tool-suites-as-sections)
-7. [Transactional Tool Execution](#transactional-tool-execution)
-8. [Tool Policies](#tool-policies)
-9. [Best Practices](#best-practices)
+1. [ToolContext and Resources](#toolcontext-and-resources)
+1. [ToolResult Semantics](#toolresult-semantics)
+1. [Tool Examples](#tool-examples)
+1. [Validation and Error Handling](#validation-and-error-handling)
+1. [Tool Suites as Sections](#tool-suites-as-sections)
+1. [Transactional Tool Execution](#transactional-tool-execution)
+1. [Tool Policies](#tool-policies)
+1. [Best Practices](#best-practices)
 
----
+______________________________________________________________________
 
 ## Tool Contracts
 
@@ -107,9 +107,9 @@ search_tool = Tool[SearchParams, SearchResult](
 The type parameters `Tool[SearchParams, SearchResult]` tell WINK:
 
 1. **How to serialize** parameters for the model's tool schema
-2. **How to validate** parameters when the model makes a tool call
-3. **What structure** to expect in the result for type checking
-4. **How to render** the result for context (via the `render()` method)
+1. **How to validate** parameters when the model makes a tool call
+1. **What structure** to expect in the result for type checking
+1. **How to render** the result for context (via the `render()` method)
 
 Type mismatches are caught at construction time, not at runtime.
 
@@ -142,7 +142,7 @@ sequenceDiagram
     Adapter->>Model: tool_result: "Found 3 results\n1. ..."
 ```
 
----
+______________________________________________________________________
 
 ## ToolContext and Resources
 
@@ -434,7 +434,7 @@ def read_file_handler(
 
 See [Chapter 12: Workspace Tools](12-workspace-tools.md) for details on VFS, Podman, and other workspace abstractions.
 
----
+______________________________________________________________________
 
 ## ToolResult Semantics
 
@@ -486,11 +486,11 @@ ToolResult(
 WINK uses the `render()` method to convert structured values into text for the model:
 
 1. **If value is a dataclass with `render()`**: Use that method
-2. **If value is a dataclass without `render()`**: Serialize to JSON (with a warning)
-3. **If value is a mapping**: Serialize to JSON
-4. **If value is a sequence**: Format as newline-separated items
-5. **If value is a string**: Use as-is
-6. **If value is None**: Return empty string
+1. **If value is a dataclass without `render()`**: Serialize to JSON (with a warning)
+1. **If value is a mapping**: Serialize to JSON
+1. **If value is a sequence**: Format as newline-separated items
+1. **If value is a string**: Use as-is
+1. **If value is None**: Return empty string
 
 **Example with custom rendering:**
 
@@ -584,7 +584,7 @@ def read_large_file_handler(
 
 This is critical for cost control: reading a 10MB file should not consume 10MB of context tokens.
 
----
+______________________________________________________________________
 
 ## Tool Examples
 
@@ -659,7 +659,7 @@ Adapters may include examples in the tool schema sent to the model (depending on
 }
 ```
 
----
+______________________________________________________________________
 
 ## Validation and Error Handling
 
@@ -674,7 +674,7 @@ WINK's validation and error handling system provides multiple layers of protecti
 
 > **Key specs**: [specs/TOOLS.md](../specs/TOOLS.md), [specs/DBC.md](../specs/DBC.md)
 
----
+______________________________________________________________________
 
 ### Input Validation
 
@@ -837,12 +837,12 @@ def write_file_handler(
 Error messages should be **model-facing**, not developer-facing. The model needs:
 
 1. **What went wrong** (specific violation)
-2. **Why it matters** (context if non-obvious)
-3. **How to fix it** (actionable next steps)
+1. **Why it matters** (context if non-obvious)
+1. **How to fix it** (actionable next steps)
 
 **Bad error messages:**
 
-```python
+```python nocheck
 return ToolResult.error("Invalid path")  # Too vague
 return ToolResult.error("ValueError: path validation failed")  # Internal details
 return ToolResult.error("Error code 42")  # Requires lookup
@@ -850,7 +850,7 @@ return ToolResult.error("Error code 42")  # Requires lookup
 
 **Good error messages:**
 
-```python
+```python nocheck
 return ToolResult.error(
     f"Cannot write to {params.path} - path must start with /workspace/\n"
     f"Example valid paths: /workspace/output.txt, /workspace/data/results.json"
@@ -926,7 +926,7 @@ def delete_file_handler(
 
 **Key principle**: Validate as early as possible, but not earlier. Schema validation happens before the handler, business rules happen inside.
 
----
+______________________________________________________________________
 
 ### Output Validation
 
@@ -1090,7 +1090,7 @@ def validated_handler(
 
 If the handler violates the postcondition, the DbC decorator catches it and returns an error.
 
----
+______________________________________________________________________
 
 ### Error Handling Semantics
 
@@ -1223,7 +1223,7 @@ graph TD
 
 **Pattern: Include actionable next steps**
 
-```python
+```python nocheck
 # Bad: Vague error
 return ToolResult.error("Permission denied")
 
@@ -1239,7 +1239,7 @@ return ToolResult.error(
 
 **Pattern: Suggest alternative tools**
 
-```python
+```python nocheck
 # Bad: Dead end
 return ToolResult.error("Cannot search by content")
 
@@ -1253,7 +1253,7 @@ return ToolResult.error(
 
 **Pattern: Provide examples**
 
-```python
+```python nocheck
 # Bad: Format unclear
 return ToolResult.error("Invalid date format")
 
@@ -1302,9 +1302,9 @@ sequenceDiagram
 **Key behaviors:**
 
 1. **Errors trigger rollback**: Session state reverts to pre-call snapshot
-2. **ToolInvoked always recorded**: Both successes and failures appear in LOG slice
-3. **Error message sent to model**: Model receives the `message` field verbatim
-4. **Conversation continues**: Model can retry or take alternative action
+1. **ToolInvoked always recorded**: Both successes and failures appear in LOG slice
+1. **Error message sent to model**: Model receives the `message` field verbatim
+1. **Conversation continues**: Model can retry or take alternative action
 
 #### Transaction Rollback on Errors
 
@@ -1361,7 +1361,7 @@ Some errors are **retryable** (the model can take corrective action), others are
 
 **Retryable errors:**
 
-```python
+```python nocheck
 # Wrong parameters - model can correct
 return ToolResult.error(
     f"limit must be between 1 and 100 (got {params.limit})"
@@ -1382,7 +1382,7 @@ return ToolResult.error(
 
 **Terminal errors:**
 
-```python
+```python nocheck
 # System resource exhausted
 return ToolResult.error(
     f"Out of memory: cannot process {size} MB file\n"
@@ -1407,7 +1407,7 @@ return ToolResult.error(
 
 **Hint for retry**: Use the word "retry" in retryable errors, and "cannot" or "requires human intervention" in terminal errors.
 
----
+______________________________________________________________________
 
 ### Impact on Prompt Processing
 
@@ -1526,7 +1526,7 @@ write_file(path="system-modified.conf", content="...")
 
 Guide the model's recovery strategy in your prompt:
 
-```python
+```python nocheck
 section = MarkdownSection(
     title="File Operations",
     key="files",
@@ -1553,18 +1553,26 @@ If a tool call fails:
 
 ## Example Recovery Flow
 
-````
+```
+
 # Initial attempt
+
 write_file(path="output.txt", content="data")
+
 # Error: "File exists - use overwrite=true to replace"
 
 # Recovery: Read first to understand contents
+
 read_file(path="output.txt")
+
 # Output: Shows existing file has 10 bytes
 
 # Retry with overwrite
+
 write_file(path="output.txt", content="data", overwrite=true)
+
 # Success: "Wrote 4 bytes to output.txt"
+
 ````
     """.strip(),
     tools=(read_file, write_file, list_directory),
@@ -2802,3 +2810,4 @@ Together, these features make tools the **only place where side effects happen**
 - [Chapter 12: Workspace Tools](12-workspace-tools.md) - Planning, VFS, sandboxing, and more
 - [specs/TOOLS.md](../specs/TOOLS.md) - Complete tool specification
 - [specs/TOOL_POLICIES.md](../specs/TOOL_POLICIES.md) - Policy design and implementation
+````
