@@ -1,8 +1,14 @@
 # Weak Incentives (Is All You Need)
 
-WINK is a Python library for building background agents—automated AI systems that
-run unattended. It provides typed, composable primitives designed for determinism,
-testability, and safe execution without heavy dependencies or hosted services.
+WINK is the agent-definition layer: prompts, tools, policies, and trajectory
+feedback that stay stable while runtimes change.
+
+WINK is a Python library for building unattended/background agents. You define
+the prompt, tools, and policies, and you add trajectory feedback that prevents
+the agent from declaring success too early. The planning loop, sandboxing,
+retries, scheduling, and orchestration live in the execution harness—often a
+vendor runtime. WINK keeps your agent definition portable so you can swap
+harnesses without rewriting the core logic.
 
 > **New to WINK?** Read the [WINK Guide](WINK_GUIDE.md) for a comprehensive
 > introduction—philosophy, quickstart, and practical patterns for building agents.
@@ -19,10 +25,31 @@ It's a genuinely new discipline: what's relevant now, what to summarize versus
 preserve, how to structure information so models reason over it well. No clean
 precedent from traditional engineering. Builders who master it early win.
 
-Some orchestration stays—for auditability, cost control, hard constraints. WINK
-focuses there: typed prompts as the primary artifact, observable session state,
-sandboxed tools. The framework handles the scaffolding that needs to remain; you
-focus on what you're feeding the model.
+Some orchestration stays—for auditability, cost control, and hard constraints—but
+it should live in a harness you can swap. WINK focuses on the agent definition:
+typed prompts, tool contracts, policies that encode invariants, and trajectory
+feedback that resists premature "done." Run that definition on WINK's minimal
+loop when you want simplicity, or on a provider harness when you want stronger
+sandboxing and native tooling.
+
+## Definition vs. Harness
+
+A high-quality unattended agent has two parts:
+
+**Agent definition (you own):**
+- Prompt structure (context engineering)
+- Tools + typed I/O contracts (the side-effect boundary)
+- Policies (gates on tool use and state transitions)
+- Trajectory feedback ("done" criteria, drift detection)
+
+**Execution harness (runtime-owned):**
+- Planning/act loop and tool-call sequencing
+- Sandboxing/permissions (filesystem/shell/network)
+- Retries/backoff, throttling, and lifecycle management
+- Scheduling, budgets/deadlines, crash recovery
+- Multi-agent orchestration (when used)
+
+WINK is built so the definition remains stable while the harness can change.
 
 ## What makes WINK different?
 
@@ -30,6 +57,11 @@ Most agent frameworks treat prompts as an afterthought—templates glued to
 separately registered tool lists. WINK inverts this: **the prompt _is_ the
 agent**. You define an agent as a single hierarchical document where each
 section bundles its own instructions and tools together.
+
+WINK treats reliability as part of the definition. Policies encode hard
+constraints ("don't write before you've read", "don't call tool B until tool A
+ran"), and trajectory feedback encodes completion criteria so unattended runs
+don't stop early just because a model says "done."
 
 ### One flexible reasoning loop
 
@@ -107,14 +139,24 @@ structure itself.
   state. Mount host directories read-only when needed; the sandbox prevents
   accidental writes to the host. See [Workspace Tools](specs/WORKSPACE.md).
 
-- **Provider-agnostic adapters.** Swap between OpenAI, LiteLLM, Claude Agent SDK,
-  or other providers without touching agent logic. Adapters handle tool
-  negotiation, structured output schemas, and response normalization. The Claude
-  Agent SDK adapter provides full agentic capabilities with hermetic isolation.
+- **Harness-swappable adapters.** Keep the agent definition stable while
+  switching runtimes (OpenAI, LiteLLM, Claude Agent SDK, etc.). Adapters handle
+  provider negotiation, structured outputs, and tool integration. The Claude
+  Agent SDK adapter is an example of "renting the harness": native tools +
+  OS-level sandboxing, while WINK supplies the prompt/tool/policy definition.
   See [Adapters](specs/ADAPTERS.md) and [Claude Agent SDK](specs/CLAUDE_AGENT_SDK.md).
 
 - **Minimal dependencies.** No Pydantic, no heavyweight stacks. Custom serde
   modules provide validation without sprawling dependency trees.
+
+- **Tool policies (invariants over workflows).** Gate tool calls with explicit
+  policies instead of brittle orchestration graphs.
+  See [Policies Over Workflows](specs/POLICIES_OVER_WORKFLOWS.md).
+
+- **Trajectory feedback (completion resistance).** Encode "done means X" checks
+  that run during execution to catch drift and premature termination.
+  See [Task Completion Checking](specs/TASK_COMPLETION.md) and
+  [Trajectory Observers](specs/TRAJECTORY_OBSERVERS.md) (design spec).
 
 ## Requirements
 
@@ -302,6 +344,10 @@ A code review agent with structured output, sandboxed file access, observable
 state, and tunable prompts—built as regular software, not ad-hoc scripts.
 
 ### Using the Claude Agent SDK
+
+This is the "rent the harness" path: Claude's runtime drives the agent loop and
+native tools; WINK provides the portable agent definition and bridges custom
+tools where needed.
 
 The code reviewer also supports running with the Claude Agent SDK adapter,
 which provides Claude's full agentic capabilities through native tools
