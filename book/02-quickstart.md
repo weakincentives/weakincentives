@@ -54,6 +54,22 @@ export OPENAI_API_KEY="sk-..."
 
 ______________________________________________________________________
 
+## Choose an Execution Harness
+
+WINK separates the **agent definition** (prompt + tools + policies) from the
+**execution harness** (how tool calls are driven, sandboxed, retried, and
+monitored).
+
+- If you just want to run a prompt with tools, a standard adapter is enough.
+- If you need a hardened unattended runtime (sandbox + richer tool
+  orchestration), prefer a provider runtime adapter when available (e.g. Claude
+  Agent SDK).
+
+This quickstart uses `OpenAIAdapter` to keep the first example minimal. The
+prompt and tools you build here are designed to be portable across harnesses.
+
+______________________________________________________________________
+
 ## Your First Agent: Structured Summarization
 
 Let's build a tiny but complete agent that demonstrates WINK's core principles:

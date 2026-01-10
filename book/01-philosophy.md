@@ -639,6 +639,26 @@ graph LR
     end
 ```
 
+### The Unattended Agent Split: Definition vs Harness
+
+Most teams accidentally spend their complexity budget on the harness (graphs,
+routers, custom planners, bespoke sandboxes). That work does not compound: it's
+expensive, hard to harden, and increasingly duplicated by vendor runtimes.
+
+A high-quality unattended agent comes from owning the definition:
+
+- the prompt that shapes reasoning
+- the tools that expose real capabilities
+- the policies that enforce invariants
+- the trajectory feedback that prevents "looks done" failures
+
+The harness should be replaceable. WINK keeps its own loop intentionally small
+(`MainLoop`) and supports delegation to provider runtimes where available. Your
+goal is to keep "what the agent is" stable while swapping "how it runs".
+
+**In WINK terms: prompts/tools/policies/feedback are product logic; orchestration
+is plumbing.**
+
 ### The Durable Primitives
 
 **The durable part of agent systems is tools, retrieval, and context engineering.**

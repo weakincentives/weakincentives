@@ -10,6 +10,12 @@
 
 You could write the loop yourself. `MainLoop` just does it in a tested, consistent way—handling the complexity of deadline enforcement, budget tracking, visibility expansion, and resource management so you can focus on your agent's logic.
 
+`MainLoop` is WINK's reference harness: a small, tested runtime for
+deadlines/budgets and progressive disclosure. If you run on a provider harness
+(for example via the Claude Agent SDK adapter), you may use less of `MainLoop`
+directly. The intent is that your agent definition (prompt + tools + policies +
+feedback) stays the same either way.
+
 In this chapter, you'll learn:
 
 - **Minimal MainLoop** - The essential pattern for orchestrating agent execution
