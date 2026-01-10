@@ -63,9 +63,9 @@ flowchart LR
 **Key concepts:**
 
 1. **Summaries** provide one-sentence descriptions of available context
-2. **open_sections** expands sections permanently (for the session)
-3. **read_section** returns content temporarily (no state change)
-4. **Visibility overrides** persist expansion state in session slices
+1. **open_sections** expands sections permanently (for the session)
+1. **read_section** returns content temporarily (no state change)
+1. **Visibility overrides** persist expansion state in session slices
 
 This approach achieves **cost efficiency** without sacrificing model capability.
 
@@ -145,9 +145,9 @@ The callable receives a `RenderContext` with access to the session, allowing vis
 When a section with `visibility=SUMMARY` renders:
 
 1. Check for visibility override in `session[VisibilityOverrides]`
-2. If override exists and is `FULL`, render `template`
-3. Otherwise, if `summary` exists, render `summary`
-4. Otherwise, render `template` (fallback)
+1. If override exists and is `FULL`, render `template`
+1. Otherwise, if `summary` exists, render `summary`
+1. Otherwise, render `template` (fallback)
 
 ```mermaid
 flowchart TD
@@ -211,10 +211,10 @@ def open_sections(
 **MainLoop behavior:**
 
 1. Tool raises `VisibilityExpansionRequired`
-2. MainLoop catches the exception
-3. MainLoop dispatches `SetVisibilityOverride` for each section
-4. MainLoop re-renders the prompt with expanded sections
-5. MainLoop retries the evaluation
+1. MainLoop catches the exception
+1. MainLoop dispatches `SetVisibilityOverride` for each section
+1. MainLoop re-renders the prompt with expanded sections
+1. MainLoop retries the evaluation
 
 ```mermaid
 sequenceDiagram
@@ -483,53 +483,58 @@ section = MarkdownSection(
 
 Start with minimal examples, expand for complex cases:
 
-```python
+`````python nocheck
 basic_examples = """
 # Basic Examples
 
 ## Create User
 ````python
 client.create_user(name="Alice", email="alice@example.com")
-````
+`````
+
 """
 
 advanced_examples = """
+
 # Advanced Examples
 
 ## Batch Operations
-````python
+
+```python
 with client.batch() as batch:
     for user in users:
         batch.create_user(**user)
-````
+```
 
 ## Error Handling
-````python
+
+```python
 try:
     client.create_user(...)
 except ValidationError as e:
     handle_validation_error(e)
-````
+```
 
 [... 2000 tokens of advanced examples ...]
 """
 
-sections = [
-    MarkdownSection(
-        title="Examples",
-        key="examples_basic",
-        template=basic_examples,
-        visibility=SectionVisibility.FULL,  # Always show basics
-    ),
-    MarkdownSection(
-        title="Advanced Examples",
-        key="examples_advanced",
-        template=advanced_examples,
-        summary="Advanced examples for batch operations, error handling, and edge cases.",
-        visibility=SectionVisibility.SUMMARY,
-    ),
-]
-```
+sections = \[
+MarkdownSection(
+title="Examples",
+key="examples_basic",
+template=basic_examples,
+visibility=SectionVisibility.FULL, # Always show basics
+),
+MarkdownSection(
+title="Advanced Examples",
+key="examples_advanced",
+template=advanced_examples,
+summary="Advanced examples for batch operations, error handling, and edge cases.",
+visibility=SectionVisibility.SUMMARY,
+),
+\]
+
+````
 
 ### Pattern: Measuring Token Savings
 
@@ -828,14 +833,16 @@ This chapter covered WINK's progressive disclosure system:
 Key takeaways:
 
 1. Use `visibility=SUMMARY` for infrequently-needed content
-2. Provide informative summaries that guide expansion decisions
-3. Use `open_sections` for sustained access, `read_section` for one-time lookups
-4. Measure token savings to quantify cost impact
-5. Test rendering behavior with and without overrides
+1. Provide informative summaries that guide expansion decisions
+1. Use `open_sections` for sustained access, `read_section` for one-time lookups
+1. Measure token savings to quantify cost impact
+1. Test rendering behavior with and without overrides
 
 **Next**: [Chapter 11](11-prompt-optimization.md) covers prompt optimization through version management and override systems.
 
 **Related chapters:**
+
 - [Chapter 3: Prompts](03-prompts.md) - Prompt composition and section basics
 - [Chapter 7: Main Loop](07-main-loop.md) - MainLoop's automatic handling of expansion
 - [Chapter 11: Prompt Optimization](11-prompt-optimization.md) - Optimizing prompts over time
+````

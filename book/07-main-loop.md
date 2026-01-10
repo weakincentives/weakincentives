@@ -62,11 +62,11 @@ flowchart TB
 **Key responsibilities:**
 
 1. **Preparation** - Convert your request into a `Prompt` and `Session`
-2. **Execution** - Evaluate the prompt through the adapter
-3. **Visibility** - Detect and handle `VisibilityExpansionRequired` exceptions
-4. **Budgets** - Track token usage and enforce limits
-5. **Deadlines** - Ensure execution completes within time bounds
-6. **Resources** - Manage dependency lifecycle for tool handlers
+1. **Execution** - Evaluate the prompt through the adapter
+1. **Visibility** - Detect and handle `VisibilityExpansionRequired` exceptions
+1. **Budgets** - Track token usage and enforce limits
+1. **Deadlines** - Ensure execution completes within time bounds
+1. **Resources** - Manage dependency lifecycle for tool handlers
 
 ## The Minimal MainLoop
 
@@ -134,10 +134,10 @@ sequenceDiagram
 **Execution flow:**
 
 1. **Client calls `execute(request)`** - Passes domain-specific request
-2. **`prepare()` is invoked** - Your implementation builds prompt and session
-3. **Prompt is evaluated** - Through the configured adapter
-4. **Events are recorded** - Session captures telemetry automatically
-5. **Response is returned** - Along with the final session state
+1. **`prepare()` is invoked** - Your implementation builds prompt and session
+1. **Prompt is evaluated** - Through the configured adapter
+1. **Events are recorded** - Session captures telemetry automatically
+1. **Response is returned** - Along with the final session state
 
 ## Configuring MainLoop with Resources
 
@@ -199,10 +199,10 @@ flowchart TB
 **Lifecycle stages:**
 
 1. **Registration** - Define bindings at startup
-2. **Context opening** - Resources become available during execution
-3. **Lazy construction** - Resources are created on first access
-4. **Tool access** - Handlers retrieve resources via `context.resources.get(T)`
-5. **Cleanup** - Resources are released after execution
+1. **Context opening** - Resources become available during execution
+1. **Lazy construction** - Resources are created on first access
+1. **Tool access** - Handlers retrieve resources via `context.resources.get(T)`
+1. **Cleanup** - Resources are released after execution
 
 ### Per-Request Resource Overrides
 
@@ -220,6 +220,7 @@ response2, session2 = loop.execute(request, resources=custom_resources)
 ```
 
 This is useful for:
+
 - **Testing** - Inject mock dependencies
 - **Multi-tenancy** - Different configs per customer
 - **A/B testing** - Different feature flags per experiment
@@ -256,11 +257,11 @@ sequenceDiagram
 **Expansion flow:**
 
 1. **Model calls `open_sections`** - Requests more context for specific sections
-2. **Adapter throws exception** - `VisibilityExpansionRequired` with section IDs
-3. **MainLoop catches exception** - Validates the request
-4. **Prompt is expanded** - Visibility overrides are applied
-5. **Retry** - Prompt is re-evaluated with expanded context
-6. **Completion** - Model receives additional context and continues
+1. **Adapter throws exception** - `VisibilityExpansionRequired` with section IDs
+1. **MainLoop catches exception** - Validates the request
+1. **Prompt is expanded** - Visibility overrides are applied
+1. **Retry** - Prompt is re-evaluated with expanded context
+1. **Completion** - Model receives additional context and continues
 
 For more details on progressive disclosure, see [Chapter 10: Progressive Disclosure](10-progressive-disclosure.md).
 
@@ -374,9 +375,9 @@ flowchart TB
 **Tracking across retries:**
 
 1. **Initial request** - Tokens consumed are recorded
-2. **Visibility expansion** - Additional tokens are added to total
-3. **Budget check** - Before each retry, validate remaining budget
-4. **Enforcement** - Raise `BudgetExceeded` if limit would be exceeded
+1. **Visibility expansion** - Additional tokens are added to total
+1. **Budget check** - Before each retry, validate remaining budget
+1. **Enforcement** - Raise `BudgetExceeded` if limit would be exceeded
 
 ### Combining Deadlines and Budgets
 
@@ -711,6 +712,6 @@ The main loop is the orchestration layer that connects your prompts, sessions, a
 - **[Chapter 5: Sessions](05-sessions.md)** - Deep dive into session state management
 - **[Chapter 3: Prompts](03-prompts.md)** - Prompt composition and resource lifecycle
 
----
+______________________________________________________________________
 
 **Canonical Reference**: See [specs/MAIN_LOOP.md](../specs/MAIN_LOOP.md) for the complete specification, including visibility handling semantics, deadline checking algorithm, budget tracker implementation, and resource lifecycle details.

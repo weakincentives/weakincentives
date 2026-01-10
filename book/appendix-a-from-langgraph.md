@@ -241,6 +241,7 @@ print(response.output)  # "4"
 ```
 
 Key differences:
+
 - No explicit graph—model decides whether to call the tool
 - Tool and instructions co-located in the same section
 - Typed parameters with dataclasses

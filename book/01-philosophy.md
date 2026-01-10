@@ -254,8 +254,8 @@ flowchart TB
 When the agent encounters an unexpected situation, it:
 
 1. **Reasons** about which constraints apply
-2. **Discovers** alternative approaches that satisfy them
-3. **Adapts** its strategy without violating invariants
+1. **Discovers** alternative approaches that satisfy them
+1. **Adapts** its strategy without violating invariants
 
 This is the difference between giving directions ("turn left, then right") and
 giving a map with constraints ("stay on paved roads, avoid tolls"). Directions
@@ -315,7 +315,7 @@ when and how to satisfy prerequisites.
 Each policy evaluates in isolation. Policies compose through conjunction: all
 must allow, any may deny:
 
-```python
+```python nocheck
 from weakincentives.contrib.tools.policies import (
     ReadBeforeWritePolicy,
     BudgetLimitPolicy,
@@ -359,7 +359,7 @@ The agent can then reason about why denial occurred and adjust its approach
 Policies should expose their reasoning. When a policy denies an action, the agent
 and human reviewers should understand why:
 
-```python
+```python nocheck
 return PolicyDecision.deny(
     f"File '{path}' must be read before overwriting. "
     f"Read {', '.join(read_paths)} so far."
@@ -496,13 +496,13 @@ Policies are not universally superior. Workflows are appropriate when:
 1. **The sequence is truly invariant** — Not just common, but required by
    external systems (e.g., protocol handshakes, database transactions)
 
-2. **Failure is preferable to adaptation** — Some contexts require strict
+1. **Failure is preferable to adaptation** — Some contexts require strict
    reproducibility over resilience
 
-3. **The agent lacks reasoning capability** — Rule-based systems or simple state
+1. **The agent lacks reasoning capability** — Rule-based systems or simple state
    machines don't benefit from flexible policies
 
-4. **Human oversight is continuous** — Attended operation can course-correct
+1. **Human oversight is continuous** — Attended operation can course-correct
    workflow failures in real-time
 
 For unattended agents with language model reasoning, **policies are almost always
@@ -536,6 +536,7 @@ def deploy_code():
 ```
 
 **Problems**:
+
 - Rigid sequence: config → tests → build → deploy
 - Edge cases branched explicitly
 - New edge cases require code changes
@@ -571,6 +572,7 @@ tools = (
 ```
 
 **Benefits**:
+
 - Agent reasons about constraints
 - Can adapt to unexpected situations (missing config, flaky tests)
 - New edge cases don't require policy changes
@@ -662,6 +664,7 @@ discipline:
 - **Safety** is enforced at tool boundaries where side effects happen
 
 For the formal specification of these behaviors, see:
+
 - [specs/PROMPTS.md](../specs/PROMPTS.md)
 - [specs/TOOLS.md](../specs/TOOLS.md)
 - [specs/SESSIONS.md](../specs/SESSIONS.md)
@@ -749,7 +752,7 @@ Two "novel" properties fall out of this structure:
    inputs produce the same outputs. You can write tests that assert on exact
    prompt text.
 
-2. **Safe iteration**: Apply prompt tweaks via overrides that are validated
+1. **Safe iteration**: Apply prompt tweaks via overrides that are validated
    against hashes. When you change a section in code, existing overrides stop
    applying until you explicitly update them. No silent drift.
 
@@ -803,7 +806,7 @@ WINK is designed to be composable. You can use `PromptTemplate` and `Session`
 without using `MainLoop`. You can use the adapters without the contrib tools.
 Pick the pieces that solve your problems.
 
----
+______________________________________________________________________
 
 **In the next chapter**, we'll dive into a practical quickstart that shows you
 how to build your first WINK agent in under 100 lines of code.

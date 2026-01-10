@@ -17,9 +17,9 @@ WINK's workspace tools solve this with a **sandbox-first** design:
 These tools share common patterns:
 
 1. **Session-scoped** - Each tool suite is bound to a specific session
-2. **Pure handlers** - All mutations go through reducers, handlers remain side-effect-free
-3. **Sandbox isolation** - Host writes disabled by default
-4. **Progressive disclosure** - Start with summaries, expand on demand
+1. **Pure handlers** - All mutations go through reducers, handlers remain side-effect-free
+1. **Sandbox isolation** - Host writes disabled by default
+1. **Progressive disclosure** - Start with summaries, expand on demand
 
 The result: agents can safely explore and modify code without risking production systems.
 
@@ -73,11 +73,11 @@ flowchart TB
 **Key concepts:**
 
 1. **Tool sections** expose tools to the model and manage state
-2. **Session slices** store typed, immutable state (plans, files, digests)
-3. **Backends** provide actual execution (in-memory, containers, interpreters)
-4. **Host mounts** hydrate VFS from disk but remain read-only
+1. **Session slices** store typed, immutable state (plans, files, digests)
+1. **Backends** provide actual execution (in-memory, containers, interpreters)
+1. **Host mounts** hydrate VFS from disk but remain read-only
 
-See [Chapter 4: Tools](/book/04-tools.md) for tool fundamentals and [Chapter 5: Sessions](/book/05-sessions.md) for state management.
+See [Chapter 4: Tools](04-tools.md) for tool fundamentals and [Chapter 5: Sessions](05-sessions.md) for state management.
 
 ## 12.1 PlanningToolsSection
 
@@ -173,6 +173,7 @@ for step in current_plan.steps:
 ### Planning Strategies
 
 **REACT** - Model plans incrementally as it works:
+
 - Setup initial plan
 - Execute step
 - Update step status
@@ -180,6 +181,7 @@ for step in current_plan.steps:
 - Repeat
 
 **CHAIN_OF_THOUGHT** - Model plans everything upfront:
+
 - Setup complete plan
 - Execute steps sequentially
 - Mark each complete when done
@@ -362,12 +364,14 @@ This isolation is critical for safety: agents can freely experiment with code ch
 ### Limits and Constraints
 
 **Content limits:**
+
 - Maximum file size: 48,000 characters per write
 - Maximum path depth: 16 segments
 - Maximum segment length: 80 characters
 - Encoding: UTF-8 text only (no binary files)
 
 **Path normalization:**
+
 - All paths are POSIX-style (`/src/main.py`)
 - Relative paths resolved against VFS root (`/`)
 - No `..` traversal allowed
@@ -416,11 +420,13 @@ digest = WorkspaceDigestSection(
 ```
 
 **SUMMARY mode** includes:
+
 - High-level summary (project type, tech stack)
 - File count and total size
 - Key patterns detected
 
 **FULL mode** adds:
+
 - Complete file tree
 - Contents of key files (README, main modules)
 - Dependency manifests (package.json, requirements.txt)
@@ -581,11 +587,13 @@ While `asteval` blocks many dangerous operations, it's not a perfect sandbox:
 - **Logic bugs** - New asteval versions may have bypasses
 
 **Use asteval for:**
+
 - String formatting and manipulation
 - Arithmetic and data transformations
 - Prototype validation logic
 
 **Don't use asteval for:**
+
 - Untrusted user code
 - Long-running computations
 - Critical security boundaries
@@ -702,23 +710,27 @@ Result includes stdout, stderr, and exit code:
 ### Sandboxing Guarantees
 
 **What's isolated:**
+
 - Filesystem (writes don't touch host)
 - Network (disabled by default)
 - CPU and memory (cgroup limits)
 - Process table (container PID namespace)
 
 **What's NOT isolated:**
+
 - Host kernel (containers share kernel)
 - Side channels (timing, CPU cache)
 - Container escape vulnerabilities
 
 **Use Podman for:**
+
 - Running tests in clean environment
 - Executing linters and formatters
 - Building code without affecting host
 - Reproducible command execution
 
 **Don't use Podman for:**
+
 - Untrusted adversarial code
 - Critical security boundaries
 - Performance-sensitive workloads (adds latency)
@@ -739,6 +751,7 @@ pip install "weakincentives[podman]"
 Container creation adds ~1-2 seconds of latency to the first tool call. Subsequent calls reuse the running container and are fast (~100ms).
 
 For better performance:
+
 - Use lightweight base images (`python:3.12-slim` vs `python:3.12`)
 - Pre-pull images before session starts
 - Keep containers warm across sessions (advanced)
@@ -921,10 +934,10 @@ sequenceDiagram
 ### Key Design Patterns
 
 1. **Session-first** - All tool sections receive the same session instance
-2. **Pre-seed state** - Digest computed once, before prompt evaluation
-3. **Immutable config** - VFS mounts and limits set at construction
-4. **Progressive disclosure** - Start with SUMMARY, expand via tools
-5. **Pure handlers** - Tool handlers remain side-effect-free (mutations via reducers)
+1. **Pre-seed state** - Digest computed once, before prompt evaluation
+1. **Immutable config** - VFS mounts and limits set at construction
+1. **Progressive disclosure** - Start with SUMMARY, expand via tools
+1. **Pure handlers** - Tool handlers remain side-effect-free (mutations via reducers)
 
 The important idea: **workspace sections are built with the active session**. Each evaluation gets its own session with its own tool sections. This ensures isolation between concurrent agent runs.
 
@@ -1040,6 +1053,7 @@ for event in session.events:
 ```
 
 This provides:
+
 - **Debugging** - See exactly what the agent changed
 - **Testing** - Assert on specific mutations
 - **Compliance** - Audit trail for review
@@ -1102,10 +1116,10 @@ WINK solves this through the **`Filesystem` protocol**—a unified abstraction t
 This section covers:
 
 1. The Filesystem protocol and its guarantees
-2. How tools access filesystems via context
-3. Built-in backends (InMemoryFilesystem, HostFilesystem)
-4. Implementing custom backends
-5. Snapshot and restore capabilities
+1. How tools access filesystems via context
+1. Built-in backends (InMemoryFilesystem, HostFilesystem)
+1. Implementing custom backends
+1. Snapshot and restore capabilities
 
 ### The Filesystem Protocol
 
@@ -1313,9 +1327,9 @@ assert fs.exists("src/main.py")  # Hydrated from host mount
 The section:
 
 1. Creates a filesystem backend (InMemoryFilesystem)
-2. Hydrates it from host mounts
-3. Exposes it via the `filesystem` property
-4. Passes it to tools via `ToolContext`
+1. Hydrates it from host mounts
+1. Exposes it via the `filesystem` property
+1. Passes it to tools via `ToolContext`
 
 #### Prompt Integration
 
@@ -1749,7 +1763,7 @@ class MockFilesystem:
 
 Then inject into context:
 
-```python
+```python nocheck
 def test_read_file_tool():
     mock_fs = MockFilesystem(files={"config.yaml": "debug: true"})
     context = ToolContext(filesystem=mock_fs, ...)
@@ -1827,11 +1841,11 @@ WINK's workspace tools provide:
 
 The key insight: **sandbox first, host writes opt-in**. Default to safe operations (VFS, Asteval), use strong isolation (Podman) when needed, never grant unrestricted host access.
 
-Next, explore debugging and observability in [Chapter 13: Debugging](/book/13-debugging.md).
+Next, explore debugging and observability in [Chapter 13: Debugging](13-debugging.md).
 
 ## Further Reading
 
-- [specs/WORKSPACE.md](/specs/WORKSPACE.md) - Complete workspace specification
-- [Chapter 4: Tools](/book/04-tools.md) - Tool fundamentals
-- [Chapter 5: Sessions](/book/05-sessions.md) - State management and reducers
-- [code_reviewer_example.py](/code_reviewer_example.py) - Production workspace usage
+- [specs/WORKSPACE.md](../specs/WORKSPACE.md) - Complete workspace specification
+- [Chapter 4: Tools](04-tools.md) - Tool fundamentals
+- [Chapter 5: Sessions](05-sessions.md) - State management and reducers
+- [code_reviewer_example.py](../code_reviewer_example.py) - Production workspace usage

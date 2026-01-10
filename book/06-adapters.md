@@ -88,11 +88,11 @@ flowchart TB
 The adapter lifecycle has six distinct phases:
 
 1. **Validate context**: Ensure the prompt is within its resource context manager
-2. **Render**: Call `prompt.render()` to produce markdown, tools, and output schema
-3. **Format**: Convert the rendered prompt to the provider's wire format
-4. **Execute**: Make the API call with deadline and budget enforcement
-5. **Parse**: Extract assistant text, tool calls, and structured output
-6. **Emit**: Publish telemetry events (`PromptRendered`, `ToolInvoked`, `PromptExecuted`)
+1. **Render**: Call `prompt.render()` to produce markdown, tools, and output schema
+1. **Format**: Convert the rendered prompt to the provider's wire format
+1. **Execute**: Make the API call with deadline and budget enforcement
+1. **Parse**: Extract assistant text, tool calls, and structured output
+1. **Emit**: Publish telemetry events (`PromptRendered`, `ToolInvoked`, `PromptExecuted`)
 
 This separation ensures that adapters are **composable**—you can swap providers without changing orchestration logic—and **observable**—every adapter decision is logged to the session dispatcher.
 
@@ -424,9 +424,9 @@ flowchart TB
 Key differences from other adapters:
 
 1. **Tool execution**: Claude Code executes tools (via Bash, etc.), WINK just bridges custom tools
-2. **Workspace management**: WINK creates isolated temp directories and mounts host files
-3. **Subprocess lifecycle**: Each evaluation spawns a fresh Claude Code subprocess
-4. **Hermetic isolation**: Environment is controlled via `IsolationConfig`, not host state
+1. **Workspace management**: WINK creates isolated temp directories and mounts host files
+1. **Subprocess lifecycle**: Each evaluation spawns a fresh Claude Code subprocess
+1. **Hermetic isolation**: Environment is controlled via `IsolationConfig`, not host state
 
 ### Installation
 
@@ -626,8 +626,8 @@ workspace = ClaudeAgentWorkspaceSection(
 The workspace system enforces three security boundaries:
 
 1. **allowed_host_roots**: Only paths within these roots can be mounted. Paths outside raise `WorkspaceSecurityError`.
-2. **max_bytes**: Limits per-mount copy size. Exceeding raises `WorkspaceBudgetExceededError`.
-3. **Ephemeral lifecycle**: The temp directory is created fresh for each evaluation and cleaned up afterward.
+1. **max_bytes**: Limits per-mount copy size. Exceeding raises `WorkspaceBudgetExceededError`.
+1. **Ephemeral lifecycle**: The temp directory is created fresh for each evaluation and cleaned up afterward.
 
 ```python
 # Security enforcement example
@@ -659,9 +659,9 @@ The adapter **always runs in hermetic isolation by default**. This prevents the 
 The adapter automatically:
 
 1. Creates an ephemeral `HOME` directory containing `.claude/settings.json`
-2. Disables alternative providers (AWS Bedrock, etc.) to ensure Anthropic API usage
-3. Passes the controlled environment to the SDK subprocess
-4. Cleans up the ephemeral directory after execution
+1. Disables alternative providers (AWS Bedrock, etc.) to ensure Anthropic API usage
+1. Passes the controlled environment to the SDK subprocess
+1. Cleans up the ephemeral directory after execution
 
 #### Why Isolation Matters
 
@@ -872,7 +872,7 @@ adapter = ClaudeAgentSDKAdapter(
 A skill can be either:
 
 1. **A markdown file** (e.g., `code-review.md`): Copied as `SKILL.md` into a directory named after the file (without extension)
-2. **A directory** (e.g., `code-review/`): Must contain a `SKILL.md` file. The entire directory is copied, preserving structure.
+1. **A directory** (e.g., `code-review/`): Must contain a `SKILL.md` file. The entire directory is copied, preserving structure.
 
 **Validation** (when `validate_on_mount=True`):
 
@@ -1013,8 +1013,8 @@ response = ClaudeAgentSDKAdapter().evaluate(Prompt(template), session=session)
 Each bridged tool call:
 
 1. **Publishes a `ToolInvoked` event** to the session dispatcher for observability
-2. **Executes within a transaction**: State changes roll back on failure (see [Chapter 5: Sessions](05-sessions.md))
-3. **Has access to full `ToolContext`**: Including session, resources, deadline, budget tracker
+1. **Executes within a transaction**: State changes roll back on failure (see [Chapter 5: Sessions](05-sessions.md))
+1. **Has access to full `ToolContext`**: Including session, resources, deadline, budget tracker
 
 Native Claude Code tools (Read, Write, Bash, etc.) are tracked via SDK hooks and also publish `ToolInvoked` events, giving you unified observability.
 
@@ -1316,11 +1316,13 @@ The `name` field must:
 - Match the parent directory name (for directory skills)
 
 **Valid examples**:
+
 - `code-review`
 - `python-style`
 - `api-v2-testing`
 
 **Invalid examples**:
+
 - `Code-Review` (uppercase)
 - `-review` (starts with hyphen)
 - `code--review` (consecutive hyphens)
@@ -1487,10 +1489,10 @@ flowchart TB
 **Step-by-step process**:
 
 1. **Configuration**: Define `SkillMount` instances pointing to host paths
-2. **Validation**: WINK validates skill structure and frontmatter (if `validate_on_mount=True`)
-3. **Copy**: Skills are copied to ephemeral `~/.claude/skills/{skill_name}/`
-4. **Discovery**: Claude Code discovers skills natively at startup
-5. **Activation**: Claude Code loads full instructions when tasks match
+1. **Validation**: WINK validates skill structure and frontmatter (if `validate_on_mount=True`)
+1. **Copy**: Skills are copied to ephemeral `~/.claude/skills/{skill_name}/`
+1. **Discovery**: Claude Code discovers skills natively at startup
+1. **Activation**: Claude Code loads full instructions when tasks match
 
 #### Basic Example
 
@@ -1624,14 +1626,14 @@ Skills integrate naturally with WINK's progressive disclosure system (see [Chapt
 **Skill progressive disclosure** (Claude Code-managed):
 
 1. **Discovery**: Claude Code loads `name` + `description` for all skills (~50-100 tokens each)
-2. **Activation**: When a task matches, Claude Code loads the full `SKILL.md` (~500-2000 tokens)
-3. **Reference loading**: Claude Code may read additional files from the skill directory as needed
+1. **Activation**: When a task matches, Claude Code loads the full `SKILL.md` (~500-2000 tokens)
+1. **Reference loading**: Claude Code may read additional files from the skill directory as needed
 
 **Section progressive disclosure** (WINK-managed):
 
 1. **Summary rendering**: Sections start as one-sentence summaries (~10-30 tokens each)
-2. **Expansion**: Model calls `open_sections()` to permanently expand sections
-3. **Temporary access**: Model calls `read_section()` for one-time content access
+1. **Expansion**: Model calls `open_sections()` to permanently expand sections
+1. **Temporary access**: Model calls `read_section()` for one-time content access
 
 **Combined optimization flow**:
 
@@ -1681,7 +1683,7 @@ mkdir -p skills/python-testing/{examples,references}
 
 **File: `skills/python-testing/SKILL.md`**
 
-```markdown
+````markdown
 ---
 name: python-testing
 description: Write comprehensive Python tests using pytest, including fixtures, parametrization, mocks, and coverage best practices. Use when writing or reviewing test code.
@@ -1729,7 +1731,7 @@ def test_user_creation():
     assert user.name == name
     assert user.email == email
     assert user.id is not None
-```
+````
 
 ### Using Fixtures
 
@@ -1788,6 +1790,7 @@ def test_api_client_success():
 - **Exclude**: Generated code, third-party integrations (use integration tests)
 
 Run coverage with:
+
 ```bash
 pytest --cov=mypackage --cov-report=html
 ```
@@ -1802,10 +1805,12 @@ pytest --cov=mypackage --cov-report=html
 ## References
 
 For advanced patterns, see:
+
 - [examples/test_fixtures.py](examples/test_fixtures.py) - Fixture composition examples
 - [examples/test_async.py](examples/test_async.py) - Async/await testing patterns
 - [references/pytest-best-practices.md](references/pytest-best-practices.md) - Detailed guide
-```
+
+````
 
 #### 3. Add Supporting Files
 
@@ -1839,11 +1844,11 @@ def test_user_can_create_post(authenticated_user, user_repository):
     post = authenticated_user.create_post(title="Hello", body="World")
     assert post.author == authenticated_user
     assert user_repository.find_post(post.id) == post
-```
+````
 
 **File: `skills/python-testing/references/pytest-best-practices.md`**
 
-```markdown
+````markdown
 # Pytest Best Practices
 
 ## Fixture Scopes
@@ -1865,9 +1870,10 @@ def test_expensive_computation():
 @pytest.mark.integration
 def test_api_endpoint():
     ...
-```
+````
 
 Run specific marks:
+
 ```bash
 pytest -m "not slow"  # Skip slow tests
 pytest -m integration # Only integration tests
@@ -1890,11 +1896,13 @@ def test_file_processing(tmp_path):
 ## Plugins
 
 Essential plugins:
+
 - `pytest-cov`: Coverage reporting
 - `pytest-asyncio`: Async test support
 - `pytest-mock`: Mocking utilities
 - `pytest-xdist`: Parallel test execution
-```
+
+````
 
 #### 4. Mount the Skill
 
@@ -1919,13 +1927,13 @@ adapter = ClaudeAgentSDKAdapter(
         ),
     ),
 )
-```
+````
 
 Now when Claude Code encounters a testing task, it will:
 
 1. Recognize the match via the `description` field
-2. Load the full `SKILL.md` instructions
-3. Optionally read `examples/` or `references/` files as needed
+1. Load the full `SKILL.md` instructions
+1. Optionally read `examples/` or `references/` files as needed
 
 ### Testing Skills
 
@@ -2137,19 +2145,21 @@ skills/
 
 **Example**:
 
-```markdown
+````markdown
 ## Authentication
 
 To authenticate, set the API key in your environment:
 
 ```bash
 export API_KEY="your-key-here"
-```
+````
 
 Then use it in requests:
+
 ```python
 headers = {"Authorization": f"Bearer {os.environ['API_KEY']}"}
 ```
+
 ```
 
 #### 8. Composability
@@ -2221,3 +2231,4 @@ Adapters bridge WINK's prompt abstraction and LLM providers, enforcing consisten
 - **Observability**: All adapters publish telemetry events (PromptRendered, ToolInvoked, PromptExecuted)
 
 With adapters, your orchestration logic stays clean and portable while provider-specific complexity stays encapsulated. Change providers by swapping the adapter—nothing else needs to change.
+```

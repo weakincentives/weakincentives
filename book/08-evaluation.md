@@ -62,9 +62,9 @@ flowchart LR
 **Key insight:** `EvalLoop` orchestrates evaluation by:
 
 1. **Iterating over samples** - Each sample becomes an `EvalRequest`
-2. **Executing through MainLoop** - Your existing agent logic handles the request
-3. **Scoring outputs** - Evaluator functions compare output to expected
-4. **Aggregating results** - Reports summarize pass rates, latencies, and failures
+1. **Executing through MainLoop** - Your existing agent logic handles the request
+1. **Scoring outputs** - Evaluator functions compare output to expected
+1. **Aggregating results** - Reports summarize pass rates, latencies, and failures
 
 You already have a `MainLoop`—evals just add datasets and scoring.
 
@@ -694,9 +694,9 @@ flowchart TB
 **Benefits of co-located workers:**
 
 1. **Same configuration** - Evals use identical prompts, tools, and adapters
-2. **Same environment** - Network, database, and file system state
-3. **Same deployment** - One container, one image, one rollout
-4. **Same metrics** - Unified observability and logging
+1. **Same environment** - Network, database, and file system state
+1. **Same deployment** - One container, one image, one rollout
+1. **Same metrics** - Unified observability and logging
 
 ### Canary Deployment
 
@@ -1095,6 +1095,6 @@ Evaluation is not a separate framework—it's a natural extension of your agent'
 - **[Chapter 11: Prompt Optimization](11-prompt-optimization.md)** - Use evals to drive prompt improvements
 - **[Chapter 16: Recipes](16-recipes.md)** - See complete evaluation examples
 
----
+______________________________________________________________________
 
 **Canonical Reference**: See [specs/EVALS.md](../specs/EVALS.md) for the complete specification, including evaluator composition semantics, session evaluator protocols, report aggregation algorithms, and mailbox routing details.

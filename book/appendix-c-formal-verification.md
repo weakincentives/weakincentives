@@ -69,10 +69,11 @@ class Counter:
 ```
 
 This decorator:
+
 1. Embeds TLA+ specification alongside implementation
-2. Documents state variables, actions, and invariants
-3. Enables extraction and verification via TLC model checker
-4. Keeps spec and code co-located to prevent drift
+1. Documents state variables, actions, and invariants
+1. Enables extraction and verification via TLC model checker
+1. Keeps spec and code co-located to prevent drift
 
 ## Running verification
 
@@ -138,6 +139,7 @@ StateVar("delivered", "SUBSET Message", "Delivered message IDs")
 ```
 
 **Common TLA+ types:**
+
 - `Nat` - natural numbers (0, 1, 2, ...)
 - `Int` - integers
 - `BOOLEAN` - true/false
@@ -162,6 +164,7 @@ Action(
 ```
 
 **Action components:**
+
 - **name**: Action identifier (must be valid TLA+ identifier)
 - **parameters**: Optional tuple of `ActionParameter` for quantified actions
 - **preconditions**: Tuple of TLA+ expressions that must hold
@@ -187,6 +190,7 @@ Invariant(
 ```
 
 **Invariant components:**
+
 - **id**: Short identifier (e.g., "INV-1")
 - **name**: Descriptive name
 - **formula**: TLA+ expression that must be true in all states
@@ -226,6 +230,7 @@ Complex invariants often need helper operators:
 ```
 
 Helper operators:
+
 - Decompose complex invariants into reusable pieces
 - Improve readability of TLA+ specs
 - Can be recursively defined
@@ -286,6 +291,7 @@ constraint="now <= 4"  # Bound time progression
 ```
 
 This configuration is sufficient to catch subtle bugs like:
+
 - Race conditions between receive and delete
 - Visibility timeout edge cases
 - Message loss scenarios
@@ -295,22 +301,26 @@ This configuration is sufficient to catch subtle bugs like:
 ### Use `@formal_spec` for:
 
 **Distributed algorithms**
+
 - Message queues
 - Consensus protocols
 - Distributed locks
 - Leader election
 
 **State machines with complex invariants**
+
 - Transaction managers
 - Workflow engines
 - Resource allocators
 
 **Concurrent data structures**
+
 - Lock-free queues
 - Reference counting
 - Copy-on-write structures
 
 **Any code where "it works in testing" isn't enough**
+
 - Financial transactions
 - Safety-critical systems
 - Security-sensitive operations
@@ -318,16 +328,19 @@ This configuration is sufficient to catch subtle bugs like:
 ### Don't use it for:
 
 **Simple CRUD operations**
+
 - Basic database queries
 - REST API handlers
 - File I/O
 
 **Stateless transformations**
+
 - Data parsing
 - Formatting
 - Pure functions without complex logic
 
 **Code where types + tests provide sufficient confidence**
+
 - Business logic with simple invariants
 - UI components
 - One-off scripts
@@ -430,6 +443,7 @@ brew install tlaplus
 ```
 
 This installs:
+
 - `tlc2` command for model checking
 - `tla2tools.jar` Java library
 
@@ -588,11 +602,12 @@ Beyond invariants (safety), check liveness (eventual progress):
 The `RedisMailbox` implementation uses formal verification to ensure correctness. Key invariants:
 
 1. **Message exclusivity**: Each message exists in exactly one place (queue, in-flight, or delivered)
-2. **No message loss**: Total message count never changes
-3. **Visibility timeout semantics**: In-flight messages become visible again after timeout
-4. **Delete idempotence**: Deleting an already-deleted message is safe
+1. **No message loss**: Total message count never changes
+1. **Visibility timeout semantics**: In-flight messages become visible again after timeout
+1. **Delete idempotence**: Deleting an already-deleted message is safe
 
 The spec found bugs during development:
+
 - Race condition between receive and visibility timeout
 - Edge case in delete-after-timeout scenario
 - Missing null check in retry logic

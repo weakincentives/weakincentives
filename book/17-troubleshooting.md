@@ -4,7 +4,7 @@ This chapter covers common errors you'll encounter when building WINK agents and
 
 The goal is to help you move from "it's broken" to "I know exactly what's wrong and how to fix it" as quickly as possible.
 
----
+______________________________________________________________________
 
 ## Overview: Common Error Categories
 
@@ -43,7 +43,7 @@ graph TB
 
 Let's address each category systematically.
 
----
+______________________________________________________________________
 
 ## Prompt Errors
 
@@ -124,7 +124,7 @@ class SummarizeRequest:
 
 See [Chapter 3: Prompts](03-prompts.md) for parameter binding details.
 
----
+______________________________________________________________________
 
 ### "OutputParseError: missing required field"
 
@@ -228,7 +228,7 @@ template=(
 
 See [Chapter 3: Prompts](03-prompts.md) for structured output patterns.
 
----
+______________________________________________________________________
 
 ## Tool Errors
 
@@ -306,7 +306,7 @@ def my_handler(params: ParamsType, *, context: ToolContext) -> ToolResult[Result
 
 See [Chapter 4: Tools](04-tools.md) for tool handler patterns.
 
----
+______________________________________________________________________
 
 ### "ToolValidationError: schema mismatch"
 
@@ -383,7 +383,7 @@ Tool[Params, Result](
 
 See [Chapter 4: Tools](04-tools.md) for tool documentation best practices.
 
----
+______________________________________________________________________
 
 ## State Errors
 
@@ -507,7 +507,7 @@ add_events = [e for e in session.events if isinstance(e, AddItem)]
 
 See [Chapter 5: Sessions](05-sessions.md) for session state management details.
 
----
+______________________________________________________________________
 
 ## Runtime Errors
 
@@ -597,6 +597,7 @@ def slow_handler(params, *, context):
 ```
 
 Consider:
+
 - Caching repeated operations
 - Reducing I/O
 - Using async operations (if supported by your adapter)
@@ -628,7 +629,7 @@ review_deadline = Deadline.from_now(timedelta(minutes=10))
 research_deadline = Deadline.from_now(timedelta(minutes=30))
 ```
 
----
+______________________________________________________________________
 
 ### Resource cleanup errors
 
@@ -670,7 +671,7 @@ loop.run()  # Handles resources automatically
 
 See [Chapter 7: Main Loop](07-main-loop.md) for orchestration patterns.
 
----
+______________________________________________________________________
 
 ## Model Behavior Issues
 
@@ -779,7 +780,7 @@ template=(
 
 See [Chapter 4: Tools](04-tools.md) for tool design patterns.
 
----
+______________________________________________________________________
 
 ### Model returns invalid output format
 
@@ -838,7 +839,7 @@ if response.output is None:
     # Adjust prompt based on what you see
 ```
 
----
+______________________________________________________________________
 
 ## Debugging Workflows
 
@@ -866,7 +867,7 @@ for section in rendered.sections:
 
 See [Chapter 3: Prompts](03-prompts.md) for rendering details.
 
----
+______________________________________________________________________
 
 ### Inspecting session state
 
@@ -890,7 +891,7 @@ if session[Plan].exists():
 
 See [Chapter 5: Sessions](05-sessions.md) for session querying.
 
----
+______________________________________________________________________
 
 ### Using the debug UI
 
@@ -910,6 +911,7 @@ wink debug snapshots/debug.jsonl
 ```
 
 The debug UI shows:
+
 - Full prompt text
 - Tool calls with parameters and results
 - Session state over time
@@ -917,7 +919,7 @@ The debug UI shows:
 
 See [specs/WINK_DEBUG.md](../specs/WINK_DEBUG.md) for debug UI details.
 
----
+______________________________________________________________________
 
 ## Quick Reference: Error to Solution
 
@@ -932,7 +934,7 @@ See [specs/WINK_DEBUG.md](../specs/WINK_DEBUG.md) for debug UI details.
 | Model doesn't call tools | Add explicit instructions, examples | [Ch 4](04-tools.md) |
 | Resource cleanup error | Use `with prompt.resources:` | [Ch 5](05-sessions.md) |
 
----
+______________________________________________________________________
 
 ## Systematic Debugging Approach
 
@@ -1033,7 +1035,7 @@ import pdb; pdb.set_trace()
 import ipdb; ipdb.set_trace()
 ```
 
----
+______________________________________________________________________
 
 ## Getting Help
 
@@ -1067,37 +1069,42 @@ cat tests/test_prompt.py
 If you've found a bug or unclear behavior:
 
 1. Create a minimal reproduction case
-2. Include the full error message
-3. Share relevant code snippets
-4. Describe expected vs actual behavior
+1. Include the full error message
+1. Share relevant code snippets
+1. Describe expected vs actual behavior
 
----
+______________________________________________________________________
 
 ## Summary
 
 Common errors and their solutions:
 
 **Prompt Errors**:
+
 - Match placeholder names to dataclass fields exactly
 - Add clear JSON schema descriptions for structured output
 - Use `allow_extra_keys=True` if the model adds extra fields
 
 **Tool Errors**:
+
 - Always return `ToolResult`, never `None`
 - Add `ToolExample` instances to show correct usage
 - Use clear, detailed tool descriptions
 
 **State Errors**:
+
 - Reuse the same `Session` instance
 - Register reducers before dispatching events
 - Return `Append` or `Replace` from reducers
 
 **Runtime Errors**:
+
 - Use progressive disclosure to reduce token count and latency
 - Set appropriate deadlines for task complexity
 - Use `with prompt.resources:` for resource management
 
 **Model Behavior**:
+
 - Add explicit instructions to use tools
 - Include complete workflow examples
 - Use models that support structured output (GPT-4+, Claude 3+)
@@ -1106,7 +1113,7 @@ Remember: most errors are fixable by inspecting the rendered prompt, checking se
 
 When in doubt, start with a minimal test case and build up complexity incrementally.
 
----
+______________________________________________________________________
 
 **Congratulations!** You now have a comprehensive guide to building, debugging, and troubleshooting WINK agents. Use this book as a reference as you build real-world agent systems.
 

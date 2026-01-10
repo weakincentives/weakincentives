@@ -63,9 +63,9 @@ flowchart TB
 The lifecycle has four distinct phases:
 
 1. **Construction**: Define your prompt template with sections, tools, and resources
-2. **Binding**: Attach runtime parameters (dataclass instances) to the prompt
-3. **Rendering**: Walk the section tree, apply overrides, and build markdown
-4. **Resource Management**: Initialize and cleanup resources via context manager
+1. **Binding**: Attach runtime parameters (dataclass instances) to the prompt
+1. **Rendering**: Walk the section tree, apply overrides, and build markdown
+1. **Resource Management**: Initialize and cleanup resources via context manager
 
 This separation ensures that templates are reusable, parameters are validated early, and resources are properly managed.
 
@@ -444,9 +444,9 @@ with prompt.resources:
 The adapter:
 
 1. Generates a JSON schema from your dataclass
-2. Instructs the model to use JSON mode
-3. Parses and validates the response
-4. Returns a typed instance
+1. Instructs the model to use JSON mode
+1. Parses and validates the response
+1. Returns a typed instance
 
 ### Manual Parsing
 
@@ -762,8 +762,8 @@ Prompts own their resource dependencies and manage lifecycle via the context man
 When you enter a prompt's context (`with prompt.resources:`), it collects resources from three sources:
 
 1. **Template resources** - Declared on `PromptTemplate.resources`
-2. **Section resources** - Collected from all sections via `section.resources()`
-3. **Bind-time resources** - Passed to `bind(resources=...)`
+1. **Section resources** - Collected from all sections via `section.resources()`
+1. **Bind-time resources** - Passed to `bind(resources=...)`
 
 Resources merge in order; later sources override earlier ones on conflict.
 
@@ -1000,9 +1000,9 @@ OutputParseError: "Field 'count' expected int, got str"
 ### Best Practices
 
 1. **Catch validation errors early**: Run `make check` before committing
-2. **Add fallback handling**: Wrap `parse_structured_output()` in try/except for production
-3. **Log raw responses**: On `OutputParseError`, log the raw response for debugging
-4. **Use strict types**: Leverage pyright to catch type errors before runtime
+1. **Add fallback handling**: Wrap `parse_structured_output()` in try/except for production
+1. **Log raw responses**: On `OutputParseError`, log the raw response for debugging
+1. **Use strict types**: Leverage pyright to catch type errors before runtime
 
 ## Best Practices
 
@@ -1234,8 +1234,8 @@ with registry.open() as ctx:
 **Lifecycle:**
 
 1. **Construction**: On first `get()` call
-2. **Caching**: Stored in `singleton_cache`
-3. **Cleanup**: `close()` called on context exit (if `Closeable`)
+1. **Caching**: Stored in `singleton_cache`
+1. **Cleanup**: `close()` called on context exit (if `Closeable`)
 
 **Key characteristics:**
 
@@ -1286,8 +1286,8 @@ with registry.open() as ctx:
 **Lifecycle:**
 
 1. **Construction**: On first `get()` within a tool scope
-2. **Caching**: Stored in tool-call cache (scoped to `with ctx.tool_scope()`)
-3. **Cleanup**: `close()` called on tool scope exit (if `Closeable`)
+1. **Caching**: Stored in tool-call cache (scoped to `with ctx.tool_scope()`)
+1. **Cleanup**: `close()` called on tool scope exit (if `Closeable`)
 
 **Key characteristics:**
 
@@ -1330,8 +1330,8 @@ with registry.open() as ctx:
 **Lifecycle:**
 
 1. **Construction**: On every `get()` call
-2. **Caching**: Not cached
-3. **Cleanup**: Not tracked (caller responsible)
+1. **Caching**: Not cached
+1. **Cleanup**: Not tracked (caller responsible)
 
 **Key characteristics:**
 
@@ -1372,10 +1372,10 @@ with registry.open() as ctx:
 **Resolution order:**
 
 1. `ctx.get(APIClient)` invokes the provider
-2. Provider calls `r.get(Config)`
-3. Config provider invokes and caches result
-4. APIClient provider constructs with resolved Config
-5. APIClient cached and returned
+1. Provider calls `r.get(Config)`
+1. Config provider invokes and caches result
+1. APIClient provider constructs with resolved Config
+1. APIClient cached and returned
 
 #### Multi-Level Dependencies
 
@@ -1920,8 +1920,8 @@ flowchart TB
 **Collection order:**
 
 1. **Template resources** - Defined at template construction
-2. **Section resources** - Each section's `resources()` method (depth-first)
-3. **Bind-time resources** - Passed to `prompt.bind(resources=...)`
+1. **Section resources** - Each section's `resources()` method (depth-first)
+1. **Bind-time resources** - Passed to `prompt.bind(resources=...)`
 
 **Example:**
 
@@ -2062,7 +2062,7 @@ finally:
 
 Resolution is single-threaded; async providers not supported.
 
-```python
+```python nocheck
 # Not supported
 Binding(Service, async lambda r: await fetch_service())
 ```
@@ -2088,7 +2088,7 @@ registry = (
 
 No AOP-style interceptors on resource access:
 
-```python
+```python nocheck
 # Not supported
 @intercept_access(Protocol)
 def log_access(...): ...
@@ -2236,11 +2236,11 @@ with prompt.resources:
 Advanced resource management in WINK provides:
 
 1. **Scope-aware lifecycles** - SINGLETON, TOOL_CALL, PROTOTYPE
-2. **Dependency injection** - Lazy, explicit, cycle-detected
-3. **Registry composition** - Immutable, mergeable, conflict-aware
-4. **Lifecycle protocols** - PostConstruct, Closeable, Snapshotable
-5. **Transactional rollback** - Snapshot/restore for session + resources
-6. **Prompt-owned lifecycle** - Context manager with automatic cleanup
+1. **Dependency injection** - Lazy, explicit, cycle-detected
+1. **Registry composition** - Immutable, mergeable, conflict-aware
+1. **Lifecycle protocols** - PostConstruct, Closeable, Snapshotable
+1. **Transactional rollback** - Snapshot/restore for session + resources
+1. **Prompt-owned lifecycle** - Context manager with automatic cleanup
 
 **Key principles:**
 
@@ -2282,6 +2282,6 @@ The prompt system is intentionally constrained—simple templating, explicit com
 - **[Chapter 11: Prompt Optimization](11-prompt-optimization.md)** - Version and A/B test your prompts
 - **[Chapter 13: Debugging](13-debugging.md)** - Inspect and troubleshoot prompt rendering
 
----
+______________________________________________________________________
 
 **Canonical Reference**: See [specs/PROMPTS.md](../specs/PROMPTS.md) for the complete specification, including resource lifecycle details, transactional tool execution, and advanced patterns.
