@@ -57,6 +57,7 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
 
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
+    from ..runtime.run_context import RunContext
     from ..runtime.session.protocols import SessionProtocol
     from ._prompt_resources import PromptResources
     from .protocols import (
@@ -118,6 +119,8 @@ class ToolContext:
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     deadline: Deadline | None = None
+    run_context: RunContext | None = None
+    """Execution context with correlation identifiers and metadata."""
 
     @property
     def resources(self) -> PromptResources:

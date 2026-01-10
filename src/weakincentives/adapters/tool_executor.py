@@ -32,6 +32,7 @@ from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
 from ..prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ..runtime.events import HandlerFailure, ToolInvoked
 from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.run_context import RunContext
 from ..runtime.transactions import (
     CompositeSnapshot,
     restore_snapshot,
@@ -117,6 +118,7 @@ class ToolExecutionContext:
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
     budget_tracker: BudgetTracker | None = None
+    run_context: RunContext | None = None
 
     def with_provider_payload(
         self, provider_payload: dict[str, Any] | None
@@ -469,6 +471,7 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
         adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
         session=context.session,
         deadline=context.deadline,
+        run_context=context.run_context,
     )
 
     # Get policies for this tool
@@ -638,6 +641,7 @@ def dispatch_tool_invocation(
         usage=usage,
         rendered_output=rendered_output,
         call_id=outcome.call_id,
+        run_context=context.run_context,
         event_id=uuid4(),
     )
     dispatch_result = context.session.dispatcher.dispatch(invocation)
@@ -714,6 +718,7 @@ class ToolExecutor:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
+    run_context: RunContext | None = None
     _log: StructuredLogger = field(init=False)
     _context: ToolExecutionContext = field(init=False)
     _tool_message_records: list[
@@ -738,6 +743,7 @@ class ToolExecutor:
             deadline=self.deadline,
             logger_override=self.logger_override,
             budget_tracker=self.budget_tracker,
+            run_context=self.run_context,
         )
         self._tool_message_records = []
 

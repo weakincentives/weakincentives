@@ -53,6 +53,7 @@ from .main_loop import (
     MainLoopRequest,
     MainLoopResult,
 )
+from .run_context import RunContext
 from .session import (
     DEFAULT_SNAPSHOT_POLICIES,
     DataEvent,
@@ -123,6 +124,7 @@ __all__ = [
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
+    "RunContext",
     "Runnable",
     "SerializationError",
     "Session",
