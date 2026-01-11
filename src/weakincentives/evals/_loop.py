@@ -24,6 +24,8 @@ import threading
 import time
 from typing import TYPE_CHECKING, Self
 
+from ..dataclasses import FrozenDataclass
+from ..runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
 from ..runtime.lifecycle import wait_until
 from ..runtime.mailbox import (
     Mailbox,
@@ -31,6 +33,7 @@ from ..runtime.mailbox import (
     ReceiptHandleExpiredError,
     ReplyNotAvailableError,
 )
+from ..runtime.watchdog import Heartbeat
 from ._evaluators import is_session_aware
 from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
@@ -38,6 +41,20 @@ if TYPE_CHECKING:
     from ..runtime import MainLoop
 
 _logger = logging.getLogger(__name__)
+
+
+@FrozenDataclass()
+class EvalLoopConfig:
+    """Configuration for EvalLoop execution defaults.
+
+    The ``lease_extender`` field controls automatic message visibility extension
+    during evaluation processing. When enabled, heartbeats from tool execution
+    and after each sample extend the message lease, preventing timeout during
+    long evaluation runs. EvalLoop's heartbeat is passed to MainLoop.execute()
+    so that all tool/adapter beats extend the evaluation message's lease.
+    """
+
+    lease_extender: LeaseExtenderConfig | None = None
 
 
 class EvalLoop[InputT, OutputT, ExpectedT]:
@@ -72,9 +89,12 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     _loop: MainLoop[InputT, OutputT]
     _evaluator: Evaluator | SessionEvaluator
     _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
+    _config: EvalLoopConfig
     _shutdown_event: threading.Event
     _running: bool
     _lock: threading.Lock
+    _heartbeat: Heartbeat
+    _lease_extender: LeaseExtender
 
     def __init__(
         self,
@@ -82,6 +102,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         loop: MainLoop[InputT, OutputT],
         evaluator: Evaluator | SessionEvaluator,
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
+        config: EvalLoopConfig | None = None,
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -92,14 +113,24 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 - Session-aware: (output, expected, session) -> Score
             requests: Mailbox to receive EvalRequest messages from.
                 Response routing derives from each message's reply_to field.
+            config: Optional configuration for evaluation defaults.
         """
         super().__init__()
         self._loop = loop
         self._evaluator = evaluator
         self._requests = requests
+        self._config = config if config is not None else EvalLoopConfig()
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
+        self._heartbeat = Heartbeat()
+        # Initialize lease extender with config or defaults
+        lease_config = (
+            self._config.lease_extender
+            if self._config.lease_extender is not None
+            else LeaseExtenderConfig()
+        )
+        self._lease_extender = LeaseExtender(config=lease_config)
 
     def run(
         self,
@@ -153,15 +184,18 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                             msg.nack(visibility_timeout=0)
                         break
 
-                    try:
-                        result = self._evaluate_sample(msg.body)
-                    except Exception as e:
-                        result = EvalResult(
-                            sample_id=msg.body.sample.id,
-                            score=Score(value=0.0, passed=False, reason=str(e)),
-                            latency_ms=0,
-                            error=str(e),
-                        )
+                    # Attach lease extender to heartbeat for this message
+                    with self._lease_extender.attach(msg, self._heartbeat):
+                        try:
+                            result = self._evaluate_sample(msg.body)
+                        except Exception as e:
+                            result = EvalResult(
+                                sample_id=msg.body.sample.id,
+                                score=Score(value=0.0, passed=False, reason=str(e)),
+                                latency_ms=0,
+                                error=str(e),
+                            )
+
                     self._reply_and_ack(msg, result)
                 iterations += 1
         finally:
@@ -234,12 +268,21 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 msg.nack(visibility_timeout=backoff)
 
     def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
-        """Execute and score a single sample."""
+        """Execute and score a single sample.
+
+        Passes EvalLoop's heartbeat to MainLoop.execute() so that tool execution
+        beats extend the evaluation message's lease. Also beats after sample
+        execution completes to prove progress between samples.
+        """
         sample = request.sample
         start = time.monotonic()
 
-        response, session = self._loop.execute(sample.input)
+        # Pass our heartbeat to MainLoop so tool/adapter beats extend our message lease
+        response, session = self._loop.execute(sample.input, heartbeat=self._heartbeat)
         latency_ms = int((time.monotonic() - start) * 1000)
+
+        # Beat after sample execution to prove progress
+        self._heartbeat.beat()
 
         if response.output is None:
             return EvalResult(
@@ -265,4 +308,5 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
 __all__ = [
     "EvalLoop",
+    "EvalLoopConfig",
 ]

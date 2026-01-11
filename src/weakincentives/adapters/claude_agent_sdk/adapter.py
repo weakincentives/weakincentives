@@ -32,6 +32,7 @@ from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol
+from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
 from ...types import AdapterName
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
@@ -278,6 +279,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using Claude Agent SDK with hook-based state sync.
 
@@ -289,12 +291,17 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         before calling evaluate(). The adapter will merge workspace resources
         (filesystem) with any pre-bound resources.
 
+        When ``heartbeat`` is provided, the adapter beats at key execution
+        points (tool calls via hooks) to prove liveness. Bridged tool handlers
+        receive the heartbeat via ToolContext.beat().
+
         Args:
             prompt: The prompt to evaluate.
             session: Session for state management and event dispatching.
             deadline: Optional deadline for execution timeout.
             budget: Optional token budget constraints.
             budget_tracker: Optional shared budget tracker.
+            heartbeat: Optional heartbeat for lease extension.
 
         Returns:
             PromptResponse with structured output and events dispatched.
@@ -324,6 +331,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 ),
                 "has_budget": budget is not None,
                 "has_budget_tracker": budget_tracker is not None,
+                "has_heartbeat": heartbeat is not None,
             },
         )
 
@@ -345,6 +353,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 session=session,
                 deadline=effective_deadline,
                 budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
             )
         )
 
@@ -355,6 +364,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         session: SessionProtocol,
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
+        heartbeat: Heartbeat | None,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
         sdk = _import_sdk()
@@ -443,6 +453,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     deadline=deadline,
                     budget_tracker=budget_tracker,
                     effective_cwd=effective_cwd,
+                    heartbeat=heartbeat,
                 )
         finally:
             # Clean up temp workspace if we created one
@@ -462,6 +473,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
         effective_cwd: str | None,
+        heartbeat: Heartbeat | None,
     ) -> PromptResponse[OutputT]:
         """Run SDK query within prompt context."""
         logger.debug(
@@ -482,6 +494,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             prompt_name=prompt_name,
             deadline=deadline,
             budget_tracker=budget_tracker,
+            heartbeat=heartbeat,
         )
 
         bridged_tools = create_bridged_tools(
@@ -494,6 +507,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             budget_tracker=budget_tracker,
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
+            heartbeat=heartbeat,
         )
 
         logger.debug(

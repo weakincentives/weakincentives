@@ -50,19 +50,24 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class Heartbeat:
-    """Thread-safe heartbeat tracker for a single loop.
+    """Thread-safe heartbeat tracker with observer callbacks.
 
     Workers call ``beat()`` at regular intervals to prove liveness.
-    The watchdog calls ``elapsed()`` to check for stalls.
+    The watchdog calls ``elapsed()`` to check for stalls. Multiple
+    callbacks can be registered to observe beats (lease extension,
+    metrics, logging, etc.).
 
     Example::
 
         hb = Heartbeat()
 
+        # Register callbacks for beat observation
+        hb.add_callback(lambda: print("beat!"))
+
         # In worker loop
         while running:
             process_message()
-            hb.beat()
+            hb.beat()  # Records beat AND invokes callbacks
 
         # Watchdog checks
         if hb.elapsed() > threshold:
@@ -72,16 +77,57 @@ class Heartbeat:
 
     _last_beat: float = field(default_factory=time.monotonic)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _callbacks: list[Callable[[], None]] = field(
+        default_factory=lambda: list[Callable[[], None]]()
+    )
 
     def beat(self) -> None:
-        """Record a heartbeat. Called by the worker loop."""
+        """Record a heartbeat and invoke all registered callbacks.
+
+        Callbacks are invoked outside the lock to avoid deadlock.
+        Exceptions in callbacks are logged but do not prevent other
+        callbacks from running.
+        """
         with self._lock:
             self._last_beat = time.monotonic()
+            callbacks = list(self._callbacks)  # Snapshot under lock
+
+        # Invoke outside lock to avoid deadlock
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                logger.exception("Heartbeat callback failed")
 
     def elapsed(self) -> float:
         """Seconds since last heartbeat."""
         with self._lock:
             return time.monotonic() - self._last_beat
+
+    def add_callback(self, callback: Callable[[], None]) -> None:
+        """Add a callback to be invoked on each beat.
+
+        Callbacks are invoked outside the lock in registration order.
+        Exceptions in callbacks are logged but do not prevent other
+        callbacks from running.
+
+        Args:
+            callback: Callable with no arguments to invoke on beat.
+        """
+        with self._lock:
+            self._callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a previously added callback.
+
+        Args:
+            callback: The callback to remove.
+
+        Raises:
+            ValueError: If callback was not registered.
+        """
+        with self._lock:
+            self._callbacks.remove(callback)
 
 
 class Watchdog:

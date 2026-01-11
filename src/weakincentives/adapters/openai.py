@@ -27,6 +27,7 @@ from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
 from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.watchdog import Heartbeat
 from ..types import OPENAI_ADAPTER_NAME
 from ..types.dataclass import SupportsDataclass
 from ._provider_protocols import (
@@ -617,6 +618,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> PromptResponse[OutputT]:
         prompt_name = prompt.name or prompt.template.__class__.__name__
 
@@ -631,6 +633,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                 ),
                 "has_budget": budget is not None,
                 "has_budget_tracker": budget_tracker is not None,
+                "has_heartbeat": heartbeat is not None,
             },
         )
 
@@ -675,6 +678,7 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                 logger_override=self._conversation_logger(),
                 deadline=deadline,
                 budget_tracker=effective_tracker,
+                heartbeat=heartbeat,
             )
 
             inputs = InnerLoopInputs[OutputT](

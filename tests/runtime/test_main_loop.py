@@ -44,6 +44,7 @@ from weakincentives.runtime.main_loop import (
 )
 from weakincentives.runtime.session import Session, VisibilityOverrides
 from weakincentives.runtime.session.protocols import SessionProtocol
+from weakincentives.runtime.watchdog import Heartbeat
 
 
 @dataclass(slots=True, frozen=True)
@@ -105,8 +106,9 @@ class _MockAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> PromptResponse[_Output]:
-        del budget
+        del budget, heartbeat
         self._call_count += 1
         self._last_budget_tracker = budget_tracker
         self._budget_trackers.append(budget_tracker)

@@ -54,6 +54,7 @@ from weakincentives.runtime import (
 )
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.watchdog import Heartbeat
 from weakincentives.types import SupportsDataclass
 
 
@@ -131,8 +132,9 @@ class _RecordingDeadlineAdapter:
         budget: object | None = None,
         budget_tracker: object | None = None,
         resources: object | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> PromptResponse[Any]:
-        del dispatcher, session, budget, budget_tracker, resources
+        del dispatcher, session, budget, budget_tracker, resources, heartbeat
         self.deadlines.append(deadline)
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,

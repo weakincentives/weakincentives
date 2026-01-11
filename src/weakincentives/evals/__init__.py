@@ -83,7 +83,7 @@ from ._judge import (
     Rating,
     llm_judge,
 )
-from ._loop import EvalLoop
+from ._loop import EvalLoop, EvalLoopConfig
 from ._session_evaluators import (
     all_tools_succeeded,
     slice_contains,
@@ -106,6 +106,7 @@ from ._types import (
 __all__ = [  # noqa: RUF022
     "Dataset",
     "EvalLoop",
+    "EvalLoopConfig",
     "EvalReport",
     "EvalRequest",
     "EvalResult",

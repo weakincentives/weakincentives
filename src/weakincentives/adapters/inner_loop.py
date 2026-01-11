@@ -77,6 +77,7 @@ from .utilities import (
 
 if TYPE_CHECKING:
     from ..prompt.tool import Tool
+    from ..runtime.watchdog import Heartbeat
     from .core import ProviderAdapter
 
 
@@ -120,6 +121,10 @@ class InnerLoopConfig:
 
     Provides access to session for transactional tool execution. Prompt
     resources are accessed via the prompt in InnerLoopInputs.
+
+    When ``heartbeat`` is provided, the inner loop beats at key execution
+    points (each iteration, before/after provider calls) to prove liveness.
+    Tool handlers receive the heartbeat via ToolContext.beat().
     """
 
     session: SessionProtocol
@@ -137,6 +142,7 @@ class InnerLoopConfig:
     deadline: Deadline | None = None
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
+    heartbeat: Heartbeat | None = None
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> InnerLoopConfig:
         """Fill in optional settings using rendered prompt metadata."""
@@ -179,6 +185,11 @@ class InnerLoop[OutputT]:
             self._rendered = replace(self.inputs.rendered, deadline=self._deadline)
         else:
             self._rendered = self.inputs.rendered
+
+    def _beat(self) -> None:
+        """Record a heartbeat if available."""
+        if self.config.heartbeat is not None:
+            self.config.heartbeat.beat()
 
     def _raise_deadline_error(
         self, message: str, *, phase: PromptEvaluationPhase
@@ -230,6 +241,9 @@ class InnerLoop[OutputT]:
         self._prepare()
 
         while True:
+            # Beat at start of each iteration
+            self._beat()
+
             response = self._issue_provider_request()
 
             self._provider_payload = extract_payload(response)
@@ -367,6 +381,7 @@ class InnerLoop[OutputT]:
             logger_override=self.config.logger_override,
             deadline=self._deadline,
             budget_tracker=self.config.budget_tracker,
+            heartbeat=self.config.heartbeat,
         )
         self._response_parser = ResponseParser[OutputT](
             prompt_name=self.inputs.prompt_name,
