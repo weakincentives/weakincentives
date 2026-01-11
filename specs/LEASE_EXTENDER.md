@@ -536,6 +536,112 @@ This ensures:
 1. Heartbeat occurs before/after each tool execution
 1. Long-running tools can add additional beats as needed
 
+## Claude Agent SDK Native Tools
+
+The Claude Agent SDK executes **native tools** (Bash, Read, Write, etc.) in a
+subprocess managed by the SDK itself. These tools don't flow through WINK's
+`ToolExecutor`, so heartbeats must be triggered via the hook system.
+
+### HookContext Extension
+
+Add heartbeat to `HookContext` so hooks can beat:
+
+```python
+@dataclass(frozen=True, slots=True)
+class HookContext:
+    """Context passed to SDK hooks."""
+
+    adapter: ClaudeAgentSDKAdapter[Any]
+    prompt: Prompt[Any]
+    session: Session
+    deadline: Deadline | None = None
+    heartbeat: Heartbeat | None = None  # NEW
+
+    def beat(self) -> None:
+        """Record a heartbeat if available."""
+        if self.heartbeat is not None:
+            self.heartbeat.beat()
+```
+
+### Hook-Based Beating
+
+Native tools trigger heartbeats via `PreToolUse` and `PostToolUse` hooks:
+
+```python
+def pre_tool_use_hook(
+    tool: ToolUse,
+    context: HookContext,
+) -> ToolUseHookResponse | None:
+    """Called before each native tool execution."""
+    # Beat before tool runs
+    context.beat()
+    return None
+
+
+def post_tool_use_hook(
+    tool: ToolUse,
+    result: ToolResult,
+    context: HookContext,
+) -> None:
+    """Called after each native tool execution."""
+    # Beat after tool completes
+    context.beat()
+```
+
+### Adapter Integration
+
+The Claude Agent SDK adapter passes heartbeat when creating hook context:
+
+```python
+class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
+    def evaluate(
+        self,
+        prompt: Prompt[OutputT],
+        *,
+        session: Session,
+        deadline: Deadline | None = None,
+        budget_tracker: BudgetTracker | None = None,
+        heartbeat: Heartbeat | None = None,
+    ) -> PromptResponse[OutputT]:
+        # Create hook context with heartbeat
+        hook_context = HookContext(
+            adapter=self,
+            prompt=prompt,
+            session=session,
+            deadline=deadline,
+            heartbeat=heartbeat,
+        )
+        # ... pass to SDK runner ...
+```
+
+### Limitations
+
+Native tools have inherent limitations for heartbeat granularity:
+
+| Tool Type | Heartbeat Granularity |
+| ------------- | ------------------------------------------------- |
+| WINK tools | Can beat during execution (context.beat()) |
+| Native tools | Beat only at hook boundaries (before/after) |
+
+For long-running native tools (e.g., `Bash` running a 10-minute build),
+heartbeats only occur before and after the entire execution. The lease
+extension interval should account for this:
+
+```python
+# If native tools can run for up to 10 minutes, ensure visibility_timeout
+# exceeds this, or use shorter lease extensions with margin
+config = MainLoopConfig(
+    lease_extender=LeaseExtenderConfig(
+        interval=60,       # Check every minute
+        extension=600,     # Extend by 10 minutes
+    ),
+)
+```
+
+**Trade-off**: Native tools provide rich functionality (shell access, file
+I/O) but sacrifice heartbeat granularity. For operations requiring fine-grained
+liveness tracking, consider implementing as WINK tools instead.
+
 ## Error Handling
 
 | Error | Behavior |
