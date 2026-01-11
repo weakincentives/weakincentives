@@ -128,7 +128,7 @@ class ToolContext:
         return self.resources.get_optional(Filesystem)
 ```
 
-Tool handlers that need an event bus should publish via `context.session.dispatcher`.
+Tool handlers that need an event dispatcher should publish via `context.session.dispatcher`.
 
 ### Resource Access
 
@@ -281,7 +281,7 @@ class ReadPlan:
 ### Session Integration
 
 ```python
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 section = PlanningToolsSection(session=session, accepts_overrides=False)
 # ... after tool calls ...
 plan = session[Plan].latest()

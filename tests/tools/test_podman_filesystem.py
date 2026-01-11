@@ -54,9 +54,9 @@ from weakincentives.runtime.session import Session
 
 
 def test_section_registers_vfs_tool(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
 
@@ -65,14 +65,14 @@ def test_section_registers_vfs_tool(
 
 
 def test_host_mount_filesystem_is_populated_at_construction(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     """Verify mounts are hydrated eagerly during section construction.
 
     This enables filesystem operations to work before a container starts,
     which is required for workspace digest optimization.
     """
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     host_root, mount, file_path = setup_host_mount(tmp_path)
     cache_dir = tmp_path / "cache"
@@ -97,9 +97,9 @@ def test_host_mount_filesystem_is_populated_at_construction(
 
 
 def test_host_mount_populates_prompt_copy(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     host_root, mount, _file_path = setup_host_mount(tmp_path)
     section = make_section(
@@ -115,9 +115,9 @@ def test_host_mount_populates_prompt_copy(
 
 
 def test_host_mount_materializes_overlay(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     host_root, mount, file_path = setup_host_mount(tmp_path)
     cache_dir = tmp_path / "cache"
@@ -174,9 +174,9 @@ def test_iter_host_mount_files_handles_file(tmp_path: Path) -> None:
 
 
 def test_host_mount_allows_binary_files(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     host_root = tmp_path / "host-root"
     repo = host_root / "sunfish"
@@ -209,7 +209,7 @@ def test_host_mount_allows_binary_files(
 
 
 def test_host_mount_hydration_skips_existing_overlay(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
     """Verify _hydrate_overlay_mounts is a no-op when overlay is non-empty.
 
@@ -217,7 +217,7 @@ def test_host_mount_hydration_skips_existing_overlay(
     this test verifies that re-calling _hydrate_overlay_mounts on an
     already-populated overlay doesn't duplicate files.
     """
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     host_root, mount, file_path = setup_host_mount(tmp_path)
     cache_dir = tmp_path / "cache"
@@ -249,7 +249,7 @@ def test_host_mount_hydration_skips_existing_overlay(
 
 
 def test_host_mount_hydration_raises_on_write_error(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -258,7 +258,7 @@ def test_host_mount_hydration_raises_on_write_error(
     Note: Mounts are now hydrated eagerly during section construction,
     so we must patch shutil.copy2 before creating the section.
     """
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     host_root, mount, file_path = setup_host_mount(tmp_path)
     cache_dir = tmp_path / "cache"
@@ -291,9 +291,9 @@ def test_host_mount_hydration_raises_on_write_error(
 
 
 def test_ls_lists_workspace_files(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -314,9 +314,9 @@ def test_ls_lists_workspace_files(
 
 
 def test_read_file_returns_numbered_lines(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -337,11 +337,11 @@ def test_read_file_returns_numbered_lines(
 
 
 def test_write_via_container_appends_existing_content(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -388,11 +388,11 @@ def test_write_via_container_appends_existing_content(
 
 
 def test_write_via_container_reports_mkdir_failure(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     section.ensure_workspace()
@@ -435,11 +435,11 @@ def test_write_via_container_reports_mkdir_failure(
 
 
 def test_write_via_container_rejects_non_utf8_append(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -472,11 +472,11 @@ def test_write_via_container_rejects_non_utf8_append(
 
 
 def test_write_via_container_propagates_read_oserror(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -521,9 +521,9 @@ def test_write_via_container_propagates_read_oserror(
 
 
 def test_glob_matches_files(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -544,9 +544,9 @@ def test_glob_matches_files(
 
 
 def test_grep_finds_pattern(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -565,9 +565,9 @@ def test_grep_finds_pattern(
 
 
 def test_ls_rejects_file_path(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -585,9 +585,9 @@ def test_ls_rejects_file_path(
 
 
 def test_read_file_missing_path(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "read_file")
@@ -602,9 +602,9 @@ def test_read_file_missing_path(
 
 
 def test_read_file_rejects_invalid_encoding(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -622,9 +622,9 @@ def test_read_file_rejects_invalid_encoding(
 
 
 def test_write_file_rejects_existing_file(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -648,9 +648,9 @@ def test_write_file_rejects_existing_file(
 
 
 def test_edit_file_rejects_long_strings(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "edit_file")
@@ -680,9 +680,9 @@ def test_edit_file_rejects_long_strings(
 
 
 def test_edit_file_missing_path(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "edit_file")
@@ -701,9 +701,9 @@ def test_edit_file_missing_path(
 
 
 def test_edit_file_rejects_invalid_encoding(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -731,9 +731,9 @@ def test_edit_file_rejects_invalid_encoding(
 
 
 def test_edit_file_requires_occurrence(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -761,9 +761,9 @@ def test_edit_file_requires_occurrence(
 
 
 def test_edit_file_requires_unique_match(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -791,9 +791,9 @@ def test_edit_file_requires_unique_match(
 
 
 def test_edit_file_replace_all_branch(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -821,9 +821,9 @@ def test_edit_file_replace_all_branch(
 
 
 def test_glob_rejects_empty_pattern(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "glob")
@@ -838,9 +838,9 @@ def test_glob_rejects_empty_pattern(
 
 
 def test_grep_rejects_invalid_regex(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "grep")
@@ -857,9 +857,9 @@ def test_grep_rejects_invalid_regex(
 
 
 def test_grep_honors_glob_argument(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -880,9 +880,9 @@ def test_grep_honors_glob_argument(
 
 
 def test_grep_supports_default_path(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -904,9 +904,9 @@ def test_grep_supports_default_path(
 
 
 def test_grep_respects_glob_filter(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -923,9 +923,9 @@ def test_grep_respects_glob_filter(
 
 
 def test_grep_ignores_blank_glob(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -947,10 +947,10 @@ def test_grep_ignores_blank_glob(
 
 
 def test_grep_skips_invalid_file_encoding(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -971,10 +971,10 @@ def test_grep_skips_invalid_file_encoding(
 
 def test_grep_handles_oserror(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -1007,10 +1007,10 @@ def test_grep_handles_oserror(
 
 def test_grep_honors_result_limit(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -1031,9 +1031,9 @@ def test_grep_honors_result_limit(
 
 
 def test_grep_skips_binary_and_collects_match(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     handle = section.ensure_workspace()
@@ -1061,10 +1061,10 @@ def test_grep_skips_binary_and_collects_match(
 
 def test_remove_rejects_root_and_missing(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     tool = find_tool(section, "rm")
@@ -1108,10 +1108,10 @@ def test_remove_rejects_root_and_missing(
 
 def test_write_via_container_handles_cli_failures(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
     path = vfs_module.VfsPath(("file.txt",))
@@ -1131,11 +1131,11 @@ def test_write_via_container_handles_cli_failures(
 
 def test_write_via_container_skips_mkdir_for_root_level_file(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     """Test branch 1285->1296: skip mkdir when parent is '/' (empty VfsPath)."""
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
 

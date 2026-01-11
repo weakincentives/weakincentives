@@ -78,7 +78,7 @@ class _DummyPrompt:
         return self._sections
 
 
-def _publish_tool_event(bus: InProcessDispatcher, index: int) -> None:
+def _publish_tool_event(dispatcher: InProcessDispatcher, index: int) -> None:
     params = ExampleParams(value=index)
     result_payload = ExampleResult(value=index)
     result = ToolResult.ok(result_payload, message=f"ok-{index}")
@@ -94,14 +94,14 @@ def _publish_tool_event(bus: InProcessDispatcher, index: int) -> None:
         created_at=datetime.now(UTC),
         rendered_output=rendered_output,
     )
-    bus.dispatch(event)
+    dispatcher.dispatch(event)
 
 
 def test_session_attach_to_dispatcher_is_idempotent() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
-    session._attach_to_dispatcher(bus)
+    session._attach_to_dispatcher(dispatcher)
 
     params = ExampleParams(value=999)
     result_payload = ExampleResult(value=999)
@@ -119,7 +119,7 @@ def test_session_attach_to_dispatcher_is_idempotent() -> None:
         rendered_output=rendered_output,
     )
 
-    publish_result = bus.dispatch(event)
+    publish_result = dispatcher.dispatch(event)
     assert publish_result.handled_count == 1
 
 
@@ -127,14 +127,14 @@ def test_session_attach_to_dispatcher_is_idempotent() -> None:
 def test_session_collects_tool_data_across_threads(
     threadstress_workers: int,
 ) -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     max_workers = threadstress_workers
     total_events = max(16, max_workers * 8)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(_publish_tool_event, bus, index)
+            executor.submit(_publish_tool_event, dispatcher, index)
             for index in range(total_events)
         ]
         for future in futures:
@@ -155,15 +155,15 @@ def test_session_collects_tool_data_across_threads(
 def test_session_snapshots_restore_across_threads(
     threadstress_workers: int,
 ) -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     max_workers = threadstress_workers
     total_events = max(24, max_workers * 6)
     snapshot_requests = max_workers * 4
 
     mutation_tasks = [
-        (lambda idx=index: _publish_tool_event(bus, idx))
+        (lambda idx=index: _publish_tool_event(dispatcher, idx))
         for index in range(total_events)
     ]
     snapshot_tasks = [
@@ -191,7 +191,7 @@ def test_session_snapshots_restore_across_threads(
         expected_tool_events = snapshot.slices.get(ToolInvoked, ())
         expected_results = snapshot.slices.get(ExampleResult, ())
 
-        restored = Session(bus=InProcessDispatcher())
+        restored = Session(dispatcher=InProcessDispatcher())
         restored[ToolInvoked].seed(())
         restored[ExampleResult].seed(())
         restored.restore(snapshot, preserve_logs=False)
@@ -257,8 +257,8 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
 
 def test_session_reset_clears_runtime_state() -> None:
     """Session reset clears all slices."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     seeded_value = ExampleResult(value=1)
     session[ExampleResult].seed((seeded_value,))
@@ -282,8 +282,8 @@ def test_session_reducer_optimistic_concurrency_retry() -> None:
     class CounterEvent:
         value: int
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Track how many times the reducer is called (retries will increase this)
     call_count = 0

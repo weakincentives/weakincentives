@@ -252,7 +252,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
   - Events:
     - `Dispatcher`: Interface for publishing events.
     - `HandlerFailure`: Event emitted when a handler fails.
-    - `InProcessDispatcher`: Simple in-process event bus.
+    - `InProcessDispatcher`: Simple in-process event dispatcher.
     - `PromptExecuted`: Event emitted when a prompt is executed.
     - `PromptRendered`: Event emitted when a prompt is rendered.
     - `DispatchResult`: Result of publishing an event.
@@ -264,8 +264,8 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `MainLoopConfig`: Configuration for default deadline/budget/resources.
     - `MainLoopRequest`: Event requesting execution with optional constraints
       (budget, deadline, resources).
-    - `MainLoopCompleted`: Success event published via bus.
-    - `MainLoopFailed`: Failure event published via bus.
+    - `MainLoopCompleted`: Success event published via dispatcher.
+    - `MainLoopFailed`: Failure event published via dispatcher.
   - Lifecycle management:
     - `Runnable`: Protocol for loops supporting graceful shutdown (`run()`,
       `shutdown()`, `running`, `heartbeat` properties).
@@ -338,7 +338,7 @@ The Claude Agent SDK adapter also requires the Claude Code CLI:
     - `OptimizerConfig`: Base configuration dataclass with `accepts_overrides`
       field.
   - Context and results:
-    - `OptimizationContext`: Immutable context bundle with adapter, event bus,
+    - `OptimizationContext`: Immutable context bundle with adapter, event dispatcher,
       deadline, and overrides.
     - `OptimizationResult`: Generic result container with response, artifact,
       and metadata.
@@ -525,7 +525,7 @@ template = PromptTemplate[TaskResponse](
     sections=[MarkdownSection(title="Instructions", template="...", key="instructions")],
 )
 
-session = Session()  # Creates event bus internally (access via session.dispatcher)
+session = Session()  # Creates event dispatcher internally (access via session.dispatcher)
 adapter = OpenAIAdapter(model="gpt-4o-mini")
 response = adapter.evaluate(Prompt(template), session=session)
 result: TaskResponse = response.output
@@ -965,11 +965,11 @@ from weakincentives.prompt import Prompt, PromptTemplate
 
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
     def __init__(
-        self, *, adapter: ProviderAdapter[ReviewResult], bus: Dispatcher
+        self, *, adapter: ProviderAdapter[ReviewResult], dispatcher: Dispatcher
     ) -> None:
         super().__init__(
             adapter=adapter,
-            bus=bus,
+            dispatcher=dispatcher,
             config=MainLoopConfig(budget=Budget(max_total_tokens=50000)),
         )
         self._template = PromptTemplate[ReviewResult](
@@ -978,14 +978,14 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 
     def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        session = Session(dispatcher=self._dispatcher, tags={"loop": "code-review"})
         return prompt, session
 ```
 
 ### Direct execution
 
 ```python
-loop = CodeReviewLoop(adapter=adapter, bus=bus)
+loop = CodeReviewLoop(adapter=adapter, dispatcher=dispatcher)
 response, session = loop.execute(ReviewRequest(...))
 ```
 

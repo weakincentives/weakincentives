@@ -455,7 +455,7 @@ A patent license is &ldquo;discriminatory&rdquo; if it does not include within t
 scope of its coverage, prohibits the exercise of, or is conditioned on the
 non-exercise of one or more of the rights that are specifically granted under this
 License. You may not convey a covered work if you are a party to an arrangement with
-a third party that is in the business of distributing software, under which you make
+a third party that is in the dispatcheriness of distributing software, under which you make
 payment to the third party based on the extent of your activity of conveying the
 work, and under which the third party grants, to any of the parties who would receive
 the covered work from you, a discriminatory patent license (a) in connection with

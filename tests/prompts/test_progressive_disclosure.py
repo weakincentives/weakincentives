@@ -163,8 +163,8 @@ def test_has_summarized_sections_with_overrides() -> None:
     assert has_summarized_sections(snapshot) is True
 
     # With override to FULL via session state, no summarized sections
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session.dispatch(
         SetVisibilityOverride(path=("sec",), visibility=SectionVisibility.FULL)
     )
@@ -198,8 +198,8 @@ def test_compute_current_visibility_with_overrides() -> None:
     registry = _make_registry((section,))
     snapshot = registry.snapshot()
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session.dispatch(
         SetVisibilityOverride(path=("sec",), visibility=SectionVisibility.FULL)
     )

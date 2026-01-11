@@ -133,7 +133,7 @@ This hierarchy enables:
 - **Conditional rendering**: Examples can use `enabled` predicates
 - **Section paths**: Examples are addressable via dot notation
   (e.g., `"task-examples.example-auth-review"`)
-- **Cloning**: Examples clone correctly with session/bus rewiring
+- **Cloning**: Examples clone correctly with session/dispatcher rewiring
 
 ### Child Section Registration
 

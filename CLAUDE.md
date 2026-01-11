@@ -234,8 +234,8 @@ from weakincentives.runtime import Session, InProcessDispatcher
 from weakincentives.runtime.session import InitializeSlice, ClearSlice
 from weakincentives.contrib.tools import Plan, AddStep
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # Query state via indexing
 session[Plan].latest()                            # Most recent value

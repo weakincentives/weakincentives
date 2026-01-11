@@ -66,7 +66,7 @@ def test_tool_sections_clone_to_new_sessions() -> None:
     assert asteval_clone.session is new_session
 
 
-def test_tool_clones_validate_session_and_bus() -> None:
+def test_tool_clones_validate_session_and_dispatcher() -> None:
     base_session = Session()
     vfs = VfsToolsSection(session=base_session)
     planning = PlanningToolsSection(
@@ -83,4 +83,4 @@ def test_tool_clones_validate_session_and_bus() -> None:
 
     other_session = Session()
     with pytest.raises(TypeError):
-        _ = vfs.clone(session=base_session, bus=other_session.dispatcher)
+        _ = vfs.clone(session=base_session, dispatcher=other_session.dispatcher)

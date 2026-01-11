@@ -15,7 +15,7 @@ future improvements can be layered without guessing at implicit expectations.
 - Maintain copy-on-write semantics for state transitions to avoid leaking
   partially-mutated objects across reducer boundaries.
 - Use a single synchronization primitive per shared structure (e.g., one lock
-  for the event bus registry) instead of sprinkling bespoke guards throughout
+  for the event dispatcher registry) instead of sprinkling bespoke guards throughout
   call sites.
 - Document invariants where they are enforced. If a component assumes
   single-threaded use, state it explicitly so downstream callers know when to
@@ -51,9 +51,9 @@ to provide thread-based synchronization only.
 
 ## Current Thread Model and Assumptions
 
-- The event bus delivers events synchronously on the publisher thread. No thread
+- The event dispatcher delivers events synchronously on the publisher thread. No thread
   pools or async dispatchers wrap handler execution today.
-- Session reducers are invoked inline as the bus delivers events; callers expect
+- Session reducers are invoked inline as the dispatcher delivers events; callers expect
   eventual consistency at the end of a publish call rather than background
   reconciliation.
 - File-backed prompt overrides are written synchronously using atomic rename
@@ -80,7 +80,7 @@ to provide thread-based synchronization only.
   `clone`, `snapshot`, `mutation_rollback`, and selectors) acquire the lock.
 - Copy-on-write patterns take the copy inside the critical section to prevent
   observing partially updated tuples.
-- `_attach_to_bus` uses a flag to ensure handlers are registered only once even
+- `_attach_to_dispatcher` uses a flag to ensure handlers are registered only once even
   when called concurrently.
 
 ### Prompt Override Store
@@ -95,7 +95,7 @@ to provide thread-based synchronization only.
 
 - The code reviewer example and `CodeReviewSession` both keep mutable state such
   as `_history` lists and override tags that are mutated from event handlers
-  without locks. The event bus invokes those handlers synchronously on the
+  without locks. The event dispatcher invokes those handlers synchronously on the
   publisher thread, so cross-thread publish calls would interleave access to
   these lists.
 - The planning tools (`PlanningToolsSection`, `_PlanningToolSuite`) lean on the
@@ -133,10 +133,10 @@ to provide thread-based synchronization only.
   best-effort within a single process and should not be treated as a
   multi-process rendezvous point.
 - Handler ordering is preserved only within a single publish call. If multiple
-  threads publish concurrently, interleaving is possible even after the bus is
+  threads publish concurrently, interleaving is possible even after the dispatcher is
   made thread-safe—callers should not assume global ordering across threads.
 - The current design assumes thread safety is achieved through cooperation
-  (shared session and bus). If callers spawn isolated sessions per thread, they
+  (shared session and dispatcher). If callers spawn isolated sessions per thread, they
   must handle reconciliation manually.
 
 ## Guarantees

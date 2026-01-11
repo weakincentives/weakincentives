@@ -178,8 +178,8 @@ def test_tool_executor_success() -> None:
             (tool,),
         ),
     )
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -205,7 +205,9 @@ def test_tool_executor_success() -> None:
     )
 
     messages, next_choice = executor.execute([cast(Any, tool_call)], None)
-    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
+    tool_events = [
+        event for event in dispatcher.events if isinstance(event, ToolInvoked)
+    ]
 
     assert len(messages) == 1
     assert messages[0]["role"] == "tool"
@@ -242,8 +244,8 @@ def test_tool_executor_succeeds_with_parameterless_tool() -> None:
             (tool,),
         ),
     )
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -270,7 +272,9 @@ def test_tool_executor_succeeds_with_parameterless_tool() -> None:
     )
 
     messages, next_choice = executor.execute([cast(Any, tool_call)], None)
-    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
+    tool_events = [
+        event for event in dispatcher.events if isinstance(event, ToolInvoked)
+    ]
 
     assert len(messages) == 1
     assert messages[0]["role"] == "tool"
@@ -292,8 +296,8 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
     result = ToolResult.ok(EchoPayload(value="hello"), message="echoed")
     log = get_logger(__name__)
 
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
     typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]] = {
@@ -333,7 +337,9 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
 
     invocation = dispatch_tool_invocation(context=context, outcome=outcome)
 
-    tool_events = [event for event in bus.events if isinstance(event, ToolInvoked)]
+    tool_events = [
+        event for event in dispatcher.events if isinstance(event, ToolInvoked)
+    ]
 
     assert invocation.usage is not None
     assert invocation.usage.input_tokens == 5
@@ -424,8 +430,8 @@ def test_tool_executor_raises_when_deadline_expired(
             (tool,),
         ),
     )
-    bus = RecordingBus()
-    session = Session(bus=bus)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
     prompt = _make_prompt()  # noqa: F841 - needed for context manager side effect
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -632,8 +638,8 @@ class TestToolExecutionFilesystemIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt()  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -696,8 +702,8 @@ class TestToolExecutionFilesystemIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -757,8 +763,8 @@ class TestToolExecutionFilesystemIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -818,8 +824,8 @@ class TestToolExecutionFilesystemIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -878,8 +884,8 @@ class TestPublishInvocationFilesystemRestore:
                     ),
                 )
 
-        bus = FailingBus()
-        session = Session(bus=bus)
+        dispatcher = FailingBus()
+        session = Session(dispatcher=dispatcher)
 
         # Create prompt and take snapshot BEFORE tool modifications
         prompt = _make_prompt_with_fs(fs)
@@ -957,8 +963,8 @@ class TestPublishInvocationFilesystemRestore:
                     ),
                 )
 
-        bus = FailingBus()
-        session = Session(bus=bus)
+        dispatcher = FailingBus()
+        session = Session(dispatcher=dispatcher)
 
         # Create prompt and take snapshot
         prompt = _make_prompt({Filesystem: fs})
@@ -1074,8 +1080,8 @@ class TestFilesystemSnapshotIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1142,8 +1148,8 @@ class TestFilesystemSnapshotIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1214,8 +1220,8 @@ class TestFilesystemSnapshotIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -1282,8 +1288,8 @@ class TestFilesystemSnapshotIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -1349,8 +1355,8 @@ class TestFilesystemSnapshotIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1417,8 +1423,8 @@ class TestFilesystemSnapshotIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1491,8 +1497,8 @@ class TestHostFilesystemToolIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1555,8 +1561,8 @@ class TestHostFilesystemToolIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         prompt = _make_prompt_with_fs(fs)  # type: ignore[arg-type]  # noqa: F841
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -1619,8 +1625,8 @@ class TestHostFilesystemToolIntegration:
             ),
         )
 
-        bus = RecordingBus()
-        session = Session(bus=bus)
+        dispatcher = RecordingBus()
+        session = Session(dispatcher=dispatcher)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},

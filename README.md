@@ -227,16 +227,16 @@ def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:  #
     ...  # type: ignore[empty-body]
 
 class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
-    def __init__(self, adapter: Any, bus: Any) -> None:
-        super().__init__(adapter=adapter, bus=bus)
-        self._session = Session(bus=bus)
+    def __init__(self, adapter: Any, dispatcher: Any) -> None:
+        super().__init__(adapter=adapter, dispatcher=dispatcher)
+        self._session = Session(dispatcher=dispatcher)
         self._template = build_task_prompt(session=self._session)
 
     def prepare(self, request: ReviewTurnParams) -> tuple[Prompt[ReviewResponse], Session]:
         return Prompt(self._template).bind(request), self._session
 
-bus = InProcessDispatcher()
-loop = ReviewLoop(OpenAIAdapter(model="gpt-4o"), bus)
+dispatcher = InProcessDispatcher()
+loop = ReviewLoop(OpenAIAdapter(model="gpt-4o"), dispatcher)
 response, _ = loop.execute(ReviewTurnParams(request="Find bugs in main.py"))
 if response.output is not None:
     review: ReviewResponse = response.output  # typed, validated

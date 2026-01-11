@@ -226,7 +226,7 @@ class WorkspaceSection(ToolSuiteSection, Protocol):
 
     @override
     def clone(self, **kwargs: object) -> WorkspaceSection:
-        """Clone the section with new session/bus."""
+        """Clone the section with new session/dispatcher."""
         ...
 
 

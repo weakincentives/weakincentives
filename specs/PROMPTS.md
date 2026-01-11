@@ -521,7 +521,7 @@ appropriate tool:
 Sections expose `clone(**kwargs)` for insertion into new prompts:
 
 ```python
-cloned = section.clone(session=new_session, bus=new_bus)
+cloned = section.clone(session=new_session, dispatcher=new_dispatcher)
 ```
 
 - Clones are fully decoupled (no shared references)

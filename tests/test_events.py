@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Tests for the prompt event bus primitives."""
+"""Tests for the prompt event dispatcher primitives."""
 
 import logging
 from dataclasses import dataclass
@@ -46,8 +46,8 @@ def make_prompt_response(prompt_name: str) -> PromptResponse[object]:
     )
 
 
-def test_null_event_bus_is_noop() -> None:
-    bus = NullDispatcher()
+def test_null_event_dispatcher_is_noop() -> None:
+    dispatcher = NullDispatcher()
 
     events: list[PromptExecuted] = []
 
@@ -55,8 +55,8 @@ def test_null_event_bus_is_noop() -> None:
         assert isinstance(event, PromptExecuted)
         events.append(event)
 
-    bus.subscribe(PromptExecuted, record_event)
-    result = bus.dispatch(
+    dispatcher.subscribe(PromptExecuted, record_event)
+    result = dispatcher.dispatch(
         PromptExecuted(
             prompt_name="demo",
             adapter=TEST_ADAPTER_NAME,
@@ -75,7 +75,7 @@ def test_null_event_bus_is_noop() -> None:
 
 
 def test_publish_without_subscribers_returns_success_result() -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
 
     event = PromptExecuted(
         prompt_name="demo",
@@ -85,7 +85,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
         created_at=datetime.now(UTC),
     )
 
-    result = bus.dispatch(event)
+    result = dispatcher.dispatch(event)
 
     assert result.ok
     assert result.handlers_invoked == ()
@@ -96,7 +96,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
 
 
 def test_publish_prompt_rendered_returns_success() -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
 
     event = PromptRendered(
         prompt_ns="demo",
@@ -109,15 +109,15 @@ def test_publish_prompt_rendered_returns_success() -> None:
         created_at=datetime.now(UTC),
     )
 
-    result = bus.dispatch(event)
+    result = dispatcher.dispatch(event)
 
     assert result.ok
     assert result.errors == ()
     assert isinstance(event.event_id, UUID)
 
 
-def test_in_process_bus_delivers_in_order() -> None:
-    bus = InProcessDispatcher()
+def test_in_process_dispatcher_delivers_in_order() -> None:
+    dispatcher = InProcessDispatcher()
     delivered: list[PromptExecuted] = []
 
     def first_handler(event: object) -> None:
@@ -128,8 +128,8 @@ def test_in_process_bus_delivers_in_order() -> None:
         assert isinstance(event, PromptExecuted)
         delivered.append(event)
 
-    bus.subscribe(PromptExecuted, first_handler)
-    bus.subscribe(PromptExecuted, second_handler)
+    dispatcher.subscribe(PromptExecuted, first_handler)
+    dispatcher.subscribe(PromptExecuted, second_handler)
 
     event = PromptExecuted(
         prompt_name="demo",
@@ -138,7 +138,7 @@ def test_in_process_bus_delivers_in_order() -> None:
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
-    result = bus.dispatch(event)
+    result = dispatcher.dispatch(event)
 
     assert delivered == [event, event]
     assert result.handlers_invoked == (first_handler, second_handler)
@@ -148,10 +148,10 @@ def test_in_process_bus_delivers_in_order() -> None:
     assert isinstance(event.event_id, UUID)
 
 
-def test_in_process_bus_isolates_handler_exceptions(
+def test_in_process_dispatcher_isolates_handler_exceptions(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
     received: list[PromptExecuted] = []
 
     def bad_handler(event: object) -> None:
@@ -162,8 +162,8 @@ def test_in_process_bus_isolates_handler_exceptions(
         assert isinstance(event, PromptExecuted)
         received.append(event)
 
-    bus.subscribe(PromptExecuted, bad_handler)
-    bus.subscribe(PromptExecuted, good_handler)
+    dispatcher.subscribe(PromptExecuted, bad_handler)
+    dispatcher.subscribe(PromptExecuted, good_handler)
 
     event = PromptExecuted(
         prompt_name="demo",
@@ -173,7 +173,7 @@ def test_in_process_bus_isolates_handler_exceptions(
         created_at=datetime.now(UTC),
     )
     with caplog.at_level(logging.ERROR, logger="weakincentives.runtime.events"):
-        result = bus.dispatch(event)
+        result = dispatcher.dispatch(event)
 
     assert received == [event]
     assert any(
@@ -192,7 +192,7 @@ def test_in_process_bus_isolates_handler_exceptions(
 
 
 def test_publish_result_raise_if_errors() -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
 
     def first_handler(_: object) -> None:
         raise ValueError("first")
@@ -200,10 +200,10 @@ def test_publish_result_raise_if_errors() -> None:
     def second_handler(_: object) -> None:
         raise RuntimeError("second")
 
-    bus.subscribe(PromptExecuted, first_handler)
-    bus.subscribe(PromptExecuted, second_handler)
+    dispatcher.subscribe(PromptExecuted, first_handler)
+    dispatcher.subscribe(PromptExecuted, second_handler)
 
-    result = bus.dispatch(
+    result = dispatcher.dispatch(
         PromptExecuted(
             prompt_name="demo",
             adapter=TEST_ADAPTER_NAME,
@@ -278,14 +278,14 @@ def test_token_usage_total_tokens_sums_counts() -> None:
 
 
 def test_unsubscribe_removes_handler_and_returns_true() -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
     delivered: list[PromptExecuted] = []
 
     def handler(event: object) -> None:
         assert isinstance(event, PromptExecuted)
         delivered.append(event)
 
-    bus.subscribe(PromptExecuted, handler)
+    dispatcher.subscribe(PromptExecuted, handler)
     event = PromptExecuted(
         prompt_name="demo",
         adapter=TEST_ADAPTER_NAME,
@@ -294,18 +294,18 @@ def test_unsubscribe_removes_handler_and_returns_true() -> None:
         created_at=datetime.now(UTC),
     )
 
-    bus.dispatch(event)
+    dispatcher.dispatch(event)
     assert len(delivered) == 1
 
-    result = bus.unsubscribe(PromptExecuted, handler)
+    result = dispatcher.unsubscribe(PromptExecuted, handler)
     assert result is True
 
-    bus.dispatch(event)
+    dispatcher.dispatch(event)
     assert len(delivered) == 1
 
 
 def test_unsubscribe_returns_false_for_nonexistent_handler() -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
 
     def handler_a(_: object) -> None:
         pass
@@ -313,24 +313,24 @@ def test_unsubscribe_returns_false_for_nonexistent_handler() -> None:
     def handler_b(_: object) -> None:
         pass
 
-    bus.subscribe(PromptExecuted, handler_a)
+    dispatcher.subscribe(PromptExecuted, handler_a)
 
-    result = bus.unsubscribe(PromptExecuted, handler_b)
+    result = dispatcher.unsubscribe(PromptExecuted, handler_b)
     assert result is False
 
 
 def test_unsubscribe_returns_false_for_nonexistent_event_type() -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
 
     def handler(_: object) -> None:
         pass
 
-    result = bus.unsubscribe(PromptExecuted, handler)
+    result = dispatcher.unsubscribe(PromptExecuted, handler)
     assert result is False
 
 
 def test_unsubscribe_does_not_affect_other_handlers() -> None:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
     delivered_a: list[PromptExecuted] = []
     delivered_b: list[PromptExecuted] = []
 
@@ -342,8 +342,8 @@ def test_unsubscribe_does_not_affect_other_handlers() -> None:
         assert isinstance(event, PromptExecuted)
         delivered_b.append(event)
 
-    bus.subscribe(PromptExecuted, handler_a)
-    bus.subscribe(PromptExecuted, handler_b)
+    dispatcher.subscribe(PromptExecuted, handler_a)
+    dispatcher.subscribe(PromptExecuted, handler_b)
 
     event = PromptExecuted(
         prompt_name="demo",
@@ -353,23 +353,23 @@ def test_unsubscribe_does_not_affect_other_handlers() -> None:
         created_at=datetime.now(UTC),
     )
 
-    bus.dispatch(event)
+    dispatcher.dispatch(event)
     assert len(delivered_a) == 1
     assert len(delivered_b) == 1
 
-    bus.unsubscribe(PromptExecuted, handler_a)
+    dispatcher.unsubscribe(PromptExecuted, handler_a)
 
-    bus.dispatch(event)
+    dispatcher.dispatch(event)
     assert len(delivered_a) == 1
     assert len(delivered_b) == 2
 
 
-def test_null_event_bus_unsubscribe_returns_false() -> None:
-    bus = NullDispatcher()
+def test_null_event_dispatcher_unsubscribe_returns_false() -> None:
+    dispatcher = NullDispatcher()
 
     def handler(_: object) -> None:
         pass
 
-    bus.subscribe(PromptExecuted, handler)
-    result = bus.unsubscribe(PromptExecuted, handler)
+    dispatcher.subscribe(PromptExecuted, handler)
+    result = dispatcher.unsubscribe(PromptExecuted, handler)
     assert result is False

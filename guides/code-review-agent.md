@@ -64,7 +64,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
 Owns user interaction:
 
 - Creates an `Dispatcher` with logging subscribers
-- Instantiates `CodeReviewLoop` with the adapter and bus
+- Instantiates `CodeReviewLoop` with the adapter and dispatcher
 - Runs the interactive REPL loop
 - Dumps session state on exit
 
@@ -72,7 +72,7 @@ Owns user interaction:
 
 1. `configure_logging()` sets up logging
 1. `build_adapter()` creates the OpenAI adapter (requires `OPENAI_API_KEY`)
-1. `CodeReviewApp` creates the event bus and `CodeReviewLoop`
+1. `CodeReviewApp` creates the event dispatcher and `CodeReviewLoop`
 1. `CodeReviewLoop.__init__`:
    - Creates a persistent `Session` via `build_logged_session()`
    - Builds the `PromptTemplate` via `build_task_prompt()`
@@ -210,7 +210,7 @@ The example automatically optimizes the workspace digest on first use:
 1. `CodeReviewLoop.execute()` checks if `WorkspaceDigest` exists in session
 1. If missing, calls `_run_optimization()` before processing the request
 1. Creates a child session via `build_logged_session(parent=...)`
-1. Builds `OptimizationContext` with adapter, bus, store, tag
+1. Builds `OptimizationContext` with adapter, dispatcher, store, tag
 1. Runs `WorkspaceDigestOptimizer` with `PersistenceScope.SESSION`
 1. Digest is stored in the session for subsequent requests
 
@@ -251,7 +251,7 @@ Custom deadlines can be passed to `execute()` if needed.
 
 ### Event Subscribers
 
-Attached via `attach_logging_subscribers(bus)` from `examples.logging`:
+Attached via `attach_logging_subscribers(dispatcher)` from `examples.logging`:
 
 | Event | Output |
 | ---------------- | ------------------------------------ |
@@ -307,7 +307,7 @@ The example imports several helpers from the `examples` package:
 | `configure_logging` | Set up console logging |
 | `render_plan_snapshot` | Format plan state for display |
 | `resolve_override_tag` | Resolve tag from arg/env/default |
-| `attach_logging_subscribers` | Attach event logging to bus |
+| `attach_logging_subscribers` | Attach event logging to dispatcher |
 
 ## Key Files
 

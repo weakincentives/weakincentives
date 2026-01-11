@@ -930,8 +930,8 @@ class QAParams:
 
 # Define the MainLoop for QA
 class QALoop(MainLoop[str, str]):
-    def __init__(self, *, adapter: OpenAIAdapter[str], bus: ControlDispatcher) -> None:
-        super().__init__(adapter=adapter, bus=bus)
+    def __init__(self, *, adapter: OpenAIAdapter[str], dispatcher: ControlDispatcher) -> None:
+        super().__init__(adapter=adapter, dispatcher=dispatcher)
         self._template = PromptTemplate[str](
             ns="qa",
             key="answer",
@@ -947,7 +947,7 @@ class QALoop(MainLoop[str, str]):
 
     def initialize(self, question: str) -> tuple[Prompt[str], Session]:
         prompt = Prompt(self._template).bind(QAParams(question=question))
-        session = Session(bus=self._bus)
+        session = Session(dispatcher=self._dispatcher)
         return prompt, session
 
 
@@ -960,8 +960,8 @@ results: Mailbox[EvalResult] = InMemoryMailbox(name="eval-results")
 
 # Create MainLoop and EvalLoop
 adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
-bus = ControlDispatcher()
-main_loop = QALoop(adapter=adapter, bus=bus)
+dispatcher = ControlDispatcher()
+main_loop = QALoop(adapter=adapter, dispatcher=dispatcher)
 eval_loop = EvalLoop(
     loop=main_loop,
     evaluator=exact_match,
@@ -1122,8 +1122,8 @@ results: Mailbox[EvalResult] = RedisMailbox(
 
 # Create MainLoop (same as basic example)
 adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
-bus = ControlDispatcher()
-main_loop = QALoop(adapter=adapter, bus=bus)
+dispatcher = ControlDispatcher()
+main_loop = QALoop(adapter=adapter, dispatcher=dispatcher)
 
 # Create and run worker (runs forever)
 eval_loop = EvalLoop(
