@@ -34,6 +34,7 @@ from ..deadlines import Deadline
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..runtime.events import HandlerFailure, PromptExecuted, PromptRendered
 from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.run_context import RunContext
 from ..types import AdapterName
 from ..types.dataclass import (
     SupportsDataclass,
@@ -143,6 +144,7 @@ class InnerLoopConfig:
     throttle_policy: ThrottlePolicy = field(default_factory=new_throttle_policy)
     budget_tracker: BudgetTracker | None = None
     heartbeat: Heartbeat | None = None
+    run_context: RunContext | None = None
 
     def with_defaults(self, rendered: RenderedPrompt[object]) -> InnerLoopConfig:
         """Fill in optional settings using rendered prompt metadata."""
@@ -382,6 +384,7 @@ class InnerLoop[OutputT]:
             deadline=self._deadline,
             budget_tracker=self.config.budget_tracker,
             heartbeat=self.config.heartbeat,
+            run_context=self.config.run_context,
         )
         self._response_parser = ResponseParser[OutputT](
             prompt_name=self.inputs.prompt_name,
@@ -405,6 +408,7 @@ class InnerLoop[OutputT]:
                 rendered_prompt=self._rendered.text,
                 descriptor=self._rendered.descriptor,
                 created_at=datetime.now(UTC),
+                run_context=self.config.run_context,
                 event_id=uuid4(),
             )
         )
@@ -509,6 +513,7 @@ class InnerLoop[OutputT]:
                 session_id=getattr(self.config.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 usage=usage,
+                run_context=self.config.run_context,
                 event_id=uuid4(),
             )
         )

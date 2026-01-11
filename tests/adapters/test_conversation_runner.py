@@ -79,9 +79,11 @@ class DummyAdapter(ProviderAdapter[object]):
         self,
         prompt: Prompt[object],
         *,
-        dispatcher: Dispatcher,
-        session: SessionProtocol | None = None,
+        session: SessionProtocol,
         deadline: Deadline | None = None,
+        budget: object = None,
+        budget_tracker: object = None,
+        run_context: object = None,
     ) -> PromptResponse[object]:
         raise NotImplementedError
 

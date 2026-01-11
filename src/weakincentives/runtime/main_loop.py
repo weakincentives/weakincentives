@@ -298,6 +298,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         request_event: MainLoopRequest[UserRequestT],
         *,
         heartbeat: Heartbeat | None = None,
+        run_context: RunContext | None = None,
     ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute the main loop for a request event.
 
@@ -307,6 +308,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             request_event: The request to process.
             heartbeat: Optional heartbeat override. If provided, uses this
                 instead of self._heartbeat for adapter evaluation.
+            run_context: Optional execution context for distributed tracing.
         """
         prompt, session = self.prepare(request_event.request)
 
@@ -347,6 +349,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     deadline=effective_deadline,
                     budget_tracker=budget_tracker,
                     heartbeat=effective_heartbeat,
+                    run_context=run_context,
                 )
             except VisibilityExpansionRequired as e:
                 for path, visibility in e.requested_overrides.items():
@@ -389,11 +392,18 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """Process a single message from the requests mailbox."""
         request_event = msg.body
 
+        # Build RunContext BEFORE execution so it's available for telemetry events
+        # session_id is updated after execution completes
+        run_context = self._build_run_context(request_event, msg, session_id=None)
+
         # Attach lease extender to heartbeat for this message
         with self._lease_extender.attach(msg, self._heartbeat):
             try:
-                response, session = self._execute(request_event)
+                response, session = self._execute(
+                    request_event, run_context=run_context
+                )
 
+                # Update run_context with session_id now that we have it
                 run_context = self._build_run_context(
                     request_event, msg, session_id=session.session_id
                 )
@@ -406,8 +416,6 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 )
 
             except Exception as exc:
-                run_context = self._build_run_context(request_event, msg)
-
                 result = MainLoopResult[OutputT](
                     request_id=request_event.request_id,
                     error=str(exc),

@@ -27,7 +27,6 @@ from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime import (
     InMemoryMailbox,
     LoopGroup,
@@ -91,10 +90,10 @@ class _MockAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
-        heartbeat: Heartbeat | None = None,
+        heartbeat: object = None,
+        run_context: object = None,
     ) -> PromptResponse[_Output]:
-        del prompt, session, deadline, budget, budget_tracker, resources, heartbeat
+        del prompt, session, deadline, budget, budget_tracker, heartbeat, run_context
         self.call_count += 1
         if self._delay > 0:
             time.sleep(self._delay)
@@ -685,8 +684,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             deadline: Deadline | None = None,
             budget: Budget | None = None,
             budget_tracker: BudgetTracker | None = None,
-            resources: ResourceRegistry | None = None,
-            heartbeat: Heartbeat | None = None,
+            run_context: object = None,
         ) -> PromptResponse[_Output]:
             result = super().evaluate(
                 prompt,
@@ -694,8 +692,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
                 deadline=deadline,
                 budget=budget,
                 budget_tracker=budget_tracker,
-                resources=resources,
-                heartbeat=heartbeat,
+                run_context=run_context,
             )
             # Trigger shutdown after first message
             if self.call_count == 1:
@@ -767,8 +764,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             deadline: Deadline | None = None,
             budget: Budget | None = None,
             budget_tracker: BudgetTracker | None = None,
-            resources: ResourceRegistry | None = None,
-            heartbeat: Heartbeat | None = None,
+            run_context: object = None,
         ) -> PromptResponse[_Output]:
             result = super().evaluate(
                 prompt,
@@ -776,8 +772,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
                 deadline=deadline,
                 budget=budget,
                 budget_tracker=budget_tracker,
-                resources=resources,
-                heartbeat=heartbeat,
+                run_context=run_context,
             )
             # Trigger shutdown after first message
             if self.call_count == 1:

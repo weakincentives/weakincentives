@@ -24,6 +24,7 @@ from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
 from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.run_context import RunContext
 from ..runtime.watchdog import Heartbeat
 from ..types import LITELLM_ADAPTER_NAME
 from ._provider_protocols import (
@@ -324,6 +325,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
+        run_context: RunContext | None = None,
     ) -> PromptResponse[OutputT]:
         prompt_name_for_log = prompt.name or prompt.template.__class__.__name__
 
@@ -456,6 +458,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 deadline=deadline,
                 budget_tracker=effective_tracker,
                 heartbeat=heartbeat,
+                run_context=run_context,
             )
 
             inputs = InnerLoopInputs[OutputT](

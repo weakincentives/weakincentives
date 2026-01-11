@@ -33,7 +33,6 @@ from weakincentives.evals import (
     submit_dataset,
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
 from weakincentives.runtime.mailbox import (
     Mailbox,
@@ -83,10 +82,10 @@ class _MockAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
-        heartbeat: Heartbeat | None = None,
+        heartbeat: object = None,
+        run_context: object = None,
     ) -> PromptResponse[_Output]:
-        del prompt, session, deadline, budget, budget_tracker, resources, heartbeat
+        del prompt, session, deadline, budget, budget_tracker, heartbeat, run_context
         self.call_count += 1
         if self._error is not None:
             raise self._error
@@ -455,10 +454,10 @@ class _NoneOutputAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
-        heartbeat: Heartbeat | None = None,
+        heartbeat: object = None,
+        run_context: object = None,
     ) -> PromptResponse[_Output]:
-        del prompt, session, deadline, budget, budget_tracker, resources, heartbeat
+        del prompt, session, deadline, budget, budget_tracker, heartbeat, run_context
         return PromptResponse(
             prompt_name="test",
             text="no structured output",

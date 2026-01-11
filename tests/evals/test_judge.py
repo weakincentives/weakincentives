@@ -30,7 +30,6 @@ from weakincentives.evals import (
     llm_judge,
 )
 from weakincentives.prompt import Prompt
-from weakincentives.resources import ResourceRegistry
 from weakincentives.runtime.session import SessionProtocol
 
 # =============================================================================
@@ -172,9 +171,9 @@ class _MockJudgeAdapter(ProviderAdapter[JudgeOutput]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        resources: ResourceRegistry | None = None,
+        run_context: object = None,
     ) -> PromptResponse[JudgeOutput]:
-        del prompt, session, deadline, budget, budget_tracker, resources
+        del prompt, session, deadline, budget, budget_tracker, run_context
         self.call_count += 1
         if self._return_none:
             return PromptResponse(
@@ -273,9 +272,9 @@ def test_llm_judge_uses_criterion() -> None:
             deadline: Deadline | None = None,
             budget: Budget | None = None,
             budget_tracker: BudgetTracker | None = None,
-            resources: ResourceRegistry | None = None,
+            run_context: object = None,
         ) -> PromptResponse[JudgeOutput]:
-            del session, deadline, budget, budget_tracker, resources
+            del session, deadline, budget, budget_tracker, run_context
             self.captured_prompt = prompt
             return PromptResponse(
                 prompt_name="llm_judge",
