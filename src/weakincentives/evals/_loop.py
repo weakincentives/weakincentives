@@ -22,9 +22,11 @@ import contextlib
 import logging
 import threading
 import time
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Self
 
 from ..dataclasses import FrozenDataclass
+from ..runtime.dlq import DeadLetter, DLQPolicy
 from ..runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
 from ..runtime.lifecycle import wait_until
 from ..runtime.mailbox import (
@@ -90,6 +92,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     _evaluator: Evaluator | SessionEvaluator
     _requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult]
     _config: EvalLoopConfig
+    _dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None
     _shutdown_event: threading.Event
     _running: bool
     _lock: threading.Lock
@@ -103,6 +106,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         evaluator: Evaluator | SessionEvaluator,
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         config: EvalLoopConfig | None = None,
+        dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -114,12 +118,16 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             requests: Mailbox to receive EvalRequest messages from.
                 Response routing derives from each message's reply_to field.
             config: Optional configuration for evaluation defaults.
+            dlq: Optional dead letter queue policy. When configured, messages
+                that fail repeatedly are sent to the DLQ mailbox instead of
+                retrying indefinitely.
         """
         super().__init__()
         self._loop = loop
         self._evaluator = evaluator
         self._requests = requests
         self._config = config if config is not None else EvalLoopConfig()
+        self._dlq = dlq
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
@@ -189,15 +197,9 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                         try:
                             result = self._evaluate_sample(msg.body)
                         except Exception as e:
-                            result = EvalResult(
-                                sample_id=msg.body.sample.id,
-                                experiment_name=msg.body.experiment.name,
-                                score=Score(value=0.0, passed=False, reason=str(e)),
-                                latency_ms=0,
-                                error=str(e),
-                            )
-
-                    self._reply_and_ack(msg, result)
+                            self._handle_failure(msg, e)
+                        else:
+                            self._reply_and_ack(msg, result)
                 iterations += 1
         finally:
             with self._lock:
@@ -315,6 +317,100 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             score=score,  # pyright: ignore[reportUnknownArgumentType]
             latency_ms=latency_ms,
         )
+
+    def _handle_failure(
+        self,
+        msg: Message[EvalRequest[InputT, ExpectedT], EvalResult],
+        error: Exception,
+    ) -> None:
+        """Handle message processing failure.
+
+        When DLQ is configured:
+        - Checks DLQ policy and either dead-letters or retries with backoff
+        - Only sends error replies on terminal outcomes (DLQ)
+
+        When DLQ is not configured:
+        - Sends error reply and acknowledges (original behavior)
+        """
+        if self._dlq is None:
+            # No DLQ configured - use original behavior: error reply + acknowledge
+            result = EvalResult(
+                sample_id=msg.body.sample.id,
+                experiment_name=msg.body.experiment.name,
+                score=Score(value=0.0, passed=False, reason=str(error)),
+                latency_ms=0,
+                error=str(error),
+            )
+            self._reply_and_ack(msg, result)
+            return
+
+        # DLQ is configured - check if we should dead-letter
+        if self._dlq.should_dead_letter(msg, error):
+            self._dead_letter(msg, error)
+            return
+
+        # Retry with backoff - do NOT send error reply here.
+        # The message will be redelivered and may succeed on retry.
+        # Only send error replies on terminal outcomes (DLQ or final failure).
+        backoff = min(60 * msg.delivery_count, 900)
+        with contextlib.suppress(ReceiptHandleExpiredError):
+            msg.nack(visibility_timeout=backoff)
+
+    def _dead_letter(
+        self,
+        msg: Message[EvalRequest[InputT, ExpectedT], EvalResult],
+        error: Exception,
+    ) -> None:
+        """Send message to dead letter queue."""
+        if self._dlq is None:  # pragma: no cover - defensive check
+            return
+
+        dead_letter: DeadLetter[EvalRequest[InputT, ExpectedT]] = DeadLetter(
+            message_id=msg.id,
+            body=msg.body,
+            source_mailbox=self._requests.name,
+            delivery_count=msg.delivery_count,
+            last_error=str(error),
+            last_error_type=f"{type(error).__module__}.{type(error).__qualname__}",
+            dead_lettered_at=datetime.now(UTC),
+            first_received_at=msg.enqueued_at,
+            request_id=msg.body.request_id,
+            reply_to=msg.reply_to.name if msg.reply_to else None,
+        )
+
+        # Send error reply - this is a terminal outcome
+        try:
+            if msg.reply_to:
+                _ = msg.reply(
+                    EvalResult(
+                        sample_id=msg.body.sample.id,
+                        experiment_name=msg.body.experiment.name,
+                        score=Score(value=0.0, passed=False, reason=str(error)),
+                        latency_ms=0,
+                        error=f"Dead-lettered after {msg.delivery_count} attempts: {error}",
+                    )
+                )
+        except Exception as reply_error:  # nosec B110 - intentional: reply failure should not block dead-lettering
+            _logger.debug(
+                "Failed to send error reply during dead-lettering",
+                extra={"message_id": msg.id, "error": str(reply_error)},
+            )
+
+        _ = self._dlq.mailbox.send(dead_letter)
+        _logger.warning(
+            "Message dead-lettered",
+            extra={
+                "message_id": msg.id,
+                "request_id": str(msg.body.request_id),
+                "sample_id": msg.body.sample.id,
+                "delivery_count": msg.delivery_count,
+                "error_type": dead_letter.last_error_type,
+            },
+        )
+
+        # Acknowledge to remove from source queue
+        with contextlib.suppress(ReceiptHandleExpiredError):
+            msg.acknowledge()
 
 
 __all__ = [

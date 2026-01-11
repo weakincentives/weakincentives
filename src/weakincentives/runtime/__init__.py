@@ -14,7 +14,21 @@
 
 from __future__ import annotations
 
-from . import events, lease_extender, lifecycle, mailbox, main_loop, session, watchdog
+from . import (
+    dlq,
+    events,
+    lease_extender,
+    lifecycle,
+    mailbox,
+    main_loop,
+    session,
+    watchdog,
+)
+from .dlq import (
+    DeadLetter,
+    DLQConsumer,
+    DLQPolicy,
+)
 from .events import (
     ControlDispatcher,
     Dispatcher,
@@ -97,7 +111,10 @@ __all__ = [
     "CollectingMailbox",
     "CompositeSnapshot",
     "ControlDispatcher",
+    "DLQConsumer",
+    "DLQPolicy",
     "DataEvent",
+    "DeadLetter",
     "DispatchResult",
     "Dispatcher",
     "FakeMailbox",
@@ -150,6 +167,7 @@ __all__ = [
     "build_reducer_context",
     "configure_logging",
     "create_snapshot",
+    "dlq",
     "events",
     "get_logger",
     "iter_sessions_bottom_up",
