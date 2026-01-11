@@ -1311,3 +1311,9 @@ def test_all_tools_succeeded_with_failure():
 - **No caching** - Repeated samples re-execute; add caching at adapter level
 - **No checkpoints** - Cannot resume interrupted runs
 - **Single loop** - Each `EvalLoop.execute()` uses one MainLoop instance
+
+## Related Specifications
+
+- `specs/DLQ.md` - Dead letter queue configuration for failed samples
+- `specs/MAIN_LOOP.md` - MainLoop orchestration that EvalLoop wraps
+- `specs/MAILBOX.md` - Mailbox protocol for distributed evaluation
