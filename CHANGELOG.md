@@ -1264,7 +1264,7 @@ agent styles":
   section headings and descriptors so multi-section outputs remain readable
   and traceable.
 - Prompts and sections have explicit clone contracts that rebind to new
-  sessions and event dispatcheres, keeping reusable prompt trees isolated.
+  sessions and event dispatchers, keeping reusable prompt trees isolated.
 - The prompt overrides store protocol is unified and re-exported through the
   versioned overrides module so custom stores and adapters target the same
   interface.
@@ -1455,7 +1455,7 @@ agent styles":
 
 ### Logging & Telemetry
 
-- Added a structured logging facility used across sessions, event dispatcheres, and
+- Added a structured logging facility used across sessions, event dispatchers, and
   prompt overrides, alongside dedicated unit tests and README guidance for
   configuring INFO-level output in the code review example.
 
@@ -1493,7 +1493,7 @@ agent styles":
 
 ### Events & Telemetry
 
-- Event dispatcheres now return a `PublishResult` summary capturing handler failures
+- Event dispatchers now return a `PublishResult` summary capturing handler failures
   and expose `raise_if_errors` for aggregated exceptions.
 
 ### Tooling & Quality
