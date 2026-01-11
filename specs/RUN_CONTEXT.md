@@ -246,6 +246,92 @@ with tracer.start_as_current_span("process_request") as span:
 1. **Preserved trace context**: `trace_id` and `span_id` pass through unchanged
 1. **Optional everywhere**: All integration points accept `run_context: RunContext | None`
 
+## Implementation Status
+
+### Current State
+
+RunContext is fully integrated for:
+
+- `MainLoopResult` - includes `run_context` on success and error paths
+- `ToolContext` - tool handlers receive context via `context.run_context`
+- `ToolInvoked` events - populated by `ToolExecutor` and `BridgedTool`
+
+### Known Limitations
+
+#### 1. RunContext Not Propagated to Adapters
+
+**Issue**: `PromptRendered` and `PromptExecuted` events cannot include `run_context`
+because:
+
+- `ProviderAdapter.evaluate()` does not accept a `run_context` parameter
+  (`src/weakincentives/adapters/core.py:45-53`)
+- Adapter implementations dispatch these events without context
+
+**Impact**: Distributed tracing metadata is missing from prompt-level telemetry
+events, breaking end-to-end request correlation.
+
+**Fix Required**: Add `run_context: RunContext | None = None` parameter to
+`ProviderAdapter.evaluate()` and thread through all implementations (OpenAI,
+LiteLLM, Claude Agent SDK).
+
+```python
+# Future signature
+@abstractmethod
+def evaluate[OutputT](
+    self,
+    prompt: Prompt[OutputT],
+    *,
+    session: SessionProtocol,
+    deadline: Deadline | None = None,
+    budget: Budget | None = None,
+    budget_tracker: BudgetTracker | None = None,
+    run_context: RunContext | None = None,  # Add this
+) -> PromptResponse[OutputT]:
+    ...
+```
+
+#### 2. RunContext Built After Execution
+
+**Issue**: In `MainLoop._handle_message()` (`src/weakincentives/runtime/main_loop.py:362-367`),
+RunContext is built *after* `self._execute()` completes:
+
+```python
+# Current (problematic)
+response, session = self._execute(request_event)  # Events dispatched here
+run_context = self._build_run_context(...)        # Context built too late
+```
+
+**Impact**: During prompt execution, tools receive `None` for `run_context`
+because the context doesn't exist yet. ToolInvoked events dispatched during
+execution lack the context.
+
+**Fix Required**: Build RunContext *before* calling `_execute()` and pass it
+through to the execution path:
+
+```python
+# Future (correct)
+run_context = self._build_run_context(request_event, msg)
+response, session = self._execute(request_event, run_context=run_context)
+result = MainLoopResult(..., run_context=run_context)
+```
+
+### Propagation Path (Target State)
+
+Once fixes are applied, RunContext will flow as:
+
+```
+MainLoop._handle_message()
+  └─ _build_run_context()           # Create before execution
+  └─ _execute(run_context=...)
+       └─ adapter.evaluate(run_context=...)
+            └─ PromptRendered(run_context=...)
+            └─ ToolExecutor(run_context=...)
+                 └─ ToolContext(run_context=...)
+                 └─ ToolInvoked(run_context=...)
+            └─ PromptExecuted(run_context=...)
+  └─ MainLoopResult(run_context=...)
+```
+
 ## See Also
 
 - `specs/MAIN_LOOP.md` - MainLoop request processing
