@@ -469,7 +469,7 @@ response = adapter.evaluate(prompt, session=session, resources=resources)
 
 # Or at the MainLoop level
 config = MainLoopConfig(resources=resources)
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
+loop = MyLoop(adapter=adapter, dispatcher=dispatcher, config=config)
 response, session = loop.execute(request)
 ```
 
@@ -493,8 +493,8 @@ accessors dispatch events internally rather than mutating state directly.
 from weakincentives.runtime import Session, InProcessDispatcher
 from weakincentives.runtime.session import InitializeSlice, ClearSlice
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # All mutations go through dispatch
 session.dispatch(AddStep(step="Research"))
@@ -892,8 +892,8 @@ design specifications:
 
 - `PromptTemplateProtocol` no longer advertises a `render()` method (rendering is
   done via `Prompt.render()`).
-- `ProviderAdapterProtocol.evaluate()` no longer includes a `bus` parameter
-  (telemetry is published via `session.event_bus`).
+- `ProviderAdapterProtocol.evaluate()` no longer includes a `dispatcher` parameter
+  (telemetry is published via `session.dispatcher`).
 - `_ToolExecutionContext` is now internal (previous `ToolExecutionContext` name
   removed).
 
@@ -1072,7 +1072,7 @@ agent styles":
 - Enabled parallel tool calls in OpenAI adapter via `parallel_tool_calls`
   config option.
 - Simplified adapter method signatures to use `session` parameter only,
-  removing separate `bus` parameter since session now owns its event bus.
+  removing separate `dispatcher` parameter since session now owns its event dispatcher.
 - Added native web search tool integration spec for provider-executed tools.
 
 ### Error Handling
@@ -1264,7 +1264,7 @@ agent styles":
   section headings and descriptors so multi-section outputs remain readable
   and traceable.
 - Prompts and sections have explicit clone contracts that rebind to new
-  sessions and event buses, keeping reusable prompt trees isolated.
+  sessions and event dispatchers, keeping reusable prompt trees isolated.
 - The prompt overrides store protocol is unified and re-exported through the
   versioned overrides module so custom stores and adapters target the same
   interface.
@@ -1286,8 +1286,8 @@ agent styles":
 
 ### Session & Concurrency
 
-- `Session` now owns an in-process event bus by default, removing boilerplate
-  for common setups while preserving the ability to inject a custom bus.
+- `Session` now owns an in-process event dispatcher by default, removing boilerplate
+  for common setups while preserving the ability to inject a custom dispatcher.
 - Added a reusable locking helper around session mutations to guard reducers
   and state updates without sprinkling ad hoc locks.
 
@@ -1314,7 +1314,7 @@ agent styles":
 
 - `PlanningToolsSection`, `VfsToolsSection`, and `AstevalSection` now require
   a live `Session` at construction time, register their reducers immediately,
-  and verify that tool handlers execute within the same `Session`/event bus.
+  and verify that tool handlers execute within the same `Session`/event dispatcher.
   Update custom prompts to pass the session you plan to route through
   `ToolContext`.
 - Section registration reinstates strict validation for tool entries and tool
@@ -1447,15 +1447,15 @@ agent styles":
 ### Session & Adapters
 
 - Hardened session concurrency with RLock-protected reducers, snapshot
-  restores, and new thread-safety regression tests/specs while the event bus
+  restores, and new thread-safety regression tests/specs while the event dispatcher
   now emits structured logs for publish failures.
 - Centralized adapter protocols and the conversation runner, enforcing that
-  adapters always supply a session and event bus before executing prompts and
+  adapters always supply a session and event dispatcher before executing prompts and
   improving tool invocation error reporting.
 
 ### Logging & Telemetry
 
-- Added a structured logging facility used across sessions, event buses, and
+- Added a structured logging facility used across sessions, event dispatchers, and
   prompt overrides, alongside dedicated unit tests and README guidance for
   configuring INFO-level output in the code review example.
 
@@ -1493,7 +1493,7 @@ agent styles":
 
 ### Events & Telemetry
 
-- Event buses now return a `PublishResult` summary capturing handler failures
+- Event dispatchers now return a `PublishResult` summary capturing handler failures
   and expose `raise_if_errors` for aggregated exceptions.
 
 ### Tooling & Quality
@@ -1576,7 +1576,7 @@ agent styles":
 
 ### Events & Telemetry
 
-- Implemented the event bus with `ToolInvoked` and `PromptExecuted` payloads
+- Implemented the event dispatcher with `ToolInvoked` and `PromptExecuted` payloads
   and wired adapters/examples to publish them for sessions or external
   observers.
 

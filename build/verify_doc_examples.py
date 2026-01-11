@@ -90,7 +90,7 @@ except ImportError:
 
 # Common variables referenced in examples
 session: Any = None
-bus: Any = None
+dispatcher: Any = None
 adapter: Any = None
 prompt: Any = None
 response: Any = None

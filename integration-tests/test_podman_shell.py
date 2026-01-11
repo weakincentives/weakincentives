@@ -47,8 +47,8 @@ def test_shell_execute_creates_files(tmp_path: Path) -> None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
     assert connection is not None
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     connection_name = connection.get("connection_name")
     section = PodmanSandboxSection(
         session=session,
@@ -85,8 +85,8 @@ def test_podman_vfs_round_trip(tmp_path: Path) -> None:
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PodmanSandboxSection(
         session=session, config=PodmanSandboxConfig(cache_dir=tmp_path)
     )
@@ -123,8 +123,8 @@ def test_evaluate_python_writes_file(tmp_path: Path) -> None:
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     connection_name = connection.get("connection_name")
     section = PodmanSandboxSection(
         session=session, config=PodmanSandboxConfig(cache_dir=tmp_path)
@@ -160,8 +160,8 @@ def test_podman_container_has_no_network(tmp_path: Path) -> None:
     if connection is None:
         pytest.skip("Podman integration requires a running podman machine.")
     assert connection is not None
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     connection_name = connection.get("connection_name")
     section = PodmanSandboxSection(
         session=session, config=PodmanSandboxConfig(cache_dir=tmp_path)

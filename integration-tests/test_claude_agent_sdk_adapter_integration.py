@@ -380,7 +380,7 @@ def test_claude_agent_sdk_adapter_hooks_publish_tool_invoked_events(
     """Verify that adapter hooks publish ToolInvoked events for SDK native tools.
 
     This test validates that the PostToolUse hook correctly publishes ToolInvoked
-    events to the session's event bus when the SDK uses its native tools (like Read).
+    events to the session's event dispatcher when the SDK uses its native tools (like Read).
     This is a key integration point between the SDK's execution and weakincentives'
     event-driven architecture.
     """

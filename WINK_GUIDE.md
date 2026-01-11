@@ -464,8 +464,8 @@ prompt = Prompt(template).bind(SummarizeRequest(
          "typed programs. Tools are explicit. State is inspectable."
 ))
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # To actually run this, you need an adapter and API key:
 #
@@ -1056,7 +1056,7 @@ config = MainLoopConfig(resources={
     Config: Binding(Config, lambda r: Config.from_env()),
     HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
 })
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
+loop = MyLoop(adapter=adapter, dispatcher=dispatcher, config=config)
 
 # Resources are bound to prompt automatically
 response, session = loop.execute(request)
@@ -1412,7 +1412,7 @@ A session is a container keyed by dataclass type:
 
 - Each type has a **slice**: `tuple[T, ...]`
 - **Reducers** update slices in response to events
-- The session subscribes to the event bus and records prompt/tool telemetry
+- The session subscribes to the event dispatcher and records prompt/tool telemetry
 
 Mental model: **"events in, new immutable slices out"**.
 
@@ -1690,7 +1690,7 @@ class Hello:
     message: str
 
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[Hello](
     ns="demo",
@@ -1779,7 +1779,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 from weakincentives.runtime import InProcessDispatcher, Session
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 workspace = ClaudeAgentWorkspaceSection(
     session=session,
@@ -2080,7 +2080,7 @@ mcp_search_tool = Tool[MCPSearchParams, MCPSearchResult](
     handler=mcp_search,
 )
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[None](
     ns="demo",
@@ -2144,7 +2144,7 @@ class Review:
     findings: list[str]
 
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 # Create workspace with mounted repository
 workspace = ClaudeAgentWorkspaceSection(
@@ -2293,7 +2293,7 @@ resources = ResourceRegistry.of(
 )
 
 config = MainLoopConfig(resources=resources)
-loop = MyLoop(adapter=adapter, bus=bus, config=config)
+loop = MyLoop(adapter=adapter, dispatcher=dispatcher, config=config)
 response, session = loop.execute(request)
 ```
 
@@ -3168,7 +3168,7 @@ analysis. JSON mode makes logs machine-parseable.
 
 ### 13.2 Session events
 
-Sessions subscribe to the event bus and capture telemetry events like:
+Sessions subscribe to the event dispatcher and capture telemetry events like:
 
 - `PromptRendered`: emitted when a prompt is rendered
 - `ToolInvoked`: emitted when a tool is called (includes params, result, timing)
@@ -3176,7 +3176,7 @@ Sessions subscribe to the event bus and capture telemetry events like:
   usage)
 - `TokenUsage`: token counts from provider responses
 
-You can use these for your own tracing pipeline. Subscribe to the bus and route
+You can use these for your own tracing pipeline. Subscribe to the dispatcher and route
 events wherever you need them.
 
 ### 13.3 Dumping snapshots to JSONL
@@ -3218,7 +3218,7 @@ WINK is designed so that most of your "agent logic" is testable without a model.
    markdown (snapshot tests). These run fast and catch template regressions.
 
 1. **Tool handler tests**: call handlers directly with fake `ToolContext` +
-   resources. No model needed. Test the business logic in isolation.
+   resources. No model needed. Test the dispatcheriness logic in isolation.
 
 1. **Reducer tests**: test state transitions as pure functions. Given this slice
    and this event, expect this new slice.
@@ -3633,7 +3633,7 @@ ToolResult.error(message)               # failure case
 ### 18.3 weakincentives.runtime
 
 ```python
-Session(bus, tags=None, parent=None)
+Session(dispatcher, tags=None, parent=None)
 SessionView(session)                    # Read-only wrapper for reducer contexts
 session[Type].all() / latest() / where()
 session.dispatch(event)                 # All mutations go through dispatch
@@ -3665,7 +3665,7 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 - `append_all`, `replace_latest`, `replace_latest_by`, `upsert_by`
 - Reducers receive `SliceView[S]` and return `SliceOp[S]`
 
-**Event bus:**
+**Event dispatcher:**
 
 - `InProcessDispatcher`
 - Telemetry events (`PromptRendered`, `ToolInvoked`, `PromptExecuted`,

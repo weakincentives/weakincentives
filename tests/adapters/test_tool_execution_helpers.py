@@ -77,10 +77,10 @@ def _base_context(
     deadline: Deadline | None = None,
     session: SessionProtocol | None = None,
 ) -> ToolExecutionContext:
-    bus = InProcessDispatcher()
+    dispatcher = InProcessDispatcher()
     prompt_template = _build_prompt(tool)
     prompt: Prompt[ToolPayload] = Prompt(prompt_template)
-    effective_session = session or Session(bus=bus)
+    effective_session = session or Session(dispatcher=dispatcher)
     # Enter prompt context for resource access
     prompt.resources.__enter__()
     return ToolExecutionContext(

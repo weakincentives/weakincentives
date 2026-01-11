@@ -27,7 +27,7 @@ from weakincentives.runtime import InProcessDispatcher, Session
 @pytest.fixture
 def session() -> Session:
     """Create a session for testing."""
-    return Session(bus=InProcessDispatcher())
+    return Session(dispatcher=InProcessDispatcher())
 
 
 class TestToolSuiteSectionProtocol:
@@ -98,7 +98,7 @@ class TestToolSuiteSectionProtocol:
         from weakincentives.contrib.tools import PlanningToolsSection
 
         section = PlanningToolsSection(session=session)
-        new_session = Session(bus=InProcessDispatcher())
+        new_session = Session(dispatcher=InProcessDispatcher())
 
         cloned = section.clone(session=new_session)
 
@@ -121,7 +121,7 @@ class TestToolSuiteSectionProtocol:
         class PartialImpl:
             @property
             def session(self) -> Session:
-                return Session(bus=InProcessDispatcher())
+                return Session(dispatcher=InProcessDispatcher())
 
             # Missing accepts_overrides and clone
 
@@ -199,7 +199,7 @@ class TestWorkspaceSectionProtocol:
         from weakincentives.contrib.tools import VfsToolsSection
 
         section = VfsToolsSection(session=session)
-        new_session = Session(bus=InProcessDispatcher())
+        new_session = Session(dispatcher=InProcessDispatcher())
 
         cloned = section.clone(session=new_session)
 
@@ -269,7 +269,7 @@ class TestDuckTypingConformance:
                 assert isinstance(new_session, Session)
                 return CustomWorkspaceSection(new_session)
 
-        session = Session(bus=InProcessDispatcher())
+        session = Session(dispatcher=InProcessDispatcher())
         custom = CustomWorkspaceSection(session)
 
         # Should pass both protocol checks

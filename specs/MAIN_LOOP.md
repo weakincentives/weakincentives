@@ -8,7 +8,7 @@ publish result. Implementations define only the domain-specific factories.
 
 ## Guiding Principles
 
-- **Event-driven**: Requests arrive via bus; results return the same way
+- **Event-driven**: Requests arrive via dispatcher; results return the same way
 - **Factory-based**: Subclasses own prompt and session construction
 - **Prompt-owned resources**: Resource lifecycle managed by prompt context
 - **Visibility-transparent**: Expansion exceptions retry automatically
@@ -24,7 +24,7 @@ class MainLoop(ABC, Generic[UserRequestT, OutputT]):
         self,
         *,
         adapter: ProviderAdapter[OutputT],
-        bus: ControlDispatcher,
+        dispatcher: ControlDispatcher,
         config: MainLoopConfig | None = None,
     ) -> None: ...
 
@@ -88,7 +88,7 @@ flowchart LR
     ExitContext --> Result
 ```
 
-1. Receive `MainLoopRequest` via bus or direct `execute()` call
+1. Receive `MainLoopRequest` via dispatcher or direct `execute()` call
 1. Initialize prompt and session via `prepare(request)`
 1. Enter prompt context (`with prompt.resources:`) to initialize resources
 1. Evaluate with adapter
@@ -144,12 +144,12 @@ is not recreated. The `finalize` hook is called only on successful evaluation.
 ### Bus-Driven
 
 ```python
-loop = MyMainLoop(adapter=adapter, bus=bus)
+loop = MyMainLoop(adapter=adapter, dispatcher=dispatcher)
 
 # MainLoop subscribes to MainLoopRequest in __init__
 
 # With request-specific constraints
-bus.dispatch(MainLoopRequest(
+dispatcher.dispatch(MainLoopRequest(
     request=MyRequest(...),
     budget=Budget(max_total_tokens=10000),
 ))
@@ -157,8 +157,8 @@ bus.dispatch(MainLoopRequest(
 
 **Note:** `InProcessDispatcher` dispatches by `type(event)`, not generic alias.
 `MainLoopRequest[T]` is for static type checking; at runtime all events are
-`MainLoopRequest`. For multiple loop types on one bus, filter by request type
-in the handler or use separate buses.
+`MainLoopRequest`. For multiple loop types on one dispatcher, filter by request type
+in the handler or use separate dispatchers.
 
 ### Direct
 
@@ -170,8 +170,8 @@ response, session = loop.execute(MyRequest(...))
 
 ```python
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
-    def __init__(self, *, adapter: ProviderAdapter[ReviewResult], bus: ControlDispatcher) -> None:
-        super().__init__(adapter=adapter, bus=bus)
+    def __init__(self, *, adapter: ProviderAdapter[ReviewResult], dispatcher: ControlDispatcher) -> None:
+        super().__init__(adapter=adapter, dispatcher=dispatcher)
         self._template = PromptTemplate[ReviewResult](
             ns="reviews",
             key="code-review",
@@ -180,7 +180,7 @@ class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
 
     def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-        session = Session(bus=self._bus, tags={"loop": "code-review"})
+        session = Session(dispatcher=self._dispatcher, tags={"loop": "code-review"})
         return prompt, session
 
     def finalize(self, prompt: Prompt[ReviewResult], session: Session) -> None:
@@ -200,7 +200,7 @@ def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session
         ReviewParams.from_request(request),
         resources={GitClient: GitClient(repo=request.repo_path)},
     )
-    session = Session(bus=self._bus)
+    session = Session(dispatcher=self._dispatcher)
     return prompt, session
 ```
 
@@ -209,7 +209,7 @@ def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session
 ```python
 def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
     prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-    session = Session(bus=self._bus)
+    session = Session(dispatcher=self._dispatcher)
     session[Plan].register(SetupPlan, plan_reducer)
     return prompt, session
 ```
@@ -231,7 +231,7 @@ def prepare(self, request: Request) -> tuple[Prompt[Output], Session]:
             ),
         ],
     )).bind(Params.from_request(request))
-    session = Session(bus=self._bus)
+    session = Session(dispatcher=self._dispatcher)
     return prompt, session
 ```
 

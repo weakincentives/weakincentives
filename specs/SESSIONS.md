@@ -15,8 +15,8 @@ event emission and subscription, deadline enforcement, and budget tracking.
   making state easy to reconstruct.
 - **Publisher isolation**: Event dispatch is fire-and-forget; handler failures
   are logged and isolated.
-- **Explicit buses**: Callers may provide an `Dispatcher`. When omitted,
-  `Session` creates an in-process bus for telemetry.
+- **Explicit dispatchers**: Callers may provide an `Dispatcher`. When omitted,
+  `Session` creates an in-process dispatcher for telemetry.
 
 ```mermaid
 flowchart TB
@@ -59,7 +59,7 @@ class Session:
     def __init__(
         self,
         *,
-        bus: Dispatcher | None = None,  # Creates InProcessDispatcher if None
+        dispatcher: Dispatcher | None = None,  # Creates InProcessDispatcher if None
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -86,7 +86,7 @@ class Session:
     def clone(
         self,
         *,
-        bus: Dispatcher,
+        dispatcher: Dispatcher,
         parent: Session | None = None,
         session_id: UUID | None = None,
         created_at: datetime | None = None,
@@ -265,7 +265,7 @@ class AgentPlan:
 ### Installing a State Slice
 
 ```python
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 session.install(AgentPlan)
 
 # Now use the slice
@@ -366,8 +366,8 @@ session[PodmanWorkspace].register(PodmanWorkspace, replace_latest)
 Sessions form a tree for nested orchestration:
 
 ```python
-parent_session = Session(bus=bus)
-child_session = Session(bus=bus, parent=parent_session)
+parent_session = Session(dispatcher=dispatcher)
+child_session = Session(dispatcher=dispatcher, parent=parent_session)
 
 # Traverse from leaves up
 for session in iter_sessions_bottom_up(root_session):
@@ -401,9 +401,9 @@ In-process pub/sub for prompt lifecycle events:
 ```python
 from weakincentives.runtime.events import InProcessDispatcher
 
-bus = InProcessDispatcher()
-bus.subscribe(PromptExecuted, handler)
-result = bus.dispatch(event)
+dispatcher = InProcessDispatcher()
+dispatcher.subscribe(PromptExecuted, handler)
+result = dispatcher.dispatch(event)
 
 if not result.ok:
     result.raise_if_errors()  # Optional strict mode
@@ -481,7 +481,7 @@ class DispatchResult:
 ### Delivery Semantics
 
 - Events delivered synchronously on publisher thread
-- In-order delivery per bus instance
+- In-order delivery per dispatcher instance
 - Handler exceptions logged and isolated (unless `raise_if_errors()` called)
 - No persistence or cross-process forwarding (implement in subscribers)
 
@@ -525,7 +525,7 @@ deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=30))
 response = adapter.evaluate(
     prompt,
     params,
-    bus=bus,
+    dispatcher=dispatcher,
     session=session,
     deadline=deadline,
 )
@@ -643,8 +643,8 @@ from weakincentives.deadlines import Deadline
 from weakincentives.budget import Budget, BudgetTracker
 
 # Setup
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # Optional: register custom reducers
 session[ResearchMetrics].register(ResearchSummary, update_metrics_reducer)
@@ -658,7 +658,7 @@ tracker = BudgetTracker(budget)
 response = adapter.evaluate(
     prompt,
     params,
-    bus=bus,
+    dispatcher=dispatcher,
     session=session,
     deadline=deadline,
 )

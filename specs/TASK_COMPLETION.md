@@ -253,7 +253,7 @@ from weakincentives.contrib.tools.planning import Plan
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.runtime import InProcessDispatcher, Session
 
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 
 template = PromptTemplate[None](
     ns="demo",
@@ -420,7 +420,7 @@ Test checkers in isolation with mock contexts:
 
 ```python
 def test_checker_returns_incomplete_when_files_missing():
-    session = Session(bus=InProcessDispatcher())
+    session = Session(dispatcher=InProcessDispatcher())
     fs = InMemoryFilesystem()
 
     context = TaskCompletionContext(

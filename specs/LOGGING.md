@@ -17,7 +17,7 @@ truth for the in-repo logging framework.
 
 ## Scope
 
-The logging framework covers runtime-facing modules (event bus, sessions,
+The logging framework covers runtime-facing modules (event dispatcher, sessions,
 adapters, prompt overrides, built-in tools). It intentionally excludes:
 
 - build and CI scripts;
@@ -333,7 +333,7 @@ fields propagate alongside the traceback.
 
 ## Error Handling Expectations
 
-- Publishing events MUST NOT raise from subscriber failures; the bus records
+- Publishing events MUST NOT raise from subscriber failures; the dispatcher records
   each exception, logs it, and exposes failures through the `DispatchResult`.
 - Reducers that raise are logged and skipped, leaving the previous state in
   place.

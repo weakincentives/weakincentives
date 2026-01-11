@@ -39,7 +39,7 @@ enable behavioral assertions against tool usage and token budgets. See
 
 ## Event Bus
 
-`weakincentives.runtime.events` exposes an in-process publish/subscribe bus that
+`weakincentives.runtime.events` exposes an in-process publish/subscribe dispatcher that
 adapters use to emit prompt lifecycle telemetry. Sessions subscribe to collect
 prompt renders, tool invocations, and executions. Refer to
 [Prompt Event Emission](specs/SESSIONS.md).

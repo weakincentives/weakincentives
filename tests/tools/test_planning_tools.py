@@ -78,14 +78,14 @@ def test_plan_command_renders() -> None:
 
 
 def test_planning_tools_reject_mismatched_context_session() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     tool = find_tool(section, "planning_setup_plan")
     handler = tool.handler
     assert handler is not None
-    other_bus = InProcessDispatcher()
-    mismatched_session = Session(bus=other_bus)
+    other_dispatcher = InProcessDispatcher()
+    mismatched_session = Session(dispatcher=other_dispatcher)
     context = build_tool_context(mismatched_session)
 
     with pytest.raises(RuntimeError, match="session does not match"):
@@ -93,8 +93,8 @@ def test_planning_tools_reject_mismatched_context_session() -> None:
 
 
 def test_setup_plan_normalizes_payloads() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
 
@@ -114,8 +114,8 @@ def test_setup_plan_normalizes_payloads() -> None:
 
 
 def test_setup_plan_returns_plan() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
 
@@ -134,8 +134,8 @@ def test_setup_plan_returns_plan() -> None:
 
 
 def test_setup_plan_rejects_invalid_objective() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
 
@@ -152,8 +152,8 @@ def test_setup_plan_rejects_invalid_objective() -> None:
 
 
 def test_add_step_requires_existing_plan() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     add_tool = find_tool(section, "planning_add_step")
 
@@ -166,8 +166,8 @@ def test_add_step_requires_existing_plan() -> None:
 
 
 def test_add_step_appends_new_steps() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -190,8 +190,8 @@ def test_add_step_appends_new_steps() -> None:
 
 
 def test_add_step_returns_plan() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -215,8 +215,8 @@ def test_add_step_returns_plan() -> None:
 
 
 def test_add_step_rejects_empty_payload() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -232,8 +232,8 @@ def test_add_step_rejects_empty_payload() -> None:
 
 
 def test_add_step_rejects_when_plan_not_active() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -259,8 +259,8 @@ def test_add_step_rejects_when_plan_not_active() -> None:
 
 
 def test_session_keeps_single_plan_snapshot() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -281,8 +281,8 @@ def test_session_keeps_single_plan_snapshot() -> None:
 
 
 def test_update_step_rejects_empty_patch() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -298,8 +298,8 @@ def test_update_step_rejects_empty_patch() -> None:
 
 
 def test_update_step_updates_existing_step_title() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -329,8 +329,8 @@ def test_update_step_updates_existing_step_title() -> None:
 
 
 def test_update_step_returns_plan() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -357,8 +357,8 @@ def test_update_step_returns_plan() -> None:
 
 
 def test_update_step_updates_status() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -381,8 +381,8 @@ def test_update_step_updates_status() -> None:
 
 
 def test_update_step_rejects_unknown_identifier() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -402,8 +402,8 @@ def test_update_step_rejects_unknown_identifier() -> None:
 
 
 def test_update_step_sets_plan_completed_when_all_done() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -446,8 +446,8 @@ def test_update_step_sets_plan_completed_when_all_done() -> None:
 
 
 def test_update_step_rejects_completed_plan() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -472,8 +472,8 @@ def test_update_step_rejects_completed_plan() -> None:
 
 
 def test_read_plan_returns_snapshot() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     read_tool = find_tool(section, "planning_read_plan")
@@ -490,8 +490,8 @@ def test_read_plan_returns_snapshot() -> None:
 
 
 def test_read_plan_requires_existing_plan() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     read_tool = find_tool(section, "planning_read_plan")
 
@@ -500,8 +500,8 @@ def test_read_plan_requires_existing_plan() -> None:
 
 
 def test_read_plan_reports_empty_steps() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     read_tool = find_tool(section, "planning_read_plan")
@@ -517,8 +517,8 @@ def test_read_plan_reports_empty_steps() -> None:
 
 
 def test_planning_tools_section_disables_tool_overrides_by_default() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(session=session)
 
     assert section.accepts_overrides is False
@@ -526,8 +526,8 @@ def test_planning_tools_section_disables_tool_overrides_by_default() -> None:
 
 
 def test_planning_tools_section_allows_configuring_overrides() -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = PlanningToolsSection(
         session=session,
         accepts_overrides=True,
@@ -552,8 +552,8 @@ def test_planning_config_accepts_overrides() -> None:
     """Test that config accepts_overrides is respected."""
     from weakincentives.contrib.tools import PlanningConfig
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     config = PlanningConfig(accepts_overrides=True)
     section = PlanningToolsSection(session=session, config=config)
 

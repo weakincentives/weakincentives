@@ -49,17 +49,17 @@ def session_factory() -> SessionFactory:
         session_id: UUID | None = None,
         created_at: datetime | None = None,
     ) -> tuple[Session, InProcessDispatcher]:
-        bus = InProcessDispatcher()
+        dispatcher = InProcessDispatcher()
         resolved_session_id = session_id if session_id is not None else uuid4()
         resolved_created_at = (
             created_at if created_at is not None else datetime.now(UTC)
         )
         session = Session(
-            bus=bus,
+            dispatcher=dispatcher,
             session_id=resolved_session_id,
             created_at=resolved_created_at,
             tags={"suite": "tests"},
         )
-        return session, bus
+        return session, dispatcher
 
     return factory

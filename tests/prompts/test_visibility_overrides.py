@@ -60,8 +60,8 @@ def test_visibility_overrides_without_override() -> None:
 
 def test_session_auto_registers_visibility_reducers() -> None:
     """Session automatically registers visibility reducers on creation."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Initially no overrides
     assert session[VisibilityOverrides].latest() is None
@@ -86,8 +86,8 @@ def test_session_auto_registers_visibility_reducers() -> None:
 
 def test_clear_visibility_override_event() -> None:
     """ClearVisibilityOverride removes a single override."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Set some overrides
     session.dispatch(
@@ -108,8 +108,8 @@ def test_clear_visibility_override_event() -> None:
 
 def test_clear_all_visibility_overrides_event() -> None:
     """ClearAllVisibilityOverrides removes all overrides."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Set some overrides
     session.dispatch(
@@ -135,16 +135,16 @@ def test_get_session_visibility_override_returns_none_for_none_session() -> None
 
 def test_get_session_visibility_override_returns_none_for_empty_session() -> None:
     """get_session_visibility_override returns None when no overrides set."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     assert get_session_visibility_override(session, ("section",)) is None
 
 
 def test_get_session_visibility_override_returns_override_from_session() -> None:
     """get_session_visibility_override returns override from session state."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     session.dispatch(
         SetVisibilityOverride(path=("section",), visibility=SectionVisibility.SUMMARY)
@@ -159,8 +159,8 @@ def test_get_session_visibility_override_returns_override_from_session() -> None
 
 def test_cloned_session_preserves_visibility_reducers() -> None:
     """Session.clone preserves visibility reducers without duplicating them."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Set an override on original session
     session.dispatch(
@@ -168,7 +168,7 @@ def test_cloned_session_preserves_visibility_reducers() -> None:
     )
 
     # Clone the session
-    cloned = session.clone(bus=bus)
+    cloned = session.clone(dispatcher=dispatcher)
 
     # Cloned session should have exactly 1 reducer per event type (not duplicates)
     assert len(cloned._reducers.get(SetVisibilityOverride, [])) == 1
@@ -195,8 +195,8 @@ def test_cloned_session_preserves_visibility_reducers() -> None:
 
 def test_builtin_reducer_registration_is_idempotent() -> None:
     """Calling _register_builtin_reducers multiple times is safe."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Reducers are already registered from __init__
     # Calling again should be a no-op (guard prevents re-registration)
@@ -215,8 +215,8 @@ def test_register_visibility_reducers_is_idempotent() -> None:
     """Calling register_visibility_reducers on a session adds reducers (idempotent)."""
     from weakincentives.runtime.session import register_visibility_reducers
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Session already has reducers from __init__, but calling again is safe
     # (though it adds duplicate reducers - the guard is in _register_builtin_reducers)

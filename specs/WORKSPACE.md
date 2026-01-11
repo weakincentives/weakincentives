@@ -117,7 +117,7 @@ Mounts hydrate at section construction and appear in prompt guidance.
 ### Session Integration
 
 ```python
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 section = VfsToolsSection(
     session=session,
     mounts=(HostMount(host_path="docs/", include_glob=("*.md",)),),
@@ -298,8 +298,8 @@ from weakincentives.runtime.session import Session
 from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
 from weakincentives.contrib.tools import vfs, podman
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # VFS-based prompt
 vfs_template = PromptTemplate(
@@ -341,10 +341,10 @@ workspace = session[podman.PodmanWorkspace].latest()
 
 ## Cloning
 
-All workspace sections support `clone(session=..., bus=...)`:
+All workspace sections support `clone(session=..., dispatcher=...)`:
 
 - Re-registers reducers on new session
-- Binds telemetry to new event bus
+- Binds telemetry to new event dispatcher
 - Reapplies host mount hydration
 - Fully decoupled from original section
 

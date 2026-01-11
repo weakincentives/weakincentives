@@ -42,9 +42,9 @@ from weakincentives.runtime.session import Session
 
 
 def test_section_exposes_new_client(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
 
@@ -52,10 +52,10 @@ def test_section_exposes_new_client(
 
 
 def test_close_stops_and_removes_container(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -79,10 +79,10 @@ def test_close_stops_and_removes_container(
 
 
 def test_close_is_idempotent(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -106,10 +106,10 @@ def test_close_is_idempotent(
 
 
 def test_close_without_workspace(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     section = make_section(session=session, client=client, cache_dir=tmp_path)
 
@@ -117,10 +117,10 @@ def test_close_without_workspace(
 
 
 def test_close_handles_client_factory_failure(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -142,10 +142,10 @@ def test_close_handles_client_factory_failure(
 
 
 def test_close_handles_missing_container(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner([ExecResponse(exit_code=0)])
     section = make_section(
@@ -177,10 +177,10 @@ def test_close_handles_missing_container(
 
 
 def test_workspace_reuse_between_calls(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner(
         [ExecResponse(exit_code=0), ExecResponse(exit_code=0)]
@@ -207,8 +207,8 @@ def test_workspace_reuse_between_calls(
 def test_touch_workspace_handles_missing_handle(
     tmp_path: Path,
 ) -> None:
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     section = make_section(
         session=session, client=FakePodmanClient(), cache_dir=tmp_path
     )
@@ -216,10 +216,10 @@ def test_touch_workspace_handles_missing_handle(
 
 
 def test_readiness_failure_raises(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     client.containers.set_readiness_exit_code(1)
     section = make_section(session=session, client=client, cache_dir=tmp_path)
@@ -235,9 +235,9 @@ def test_readiness_failure_raises(
 
 
 def test_exec_runner_property_exposes_runner(
-    session_and_bus: tuple[Session, InProcessDispatcher], tmp_path: Path
+    session_and_dispatcher: tuple[Session, InProcessDispatcher], tmp_path: Path
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner()
     section = make_section(
@@ -317,10 +317,10 @@ def test_client_factory_uses_connection_options(
 
 def test_section_auto_resolves_connection(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cli_runner = FakeCliRunner([ExecResponse(exit_code=0, stdout="auto")])
     resolved = podman_connection_module.PodmanConnectionInfo(
@@ -371,10 +371,10 @@ def test_connection_resolution_prefers_env(monkeypatch: pytest.MonkeyPatch) -> N
 
 
 def test_run_cli_cp_honors_connection_flag(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner()
     section = make_section(
@@ -392,11 +392,11 @@ def test_run_cli_cp_honors_connection_flag(
 
 
 def test_run_cli_cp_without_connection_flag(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     """Test branch 1241->1243: run_cli_cp without connection_name."""
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     runner = FakeCliRunner()
     section = make_section(
@@ -613,10 +613,10 @@ def test_resolve_connection_static_returns_mapping(
 
 def test_section_requires_connection_when_detection_fails(
     monkeypatch: pytest.MonkeyPatch,
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     monkeypatch.setattr(
         podman_connection_module,
@@ -636,11 +636,11 @@ def test_section_requires_connection_when_detection_fails(
 
 
 def test_section_init_with_overlay_path_and_filesystem(
-    session_and_bus: tuple[Session, InProcessDispatcher],
+    session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
 ) -> None:
     """Test that PodmanSandboxSection accepts _overlay_path and _filesystem for cloning."""
-    session, _bus = session_and_bus
+    session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
     cache_dir = tmp_path / "cache"
 
@@ -652,8 +652,8 @@ def test_section_init_with_overlay_path_and_filesystem(
     _ = fs.write("test_file.txt", "test content")
 
     # Create new session for clone
-    new_bus = InProcessDispatcher()
-    new_session = Session(bus=new_bus)
+    new_dispatcher = InProcessDispatcher()
+    new_session = Session(dispatcher=new_dispatcher)
 
     # Create a new section with the preserved overlay path and filesystem
     # Must provide base_url to avoid Podman connection resolution
