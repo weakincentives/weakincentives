@@ -113,7 +113,7 @@ capabilities once, in one place, and the definition ports across runtimes.
 - **Completion resistance.** Encode "done means X" checks that run during
   execution to catch drift and premature termination.
   See [Task Completion Checking](specs/TASK_COMPLETION.md) and
-  [Trajectory Observers](specs/TRAJECTORY_OBSERVERS.md) (design spec).
+  [Feedback Providers](specs/FEEDBACK_PROVIDERS.md) (design spec).
 
 ### State and Adapters
 

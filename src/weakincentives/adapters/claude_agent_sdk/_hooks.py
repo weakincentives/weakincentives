@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
 from ...filesystem import Filesystem
+from ...prompt.feedback import collect_feedback
 from ...prompt.protocols import PromptProtocol
 from ...runtime.events.types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
@@ -530,7 +531,35 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         )
         return task_completion_checker.check(context)  # type: ignore[union-attr]
 
-    async def post_tool_use_hook(  # noqa: RUF029 - SDK requires async signature
+    def _run_feedback_providers(  # pragma: no cover - integration tested
+        data: _ParsedToolData,
+    ) -> dict[str, Any] | None:
+        """Run feedback providers and return hook response if triggered."""
+        feedback_text = collect_feedback(
+            prompt=hook_context._prompt,
+            session=hook_context.session,
+            deadline=hook_context.deadline,
+        )
+
+        if feedback_text:
+            logger.debug(
+                "claude_agent_sdk.hook.feedback_provided",
+                event="hook.feedback_provided",
+                context={
+                    "tool_name": data.tool_name,
+                    "feedback_length": len(feedback_text),
+                    "elapsed_ms": hook_context.elapsed_ms,
+                },
+            )
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": feedback_text,
+                }
+            }
+        return None
+
+    async def post_tool_use_hook(  # noqa: RUF029, C901 - SDK requires async; observer dispatch
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -539,14 +568,20 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         hook_start = time.monotonic()
         data = _parse_tool_data(input_data)
 
-        # Skip logging for MCP-bridged WINK tools - they dispatch their own
-        # ToolInvoked events via BridgedTool with richer context (typed values).
-        if data.tool_name.startswith("mcp__wink__"):
-            return {}
-
+        # Increment tool count for ALL tools (needed for feedback triggers)
         hook_context._tool_count += 1
         hook_context.stats.tool_count += 1
 
+        # MCP-bridged WINK tools dispatch their own ToolInvoked events via
+        # BridgedTool with richer context (typed values). By the time this hook
+        # runs, BridgedTool has already dispatched the event, so tool_call_count
+        # in FeedbackContext is accurate. Run feedback providers and return.
+        if data.tool_name.startswith("mcp__wink__"):
+            feedback_response = _run_feedback_providers(data)
+            return feedback_response if feedback_response else {}
+
+        # For native tools, dispatch ToolInvoked BEFORE running feedback providers
+        # so that FeedbackContext.tool_call_count includes this tool call.
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
@@ -602,7 +637,9 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                     },
                 )
 
-        # Handle StructuredOutput with task completion checking
+        # Handle StructuredOutput: check task completion BEFORE feedback providers.
+        # This ensures completion logic (continue: false) always runs and final
+        # outputs aren't ignored when a feedback trigger fires.
         if data.tool_name == "StructuredOutput":
             if task_completion_checker is not None:
                 result = _check_task_completion(data.tool_input)
@@ -654,6 +691,12 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                     },
                 )
                 return {"continue": False}
+
+        # Run feedback providers AFTER ToolInvoked dispatch so tool_call_count
+        # includes this tool. Return feedback response if triggered.
+        feedback_response = _run_feedback_providers(data)
+        if feedback_response is not None:
+            return feedback_response
 
         return {}
 

@@ -64,6 +64,9 @@ from weakincentives.optimizers import (
     PersistenceScope,
 )
 from weakincentives.prompt import (
+    DeadlineFeedback,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
     MarkdownSection,
     Prompt,
     PromptTemplate,
@@ -714,11 +717,22 @@ def build_task_prompt(
             ),
         )
 
+    # Configure deadline feedback provider to remind the agent of time constraints.
+    # - Triggers every 30 seconds or every 5 tool calls (whichever comes first)
+    # - Warns when less than 60 seconds remain (severity changes to "warning")
+    feedback_providers = (
+        FeedbackProviderConfig(
+            provider=DeadlineFeedback(warning_threshold_seconds=60),
+            trigger=FeedbackTrigger(every_n_seconds=30, every_n_calls=5),
+        ),
+    )
+
     return PromptTemplate[ReviewResponse](
         ns="examples/code-review",
         key="code-review-session",
         name="sunfish_code_review_agent",
         sections=sections,
+        feedback_providers=feedback_providers,
     )
 
 

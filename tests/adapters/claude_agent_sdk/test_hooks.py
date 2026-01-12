@@ -45,7 +45,13 @@ from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.contrib.tools.planning import Plan, PlanningToolsSection, PlanStep
 from weakincentives.deadlines import Deadline
 from weakincentives.filesystem import Filesystem
-from weakincentives.prompt import Prompt, PromptTemplate
+from weakincentives.prompt import (
+    Feedback,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
+    Prompt,
+    PromptTemplate,
+)
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.events.types import TokenUsage, ToolInvoked
@@ -63,6 +69,51 @@ def _make_prompt_with_fs(fs: InMemoryFilesystem) -> Prompt[object]:
     """Create a prompt with filesystem bound in active context."""
     prompt: Prompt[object] = Prompt(PromptTemplate(ns="tests", key="hooks-test"))
     prompt = prompt.bind(resources={Filesystem: fs})
+    prompt.resources.__enter__()
+    return prompt
+
+
+class _AlwaysTriggerProvider:
+    """Test provider that always triggers and returns fixed feedback."""
+
+    @property
+    def name(self) -> str:
+        return "AlwaysTrigger"
+
+    def should_run(
+        self,
+        session: Any,  # noqa: ANN401 - test mock
+        *,
+        context: Any,  # noqa: ANN401
+    ) -> bool:
+        return True
+
+    def provide(
+        self,
+        session: Any,  # noqa: ANN401 - test mock
+        *,
+        context: Any,  # noqa: ANN401
+    ) -> Feedback:
+        return Feedback(
+            provider_name=self.name,
+            summary="Test feedback triggered",
+            severity="info",
+        )
+
+
+def _make_prompt_with_feedback_provider() -> Prompt[object]:
+    """Create a prompt with a feedback provider that always triggers."""
+    provider = _AlwaysTriggerProvider()
+    config = FeedbackProviderConfig(
+        provider=provider,  # type: ignore[arg-type]
+        trigger=FeedbackTrigger(every_n_calls=1),  # Trigger on every call
+    )
+    template: PromptTemplate[object] = PromptTemplate(
+        ns="tests",
+        key="hooks-test-feedback",
+        feedback_providers=(config,),
+    )
+    prompt: Prompt[object] = Prompt(template)
     prompt.resources.__enter__()
     return prompt
 
@@ -363,7 +414,7 @@ class TestPostToolUseHook:
         assert result == {}
 
     def test_skips_mcp_wink_tools(self, session: Session) -> None:
-        """MCP-bridged WINK tools should not publish events (they do it themselves)."""
+        """MCP-bridged WINK tools should not publish ToolInvoked events (they do it themselves)."""
         events: list[ToolInvoked] = []
         session.dispatcher.subscribe(ToolInvoked, lambda e: events.append(e))
 
@@ -382,11 +433,11 @@ class TestPostToolUseHook:
 
         result = asyncio.run(hook(input_data, "call-mcp", context))
 
-        # Should return empty without publishing event
+        # Should return empty without publishing ToolInvoked event
         assert result == {}
         assert len(events) == 0
-        # Tool count should not be incremented
-        assert context._tool_count == 0
+        # Tool count IS incremented (needed for feedback provider triggers)
+        assert context._tool_count == 1
 
     def test_skips_mcp_wink_tools_with_parsed_input(self, session: Session) -> None:
         """MCP-bridged WINK tools should be skipped even with full SDK input format."""
@@ -515,6 +566,35 @@ class TestPostToolUseHook:
 
         # Should stop - no plan means nothing to enforce
         assert result == {"continue": False}
+
+    def test_returns_feedback_when_provider_triggers(self, session: Session) -> None:
+        """PostToolUse returns additionalContext when feedback provider triggers."""
+        # Initialize ToolInvoked slice with empty tuple for tool_call_count
+        session[ToolInvoked].seed(())
+
+        prompt = _make_prompt_with_feedback_provider()
+        context = HookContext(
+            session=session,
+            prompt=cast("PromptProtocol[object]", prompt),
+            adapter_name="test_adapter",
+            prompt_name="test_prompt",
+        )
+        hook = create_post_tool_use_hook(context)
+
+        # Use a regular tool (not StructuredOutput) so we hit the feedback path
+        input_data = {
+            "tool_name": "Read",
+            "tool_input": {"file_path": "/test.txt"},
+            "tool_response": {"stdout": "file content"},
+        }
+
+        result = asyncio.run(hook(input_data, "call-read", context))
+
+        # Should return additionalContext with feedback
+        hook_output = result.get("hookSpecificOutput", {})
+        assert hook_output.get("hookEventName") == "PostToolUse"
+        additional_context = hook_output.get("additionalContext", "")
+        assert "Test feedback triggered" in additional_context
 
 
 class TestUserPromptSubmitHook:
