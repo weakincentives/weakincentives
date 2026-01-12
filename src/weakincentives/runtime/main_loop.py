@@ -47,7 +47,7 @@ import logging
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
@@ -363,17 +363,20 @@ class MainLoop[UserRequestT, OutputT](ABC):
     def _build_run_context(
         self,
         request_event: MainLoopRequest[UserRequestT],
-        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
+        delivery_count: int,
         session_id: UUID | None = None,
     ) -> RunContext:
-        """Build or update RunContext for this execution."""
+        """Build RunContext for this execution.
+
+        If the request includes a run_context, trace IDs are preserved.
+        The run_id is always fresh for each execution attempt.
+        """
         if request_event.run_context is not None:
-            # Update with execution-specific values
             return RunContext(
                 run_id=uuid4(),
                 request_id=request_event.run_context.request_id,
                 session_id=session_id,
-                attempt=msg.delivery_count,
+                attempt=delivery_count,
                 worker_id=self._worker_id,
                 trace_id=request_event.run_context.trace_id,
                 span_id=request_event.run_context.span_id,
@@ -382,7 +385,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             run_id=uuid4(),
             request_id=request_event.request_id,
             session_id=session_id,
-            attempt=msg.delivery_count,
+            attempt=delivery_count,
             worker_id=self._worker_id,
         )
 
@@ -392,9 +395,11 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """Process a single message from the requests mailbox."""
         request_event = msg.body
 
-        # Build RunContext BEFORE execution so it's available for telemetry events
-        # session_id is updated after execution completes
-        run_context = self._build_run_context(request_event, msg, session_id=None)
+        # Build RunContext ONCE before execution. Session_id will be added
+        # via replace() after prepare() creates the session.
+        run_context = self._build_run_context(
+            request_event, msg.delivery_count, session_id=None
+        )
 
         # Attach lease extender to heartbeat for this message
         with self._lease_extender.attach(msg, self._heartbeat):
@@ -403,10 +408,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     request_event, run_context=run_context
                 )
 
-                # Update run_context with session_id now that we have it
-                run_context = self._build_run_context(
-                    request_event, msg, session_id=session.session_id
-                )
+                # Add session_id while preserving the same run_id
+                run_context = replace(run_context, session_id=session.session_id)
 
                 result = MainLoopResult[OutputT](
                     request_id=request_event.request_id,

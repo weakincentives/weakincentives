@@ -97,6 +97,9 @@ class _MockAdapter(ProviderAdapter[_Output]):
         # Track resources captured during evaluate (while context is active)
         self._last_custom_resource: _CustomResource | None = None
         self._custom_resources: list[_CustomResource | None] = []
+        # Track run_context passed during evaluate
+        self._last_run_context: RunContext | None = None
+        self._run_contexts: list[RunContext | None] = []
 
     def evaluate(
         self,
@@ -107,10 +110,12 @@ class _MockAdapter(ProviderAdapter[_Output]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: object = None,
-        run_context: object = None,
+        run_context: RunContext | None = None,
     ) -> PromptResponse[_Output]:
-        del budget, heartbeat, run_context
+        del budget, heartbeat
         self._call_count += 1
+        self._last_run_context = run_context
+        self._run_contexts.append(run_context)
         self._last_budget_tracker = budget_tracker
         self._budget_trackers.append(budget_tracker)
         self._last_deadline = deadline
@@ -1078,6 +1083,50 @@ def test_loop_preserves_run_context_from_request() -> None:
         assert result_ctx.span_id == "span-xyz-456"
         # worker_id comes from the loop
         assert result_ctx.worker_id == "worker-2"
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_run_id_matches_during_and_after_execution() -> None:
+    """RunContext.run_id during execution matches run_id in result.
+
+    This verifies that the run_id is generated once and preserved (via replace())
+    rather than regenerated, which would break telemetry correlation.
+    """
+    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Get run_context that was passed to adapter during execution
+        assert adapter._last_run_context is not None
+        execution_run_id = adapter._last_run_context.run_id
+
+        # Get result
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        result_ctx = msgs[0].body.run_context
+        assert result_ctx is not None
+
+        # CRITICAL: run_id must be the same
+        assert result_ctx.run_id == execution_run_id
+
+        # session_id should be populated in result (via replace())
+        assert result_ctx.session_id is not None
+        assert result_ctx.session_id == msgs[0].body.session_id
+
         msgs[0].acknowledge()
     finally:
         requests.close()

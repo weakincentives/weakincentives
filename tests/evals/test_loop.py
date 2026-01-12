@@ -40,7 +40,6 @@ from weakincentives.runtime.mailbox import (
 )
 from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
 from weakincentives.runtime.session import SessionProtocol
-from weakincentives.runtime.watchdog import Heartbeat
 
 # =============================================================================
 # Test Fixtures

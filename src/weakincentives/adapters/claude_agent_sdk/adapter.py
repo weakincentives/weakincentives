@@ -31,7 +31,6 @@ from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
-from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema

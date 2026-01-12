@@ -176,11 +176,8 @@ class BridgedTool:
                 adapter=self._adapter,
                 session=self._session,
                 deadline=self._deadline,
-<<<<<<< HEAD
                 heartbeat=self._heartbeat,
-=======
                 run_context=self._run_context,
->>>>>>> 5f49a55 (Add RunContext for execution metadata correlation)
             )
 
             result = handler(params, context=context)
@@ -321,11 +318,8 @@ def create_bridged_tools(
     budget_tracker: BudgetTracker | None,
     adapter_name: str = "claude_agent_sdk",
     prompt_name: str | None = None,
-<<<<<<< HEAD
     heartbeat: Heartbeat | None = None,
-=======
     run_context: RunContext | None = None,
->>>>>>> 5f49a55 (Add RunContext for execution metadata correlation)
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -339,11 +333,8 @@ def create_bridged_tools(
         budget_tracker: Optional budget tracker for tool context.
         adapter_name: Name of the adapter for event dispatching.
         prompt_name: Name of the prompt for event dispatching.
-<<<<<<< HEAD
         heartbeat: Optional heartbeat for tool context.
-=======
         run_context: Optional execution context with correlation identifiers.
->>>>>>> 5f49a55 (Add RunContext for execution metadata correlation)
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
@@ -383,11 +374,8 @@ def create_bridged_tools(
             budget_tracker=budget_tracker,
             adapter_name=adapter_name,
             prompt_name=resolved_prompt_name,
-<<<<<<< HEAD
             heartbeat=heartbeat,
-=======
             run_context=run_context,
->>>>>>> 5f49a55 (Add RunContext for execution metadata correlation)
         )
         bridged.append(bridged_tool)
 

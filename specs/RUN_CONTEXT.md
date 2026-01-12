@@ -242,9 +242,32 @@ with tracer.start_as_current_span("process_request") as span:
 ## Invariants
 
 1. **Immutability**: RunContext is frozen; all fields are read-only after creation
-1. **Fresh run_id**: Each execution gets a new `run_id`, never reused
+1. **Fresh run_id per execution**: Each execution gets a new `run_id`, never reused
+1. **Stable run_id during execution**: The same `run_id` is used from execution
+   start through result - telemetry events during execution have the same
+   `run_id` as the final `MainLoopResult`
 1. **Preserved trace context**: `trace_id` and `span_id` pass through unchanged
 1. **Optional everywhere**: All integration points accept `run_context: RunContext | None`
+
+### run_id Preservation
+
+MainLoop uses `dataclasses.replace()` to add `session_id` after execution
+while preserving the same `run_id`:
+
+```python
+# Build once before execution
+run_context = self._build_run_context(request_event, delivery_count, session_id=None)
+
+# Pass to adapter during execution - telemetry events get this run_id
+response, session = self._execute(request_event, run_context=run_context)
+
+# Add session_id via replace() - preserves run_id for correlation
+run_context = replace(run_context, session_id=session.session_id)
+```
+
+This ensures that `PromptRendered`, `ToolInvoked`, `PromptExecuted` events
+dispatched during execution can be correlated with the final `MainLoopResult`
+by `run_id`.
 
 ## Implementation Status
 

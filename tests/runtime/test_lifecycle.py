@@ -684,6 +684,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             deadline: Deadline | None = None,
             budget: Budget | None = None,
             budget_tracker: BudgetTracker | None = None,
+            heartbeat: object = None,
             run_context: object = None,
         ) -> PromptResponse[_Output]:
             result = super().evaluate(
@@ -692,6 +693,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
                 deadline=deadline,
                 budget=budget,
                 budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
                 run_context=run_context,
             )
             # Trigger shutdown after first message
@@ -764,6 +766,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             deadline: Deadline | None = None,
             budget: Budget | None = None,
             budget_tracker: BudgetTracker | None = None,
+            heartbeat: object = None,
             run_context: object = None,
         ) -> PromptResponse[_Output]:
             result = super().evaluate(
@@ -772,6 +775,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
                 deadline=deadline,
                 budget=budget,
                 budget_tracker=budget_tracker,
+                heartbeat=heartbeat,
                 run_context=run_context,
             )
             # Trigger shutdown after first message
