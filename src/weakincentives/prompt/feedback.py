@@ -239,24 +239,17 @@ class FeedbackProvider(Protocol):
             def name(self) -> str:
                 return "MyProvider"
 
-            def should_run(
-                self,
-                session: SessionProtocol,
-                *,
-                context: FeedbackContext,
-            ) -> bool:
+            def should_run(self, *, context: FeedbackContext) -> bool:
                 return True  # Additional filtering beyond trigger
 
-            def provide(
-                self,
-                session: SessionProtocol,
-                *,
-                context: FeedbackContext,
-            ) -> Feedback:
+            def provide(self, *, context: FeedbackContext) -> Feedback:
                 return Feedback(
                     provider_name=self.name,
                     summary="Status update",
                 )
+
+    Access session state via ``context.session`` for consistency with the
+    ToolContext pattern used elsewhere in the library.
     """
 
     @property
@@ -264,39 +257,27 @@ class FeedbackProvider(Protocol):
         """Return a unique identifier for this provider."""
         ...
 
-    def should_run(
-        self,
-        session: SessionProtocol,
-        *,
-        context: FeedbackContext,
-    ) -> bool:
+    def should_run(self, *, context: FeedbackContext) -> bool:
         """Determine if the provider should produce feedback.
 
         Called after trigger conditions are met. Use this for additional
         filtering (e.g., only run if a deadline is configured).
 
         Args:
-            session: The current session.
-            context: Feedback context with state access.
+            context: Feedback context with state access (includes session).
 
         Returns:
             True if the provider should run, False to skip.
         """
         ...
 
-    def provide(
-        self,
-        session: SessionProtocol,
-        *,
-        context: FeedbackContext,
-    ) -> Feedback:
+    def provide(self, *, context: FeedbackContext) -> Feedback:
         """Analyze trajectory and produce feedback.
 
         Called when trigger conditions are met and should_run returns True.
 
         Args:
-            session: The current session.
-            context: Feedback context with state access.
+            context: Feedback context with state access (includes session).
 
         Returns:
             Feedback to be rendered and injected into agent context.
@@ -391,7 +372,6 @@ def run_feedback_providers(
     *,
     providers: Sequence[FeedbackProviderConfig],
     context: FeedbackContext,
-    session: SessionProtocol,
 ) -> str | None:
     """Run feedback providers and return rendered feedback if triggered.
 
@@ -406,20 +386,19 @@ def run_feedback_providers(
     Args:
         providers: Sequence of provider configurations to evaluate.
         context: Feedback context with session state.
-        session: The current session for storing feedback.
 
     Returns:
         Rendered feedback text if a provider triggered, None otherwise.
     """
     for config in providers:
         if _should_trigger(config.trigger, context) and config.provider.should_run(
-            session, context=context
+            context=context
         ):
-            feedback = config.provider.provide(session, context=context)
+            feedback = config.provider.provide(context=context)
             # Update call_index to current tool call count
             feedback = replace(feedback, call_index=context.tool_call_count)
             # Store in session for history and trigger calculations
-            session[Feedback].append(feedback)
+            context.session[Feedback].append(feedback)
             return feedback.render()
 
     return None
@@ -462,7 +441,6 @@ def collect_feedback(
     return run_feedback_providers(
         providers=prompt.feedback_providers,
         context=context,
-        session=session,
     )
 
 

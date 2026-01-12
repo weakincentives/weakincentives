@@ -33,12 +33,9 @@ Example:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from .feedback import Feedback, FeedbackContext
-
-if TYPE_CHECKING:
-    from ..runtime.session.protocols import SessionProtocol
 
 # ---------------------------------------------------------------------------
 # Duration formatting
@@ -122,37 +119,25 @@ class DeadlineFeedback:
         """Return the provider name."""
         return "Deadline"
 
-    def should_run(  # noqa: PLR6301
-        self,
-        _session: SessionProtocol,
-        *,
-        context: FeedbackContext,
-    ) -> bool:
+    # PLR6301: Method doesn't use self, but must be instance method per Protocol
+    def should_run(self, *, context: FeedbackContext) -> bool:  # noqa: PLR6301
         """Return True only if a deadline is configured."""
         return context.deadline is not None
 
-    def provide(
-        self,
-        _session: SessionProtocol,
-        *,
-        context: FeedbackContext,
-    ) -> Feedback:
+    def provide(self, *, context: FeedbackContext) -> Feedback:
         """Produce feedback about remaining time.
 
         Args:
-            _session: The current session (unused, required by protocol).
             context: Feedback context with deadline access.
 
         Returns:
             Feedback with time remaining and appropriate severity.
+
+        Raises:
+            ValueError: If called without a deadline (should_run prevents this).
         """
         if context.deadline is None:
-            # Defensive: should_run prevents this, but handle gracefully
-            return Feedback(
-                provider_name=self.name,
-                summary="No deadline configured.",
-                severity="info",
-            )
+            raise ValueError("DeadlineFeedback.provide() requires a deadline")
 
         remaining = context.deadline.remaining().total_seconds()
 

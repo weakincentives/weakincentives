@@ -82,17 +82,15 @@ class _AlwaysTriggerProvider:
 
     def should_run(
         self,
-        session: Any,  # noqa: ANN401 - test mock
         *,
-        context: Any,  # noqa: ANN401
+        context: Any,  # noqa: ANN401 - test mock
     ) -> bool:
         return True
 
     def provide(
         self,
-        session: Any,  # noqa: ANN401 - test mock
         *,
-        context: Any,  # noqa: ANN401
+        context: Any,  # noqa: ANN401 - test mock
     ) -> Feedback:
         return Feedback(
             provider_name=self.name,

@@ -70,24 +70,17 @@ class FeedbackProvider(Protocol):
         """Unique identifier for this provider."""
         ...
 
-    def should_run(
-        self,
-        session: SessionProtocol,
-        *,
-        context: FeedbackContext,
-    ) -> bool:
+    def should_run(self, *, context: FeedbackContext) -> bool:
         """Additional filtering beyond trigger conditions."""
         ...
 
-    def provide(
-        self,
-        session: SessionProtocol,
-        *,
-        context: FeedbackContext,
-    ) -> Feedback:
+    def provide(self, *, context: FeedbackContext) -> Feedback:
         """Produce feedback for context injection."""
         ...
 ```
+
+Access session state via `context.session` for consistency with the `ToolContext`
+pattern used elsewhere in the library.
 
 The `should_run` method provides additional filtering after trigger conditions
 are met. For example, `DeadlineFeedback.should_run` returns `False` when no

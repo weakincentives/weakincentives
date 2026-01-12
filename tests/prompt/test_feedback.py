@@ -87,10 +87,10 @@ class MockFeedbackProvider:
     def name(self) -> str:
         return "Mock"
 
-    def should_run(self, session: Session, *, context: FeedbackContext) -> bool:
+    def should_run(self, *, context: FeedbackContext) -> bool:
         return self.should_run_return
 
-    def provide(self, session: Session, *, context: FeedbackContext) -> Feedback:
+    def provide(self, *, context: FeedbackContext) -> Feedback:
         return Feedback(provider_name=self.name, summary=self.feedback_summary)
 
 
@@ -522,79 +522,73 @@ class TestShouldTrigger:
 class TestRunFeedbackProviders:
     """Tests for the run_feedback_providers runner function."""
 
-    def _make_context(self, tool_calls: int = 0) -> tuple[Session, FeedbackContext]:
+    def _make_context(self, tool_calls: int = 0) -> FeedbackContext:
         session = make_session()
         prompt = make_prompt()
 
         for i in range(tool_calls):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
 
-        return session, FeedbackContext(session=session, prompt=prompt)
+        return FeedbackContext(session=session, prompt=prompt)
 
     def test_returns_none_when_no_providers(self) -> None:
-        session, context = self._make_context(tool_calls=5)
+        context = self._make_context(tool_calls=5)
 
-        result = run_feedback_providers(providers=(), context=context, session=session)
+        result = run_feedback_providers(providers=(), context=context)
 
         assert result is None
 
     def test_returns_none_when_trigger_not_met(self) -> None:
-        session, context = self._make_context(tool_calls=2)
+        context = self._make_context(tool_calls=2)
         config = FeedbackProviderConfig(
             provider=MockFeedbackProvider(),
             trigger=FeedbackTrigger(every_n_calls=10),
         )
 
-        result = run_feedback_providers(
-            providers=(config,), context=context, session=session
-        )
+        result = run_feedback_providers(providers=(config,), context=context)
 
         assert result is None
 
     def test_returns_none_when_should_run_false(self) -> None:
-        session, context = self._make_context(tool_calls=5)
+        context = self._make_context(tool_calls=5)
         config = FeedbackProviderConfig(
             provider=MockFeedbackProvider(should_run_return=False),
             trigger=FeedbackTrigger(every_n_calls=3),
         )
 
-        result = run_feedback_providers(
-            providers=(config,), context=context, session=session
-        )
+        result = run_feedback_providers(providers=(config,), context=context)
 
         assert result is None
 
     def test_returns_rendered_feedback_when_triggered(self) -> None:
-        session, context = self._make_context(tool_calls=5)
+        context = self._make_context(tool_calls=5)
         config = FeedbackProviderConfig(
             provider=MockFeedbackProvider(feedback_summary="Test feedback"),
             trigger=FeedbackTrigger(every_n_calls=3),
         )
 
-        result = run_feedback_providers(
-            providers=(config,), context=context, session=session
-        )
+        result = run_feedback_providers(providers=(config,), context=context)
 
         assert result is not None
         assert "Test feedback" in result
         assert "[Feedback - Mock]" in result
 
     def test_stores_feedback_in_session(self) -> None:
-        session, context = self._make_context(tool_calls=5)
+        context = self._make_context(tool_calls=5)
         config = FeedbackProviderConfig(
             provider=MockFeedbackProvider(),
             trigger=FeedbackTrigger(every_n_calls=3),
         )
 
-        run_feedback_providers(providers=(config,), context=context, session=session)
+        run_feedback_providers(providers=(config,), context=context)
 
-        latest = session[Feedback].latest()
+        latest = context.session[Feedback].latest()
         assert latest is not None
         assert latest.provider_name == "Mock"
         assert latest.call_index == 5  # Updated to current count
 
     def test_first_matching_provider_wins(self) -> None:
-        session, context = self._make_context(tool_calls=5)
+        context = self._make_context(tool_calls=5)
         configs = (
             FeedbackProviderConfig(
                 provider=MockFeedbackProvider(feedback_summary="First"),
@@ -606,9 +600,7 @@ class TestRunFeedbackProviders:
             ),
         )
 
-        result = run_feedback_providers(
-            providers=configs, context=context, session=session
-        )
+        result = run_feedback_providers(providers=configs, context=context)
 
         assert result is not None
         assert "First" in result
@@ -623,14 +615,10 @@ class TestRunFeedbackProviders:
 class TestDeadlineFeedback:
     """Tests for the built-in DeadlineFeedback provider."""
 
-    def _make_context(
-        self, deadline: Deadline | None = None
-    ) -> tuple[Session, FeedbackContext]:
+    def _make_context(self, deadline: Deadline | None = None) -> FeedbackContext:
         session = make_session()
         prompt = make_prompt()
-        return session, FeedbackContext(
-            session=session, prompt=prompt, deadline=deadline
-        )
+        return FeedbackContext(session=session, prompt=prompt, deadline=deadline)
 
     def test_name_property(self) -> None:
         provider = DeadlineFeedback()
@@ -638,23 +626,23 @@ class TestDeadlineFeedback:
 
     def test_should_run_returns_false_without_deadline(self) -> None:
         provider = DeadlineFeedback()
-        session, context = self._make_context(deadline=None)
+        context = self._make_context(deadline=None)
 
-        assert provider.should_run(session, context=context) is False
+        assert provider.should_run(context=context) is False
 
     def test_should_run_returns_true_with_deadline(self) -> None:
         provider = DeadlineFeedback()
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=1))
-        session, context = self._make_context(deadline=deadline)
+        context = self._make_context(deadline=deadline)
 
-        assert provider.should_run(session, context=context) is True
+        assert provider.should_run(context=context) is True
 
     def test_provide_returns_info_when_plenty_of_time(self) -> None:
         provider = DeadlineFeedback(warning_threshold_seconds=120)
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(hours=2))
-        session, context = self._make_context(deadline=deadline)
+        context = self._make_context(deadline=deadline)
 
-        feedback = provider.provide(session, context=context)
+        feedback = provider.provide(context=context)
 
         assert feedback.provider_name == "Deadline"
         assert feedback.severity == "info"
@@ -664,9 +652,9 @@ class TestDeadlineFeedback:
     def test_provide_returns_warning_when_low_time(self) -> None:
         provider = DeadlineFeedback(warning_threshold_seconds=120)
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=90))
-        session, context = self._make_context(deadline=deadline)
+        context = self._make_context(deadline=deadline)
 
-        feedback = provider.provide(session, context=context)
+        feedback = provider.provide(context=context)
 
         assert feedback.severity == "warning"
         assert len(feedback.suggestions) > 0
@@ -674,39 +662,38 @@ class TestDeadlineFeedback:
 
     def test_provide_returns_warning_when_deadline_passed(self) -> None:
         provider = DeadlineFeedback()
+        session = make_session()
+        prompt = make_prompt()
         # Mock deadline with negative remaining time
         mock_deadline = type(
             "MockDeadline", (), {"remaining": lambda self: timedelta(seconds=-1)}
         )()
-        session, context = self._make_context(deadline=None)
         mock_context = FeedbackContext(
             session=session,
-            prompt=context.prompt,
+            prompt=prompt,
             deadline=mock_deadline,  # type: ignore[arg-type]
         )
 
-        feedback = provider.provide(session, context=mock_context)
+        feedback = provider.provide(context=mock_context)
 
         assert feedback.severity == "warning"
         assert "deadline" in feedback.summary.lower()
 
-    def test_provide_without_deadline_returns_info(self) -> None:
-        provider = DeadlineFeedback()
-        session, context = self._make_context(deadline=None)
-
-        feedback = provider.provide(session, context=context)
-
-        assert feedback.severity == "info"
-        assert "no deadline" in feedback.summary.lower()
-
     def test_custom_warning_threshold(self) -> None:
         provider = DeadlineFeedback(warning_threshold_seconds=300)
         deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=240))
-        session, context = self._make_context(deadline=deadline)
+        context = self._make_context(deadline=deadline)
 
-        feedback = provider.provide(session, context=context)
+        feedback = provider.provide(context=context)
 
         assert feedback.severity == "warning"
+
+    def test_provide_without_deadline_raises(self) -> None:
+        provider = DeadlineFeedback()
+        context = self._make_context(deadline=None)
+
+        with pytest.raises(ValueError, match="requires a deadline"):
+            provider.provide(context=context)
 
 
 class TestFormatDuration:
