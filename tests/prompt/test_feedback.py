@@ -359,6 +359,27 @@ class TestFeedbackContext:
 
         assert len(recent) == 2
 
+    def test_recent_tool_calls_returns_empty_when_n_is_zero(self) -> None:
+        session = make_session()
+        prompt = make_prompt()
+
+        for i in range(3):
+            session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
+
+        context = FeedbackContext(session=session, prompt=prompt)
+        recent = context.recent_tool_calls(0)
+
+        assert len(recent) == 0
+
+    def test_recent_tool_calls_returns_empty_when_no_tool_invoked_events(self) -> None:
+        session = make_session()
+        prompt = make_prompt()
+
+        context = FeedbackContext(session=session, prompt=prompt)
+        recent = context.recent_tool_calls(5)
+
+        assert len(recent) == 0
+
 
 # =============================================================================
 # FeedbackTrigger Tests

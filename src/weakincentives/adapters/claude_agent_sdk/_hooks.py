@@ -541,7 +541,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             deadline=hook_context.deadline,
         )
 
-        if feedback_text:
+        if feedback_text is not None:
             logger.debug(
                 "claude_agent_sdk.hook.feedback_provided",
                 event="hook.feedback_provided",

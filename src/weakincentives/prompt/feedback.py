@@ -210,10 +210,12 @@ class FeedbackContext:
             n: Maximum number of tool calls to return.
 
         Returns:
-            Sequence of ToolInvoked events, oldest first.
+            Sequence of ToolInvoked events, oldest first. Empty if n=0.
         """
         from ..runtime.events import ToolInvoked
 
+        if n <= 0:
+            return ()
         records = self.session[ToolInvoked].all()
         return records[-n:] if len(records) >= n else records
 
