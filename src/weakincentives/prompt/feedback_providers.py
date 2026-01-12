@@ -124,7 +124,7 @@ class DeadlineFeedback:
 
     def should_run(  # noqa: PLR6301
         self,
-        session: SessionProtocol,
+        _session: SessionProtocol,
         *,
         context: FeedbackContext,
     ) -> bool:
@@ -133,14 +133,14 @@ class DeadlineFeedback:
 
     def provide(
         self,
-        session: SessionProtocol,
+        _session: SessionProtocol,
         *,
         context: FeedbackContext,
     ) -> Feedback:
         """Produce feedback about remaining time.
 
         Args:
-            session: The current session (unused).
+            _session: The current session (unused, required by protocol).
             context: Feedback context with deadline access.
 
         Returns:

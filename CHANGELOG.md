@@ -4,6 +4,47 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Feedback Providers for Agent Progress Assessment
+
+A new **Feedback Provider** system enables ongoing progress assessment for
+unattended agents. Unlike tool policies that gate individual calls, feedback
+providers analyze patterns over time and inject contextual guidance into the
+agent's context for soft course-correction.
+
+```python
+from weakincentives.prompt import (
+    DeadlineFeedback,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
+    PromptTemplate,
+)
+
+template = PromptTemplate[OutputType](
+    ns="my-agent",
+    key="main",
+    feedback_providers=(
+        FeedbackProviderConfig(
+            provider=DeadlineFeedback(warning_threshold_seconds=120),
+            trigger=FeedbackTrigger(every_n_seconds=30),
+        ),
+    ),
+)
+```
+
+Key components:
+
+- **FeedbackProvider**: Protocol for producing feedback based on session state
+- **FeedbackTrigger**: Conditions (every N calls or every N seconds) that
+  determine when a provider runs
+- **Feedback**: Structured feedback with summary, observations, and suggestions
+- **FeedbackContext**: Context provided to providers with helper methods like
+  `tool_call_count`, `recent_tool_calls(n)`, and `last_feedback`
+- **DeadlineFeedback**: Built-in provider that reports remaining time and warns
+  as deadlines approach
+
+Feedback is delivered via the adapter's hook mechanism and stored in the
+session's Feedback slice for history tracking.
+
 ### Documentation: Dead Letter Queue Specification
 
 Added `specs/DLQ.md` covering dead letter queue configuration for MainLoop and

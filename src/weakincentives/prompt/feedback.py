@@ -379,7 +379,9 @@ def _should_trigger(trigger: FeedbackTrigger, context: FeedbackContext) -> bool:
             if elapsed >= trigger.every_n_seconds:
                 return True
         else:
-            # No previous feedback - trigger immediately
+            # No previous feedback exists - trigger on first opportunity.
+            # This ensures time-based providers fire at least once early in execution
+            # rather than waiting the full interval from an undefined start time.
             return True
 
     return False
