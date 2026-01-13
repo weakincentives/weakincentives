@@ -34,13 +34,15 @@ class TestFileState:
         assert state.path == path
         assert state.position == 0
         assert state.inode == 0
+        assert state.partial_line == ""
 
     def test_with_position(self, tmp_path: Path) -> None:
         path = tmp_path / "test.log"
         path.write_text("content")
-        state = _FileState(path=path, position=100, inode=12345)
+        state = _FileState(path=path, position=100, inode=12345, partial_line="partial")
         assert state.position == 100
         assert state.inode == 12345
+        assert state.partial_line == "partial"
 
 
 class TestClaudeLogAggregatorConstants:
@@ -447,17 +449,90 @@ class TestClaudeLogAggregatorReading:
 
         asyncio.run(_test())
 
+    def test_handles_in_place_truncation(self, tmp_path: Path) -> None:
+        """Test handling of file truncated in place (e.g., copytruncate rotation)."""
+
+        async def _test() -> None:
+            claude_dir = tmp_path / ".claude"
+            claude_dir.mkdir()
+
+            log_file = claude_dir / "debug.log"
+            log_file.write_text("original content that is long\n")
+
+            aggregator = ClaudeLogAggregator(
+                claude_dir=claude_dir,
+                prompt_name="test-prompt",
+            )
+
+            # Discover and read the file
+            await aggregator._discover_files()
+            await aggregator._read_new_content()
+            old_position = aggregator._file_states[log_file].position
+            assert old_position > 0
+
+            # Simulate in-place truncation (file size becomes smaller)
+            log_file.write_text("new\n")  # Smaller than original
+
+            # Read again - should detect truncation and reset position
+            await aggregator._read_new_content()
+
+            # New content should be captured
+            new_state = aggregator._file_states[log_file]
+            # Position should be reset to capture the new content
+            assert new_state.position == len("new\n")
+
+        asyncio.run(_test())
+
+    def test_truncation_clears_partial_line_buffer(self, tmp_path: Path) -> None:
+        """Test that truncation clears the partial line buffer."""
+
+        async def _test() -> None:
+            claude_dir = tmp_path / ".claude"
+            claude_dir.mkdir()
+
+            log_file = claude_dir / "debug.log"
+            log_file.write_text("line1\npartial")  # Ends without newline
+
+            aggregator = ClaudeLogAggregator(
+                claude_dir=claude_dir,
+                prompt_name="test-prompt",
+            )
+
+            # Discover and read the file
+            await aggregator._discover_files()
+            await aggregator._read_new_content()
+
+            # Should have buffered the partial line
+            state = aggregator._file_states[log_file]
+            assert state.partial_line == "partial"
+
+            # Truncate the file
+            log_file.write_text("new\n")
+
+            # Read again - truncation should clear partial buffer
+            await aggregator._read_new_content()
+
+            # Partial line should be cleared and new content read
+            assert state.partial_line == ""
+            # Should have emitted the new line
+            assert aggregator._total_lines_emitted == 2  # line1 + new
+
+        asyncio.run(_test())
+
 
 class TestClaudeLogAggregatorEmission:
     def test_emits_log_lines(self, tmp_path: Path) -> None:
         async def _test() -> None:
             claude_dir = tmp_path / ".claude"
             claude_dir.mkdir()
+            log_file = claude_dir / "debug.log"
+            log_file.write_text("")
 
             aggregator = ClaudeLogAggregator(
                 claude_dir=claude_dir,
                 prompt_name="test-prompt",
             )
+            state = _FileState(path=log_file)
 
             with mock.patch(
                 "weakincentives.adapters.claude_agent_sdk._log_aggregator.logger.debug"
@@ -465,6 +540,7 @@ class TestClaudeLogAggregatorEmission:
                 await aggregator._emit_content(
                     Path("debug.log"),
                     b"line 1\nline 2\n",
+                    state,
                 )
 
             # Should have emitted 2 lines
@@ -476,15 +552,19 @@ class TestClaudeLogAggregatorEmission:
         async def _test() -> None:
             claude_dir = tmp_path / ".claude"
             claude_dir.mkdir()
+            log_file = claude_dir / "debug.log"
+            log_file.write_text("")
 
             aggregator = ClaudeLogAggregator(
                 claude_dir=claude_dir,
                 prompt_name="test-prompt",
             )
+            state = _FileState(path=log_file)
 
             await aggregator._emit_content(
                 Path("debug.log"),
                 b"line 1\n\n\nline 2\n",
+                state,
             )
 
             # Should have emitted only 2 non-empty lines
@@ -496,11 +576,14 @@ class TestClaudeLogAggregatorEmission:
         async def _test() -> None:
             claude_dir = tmp_path / ".claude"
             claude_dir.mkdir()
+            log_file = claude_dir / "binary.log"
+            log_file.write_text("")
 
             aggregator = ClaudeLogAggregator(
                 claude_dir=claude_dir,
                 prompt_name="test-prompt",
             )
+            state = _FileState(path=log_file)
 
             # Binary content with invalid UTF-8 - should be handled gracefully
             # with replacement characters and still emit lines
@@ -510,10 +593,106 @@ class TestClaudeLogAggregatorEmission:
                 "weakincentives.adapters.claude_agent_sdk._log_aggregator.logger.debug"
             ):
                 # Should not raise - invalid bytes are replaced with replacement char
-                await aggregator._emit_content(Path("binary.log"), binary_content)
+                await aggregator._emit_content(
+                    Path("binary.log"), binary_content, state
+                )
 
             # Should still emit a line (with replacement characters)
             assert aggregator._total_lines_emitted == 1
+
+        asyncio.run(_test())
+
+    def test_buffers_partial_lines(self, tmp_path: Path) -> None:
+        """Test that partial lines are buffered until newline is seen."""
+
+        async def _test() -> None:
+            claude_dir = tmp_path / ".claude"
+            claude_dir.mkdir()
+            log_file = claude_dir / "debug.log"
+            log_file.write_text("")
+
+            aggregator = ClaudeLogAggregator(
+                claude_dir=claude_dir,
+                prompt_name="test-prompt",
+            )
+            state = _FileState(path=log_file)
+
+            # First read: complete line + partial line
+            await aggregator._emit_content(
+                Path("debug.log"),
+                b"complete line\npartial",
+                state,
+            )
+
+            # Should have emitted only 1 complete line
+            assert aggregator._total_lines_emitted == 1
+            # Partial line should be buffered
+            assert state.partial_line == "partial"
+
+            # Second read: rest of partial line + another complete line
+            await aggregator._emit_content(
+                Path("debug.log"),
+                b" continued\nanother line\n",
+                state,
+            )
+
+            # Should have emitted 2 more lines (the completed partial + another)
+            assert aggregator._total_lines_emitted == 3
+            assert state.partial_line == ""
+
+        asyncio.run(_test())
+
+    def test_partial_line_across_multiple_reads(self, tmp_path: Path) -> None:
+        """Test partial line buffering across multiple read cycles."""
+
+        async def _test() -> None:
+            claude_dir = tmp_path / ".claude"
+            claude_dir.mkdir()
+            log_file = claude_dir / "debug.log"
+            log_file.write_text("")
+
+            aggregator = ClaudeLogAggregator(
+                claude_dir=claude_dir,
+                prompt_name="test-prompt",
+            )
+            state = _FileState(path=log_file)
+
+            # Read 1: just a partial
+            await aggregator._emit_content(Path("debug.log"), b"part1", state)
+            assert aggregator._total_lines_emitted == 0
+            assert state.partial_line == "part1"
+
+            # Read 2: more partial
+            await aggregator._emit_content(Path("debug.log"), b"part2", state)
+            assert aggregator._total_lines_emitted == 0
+            assert state.partial_line == "part1part2"
+
+            # Read 3: complete the line
+            await aggregator._emit_content(Path("debug.log"), b"part3\n", state)
+            assert aggregator._total_lines_emitted == 1
+            assert state.partial_line == ""
+
+        asyncio.run(_test())
+
+    def test_content_ending_with_carriage_return(self, tmp_path: Path) -> None:
+        """Test that carriage return is treated as line ending."""
+
+        async def _test() -> None:
+            claude_dir = tmp_path / ".claude"
+            claude_dir.mkdir()
+            log_file = claude_dir / "debug.log"
+            log_file.write_text("")
+
+            aggregator = ClaudeLogAggregator(
+                claude_dir=claude_dir,
+                prompt_name="test-prompt",
+            )
+            state = _FileState(path=log_file)
+
+            # Content ending with \r should be treated as complete
+            await aggregator._emit_content(Path("debug.log"), b"line\r", state)
+            assert aggregator._total_lines_emitted == 1
+            assert state.partial_line == ""
 
         asyncio.run(_test())
 

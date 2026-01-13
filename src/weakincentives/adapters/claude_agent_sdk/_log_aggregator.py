@@ -63,7 +63,12 @@ _POLL_INTERVAL_SECONDS: float = 0.5
 
 @dataclass(slots=True)
 class _FileState:
-    """Tracks the read state of a single file."""
+    """Tracks the read state of a single file.
+
+    Note: Not frozen because position, inode, and partial_line are mutated
+    during file reading. All mutations occur within a single async task
+    (no concurrent access) so thread safety is not a concern.
+    """
 
     path: Path
     position: int = 0
@@ -71,6 +76,9 @@ class _FileState:
 
     inode: int = 0
     """Inode number to detect file rotation."""
+
+    partial_line: str = ""
+    """Buffer for incomplete line from previous read."""
 
 
 @dataclass(slots=True)
@@ -241,10 +249,16 @@ class ClaudeLogAggregator:
 
             stat = state.path.stat()
 
-            # Detect file rotation (inode changed)
+            # Detect file rotation (inode changed) or in-place truncation
             if stat.st_ino != state.inode:
+                # File was rotated (new inode)
                 state.position = 0
                 state.inode = stat.st_ino
+                state.partial_line = ""
+            elif stat.st_size < state.position:
+                # File was truncated in place (e.g., copytruncate)
+                state.position = 0
+                state.partial_line = ""
 
             # No new content
             if stat.st_size <= state.position:
@@ -268,7 +282,7 @@ class ClaudeLogAggregator:
 
                 # Emit log lines
                 relative_path = state.path.relative_to(self.claude_dir)
-                await self._emit_content(relative_path, content)
+                await self._emit_content(relative_path, content, state)
 
         except OSError:  # pragma: no cover
             # File may have been deleted or become inaccessible
@@ -281,13 +295,38 @@ class ClaudeLogAggregator:
             f.seek(offset)
             return f.read(count)
 
-    async def _emit_content(self, relative_path: Path, content: bytes) -> None:
-        """Emit log lines from file content."""
+    async def _emit_content(
+        self, relative_path: Path, content: bytes, state: _FileState
+    ) -> None:
+        """Emit log lines from file content.
+
+        Handles partial lines by buffering content that doesn't end with a
+        newline until the next read completes the line.
+
+        Args:
+            relative_path: Path relative to .claude directory for logging.
+            content: Raw bytes read from the file.
+            state: File state containing partial line buffer.
+        """
         # Use errors="replace" to handle invalid UTF-8 gracefully
         text = content.decode("utf-8", errors="replace")
 
-        # Split into lines and emit each
+        # Prepend any partial line from previous read
+        if state.partial_line:
+            text = state.partial_line + text
+            state.partial_line = ""
+
+        # Check if content ends with a newline
+        ends_with_newline = text.endswith("\n") or text.endswith("\r")
+
+        # Split into lines
         lines = text.splitlines()
+
+        # If doesn't end with newline, buffer the last part as partial
+        if lines and not ends_with_newline:
+            state.partial_line = lines.pop()
+
+        # Emit complete lines
         for line in lines:
             if not line.strip():
                 continue
