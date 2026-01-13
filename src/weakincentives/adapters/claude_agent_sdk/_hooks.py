@@ -14,12 +14,10 @@
 
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
@@ -32,7 +30,6 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ...runtime.watchdog import Heartbeat
-from ._notifications import Notification
 from ._task_completion import (
     TaskCompletionChecker,
     TaskCompletionContext,
@@ -238,58 +235,6 @@ class HookContext:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
-
-
-def _read_transcript_file(path_str: str) -> list[dict[str, Any]]:
-    """Read a JSONL transcript file and return its contents as a list.
-
-    Args:
-        path_str: Path to the transcript file (JSONL format).
-
-    Returns:
-        List of parsed JSON objects from the file.
-        Returns empty list if file doesn't exist or can't be read.
-    """
-    if not path_str:
-        return []
-
-    path = Path(path_str).expanduser()
-    if not path.exists():
-        return []
-
-    try:
-        entries: list[dict[str, Any]] = []
-        with path.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line:
-                    entries.append(json.loads(line))
-    except (OSError, json.JSONDecodeError):
-        return []
-    else:
-        return entries
-
-
-def _expand_transcript_paths(payload: dict[str, Any]) -> dict[str, Any]:
-    """Expand transcript_path and agent_transcript_path in payload.
-
-    Reads the JSONL files at transcript_path and agent_transcript_path
-    and replaces the path strings with the actual transcript content.
-
-    Args:
-        payload: The hook input payload dict.
-
-    Returns:
-        A new payload dict with transcript paths expanded to content.
-    """
-    result = dict(payload)
-
-    for key in ("transcript_path", "agent_transcript_path"):
-        if key in result and isinstance(result[key], str):
-            path_str = result[key]
-            result[key] = _read_transcript_file(path_str)
-
-    return result
 
 
 def create_pre_tool_use_hook(
@@ -995,8 +940,7 @@ def create_subagent_start_hook(
 ) -> AsyncHookCallback:
     """Create a SubagentStart hook to capture subagent launch events.
 
-    Records Notification events when subagents are spawned during execution
-    and tracks subagent statistics for debugging.
+    Tracks subagent statistics for debugging when subagents are spawned.
 
     Args:
         hook_context: Context with session references.
@@ -1016,16 +960,6 @@ def create_subagent_start_hook(
         hook_context.stats.subagent_count += 1
         payload = input_data if isinstance(input_data, dict) else {}
 
-        notification = Notification(
-            source="subagent_start",
-            payload=payload,
-            prompt_name=hook_context.prompt_name,
-            adapter_name=hook_context.adapter_name,
-            created_at=_utcnow(),
-        )
-
-        hook_context.session.dispatch(notification)
-
         # Extract subagent details for logging
         subagent_type = payload.get("subagent_type", "")
         subagent_description = payload.get("description", "")
@@ -1041,7 +975,6 @@ def create_subagent_start_hook(
                 "description": subagent_description,
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
-                "payload": payload,
             },
         )
 
@@ -1055,9 +988,7 @@ def create_subagent_stop_hook(
 ) -> AsyncHookCallback:
     """Create a SubagentStop hook to capture subagent completion events.
 
-    Records Notification events when subagents complete execution.
-    Automatically expands transcript_path and agent_transcript_path fields
-    by reading the JSONL files and replacing the paths with their content.
+    Logs subagent completion details for debugging.
 
     Args:
         hook_context: Context with session references.
@@ -1074,18 +1005,7 @@ def create_subagent_stop_hook(
         _ = tool_use_id
         _ = sdk_context
 
-        raw_payload = input_data if isinstance(input_data, dict) else {}
-        payload = _expand_transcript_paths(raw_payload)
-
-        notification = Notification(
-            source="subagent_stop",
-            payload=payload,
-            prompt_name=hook_context.prompt_name,
-            adapter_name=hook_context.adapter_name,
-            created_at=_utcnow(),
-        )
-
-        hook_context.session.dispatch(notification)
+        payload = input_data if isinstance(input_data, dict) else {}
 
         # Extract subagent completion details for logging
         subagent_id = payload.get("subagent_id", "")
@@ -1095,11 +1015,6 @@ def create_subagent_stop_hook(
         )
         subagent_duration_ms = payload.get("duration_ms")
         subagent_tool_count = payload.get("tool_count")
-        transcript_entries = (
-            len(payload.get("transcript_path", []))
-            if isinstance(payload.get("transcript_path"), list)
-            else 0
-        )
 
         logger.debug(
             "claude_agent_sdk.hook.subagent_stop",
@@ -1109,11 +1024,9 @@ def create_subagent_stop_hook(
                 "result_preview": result_preview,
                 "subagent_duration_ms": subagent_duration_ms,
                 "subagent_tool_count": subagent_tool_count,
-                "transcript_entries": transcript_entries,
                 "elapsed_ms": hook_context.elapsed_ms,
                 "parent_tool_count": hook_context.stats.tool_count,
                 "subagent_count": hook_context.stats.subagent_count,
-                "payload": payload,
             },
         )
 
@@ -1127,8 +1040,8 @@ def create_pre_compact_hook(
 ) -> AsyncHookCallback:
     """Create a PreCompact hook to capture context compaction events.
 
-    Records Notification events before the SDK compacts conversation context.
-    Tracks context window utilization for debugging memory-constrained scenarios.
+    Tracks context window utilization for debugging memory-constrained scenarios
+    before the SDK compacts conversation context.
 
     Args:
         hook_context: Context with session references.
@@ -1147,16 +1060,6 @@ def create_pre_compact_hook(
 
         hook_context.stats.compact_count += 1
         payload = input_data if isinstance(input_data, dict) else {}
-
-        notification = Notification(
-            source="pre_compact",
-            payload=payload,
-            prompt_name=hook_context.prompt_name,
-            adapter_name=hook_context.adapter_name,
-            created_at=_utcnow(),
-        )
-
-        hook_context.session.dispatch(notification)
 
         # Extract context window details for logging
         context_tokens = payload.get("context_tokens")
@@ -1182,7 +1085,6 @@ def create_pre_compact_hook(
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "turn_count": hook_context.stats.turn_count,
-                "payload": payload,
             },
         )
 
@@ -1196,8 +1098,8 @@ def create_notification_hook(
 ) -> AsyncHookCallback:
     """Create a Notification hook to capture user-facing notifications.
 
-    Records Notification events from the SDK's notification system.
-    Extracts notification type and content for structured logging.
+    Extracts notification type and content for structured logging from
+    the SDK's notification system.
 
     Args:
         hook_context: Context with session references.
@@ -1216,16 +1118,6 @@ def create_notification_hook(
 
         payload = input_data if isinstance(input_data, dict) else {}
 
-        notification = Notification(
-            source="notification",
-            payload=payload,
-            prompt_name=hook_context.prompt_name,
-            adapter_name=hook_context.adapter_name,
-            created_at=_utcnow(),
-        )
-
-        hook_context.session.dispatch(notification)
-
         # Extract notification details for logging
         notification_type = payload.get("type", "")
         notification_message = payload.get("message", "")
@@ -1243,7 +1135,6 @@ def create_notification_hook(
                 "message_preview": message_preview,
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
-                "payload": payload,
             },
         )
 

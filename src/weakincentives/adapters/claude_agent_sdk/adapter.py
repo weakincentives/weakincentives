@@ -30,7 +30,6 @@ from ...prompt.protocols import PromptProtocol
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
-from ...runtime.session import append_all
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
@@ -52,7 +51,6 @@ from ._hooks import (
     create_user_prompt_submit_hook,
 )
 from ._log_aggregator import ClaudeLogAggregator
-from ._notifications import Notification
 from ._task_completion import TaskCompletionContext
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
@@ -412,9 +410,6 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         output_format = self._build_output_format(rendered)
 
         prompt_name = prompt.name or f"{prompt.ns}:{prompt.key}"
-
-        # Register Notification reducer if not already registered
-        session[Notification].register(Notification, append_all)
 
         # Determine effective cwd: explicit config, or create a temp folder
         # when no workspace section is present. This ensures agents start in

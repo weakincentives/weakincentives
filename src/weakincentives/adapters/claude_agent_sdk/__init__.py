@@ -74,7 +74,6 @@ Example:
 from __future__ import annotations
 
 from ._hooks import create_task_completion_stop_hook
-from ._notifications import Notification, NotificationSource
 from ._task_completion import (
     CompositeChecker,
     PlanBasedChecker,
@@ -114,8 +113,6 @@ __all__ = [
     "HostMountPreview",
     "IsolationConfig",
     "NetworkPolicy",
-    "Notification",
-    "NotificationSource",
     "PermissionMode",
     "PlanBasedChecker",
     "SandboxConfig",
