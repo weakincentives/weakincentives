@@ -450,7 +450,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             if temp_workspace_dir:
                 shutil.rmtree(temp_workspace_dir, ignore_errors=True)
 
-    async def _run_with_prompt_context[OutputT](  # noqa: PLR0914 - complexity needed for log aggregation
+    async def _run_with_prompt_context[OutputT](  # noqa: PLR0914 - locals needed for log aggregation
         self,
         *,
         sdk: Any,

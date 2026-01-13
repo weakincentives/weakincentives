@@ -175,7 +175,7 @@ evaluation. This provides visibility into Claude Code's internal operations.
 | `adapters/claude_agent_sdk/_log_aggregator.py` | `log_aggregator.start` | `claude_dir`, `prompt_name`, `poll_interval` |
 | `adapters/claude_agent_sdk/_log_aggregator.py` | `log_aggregator.stop` | `claude_dir`, `prompt_name`, `total_bytes_read`, `total_lines_emitted`, `files_monitored` |
 | `adapters/claude_agent_sdk/_log_aggregator.py` | `log_aggregator.file_discovered` | `file`, `prompt_name`, `size_bytes` |
-| `adapters/claude_agent_sdk/_log_aggregator.py` | `log_aggregator.log_line` | `file`, `prompt_name`, `content`, `line_number` |
+| `adapters/claude_agent_sdk/_log_aggregator.py` | `log_aggregator.log_line` | `file`, `prompt_name`, `content`, `sequence_number` |
 
 **Log File Discovery**: The aggregator polls the `.claude` directory for new files
 with log-related extensions (`.log`, `.jsonl`, `.txt`, `.json`) or names containing

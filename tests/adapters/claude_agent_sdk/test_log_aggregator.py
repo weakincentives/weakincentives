@@ -270,6 +270,93 @@ class TestClaudeLogAggregatorDiscovery:
         asyncio.run(_test())
 
 
+class TestClaudeLogAggregatorCleanup:
+    def test_cleanup_removes_deleted_files(self, tmp_path: Path) -> None:
+        """Test that deleted files are removed from file_states."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+
+        log_file = claude_dir / "debug.log"
+        log_file.write_text("content\n")
+
+        aggregator = ClaudeLogAggregator(
+            claude_dir=claude_dir,
+            prompt_name="test-prompt",
+        )
+
+        # Manually populate file state
+        aggregator._file_states[log_file] = _FileState(
+            path=log_file, position=8, inode=log_file.stat().st_ino
+        )
+
+        # Verify file is tracked
+        assert log_file in aggregator._file_states
+
+        # Delete the file
+        log_file.unlink()
+
+        # Run cleanup
+        aggregator._cleanup_deleted_files()
+
+        # File should be removed from tracking
+        assert log_file not in aggregator._file_states
+
+    def test_cleanup_preserves_existing_files(self, tmp_path: Path) -> None:
+        """Test that existing files are not removed during cleanup."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+
+        log_file = claude_dir / "debug.log"
+        log_file.write_text("content\n")
+
+        aggregator = ClaudeLogAggregator(
+            claude_dir=claude_dir,
+            prompt_name="test-prompt",
+        )
+
+        aggregator._file_states[log_file] = _FileState(
+            path=log_file, position=8, inode=log_file.stat().st_ino
+        )
+
+        aggregator._cleanup_deleted_files()
+
+        # File should still be tracked
+        assert log_file in aggregator._file_states
+
+    def test_cleanup_handles_mixed_states(self, tmp_path: Path) -> None:
+        """Test cleanup with mix of existing and deleted files."""
+        claude_dir = tmp_path / ".claude"
+        claude_dir.mkdir()
+
+        existing_file = claude_dir / "existing.log"
+        existing_file.write_text("content\n")
+
+        deleted_file = claude_dir / "deleted.log"
+        deleted_file.write_text("content\n")
+        deleted_inode = deleted_file.stat().st_ino
+
+        aggregator = ClaudeLogAggregator(
+            claude_dir=claude_dir,
+            prompt_name="test-prompt",
+        )
+
+        aggregator._file_states[existing_file] = _FileState(
+            path=existing_file, position=8, inode=existing_file.stat().st_ino
+        )
+        aggregator._file_states[deleted_file] = _FileState(
+            path=deleted_file, position=8, inode=deleted_inode
+        )
+
+        # Delete one file
+        deleted_file.unlink()
+
+        aggregator._cleanup_deleted_files()
+
+        # Only existing file should remain
+        assert existing_file in aggregator._file_states
+        assert deleted_file not in aggregator._file_states
+
+
 class TestClaudeLogAggregatorReading:
     def test_reads_new_content(self, tmp_path: Path) -> None:
         async def _test() -> None:

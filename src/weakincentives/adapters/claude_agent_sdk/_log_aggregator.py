@@ -54,7 +54,9 @@ _LOG_EXTENSIONS: frozenset[str] = frozenset(
     }
 )
 
-# Maximum bytes to read per file per poll cycle
+# Maximum bytes to read per file per poll cycle.
+# At 500ms poll intervals, this limits throughput to ~128KB/s per file.
+# Log files growing faster than this rate will have the aggregator fall behind.
 _MAX_READ_BYTES: int = 64 * 1024  # 64KB
 
 # Poll interval for file discovery
@@ -193,6 +195,9 @@ class ClaudeLogAggregator:
         # Read new content from tracked files
         await self._read_new_content()
 
+        # Clean up state for deleted files to prevent unbounded memory growth
+        self._cleanup_deleted_files()
+
     async def _discover_files(self) -> None:
         """Discover new log files in the .claude directory."""
         try:
@@ -240,6 +245,16 @@ class ClaudeLogAggregator:
         for file_state in list(self._file_states.values()):
             await self._read_file_content(file_state)
 
+    def _cleanup_deleted_files(self) -> None:
+        """Remove state for files that no longer exist.
+
+        Prevents unbounded memory growth when log files are created and deleted
+        repeatedly during long-running sessions.
+        """
+        deleted = [path for path in self._file_states if not path.exists()]
+        for path in deleted:
+            del self._file_states[path]
+
     async def _read_file_content(self, state: _FileState) -> None:
         """Read new content from a single file."""
         try:
@@ -268,7 +283,7 @@ class ClaudeLogAggregator:
             bytes_to_read = min(stat.st_size - state.position, _MAX_READ_BYTES)
 
             # Use run_in_executor for file I/O to avoid blocking
-            content = await asyncio.get_event_loop().run_in_executor(
+            content = await asyncio.get_running_loop().run_in_executor(
                 None,
                 ClaudeLogAggregator._read_bytes,
                 state.path,
@@ -340,7 +355,7 @@ class ClaudeLogAggregator:
                     "file": str(relative_path),
                     "prompt_name": self.prompt_name,
                     "content": line.rstrip(),
-                    "line_number": self._total_lines_emitted,
+                    "sequence_number": self._total_lines_emitted,
                 },
             )
 
