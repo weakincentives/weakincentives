@@ -15,10 +15,13 @@
 from __future__ import annotations
 
 import logging
+import zipfile
 from collections.abc import Iterable
 from pathlib import Path
+from uuid import UUID, uuid4
 
 from .dbc import dbc_enabled
+from .filesystem import Filesystem
 from .runtime.session import Session, iter_sessions_bottom_up
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -60,6 +63,108 @@ def dump_session(root_session: Session, target: str | Path) -> Path | None:
             },
         )
         return target_path
+
+
+def archive_filesystem(
+    fs: Filesystem,
+    target: str | Path,
+    *,
+    archive_id: UUID | None = None,
+) -> Path | None:
+    """Archive filesystem contents to a zip file.
+
+    Creates a zip archive containing all files from the given filesystem.
+    The archive is named ``<archive_id>.zip``. If target is a directory,
+    the archive is created inside it. If target is a file path, the archive
+    is created in the parent directory with the archive_id as the filename
+    (matching the behavior of :func:`dump_session`).
+
+    Args:
+        fs: Filesystem instance to archive.
+        target: Target directory (or file path whose parent will be used).
+        archive_id: Unique identifier for the archive. If not provided,
+            a new UUID is generated.
+
+    Returns:
+        Path to the created archive file, or None if the filesystem is empty.
+
+    Raises:
+        OSError: If the archive file cannot be created (e.g., permission denied).
+    """
+    with dbc_enabled(False):
+        archive_id = archive_id or uuid4()
+        target_path = Path(target).expanduser()
+        if target_path.is_file():
+            target_path = target_path.parent
+        archive_path = target_path / f"{archive_id}.zip"
+
+        # Collect all files eagerly (acceptable for debug snapshots;
+        # filesystems are typically small in agent contexts)
+        files = _collect_files_recursive(fs, ".")
+
+        if not files:
+            logger.info(
+                "Filesystem archive skipped; no files to archive.",
+                extra={
+                    "archive_id": str(archive_id),
+                    "archive_path": str(archive_path),
+                },
+            )
+            return None
+
+        target_path.mkdir(parents=True, exist_ok=True)
+
+        try:
+            with zipfile.ZipFile(archive_path, "w", zipfile.ZIP_DEFLATED) as zf:
+                for file_path in files:
+                    try:
+                        result = fs.read_bytes(file_path)
+                        zf.writestr(file_path, result.content)
+                    except (
+                        FileNotFoundError,
+                        IsADirectoryError,
+                        PermissionError,
+                    ) as exc:
+                        logger.warning(
+                            "Skipping file due to read error: %s",
+                            file_path,
+                            extra={"error": str(exc)},
+                        )
+                        continue
+        except OSError:
+            logger.exception(
+                "Failed to create filesystem archive",
+                extra={"archive_path": str(archive_path)},
+            )
+            if archive_path.exists():
+                archive_path.unlink()
+            raise
+
+        logger.info(
+            "Filesystem archived.",
+            extra={
+                "archive_id": str(archive_id),
+                "archive_path": str(archive_path),
+                "file_count": len(files),
+            },
+        )
+        return archive_path
+
+
+def _collect_files_recursive(fs: Filesystem, path: str) -> list[str]:
+    """Recursively collect all file paths from the filesystem."""
+    files: list[str] = []
+    try:
+        entries = fs.list(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return files
+
+    for entry in entries:
+        if entry.is_file:
+            files.append(entry.path)
+        elif entry.is_directory:
+            files.extend(_collect_files_recursive(fs, entry.path))
+    return files
 
 
 def _collect_snapshots(root_session: Session) -> list[str]:

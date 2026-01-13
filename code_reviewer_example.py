@@ -58,7 +58,7 @@ from weakincentives.contrib.tools import (
     WorkspaceDigestSection,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.debug import dump_session as dump_session_tree
+from weakincentives.debug import archive_filesystem, dump_session as dump_session_tree
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
@@ -484,6 +484,9 @@ class CodeReviewApp:
 
     def _cleanup(self) -> None:
         """Clean up resources."""
+        # Archive workspace before cleanup removes the temp directory
+        self._archive_workspace()
+
         # Gracefully shutdown the loop - completes in-flight work
         if self._loop.shutdown(timeout=5.0):
             _LOGGER.info("Worker loop stopped cleanly")
@@ -501,6 +504,25 @@ class CodeReviewApp:
         if self._workspace_section is not None:
             self._workspace_section.cleanup()
             _LOGGER.info("Cleaned up Claude Agent workspace.")
+
+    def _archive_workspace(self) -> None:
+        """Archive the workspace filesystem to a zip file.
+
+        Only archives for Claude Agent mode where workspace_section is stored.
+        VFS mode uses InMemoryFilesystem with host file copies that already
+        exist on disk, so archiving would be redundant.
+        """
+        if self._workspace_section is None:
+            return
+        archive_path = archive_filesystem(
+            self._workspace_section.filesystem,
+            SNAPSHOT_DIR,
+            archive_id=self._loop.session.session_id,
+        )
+        if archive_path is not None:
+            _LOGGER.info("Workspace archived to %s", archive_path)
+        else:
+            _LOGGER.debug("Workspace archive skipped (empty filesystem)")
 
 
 def parse_args() -> argparse.Namespace:

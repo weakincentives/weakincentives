@@ -4,6 +4,26 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+### Debug: Filesystem Archiving
+
+New `archive_filesystem()` function in the debug module creates zip archives of
+filesystem contents for post-mortem analysis:
+
+```python
+from weakincentives.debug import archive_filesystem
+
+archive_path = archive_filesystem(
+    workspace.filesystem,
+    "snapshots/",
+    archive_id=session.session_id,
+)
+```
+
+The function recursively collects all files from a `Filesystem` instance and
+writes them to a compressed zip archive. Useful for capturing workspace state
+during debugging sessions. The code reviewer example now automatically archives
+the workspace filesystem on exit when running in Claude Agent mode.
+
 ### Feedback Providers for Agent Progress Assessment
 
 A new **Feedback Provider** system enables ongoing progress assessment for
