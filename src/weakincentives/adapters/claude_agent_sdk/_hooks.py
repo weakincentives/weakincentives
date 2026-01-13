@@ -32,7 +32,6 @@ from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ...runtime.watchdog import Heartbeat
-from ._notifications import Notification
 from ._task_completion import (
     TaskCompletionChecker,
     TaskCompletionContext,
@@ -995,8 +994,7 @@ def create_subagent_start_hook(
 ) -> AsyncHookCallback:
     """Create a SubagentStart hook to capture subagent launch events.
 
-    Records Notification events when subagents are spawned during execution
-    and tracks subagent statistics for debugging.
+    Tracks subagent statistics for debugging when subagents are spawned.
 
     Args:
         hook_context: Context with session references.
@@ -1015,16 +1013,6 @@ def create_subagent_start_hook(
 
         hook_context.stats.subagent_count += 1
         payload = input_data if isinstance(input_data, dict) else {}
-
-        notification = Notification(
-            source="subagent_start",
-            payload=payload,
-            prompt_name=hook_context.prompt_name,
-            adapter_name=hook_context.adapter_name,
-            created_at=_utcnow(),
-        )
-
-        hook_context.session.dispatch(notification)
 
         # Extract subagent details for logging
         subagent_type = payload.get("subagent_type", "")
@@ -1055,9 +1043,9 @@ def create_subagent_stop_hook(
 ) -> AsyncHookCallback:
     """Create a SubagentStop hook to capture subagent completion events.
 
-    Records Notification events when subagents complete execution.
-    Automatically expands transcript_path and agent_transcript_path fields
-    by reading the JSONL files and replacing the paths with their content.
+    Logs subagent completion details for debugging. Automatically expands
+    transcript_path and agent_transcript_path fields by reading the JSONL
+    files and replacing the paths with their content.
 
     Args:
         hook_context: Context with session references.
@@ -1076,16 +1064,6 @@ def create_subagent_stop_hook(
 
         raw_payload = input_data if isinstance(input_data, dict) else {}
         payload = _expand_transcript_paths(raw_payload)
-
-        notification = Notification(
-            source="subagent_stop",
-            payload=payload,
-            prompt_name=hook_context.prompt_name,
-            adapter_name=hook_context.adapter_name,
-            created_at=_utcnow(),
-        )
-
-        hook_context.session.dispatch(notification)
 
         # Extract subagent completion details for logging
         subagent_id = payload.get("subagent_id", "")
@@ -1127,8 +1105,8 @@ def create_pre_compact_hook(
 ) -> AsyncHookCallback:
     """Create a PreCompact hook to capture context compaction events.
 
-    Records Notification events before the SDK compacts conversation context.
-    Tracks context window utilization for debugging memory-constrained scenarios.
+    Tracks context window utilization for debugging memory-constrained scenarios
+    before the SDK compacts conversation context.
 
     Args:
         hook_context: Context with session references.
@@ -1147,16 +1125,6 @@ def create_pre_compact_hook(
 
         hook_context.stats.compact_count += 1
         payload = input_data if isinstance(input_data, dict) else {}
-
-        notification = Notification(
-            source="pre_compact",
-            payload=payload,
-            prompt_name=hook_context.prompt_name,
-            adapter_name=hook_context.adapter_name,
-            created_at=_utcnow(),
-        )
-
-        hook_context.session.dispatch(notification)
 
         # Extract context window details for logging
         context_tokens = payload.get("context_tokens")
@@ -1196,8 +1164,8 @@ def create_notification_hook(
 ) -> AsyncHookCallback:
     """Create a Notification hook to capture user-facing notifications.
 
-    Records Notification events from the SDK's notification system.
-    Extracts notification type and content for structured logging.
+    Extracts notification type and content for structured logging from
+    the SDK's notification system.
 
     Args:
         hook_context: Context with session references.
@@ -1215,16 +1183,6 @@ def create_notification_hook(
         _ = sdk_context
 
         payload = input_data if isinstance(input_data, dict) else {}
-
-        notification = Notification(
-            source="notification",
-            payload=payload,
-            prompt_name=hook_context.prompt_name,
-            adapter_name=hook_context.adapter_name,
-            created_at=_utcnow(),
-        )
-
-        hook_context.session.dispatch(notification)
 
         # Extract notification details for logging
         notification_type = payload.get("type", "")

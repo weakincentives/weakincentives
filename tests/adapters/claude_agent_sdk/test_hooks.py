@@ -55,7 +55,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.protocols import PromptProtocol
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.events.types import TokenUsage, ToolInvoked
-from weakincentives.runtime.session import Session, append_all
+from weakincentives.runtime.session import Session
 
 
 def _make_prompt() -> Prompt[object]:
@@ -920,196 +920,29 @@ class TestNotification:
 
 
 class TestSubagentStartHook:
-    def test_dispatches_notification_to_session(self, session: Session) -> None:
-        # Register reducer for Notification
-        session[Notification].register(Notification, append_all)
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_subagent_start_hook(context)
-        input_data = {
-            "session_id": "sess-123",
-            "subagent_type": "code_reviewer",
-            "prompt": "Review this code",
-        }
-
-        asyncio.run(hook(input_data, None, context))
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 1
-        notif = notifications[0]
-        assert notif.source == "subagent_start"
-        assert notif.payload == input_data
-        assert notif.prompt_name == "test_prompt"
-        assert notif.adapter_name == "test_adapter"
-
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        # Register reducer for Notification
-        hook_context.session[Notification].register(Notification, append_all)
-
         hook = create_subagent_start_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
 
         assert result == {}
 
+    def test_increments_subagent_count(self, hook_context: HookContext) -> None:
+        assert hook_context.stats.subagent_count == 0
+        hook = create_subagent_start_hook(hook_context)
+
+        asyncio.run(hook({"session_id": "test"}, None, hook_context))
+        assert hook_context.stats.subagent_count == 1
+
+        asyncio.run(hook({"session_id": "test2"}, None, hook_context))
+        assert hook_context.stats.subagent_count == 2
+
 
 class TestSubagentStopHook:
-    def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session[Notification].register(Notification, append_all)
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_subagent_stop_hook(context)
-        input_data = {
-            "session_id": "sess-123",
-            "stop_reason": "completed",
-            "result": "Review complete",
-        }
-
-        asyncio.run(hook(input_data, None, context))
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 1
-        notif = notifications[0]
-        assert notif.source == "subagent_stop"
-        assert notif.payload == input_data
-
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session[Notification].register(Notification, append_all)
-
         hook = create_subagent_stop_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
 
         assert result == {}
-
-    def test_expands_transcript_path(self, session: Session, tmp_path: Path) -> None:
-        session[Notification].register(Notification, append_all)
-
-        # Create a temporary JSONL transcript file
-        transcript_file = tmp_path / "transcript.jsonl"
-        transcript_file.write_text(
-            '{"role": "user", "content": "hello"}\n'
-            '{"role": "assistant", "content": "hi there"}\n'
-        )
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_subagent_stop_hook(context)
-        input_data = {
-            "session_id": "sess-123",
-            "transcript_path": str(transcript_file),
-        }
-
-        asyncio.run(hook(input_data, None, context))
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 1
-        notif = notifications[0]
-        assert notif.source == "subagent_stop"
-        # transcript_path should now be a list of parsed entries
-        assert notif.payload["transcript_path"] == [
-            {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi there"},
-        ]
-
-    def test_expands_agent_transcript_path(
-        self, session: Session, tmp_path: Path
-    ) -> None:
-        session[Notification].register(Notification, append_all)
-
-        # Create a temporary JSONL transcript file
-        transcript_file = tmp_path / "agent_transcript.jsonl"
-        transcript_file.write_text('{"event": "tool_call", "name": "Read"}\n')
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_subagent_stop_hook(context)
-        input_data = {
-            "session_id": "sess-123",
-            "agent_transcript_path": str(transcript_file),
-        }
-
-        asyncio.run(hook(input_data, None, context))
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 1
-        notif = notifications[0]
-        assert notif.payload["agent_transcript_path"] == [
-            {"event": "tool_call", "name": "Read"},
-        ]
-
-    def test_expands_both_transcript_paths(
-        self, session: Session, tmp_path: Path
-    ) -> None:
-        session[Notification].register(Notification, append_all)
-
-        transcript_file = tmp_path / "transcript.jsonl"
-        transcript_file.write_text('{"role": "user", "content": "test"}\n')
-
-        agent_transcript_file = tmp_path / "agent.jsonl"
-        agent_transcript_file.write_text('{"event": "start"}\n')
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_subagent_stop_hook(context)
-        input_data = {
-            "session_id": "sess-123",
-            "transcript_path": str(transcript_file),
-            "agent_transcript_path": str(agent_transcript_file),
-        }
-
-        asyncio.run(hook(input_data, None, context))
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 1
-        notif = notifications[0]
-        assert notif.payload["transcript_path"] == [
-            {"role": "user", "content": "test"},
-        ]
-        assert notif.payload["agent_transcript_path"] == [{"event": "start"}]
-
-    def test_handles_nonexistent_transcript_path(self, session: Session) -> None:
-        session[Notification].register(Notification, append_all)
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_subagent_stop_hook(context)
-        input_data = {
-            "session_id": "sess-123",
-            "transcript_path": "/nonexistent/path/transcript.jsonl",
-        }
-
-        asyncio.run(hook(input_data, None, context))
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 1
-        notif = notifications[0]
-        # Returns empty list for nonexistent file
-        assert notif.payload["transcript_path"] == []
 
 
 class TestReadTranscriptFile:
@@ -1219,118 +1052,29 @@ class TestExpandTranscriptPaths:
 
 
 class TestPreCompactHook:
-    def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session[Notification].register(Notification, append_all)
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_pre_compact_hook(context)
-        input_data = {
-            "session_id": "sess-123",
-            "message_count": 100,
-            "token_count": 50000,
-        }
-
-        asyncio.run(hook(input_data, None, context))
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 1
-        notif = notifications[0]
-        assert notif.source == "pre_compact"
-        assert notif.payload == input_data
-
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session[Notification].register(Notification, append_all)
-
         hook = create_pre_compact_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
 
         assert result == {}
 
+    def test_increments_compact_count(self, hook_context: HookContext) -> None:
+        assert hook_context.stats.compact_count == 0
+        hook = create_pre_compact_hook(hook_context)
+
+        asyncio.run(hook({"session_id": "test"}, None, hook_context))
+        assert hook_context.stats.compact_count == 1
+
+        asyncio.run(hook({"session_id": "test2"}, None, hook_context))
+        assert hook_context.stats.compact_count == 2
+
 
 class TestNotificationHook:
-    def test_dispatches_notification_to_session(self, session: Session) -> None:
-        session[Notification].register(Notification, append_all)
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-        hook = create_notification_hook(context)
-        input_data = {
-            "session_id": "sess-123",
-            "message": "Operation completed",
-            "level": "info",
-        }
-
-        asyncio.run(hook(input_data, None, context))
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 1
-        notif = notifications[0]
-        assert notif.source == "notification"
-        assert notif.payload == input_data
-
     def test_returns_empty_dict(self, hook_context: HookContext) -> None:
-        hook_context.session[Notification].register(Notification, append_all)
-
         hook = create_notification_hook(hook_context)
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
 
         assert result == {}
-
-
-class TestMultipleNotificationsAccumulate:
-    def test_multiple_hooks_accumulate_notifications(self, session: Session) -> None:
-        """Test that notifications from different hooks accumulate in session."""
-        session[Notification].register(Notification, append_all)
-
-        context = HookContext(
-            session=session,
-            prompt=cast("PromptProtocol[object]", _make_prompt()),
-            adapter_name="test_adapter",
-            prompt_name="test_prompt",
-        )
-
-        # Fire multiple different hooks
-        subagent_start = create_subagent_start_hook(context)
-        asyncio.run(
-            subagent_start(
-                {"session_id": "sess-1", "subagent_type": "analyzer"}, None, context
-            )
-        )
-
-        pre_compact = create_pre_compact_hook(context)
-        asyncio.run(
-            pre_compact({"session_id": "sess-1", "message_count": 50}, None, context)
-        )
-
-        subagent_stop = create_subagent_stop_hook(context)
-        asyncio.run(
-            subagent_stop(
-                {"session_id": "sess-1", "stop_reason": "completed"}, None, context
-            )
-        )
-
-        notification = create_notification_hook(context)
-        asyncio.run(
-            notification({"session_id": "sess-1", "message": "Done"}, None, context)
-        )
-
-        notifications = session[Notification].all()
-        assert len(notifications) == 4
-
-        sources = [n.source for n in notifications]
-        assert "subagent_start" in sources
-        assert "pre_compact" in sources
-        assert "subagent_stop" in sources
-        assert "notification" in sources
 
 
 class TestPreToolUseHookTransactional:
