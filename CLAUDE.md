@@ -148,6 +148,7 @@ Consult these specs before modifying related code:
 | Spec | When to Read |
 | ------------------------------ | --------------------------------------------------------------------- |
 | `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
+| `specs/ANALYSIS_LOOP.md` | Meta-level debugging of agents, analyzing eval results, failure diagnosis |
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging, skill mounting |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |

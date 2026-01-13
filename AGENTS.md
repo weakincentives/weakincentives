@@ -76,6 +76,8 @@ a goal at any time.
 
 - **ADAPTERS.md**: Provider adapters, structured output, and throttling—before
   adding or modifying adapters.
+- **ANALYSIS_LOOP.md**: Meta-level debugging and analysis of agent
+  behavior—when building analysis tooling over eval results.
 - **DATACLASSES.md**: Serde utilities and frozen dataclass patterns—when adding
   dataclass models or serialization.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
