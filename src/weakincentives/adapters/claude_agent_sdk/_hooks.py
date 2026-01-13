@@ -975,7 +975,6 @@ def create_subagent_start_hook(
                 "description": subagent_description,
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
-                "payload": payload,
             },
         )
 
@@ -989,9 +988,7 @@ def create_subagent_stop_hook(
 ) -> AsyncHookCallback:
     """Create a SubagentStop hook to capture subagent completion events.
 
-    Logs subagent completion details for debugging. Automatically expands
-    transcript_path and agent_transcript_path fields by reading the JSONL
-    files and replacing the paths with their content.
+    Logs subagent completion details for debugging.
 
     Args:
         hook_context: Context with session references.
@@ -1088,7 +1085,6 @@ def create_pre_compact_hook(
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
                 "turn_count": hook_context.stats.turn_count,
-                "payload": payload,
             },
         )
 
@@ -1139,7 +1135,6 @@ def create_notification_hook(
                 "message_preview": message_preview,
                 "elapsed_ms": hook_context.elapsed_ms,
                 "tool_count": hook_context.stats.tool_count,
-                "payload": payload,
             },
         )
 

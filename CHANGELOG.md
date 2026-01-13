@@ -45,6 +45,16 @@ Key components:
 Feedback is delivered via the adapter's hook mechanism and stored in the
 session's Feedback slice for history tracking.
 
+### Removed: Notification from Claude Agent SDK Public API
+
+The `Notification` and `NotificationSource` types have been removed from the
+`weakincentives.adapters.claude_agent_sdk` public API. These were previously
+used to store SDK hook events in the session but are no longer needed.
+
+**Migration:** If you were accessing `session[Notification]` to inspect hook
+events, this data is no longer stored. Hook events are still logged for
+debugging purposes.
+
 ### Documentation: Dead Letter Queue Specification
 
 Added `specs/DLQ.md` covering dead letter queue configuration for MainLoop and
