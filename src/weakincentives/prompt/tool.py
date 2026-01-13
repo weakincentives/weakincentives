@@ -58,6 +58,7 @@ _NAME_PATTERN: Final[re.Pattern[str]] = re.compile(
 if TYPE_CHECKING:
     from ..filesystem import Filesystem
     from ..runtime.session.protocols import SessionProtocol
+    from ..runtime.watchdog import Heartbeat
     from ._prompt_resources import PromptResources
     from .protocols import (
         PromptProtocol,
@@ -111,6 +112,11 @@ class ToolContext:
 
         context.budget_tracker
         context.resources.get(BudgetTracker)
+
+    When running within a MainLoop or EvalLoop with lease extension enabled,
+    tool handlers can call ``context.beat()`` to record a heartbeat during
+    long-running operations. This helps extend the message visibility
+    timeout and proves that processing is making progress.
     """
 
     prompt: PromptProtocol[Any]
@@ -118,6 +124,7 @@ class ToolContext:
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     deadline: Deadline | None = None
+    heartbeat: Heartbeat | None = None
 
     @property
     def resources(self) -> PromptResources:
@@ -146,6 +153,24 @@ class ToolContext:
         This is sugar for ``self.resources.get_optional(BudgetTracker)``.
         """
         return self.resources.get_optional(BudgetTracker)
+
+    def beat(self) -> None:
+        """Record a heartbeat to prove processing is active.
+
+        Tool handlers should call this during long-running operations to
+        extend the message visibility timeout. This is a no-op if heartbeat
+        is not configured.
+
+        Example::
+
+            def my_long_running_tool(params: Params, *, context: ToolContext) -> ToolResult[None]:
+                for chunk in process_chunks(params.data):
+                    handle_chunk(chunk)
+                    context.beat()  # Prove we're making progress
+                return ToolResult.ok(None)
+        """
+        if self.heartbeat is not None:
+            self.heartbeat.beat()
 
 
 def _normalize_specialization(item: object) -> tuple[object, object]:

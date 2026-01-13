@@ -30,6 +30,7 @@ from ...runtime.transactions import (
     restore_snapshot,
     tool_transaction,
 )
+from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
 
 if TYPE_CHECKING:
@@ -91,6 +92,7 @@ class BridgedTool:
         budget_tracker: BudgetTracker | None,
         adapter_name: str = "claude_agent_sdk",
         prompt_name: str | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -104,6 +106,7 @@ class BridgedTool:
         self._budget_tracker = budget_tracker
         self._adapter_name = adapter_name
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
+        self._heartbeat = heartbeat
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -170,6 +173,7 @@ class BridgedTool:
                 adapter=self._adapter,
                 session=self._session,
                 deadline=self._deadline,
+                heartbeat=self._heartbeat,
             )
 
             result = handler(params, context=context)
@@ -309,6 +313,7 @@ def create_bridged_tools(
     budget_tracker: BudgetTracker | None,
     adapter_name: str = "claude_agent_sdk",
     prompt_name: str | None = None,
+    heartbeat: Heartbeat | None = None,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -322,6 +327,7 @@ def create_bridged_tools(
         budget_tracker: Optional budget tracker for tool context.
         adapter_name: Name of the adapter for event dispatching.
         prompt_name: Name of the prompt for event dispatching.
+        heartbeat: Optional heartbeat for tool context.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
@@ -361,6 +367,7 @@ def create_bridged_tools(
             budget_tracker=budget_tracker,
             adapter_name=adapter_name,
             prompt_name=resolved_prompt_name,
+            heartbeat=heartbeat,
         )
         bridged.append(bridged_tool)
 

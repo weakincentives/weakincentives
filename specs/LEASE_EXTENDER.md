@@ -483,6 +483,153 @@ def _execute(
             return response, session
 ```
 
+## EvalLoop Integration
+
+`EvalLoop` faces the same lease expiration challenges as `MainLoop`: evaluation
+samples can take significant time (especially with multi-step tool execution),
+and the original message lease may expire during processing.
+
+### EvalLoop Configuration
+
+```python
+@FrozenDataclass()
+class EvalLoopConfig:
+    """Configuration for EvalLoop execution defaults."""
+
+    deadline: Deadline | None = None
+    budget: Budget | None = None
+    lease_extender: LeaseExtenderConfig | None = None
+```
+
+### EvalLoop Constructor
+
+```python
+class EvalLoop:
+    def __init__(
+        self,
+        *,
+        loop: MainLoop[Any, Any],
+        requests: Mailbox[EvalRequest, EvalResult],
+        config: EvalLoopConfig | None = None,
+    ) -> None:
+        # ... existing initialization ...
+        self._heartbeat = Heartbeat()
+        lease_config = (
+            self._config.lease_extender
+            if self._config.lease_extender is not None
+            else LeaseExtenderConfig()
+        )
+        self._lease_extender = LeaseExtender(config=lease_config)
+```
+
+### EvalLoop Message Handling
+
+```python
+def _handle_message(
+    self, msg: Message[EvalRequest, EvalResult]
+) -> None:
+    """Process a single evaluation request message."""
+    request = msg.body
+
+    # Attach lease extender to heartbeat for this message
+    with self._lease_extender.attach(msg, self._heartbeat):
+        try:
+            result = self._evaluate(request)
+        except Exception as exc:
+            result = EvalResult(request_id=request.request_id, error=str(exc))
+
+    self._reply_and_ack(msg, result)
+```
+
+### Heartbeat Propagation in EvalLoop
+
+EvalLoop delegates to `MainLoop` for actual prompt evaluation. The heartbeat
+is passed via `MainLoop.execute()` so that all tool/adapter beats extend
+EvalLoop's message lease:
+
+```python
+def _evaluate_sample(
+    self,
+    request: EvalRequest[InputT, ExpectedT],
+) -> EvalResult:
+    """Evaluate a single sample with heartbeat propagation."""
+    sample = request.sample
+    start = time.monotonic()
+
+    # Pass our heartbeat to MainLoop so tool/adapter beats extend our message lease
+    response, session = self._loop.execute(sample.input, heartbeat=self._heartbeat)
+    latency_ms = int((time.monotonic() - start) * 1000)
+
+    # Beat after each sample completes
+    self._heartbeat.beat()
+
+    # ... scoring logic ...
+```
+
+### MainLoop.execute() Heartbeat Parameter
+
+`MainLoop.execute()` accepts an optional heartbeat parameter that overrides
+the loop's internal heartbeat for adapter evaluation:
+
+```python
+def execute(
+    self,
+    request: UserRequestT,
+    *,
+    budget: Budget | None = None,
+    deadline: Deadline | None = None,
+    resources: Mapping[type[object], object] | None = None,
+    heartbeat: Heartbeat | None = None,  # EvalLoop passes its heartbeat here
+) -> tuple[PromptResponse[OutputT], Session]:
+    """Execute directly without mailbox routing.
+
+    Args:
+        heartbeat: Optional heartbeat for lease extension. If provided, this
+            heartbeat is used for adapter evaluation instead of the loop's
+            internal heartbeat. Use this when EvalLoop needs to extend its
+            own message lease based on MainLoop work.
+    """
+    # ...
+    effective_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
+    response = self._adapter.evaluate(..., heartbeat=effective_heartbeat)
+```
+
+This ensures that when EvalLoop processes a message:
+
+1. EvalLoop attaches its LeaseExtender to its heartbeat
+1. EvalLoop passes its heartbeat to `MainLoop.execute()`
+1. MainLoop passes that heartbeat to the adapter
+1. Tool execution beats on EvalLoop's heartbeat
+1. LeaseExtender extends the evaluation message's lease
+
+### Why EvalLoop Needs Lease Extension
+
+Evaluation workloads often involve:
+
+1. **Dataset iteration**: Processing hundreds of samples in sequence
+1. **Per-sample tool execution**: Each sample may invoke multiple tools
+1. **Scoring overhead**: Running evaluators after each sample
+1. **Long-running prompts**: Complex prompts with many tool calls
+
+Without lease extension, the evaluation message can expire mid-dataset,
+causing partial evaluation loss and duplicate work on retry.
+
+### EvalLoop Heartbeat Points
+
+EvalLoop beats at these points:
+
+| Point | When | Purpose |
+| ------------------- | --------------------------- | ----------------------- |
+| Before sample | Start of `_evaluate_sample` | Prove starting new work |
+| After sample | End of `_evaluate_sample` | Prove sample completed |
+| On inner loop beats | Via MainLoop heartbeat | During tool execution |
+
+This ensures:
+
+- Each sample iteration triggers heartbeats
+- Long-running samples don't cause lease expiration
+- Stuck evaluations correctly allow lease to expire
+
 ## Automatic Beating in Adapters
 
 To ensure consistent heartbeating without requiring every tool to manually
@@ -619,7 +766,7 @@ class ClaudeAgentSDKAdapter(ProviderAdapter[OutputT]):
 Native tools have inherent limitations for heartbeat granularity:
 
 | Tool Type | Heartbeat Granularity |
-| ------------- | ------------------------------------------------- |
+| ------------ | ------------------------------------------- |
 | WINK tools | Can beat during execution (context.beat()) |
 | Native tools | Beat only at hook boundaries (before/after) |
 
@@ -645,7 +792,7 @@ liveness tracking, consider implementing as WINK tools instead.
 ## Error Handling
 
 | Error | Behavior |
-| --------------------------- | ----------------------------------------- |
+| --------------------------- | ---------------------------------- |
 | `ReceiptHandleExpiredError` | Log warning; processing continues |
 | Network/transient errors | Log exception; skip this extension |
 | Callback exception | Logged; other callbacks still run |

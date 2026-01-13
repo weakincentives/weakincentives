@@ -41,6 +41,7 @@ from weakincentives.runtime.mailbox import (
 )
 from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
 from weakincentives.runtime.session import SessionProtocol
+from weakincentives.runtime.watchdog import Heartbeat
 
 # =============================================================================
 # Test Fixtures
@@ -83,8 +84,9 @@ class _MockAdapter(ProviderAdapter[_Output]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         resources: ResourceRegistry | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> PromptResponse[_Output]:
-        del prompt, session, deadline, budget, budget_tracker, resources
+        del prompt, session, deadline, budget, budget_tracker, resources, heartbeat
         self.call_count += 1
         if self._error is not None:
             raise self._error
@@ -454,8 +456,9 @@ class _NoneOutputAdapter(ProviderAdapter[_Output]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         resources: ResourceRegistry | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> PromptResponse[_Output]:
-        del prompt, session, deadline, budget, budget_tracker, resources
+        del prompt, session, deadline, budget, budget_tracker, resources, heartbeat
         return PromptResponse(
             prompt_name="test",
             text="no structured output",

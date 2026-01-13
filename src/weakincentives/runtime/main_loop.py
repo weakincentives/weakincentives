@@ -56,6 +56,7 @@ from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
+from .lease_extender import LeaseExtender, LeaseExtenderConfig
 from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError, ReplyNotAvailableError
 from .session import Session
@@ -103,11 +104,16 @@ class MainLoopConfig:
     """Configuration for MainLoop execution defaults.
 
     Request-level ``budget``, ``deadline``, and ``resources`` override these defaults.
+
+    The ``lease_extender`` field controls automatic message visibility extension
+    during processing. When enabled, heartbeats from tool execution extend the
+    message lease, preventing timeout during long-running requests.
     """
 
     deadline: Deadline | None = None
     budget: Budget | None = None
     resources: Mapping[type[object], object] | None = None
+    lease_extender: LeaseExtenderConfig | None = None
 
 
 @FrozenDataclass()
@@ -168,6 +174,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
     _running: bool
     _lock: threading.Lock
     _heartbeat: Heartbeat
+    _lease_extender: LeaseExtender
 
     def __init__(
         self,
@@ -192,6 +199,13 @@ class MainLoop[UserRequestT, OutputT](ABC):
         self._running = False
         self._lock = threading.Lock()
         self._heartbeat = Heartbeat()
+        # Initialize lease extender with config or defaults
+        lease_config = (
+            self._config.lease_extender
+            if self._config.lease_extender is not None
+            else LeaseExtenderConfig()
+        )
+        self._lease_extender = LeaseExtender(config=lease_config)
 
     @property
     def heartbeat(self) -> Heartbeat:
@@ -236,6 +250,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         budget: Budget | None = None,
         deadline: Deadline | None = None,
         resources: Mapping[type[object], object] | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute directly without mailbox routing.
 
@@ -247,6 +262,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
             budget: Optional budget override (takes precedence over config).
             deadline: Optional deadline override (takes precedence over config).
             resources: Optional resources override (dict mapping types to instances).
+            heartbeat: Optional heartbeat for lease extension. If provided, this
+                heartbeat is used for adapter evaluation instead of the loop's
+                internal heartbeat. Use this when EvalLoop needs to extend its
+                own message lease based on MainLoop work.
 
         Returns:
             Tuple of (PromptResponse, Session) from the evaluation.
@@ -257,15 +276,22 @@ class MainLoop[UserRequestT, OutputT](ABC):
             deadline=deadline,
             resources=resources,
         )
-        return self._execute(request_event)
+        return self._execute(request_event, heartbeat=heartbeat)
 
     def _execute(
         self,
         request_event: MainLoopRequest[UserRequestT],
+        *,
+        heartbeat: Heartbeat | None = None,
     ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute the main loop for a request event.
 
         Handles core execution logic including visibility expansion retries.
+
+        Args:
+            request_event: The request to process.
+            heartbeat: Optional heartbeat override. If provided, uses this
+                instead of self._heartbeat for adapter evaluation.
         """
         prompt, session = self.prepare(request_event.request)
 
@@ -295,6 +321,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
             else None
         )
 
+        # Use provided heartbeat or fall back to loop's internal heartbeat
+        effective_heartbeat = heartbeat if heartbeat is not None else self._heartbeat
+
         while True:
             try:
                 response = self._adapter.evaluate(
@@ -302,6 +331,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     session=session,
                     deadline=effective_deadline,
                     budget_tracker=budget_tracker,
+                    heartbeat=effective_heartbeat,
                 )
             except VisibilityExpansionRequired as e:
                 for path, visibility in e.requested_overrides.items():
@@ -318,24 +348,24 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """Process a single message from the requests mailbox."""
         request_event = msg.body
 
-        try:
-            response, session = self._execute(request_event)
+        # Attach lease extender to heartbeat for this message
+        with self._lease_extender.attach(msg, self._heartbeat):
+            try:
+                response, session = self._execute(request_event)
 
-            result = MainLoopResult[OutputT](
-                request_id=request_event.request_id,
-                output=response.output,
-                session_id=session.session_id,
-            )
+                result = MainLoopResult[OutputT](
+                    request_id=request_event.request_id,
+                    output=response.output,
+                    session_id=session.session_id,
+                )
 
-            self._reply_and_ack(msg, result)
+            except Exception as exc:
+                result = MainLoopResult[OutputT](
+                    request_id=request_event.request_id,
+                    error=str(exc),
+                )
 
-        except Exception as exc:
-            result = MainLoopResult[OutputT](
-                request_id=request_event.request_id,
-                error=str(exc),
-            )
-
-            self._reply_and_ack(msg, result)
+        self._reply_and_ack(msg, result)
 
     def _reply_and_ack(
         self,

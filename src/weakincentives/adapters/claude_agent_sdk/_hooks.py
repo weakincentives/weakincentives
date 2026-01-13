@@ -31,6 +31,7 @@ from ...runtime.events.types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
+from ...runtime.watchdog import Heartbeat
 from ._notifications import Notification
 from ._task_completion import (
     TaskCompletionChecker,
@@ -168,6 +169,7 @@ class HookContext:
         prompt_name: str,
         deadline: Deadline | None = None,
         budget_tracker: BudgetTracker | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> None:
         self._session = session
         self._prompt = prompt
@@ -175,11 +177,22 @@ class HookContext:
         self.prompt_name = prompt_name
         self.deadline = deadline
         self.budget_tracker = budget_tracker
+        self.heartbeat = heartbeat
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
         self.stats: HookStats = HookStats()
         self._start_time = time.monotonic()
+
+    def beat(self) -> None:
+        """Record a heartbeat to prove processing is active.
+
+        Hooks should call this during native tool execution to extend
+        the message visibility timeout. This is a no-op if heartbeat
+        is not configured.
+        """
+        if self.heartbeat is not None:
+            self.heartbeat.beat()
 
     @property
     def session(self) -> SessionProtocol:
@@ -301,6 +314,9 @@ def create_pre_tool_use_hook(
     ) -> dict[str, Any]:
         _ = sdk_context
         hook_start = time.monotonic()
+
+        # Beat before tool execution to prove liveness
+        hook_context.beat()
 
         tool_name = (
             input_data.get("tool_name", "") if isinstance(input_data, dict) else ""
@@ -567,6 +583,9 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         _ = sdk_context
         hook_start = time.monotonic()
         data = _parse_tool_data(input_data)
+
+        # Beat after tool execution to prove liveness
+        hook_context.beat()
 
         # Increment tool count for ALL tools (needed for feedback triggers)
         hook_context._tool_count += 1

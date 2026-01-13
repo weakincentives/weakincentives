@@ -92,8 +92,9 @@ class _MockAdapter(ProviderAdapter[_Output]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         resources: ResourceRegistry | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> PromptResponse[_Output]:
-        del prompt, session, deadline, budget, budget_tracker, resources
+        del prompt, session, deadline, budget, budget_tracker, resources, heartbeat
         self.call_count += 1
         if self._delay > 0:
             time.sleep(self._delay)
@@ -685,6 +686,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             budget: Budget | None = None,
             budget_tracker: BudgetTracker | None = None,
             resources: ResourceRegistry | None = None,
+            heartbeat: Heartbeat | None = None,
         ) -> PromptResponse[_Output]:
             result = super().evaluate(
                 prompt,
@@ -693,6 +695,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
                 budget=budget,
                 budget_tracker=budget_tracker,
                 resources=resources,
+                heartbeat=heartbeat,
             )
             # Trigger shutdown after first message
             if self.call_count == 1:
@@ -765,6 +768,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             budget: Budget | None = None,
             budget_tracker: BudgetTracker | None = None,
             resources: ResourceRegistry | None = None,
+            heartbeat: Heartbeat | None = None,
         ) -> PromptResponse[_Output]:
             result = super().evaluate(
                 prompt,
@@ -773,6 +777,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
                 budget=budget,
                 budget_tracker=budget_tracker,
                 resources=resources,
+                heartbeat=heartbeat,
             )
             # Trigger shutdown after first message
             if self.call_count == 1:

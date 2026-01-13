@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-from . import events, lifecycle, mailbox, main_loop, session, watchdog
+from . import events, lease_extender, lifecycle, mailbox, main_loop, session, watchdog
 from .events import (
     ControlDispatcher,
     Dispatcher,
@@ -27,6 +27,7 @@ from .events import (
     TokenUsage,
     ToolInvoked,
 )
+from .lease_extender import LeaseExtender, LeaseExtenderConfig
 from .lifecycle import (
     LoopGroup,
     Runnable,
@@ -104,6 +105,8 @@ __all__ = [
     "Heartbeat",
     "InMemoryMailbox",
     "InProcessDispatcher",
+    "LeaseExtender",
+    "LeaseExtenderConfig",
     "LoopGroup",
     "Mailbox",
     "MailboxConnectionError",
@@ -148,6 +151,7 @@ __all__ = [
     "events",
     "get_logger",
     "iter_sessions_bottom_up",
+    "lease_extender",
     "lifecycle",
     "mailbox",
     "main_loop",

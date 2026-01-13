@@ -60,6 +60,7 @@ from .utilities import (
 )
 
 if TYPE_CHECKING:
+    from ..runtime.watchdog import Heartbeat
     from .core import ProviderAdapter
 
 
@@ -103,6 +104,9 @@ class ToolExecutionContext:
 
     Provides unified access to session and prompt resources for transactional
     tool execution.
+
+    When ``heartbeat`` is provided, beats occur before and after each tool
+    execution to prove liveness.
     """
 
     adapter_name: AdapterName
@@ -118,6 +122,7 @@ class ToolExecutionContext:
     provider_payload: dict[str, Any] | None = None
     logger_override: StructuredLogger | None = None
     budget_tracker: BudgetTracker | None = None
+    heartbeat: Heartbeat | None = None
 
     def with_provider_payload(
         self, provider_payload: dict[str, Any] | None
@@ -126,6 +131,11 @@ class ToolExecutionContext:
         from dataclasses import replace
 
         return replace(self, provider_payload=provider_payload)
+
+    def beat(self) -> None:
+        """Record a heartbeat if available."""
+        if self.heartbeat is not None:
+            self.heartbeat.beat()
 
 
 def _resolve_tool_and_handler(
@@ -470,6 +480,7 @@ def _execute_tool_with_snapshot(  # noqa: PLR0913
         adapter=cast(ProviderAdapterProtocol[Any], context.adapter),
         session=context.session,
         deadline=context.deadline,
+        heartbeat=context.heartbeat,
     )
 
     # Get policies for this tool
@@ -568,7 +579,8 @@ def tool_execution(
     """Context manager that executes a tool call and standardizes logging.
 
     Uses transactional semantics to ensure both session state and
-    resources are rolled back on tool failure.
+    resources are rolled back on tool failure. When heartbeat is available,
+    beats occur before and after tool execution.
     """
     tool, handler = _resolve_tool_and_handler(
         tool_call=tool_call,
@@ -602,6 +614,9 @@ def tool_execution(
         },
     )
 
+    # Beat before tool execution
+    context.beat()
+
     # Use transactional execution
     with tool_transaction(
         context.session, context.prompt.resources.context, tag=f"tool:{tool_name}"
@@ -616,6 +631,9 @@ def tool_execution(
             log=log,
             snapshot=snapshot,
         )
+
+    # Beat after tool execution
+    context.beat()
 
 
 def dispatch_tool_invocation(
@@ -739,6 +757,10 @@ class ToolExecutor:
 
     Provides unified access to session and prompt resources for transactional
     tool execution.
+
+    When ``heartbeat`` is provided, beats occur before and after each tool
+    execution to prove liveness. Tool handlers receive the heartbeat via
+    ToolContext.beat() for additional beats during long-running operations.
     """
 
     adapter_name: AdapterName
@@ -754,6 +776,7 @@ class ToolExecutor:
     logger_override: StructuredLogger | None = None
     deadline: Deadline | None = None
     budget_tracker: BudgetTracker | None = None
+    heartbeat: Heartbeat | None = None
     _log: StructuredLogger = field(init=False)
     _context: ToolExecutionContext = field(init=False)
     _tool_message_records: list[
@@ -778,6 +801,7 @@ class ToolExecutor:
             deadline=self.deadline,
             logger_override=self.logger_override,
             budget_tracker=self.budget_tracker,
+            heartbeat=self.heartbeat,
         )
         self._tool_message_records = []
 

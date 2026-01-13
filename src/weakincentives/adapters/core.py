@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
@@ -23,6 +23,9 @@ from ..deadlines import Deadline
 from ..errors import WinkError
 from ..prompt import Prompt
 from ..runtime.session.protocols import SessionProtocol
+
+if TYPE_CHECKING:
+    from ..runtime.watchdog import Heartbeat
 
 
 @FrozenDataclass()
@@ -50,6 +53,7 @@ class ProviderAdapter(ABC):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
+        heartbeat: Heartbeat | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response.
 
@@ -63,6 +67,11 @@ class ProviderAdapter(ABC):
         When ``budget`` is provided and ``budget_tracker`` is not, a new tracker
         is created. When ``budget_tracker`` is supplied, it is used directly for
         shared limit enforcement.
+
+        When ``heartbeat`` is provided, the adapter will beat at key execution
+        points (LLM calls, tool execution boundaries) to prove liveness. Tool
+        handlers receive the heartbeat via ToolContext.beat() for additional
+        beats during long-running operations.
         """
 
         ...

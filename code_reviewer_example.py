@@ -78,7 +78,9 @@ from weakincentives.prompt.overrides import (
 )
 from weakincentives.runtime import (
     InMemoryMailbox,
+    LeaseExtenderConfig,
     MainLoop,
+    MainLoopConfig,
     MainLoopRequest,
     MainLoopResult,
     Session,
@@ -222,7 +224,15 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
         enable_optimization: bool = False,
     ) -> None:
-        super().__init__(adapter=adapter, requests=requests)
+        # Configure lease extender to extend message visibility during long tool execution.
+        # Extends by 5 minutes every 60 seconds of active work (heartbeats from tools).
+        config = MainLoopConfig(
+            lease_extender=LeaseExtenderConfig(
+                interval=60.0,  # Rate-limit extensions to once per minute
+                extension=300,  # Extend by 5 minutes on each extension
+            ),
+        )
+        super().__init__(adapter=adapter, requests=requests, config=config)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = resolve_override_tag(
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV
