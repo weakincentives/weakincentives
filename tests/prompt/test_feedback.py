@@ -380,6 +380,59 @@ class TestFeedbackContext:
 
         assert len(recent) == 0
 
+    def test_tool_call_count_scoped_to_current_prompt(self) -> None:
+        """Tool call count only includes events for the current prompt."""
+        session = make_session()
+        prompt = make_prompt()  # name="test"
+
+        # Add tool calls from different prompts
+        session.dispatcher.dispatch(make_tool_invoked("tool_1"))  # prompt_name="test"
+        session.dispatcher.dispatch(make_tool_invoked("tool_2"))  # prompt_name="test"
+        session.dispatcher.dispatch(
+            ToolInvoked(
+                prompt_name="other_prompt",  # Different prompt
+                adapter="test",
+                name="other_tool",
+                params=None,
+                result=None,
+                session_id=None,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.dispatcher.dispatch(make_tool_invoked("tool_3"))  # prompt_name="test"
+
+        context = FeedbackContext(session=session, prompt=prompt)
+
+        # Only 3 calls for "test" prompt, not the 4th from "other_prompt"
+        assert context.tool_call_count == 3
+
+    def test_recent_tool_calls_scoped_to_current_prompt(self) -> None:
+        """Recent tool calls only includes events for the current prompt."""
+        session = make_session()
+        prompt = make_prompt()
+
+        session.dispatcher.dispatch(make_tool_invoked("tool_1"))
+        session.dispatcher.dispatch(
+            ToolInvoked(
+                prompt_name="other_prompt",
+                adapter="test",
+                name="other_tool",
+                params=None,
+                result=None,
+                session_id=None,
+                created_at=datetime.now(UTC),
+            )
+        )
+        session.dispatcher.dispatch(make_tool_invoked("tool_2"))
+
+        context = FeedbackContext(session=session, prompt=prompt)
+        recent = context.recent_tool_calls(5)
+
+        # Only 2 calls for "test" prompt
+        assert len(recent) == 2
+        assert recent[0].name == "tool_1"
+        assert recent[1].name == "tool_2"
+
 
 # =============================================================================
 # FeedbackTrigger Tests

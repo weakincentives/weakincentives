@@ -680,7 +680,11 @@ def _append_feedback_to_result(
     result: ToolResult[SupportsToolResult],
     feedback_text: str | None,
 ) -> ToolResult[SupportsToolResult]:
-    """Append feedback text to tool result message if both are present.
+    """Append feedback text to tool result message.
+
+    Feedback is always delivered when present, even if the tool message is empty.
+    This ensures feedback providers work for tools that return meaningful output
+    in their value/rendered payload rather than the message field.
 
     Args:
         result: The original tool result.
@@ -689,14 +693,14 @@ def _append_feedback_to_result(
     Returns:
         Updated tool result with feedback appended, or original if no feedback.
     """
-    if feedback_text and result.message:
-        from dataclasses import replace
+    if not feedback_text:
+        return result
 
-        return replace(
-            result,
-            message=f"{result.message}\n\n{feedback_text}",
-        )
-    return result
+    from dataclasses import replace
+
+    if result.message:
+        return replace(result, message=f"{result.message}\n\n{feedback_text}")
+    return replace(result, message=feedback_text)
 
 
 def execute_tool_call(

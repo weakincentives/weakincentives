@@ -159,6 +159,10 @@ class FeedbackContext:
     for analyzing agent trajectory. Mirrors the ToolContext interface for
     consistency.
 
+    Tool call counts and recent tool calls are scoped to the current prompt
+    to ensure triggers behave consistently when sessions are reused across
+    multiple prompt evaluations.
+
     Attributes:
         session: The current session for state access.
         prompt: The prompt being executed.
@@ -168,6 +172,11 @@ class FeedbackContext:
     session: SessionProtocol
     prompt: PromptProtocol[Any]
     deadline: Deadline | None = None
+
+    @property
+    def _prompt_name(self) -> str:
+        """Return the prompt name for filtering events."""
+        return self.prompt.name or f"{self.prompt.ns}:{self.prompt.key}"
 
     @property
     def resources(self) -> PromptResources:
@@ -186,17 +195,31 @@ class FeedbackContext:
         """Return the most recent feedback, or None if no feedback exists."""
         return self.session[Feedback].latest()
 
-    @property
-    def tool_call_count(self) -> int:
-        """Return the total number of tool calls in the session."""
+    def _tool_calls_for_prompt(self) -> Sequence[ToolInvoked]:
+        """Return all tool calls for the current prompt."""
         from ..runtime.events import ToolInvoked
 
-        return len(self.session[ToolInvoked].all())
+        prompt_name = self._prompt_name
+        return tuple(
+            event
+            for event in self.session[ToolInvoked].all()
+            if event.prompt_name == prompt_name
+        )
+
+    @property
+    def tool_call_count(self) -> int:
+        """Return the number of tool calls for the current prompt.
+
+        Only counts ToolInvoked events matching this prompt's name to ensure
+        triggers behave consistently when sessions are reused across prompts.
+        """
+        return len(self._tool_calls_for_prompt())
 
     def tool_calls_since_last_feedback(self) -> int:
         """Return the number of tool calls since the last feedback.
 
-        If no feedback has been produced yet, returns the total tool call count.
+        If no feedback has been produced yet, returns the total tool call count
+        for the current prompt.
         """
         last = self.last_feedback
         if last is None:
@@ -204,7 +227,7 @@ class FeedbackContext:
         return self.tool_call_count - last.call_index
 
     def recent_tool_calls(self, n: int) -> Sequence[ToolInvoked]:
-        """Return the N most recent tool invocations.
+        """Return the N most recent tool invocations for the current prompt.
 
         Args:
             n: Maximum number of tool calls to return.
@@ -212,11 +235,9 @@ class FeedbackContext:
         Returns:
             Sequence of ToolInvoked events, oldest first. Empty if n=0.
         """
-        from ..runtime.events import ToolInvoked
-
         if n <= 0:
             return ()
-        records = self.session[ToolInvoked].all()
+        records = self._tool_calls_for_prompt()
         return records[-n:] if len(records) >= n else records
 
 

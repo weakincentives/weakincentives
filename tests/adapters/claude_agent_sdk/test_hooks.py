@@ -109,6 +109,7 @@ def _make_prompt_with_feedback_provider() -> Prompt[object]:
     template: PromptTemplate[object] = PromptTemplate(
         ns="tests",
         key="hooks-test-feedback",
+        name="test_prompt",  # Match the prompt_name used in HookContext
         feedback_providers=(config,),
     )
     prompt: Prompt[object] = Prompt(template)

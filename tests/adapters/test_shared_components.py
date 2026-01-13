@@ -143,7 +143,7 @@ class TestAppendFeedbackToResult:
 
         assert updated is result
 
-    def test_returns_original_when_empty_message(self) -> None:
+    def test_uses_feedback_as_message_when_original_empty(self) -> None:
         result: ToolResult[EchoPayload] = ToolResult.ok(
             EchoPayload(value="test"), message=""
         )
@@ -151,7 +151,9 @@ class TestAppendFeedbackToResult:
 
         updated = _append_feedback_to_result(result, feedback_text)
 
-        assert updated is result
+        # Feedback is delivered even when tool message is empty
+        assert updated.message == "[Feedback - Test]\n\nStatus update."
+        assert updated.value == result.value
 
 
 def test_tool_to_spec_accepts_none_params() -> None:
