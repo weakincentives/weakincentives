@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, cast
 
 import pytest
@@ -25,8 +24,6 @@ from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     PostToolUseInput,
-    _expand_transcript_paths,
-    _read_transcript_file,
     create_notification_hook,
     create_post_tool_use_hook,
     create_pre_compact_hook,
@@ -913,112 +910,6 @@ class TestSubagentStopHook:
         result = asyncio.run(hook({"session_id": "test"}, None, hook_context))
 
         assert result == {}
-
-
-class TestReadTranscriptFile:
-    def test_reads_jsonl_file(self, tmp_path: Path) -> None:
-        transcript_file = tmp_path / "test.jsonl"
-        transcript_file.write_text('{"a": 1}\n{"b": 2}\n{"c": 3}\n')
-
-        result = _read_transcript_file(str(transcript_file))
-
-        assert result == [{"a": 1}, {"b": 2}, {"c": 3}]
-
-    def test_returns_empty_list_for_empty_path(self) -> None:
-        assert _read_transcript_file("") == []
-
-    def test_returns_empty_list_for_nonexistent_file(self) -> None:
-        assert _read_transcript_file("/nonexistent/file.jsonl") == []
-
-    def test_handles_blank_lines(self, tmp_path: Path) -> None:
-        transcript_file = tmp_path / "test.jsonl"
-        transcript_file.write_text('{"a": 1}\n\n{"b": 2}\n  \n')
-
-        result = _read_transcript_file(str(transcript_file))
-
-        assert result == [{"a": 1}, {"b": 2}]
-
-    def test_handles_invalid_json_gracefully(self, tmp_path: Path) -> None:
-        transcript_file = tmp_path / "test.jsonl"
-        transcript_file.write_text('{"a": 1}\nnot json\n{"b": 2}\n')
-
-        # Returns empty list on JSON decode error
-        result = _read_transcript_file(str(transcript_file))
-
-        assert result == []
-
-    def test_expands_tilde_in_path(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        # Create file in tmp_path and mock expanduser
-        transcript_file = tmp_path / "test.jsonl"
-        transcript_file.write_text('{"key": "value"}\n')
-
-        original_expanduser = Path.expanduser
-
-        def mock_expanduser(path_self: Path) -> Path:
-            if str(path_self).startswith("~"):
-                return tmp_path / str(path_self)[2:]  # Remove "~/"
-            return original_expanduser(path_self)
-
-        monkeypatch.setattr(Path, "expanduser", mock_expanduser)
-
-        result = _read_transcript_file("~/test.jsonl")
-
-        assert result == [{"key": "value"}]
-
-
-class TestExpandTranscriptPaths:
-    def test_expands_transcript_path(self, tmp_path: Path) -> None:
-        transcript_file = tmp_path / "transcript.jsonl"
-        transcript_file.write_text('{"role": "user"}\n')
-
-        payload = {"session_id": "123", "transcript_path": str(transcript_file)}
-        result = _expand_transcript_paths(payload)
-
-        assert result["session_id"] == "123"
-        assert result["transcript_path"] == [{"role": "user"}]
-
-    def test_expands_agent_transcript_path(self, tmp_path: Path) -> None:
-        transcript_file = tmp_path / "agent.jsonl"
-        transcript_file.write_text('{"event": "start"}\n')
-
-        payload = {"agent_transcript_path": str(transcript_file)}
-        result = _expand_transcript_paths(payload)
-
-        assert result["agent_transcript_path"] == [{"event": "start"}]
-
-    def test_preserves_other_fields(self, tmp_path: Path) -> None:
-        transcript_file = tmp_path / "transcript.jsonl"
-        transcript_file.write_text('{"msg": 1}\n')
-
-        payload = {
-            "session_id": "abc",
-            "transcript_path": str(transcript_file),
-            "other_field": "value",
-        }
-        result = _expand_transcript_paths(payload)
-
-        assert result["session_id"] == "abc"
-        assert result["other_field"] == "value"
-
-    def test_does_not_modify_original_payload(self, tmp_path: Path) -> None:
-        transcript_file = tmp_path / "transcript.jsonl"
-        transcript_file.write_text('{"data": 1}\n')
-
-        original_path = str(transcript_file)
-        payload = {"transcript_path": original_path}
-        _expand_transcript_paths(payload)
-
-        # Original should be unchanged
-        assert payload["transcript_path"] == original_path
-
-    def test_handles_non_string_transcript_path(self) -> None:
-        # If transcript_path is not a string, leave it unchanged
-        payload = {"transcript_path": 123}
-        result = _expand_transcript_paths(payload)
-
-        assert result["transcript_path"] == 123
 
 
 class TestPreCompactHook:
