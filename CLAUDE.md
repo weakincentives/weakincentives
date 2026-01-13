@@ -176,7 +176,7 @@ Consult these specs before modifying related code:
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
 | `specs/TOOLS.md` | Adding/modifying tools, planning tools |
 | `specs/TOOL_POLICIES.md` | Sequential dependencies, read-before-write, keyed constraints |
-| `specs/TRAJECTORY_OBSERVERS.md` | Ongoing progress assessment, stall/drift detection, feedback injection |
+| `specs/FEEDBACK_PROVIDERS.md` | Ongoing progress feedback, stall/drift detection, context injection |
 | `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |
 | `specs/WINK_DEBUG.md` | Debug web UI, snapshot explorer, session inspection |
 | `specs/WINK_DOCS.md` | CLI docs command, bundled documentation access |

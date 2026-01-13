@@ -38,6 +38,7 @@ from weakincentives.adapters.tool_executor import (
     ToolExecutionContext,
     ToolExecutionOutcome,
     ToolExecutor,
+    _append_feedback_to_result,
     dispatch_tool_invocation,
     parse_tool_params,
 )
@@ -109,6 +110,50 @@ def serialize_tool_message(
     result: ToolResult[SupportsToolResult], *, payload: object | None = None
 ) -> object:
     return {"message": result.message, "payload": payload}
+
+
+# =============================================================================
+# Feedback Append Helper Tests
+# =============================================================================
+
+
+class TestAppendFeedbackToResult:
+    """Tests for _append_feedback_to_result helper."""
+
+    def test_appends_feedback_to_message(self) -> None:
+        result: ToolResult[EchoPayload] = ToolResult.ok(
+            EchoPayload(value="test"), message="Tool completed"
+        )
+        feedback_text = "[Feedback - Test]\n\nStatus update."
+
+        updated = _append_feedback_to_result(result, feedback_text)
+
+        assert (
+            updated.message == "Tool completed\n\n[Feedback - Test]\n\nStatus update."
+        )
+        assert updated.value == result.value
+        assert updated.success == result.success
+
+    def test_returns_original_when_no_feedback(self) -> None:
+        result: ToolResult[EchoPayload] = ToolResult.ok(
+            EchoPayload(value="test"), message="Tool completed"
+        )
+
+        updated = _append_feedback_to_result(result, None)
+
+        assert updated is result
+
+    def test_uses_feedback_as_message_when_original_empty(self) -> None:
+        result: ToolResult[EchoPayload] = ToolResult.ok(
+            EchoPayload(value="test"), message=""
+        )
+        feedback_text = "[Feedback - Test]\n\nStatus update."
+
+        updated = _append_feedback_to_result(result, feedback_text)
+
+        # Feedback is delivered even when tool message is empty
+        assert updated.message == "[Feedback - Test]\n\nStatus update."
+        assert updated.value == result.value
 
 
 def test_tool_to_spec_accepts_none_params() -> None:
@@ -575,6 +620,11 @@ class _MockPromptWithFilesystem:
 
     def policies_for_tool(self, tool_name: str) -> tuple[()]:
         """Return no policies for mock prompt."""
+        return ()
+
+    @property
+    def feedback_providers(self) -> tuple[()]:
+        """Return no feedback providers for mock prompt."""
         return ()
 
 

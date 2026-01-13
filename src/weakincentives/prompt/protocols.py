@@ -133,6 +133,11 @@ class PromptProtocol[PromptOutputT](Protocol):
         """Resource accessor for lifecycle management and dependency resolution."""
         ...
 
+    @property
+    def feedback_providers(self) -> tuple[Any, ...]:
+        """Return feedback providers configured on this prompt."""
+        ...
+
     def bind(
         self,
         *params: SupportsDataclass,

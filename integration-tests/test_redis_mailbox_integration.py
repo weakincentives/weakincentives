@@ -407,8 +407,8 @@ class TestRedisMailboxStandalone:
             finally:
                 mailbox.close()
 
-    def test_send_serializes_reply_to_name_without_resolver(self) -> None:
-        """send() serializes reply_to mailbox name; without resolver it stays None."""
+    def test_send_serializes_reply_to_name_with_default_resolver(self) -> None:
+        """send() serializes reply_to mailbox name; default resolver resolves it."""
         with redis_standalone() as client:
             mailbox: RedisMailbox[str, None] = RedisMailbox(
                 name="test-reply-to", client=client, body_type=str
@@ -420,9 +420,10 @@ class TestRedisMailboxStandalone:
                 mailbox.send("hello", reply_to=responses)
                 messages = mailbox.receive(max_messages=1)
                 assert len(messages) == 1
-                # reply_to is None because no resolver is configured to reconstruct
-                # the mailbox from the serialized name
-                assert messages[0].reply_to is None
+                # reply_to is resolved by the default resolver (RedisMailboxFactory)
+                # which creates a mailbox for the stored name
+                assert messages[0].reply_to is not None
+                assert messages[0].reply_to.name == "responses"
             finally:
                 mailbox.close()
                 responses.close()

@@ -26,6 +26,7 @@ from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..errors import DeadlineExceededError, ToolValidationError
 from ..prompt.errors import VisibilityExpansionRequired
+from ..prompt.feedback import collect_feedback
 from ..prompt.policy import PolicyDecision, ToolPolicy
 from ..prompt.prompt import Prompt, RenderedPrompt
 from ..prompt.protocols import PromptProtocol, ProviderAdapterProtocol
@@ -675,13 +676,43 @@ def dispatch_tool_invocation(
     return invocation
 
 
+def _append_feedback_to_result(
+    result: ToolResult[SupportsToolResult],
+    feedback_text: str | None,
+) -> ToolResult[SupportsToolResult]:
+    """Append feedback text to tool result message.
+
+    Feedback is always delivered when present, even if the tool message is empty.
+    This ensures feedback providers work for tools that return meaningful output
+    in their value/rendered payload rather than the message field.
+
+    Args:
+        result: The original tool result.
+        feedback_text: Feedback text to append, or None.
+
+    Returns:
+        Updated tool result with feedback appended, or original if no feedback.
+    """
+    if not feedback_text:
+        return result
+
+    from dataclasses import replace
+
+    if result.message:
+        return replace(result, message=f"{result.message}\n\n{feedback_text}")
+    return replace(result, message=feedback_text)
+
+
 def execute_tool_call(
     *,
     context: ToolExecutionContext,
     tool_call: ProviderToolCall,
 ) -> tuple[ToolInvoked, ToolResult[SupportsToolResult]]:
-    """Execute a provider tool call and dispatch the resulting event."""
+    """Execute a provider tool call and dispatch the resulting event.
 
+    After tool execution, runs feedback providers and appends any feedback
+    to the tool result message.
+    """
     with tool_execution(
         context=context,
         tool_call=tool_call,
@@ -690,7 +721,16 @@ def execute_tool_call(
             context=context,
             outcome=outcome,
         )
-    return invocation, outcome.result
+
+    # Run feedback providers after tool completion
+    feedback_text = collect_feedback(
+        prompt=cast(PromptProtocol[Any], context.prompt),
+        session=context.session,
+        deadline=context.deadline,
+    )
+
+    tool_result = _append_feedback_to_result(outcome.result, feedback_text)
+    return invocation, tool_result
 
 
 @dataclass(slots=True)
@@ -775,13 +815,21 @@ class ToolExecutor:
                     outcome=outcome,
                 )
 
+            # Run feedback providers after tool completion
+            feedback_text = collect_feedback(
+                prompt=cast(PromptProtocol[Any], self.prompt),
+                session=self.session,
+                deadline=self.deadline,
+            )
+            tool_result = _append_feedback_to_result(outcome.result, feedback_text)
+
             tool_message = {
                 "role": "tool",
                 "tool_call_id": tool_call.id,
-                "content": self.serialize_tool_message_fn(outcome.result),
+                "content": self.serialize_tool_message_fn(tool_result),
             }
             messages.append(tool_message)
-            self._tool_message_records.append((outcome.result, tool_message))
+            self._tool_message_records.append((tool_result, tool_message))
 
         return messages, next_tool_choice
 

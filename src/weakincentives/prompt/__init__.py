@@ -23,6 +23,17 @@ from .errors import (
     SectionPath,
     VisibilityExpansionRequired,
 )
+from .feedback import (
+    Feedback,
+    FeedbackContext,
+    FeedbackProvider,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
+    Observation,
+    collect_feedback,
+    run_feedback_providers,
+)
+from .feedback_providers import DeadlineFeedback
 from .markdown import MarkdownSection
 from .overrides import (
     LocalPromptOverridesStore,
@@ -71,8 +82,15 @@ from .tool import Tool, ToolContext, ToolExample, ToolHandler
 from .tool_result import ToolResult
 
 __all__ = [
+    "DeadlineFeedback",
+    "Feedback",
+    "FeedbackContext",
+    "FeedbackProvider",
+    "FeedbackProviderConfig",
+    "FeedbackTrigger",
     "LocalPromptOverridesStore",
     "MarkdownSection",
+    "Observation",
     "OpenSectionsParams",
     "OutputParseError",
     "PolicyDecision",
@@ -119,9 +137,11 @@ __all__ = [
     "ToolSuiteSection",
     "VisibilityExpansionRequired",
     "WorkspaceSection",
+    "collect_feedback",
     "hash_json",
     "hash_text",
     "parse_structured_output",
+    "run_feedback_providers",
 ]
 
 
