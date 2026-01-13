@@ -441,7 +441,7 @@ def run_feedback_providers(
                 prompt_name=context.prompt_name,
             )
             # Store in session for history and trigger calculations
-            context.session[Feedback].append(feedback)
+            _ = context.session.dispatch(feedback)
             return feedback.render()
 
     return None

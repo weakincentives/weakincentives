@@ -293,11 +293,9 @@ session[Feedback].all()      # All feedback in session
 session[Feedback].latest()   # Most recent feedback
 ```
 
-Feedback is stored directly via `session[Feedback].append(feedback)` rather than
-through an event dispatch. This is intentional: feedback storage is an
-implementation detail of the runner, not a domain event that external handlers
-need to observe. If you need to react to feedback being produced, check the
-slice after tool execution.
+Feedback is stored via `session.dispatch(feedback)` using the default `append_all`
+reducer. This follows the standard session dispatch pattern and allows external
+handlers to observe feedback being produced if needed.
 
 ### Prompt Scoping
 
