@@ -53,6 +53,7 @@ src/weakincentives/
 │   └── mailbox/     # Redis mailbox implementation
 ├── dataclasses/     # FrozenDataclass utilities
 ├── dbc/             # Design-by-contract decorators
+├── debug/           # Debugging utilities (log collector, session inspection)
 ├── evals/           # Evaluation framework (datasets, evaluators, EvalLoop)
 ├── filesystem/      # Filesystem protocol and types (core abstraction)
 ├── formal/          # TLA+ formal specification support
@@ -151,6 +152,7 @@ Consult these specs before modifying related code:
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging, skill mounting |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
+| `specs/DEBUGGING.md` | Log collector, session event slices, debug web UI, structured logging |
 | `specs/DLQ.md` | Dead letter queues, poison message handling, MainLoop/EvalLoop DLQ config |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, session evaluators |
 | `specs/EXAMPLES.md` | Code review agent reference implementation |

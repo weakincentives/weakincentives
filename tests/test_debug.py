@@ -217,7 +217,7 @@ def test_archive_filesystem_raises_on_write_failure_with_cleanup(
     assert archive_path.exists()
 
     # Mock ZipFile to raise OSError on write
-    with patch("weakincentives.debug.zipfile.ZipFile") as mock_zipfile:
+    with patch("weakincentives.debug._dump.zipfile.ZipFile") as mock_zipfile:
         mock_zf = Mock()
         mock_zf.__enter__ = Mock(return_value=mock_zf)
         mock_zf.__exit__ = Mock(return_value=False)
@@ -247,7 +247,7 @@ def test_archive_filesystem_raises_on_write_failure_no_file(tmp_path: Path) -> N
     assert not archive_path.exists()
 
     # Mock ZipFile to raise OSError before any file is created
-    with patch("weakincentives.debug.zipfile.ZipFile") as mock_zipfile:
+    with patch("weakincentives.debug._dump.zipfile.ZipFile") as mock_zipfile:
         mock_zipfile.side_effect = OSError("Permission denied")
 
         with pytest.raises(OSError, match="Permission denied"):

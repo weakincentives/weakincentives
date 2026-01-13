@@ -58,7 +58,11 @@ from weakincentives.contrib.tools import (
     WorkspaceDigestSection,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.debug import archive_filesystem, dump_session as dump_session_tree
+from weakincentives.debug import (
+    archive_filesystem,
+    collect_all_logs,
+    dump_session as dump_session_tree,
+)
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
@@ -378,8 +382,11 @@ class CodeReviewApp:
 
     def _run_worker(self) -> None:
         """Background worker that processes requests from the mailbox."""
-        # Run indefinitely until mailbox is closed
-        self._loop.run(max_iterations=None, wait_time_seconds=5)
+        # Collect all logs during prompt evaluations to a session-specific file
+        log_path = SNAPSHOT_DIR / f"{self._loop.session.session_id}.log"
+        with collect_all_logs(log_path):
+            # Run indefinitely until mailbox is closed
+            self._loop.run(max_iterations=None, wait_time_seconds=5)
         _LOGGER.debug("Worker thread exiting")
 
     def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:
@@ -480,7 +487,11 @@ class CodeReviewApp:
             self._cleanup()
 
         print("Goodbye.")
+        session_id = self._loop.session.session_id
         dump_session_tree(self._loop.session, SNAPSHOT_DIR)
+        print(f"Debug artifacts saved to {SNAPSHOT_DIR}/:")
+        print(f"  - {session_id}.jsonl (session snapshots)")
+        print(f"  - {session_id}.log (prompt evaluation logs)")
 
     def _cleanup(self) -> None:
         """Clean up resources."""

@@ -20,9 +20,9 @@ from collections.abc import Iterable
 from pathlib import Path
 from uuid import UUID, uuid4
 
-from .dbc import dbc_enabled
-from .filesystem import Filesystem
-from .runtime.session import Session, iter_sessions_bottom_up
+from ..dbc import dbc_enabled
+from ..filesystem import Filesystem
+from ..runtime.session import Session, iter_sessions_bottom_up
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -202,3 +202,9 @@ def _iter_sessions_top_down(root_session: Session) -> Iterable[Session]:
     sessions = list(iter_sessions_bottom_up(root_session))
     sessions.reverse()
     return sessions
+
+
+__all__ = [
+    "archive_filesystem",
+    "dump_session",
+]
