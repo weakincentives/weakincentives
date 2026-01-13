@@ -173,6 +173,7 @@ Consult these specs before modifying related code:
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |
 | `specs/RUN_CONTEXT.md` | Execution metadata, request correlation, distributed tracing |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
+| `specs/SHELL.md` | Shell protocol, command execution, sandboxing, ToolContext integration |
 | `specs/SKILLS.md` | Agent Skills specification and WINK skill mounting |
 | `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
 | `specs/TASK_COMPLETION.md` | Task completion checking, PlanBasedChecker, composite verification |

@@ -95,6 +95,8 @@ a goal at any time.
   altering prompt overrides or optimization.
 - **SESSIONS.md**: Session lifecycle, events, deadlines, and budgets—when
   modifying runtime session code.
+- **SHELL.md**: Shell protocol, command execution, and sandboxing—when adding
+  or modifying shell execution tools or backends.
 - **SLICES.md**: Slice storage protocol, factory configuration, and JSONL
   persistence—when modifying slice storage or adding persistence backends.
 - **THREAD_SAFETY.md**: Thread safety guarantees—when touching concurrency
