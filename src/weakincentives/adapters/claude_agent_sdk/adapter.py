@@ -51,6 +51,7 @@ from ._hooks import (
     create_task_completion_stop_hook,
     create_user_prompt_submit_hook,
 )
+from ._log_aggregator import ClaudeLogAggregator
 from ._notifications import Notification
 from ._task_completion import TaskCompletionContext
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
@@ -460,7 +461,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             if temp_workspace_dir:
                 shutil.rmtree(temp_workspace_dir, ignore_errors=True)
 
-    async def _run_with_prompt_context[OutputT](
+    async def _run_with_prompt_context[OutputT](  # noqa: PLR0914 - locals needed for log aggregation
         self,
         *,
         sdk: Any,
@@ -569,16 +570,23 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
+        # Create log aggregator to monitor .claude directory for log files
+        log_aggregator = ClaudeLogAggregator(
+            claude_dir=ephemeral_home.claude_dir,
+            prompt_name=prompt_name,
+        )
+
         try:
-            messages = await self._run_sdk_query(
-                sdk=sdk,
-                prompt_text=prompt_text,
-                output_format=output_format,
-                hook_context=hook_context,
-                bridged_tools=bridged_tools,
-                ephemeral_home=ephemeral_home,
-                effective_cwd=effective_cwd,
-            )
+            async with log_aggregator.run():
+                messages = await self._run_sdk_query(
+                    sdk=sdk,
+                    prompt_text=prompt_text,
+                    output_format=output_format,
+                    hook_context=hook_context,
+                    bridged_tools=bridged_tools,
+                    ephemeral_home=ephemeral_home,
+                    effective_cwd=effective_cwd,
+                )
         except VisibilityExpansionRequired:
             # Progressive disclosure: let this propagate to the caller
             logger.debug(
