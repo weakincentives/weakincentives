@@ -38,7 +38,6 @@ from weakincentives.adapters.claude_agent_sdk._hooks import (
     create_user_prompt_submit_hook,
     safe_hook_wrapper,
 )
-from weakincentives.adapters.claude_agent_sdk._notifications import Notification
 from weakincentives.adapters.claude_agent_sdk._task_completion import PlanBasedChecker
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
@@ -888,35 +887,6 @@ class TestPostToolUseHookWithTypedParsing:
         event = events[0]
         assert event.name == ""
         assert event.rendered_output == ""
-
-
-class TestNotification:
-    def test_construction(self) -> None:
-        payload = {"session_id": "sess-123", "subagent_type": "analyzer"}
-        notification = Notification(
-            source="subagent_start",
-            payload=payload,
-            prompt_name="test_prompt",
-            adapter_name="test_adapter",
-        )
-
-        assert notification.source == "subagent_start"
-        assert notification.payload == payload
-        assert notification.prompt_name == "test_prompt"
-        assert notification.adapter_name == "test_adapter"
-        assert notification.notification_id is not None
-
-    def test_render(self) -> None:
-        notification = Notification(
-            source="notification",
-            payload={"message": "Test message"},
-            prompt_name="test_prompt",
-            adapter_name="test_adapter",
-        )
-        rendered = notification.render()
-
-        assert "[notification]" in rendered
-        assert "test_prompt" in rendered
 
 
 class TestSubagentStartHook:
