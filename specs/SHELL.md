@@ -1053,72 +1053,10 @@ if not result.success:
 # context.shell.execute(...) works in tool handlers
 ```
 
-## Streaming Output
-
-For long-running commands, backends may support streaming output. This is
-exposed through an optional extended protocol:
-
-```python
-from collections.abc import Iterator
-
-class StreamingShell(Shell, Protocol):
-    """Shell that supports streaming command output."""
-
-    def execute_streaming(
-        self,
-        command: str | Sequence[str],
-        *,
-        cwd: str | None = None,
-        env: Mapping[str, str] | None = None,
-        timeout_seconds: float = 30.0,
-    ) -> Iterator[StreamChunk]:
-        """Execute command and yield output chunks as they arrive.
-
-        Yields:
-            StreamChunk objects with partial stdout/stderr.
-
-        The final chunk contains the exit code.
-        """
-        ...
-
-
-@dataclass(slots=True, frozen=True)
-class StreamChunk:
-    """Partial output from a streaming execution."""
-
-    stream: Literal["stdout", "stderr"]
-    content: str
-    exit_code: int | None = None  # Set on final chunk
-```
-
-Tool handlers can use streaming for progress reporting:
-
-```python
-def long_running_handler(
-    params: Params,
-    *,
-    context: ToolContext,
-) -> ToolResult[Result]:
-    shell = context.shell
-    if not isinstance(shell, StreamingShell):
-        # Fall back to regular execution
-        return shell.execute(params.command)
-
-    output_lines = []
-    for chunk in shell.execute_streaming(params.command, timeout_seconds=300.0):
-        output_lines.append(chunk.content)
-        context.beat()  # Keep lease alive during long execution
-
-        if chunk.exit_code is not None:
-            # Final chunk
-            if chunk.exit_code != 0:
-                return ToolResult.error(f"Failed: {''.join(output_lines)}")
-
-    return ToolResult.ok(Result(output="".join(output_lines)))
-```
-
 ## Limitations
 
+- **Synchronous only**: All execution is blocking; no async API.
+- **No streaming**: Output is buffered; no incremental streaming support.
 - **No PTY support**: Interactive commands (vim, less, etc.) are not supported.
 - **No background jobs**: Commands must complete within timeout; no `&` support.
 - **Text output only**: Binary output is decoded as UTF-8 with replacement chars.
