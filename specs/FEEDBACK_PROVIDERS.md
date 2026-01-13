@@ -97,7 +97,8 @@ class Feedback:
     suggestions: tuple[str, ...] = ()
     severity: Literal["info", "caution", "warning"] = "info"
     timestamp: datetime = field(default_factory=_utcnow)
-    call_index: int = 0  # Set by runner after provide()
+    call_index: int = 0    # Set by runner after provide()
+    prompt_name: str = ""  # Set by runner after provide()
 ```
 
 The `render()` method produces text for injection:
@@ -122,6 +123,8 @@ class FeedbackContext:
     deadline: Deadline | None = None
 
     @property
+    def prompt_name(self) -> str: ...
+    @property
     def resources(self) -> PromptResources: ...
     @property
     def filesystem(self) -> Filesystem | None: ...
@@ -133,6 +136,10 @@ class FeedbackContext:
     def tool_calls_since_last_feedback(self) -> int: ...
     def recent_tool_calls(self, n: int) -> Sequence[ToolInvoked]: ...
 ```
+
+The `last_feedback`, `tool_call_count`, `tool_calls_since_last_feedback()`, and
+`recent_tool_calls()` methods are scoped to the current prompt (via `prompt_name`)
+to ensure consistent behavior when sessions are reused across prompts.
 
 ## Execution Flow
 
@@ -229,7 +236,6 @@ Implement the `FeedbackProvider` protocol:
 ```python
 from dataclasses import dataclass
 from weakincentives.prompt import Feedback, FeedbackContext
-from weakincentives.runtime.session import SessionProtocol
 
 
 @dataclass(frozen=True)
@@ -242,20 +248,10 @@ class ToolUsageMonitor:
     def name(self) -> str:
         return "ToolUsageMonitor"
 
-    def should_run(
-        self,
-        session: SessionProtocol,
-        *,
-        context: FeedbackContext,
-    ) -> bool:
+    def should_run(self, *, context: FeedbackContext) -> bool:
         return True  # Always run when triggered
 
-    def provide(
-        self,
-        session: SessionProtocol,
-        *,
-        context: FeedbackContext,
-    ) -> Feedback:
+    def provide(self, *, context: FeedbackContext) -> Feedback:
         count = context.tool_call_count
         if count > self.max_calls_without_progress:
             return Feedback(
@@ -302,6 +298,20 @@ through an event dispatch. This is intentional: feedback storage is an
 implementation detail of the runner, not a domain event that external handlers
 need to observe. If you need to react to feedback being produced, check the
 slice after tool execution.
+
+### Prompt Scoping
+
+When sessions are reused across multiple prompt evaluations, feedback history
+and tool call counts are scoped to the current prompt. Each `Feedback` object
+includes a `prompt_name` field that the runner sets automatically. The
+`FeedbackContext` filters by this field when calculating:
+
+- `last_feedback` - Most recent feedback for the current prompt
+- `tool_call_count` - Tool calls matching the current prompt
+- `tool_calls_since_last_feedback()` - Calls since last feedback for this prompt
+
+This ensures triggers behave consistently regardless of prior activity in the
+session.
 
 This history enables:
 

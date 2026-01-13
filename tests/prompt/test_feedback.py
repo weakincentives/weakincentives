@@ -277,8 +277,12 @@ class TestFeedbackContext:
         session = make_session()
         prompt = make_prompt()
 
-        session[Feedback].append(Feedback(provider_name="A", summary="First"))
-        session[Feedback].append(Feedback(provider_name="B", summary="Second"))
+        session[Feedback].append(
+            Feedback(provider_name="A", summary="First", prompt_name="test")
+        )
+        session[Feedback].append(
+            Feedback(provider_name="B", summary="Second", prompt_name="test")
+        )
 
         context = FeedbackContext(session=session, prompt=prompt)
 
@@ -322,7 +326,9 @@ class TestFeedbackContext:
         for i in range(3):
             session.dispatcher.dispatch(make_tool_invoked(f"tool_{i}"))
         session[Feedback].append(
-            Feedback(provider_name="A", summary="Test", call_index=3)
+            Feedback(
+                provider_name="A", summary="Test", call_index=3, prompt_name="test"
+            )
         )
         for i in range(2):
             session.dispatcher.dispatch(make_tool_invoked(f"more_{i}"))
@@ -484,6 +490,7 @@ class TestShouldTrigger:
                     summary="Test",
                     call_index=last_feedback_call_index,
                     timestamp=ts,
+                    prompt_name="test",  # Match make_prompt's name
                 )
             )
 

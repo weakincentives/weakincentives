@@ -111,6 +111,7 @@ class Feedback:
         severity: Urgency level - "info", "caution", or "warning".
         timestamp: When the feedback was produced.
         call_index: Tool call count when feedback was produced (set by runner).
+        prompt_name: Name of the prompt that produced this feedback (set by runner).
     """
 
     provider_name: str
@@ -120,6 +121,7 @@ class Feedback:
     severity: Literal["info", "caution", "warning"] = "info"
     timestamp: datetime = field(default_factory=_utcnow)
     call_index: int = 0
+    prompt_name: str = ""
 
     def render(self) -> str:
         """Render feedback as text for context injection.
@@ -174,8 +176,12 @@ class FeedbackContext:
     deadline: Deadline | None = None
 
     @property
-    def _prompt_name(self) -> str:
-        """Return the prompt name for filtering events."""
+    def prompt_name(self) -> str:
+        """Return the prompt name for filtering events.
+
+        Used internally by feedback providers and runners to scope trigger
+        calculations to the current prompt.
+        """
         return self.prompt.name or f"{self.prompt.ns}:{self.prompt.key}"
 
     @property
@@ -190,16 +196,28 @@ class FeedbackContext:
 
         return self.resources.get_optional(Filesystem)
 
+    def _feedback_for_prompt(self) -> Sequence[Feedback]:
+        """Return all feedback for the current prompt."""
+        prompt_name = self.prompt_name
+        return tuple(
+            fb for fb in self.session[Feedback].all() if fb.prompt_name == prompt_name
+        )
+
     @property
     def last_feedback(self) -> Feedback | None:
-        """Return the most recent feedback, or None if no feedback exists."""
-        return self.session[Feedback].latest()
+        """Return the most recent feedback for the current prompt.
+
+        Only considers feedback matching this prompt's name to ensure triggers
+        behave consistently when sessions are reused across prompts.
+        """
+        feedback_list = self._feedback_for_prompt()
+        return feedback_list[-1] if feedback_list else None
 
     def _tool_calls_for_prompt(self) -> Sequence[ToolInvoked]:
         """Return all tool calls for the current prompt."""
         from ..runtime.events import ToolInvoked
 
-        prompt_name = self._prompt_name
+        prompt_name = self.prompt_name
         return tuple(
             event
             for event in self.session[ToolInvoked].all()
@@ -416,8 +434,12 @@ def run_feedback_providers(
             context=context
         ):
             feedback = config.provider.provide(context=context)
-            # Update call_index to current tool call count
-            feedback = replace(feedback, call_index=context.tool_call_count)
+            # Update call_index and prompt_name for trigger state tracking
+            feedback = replace(
+                feedback,
+                call_index=context.tool_call_count,
+                prompt_name=context.prompt_name,
+            )
             # Store in session for history and trigger calculations
             context.session[Feedback].append(feedback)
             return feedback.render()
