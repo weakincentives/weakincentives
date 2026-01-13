@@ -134,7 +134,7 @@ extend-select = [
     "PLR",
     "PERF",
 ]
-extend-ignore = ["TRY003"]
+extend-ignore = ["TRY003", "RUF067"]
 fixable = ["I001", "F401"]
 
 [tool.ruff.lint.isort]
