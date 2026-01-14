@@ -613,8 +613,8 @@ def test_summary_rendering() -> None:
     )
     prompt = Prompt(template)
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     rendered = prompt.render(session=session, params=None)
 

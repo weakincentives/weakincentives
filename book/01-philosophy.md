@@ -414,7 +414,7 @@ budget = Budget(
     max_total_tokens=50000,
 )
 
-session = Session(bus=bus, budget=budget)
+session = Session(dispatcher=bus, budget=budget)
 ```
 
 Budgets are policies at the resource level: the agent is free to allocate tokens

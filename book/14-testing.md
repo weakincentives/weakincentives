@@ -311,8 +311,8 @@ def test_add_step_creates_new_step() -> None:
     """Test that AddStepEvent creates a new step."""
     from weakincentives.runtime import Session, InProcessDispatcher
 
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
 
     # Register reducer
     session[Step].register(AddStepEvent, add_step_reducer)
@@ -352,7 +352,7 @@ def complete_step_reducer(
 
 def test_complete_step_updates_status() -> None:
     """Test that CompleteStepEvent marks step as completed."""
-    session = Session(bus=InProcessDispatcher())
+    session = Session(dispatcher=InProcessDispatcher())
     session[Step].register(AddStepEvent, add_step_reducer)
     session[Step].register(CompleteStepEvent, complete_step_reducer)
 
@@ -412,7 +412,7 @@ def test_code_review_integration() -> None:
     adapter = OpenAIAdapter(model="gpt-4o-mini")
 
     # Create session
-    session = Session(bus=InProcessDispatcher())
+    session = Session(dispatcher=InProcessDispatcher())
 
     # Bind prompt
     bound_prompt = review_prompt.bind(
@@ -440,7 +440,7 @@ from weakincentives.runtime.debug import dump_session
 def test_complex_agent_flow() -> None:
     """Integration test that records session snapshot."""
     adapter = OpenAIAdapter(model="gpt-4o-mini")
-    session = Session(bus=InProcessDispatcher())
+    session = Session(dispatcher=InProcessDispatcher())
 
     # Run agent
     response = adapter.evaluate(prompt, session=session)
@@ -632,7 +632,7 @@ def test_regression_42_session_deadlock() -> None:
     https://github.com/org/weakincentives/issues/42
     """
     # Reproduce exact conditions from bug report
-    session = Session(bus=InProcessDispatcher())
+    session = Session(dispatcher=InProcessDispatcher())
     # ... test setup that triggers the deadlock ...
     assert session.is_healthy()
 ```
@@ -644,7 +644,7 @@ Sessions support snapshotting and restoration. Test round-trip integrity:
 ```python nocheck
 def test_snapshot_roundtrip_integrity() -> None:
     """Snapshot and rollback preserve exact state."""
-    session = Session(bus=InProcessDispatcher())
+    session = Session(dispatcher=InProcessDispatcher())
     session.dispatch(AddStepEvent(description="Step 1"))
 
     # Take snapshot

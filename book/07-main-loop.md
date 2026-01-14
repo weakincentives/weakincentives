@@ -103,7 +103,7 @@ from weakincentives.runtime import InProcessDispatcher
 
 # Create dependencies
 adapter = OpenAIAdapter(model="gpt-4o")
-bus = InProcessDispatcher()
+dispatcher = InProcessDispatcher()
 
 # Instantiate the loop
 loop = MyLoop(adapter=adapter, bus=bus)
@@ -496,7 +496,7 @@ from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection
 
 class AgentLoop(MainLoop[str, str]):
     def prepare(self, request: str) -> tuple[Prompt[str], Session]:
-        session = Session(bus=self._bus, tags={"query": request})
+        session = Session(dispatcher=self._bus, tags={"query": request})
 
         # Build template with session-bound sections
         template = PromptTemplate(
@@ -528,12 +528,12 @@ class AgentLoop(MainLoop[str, str]):
 def prepare(self, request: RequestType) -> tuple[Prompt[OutputType], Session]:
     data = requests.get(f"https://api.example.com/data/{request.id}").json()  # Slow!
     prompt = Prompt(self._template).bind(data)
-    return prompt, Session(bus=self._bus)
+    return prompt, Session(dispatcher=self._bus)
 
 # Good: Load data in tool handler or before execute()
 def prepare(self, request: RequestType) -> tuple[Prompt[OutputType], Session]:
     prompt = Prompt(self._template).bind(request)
-    return prompt, Session(bus=self._bus)
+    return prompt, Session(dispatcher=self._bus)
 ```
 
 ### 2. Use Session Tags for Tracking
@@ -643,7 +643,7 @@ Execute multiple prompts in sequence:
 ```python
 class MultiStepLoop(MainLoop[Request, FinalOutput]):
     def prepare(self, request: Request) -> tuple[Prompt[FinalOutput], Session]:
-        session = Session(bus=self._bus)
+        session = Session(dispatcher=self._bus)
 
         # Step 1: Research
         research_prompt = Prompt(self._research_template).bind(request)
@@ -667,7 +667,7 @@ Choose prompts based on request:
 ```python
 class ConditionalLoop(MainLoop[Request, Output]):
     def prepare(self, request: Request) -> tuple[Prompt[Output], Session]:
-        session = Session(bus=self._bus)
+        session = Session(dispatcher=self._bus)
 
         # Select template based on request type
         if request.type == "bug_fix":

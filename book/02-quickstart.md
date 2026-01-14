@@ -130,8 +130,8 @@ prompt = Prompt(template).bind(SummarizeRequest(
 ))
 
 # Create a session to track execution
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # Evaluate the prompt using an adapter
 adapter = OpenAIAdapter(model="gpt-4o-mini")
@@ -210,7 +210,7 @@ You'll see this pattern in every WINK example.
 **4. Sessions Track Everything**
 
 ```python
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 ```
 
 The session receives events for every significant operation: prompt rendering, tool calls, adapter responses. This creates an auditable trace of agent behavior. We'll explore sessions in depth in [Chapter 5: Sessions](05-sessions.md).

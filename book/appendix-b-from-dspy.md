@@ -151,7 +151,7 @@ DSPy traces execution but doesn't expose a structured state model. WINK sessions
 
 ```python
 # Explicit state slices
-session = Session(bus=InProcessDispatcher())
+session = Session(dispatcher=InProcessDispatcher())
 session[Plan].seed(initial_plan)
 session.dispatch(AddStep(step="Research topic"))
 

@@ -960,7 +960,7 @@ The in-process event bus is fully thread-safe:
 ```python
 from weakincentives.runtime import InProcessDispatcher
 
-bus = InProcessDispatcher()
+dispatcher = InProcessDispatcher()
 
 # All operations are thread-safe
 bus.subscribe(EventType, handler)  # Protected by RLock
@@ -979,7 +979,7 @@ Sessions protect reducer registration and state mutation with an `RLock`:
 ```python
 from weakincentives.runtime import Session
 
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 
 # All operations are thread-safe
 session.dispatch(event)                    # Protected by RLock
@@ -1077,7 +1077,7 @@ Custom event handlers are invoked on the publisher thread without additional syn
 ```python
 from weakincentives.runtime import InProcessDispatcher
 
-bus = InProcessDispatcher()
+dispatcher = InProcessDispatcher()
 shared_list = []
 
 def handler(event: MyEvent) -> None:
@@ -1243,8 +1243,8 @@ import pytest
 @pytest.mark.threadstress(threads=4, iterations=100)
 def test_concurrent_dispatch():
     """Test session dispatch from multiple threads."""
-    bus = InProcessDispatcher()
-    session = Session(bus=bus)
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
     session[CallCount].register(CallCount, replace_latest)
 
     def worker():

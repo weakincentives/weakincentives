@@ -120,8 +120,8 @@ class Plan:
 from weakincentives.contrib.tools import PlanningToolsSection, PlanningStrategy
 from weakincentives.runtime import Session, InProcessDispatcher
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # Add planning tools to prompt
 planning = PlanningToolsSection(
@@ -869,8 +869,8 @@ def build_repo_agent_template(
 from weakincentives.runtime import Session, InProcessDispatcher
 from weakincentives.adapters.openai import OpenAIAdapter
 
-bus = InProcessDispatcher()
-session = Session(bus=bus)
+dispatcher = InProcessDispatcher()
+session = Session(dispatcher=dispatcher)
 
 # Build prompt with workspace tools
 template = build_repo_agent_template(
@@ -1044,7 +1044,7 @@ All workspace mutations flow through the session:
 ```python
 from weakincentives.runtime import Session
 
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 
 # Agent uses workspace tools
 # → Events dispatched

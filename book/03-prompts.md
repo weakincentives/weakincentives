@@ -640,7 +640,7 @@ def build_prompt_template(*, session: Session) -> PromptTemplate[Any]:
 
 
 # Usage:
-session = Session(bus=dispatcher)
+session = Session(dispatcher=dispatcher)
 template = build_prompt_template(session=session)
 prompt = Prompt(template).bind(params)
 ```

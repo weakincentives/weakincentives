@@ -221,7 +221,7 @@ You can subscribe to the event bus to build custom observability:
 from weakincentives.runtime import InProcessDispatcher, Session
 from weakincentives.runtime.events import ToolInvoked, TokenUsage
 
-bus = InProcessDispatcher()
+dispatcher = InProcessDispatcher()
 
 def log_tool_calls(event: ToolInvoked) -> None:
     print(f"Tool {event.tool_name} took {event.duration_ms}ms")
@@ -233,7 +233,7 @@ def track_token_usage(event: TokenUsage) -> None:
 bus.subscribe(ToolInvoked, log_tool_calls)
 bus.subscribe(TokenUsage, track_token_usage)
 
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 ```
 
 This pattern lets you route events to external systems (Datadog, Honeycomb, Prometheus, etc.) without modifying agent code.
@@ -1698,7 +1698,7 @@ from weakincentives.runtime.debug import dump_session
 configure_logging(level="INFO", json_mode=True)
 
 # 2. Set up event bus with subscribers
-bus = InProcessDispatcher()
+dispatcher = InProcessDispatcher()
 
 def track_tool_performance(event: ToolInvoked) -> None:
     # Send to metrics backend

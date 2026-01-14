@@ -91,10 +91,10 @@ The minimal setup requires an event dispatcher:
 from weakincentives.runtime import Session, InProcessDispatcher
 
 # Create event bus
-bus = InProcessDispatcher()
+dispatcher = InProcessDispatcher()
 
 # Create session
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 ```
 
 ### Session Parameters
@@ -1029,10 +1029,10 @@ graph TB
 
 ```python
 # Create parent session
-parent_session = Session(bus=bus)
+parent_session = Session(dispatcher=dispatcher)
 
 # Create child session
-child_session = Session(bus=bus, parent=parent_session)
+child_session = Session(dispatcher=bus, parent=parent_session)
 
 # Access relationship
 assert child_session.parent is parent_session
@@ -1057,7 +1057,7 @@ for session in iter_sessions_bottom_up(root_session):
 ```python
 def execute_subtask(parent: Session, task: Task) -> Result:
     # Create isolated session for subtask
-    child = Session(bus=parent.dispatcher, parent=parent)
+    child = Session(dispatcher=parent.dispatcher, parent=parent)
 
     # Execute subtask in child session
     child.dispatch(SetupTask(task))
@@ -1091,7 +1091,7 @@ Sessions integrate seamlessly with WINK's prompt and adapter systems (see [Chapt
 from weakincentives.adapters.openai import OpenAIAdapter
 
 adapter = OpenAIAdapter(model="gpt-4")
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 
 # Session receives telemetry events
 prompt = Prompt(template).bind(params)
@@ -1265,7 +1265,7 @@ Create child sessions for subtasks to maintain isolation:
 ```python
 def execute_risky_operation(parent: Session) -> Result:
     # Create isolated session
-    child = Session(bus=parent.dispatcher, parent=parent)
+    child = Session(dispatcher=parent.dispatcher, parent=parent)
 
     try:
         # Execute in isolation
@@ -1287,7 +1287,7 @@ Write tests for reducer logic:
 ```python
 def test_add_step_reducer():
     # Create test session
-    session = Session(bus=InProcessDispatcher())
+    session = Session(dispatcher=InProcessDispatcher())
     session[Plan].register(AddStep, add_step_reducer)
 
     # Dispatch events
@@ -1535,7 +1535,7 @@ config = SliceFactoryConfig(
     log_factory=JsonlSliceFactory(base_dir=Path("./session_logs")),
 )
 
-session = Session(bus=bus, slice_config=config)
+session = Session(dispatcher=bus, slice_config=config)
 ```
 
 Each slice type is assigned a policy when registered. The factory creates appropriate backends automatically:
@@ -1762,7 +1762,7 @@ def transform_reducer(
 
 ```python
 # Implicit default - no configuration needed
-session = Session(bus=bus)
+session = Session(dispatcher=dispatcher)
 ```
 
 All slices use `MemorySlice`. State lives only in memory.
@@ -1774,7 +1774,7 @@ config = SliceFactoryConfig(
     state_factory=MemorySliceFactory(),
     log_factory=JsonlSliceFactory(base_dir=Path("./logs")),
 )
-session = Session(bus=bus, slice_config=config)
+session = Session(dispatcher=bus, slice_config=config)
 ```
 
 `ToolInvoked`, `PromptExecuted`, and other `LOG` slices persist. `Plan` and custom state stay in memory.
@@ -1788,7 +1788,7 @@ config = SliceFactoryConfig(
     state_factory=MemorySliceFactory(),
     log_factory=log_factory,
 )
-session = Session(bus=bus, slice_config=config)
+session = Session(dispatcher=bus, slice_config=config)
 
 # Logs written to /tmp/wink_slices_abc123/
 print(f"Debug logs: {log_factory.directory}")
@@ -1804,7 +1804,7 @@ config = SliceFactoryConfig(
     state_factory=jsonl_factory,
     log_factory=jsonl_factory,
 )
-session = Session(bus=bus, slice_config=config)
+session = Session(dispatcher=bus, slice_config=config)
 ```
 
 Everything persists to disk. Slower but enables crash recovery.
