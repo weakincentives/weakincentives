@@ -156,6 +156,7 @@ Consult these specs before modifying related code:
 | `specs/DLQ.md` | Dead letter queues, poison message handling, MainLoop/EvalLoop DLQ config |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, session evaluators |
 | `specs/EXAMPLES.md` | Code review agent reference implementation |
+| `specs/EXPERIMENTS.md` | Experiment configuration for A/B testing, prompt overrides tags, feature flags |
 | `specs/EXHAUSTIVENESS.md` | Union type totality, `assert_never` patterns, match statement coverage |
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/FORMAL_VERIFICATION.md` | Embedding TLA+ in Python, `@formal_spec` decorator, TLC verification |
