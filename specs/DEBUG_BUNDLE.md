@@ -6,15 +6,15 @@ on a potentially long-running task.
 
 ## Overview
 
-A debug bundle consolidates multiple debugging surfaces into a single,
+A debug bundle consolidates all debugging information into a single,
 self-contained artifact:
 
-| Component | Source | Purpose |
-| -------------------- | ---------------------- | -------------------------------------------- |
-| **Session Snapshots** | `dump_session` | Complete session state, events, and slices |
-| **Execution Logs** | `collect_all_logs` | Structured log timeline with full context |
-| **Filesystem Archive** | `archive_filesystem` | Files created/modified during execution |
-| **Bundle Metadata** | `DebugBundle` | Timing, configuration, environment context |
+| Component | Purpose |
+| -------------------- | ---------------------------------------------------- |
+| **Session Snapshots** | Complete session state, events, and slices |
+| **Execution Logs** | Structured log timeline with full context |
+| **Filesystem Archive** | Files created/modified during execution |
+| **Bundle Metadata** | Timing, configuration, environment context |
 
 ```mermaid
 flowchart TB
@@ -534,13 +534,12 @@ wink debug ./debug/abc123.wink --export-files ./files/
 The `wink debug` command accepts:
 
 1. **Bundle files** (`.wink`): Load the complete bundle
-2. **JSONL files** (`.jsonl`): Load as snapshots (backward compatible)
-3. **Directories**: Search for most recent `.wink` or `.jsonl` file
+2. **Directories**: Search for most recent `.wink` file
 
 ```bash
-# All equivalent for bundle loading
+# Both equivalent for bundle loading
 wink debug ./debug/abc123.wink
-wink debug ./debug/  # Finds most recent .wink or .jsonl
+wink debug ./debug/  # Finds most recent .wink bundle
 ```
 
 ### Web UI Enhancements
@@ -655,19 +654,6 @@ builder.add_filesystem(
 )
 ```
 
-## Relationship to Existing APIs
-
-The `DebugBundle` abstraction builds on existing functions:
-
-| Existing Function | Bundle Usage |
-| --------------------- | ------------------------------------------------- |
-| `collect_all_logs()` | Powers log capture within `capture()` context |
-| `dump_session()` | Called by `add_snapshot()` to serialize state |
-| `archive_filesystem()` | Called by `add_filesystem()` to archive VFS |
-
-The bundle provides a unified interface while preserving the ability to use
-these functions independently for simpler use cases.
-
 ## Thread Safety
 
 - `DebugBundleBuilder` is **not** thread-safe; use one builder per execution
@@ -682,38 +668,8 @@ these functions independently for simpler use cases.
 - File paths use forward slashes regardless of platform
 - The `.wink` extension is chosen to avoid conflicts with common formats
 
-## Migration Path
-
-### From Existing Debug Utilities
-
-Applications using the existing debug utilities can migrate incrementally:
-
-```python
-# Before: Manual coordination of debug outputs
-debug_dir = f"./debug/{session.session_id}"
-with collect_all_logs(f"{debug_dir}/prompt.log"):
-    response = adapter.evaluate(prompt, session=session)
-dump_session(session, debug_dir)
-archive_filesystem(fs, debug_dir)
-
-# After: Unified bundle capture
-builder = DebugBundleBuilder(session=session, agent=agent_info)
-with builder.capture():
-    response = adapter.evaluate(prompt, session=session)
-builder.add_filesystem(fs)
-builder.finalize().export("./debug/")
-```
-
-### Backward Compatibility
-
-- `wink debug` continues to accept JSONL snapshot files
-- Existing `collect_all_logs`, `dump_session`, and `archive_filesystem`
-  remain available for standalone use
-- Bundle format version in manifest enables future evolution
-
 ## Related Specifications
 
-- `specs/DEBUGGING.md` - Original debugging surfaces (superseded by this spec)
 - `specs/WINK_DEBUG.md` - Debug web UI specification
 - `specs/SESSIONS.md` - Session lifecycle and snapshots
 - `specs/SLICES.md` - Slice storage backends
