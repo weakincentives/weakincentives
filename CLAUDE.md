@@ -152,7 +152,8 @@ Consult these specs before modifying related code:
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging, skill mounting |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
-| `specs/DEBUGGING.md` | Log collector, session event slices, debug web UI, structured logging |
+| `specs/DEBUG_BUNDLE.md` | Unified debug artifact, bundle capture, CLI integration |
+| `specs/DEBUGGING.md` | Log collector, session event slices (superseded by DEBUG_BUNDLE.md) |
 | `specs/DLQ.md` | Dead letter queues, poison message handling, MainLoop/EvalLoop DLQ config |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, session evaluators |
 | `specs/EXAMPLES.md` | Code review agent reference implementation |

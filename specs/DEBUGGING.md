@@ -1,5 +1,9 @@
 # Debugging Specification
 
+> **Note**: This specification describes individual debugging utilities. For the
+> unified debug bundle abstraction that consolidates all debugging surfaces into
+> a single artifact, see `specs/DEBUG_BUNDLE.md`.
+
 This document describes debugging tools and patterns available in the
 `weakincentives` library for inspecting prompt evaluation, session state, and
 runtime behavior.
