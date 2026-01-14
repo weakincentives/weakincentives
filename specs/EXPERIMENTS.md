@@ -370,21 +370,6 @@ def prepare(
 
 ## Session Tracking
 
-### ExperimentStarted Event
-
-```python
-@dataclass(slots=True, frozen=True)
-class ExperimentStarted:
-    """Event indicating an experiment context was established."""
-
-    experiment_name: str
-    overrides_tag: str
-    flags: Mapping[str, object]
-    owner: str | None = None
-    description: str | None = None
-    started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-```
-
 ### Seeding Pattern
 
 ```python
@@ -399,15 +384,6 @@ def prepare(
     if experiment:
         # Seed experiment into session for tracking
         session[Experiment].seed(experiment)
-
-        # Dispatch started event for observability
-        session.dispatch(ExperimentStarted(
-            experiment_name=experiment.name,
-            overrides_tag=experiment.overrides_tag,
-            flags=dict(experiment.flags),
-            owner=experiment.owner,
-            description=experiment.description,
-        ))
 
     return Prompt(self._template), session
 ```
