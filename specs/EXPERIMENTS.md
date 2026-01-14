@@ -63,14 +63,17 @@ class Experiment:
         flags: Feature flags controlling runtime behavior. Keys are flag names,
             values are flag settings. Agent implementations check these flags
             to conditionally enable features.
-        metadata: Optional metadata for tracking and reporting (e.g., author,
-            description, created_at). Not used by runtime—purely informational.
+        owner: Optional owner identifier (e.g., email, username) for tracking
+            who created or is responsible for this experiment.
+        description: Optional human-readable description of what this experiment
+            tests or changes.
     """
 
     name: str
     overrides_tag: str = "latest"
     flags: Mapping[str, object] = field(default_factory=dict)
-    metadata: Mapping[str, object] = field(default_factory=dict)
+    owner: str | None = None
+    description: str | None = None
 
     def with_flag(self, key: str, value: object) -> "Experiment":
         """Return new experiment with flag added/updated."""
@@ -377,6 +380,8 @@ class ExperimentStarted:
     experiment_name: str
     overrides_tag: str
     flags: Mapping[str, object]
+    owner: str | None = None
+    description: str | None = None
     started_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 ```
 
@@ -400,6 +405,8 @@ def prepare(
             experiment_name=experiment.name,
             overrides_tag=experiment.overrides_tag,
             flags=dict(experiment.flags),
+            owner=experiment.owner,
+            description=experiment.description,
         ))
 
     return Prompt(self._template), session
@@ -569,6 +576,8 @@ treatment = Experiment(
     name="concise-prompts",
     overrides_tag="v2-concise",
     flags={"max_response_tokens": 500},
+    owner="alice@example.com",
+    description="Test shorter, more direct prompt phrasing",
 )
 
 # Load dataset
