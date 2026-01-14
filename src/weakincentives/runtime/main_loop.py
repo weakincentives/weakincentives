@@ -44,6 +44,8 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import socket
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
@@ -189,7 +191,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         adapter: ProviderAdapter[OutputT],
         requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         config: MainLoopConfig | None = None,
-        worker_id: str = "",
+        worker_id: str | None = None,
     ) -> None:
         """Initialize the MainLoop.
 
@@ -198,7 +200,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
             requests: Mailbox to receive MainLoopRequest messages from.
                 Response routing derives from each message's reply_to field.
             config: Optional configuration for default deadline/budget.
-            worker_id: Identifier for this worker instance.
+            worker_id: Identifier for this worker instance. If None or empty,
+                auto-generates as "{hostname}-{pid}". Recommended formats:
+                - Production: "{hostname}-{pid}" or "{k8s_pod_name}"
+                - Testing: "test-worker" or descriptive test name
         """
         super().__init__()
         self._adapter = adapter
@@ -215,7 +220,12 @@ class MainLoop[UserRequestT, OutputT](ABC):
             else LeaseExtenderConfig()
         )
         self._lease_extender = LeaseExtender(config=lease_config)
-        self._worker_id = worker_id
+        # Auto-generate worker_id if not provided
+        if worker_id:
+            self._worker_id = worker_id
+        else:
+            hostname = socket.gethostname()
+            self._worker_id = f"{hostname}-{os.getpid()}"
 
     @property
     def heartbeat(self) -> Heartbeat:
@@ -368,25 +378,34 @@ class MainLoop[UserRequestT, OutputT](ABC):
     ) -> RunContext:
         """Build RunContext for this execution.
 
-        If the request includes a run_context, trace IDs are preserved.
         The run_id is always fresh for each execution attempt.
+
+        Request ID always comes from request_event.request_id to ensure
+        correlation with MainLoopResult.request_id. The run_context parameter
+        is only used for distributed trace context (trace_id, span_id).
+
+        Args:
+            request_event: The incoming request with optional run_context.
+            delivery_count: Message delivery count (attempt number).
+            session_id: Session ID to embed (typically set via replace() later).
+
+        Returns:
+            Fresh RunContext with new run_id and preserved trace context.
         """
+        trace_id: str | None = None
+        span_id: str | None = None
         if request_event.run_context is not None:
-            return RunContext(
-                run_id=uuid4(),
-                request_id=request_event.run_context.request_id,
-                session_id=session_id,
-                attempt=delivery_count,
-                worker_id=self._worker_id,
-                trace_id=request_event.run_context.trace_id,
-                span_id=request_event.run_context.span_id,
-            )
+            trace_id = request_event.run_context.trace_id
+            span_id = request_event.run_context.span_id
+
         return RunContext(
             run_id=uuid4(),
             request_id=request_event.request_id,
             session_id=session_id,
             attempt=delivery_count,
             worker_id=self._worker_id,
+            trace_id=trace_id,
+            span_id=span_id,
         )
 
     def _handle_message(

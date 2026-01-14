@@ -1076,9 +1076,9 @@ def test_loop_preserves_run_context_from_request() -> None:
         assert result_ctx is not None
         # run_id is generated fresh per execution
         assert result_ctx.run_id != input_run_ctx.run_id
-        # request_id is preserved from input
-        assert result_ctx.request_id == input_run_ctx.request_id
-        # trace/span IDs are preserved
+        # request_id comes from MainLoopRequest.request_id (for correlation)
+        assert result_ctx.request_id == request.request_id
+        # trace/span IDs are preserved from input run_context
         assert result_ctx.trace_id == "trace-abc-123"
         assert result_ctx.span_id == "span-xyz-456"
         # worker_id comes from the loop

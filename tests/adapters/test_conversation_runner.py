@@ -57,6 +57,7 @@ from weakincentives.runtime.events import (
     ToolInvoked,
 )
 from weakincentives.runtime.events.types import EventHandler
+from weakincentives.runtime.run_context import RunContext
 from weakincentives.runtime.session import (
     DEFAULT_SNAPSHOT_POLICIES,
     SessionProtocol,
@@ -172,6 +173,7 @@ def build_inner_loop(
     throttle_policy: ThrottlePolicy | None = None,
     budget_tracker: BudgetTracker | None = None,
     deadline: Deadline | None = None,
+    run_context: RunContext | None = None,
 ) -> InnerLoop[object]:
     """Build an InnerLoop instance using the new API."""
     template = PromptTemplate(ns="tests", key="example")
@@ -200,6 +202,7 @@ def build_inner_loop(
         throttle_policy=throttle_policy or new_throttle_policy(),
         budget_tracker=budget_tracker,
         deadline=deadline,
+        run_context=run_context,
     )
     return InnerLoop[object](inputs=inputs, config=config)
 
@@ -700,3 +703,212 @@ def test_inner_loop_ensure_deadline_remaining_expired(
 
     error = cast(PromptEvaluationError, exc_info.value)
     assert error.phase == PROMPT_EVALUATION_PHASE_REQUEST
+
+
+# =============================================================================
+# RunContext Telemetry Correlation Tests
+# =============================================================================
+
+
+def test_inner_loop_includes_run_context_in_prompt_rendered_event() -> None:
+    """InnerLoop includes run_context in PromptRendered events."""
+    from uuid import UUID
+
+    rendered = RenderedPrompt(text="system")
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
+    provider = ProviderStub(responses)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+
+    run_context = RunContext(
+        run_id=UUID("00000000-0000-0000-0000-000000000001"),
+        request_id=UUID("00000000-0000-0000-0000-000000000002"),
+        worker_id="test-worker",
+        trace_id="trace-123",
+        span_id="span-456",
+    )
+
+    loop = build_inner_loop(
+        rendered=rendered,
+        provider=provider,
+        session=session,
+        run_context=run_context,
+    )
+    loop.run()
+
+    # Find PromptRendered event
+    rendered_events = [e for e in dispatcher.events if isinstance(e, PromptRendered)]
+    assert len(rendered_events) == 1
+    event = rendered_events[0]
+    assert event.run_context is not None
+    assert event.run_context.run_id == run_context.run_id
+    assert event.run_context.worker_id == "test-worker"
+    assert event.run_context.trace_id == "trace-123"
+    assert event.run_context.span_id == "span-456"
+
+
+def test_inner_loop_includes_run_context_in_prompt_executed_event() -> None:
+    """InnerLoop includes run_context in PromptExecuted events."""
+    from uuid import UUID
+
+    rendered = RenderedPrompt(text="system")
+    responses = [DummyResponse([DummyChoice(DummyMessage(content="Done"))])]
+    provider = ProviderStub(responses)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+
+    run_context = RunContext(
+        run_id=UUID("00000000-0000-0000-0000-000000000003"),
+        request_id=UUID("00000000-0000-0000-0000-000000000004"),
+        worker_id="exec-worker",
+        trace_id="trace-exec",
+        span_id="span-exec",
+    )
+
+    loop = build_inner_loop(
+        rendered=rendered,
+        provider=provider,
+        session=session,
+        run_context=run_context,
+    )
+    loop.run()
+
+    # Find PromptExecuted event
+    executed_events = [e for e in dispatcher.events if isinstance(e, PromptExecuted)]
+    assert len(executed_events) == 1
+    event = executed_events[0]
+    assert event.run_context is not None
+    assert event.run_context.run_id == run_context.run_id
+    assert event.run_context.worker_id == "exec-worker"
+    assert event.run_context.trace_id == "trace-exec"
+
+
+def test_inner_loop_includes_run_context_in_tool_invoked_event() -> None:
+    """InnerLoop includes run_context in ToolInvoked events."""
+    from uuid import UUID
+
+    def echo_handler(params: EchoParams, *, context: ToolContext) -> ToolResult[str]:
+        return ToolResult.ok(params.value)
+
+    tool = Tool[EchoParams, str](
+        name="echo",
+        description="Echo back the value",
+        handler=echo_handler,
+    )
+    rendered = RenderedPrompt(
+        text="system",
+        _tools=cast(
+            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+            (tool,),
+        ),
+    )
+
+    # Provider returns a tool call followed by final response
+    responses = [
+        DummyResponse(
+            [
+                DummyChoice(
+                    DummyMessage(
+                        content="",
+                        tool_calls=[DummyToolCall("call-1", "echo", '{"value": "hi"}')],
+                    )
+                )
+            ]
+        ),
+        DummyResponse([DummyChoice(DummyMessage(content="Final"))]),
+    ]
+    provider = ProviderStub(responses)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+
+    run_context = RunContext(
+        run_id=UUID("00000000-0000-0000-0000-000000000005"),
+        request_id=UUID("00000000-0000-0000-0000-000000000006"),
+        worker_id="tool-worker",
+        trace_id="trace-tool",
+        span_id="span-tool",
+    )
+
+    loop = build_inner_loop(
+        rendered=rendered,
+        provider=provider,
+        session=session,
+        run_context=run_context,
+    )
+    loop.run()
+
+    # Find ToolInvoked event
+    tool_events = [e for e in dispatcher.events if isinstance(e, ToolInvoked)]
+    assert len(tool_events) == 1
+    event = tool_events[0]
+    assert event.run_context is not None
+    assert event.run_context.run_id == run_context.run_id
+    assert event.run_context.worker_id == "tool-worker"
+    assert event.run_context.trace_id == "trace-tool"
+
+
+def test_inner_loop_all_events_share_same_run_id() -> None:
+    """All telemetry events from a single execution share the same run_id."""
+    from uuid import UUID
+
+    def noop_handler(params: EchoParams, *, context: ToolContext) -> ToolResult[str]:
+        return ToolResult.ok("done")
+
+    tool = Tool[EchoParams, str](
+        name="noop",
+        description="Do nothing",
+        handler=noop_handler,
+    )
+    rendered = RenderedPrompt(
+        text="system",
+        _tools=cast(
+            tuple[Tool[SupportsDataclassOrNone, SupportsToolResult], ...],
+            (tool,),
+        ),
+    )
+
+    # Provider returns tool call then final response
+    responses = [
+        DummyResponse(
+            [
+                DummyChoice(
+                    DummyMessage(
+                        content="",
+                        tool_calls=[DummyToolCall("call-1", "noop", '{"value": "x"}')],
+                    )
+                )
+            ]
+        ),
+        DummyResponse([DummyChoice(DummyMessage(content="Done"))]),
+    ]
+    provider = ProviderStub(responses)
+    dispatcher = RecordingBus()
+    session = Session(dispatcher=dispatcher)
+
+    run_context = RunContext(
+        run_id=UUID("00000000-0000-0000-0000-000000000007"),
+        request_id=UUID("00000000-0000-0000-0000-000000000008"),
+    )
+
+    loop = build_inner_loop(
+        rendered=rendered,
+        provider=provider,
+        session=session,
+        run_context=run_context,
+    )
+    loop.run()
+
+    # Collect all events with run_context
+    events_with_context = [
+        e
+        for e in dispatcher.events
+        if hasattr(e, "run_context") and e.run_context is not None
+    ]
+
+    # Should have PromptRendered, ToolInvoked, and PromptExecuted
+    assert len(events_with_context) >= 3
+
+    # All events should have the same run_id
+    run_ids = {e.run_context.run_id for e in events_with_context}
+    assert len(run_ids) == 1
+    assert run_context.run_id in run_ids

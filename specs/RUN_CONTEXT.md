@@ -121,11 +121,11 @@ mailbox.send(request, reply_to=results)
 
 # MainLoop creates full context for result
 # - Fresh run_id per execution
-# - request_id from input context or MainLoopRequest.request_id
+# - request_id always from MainLoopRequest.request_id (ensures correlation)
 # - session_id from Session
 # - attempt from Message.delivery_count
 # - worker_id from MainLoop
-# - trace_id/span_id preserved from input
+# - trace_id/span_id preserved from input run_context (if provided)
 ```
 
 ### ToolContext
@@ -187,8 +187,8 @@ bound_log.info("Processing request")
 
 - **run_id**: Generated fresh for each execution. A retried message gets a new
   `run_id` but the same `request_id`.
-- **request_id**: Stable identifier for the logical request. Preserved from
-  `MainLoopRequest.request_id` or input `RunContext.request_id`.
+- **request_id**: Stable identifier for the logical request. Always comes from
+  `MainLoopRequest.request_id` to ensure correlation with `MainLoopResult.request_id`.
 
 ```python
 # First attempt
