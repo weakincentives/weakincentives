@@ -10,7 +10,7 @@ A debug bundle consolidates all debugging information into a single,
 self-contained artifact:
 
 | Component | Purpose |
-| -------------------- | ---------------------------------------------------- |
+| ---------------------- | ------------------------------------------ |
 | **Session Snapshots** | Complete session state, events, and slices |
 | **Execution Logs** | Structured log timeline with full context |
 | **Filesystem Archive** | Files created/modified during execution |
@@ -52,18 +52,19 @@ flowchart TB
 1. **Single artifact**: One file captures everything needed for post-mortem
    analysis, shareable across teams and environments.
 
-2. **Complete context**: The bundle contains sufficient information to
+1. **Complete context**: The bundle contains sufficient information to
    reconstruct the agent's decision-making process, including:
+
    - What prompts were rendered and sent
    - What tools were invoked and their results
    - What files were read/written
    - What logs were emitted at each stage
    - Session state transitions over time
 
-3. **Offline analysis**: Bundles can be loaded into `wink debug` without
+1. **Offline analysis**: Bundles can be loaded into `wink debug` without
    requiring the original codebase, runtime, or provider access.
 
-4. **Streaming capture**: Bundles can be built incrementally during long
+1. **Streaming capture**: Bundles can be built incrementally during long
    executions without requiring full in-memory state.
 
 ## Bundle Format
@@ -137,7 +138,7 @@ bundle.wink
 ### Manifest Fields
 
 | Field | Type | Description |
-| --------------------- | -------- | ---------------------------------------------------- |
+| ---------------------------- | -------- | --------------------------------------------------------------- |
 | `version` | `string` | Bundle format version (currently `"1"`) |
 | `bundle_id` | `string` | Unique identifier for this bundle |
 | `created_at` | `string` | ISO 8601 timestamp when bundle was finalized |
@@ -534,7 +535,7 @@ wink debug ./debug/abc123.wink --export-files ./files/
 The `wink debug` command accepts:
 
 1. **Bundle files** (`.wink`): Load the complete bundle
-2. **Directories**: Search for most recent `.wink` file
+1. **Directories**: Search for most recent `.wink` file
 
 ```bash
 # Both equivalent for bundle loading
@@ -547,7 +548,7 @@ wink debug ./debug/  # Finds most recent .wink bundle
 The debug web UI gains new capabilities for bundle inspection:
 
 | Tab | Purpose |
-| ------------ | ------------------------------------------- |
+| ------------- | -------------------------------------------- |
 | **Snapshots** | Existing slice/event browser |
 | **Logs** | Filterable log timeline with search |
 | **Files** | File browser with preview |
@@ -559,7 +560,7 @@ The `DebugBundleBuilder.capture()` context manager automatically takes
 snapshots at key lifecycle points:
 
 | Event | Snapshot Timing |
-| -------------------- | ----------------------------------- |
+| ----------------- | ----------------------------------- |
 | `capture()` entry | Initial state before execution |
 | `PromptRendered` | After prompt rendering, before send |
 | `ToolInvoked` | After each tool execution |
