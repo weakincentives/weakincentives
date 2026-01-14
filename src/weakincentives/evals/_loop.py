@@ -35,6 +35,7 @@ from ..runtime.mailbox import (
 )
 from ..runtime.watchdog import Heartbeat
 from ._evaluators import is_session_aware
+from ._experiment import Experiment
 from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
 if TYPE_CHECKING:
@@ -52,9 +53,14 @@ class EvalLoopConfig:
     and after each sample extend the message lease, preventing timeout during
     long evaluation runs. EvalLoop's heartbeat is passed to MainLoop.execute()
     so that all tool/adapter beats extend the evaluation message's lease.
+
+    The ``default_experiment`` field provides a fallback experiment if not
+    specified in the request. Note that EvalRequest.experiment is required,
+    so this is only used when constructing results if request data is malformed.
     """
 
     lease_extender: LeaseExtenderConfig | None = None
+    default_experiment: Experiment | None = None
 
 
 class EvalLoop[InputT, OutputT, ExpectedT]:
@@ -191,6 +197,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                         except Exception as e:
                             result = EvalResult(
                                 sample_id=msg.body.sample.id,
+                                experiment_name=msg.body.experiment.name,
                                 score=Score(value=0.0, passed=False, reason=str(e)),
                                 latency_ms=0,
                                 error=str(e),
@@ -268,17 +275,25 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
                 msg.nack(visibility_timeout=backoff)
 
     def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
-        """Execute and score a single sample.
+        """Execute and score a single sample under an experiment.
 
         Passes EvalLoop's heartbeat to MainLoop.execute() so that tool execution
         beats extend the evaluation message's lease. Also beats after sample
         execution completes to prove progress between samples.
+
+        The experiment from the request is passed to MainLoop.execute() for
+        prompt override resolution and feature flag checking.
         """
         sample = request.sample
+        experiment = request.experiment
         start = time.monotonic()
 
-        # Pass our heartbeat to MainLoop so tool/adapter beats extend our message lease
-        response, session = self._loop.execute(sample.input, heartbeat=self._heartbeat)
+        # Pass our heartbeat and experiment to MainLoop
+        response, session = self._loop.execute(
+            sample.input,
+            heartbeat=self._heartbeat,
+            experiment=experiment,
+        )
         latency_ms = int((time.monotonic() - start) * 1000)
 
         # Beat after sample execution to prove progress
@@ -287,6 +302,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         if response.output is None:
             return EvalResult(
                 sample_id=sample.id,
+                experiment_name=experiment.name,
                 score=Score(value=0.0, passed=False, reason="No output from MainLoop"),
                 latency_ms=latency_ms,
                 error="No output from MainLoop",
@@ -301,6 +317,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
 
         return EvalResult(
             sample_id=sample.id,
+            experiment_name=experiment.name,
             score=score,  # pyright: ignore[reportUnknownArgumentType]
             latency_ms=latency_ms,
         )

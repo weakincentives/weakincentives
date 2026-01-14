@@ -179,7 +179,13 @@ class _TestLoop(MainLoop[_Request, _Output]):
         self.session_created: Session | None = None
         self.finalize_called = False
 
-    def prepare(self, request: _Request) -> tuple[Prompt[_Output], Session]:
+    def prepare(
+        self,
+        request: _Request,
+        *,
+        experiment: object = None,
+    ) -> tuple[Prompt[_Output], Session]:
+        _ = experiment
         prompt = Prompt(self._template).bind(_Params(content=request.message))
         session = Session(tags={"loop": "test"})
         self.session_created = session
@@ -599,7 +605,13 @@ class _TestLoopNoFinalizeOverride(MainLoop[_Request, _Output]):
             ],
         )
 
-    def prepare(self, request: _Request) -> tuple[Prompt[_Output], Session]:
+    def prepare(
+        self,
+        request: _Request,
+        *,
+        experiment: object = None,
+    ) -> tuple[Prompt[_Output], Session]:
+        _ = experiment
         prompt = Prompt(self._template).bind(_Params(content=request.message))
         session = Session(tags={"loop": "test"})
         return prompt, session

@@ -27,6 +27,7 @@ import pytest
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.tools import AstevalSection
 from weakincentives.evals import (
+    BASELINE,
     Dataset,
     EvalLoop,
     EvalRequest,
@@ -135,7 +136,13 @@ For example, if the problem is "What is 2 + 2?", you would:
         )
 
     @override
-    def prepare(self, request: MathProblem) -> tuple[Prompt[MathAnswer], Session]:
+    def prepare(
+        self,
+        request: MathProblem,
+        *,
+        experiment: object = None,
+    ) -> tuple[Prompt[MathAnswer], Session]:
+        _ = experiment
         prompt = Prompt(self._template).bind(
             _InstructionParams(question=request.question)
         )
@@ -296,7 +303,9 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
             input=MathProblem(question="What is 2 + 2?"),
             expected="4",
         )
-        _ = requests.send(EvalRequest(sample=sample), reply_to=results)
+        _ = requests.send(
+            EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
+        )
 
         eval_loop.run(max_iterations=1)
 
@@ -340,7 +349,9 @@ def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
         # Create and submit the full dataset with reply_to
         dataset = _create_math_dataset()
         for sample in dataset:
-            _ = requests.send(EvalRequest(sample=sample), reply_to=results)
+            _ = requests.send(
+                EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
+            )
 
         # Run evaluations (10 samples, give some headroom for iterations)
         eval_loop.run(max_iterations=15)

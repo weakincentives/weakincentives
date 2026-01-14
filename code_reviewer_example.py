@@ -264,13 +264,17 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             raise SystemExit(f"Failed to initialize prompt overrides: {exc}") from exc
 
     def prepare(
-        self, request: ReviewTurnParams
+        self,
+        request: ReviewTurnParams,
+        *,
+        experiment: object = None,
     ) -> tuple[Prompt[ReviewResponse], Session]:
         """Prepare prompt and session for the given request.
 
         Runs workspace optimization on first request if enabled, then creates
         the review prompt and returns the persistent session.
         """
+        _ = experiment  # Experiment support not yet implemented
         # Run optimization once on first request (if enabled)
         if self._enable_optimization and not self._optimization_done:
             needs_optimization = (
