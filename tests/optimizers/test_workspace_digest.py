@@ -154,8 +154,11 @@ class _RecordingAdapter(ProviderAdapter):
         *,
         session: SessionProtocol,
         deadline: Deadline | None = None,
+        budget: object = None,
+        budget_tracker: object = None,
+        run_context: object = None,
     ) -> PromptResponse[Any]:
-        del deadline
+        del deadline, budget, budget_tracker, run_context
         prompt_name = prompt.name or prompt.key
         self.rendered_prompts.append(prompt)
         self.sessions.append(session)
@@ -514,8 +517,11 @@ def test_optimize_handles_non_string_digest_attribute() -> None:
             *,
             session: SessionProtocol,
             deadline: Deadline | None = None,
+            budget: object = None,
+            budget_tracker: object = None,
+            run_context: object = None,
         ) -> PromptResponse[Any]:
-            del deadline
+            del deadline, budget, budget_tracker, run_context
             # Return output with digest attribute that's not a string
             return PromptResponse(
                 prompt_name=prompt.name or prompt.key,

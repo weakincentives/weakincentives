@@ -42,9 +42,9 @@ from weakincentives.runtime.main_loop import (
     MainLoopRequest,
     MainLoopResult,
 )
+from weakincentives.runtime.run_context import RunContext
 from weakincentives.runtime.session import Session, VisibilityOverrides
 from weakincentives.runtime.session.protocols import SessionProtocol
-from weakincentives.runtime.watchdog import Heartbeat
 
 
 @dataclass(slots=True, frozen=True)
@@ -97,6 +97,9 @@ class _MockAdapter(ProviderAdapter[_Output]):
         # Track resources captured during evaluate (while context is active)
         self._last_custom_resource: _CustomResource | None = None
         self._custom_resources: list[_CustomResource | None] = []
+        # Track run_context passed during evaluate
+        self._last_run_context: RunContext | None = None
+        self._run_contexts: list[RunContext | None] = []
 
     def evaluate(
         self,
@@ -106,10 +109,13 @@ class _MockAdapter(ProviderAdapter[_Output]):
         deadline: Deadline | None = None,
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
-        heartbeat: Heartbeat | None = None,
+        heartbeat: object = None,
+        run_context: RunContext | None = None,
     ) -> PromptResponse[_Output]:
         del budget, heartbeat
         self._call_count += 1
+        self._last_run_context = run_context
+        self._run_contexts.append(run_context)
         self._last_budget_tracker = budget_tracker
         self._budget_trackers.append(budget_tracker)
         self._last_deadline = deadline
@@ -154,8 +160,11 @@ class _TestLoop(MainLoop[_Request, _Output]):
         requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]]
         | FakeMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]],
         config: MainLoopConfig | None = None,
+        worker_id: str = "",
     ) -> None:
-        super().__init__(adapter=adapter, requests=requests, config=config)
+        super().__init__(
+            adapter=adapter, requests=requests, config=config, worker_id=worker_id
+        )
         self._template = PromptTemplate[_Output](
             ns="test",
             key="test-prompt",
@@ -978,3 +987,175 @@ def test_loop_exits_when_mailbox_closed() -> None:
     thread.join(timeout=2.0)
     assert not thread.is_alive()
     assert len(exited) == 1
+
+
+# =============================================================================
+# Worker ID Tests
+# =============================================================================
+
+
+def test_loop_worker_id_property() -> None:
+    """MainLoop exposes worker_id property."""
+    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, worker_id="test-worker-42")
+        assert loop.worker_id == "test-worker-42"
+    finally:
+        requests.close()
+        results.close()
+
+
+# =============================================================================
+# RunContext Tests
+# =============================================================================
+
+
+def test_loop_includes_run_context_in_result() -> None:
+    """MainLoop result includes RunContext."""
+    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, worker_id="worker-1")
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.run_context is not None
+        assert msgs[0].body.run_context.request_id == request.request_id
+        assert msgs[0].body.run_context.worker_id == "worker-1"
+        assert msgs[0].body.run_context.attempt == 1
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_preserves_run_context_from_request() -> None:
+    """MainLoop preserves trace_id and span_id from request RunContext."""
+    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests, worker_id="worker-2")
+
+        # Include run_context with trace/span IDs in request
+        input_run_ctx = RunContext(
+            trace_id="trace-abc-123",
+            span_id="span-xyz-456",
+        )
+        request = MainLoopRequest(
+            request=_Request(message="hello"),
+            run_context=input_run_ctx,
+        )
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        result_ctx = msgs[0].body.run_context
+        assert result_ctx is not None
+        # run_id is generated fresh per execution
+        assert result_ctx.run_id != input_run_ctx.run_id
+        # request_id comes from MainLoopRequest.request_id (for correlation)
+        assert result_ctx.request_id == request.request_id
+        # trace/span IDs are preserved from input run_context
+        assert result_ctx.trace_id == "trace-abc-123"
+        assert result_ctx.span_id == "span-xyz-456"
+        # worker_id comes from the loop
+        assert result_ctx.worker_id == "worker-2"
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_run_id_matches_during_and_after_execution() -> None:
+    """RunContext.run_id during execution matches run_id in result.
+
+    This verifies that the run_id is generated once and preserved (via replace())
+    rather than regenerated, which would break telemetry correlation.
+    """
+    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter()
+        loop = _TestLoop(adapter=adapter, requests=requests)
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        # Get run_context that was passed to adapter during execution
+        assert adapter._last_run_context is not None
+        execution_run_id = adapter._last_run_context.run_id
+
+        # Get result
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        result_ctx = msgs[0].body.run_context
+        assert result_ctx is not None
+
+        # CRITICAL: run_id must be the same
+        assert result_ctx.run_id == execution_run_id
+
+        # session_id should be populated in result (via replace())
+        assert result_ctx.session_id is not None
+        assert result_ctx.session_id == msgs[0].body.session_id
+
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_loop_includes_run_context_on_error() -> None:
+    """MainLoop includes RunContext in error result."""
+    results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
+        name="results"
+    )
+    requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
+        InMemoryMailbox(name="requests")
+    )
+    try:
+        adapter = _MockAdapter(error=RuntimeError("adapter failure"))
+        loop = _TestLoop(adapter=adapter, requests=requests, worker_id="worker-err")
+
+        request = MainLoopRequest(request=_Request(message="hello"))
+        requests.send(request, reply_to=results)
+
+        loop.run(max_iterations=1, wait_time_seconds=0)
+
+        msgs = results.receive(max_messages=1)
+        assert len(msgs) == 1
+        assert msgs[0].body.success is False
+        assert msgs[0].body.run_context is not None
+        assert msgs[0].body.run_context.worker_id == "worker-err"
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()

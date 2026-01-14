@@ -23,6 +23,7 @@ from uuid import UUID, uuid4
 from ...dataclasses import FrozenDataclass
 from ...types import AdapterName
 from ..logging import StructuredLogger, get_logger
+from ..run_context import RunContext
 from .types import (
     ControlDispatcher,
     Dispatcher,
@@ -114,6 +115,7 @@ class PromptExecuted:
     session_id: UUID | None
     created_at: datetime
     usage: TokenUsage | None = None
+    run_context: RunContext | None = None
     event_id: UUID = field(default_factory=uuid4)
 
 
@@ -130,6 +132,7 @@ class PromptRendered:
     rendered_prompt: str
     created_at: datetime
     descriptor: PromptDescriptor | None = None
+    run_context: RunContext | None = None
     event_id: UUID = field(default_factory=uuid4)
 
 

@@ -25,6 +25,7 @@ from ..prompt import Prompt
 from ..runtime.session.protocols import SessionProtocol
 
 if TYPE_CHECKING:
+    from ..runtime.run_context import RunContext
     from ..runtime.watchdog import Heartbeat
 
 
@@ -54,6 +55,7 @@ class ProviderAdapter(ABC):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
+        run_context: RunContext | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate the prompt and return a structured response.
 
@@ -72,6 +74,9 @@ class ProviderAdapter(ABC):
         points (LLM calls, tool execution boundaries) to prove liveness. Tool
         handlers receive the heartbeat via ToolContext.beat() for additional
         beats during long-running operations.
+
+        When ``run_context`` is provided, it is threaded through telemetry events
+        (PromptRendered, PromptExecuted, ToolInvoked) for distributed tracing.
         """
 
         ...

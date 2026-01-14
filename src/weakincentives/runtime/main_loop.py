@@ -44,10 +44,12 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
+import socket
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
@@ -59,6 +61,7 @@ from ..prompt.errors import VisibilityExpansionRequired
 from .lease_extender import LeaseExtender, LeaseExtenderConfig
 from .lifecycle import wait_until
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError, ReplyNotAvailableError
+from .run_context import RunContext
 from .session import Session
 from .session.visibility_overrides import SetVisibilityOverride
 from .watchdog import Heartbeat
@@ -89,6 +92,9 @@ class MainLoopResult[OutputT]:
 
     session_id: UUID | None = None
     """Session that processed the request (if available)."""
+
+    run_context: RunContext | None = None
+    """Execution context with correlation identifiers and metadata."""
 
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     """Timestamp when processing completed."""
@@ -129,6 +135,8 @@ class MainLoopRequest[UserRequestT]:
     resources: Mapping[type[object], object] | None = None
     request_id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    run_context: RunContext | None = None
+    """Optional execution context. If not provided, MainLoop creates one."""
 
 
 class MainLoop[UserRequestT, OutputT](ABC):
@@ -175,6 +183,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
     _lock: threading.Lock
     _heartbeat: Heartbeat
     _lease_extender: LeaseExtender
+    _worker_id: str
 
     def __init__(
         self,
@@ -182,6 +191,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         adapter: ProviderAdapter[OutputT],
         requests: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         config: MainLoopConfig | None = None,
+        worker_id: str | None = None,
     ) -> None:
         """Initialize the MainLoop.
 
@@ -190,6 +200,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
             requests: Mailbox to receive MainLoopRequest messages from.
                 Response routing derives from each message's reply_to field.
             config: Optional configuration for default deadline/budget.
+            worker_id: Identifier for this worker instance. If None or empty,
+                auto-generates as "{hostname}-{pid}". Recommended formats:
+                - Production: "{hostname}-{pid}" or "{k8s_pod_name}"
+                - Testing: "test-worker" or descriptive test name
         """
         super().__init__()
         self._adapter = adapter
@@ -206,6 +220,12 @@ class MainLoop[UserRequestT, OutputT](ABC):
             else LeaseExtenderConfig()
         )
         self._lease_extender = LeaseExtender(config=lease_config)
+        # Auto-generate worker_id if not provided
+        if worker_id:
+            self._worker_id = worker_id
+        else:
+            hostname = socket.gethostname()
+            self._worker_id = f"{hostname}-{os.getpid()}"
 
     @property
     def heartbeat(self) -> Heartbeat:
@@ -215,6 +235,11 @@ class MainLoop[UserRequestT, OutputT](ABC):
         message, enabling the watchdog to detect stuck workers.
         """
         return self._heartbeat
+
+    @property
+    def worker_id(self) -> str:
+        """Identifier for this worker instance."""
+        return self._worker_id
 
     @abstractmethod
     def prepare(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]:
@@ -283,6 +308,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         request_event: MainLoopRequest[UserRequestT],
         *,
         heartbeat: Heartbeat | None = None,
+        run_context: RunContext | None = None,
     ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute the main loop for a request event.
 
@@ -292,6 +318,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             request_event: The request to process.
             heartbeat: Optional heartbeat override. If provided, uses this
                 instead of self._heartbeat for adapter evaluation.
+            run_context: Optional execution context for distributed tracing.
         """
         prompt, session = self.prepare(request_event.request)
 
@@ -332,6 +359,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     deadline=effective_deadline,
                     budget_tracker=budget_tracker,
                     heartbeat=effective_heartbeat,
+                    run_context=run_context,
                 )
             except VisibilityExpansionRequired as e:
                 for path, visibility in e.requested_overrides.items():
@@ -342,27 +370,78 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 self.finalize(prompt, session)
                 return response, session
 
+    def _build_run_context(
+        self,
+        request_event: MainLoopRequest[UserRequestT],
+        delivery_count: int,
+        session_id: UUID | None = None,
+    ) -> RunContext:
+        """Build RunContext for this execution.
+
+        The run_id is always fresh for each execution attempt.
+
+        Request ID always comes from request_event.request_id to ensure
+        correlation with MainLoopResult.request_id. The run_context parameter
+        is only used for distributed trace context (trace_id, span_id).
+
+        Args:
+            request_event: The incoming request with optional run_context.
+            delivery_count: Message delivery count (attempt number).
+            session_id: Session ID to embed (typically set via replace() later).
+
+        Returns:
+            Fresh RunContext with new run_id and preserved trace context.
+        """
+        trace_id: str | None = None
+        span_id: str | None = None
+        if request_event.run_context is not None:
+            trace_id = request_event.run_context.trace_id
+            span_id = request_event.run_context.span_id
+
+        return RunContext(
+            run_id=uuid4(),
+            request_id=request_event.request_id,
+            session_id=session_id,
+            attempt=delivery_count,
+            worker_id=self._worker_id,
+            trace_id=trace_id,
+            span_id=span_id,
+        )
+
     def _handle_message(
         self, msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]]
     ) -> None:
         """Process a single message from the requests mailbox."""
         request_event = msg.body
 
+        # Build RunContext ONCE before execution. Session_id will be added
+        # via replace() after prepare() creates the session.
+        run_context = self._build_run_context(
+            request_event, msg.delivery_count, session_id=None
+        )
+
         # Attach lease extender to heartbeat for this message
         with self._lease_extender.attach(msg, self._heartbeat):
             try:
-                response, session = self._execute(request_event)
+                response, session = self._execute(
+                    request_event, run_context=run_context
+                )
+
+                # Add session_id while preserving the same run_id
+                run_context = replace(run_context, session_id=session.session_id)
 
                 result = MainLoopResult[OutputT](
                     request_id=request_event.request_id,
                     output=response.output,
                     session_id=session.session_id,
+                    run_context=run_context,
                 )
 
             except Exception as exc:
                 result = MainLoopResult[OutputT](
                     request_id=request_event.request_id,
                     error=str(exc),
+                    run_context=run_context,
                 )
 
         self._reply_and_ack(msg, result)

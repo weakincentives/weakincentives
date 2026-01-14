@@ -30,6 +30,7 @@ from ...prompt.protocols import PromptProtocol
 from ...runtime.events import PromptExecuted, PromptRendered
 from ...runtime.events.types import TokenUsage
 from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
@@ -279,6 +280,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         budget: Budget | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
+        run_context: RunContext | None = None,
     ) -> PromptResponse[OutputT]:
         """Evaluate prompt using Claude Agent SDK with hook-based state sync.
 
@@ -353,6 +355,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 deadline=effective_deadline,
                 budget_tracker=budget_tracker,
                 heartbeat=heartbeat,
+                run_context=run_context,
             )
         )
 
@@ -364,6 +367,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         deadline: Deadline | None,
         budget_tracker: BudgetTracker | None,
         heartbeat: Heartbeat | None,
+        run_context: RunContext | None,
     ) -> PromptResponse[OutputT]:
         """Async implementation of evaluate."""
         sdk = _import_sdk()
@@ -404,6 +408,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 rendered_prompt=prompt_text,
                 created_at=_utcnow(),
                 descriptor=None,
+                run_context=run_context,
             )
         )
 
@@ -450,6 +455,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     budget_tracker=budget_tracker,
                     effective_cwd=effective_cwd,
                     heartbeat=heartbeat,
+                    run_context=run_context,
                 )
         finally:
             # Clean up temp workspace if we created one
@@ -470,6 +476,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         budget_tracker: BudgetTracker | None,
         effective_cwd: str | None,
         heartbeat: Heartbeat | None,
+        run_context: RunContext | None,
     ) -> PromptResponse[OutputT]:
         """Run SDK query within prompt context."""
         logger.debug(
@@ -491,6 +498,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             deadline=deadline,
             budget_tracker=budget_tracker,
             heartbeat=heartbeat,
+            run_context=run_context,
         )
 
         bridged_tools = create_bridged_tools(
@@ -504,6 +512,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             adapter_name=CLAUDE_AGENT_SDK_ADAPTER_NAME,
             prompt_name=prompt_name,
             heartbeat=heartbeat,
+            run_context=run_context,
         )
 
         logger.debug(
@@ -647,6 +656,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 session_id=None,
                 created_at=_utcnow(),
                 usage=usage,
+                run_context=run_context,
             )
         )
 

@@ -54,7 +54,6 @@ from weakincentives.runtime import (
 )
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
 from weakincentives.runtime.session import Session
-from weakincentives.runtime.watchdog import Heartbeat
 from weakincentives.types import SupportsDataclass
 
 
@@ -77,32 +76,31 @@ class _RepositoryOptimizationAdapter:
         self,
         prompt: Prompt[SupportsDataclass],
         *,
-        dispatcher: InProcessDispatcher | None = None,
         session: Session | None = None,
         deadline: object | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
-        resources: object | None = None,
+        heartbeat: object | None = None,
+        run_context: object | None = None,
     ) -> PromptResponse[Any]:
-        del deadline, budget, budget_tracker, resources
+        del deadline, budget, budget_tracker, heartbeat, run_context
         self.calls.append(prompt.key)
 
         if "workspace-digest" in prompt.key:
             assert session is not None
             self.optimization_sessions.append(session)
-            if dispatcher is not None:
-                optimization_event = PromptRendered(
-                    prompt_ns=prompt.ns,
-                    prompt_key=prompt.key,
-                    prompt_name=prompt.name,
-                    adapter=UNIT_TEST_ADAPTER_NAME,
-                    session_id=session.session_id,
-                    render_inputs=(),
-                    rendered_prompt="<optimize prompt>",
-                    created_at=datetime.now(UTC),
-                    event_id=uuid4(),
-                )
-                dispatcher.dispatch(optimization_event)
+            optimization_event = PromptRendered(
+                prompt_ns=prompt.ns,
+                prompt_key=prompt.key,
+                prompt_name=prompt.name,
+                adapter=UNIT_TEST_ADAPTER_NAME,
+                session_id=session.session_id,
+                render_inputs=(),
+                rendered_prompt="<optimize prompt>",
+                created_at=datetime.now(UTC),
+                event_id=uuid4(),
+            )
+            session.dispatcher.dispatch(optimization_event)
             return PromptResponse(
                 prompt_name=prompt.name or prompt.key,
                 text=self.instructions,
@@ -126,15 +124,14 @@ class _RecordingDeadlineAdapter:
         self,
         prompt: Prompt[SupportsDataclass],
         *,
-        dispatcher: InProcessDispatcher | None = None,
         session: Session | None = None,
         deadline: Deadline | None = None,
         budget: object | None = None,
         budget_tracker: object | None = None,
-        resources: object | None = None,
-        heartbeat: Heartbeat | None = None,
+        heartbeat: object | None = None,
+        run_context: object | None = None,
     ) -> PromptResponse[Any]:
-        del dispatcher, session, budget, budget_tracker, resources, heartbeat
+        del session, budget, budget_tracker, heartbeat, run_context
         self.deadlines.append(deadline)
         return PromptResponse(
             prompt_name=prompt.name or prompt.key,

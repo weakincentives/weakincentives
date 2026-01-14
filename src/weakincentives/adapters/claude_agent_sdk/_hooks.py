@@ -27,6 +27,7 @@ from ...prompt.feedback import collect_feedback
 from ...prompt.protocols import PromptProtocol
 from ...runtime.events.types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.run_context import RunContext
 from ...runtime.session.protocols import SessionProtocol
 from ...runtime.transactions import PendingToolTracker
 from ...runtime.watchdog import Heartbeat
@@ -167,6 +168,7 @@ class HookContext:
         deadline: Deadline | None = None,
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
+        run_context: RunContext | None = None,
     ) -> None:
         self._session = session
         self._prompt = prompt
@@ -175,6 +177,7 @@ class HookContext:
         self.deadline = deadline
         self.budget_tracker = budget_tracker
         self.heartbeat = heartbeat
+        self.run_context = run_context
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
@@ -557,6 +560,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             usage=None,
             rendered_output=data.output_text[:1000] if data.output_text else "",
             call_id=tool_use_id,
+            run_context=hook_context.run_context,
         )
         hook_context.session.dispatcher.dispatch(event)
 

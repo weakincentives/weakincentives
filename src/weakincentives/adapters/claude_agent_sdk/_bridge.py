@@ -25,6 +25,7 @@ from ...prompt.errors import VisibilityExpansionRequired
 from ...prompt.tool import Tool, ToolContext, ToolHandler, ToolResult
 from ...runtime.events import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
+from ...runtime.run_context import RunContext
 from ...runtime.transactions import (
     CompositeSnapshot,
     restore_snapshot,
@@ -93,6 +94,7 @@ class BridgedTool:
         adapter_name: str = "claude_agent_sdk",
         prompt_name: str | None = None,
         heartbeat: Heartbeat | None = None,
+        run_context: RunContext | None = None,
     ) -> None:
         self.name = name
         self.description = description
@@ -107,6 +109,7 @@ class BridgedTool:
         self._adapter_name = adapter_name
         self._prompt_name = prompt_name or f"{prompt.ns}:{prompt.key}"
         self._heartbeat = heartbeat
+        self._run_context = run_context
 
     def __call__(self, args: dict[str, Any]) -> dict[str, Any]:
         """Execute the tool and return MCP-format result.
@@ -174,6 +177,7 @@ class BridgedTool:
                 session=self._session,
                 deadline=self._deadline,
                 heartbeat=self._heartbeat,
+                run_context=self._run_context,
             )
 
             result = handler(params, context=context)
@@ -298,6 +302,7 @@ class BridgedTool:
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
             call_id=None,
+            run_context=self._run_context,
         )
         self._session.dispatcher.dispatch(event)
 
@@ -314,6 +319,7 @@ def create_bridged_tools(
     adapter_name: str = "claude_agent_sdk",
     prompt_name: str | None = None,
     heartbeat: Heartbeat | None = None,
+    run_context: RunContext | None = None,
 ) -> tuple[BridgedTool, ...]:
     """Create MCP-compatible tool wrappers for weakincentives tools.
 
@@ -328,6 +334,7 @@ def create_bridged_tools(
         adapter_name: Name of the adapter for event dispatching.
         prompt_name: Name of the prompt for event dispatching.
         heartbeat: Optional heartbeat for tool context.
+        run_context: Optional execution context with correlation identifiers.
 
     Returns:
         Tuple of BridgedTool instances ready for MCP registration.
@@ -368,6 +375,7 @@ def create_bridged_tools(
             adapter_name=adapter_name,
             prompt_name=resolved_prompt_name,
             heartbeat=heartbeat,
+            run_context=run_context,
         )
         bridged.append(bridged_tool)
 

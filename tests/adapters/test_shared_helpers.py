@@ -47,7 +47,6 @@ from weakincentives.adapters.utilities import (
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
-from weakincentives.runtime.events import Dispatcher
 from weakincentives.runtime.session import Session
 
 
@@ -123,9 +122,11 @@ def test_run_inner_loop_requires_message_payload() -> None:
             self,
             prompt: Prompt[object],
             *,
-            dispatcher: Dispatcher,
             session: SessionProtocol,
             deadline: Deadline | None = None,
+            budget: object = None,
+            budget_tracker: object = None,
+            run_context: object = None,
         ) -> PromptResponse[object]:
             raise NotImplementedError
 
