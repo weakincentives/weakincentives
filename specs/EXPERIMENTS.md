@@ -728,4 +728,27 @@ def prepare(
 - `specs/PROMPT_OPTIMIZATION.md` - Override system that experiments reference
 - `specs/EVALS.md` - Evaluation framework that experiments enable
 - `specs/MAIN_LOOP.md` - MainLoop integration for experiment execution
+- `specs/RUN_CONTEXT.md` - Execution metadata (orthogonal to experiments)
 - `specs/SESSIONS.md` - Session tracking for experiment observability
+
+## Relationship to RunContext
+
+`Experiment` and `RunContext` are orthogonal concepts that can be used together:
+
+| Concept | Purpose | Answers |
+|---------|---------|---------|
+| `Experiment` | Configuration variant | "Which prompt/flags are being tested?" |
+| `RunContext` | Execution metadata | "Where/when/how is this running?" |
+
+Both can be specified on `MainLoopRequest`:
+
+```python
+request = MainLoopRequest(
+    request=my_request,
+    experiment=Experiment(name="v2-prompts", overrides_tag="v2"),
+    run_context=RunContext(trace_id="trace-abc", worker_id="worker-1"),
+)
+```
+
+`Experiment` affects prompt rendering and agent behavior. `RunContext` provides
+correlation IDs for tracing and debugging. Neither depends on the other.
