@@ -73,15 +73,30 @@ def first_choice(response: object, *, prompt_name: str) -> object:
         ) from error
 
 
-def call_provider_with_normalization(
+def call_provider_with_normalization(  # noqa: PLR0913
     call_provider: Callable[[], object],
     *,
     prompt_name: str,
     normalize_throttle: Callable[[Exception], ThrottleError | None],
     provider_payload: Callable[[Exception], dict[str, Any] | None],
     request_error_message: str,
+    error_factory: Callable[
+        [str, str, dict[str, Any] | None, Exception], PromptEvaluationError
+    ]
+    | None = None,
 ) -> object:
-    """Invoke a provider callable and normalize errors into PromptEvaluationError."""
+    """Invoke a provider callable and normalize errors into PromptEvaluationError.
+
+    Args:
+        call_provider: Callable that invokes the provider and returns a response.
+        prompt_name: Name of the prompt being evaluated.
+        normalize_throttle: Function to normalize throttle errors.
+        provider_payload: Function to extract provider payload from the error.
+        request_error_message: Default error message for request failures.
+        error_factory: Optional factory function to create adapter-specific errors.
+            Signature: (message, prompt_name, provider_payload, error) -> Exception.
+            If not provided, raises generic PromptEvaluationError.
+    """
 
     try:
         return call_provider()
@@ -89,11 +104,19 @@ def call_provider_with_normalization(
         throttle_error = normalize_throttle(error)
         if throttle_error is not None:
             raise throttle_error from error
+        payload = provider_payload(error)
+        if error_factory is not None:
+            raise error_factory(
+                str(error) or request_error_message,
+                prompt_name,
+                payload,
+                error,
+            ) from error
         raise PromptEvaluationError(
             request_error_message,
             prompt_name=prompt_name,
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
-            provider_payload=provider_payload(error),
+            provider_payload=payload,
         ) from error
 
 

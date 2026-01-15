@@ -73,6 +73,7 @@ Example:
 
 from __future__ import annotations
 
+from ..exceptions import ClaudeAgentSDKError
 from ._hooks import create_task_completion_stop_hook
 from ._task_completion import (
     CompositeChecker,
@@ -105,6 +106,7 @@ __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
     "ClaudeAgentSDKAdapter",
     "ClaudeAgentSDKClientConfig",
+    "ClaudeAgentSDKError",
     "ClaudeAgentSDKModelConfig",
     "ClaudeAgentWorkspaceSection",
     "CompositeChecker",
