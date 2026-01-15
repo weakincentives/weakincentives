@@ -2923,7 +2923,7 @@ ______________________________________________________________________
 
 ## 11. Prompt overrides and optimization
 
-_Canonical spec: [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)_
+_Canonical spec: [specs/PROMPTS.md](specs/PROMPTS.md)_
 
 Overrides are how WINK supports fast iteration without code edits:
 
@@ -3935,9 +3935,8 @@ ______________________________________________________________________
 - **Skills**: [specs/SKILLS.md](specs/SKILLS.md)
 - **Filesystem**: [specs/FILESYSTEM.md](specs/FILESYSTEM.md)
 - **Workspace**: [specs/WORKSPACE.md](specs/WORKSPACE.md)
-- **Overrides & optimization**:
-  [specs/PROMPT_OPTIMIZATION.md](specs/PROMPT_OPTIMIZATION.md)
-- **Exhaustiveness checking**: [specs/EXHAUSTIVENESS.md](specs/EXHAUSTIVENESS.md)
+- **Prompts & overrides**: [specs/PROMPTS.md](specs/PROMPTS.md)
+- **DbC & exhaustiveness**: [specs/DBC.md](specs/DBC.md)
 - **Formal verification**: [specs/FORMAL_VERIFICATION.md](specs/FORMAL_VERIFICATION.md)
   (embedding TLA+ specs in Python)
 - **Code review example**:

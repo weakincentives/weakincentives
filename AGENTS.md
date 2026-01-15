@@ -78,21 +78,17 @@ a goal at any time.
   adding or modifying adapters.
 - **DATACLASSES.md**: Serde utilities and frozen dataclass patterns—when adding
   dataclass models or serialization.
-- **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
-  modules.
+- **DBC.md**: Design-by-contract patterns and exhaustiveness checking—mandatory
+  before editing DbC-covered modules or adding union variants.
 - **EVALS.md**: Evaluation framework—when implementing evals, datasets,
   evaluators, or metrics aggregation.
-- **EXHAUSTIVENESS.md**: Union type totality and `assert_never` patterns—when
-  adding union variants or match statements on events and operations.
 - **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
   ToolContext integration—when adding or modifying filesystem operations.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
 - **POLICIES_OVER_WORKFLOWS.md**: Design philosophy—preferring declarative
   policies over rigid workflows for unattended agent autonomy.
-- **PROMPTS.md**: Prompt abstraction, structured output, composition, and
-  progressive disclosure—required for prompt system work.
-- **PROMPT_OPTIMIZATION.md**: Override system and optimizer abstraction—when
-  altering prompt overrides or optimization.
+- **PROMPTS.md**: Prompt abstraction, structured output, composition, overrides,
+  and progressive disclosure—required for prompt system work.
 - **SESSIONS.md**: Session lifecycle, events, deadlines, and budgets—when
   modifying runtime session code.
 - **SLICES.md**: Slice storage protocol, factory configuration, and JSONL

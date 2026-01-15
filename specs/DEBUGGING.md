@@ -194,25 +194,129 @@ if executed:
 
 ## Debug Web UI
 
-The `wink debug` command provides a browser-based interface for exploring
-session snapshots. See `specs/WINK_DEBUG.md` for full documentation.
+The `wink debug` command launches a local web server for inspecting session
+snapshot files. It provides a browser-based UI for exploring session state,
+slice contents, and snapshot metadata without writing code.
 
-### Quick Start
+### CLI Contract
 
-```bash
-# Start debug server with a snapshot file
-wink debug ./snapshots/session.jsonl
-
-# Opens browser to http://127.0.0.1:8000
+```
+wink debug <snapshot_path> [--host HOST] [--port PORT] [--open-browser|--no-open-browser]
 ```
 
-### Capabilities
+| Argument | Required | Default | Description |
+| ---------------- | -------- | ----------- | --------------------------------------------------------------- |
+| `snapshot_path` | Yes | - | Path to a JSONL snapshot file or directory containing snapshots |
+| `--host` | No | `127.0.0.1` | Host interface to bind the server |
+| `--port` | No | `8000` | Port to bind the server |
+| `--open-browser` | No | `True` | Open the default browser automatically |
 
-- Browse all snapshots in a directory
-- Inspect slice contents with syntax highlighting
-- View raw JSON payloads
-- Navigate between snapshot entries
-- Automatic Markdown rendering for text fields
+Global options inherited from `wink`:
+
+| Option | Default | Description |
+| ------------- | ------- | ------------------------------------------------------------------ |
+| `--log-level` | `None` | Override log level (CRITICAL, ERROR, WARNING, INFO, DEBUG, NOTSET) |
+| `--json-logs` | `True` | Emit structured JSON logs (disable with `--no-json-logs`) |
+
+Exit codes:
+
+| Code | Meaning |
+| ---- | ------------------------------------- |
+| `0` | Server stopped normally |
+| `2` | Snapshot validation failed at startup |
+| `3` | Server failed to start |
+
+### Snapshot Loading
+
+When `snapshot_path` is a directory:
+
+1. Glob for `*.jsonl` and `*.json` files
+1. Sort by modification time (newest first)
+1. Load the most recent file
+1. Use the directory as the root for snapshot switching
+
+When `snapshot_path` is a file:
+
+1. Load the specified file directly
+1. Use the parent directory as the root for snapshot switching
+
+Snapshot files contain one JSON object per line. Each line represents a complete
+session snapshot. The loader skips empty lines, parses each non-empty line as
+JSON, validates the `SnapshotPayload` structure, and requires a `session_id` tag
+on every entry.
+
+When a snapshot line fails full validation (e.g., missing dataclass types), the
+server logs a warning with event `wink.debug.snapshot_error`, stores the
+validation error in metadata, and continues serving the raw payload for
+inspection.
+
+### API Routes
+
+| Route | Method | Description |
+| --------------------------------- | ------ | ------------------------------------------- |
+| `/` | GET | HTML index page for the web UI |
+| `/api/meta` | GET | Metadata for current snapshot entry |
+| `/api/entries` | GET | List all entries in current file |
+| `/api/slices/{encoded_slice_type}` | GET | Items from a specific slice (supports `offset`, `limit`) |
+| `/api/raw` | GET | Raw JSON payload without transformation |
+| `/api/reload` | POST | Reload current file from disk |
+| `/api/snapshots` | GET | List all snapshot files in root directory |
+| `/api/select` | POST | Select entry by `session_id` or `line_number` |
+| `/api/switch` | POST | Switch to different snapshot file |
+
+String values that look like Markdown are automatically wrapped with rendered
+HTML. Detection checks for headers, lists, code spans, links, bold, and
+paragraph breaks (minimum 16 characters).
+
+### Data Types
+
+```python
+@FrozenDataclass()
+class LoadedSnapshot:
+    meta: SnapshotMeta
+    slices: Mapping[str, SnapshotSlicePayload]
+    raw_payload: Mapping[str, JSONValue]
+    raw_text: str
+    path: Path
+
+@FrozenDataclass()
+class SnapshotMeta:
+    version: str
+    created_at: str
+    path: str
+    session_id: str
+    line_number: int
+    slices: tuple[SliceSummary, ...]
+    tags: Mapping[str, str]
+    validation_error: str | None = None
+
+@FrozenDataclass()
+class SliceSummary:
+    slice_type: str
+    item_type: str
+    count: int
+```
+
+`SnapshotStore` is a thread-safe in-memory store supporting entry loading,
+selection by `session_id` or `line_number`, file reloading, and switching
+between files within the root directory.
+
+### Debug Web UI Logging
+
+| Event | Level | Context |
+| ---------------------------- | ------- | ------------------------------ |
+| `wink.debug.snapshot_error` | WARNING | `path`, `line_number`, `error` |
+| `debug.server.start` | INFO | `url` |
+| `debug.server.reload` | INFO | `path` |
+| `debug.server.reload_failed` | WARNING | `path`, `error` |
+| `debug.server.switch` | INFO | `path` |
+| `debug.server.error` | ERROR | `url`, `error` |
+| `debug.server.browser` | WARNING | `url`, `error` |
+
+Implementation uses FastAPI for HTTP, uvicorn as ASGI server, and markdown-it
+for rendering. Browser opening uses a 0.2-second timer to avoid blocking server
+startup. Snapshot path validation restricts file switching to the initial root
+directory.
 
 ## Structured Logging
 

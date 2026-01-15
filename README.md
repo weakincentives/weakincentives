@@ -89,7 +89,7 @@ capabilities once, in one place, and the definition ports across runtimes.
 - **Hash-based overrides.** Prompt descriptors carry content hashes so overrides
   apply only to the intended version. Teams iterate on prompts via
   version-controlled JSON without risking stale edits.
-  See [Prompt Optimization](specs/PROMPT_OPTIMIZATION.md).
+  See [Prompts](specs/PROMPTS.md).
 
 ### Tools
 

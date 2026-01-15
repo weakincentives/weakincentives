@@ -384,7 +384,7 @@ match op:
 ```
 
 Applied to `SliceOp` handling throughout the session runtime. See
-`specs/EXHAUSTIVENESS.md`.
+`specs/DBC.md`.
 
 ### Skill Validation at Mount Time
 

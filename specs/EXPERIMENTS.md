@@ -420,7 +420,7 @@ class ExperimentComparison:
 1. Submit dataset under all experiment variants
 1. Compare results to identify best-performing prompts
 
-See `specs/PROMPT_OPTIMIZATION.md` for detailed override workflow.
+See `specs/PROMPTS.md` for detailed override workflow.
 
 ## Storage Layout
 
@@ -485,7 +485,7 @@ correlation IDs for tracing and debugging. Neither depends on the other.
 
 ## Related Specifications
 
-- **`specs/PROMPT_OPTIMIZATION.md`** - Override system that experiments reference
+- **`specs/PROMPTS.md`** - Override system that experiments reference
   via `overrides_tag`. Covers override storage, seeding, and rendering.
 
 - **`specs/EVALS.md`** - Evaluation framework using experiments as the primary unit

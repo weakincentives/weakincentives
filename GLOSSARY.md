@@ -116,7 +116,7 @@ context manager protocol. Full contract in the
 
 Hash-addressed override files let optimizers or humans replace prompt sections or
 tool definitions without editing source code. Storage layout and hashing rules
-are specified in the [Prompt Overrides specification](specs/PROMPT_OPTIMIZATION.md).
+are specified in the [Prompts specification](specs/PROMPTS.md).
 
 ## Provider Adapter
 
