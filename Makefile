@@ -222,6 +222,7 @@ sync-docs:
 	@cp llms.md src/weakincentives/docs/
 	@cp WINK_GUIDE.md src/weakincentives/docs/
 	@cp CHANGELOG.md src/weakincentives/docs/
+	@cp code_reviewer_example.py src/weakincentives/docs/
 	@cp specs/*.md src/weakincentives/docs/specs/
 	@touch src/weakincentives/docs/__init__.py
 
