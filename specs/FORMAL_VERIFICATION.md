@@ -10,8 +10,8 @@ next to implementation, verified via TLC model checker.
 ## Components
 
 1. **`@formal_spec` decorator** - Embed TLA+ metadata in Python classes
-2. **Test utilities** - Extract specs and run TLC
-3. **CI integration** - `make verify-formal`
+1. **Test utilities** - Extract specs and run TLC
+1. **CI integration** - `make verify-formal`
 
 ## @formal_spec Decorator
 
@@ -86,9 +86,9 @@ pytest formal-tests/ -v
 ## Best Practices
 
 1. Start small - model 2-3 core actions first
-2. Use smallest constants that test interesting behavior
-3. Each invariant tests one specific property
-4. Verify incrementally - add one action at a time
+1. Use smallest constants that test interesting behavior
+1. Each invariant tests one specific property
+1. Verify incrementally - add one action at a time
 
 ## Related Specifications
 

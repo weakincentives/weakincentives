@@ -56,6 +56,7 @@ class Account:
 ```
 
 Implementation details:
+
 - `_wrap_init_with_invariants()` at `dbc/__init__.py:264-277`
 - `_wrap_methods_with_invariants()` at `dbc/__init__.py:308-320`
 
@@ -64,6 +65,7 @@ Implementation details:
 At `dbc/__init__.py:475-500`. Documents side-effect-free functions.
 
 Enforcement (best-effort via `deepcopy` + equality):
+
 - No mutation of arguments
 - No calls to `builtins.open`, `Path.write_text/bytes`, `logging`
 

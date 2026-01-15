@@ -13,6 +13,7 @@ Unlike tool policies that gate calls, feedback providers observe trajectory and
 produce contextual feedback delivered immediately after tool execution.
 
 **Key characteristics:**
+
 - **Non-blocking**: Guidance, not gates; agent decides response
 - **Trigger-based**: Run when conditions met (every N calls/seconds)
 - **Immediate delivery**: Inject via hook response, not next render
@@ -78,12 +79,12 @@ template = PromptTemplate(
 ## Execution Flow
 
 1. Tool call completes
-2. `ToolInvoked` dispatched
-3. Check trigger conditions
-4. Call `provider.should_run()`
-5. Call `provider.provide()`
-6. Store in session, return text
-7. First match wins
+1. `ToolInvoked` dispatched
+1. Check trigger conditions
+1. Call `provider.should_run()`
+1. Call `provider.provide()`
+1. Store in session, return text
+1. First match wins
 
 ## Adapter Integration
 

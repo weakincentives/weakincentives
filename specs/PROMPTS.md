@@ -77,9 +77,10 @@ Provides filesystem access, contributes to prompt resources via `resources()` me
 ### Collection
 
 Resources collected from (lowest to highest precedence):
+
 1. `PromptTemplate.resources`
-2. Section `resources()` methods (depth-first)
-3. `bind(resources=...)` at bind time
+1. Section `resources()` methods (depth-first)
+1. `bind(resources=...)` at bind time
 
 ### Context Manager Protocol
 
@@ -98,6 +99,7 @@ Accessing outside context raises `RuntimeError`.
 ### Transactional Tool Execution
 
 Via `runtime/transactions.py`:
+
 - `tool_transaction(session, resource_context, tag)` context manager
 - `create_snapshot()` / `restore_snapshot()` for manual control
 
@@ -115,8 +117,8 @@ deterministic headings.
 ### Parameter Lookup
 
 1. Use `default_params` if configured
-2. Else use first default for that type
-3. Else instantiate with no arguments
+1. Else use first default for that type
+1. Else instantiate with no arguments
 
 Missing required fields raise `PromptRenderError`.
 
@@ -146,9 +148,10 @@ Non-dataclass types raise `PromptValidationError`.
 ### Parsing
 
 `parse_structured_output(output_text, rendered)`:
+
 1. Extract JSON (fenced block preferred, else parse entire message)
-2. Validate container type matches declaration
-3. Validate dataclass fields, no extra keys (unless allowed)
+1. Validate container type matches declaration
+1. Validate dataclass fields, no extra keys (unless allowed)
 
 Failures raise `OutputParseError` with raw response attached.
 
@@ -168,6 +171,7 @@ At `prompt/progressive_disclosure.py`:
 ### VisibilityExpansionRequired
 
 Exception at `prompt/__init__.py`:
+
 - `requested_overrides`: Mapping of paths to visibility
 - `reason`: Why expansion needed
 - `section_keys`: Affected section keys
@@ -193,6 +197,7 @@ Enable prompt iteration without source changes at `prompt/overrides/`.
 ### Descriptor System
 
 Hashes track drift:
+
 - `SectionDescriptor` with `content_hash`
 - `ToolDescriptor` with `contract_hash`
 - `PromptDescriptor` aggregates all
@@ -202,6 +207,7 @@ Hash mismatches indicate stale overrides; filtered on load.
 ### Store Protocol
 
 `PromptOverridesStore` at `prompt/overrides/versioning.py`:
+
 - `resolve(descriptor, tag)` - Load, filter stale
 - `upsert(descriptor, override)` - Persist
 - `seed(prompt, tag)` - Bootstrap from current state

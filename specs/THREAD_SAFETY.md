@@ -61,6 +61,6 @@ def bad_reducer(state, event):
 ## Recommendations
 
 1. One session per logical workflow
-2. Use frozen dataclasses for slice contents
-3. Keep reducers fast and pure
-4. Don't share adapters across threads
+1. Use frozen dataclasses for slice contents
+1. Keep reducers fast and pure
+1. Don't share adapters across threads

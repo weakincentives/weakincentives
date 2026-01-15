@@ -77,9 +77,9 @@ with tracer.start_as_current_span("process_request") as span:
 ## Invariants
 
 1. **Immutable**: All fields read-only after creation
-2. **Fresh run_id per execution**: Never reused across attempts
-3. **Stable run_id during execution**: Same across all events in one execution
-4. **Preserved trace context**: `trace_id`/`span_id` pass through unchanged
+1. **Fresh run_id per execution**: Never reused across attempts
+1. **Stable run_id during execution**: Same across all events in one execution
+1. **Preserved trace context**: `trace_id`/`span_id` pass through unchanged
 
 ## Related Specifications
 

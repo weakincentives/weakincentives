@@ -23,8 +23,8 @@ my-skill/
 ### Progressive Disclosure
 
 1. **Discovery**: Load name/description only
-2. **Activation**: Read full instructions when task matches
-3. **Execution**: Load referenced files as needed
+1. **Activation**: Read full instructions when task matches
+1. **Execution**: Load referenced files as needed
 
 ## Agent Skills Specification
 
@@ -63,12 +63,14 @@ description: Extract text and tables from PDF files.
 ### Architecture
 
 **Core Library (`weakincentives.skills`):**
+
 - Types: `Skill`, `SkillMount`, `SkillConfig`
 - Validation: `validate_skill()`, `validate_skill_name()`
 - Errors: `SkillError`, `SkillValidationError`, `SkillNotFoundError`, `SkillMountError`
 - Constants: `MAX_SKILL_FILE_BYTES` (1 MiB), `MAX_SKILL_TOTAL_BYTES` (10 MiB)
 
 **Adapter (`adapters/claude_agent_sdk`):**
+
 - `IsolationConfig.skills`: Integration point
 - `EphemeralHome._mount_skills()`: Copies to `.claude/skills/`
 
@@ -83,8 +85,8 @@ description: Extract text and tables from PDF files.
 ### Name Resolution
 
 1. Explicit `mount.name` if provided
-2. Directory name if source is directory
-3. File stem (without `.md`) if source is file
+1. Directory name if source is directory
+1. File stem (without `.md`) if source is file
 
 ### Destination Layout
 

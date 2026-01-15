@@ -7,6 +7,7 @@ and property-based testing. Verifies critical invariants for message queue
 correctness.
 
 **Implementation:**
+
 - TLA+ spec: `src/weakincentives/contrib/mailbox/_redis.py` (embedded)
 - Property tests: `tests/contrib/mailbox/test_redis_mailbox_properties.py`
 

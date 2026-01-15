@@ -27,6 +27,7 @@ At `prompt/tool.py` (`Tool` class):
 | `examples` | `tuple[ToolExample, ...]` |
 
 Handler signature:
+
 ```python
 def handle(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]: ...
 ```
@@ -43,6 +44,7 @@ At `prompt/tool_result.py` (`ToolResult` class):
 | `exclude_value_from_context` | Hide from provider |
 
 **Factories:**
+
 - `ToolResult.ok(value, message)` - Success
 - `ToolResult.error(message)` - Failure
 
@@ -107,9 +109,10 @@ section = MarkdownSection[Params](
 ### Prompt Rendering
 
 Validates:
+
 1. Duplicate names → `PromptValidationError`
-2. Examples against params/result dataclasses
-3. Declaration order cached
+1. Examples against params/result dataclasses
+1. Declaration order cached
 
 `RenderedPrompt.tools` contains ordered tuple from enabled sections.
 
@@ -118,14 +121,14 @@ Validates:
 Via `ToolExecutor` at `adapters/tool_executor.py`:
 
 1. **Registry lookup** - Resolve tool name
-2. **Argument parsing** - `serde.parse(..., extra="forbid")`
-3. **Deadline check** - Refuse if elapsed
-4. **Context construction** - Build `ToolContext`
-5. **Snapshot** - Capture session and resource state
-6. **Handler execution** - Run with params/context
-7. **Restore on failure** - Rollback state
-8. **Telemetry** - Publish `ToolInvoked` to `session.dispatcher`
-9. **Response assembly** - Return result
+1. **Argument parsing** - `serde.parse(..., extra="forbid")`
+1. **Deadline check** - Refuse if elapsed
+1. **Context construction** - Build `ToolContext`
+1. **Snapshot** - Capture session and resource state
+1. **Handler execution** - Run with params/context
+1. **Restore on failure** - Rollback state
+1. **Telemetry** - Publish `ToolInvoked` to `session.dispatcher`
+1. **Response assembly** - Return result
 
 ## Planning Tool Suite
 
@@ -209,6 +212,7 @@ All failure paths restore session and resource state before returning.
 ### Handler Validation
 
 Fail-fast approach:
+
 - **Development**: pyright strict mode catches mismatches
 - **Runtime**: TypeErrors converted to failed results
 

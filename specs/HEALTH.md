@@ -6,9 +6,10 @@ Enable container orchestrators to manage `LoopGroup` workers through health
 probes and automatic termination of stuck workers. Two complementary mechanisms:
 
 1. **Health endpoints**: HTTP for Kubernetes liveness/readiness probes
-2. **Watchdog**: Internal monitor terminating unresponsive workers
+1. **Watchdog**: Internal monitor terminating unresponsive workers
 
 **Implementation:**
+
 - `src/weakincentives/runtime/watchdog.py` - Heartbeat, Watchdog, HealthServer
 - `src/weakincentives/runtime/lifecycle.py` - LoopGroup
 
@@ -74,8 +75,9 @@ Monitors heartbeats in daemon thread. Terminates via SIGKILL when threshold exce
 ## MainLoop Integration
 
 MainLoop beats heartbeat at two points:
+
 1. After receiving messages from mailbox
-2. After processing each message
+1. After processing each message
 
 This proves both idle and busy loops are live.
 
@@ -92,8 +94,9 @@ LoopGroup manages health endpoints and watchdog:
 ### Readiness and Heartbeats
 
 When both enabled, `/health/ready` incorporates heartbeat freshness:
+
 1. **Early warning**: Readiness fails when heartbeats stale
-2. **Hard stop**: Watchdog terminates if heartbeats remain stale
+1. **Hard stop**: Watchdog terminates if heartbeats remain stale
 
 ## Default Timeout Calibration
 
@@ -182,6 +185,7 @@ group = LoopGroup(
 ### Logging
 
 Watchdog emits CRITICAL logs before termination:
+
 ```
 CRITICAL: Watchdog: main-loop stalled for 65.2s (threshold: 60.0s)
 CRITICAL: Watchdog: terminating process due to stalled workers

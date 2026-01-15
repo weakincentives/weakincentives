@@ -64,6 +64,7 @@ Creates slice backends for dataclass types.
 ### SliceFactoryConfig
 
 Maps `SlicePolicy` to factories:
+
 - `state_factory`: For STATE slices (rolled back on failure)
 - `log_factory`: For LOG slices (preserved during restore)
 
@@ -105,6 +106,7 @@ JSONL file-backed slice for persistent storage. Each item stored as single JSON
 line with `__type__` field for polymorphic deserialization.
 
 **Key characteristics:**
+
 - Append-optimized I/O (O(1) appends)
 - Lazy view with optimized `is_empty`, `latest()`, streaming iteration
 - Write-through cache invalidation
@@ -116,6 +118,7 @@ Creates JSONL file-backed slices. Each slice type gets its own file based on
 qualified class name.
 
 **Configuration:**
+
 - `base_dir: Path | None` - Directory for slice files (temp dir if None)
 
 ## Performance Characteristics

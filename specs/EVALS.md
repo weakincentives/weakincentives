@@ -34,6 +34,7 @@ Immutable collection of samples with JSONL loading support.
 | `load(path, input_type, expected_type)` | Load from JSONL |
 
 **JSONL format:**
+
 ```jsonl
 {"id": "1", "input": "What is 2+2?", "expected": "4"}
 ```
@@ -148,16 +149,19 @@ EvalLoop supports distributed evaluation using Redis/SQS mailboxes.
 ### Deployment Modes
 
 **Worker Process:**
+
 - Runs `EvalLoop.run()` indefinitely
 - Polls with long polling (20s)
 - Executes, scores, acks/nacks
 
 **Client Process:**
+
 - Submits via `submit_dataset()`
 - Collects via `collect_results()`
 - Aggregates into EvalReport
 
 **Scaling:**
+
 - Multiple workers for horizontal scaling
 - Visibility timeout ensures exactly-once
 - Failed evaluations retry with backoff

@@ -82,10 +82,10 @@ Isolated Linux container for shell commands and file operations.
 ### Workspace Lifecycle
 
 1. **Overlay Root** - Session-specific directory under cache
-2. **Container Creation** - Python 3.12 image, 1 CPU, 1 GiB RAM, no network
-3. **Startup** - `sleep infinity` with health check
-4. **Reuse** - Subsequent calls share container
-5. **Teardown** - Stopped and removed on section close
+1. **Container Creation** - Python 3.12 image, 1 CPU, 1 GiB RAM, no network
+1. **Startup** - `sleep infinity` with health check
+1. **Reuse** - Subsequent calls share container
+1. **Teardown** - Stopped and removed on section close
 
 ### Tools
 
@@ -93,8 +93,8 @@ All VFS tools plus:
 
 | Tool | Description |
 |------|-------------|
-| `shell_execute` | Run command in container (<=120s) |
-| `evaluate_python` | Execute Python via `python3 -c` (<=5s) |
+| `shell_execute` | Run command in container (\<=120s) |
+| `evaluate_python` | Execute Python via `python3 -c` (\<=5s) |
 
 ### Shell Execution
 
@@ -109,7 +109,7 @@ All VFS tools plus:
 
 ### Limits
 
-- Commands: ASCII, <=4,096 chars combined
+- Commands: ASCII, \<=4,096 chars combined
 - Timeout: 1-120 seconds
 - Output: Truncated to 32 KiB
 
@@ -157,8 +157,8 @@ Task-agnostic repository summaries.
 ### Resolution Order
 
 1. **Session snapshot** - `latest_workspace_digest(session, key)`
-2. **Override fallback** - From `PromptOverridesStore`
-3. **Placeholder** - Default text with warning log
+1. **Override fallback** - From `PromptOverridesStore`
+1. **Placeholder** - Default text with warning log
 
 ### Data Captured
 
@@ -194,6 +194,7 @@ result = optimizer.optimize(prompt, session=session)
 ## Cloning
 
 All workspace sections support `clone(session=..., dispatcher=...)`:
+
 - Re-registers reducers on new session
 - Binds telemetry to new event dispatcher
 - Reapplies host mount hydration

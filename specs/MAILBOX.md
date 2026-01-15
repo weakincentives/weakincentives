@@ -100,9 +100,9 @@ MainLoop receives requests mailbox; response routing derives from `reply_to`.
 ### Error Handling Guidelines
 
 1. `visibility_timeout` > max execution time
-2. Send response before acknowledging
-3. Use `delivery_count` for backoff: `min(60 * delivery_count, 900)`
-4. Dead-letter after N retries: `delivery_count > 5` → log and acknowledge
+1. Send response before acknowledging
+1. Use `delivery_count` for backoff: `min(60 * delivery_count, 900)`
+1. Dead-letter after N retries: `delivery_count > 5` → log and acknowledge
 
 ## Implementations
 

@@ -12,8 +12,8 @@ must be tested.
 #### Strict Requirements
 
 1. **No `pragma: no branch`**: Simplify code to eliminate untestable branches
-2. **Test all conditionals**: `if`, `elif`, `else`, `for`, `while`, ternary
-3. **Simplify over exclude**: Remove defensive code or prove branch reachable
+1. **Test all conditionals**: `if`, `elif`, `else`, `for`, `while`, ternary
+1. **Simplify over exclude**: Remove defensive code or prove branch reachable
 
 #### Excluded Patterns
 
@@ -28,16 +28,16 @@ must be tested.
 Every bug fix requires a regression test:
 
 1. MUST fail before fix, pass after
-2. MUST be named `test_regression_<issue>_<description>`
-3. MUST include docstring linking to issue
+1. MUST be named `test_regression_<issue>_<description>`
+1. MUST include docstring linking to issue
 
 ## Snapshot Integrity Tests
 
 Test critical rollback correctness:
 
 1. **Round-trip**: `snapshot() → rollback() → snapshot()` identical
-2. **Corruption detection**: Tampered snapshots raise error
-3. **Partial rollback**: Interrupted leaves recoverable state
+1. **Corruption detection**: Tampered snapshots raise error
+1. **Partial rollback**: Interrupted leaves recoverable state
 
 ## CI Pipeline
 

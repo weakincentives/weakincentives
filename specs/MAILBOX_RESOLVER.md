@@ -40,8 +40,9 @@ def create(self, identifier: str) -> Mailbox[R, None]:
 ### CompositeResolver
 
 Resolution order:
+
 1. Check registry for pre-registered mailbox
-2. Fall back to factory for dynamic creation
+1. Fall back to factory for dynamic creation
 
 ### RegistryResolver
 

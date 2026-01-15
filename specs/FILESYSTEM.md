@@ -56,6 +56,7 @@ handlers can perform file operations without coupling to storage implementation.
 **Write modes:** `"create"`, `"overwrite"`, `"append"`
 
 **Metadata:**
+
 - `root`: Workspace root path
 - `read_only`: Whether writes disabled
 
@@ -85,6 +86,7 @@ Adapters construct `ToolContext` with filesystem from prompt.
 ### Design Characteristics
 
 All backends share:
+
 - **Exception mapping**: Standard Python exceptions
 - **Path normalization**: Validated relative to root
 - **Limit enforcement**: Backend-specific limits

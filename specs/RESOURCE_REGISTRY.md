@@ -141,9 +141,10 @@ Failures prevent caching, wrapped in `ProviderError`.
 ## Prompt Integration
 
 Resources collected from (lowest to highest precedence):
+
 1. `PromptTemplate.resources`
-2. Section `resources()` methods (depth-first)
-3. `bind(resources=...)` at bind time
+1. Section `resources()` methods (depth-first)
+1. `bind(resources=...)` at bind time
 
 ### Usage
 

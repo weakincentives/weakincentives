@@ -60,10 +60,12 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 ## Isolation Behavior
 
 When `isolation` is set:
+
 - Creates ephemeral `HOME` with `.claude/settings.json`
 - Passes `env` and `setting_sources=["user"]` to SDK
 
 **Notes:**
+
 - `NetworkPolicy` restricts tools only, not API connection
 - Without `api_key`, `ANTHROPIC_API_KEY` from process env is forwarded
 

@@ -62,10 +62,10 @@ Each loop runs in dedicated thread via `ThreadPoolExecutor`.
 ### Run Loop
 
 1. Set `_running = True`, clear `_shutdown_event`
-2. Poll messages until max_iterations or shutdown
-3. Check `_shutdown_event` before each message
-4. On shutdown during batch: nack remaining messages
-5. Set `_running = False` on exit
+1. Poll messages until max_iterations or shutdown
+1. Check `_shutdown_event` before each message
+1. On shutdown during batch: nack remaining messages
+1. Set `_running = False` on exit
 
 ### Shutdown Method
 

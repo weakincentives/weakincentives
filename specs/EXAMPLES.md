@@ -58,6 +58,7 @@ Container section for `TaskExample` children.
 ## Section Hierarchy
 
 `TaskExample` instances register as children of `TaskExamplesSection`:
+
 - Per-example visibility/enabled predicates
 - Section paths: `"task-examples.example-auth-review"`
 - Cloning support

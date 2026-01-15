@@ -36,11 +36,11 @@ Provider-specific configs extend this.
 ### Lifecycle
 
 1. **Validate context** - Verify prompt within context manager
-2. **Render** - `prompt.render()` → `RenderedPrompt`
-3. **Format** - Convert to provider wire format
-4. **Call** - Issue request with throttle protection and deadline checks
-5. **Parse** - Extract content, dispatch tool calls
-6. **Emit** - Publish `PromptRendered`, `PromptExecuted` to `session.dispatcher`
+1. **Render** - `prompt.render()` → `RenderedPrompt`
+1. **Format** - Convert to provider wire format
+1. **Call** - Issue request with throttle protection and deadline checks
+1. **Parse** - Extract content, dispatch tool calls
+1. **Emit** - Publish `PromptRendered`, `PromptExecuted` to `session.dispatcher`
 
 ## Provider Implementations
 
@@ -74,6 +74,7 @@ normalized to `ThrottleError` or `PromptEvaluationError`. Always sets
 ### Claude Agent SDK Adapter
 
 At `adapters/claude_agent_sdk/adapter.py`:
+
 - Async execution with MCP tool bridging
 - Skill mounting support
 
@@ -102,6 +103,7 @@ At `adapters/throttle.py` via `new_throttle_policy()`:
 ### ThrottleError
 
 At `adapters/throttle.py`:
+
 - `kind`: rate_limit, quota_exhausted, timeout, unknown
 - `retry_after`: Provider-suggested delay
 - `attempts`: Retry count
@@ -112,17 +114,18 @@ At `adapters/throttle.py`:
 Shared `InnerLoop` at `adapters/inner_loop.py` drives request/response:
 
 1. **Render** → RenderedPrompt
-2. **Publish PromptRendered**
-3. **Prepare tools** via `tool_to_spec`
-4. **Call provider** (failures → `PromptEvaluationError` with `phase="request"`)
-5. **Handle tool calls** via `ToolExecutor` at `adapters/tool_executor.py`
-6. **Loop** until message without tool calls
-7. **Parse output** from `.parsed` or text
-8. **Publish PromptExecuted**
+1. **Publish PromptRendered**
+1. **Prepare tools** via `tool_to_spec`
+1. **Call provider** (failures → `PromptEvaluationError` with `phase="request"`)
+1. **Handle tool calls** via `ToolExecutor` at `adapters/tool_executor.py`
+1. **Loop** until message without tool calls
+1. **Parse output** from `.parsed` or text
+1. **Publish PromptExecuted**
 
 ### Tool Execution
 
 `ToolExecutor` at `adapters/tool_executor.py`:
+
 - Arguments decoded via `parse_tool_arguments`
 - Dataclass parsing via `serde.parse`
 - Tool handlers access resources via `context.prompt.resources`
@@ -162,6 +165,7 @@ At `adapters/core.py`:
 ## Budget Tracking
 
 Via `Budget` and `BudgetTracker` at `src/weakincentives/budget.py`:
+
 - Records token usage after each response
 - Checks limits at defined checkpoints
 - Thread-safe for concurrent execution
@@ -182,11 +186,11 @@ Logs: `prompt.render.start`, `prompt.render.complete`, `prompt.call.start`,
 ## Implementing New Adapters
 
 1. Define `ClientConfig` and `ModelConfig` extending `LLMConfig`
-2. Accept concrete client or config for test injection
-3. Call `prompt.render` once
-4. Access resources via `prompt.resources`
-5. Delegate to `run_inner_loop`
-6. Wrap SDK failures as `PromptEvaluationError`
+1. Accept concrete client or config for test injection
+1. Call `prompt.render` once
+1. Access resources via `prompt.resources`
+1. Delegate to `run_inner_loop`
+1. Wrap SDK failures as `PromptEvaluationError`
 
 ## Testing
 

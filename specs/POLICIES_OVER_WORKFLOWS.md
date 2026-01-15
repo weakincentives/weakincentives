@@ -11,6 +11,7 @@ reasoning; workflows encode rigid sequences that fracture on edge cases.
 A workflow is predetermined steps: read → parse → identify → patch → test.
 
 When encountering unexpected states:
+
 - **Fail** - Abort on error
 - **Skip** - Continue with invalid state
 - **Branch** - Add conditional logic (spawns decision trees)
@@ -79,9 +80,9 @@ Expose reasoning. Denial feedback enables self-correction.
 ## When Workflows Are Appropriate
 
 1. Sequence is truly invariant (protocol handshakes)
-2. Failure preferable to adaptation
-3. Agent lacks reasoning capability
-4. Human oversight is continuous
+1. Failure preferable to adaptation
+1. Agent lacks reasoning capability
+1. Human oversight is continuous
 
 For unattended agents with LLM reasoning, policies are almost always better.
 

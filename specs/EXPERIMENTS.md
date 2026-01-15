@@ -7,6 +7,7 @@ experiments. Bundles prompt overrides tag with feature flags for A/B testing,
 optimization runs, and controlled rollouts.
 
 **Implementation:**
+
 - `src/weakincentives/evals/_experiment.py` - Experiment class
 - `src/weakincentives/evals/_types.py` - EvalRequest, EvalResult, EvalReport, ExperimentComparison
 
@@ -87,6 +88,7 @@ for experiment in experiments:
 ## Result Aggregation
 
 `EvalReport` provides:
+
 - `by_experiment()` - Group by name
 - `pass_rate_by_experiment()` - Pass rates
 - `mean_score_by_experiment()` - Mean scores
@@ -112,11 +114,11 @@ Experiments reference prompt overrides in:
 ## Invariants
 
 1. Experiment names unique within eval run
-2. Missing overrides tags fall back to source (silent)
-3. Flags not validated (invalid silently ignored)
-4. Experiments are immutable (use `with_*` methods)
-5. EvalRequest requires experiment
-6. Equality is value-based
+1. Missing overrides tags fall back to source (silent)
+1. Flags not validated (invalid silently ignored)
+1. Experiments are immutable (use `with_*` methods)
+1. EvalRequest requires experiment
+1. Equality is value-based
 
 ## Related Specifications
 

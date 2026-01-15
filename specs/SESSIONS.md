@@ -57,6 +57,7 @@ All mutations go through `session.dispatch()` for auditability:
 - **System events**: `InitializeSlice`, `ClearSlice` handled before reducers
 
 Convenience methods dispatch internally:
+
 - `session[Plan].seed(value)` → `InitializeSlice`
 - `session[Plan].clear()` → `ClearSlice`
 - `session[Plan].append(value)` → dispatch to reducers
@@ -117,6 +118,7 @@ At `runtime/events/types.py` and `runtime/events/__init__.py`:
 ### DispatchResult
 
 At `runtime/events/types.py`:
+
 - `ok` property - True if no handler errors
 - `raise_if_errors()` - Optional strict mode
 
@@ -163,6 +165,7 @@ Combined time/token limits via `Budget` and `BudgetTracker` at `src/weakincentiv
 | `max_output_tokens` | Output token limit |
 
 `BudgetTracker` is thread-safe:
+
 - `record_cumulative(evaluation_id, usage)` - Record usage
 - `consumed` property - Sum across evaluations
 - `check()` - Raise `BudgetExceededError` if breached
