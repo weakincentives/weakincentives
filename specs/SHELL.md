@@ -10,8 +10,11 @@ without coupling to a specific execution environment.
 ## Guiding Principles
 
 - **Single access pattern**: Tools use one protocol regardless of backend.
-- **Context-scoped**: The shell instance lives on `ToolContext` and `Prompt`,
-  not global state.
+- **Resource-scoped**: Shell is a resource accessed via `context.shell`, owned
+  by the prompt's resource context—not global state.
+- **Stateless execution**: Each `execute()` call is independent. There is no
+  persistent working directory or shell session state. Callers specify `cwd` and
+  `env` per invocation.
 - **Immutable results**: Execution results are frozen dataclasses; state changes
   go through the protocol.
 - **Backend-managed isolation**: Backends manage their own sandboxing; no session
@@ -20,6 +23,8 @@ without coupling to a specific execution environment.
   portable across execution environments.
 - **Fail-safe defaults**: Timeouts, output limits, and restricted environments
   are the default.
+- **Observable**: Shell executions emit `ShellExecuted` telemetry events with
+  `RunContext` for distributed tracing.
 
 ```mermaid
 flowchart TB
@@ -268,7 +273,11 @@ class Shell(Protocol):
 
 ## ToolContext Integration
 
-### Updated ToolContext
+### Shell as Resource
+
+Shell access follows the same resource pattern as Filesystem. The `Shell`
+instance is registered in the prompt's resource context and accessed via
+a sugar property on `ToolContext`:
 
 ```python
 @dataclass(slots=True, frozen=True)
@@ -280,15 +289,28 @@ class ToolContext:
     adapter: ProviderAdapterProtocol[Any]
     session: SessionProtocol
     deadline: Deadline | None = None
-    budget_tracker: BudgetTracker | None = None
-    filesystem: Filesystem | None = None
-    shell: Shell | None = None  # New field
+    run_context: RunContext | None = None  # Execution metadata
 
     @property
     def resources(self) -> ScopedResourceContext:
         """Access resources from the prompt's resource context."""
         return self.prompt.resources
+
+    @property
+    def filesystem(self) -> Filesystem | None:
+        """Sugar for context.resources.get_optional(Filesystem)."""
+        return self.resources.get_optional(Filesystem)
+
+    @property
+    def shell(self) -> Shell | None:
+        """Sugar for context.resources.get_optional(Shell)."""
+        return self.resources.get_optional(Shell)
 ```
+
+This design ensures:
+- Single ownership (prompt owns resource lifecycle)
+- Consistent access pattern across all resources
+- Automatic cleanup when prompt context exits
 
 ### Handler Usage
 
@@ -301,8 +323,15 @@ def run_tests_handler(
     if context.shell is None:
         return ToolResult.error("No shell available in this context.")
 
+    # Bind run context for correlated logging
+    log = logger
+    if context.run_context:
+        log = logger.bind(**context.run_context.to_log_context())
+
     # Beat before potentially slow execution
     context.beat()
+
+    log.info("Running tests", test_path=params.test_path)
 
     try:
         result = context.shell.execute(
@@ -311,12 +340,16 @@ def run_tests_handler(
             timeout_seconds=120.0,
         )
     except PermissionError as e:
+        log.warning("Command blocked", error=str(e))
         return ToolResult.error(f"Command blocked: {e}")
 
     if result.timed_out:
+        log.warning("Tests timed out", duration=result.duration_seconds)
         return ToolResult.error(
             f"Tests timed out after {result.duration_seconds:.1f}s"
         )
+
+    log.info("Tests completed", exit_code=result.exit_code, duration=result.duration_seconds)
 
     return ToolResult.ok(
         RunTestsResult(
@@ -872,6 +905,80 @@ def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
     return ToolResult.ok(Result(output=result.stdout), message="Command succeeded")
 ```
 
+## Telemetry
+
+### ShellExecuted Event
+
+Shell executions emit telemetry events for observability and audit:
+
+```python
+@dataclass(slots=True, frozen=True)
+class ShellExecuted:
+    """Telemetry event emitted after shell command execution."""
+
+    command: tuple[str, ...]
+    """The command that was executed."""
+
+    exit_code: int
+    """Process exit code."""
+
+    duration_seconds: float
+    """Wall-clock execution time."""
+
+    timed_out: bool
+    """True if command was killed due to timeout."""
+
+    backend: str
+    """Backend identifier (e.g., 'podman', 'host', 'mock')."""
+
+    cwd: str
+    """Working directory where command ran."""
+
+    run_context: RunContext | None = None
+    """Execution context for correlation."""
+
+    truncated: bool = False
+    """True if output was truncated."""
+
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    """When the execution completed."""
+```
+
+### Event Dispatch
+
+Backends dispatch `ShellExecuted` events through the session dispatcher:
+
+```python
+def execute(self, command: str | Sequence[str], ...) -> ExecutionResult:
+    result = self._run_command(command, ...)
+
+    # Emit telemetry event
+    if self._dispatcher is not None:
+        self._dispatcher.dispatch(ShellExecuted(
+            command=result.command,
+            exit_code=result.exit_code,
+            duration_seconds=result.duration_seconds,
+            timed_out=result.timed_out,
+            backend=self.backend_name,
+            cwd=result.cwd,
+            run_context=self._run_context,
+            truncated=result.truncated,
+        ))
+
+    return result
+```
+
+### Correlation with RunContext
+
+Events include `run_context` for distributed tracing:
+
+```python
+def on_shell_executed(event: ShellExecuted) -> None:
+    if event.run_context:
+        print(f"Command in run {event.run_context.run_id}: {event.command}")
+        print(f"  Exit code: {event.exit_code}, Duration: {event.duration_seconds:.2f}s")
+```
+
 ## Testing
 
 ### Protocol Compliance
@@ -1063,3 +1170,16 @@ if not result.success:
 - **Single-threaded**: Backends are not thread-safe; use one per session.
 - **No signal control**: Beyond timeout, no SIGINT/SIGTERM control exposed.
 - **Platform-dependent**: Some backends (Podman) require Linux or compatible.
+
+## Related Specifications
+
+- `specs/FILESYSTEM.md` - Companion protocol for file operations; often used
+  together with Shell for write-then-execute patterns.
+- `specs/WORKSPACE.md` - VFS, Podman sandbox, and workspace tools that provide
+  both Filesystem and Shell implementations.
+- `specs/TOOLS.md` - Tool handler context and invocation lifecycle.
+- `specs/RESOURCE_REGISTRY.md` - Resource scoping and lifecycle management;
+  Shell follows the same resource access pattern as Filesystem.
+- `specs/RUN_CONTEXT.md` - Execution metadata for distributed tracing;
+  `ShellExecuted` events include `RunContext` for correlation.
+- `specs/LOGGING.md` - Structured logging patterns used with `RunContext`.
