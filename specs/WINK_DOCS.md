@@ -10,11 +10,12 @@ as a package. This enables LLM-assisted development workflows where
 documentation can be piped directly to tools or copied into prompts.
 
 ```bash
-wink docs --reference   # Print llms.md (API reference)
-wink docs --guide       # Print WINK_GUIDE.md (usage guide)
-wink docs --specs       # Print all specs concatenated
-wink docs --changelog   # Print CHANGELOG.md (release history)
-wink docs --example     # Print code review example as markdown
+wink docs --reference      # Print llms.md (API reference)
+wink docs --guide          # Print WINK_GUIDE.md (usage guide)
+wink docs --spec ADAPTERS  # Print a single spec by name
+wink docs --specs          # Print all specs concatenated
+wink docs --changelog      # Print CHANGELOG.md (release history)
+wink docs --example        # Print code review example as markdown
 ```
 
 ## Motivation
@@ -38,6 +39,9 @@ wink docs --guide | llm "Summarize the key concepts"
 
 # Export all specs to a file
 wink docs --specs > all-specs.md
+
+# Read a specific spec by name
+wink docs --spec ADAPTERS | less
 
 # View the code review example with introduction
 wink docs --example | less
@@ -155,15 +159,16 @@ This is useful for testing `wink docs` locally without a full build cycle.
 ### Command Signature
 
 ```
-wink docs [--reference] [--guide] [--specs] [--changelog] [--example]
+wink docs [--reference] [--guide] [--spec NAME] [--specs] [--changelog] [--example]
 ```
 
 ### Arguments
 
 | Argument | Type | Description |
-| ------------- | ---- | ----------------------------------------------- |
+| ------------- | ------ | ------------------------------------------------- |
 | `--reference` | flag | Print the API reference (`llms.md`) |
 | `--guide` | flag | Print the usage guide (`WINK_GUIDE.md`) |
+| `--spec NAME` | string | Print a single spec by name (e.g., `ADAPTERS`) |
 | `--specs` | flag | Print all specification files concatenated |
 | `--changelog` | flag | Print the changelog (`CHANGELOG.md`) |
 | `--example` | flag | Print code review example as markdown with intro |
@@ -182,6 +187,10 @@ wink docs [--reference] [--guide] [--specs] [--changelog] [--example]
    ```
    ---
    ```
+
+1. **Single spec lookup**: The `--spec NAME` argument accepts a spec name with
+   or without the `.md` extension. If the spec is not found, an error message
+   lists all available specs.
 
 1. **Spec ordering**: Specs are printed in alphabetical order by filename.
 
@@ -205,6 +214,12 @@ wink docs [--reference] [--guide] [--specs] [--changelog] [--example]
 # Print API reference
 $ wink docs --reference
 # WINK (Weak Incentives)
+...
+
+# Print a single spec by name
+$ wink docs --spec ADAPTERS
+<!-- specs/ADAPTERS.md -->
+# Adapters Specification
 ...
 
 # Print changelog
@@ -246,6 +261,42 @@ def _read_doc(name: str) -> str:
     """Read a documentation file from the package."""
     doc_files = files("weakincentives.docs")
     return doc_files.joinpath(name).read_text(encoding="utf-8")
+
+
+def _read_spec(name: str) -> str:
+    """Read a single spec file by name.
+
+    Args:
+        name: Spec filename with or without .md extension
+
+    Returns:
+        Spec content with header comment
+
+    Raises:
+        FileNotFoundError: If spec file does not exist
+    """
+    specs_dir = files("weakincentives.docs.specs")
+
+    # Normalize name to include .md extension
+    filename = name if name.endswith(".md") else f"{name}.md"
+
+    # Check if the spec file exists
+    spec_path = specs_dir.joinpath(filename)
+    try:
+        content = spec_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # List available specs for helpful error message
+        available = sorted(
+            entry.name.removesuffix(".md")
+            for entry in specs_dir.iterdir()
+            if entry.name.endswith(".md")
+        )
+        available_list = ", ".join(available)
+        msg = f"Spec '{name}' not found. Available specs: {available_list}"
+        raise FileNotFoundError(msg) from None
+
+    header = f"<!-- specs/{filename} -->"
+    return f"{header}\n{content}"
 
 
 def _read_specs() -> str:
@@ -333,6 +384,11 @@ def register_docs_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Print usage guide (WINK_GUIDE.md)",
     )
     docs_parser.add_argument(
+        "--spec",
+        metavar="NAME",
+        help="Print a single spec by name (e.g., ADAPTERS or ADAPTERS.md)",
+    )
+    docs_parser.add_argument(
         "--specs",
         action="store_true",
         help="Print all specification files",
@@ -352,9 +408,16 @@ def register_docs_parser(subparsers: argparse._SubParsersAction) -> None:
 
 def handle_docs(args: argparse.Namespace) -> int:
     """Handle the docs subcommand."""
-    if not (args.reference or args.guide or args.specs or args.changelog or args.example):
-        print("Error: At least one of --reference, --guide, --specs, --changelog, or --example required")
-        print("Usage: wink docs [--reference] [--guide] [--specs] [--changelog] [--example]")
+    if not (
+        args.reference
+        or args.guide
+        or args.spec
+        or args.specs
+        or args.changelog
+        or args.example
+    ):
+        print("Error: At least one of --reference, --guide, --spec, --specs, --changelog, or --example required")
+        print("Usage: wink docs [--reference] [--guide] [--spec NAME] [--specs] [--changelog] [--example]")
         return 1
 
     parts: list[str] = []
@@ -364,6 +427,8 @@ def handle_docs(args: argparse.Namespace) -> int:
             parts.append(_read_doc("llms.md"))
         if args.guide:
             parts.append(_read_doc("WINK_GUIDE.md"))
+        if args.spec:
+            parts.append(_read_spec(args.spec))
         if args.specs:
             parts.append(_read_specs())
         if args.changelog:
@@ -538,6 +603,5 @@ excluded from wheels.
 Potential enhancements (not in scope for initial implementation):
 
 1. **`--list`**: List available documentation files without printing content
-1. **`--spec NAME`**: Print a single spec by name
 1. **`--format json`**: Output as JSON with metadata
 1. **`--search QUERY`**: Search documentation content
