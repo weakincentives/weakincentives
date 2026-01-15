@@ -494,8 +494,8 @@ def apply_task_example_overrides(
 ### Basic Override Application
 
 ```python
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
 from weakincentives.prompt import Prompt
-from weakincentives.prompt.overrides import LocalPromptOverridesStore
 
 store = LocalPromptOverridesStore()
 

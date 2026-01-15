@@ -593,6 +593,8 @@ submit_experiments(dataset, [conservative, aggressive], requests)
 ### Prompt Optimization Workflow
 
 ```python
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
+
 # Seed baseline overrides
 store = LocalPromptOverridesStore()
 store.seed(prompt, tag="baseline")

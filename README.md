@@ -256,7 +256,7 @@ if plan:
 ### 6. Iterate prompts without code changes
 
 ```python
-from weakincentives.prompt.overrides import LocalPromptOverridesStore
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
 
 prompt = Prompt(
     template,

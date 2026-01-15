@@ -18,7 +18,7 @@ from typing import Literal, cast
 
 import pytest
 
-from weakincentives.prompt.overrides.validation import (
+from weakincentives.contrib.overrides.validation import (
     FORMAT_VERSION,
     load_sections,
     load_tools,

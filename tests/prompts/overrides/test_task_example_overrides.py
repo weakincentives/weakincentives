@@ -16,15 +16,15 @@ from __future__ import annotations
 
 import pytest
 
+from weakincentives.contrib.overrides.validation import (
+    load_task_example_overrides,
+    serialize_task_example_overrides,
+)
 from weakincentives.prompt.overrides import (
     HexDigest,
     PromptOverridesError,
     TaskExampleOverride,
     TaskStepOverride,
-)
-from weakincentives.prompt.overrides.validation import (
-    load_task_example_overrides,
-    serialize_task_example_overrides,
 )
 
 VALID_HASH = HexDigest("a" * 64)

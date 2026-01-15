@@ -10,17 +10,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Prompt override infrastructure used by :mod:`weakincentives.prompt`."""
+"""Core override protocol and data models.
+
+This module provides the minimal interface for prompt overrides:
+
+- :class:`PromptOverridesStore`: Protocol for override persistence
+- :class:`PromptOverride`: Override payload with sections and tools
+- :class:`PromptDescriptor`: Hash-based prompt metadata for versioning
+- Hashing utilities: :func:`hash_text`, :func:`hash_json`
+
+For the full filesystem-backed implementation with validation and inspection,
+see :mod:`weakincentives.contrib.overrides`.
+"""
 
 from __future__ import annotations
 
-from .inspection import (
-    OverrideFileMetadata,
-    iter_override_files,
-    resolve_overrides_root,
+# Import runtime.logging early to avoid circular import issues.
+# This mirrors the original import order where local_store.py was imported here.
+from ...runtime.logging import (  # noqa: F401
+    get_logger as _get_logger,  # pyright: ignore[reportUnusedImport]
 )
-from .local_store import LocalPromptOverridesStore
-from .validation import filter_override_for_descriptor
 from .versioning import (
     HexDigest,
     PromptDescriptor,
@@ -29,10 +38,12 @@ from .versioning import (
     PromptOverridesError,
     PromptOverridesStore,
     SectionDescriptor,
+    SectionLike,
     SectionOverride,
     TaskExampleDescriptor,
     TaskExampleOverride,
     TaskStepOverride,
+    ToolContractProtocol,
     ToolDescriptor,
     ToolExampleOverride,
     ToolOverride,
@@ -44,26 +55,23 @@ from .versioning import (
 
 __all__ = [
     "HexDigest",
-    "LocalPromptOverridesStore",
-    "OverrideFileMetadata",
     "PromptDescriptor",
     "PromptLike",
     "PromptOverride",
     "PromptOverridesError",
     "PromptOverridesStore",
     "SectionDescriptor",
+    "SectionLike",
     "SectionOverride",
     "TaskExampleDescriptor",
     "TaskExampleOverride",
     "TaskStepOverride",
+    "ToolContractProtocol",
     "ToolDescriptor",
     "ToolExampleOverride",
     "ToolOverride",
     "descriptor_for_prompt",
     "ensure_hex_digest",
-    "filter_override_for_descriptor",
     "hash_json",
     "hash_text",
-    "iter_override_files",
-    "resolve_overrides_root",
 ]

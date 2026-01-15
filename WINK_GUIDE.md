@@ -2956,7 +2956,7 @@ The default store is `LocalPromptOverridesStore`, which writes JSON files under:
 Wire it like:
 
 ```python
-from weakincentives.prompt.overrides import LocalPromptOverridesStore
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
 from weakincentives.prompt import Prompt
 
 store = LocalPromptOverridesStore()

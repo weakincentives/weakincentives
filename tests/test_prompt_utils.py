@@ -16,6 +16,7 @@ from pathlib import Path
 
 import pytest
 
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
 from weakincentives.contrib.tools.digests import (
     WorkspaceDigest,
     WorkspaceDigestSection,
@@ -25,7 +26,6 @@ from weakincentives.prompt import MarkdownSection, PromptTemplate
 from weakincentives.prompt._visibility import SectionVisibility
 from weakincentives.prompt.overrides import (
     HexDigest,
-    LocalPromptOverridesStore,
     PromptOverridesError,
     SectionOverride,
 )

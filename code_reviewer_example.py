@@ -44,6 +44,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
 from weakincentives.contrib.tools import (
     AstevalSection,
     HostMount,
@@ -76,10 +77,7 @@ from weakincentives.prompt import (
     PromptTemplate,
     SectionVisibility,
 )
-from weakincentives.prompt.overrides import (
-    LocalPromptOverridesStore,
-    PromptOverridesError,
-)
+from weakincentives.prompt.overrides import PromptOverridesError
 from weakincentives.runtime import (
     InMemoryMailbox,
     LeaseExtenderConfig,

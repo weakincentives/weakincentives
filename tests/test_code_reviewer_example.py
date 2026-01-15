@@ -35,6 +35,7 @@ from examples.logging import attach_logging_subscribers
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.adapters import PromptResponse
 from weakincentives.adapters.core import ProviderAdapter
+from weakincentives.contrib.overrides import LocalPromptOverridesStore
 from weakincentives.contrib.tools.digests import (
     latest_workspace_digest,
     set_workspace_digest,
@@ -42,11 +43,7 @@ from weakincentives.contrib.tools.digests import (
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt
-from weakincentives.prompt.overrides import (
-    LocalPromptOverridesStore,
-    SectionOverride,
-    descriptor_for_prompt,
-)
+from weakincentives.prompt.overrides import SectionOverride, descriptor_for_prompt
 from weakincentives.runtime import (
     InMemoryMailbox,
     MainLoopRequest,
