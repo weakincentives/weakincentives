@@ -45,6 +45,9 @@ class DocsSyncHook(BuildHookInterface):
         shutil.copy(root / "llms.md", docs_dir / "llms.md")
         shutil.copy(root / "WINK_GUIDE.md", docs_dir / "WINK_GUIDE.md")
         shutil.copy(root / "CHANGELOG.md", docs_dir / "CHANGELOG.md")
+        shutil.copy(
+            root / "code_reviewer_example.py", docs_dir / "code_reviewer_example.py"
+        )
 
         # Copy all spec files
         for spec_file in (root / "specs").glob("*.md"):
@@ -65,6 +68,9 @@ class DocsSyncHook(BuildHookInterface):
         )
         force_include[str(docs_dir / "CHANGELOG.md")] = (
             "weakincentives/docs/CHANGELOG.md"
+        )
+        force_include[str(docs_dir / "code_reviewer_example.py")] = (
+            "weakincentives/docs/code_reviewer_example.py"
         )
 
         for spec_file in specs_dir.glob("*.md"):
