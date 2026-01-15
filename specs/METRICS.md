@@ -9,17 +9,17 @@ captures latency, throughput, error rates, and queue health across all layers.
 
 ## Guiding Principles
 
-- **Session-native storage**: Metrics persist in Session slices using the same
-  Redux-style patterns as application state. No external metrics backends
-  required by default.
-- **Append-only ledgers**: Raw metric events are immutable and auditable.
-  Aggregations derive from the ledger, never mutate it.
+- **In-memory by default**: Metrics accumulate in the collector during execution
+  without persisting to Session slices. This avoids session bloat and lifecycle
+  mismatch—metrics are observability, not application state.
+- **Resource-scoped lifecycle**: Collectors are bound via `ResourceRegistry` with
+  `Scope.SINGLETON`, surviving across requests within a worker process.
+- **Optional persistence**: The `weakincentives.debug` module provides utilities
+  to dump metrics to disk for post-hoc analysis when needed.
 - **Compact representation**: Use fixed-size histogram buckets and periodic
   rollups to bound memory usage while preserving distribution information.
 - **Zero-config wiring**: Adapters, tools, and mailbox emit metrics
   automatically. Opt-out rather than opt-in.
-- **Type-safe queries**: Metric slices support the standard `where()`,
-  `latest()`, and `all()` patterns for analysis.
 - **RunContext correlation**: Metrics integrate with `RunContext` for
   distributed tracing and request correlation across workers.
 
@@ -27,17 +27,13 @@ captures latency, throughput, error rates, and queue health across all layers.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                              Session                                     │
+│                         ResourceRegistry                                 │
 │  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                      MetricsCollector                               │ │
+│  │              MetricsCollector (Scope.SINGLETON)                     │ │
 │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                 │ │
 │  │  │ Counter[T]  │  │Histogram[T] │  │  Gauge[T]   │                 │ │
 │  │  └─────────────┘  └─────────────┘  └─────────────┘                 │ │
-│  └────────────────────────────────────────────────────────────────────┘ │
-│                                   │                                      │
-│                                   ▼                                      │
-│  ┌────────────────────────────────────────────────────────────────────┐ │
-│  │                    MetricsSlice (Compact Storage)                   │ │
+│  │                                                                     │ │
 │  │  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │ │
 │  │  │ AdapterMetrics   │  │  ToolMetrics     │  │ MailboxMetrics   │  │ │
 │  │  │ - latency hist   │  │ - latency hist   │  │ - lag hist       │  │ │
@@ -52,6 +48,12 @@ captures latency, throughput, error rates, and queue health across all layers.
     │ Adapter │              │  Tool   │              │ Mailbox │
     │  Layer  │              │ Executor│              │  Layer  │
     └─────────┘              └─────────┘              └─────────┘
+                                  │
+                                  ▼ (optional)
+                      ┌───────────────────────┐
+                      │  weakincentives.debug │
+                      │  dump_metrics(path)   │
+                      └───────────────────────┘
 ```
 
 ## Metric Primitives
@@ -417,23 +419,22 @@ class MetricsCollector(Protocol):
         ...
 ```
 
-## Session Integration
+## Collector Implementation
 
-### MetricsSlice
+### MetricsSnapshot
 
-Compact storage for metrics in Session. Uses a single slice with dictionary-like
-access by metric key.
+Immutable snapshot of all collected metrics.
 
 ```python
 @FrozenDataclass()
 class MetricsSnapshot:
-    """Complete metrics snapshot stored in Session slice."""
+    """Complete metrics snapshot for export or inspection."""
 
     adapters: tuple[AdapterMetrics, ...] = ()
     tools: tuple[ToolMetrics, ...] = ()
     mailboxes: tuple[MailboxMetrics, ...] = ()
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    session_id: UUID | None = None
+    worker_id: str | None = None
 
     def adapter(self, name: AdapterName) -> AdapterMetrics | None:
         """Look up adapter metrics by name."""
@@ -464,20 +465,19 @@ class MetricsSnapshot:
         return (input_t, output_t, cached_t)
 ```
 
-### SessionMetricsCollector
+### InMemoryMetricsCollector
 
-Default implementation persisting to Session slice.
+Default implementation storing metrics in memory. No automatic persistence—
+metrics live for the lifetime of the collector (typically worker process).
 
 ```python
 from dataclasses import replace
-from weakincentives.runtime import Session
-from weakincentives.runtime.session import Replace
 
-class SessionMetricsCollector:
-    """MetricsCollector implementation using Session slice storage."""
+class InMemoryMetricsCollector:
+    """In-memory metrics collector with no automatic persistence."""
 
-    def __init__(self, session: Session) -> None:
-        self._session = session
+    def __init__(self, worker_id: str | None = None) -> None:
+        self._worker_id = worker_id
         self._adapters: dict[AdapterName, AdapterMetrics] = {}
         self._tools: dict[str, ToolMetrics] = {}
         self._mailboxes: dict[str, MailboxMetrics] = {}
@@ -523,7 +523,6 @@ class SessionMetricsCollector:
             metrics = replace(metrics, throttle_count=metrics.throttle_count.inc())
 
         self._adapters[adapter] = metrics
-        self._flush()
 
     def record_tool_call(
         self,
@@ -552,7 +551,6 @@ class SessionMetricsCollector:
                 metrics = replace(metrics, error_codes=tuple(codes.items()))
 
         self._tools[tool_name] = metrics
-        self._flush()
 
     def record_message_received(
         self,
@@ -573,7 +571,6 @@ class SessionMetricsCollector:
             ),
         )
         self._mailboxes[queue_name] = metrics
-        self._flush()
 
     def record_message_ack(self, queue_name: str) -> None:
         metrics = self._mailboxes.get(queue_name) or MailboxMetrics(
@@ -585,7 +582,6 @@ class SessionMetricsCollector:
             last_updated=datetime.now(UTC),
         )
         self._mailboxes[queue_name] = metrics
-        self._flush()
 
     def record_message_nack(self, queue_name: str) -> None:
         metrics = self._mailboxes.get(queue_name) or MailboxMetrics(
@@ -597,7 +593,6 @@ class SessionMetricsCollector:
             last_updated=datetime.now(UTC),
         )
         self._mailboxes[queue_name] = metrics
-        self._flush()
 
     def record_message_dead_lettered(self, queue_name: str) -> None:
         metrics = self._mailboxes.get(queue_name) or MailboxMetrics(
@@ -609,7 +604,6 @@ class SessionMetricsCollector:
             last_updated=datetime.now(UTC),
         )
         self._mailboxes[queue_name] = metrics
-        self._flush()
 
     def record_queue_depth(self, queue_name: str, depth: int) -> None:
         metrics = self._mailboxes.get(queue_name) or MailboxMetrics(
@@ -621,19 +615,20 @@ class SessionMetricsCollector:
             last_updated=datetime.now(UTC),
         )
         self._mailboxes[queue_name] = metrics
-        self._flush()
 
     def snapshot(self) -> MetricsSnapshot:
         return MetricsSnapshot(
             adapters=tuple(self._adapters.values()),
             tools=tuple(self._tools.values()),
             mailboxes=tuple(self._mailboxes.values()),
-            session_id=self._session.session_id,
+            worker_id=self._worker_id,
         )
 
-    def _flush(self) -> None:
-        """Persist current metrics to Session slice."""
-        self._session[MetricsSnapshot].seed(self.snapshot())
+    def reset(self) -> None:
+        """Clear all collected metrics."""
+        self._adapters.clear()
+        self._tools.clear()
+        self._mailboxes.clear()
 
     # Query methods delegate to snapshot
     def get_adapter_metrics(self, adapter: AdapterName) -> AdapterMetrics | None:
@@ -648,16 +643,18 @@ class SessionMetricsCollector:
 
 ### Resource Binding
 
-Register MetricsCollector in ResourceRegistry for automatic injection.
+Register MetricsCollector in ResourceRegistry for automatic injection. The
+collector is `SINGLETON` scoped, surviving across requests within a worker.
 
 ```python
 from weakincentives.resources import Binding, Scope
+import os
 
 # In resource configuration
 metrics_binding = Binding(
     MetricsCollector,
-    lambda r: SessionMetricsCollector(r.get(Session)),
-    scope=Scope.SINGLETON,  # One collector per session
+    lambda r: InMemoryMetricsCollector(worker_id=os.getenv("WORKER_ID")),
+    scope=Scope.SINGLETON,  # One collector per worker process
 )
 ```
 
@@ -816,8 +813,9 @@ class MainLoop:
 
 ## Compact Storage Format
 
-The Session slice stores a single `MetricsSnapshot` that is replaced on each
-update. This ensures bounded storage regardless of request volume.
+Metrics are stored in memory using fixed-size structures. Histograms use
+exponential buckets rather than storing raw values, ensuring bounded memory
+regardless of request volume.
 
 ### Memory Budget
 
@@ -846,19 +844,19 @@ snapshot = from_dict(MetricsSnapshot, data)
 
 ## Query Patterns
 
-### Session Slice Access
+### Collector Access
 
 ```python
-# Get current metrics snapshot
-snapshot = session[MetricsSnapshot].latest()
+# Get metrics from collector (via ResourceRegistry)
+metrics: MetricsCollector = registry.get(MetricsCollector)
+snapshot = metrics.snapshot()
 
 # Check adapter performance
-if snapshot:
-    openai = snapshot.adapter(AdapterName("openai"))
-    if openai:
-        p99 = openai.call_latency.percentile(0.99)
-        print(f"OpenAI p99 latency: {p99}ms")
-        print(f"Total tokens: {openai.input_tokens.value + openai.output_tokens.value}")
+openai = snapshot.adapter(AdapterName("openai"))
+if openai:
+    p99 = openai.call_latency.percentile(0.99)
+    print(f"OpenAI p99 latency: {p99}ms")
+    print(f"Total tokens: {openai.input_tokens.value + openai.output_tokens.value}")
 ```
 
 ### Aggregated Queries
@@ -926,6 +924,56 @@ import json
 def to_json(snapshot: MetricsSnapshot) -> str:
     """Export metrics as JSON."""
     return json.dumps(to_dict(snapshot), default=str)
+```
+
+## Debug Persistence
+
+The `weakincentives.debug` module provides utilities to dump metrics to disk
+for post-hoc analysis. This is opt-in—metrics are not persisted by default.
+
+```python
+from weakincentives.debug import dump_metrics
+
+# Dump current metrics to a file
+metrics: MetricsCollector = registry.get(MetricsCollector)
+dump_metrics(metrics.snapshot(), path="/tmp/metrics.json")
+
+# Or dump to the debug archive directory
+from weakincentives.debug import archive_metrics
+archive_metrics(metrics.snapshot())  # Writes to .weakincentives/debug/metrics/
+```
+
+### Periodic Dumping
+
+For long-running workers, dump metrics periodically:
+
+```python
+import asyncio
+from weakincentives.debug import archive_metrics
+
+async def periodic_metrics_dump(
+    metrics: MetricsCollector,
+    interval_seconds: float = 300.0,  # 5 minutes
+) -> None:
+    """Dump metrics snapshot every interval."""
+    while True:
+        await asyncio.sleep(interval_seconds)
+        archive_metrics(metrics.snapshot())
+        metrics.reset()  # Optional: reset after dump
+```
+
+### Debug Archive Structure
+
+Metrics dumps are stored alongside other debug artifacts:
+
+```
+.weakincentives/
+└── debug/
+    ├── metrics/
+    │   ├── 2024-01-15T10:30:00Z_worker-1.json
+    │   └── 2024-01-15T10:35:00Z_worker-1.json
+    ├── sessions/
+    └── logs/
 ```
 
 ## Health Integration
@@ -1062,23 +1110,23 @@ variant_p99 = variant[0].call_latency.percentile(0.99) if variant else None
 
 ## Limitations
 
-- **No distributed aggregation**: Metrics are session-local. For cross-worker
+- **No distributed aggregation**: Metrics are worker-local. For cross-worker
   aggregation, export to external systems (Prometheus, DataDog).
+- **Lost on process restart**: In-memory storage means metrics don't survive
+  worker restarts. Use debug persistence or external export for durability.
 - **Histogram bucket boundaries fixed**: Exponential buckets suit latency well
   but may lose precision for other distributions.
 - **No cardinality limits**: High-cardinality labels (e.g., user IDs) will
   consume unbounded memory. Use only bounded label sets.
-- **Snapshot replacement**: Historical trends require external storage. The
-  Session only retains the current snapshot.
 
 ## Related Specifications
 
-- `specs/SESSIONS.md` - Session slice storage patterns
 - `specs/ADAPTERS.md` - Adapter lifecycle and token usage
 - `specs/MAILBOX.md` - Message delivery metadata
 - `specs/DLQ.md` - Dead letter queue handling and poison message isolation
 - `specs/TOOLS.md` - Tool execution patterns
 - `specs/HEALTH.md` - Health endpoints and watchdog integration
-- `specs/SLICES.md` - Slice storage backends
+- `specs/RESOURCE_REGISTRY.md` - Dependency injection and collector binding
 - `specs/RUN_CONTEXT.md` - Execution metadata and distributed tracing
 - `specs/EXPERIMENTS.md` - A/B testing and experiment configuration
+- `specs/DEBUGGING.md` - Debug persistence utilities
