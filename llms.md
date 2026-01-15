@@ -18,6 +18,111 @@ Claude Agent SDK via adapter abstraction.
 
 ______________________________________________________________________
 
+## Guiding Principles
+
+### Definition vs Harness
+
+WINK separates what you own from what the runtime provides:
+
+**Agent Definition (you own and iterate):**
+
+- **Prompt** - A structured decision procedure, not a loose string
+- **Tools** - The capability surface; the only place side effects occur
+- **Policies** - Enforceable invariants constraining tool use and state
+- **Feedback** - "Are we done?" checks preventing premature termination
+
+**Execution Harness (runtime-owned):**
+
+- Planning/act loop driving tool calls
+- Sandboxing and permissions (filesystem, shell, network)
+- Retries, throttling, crash recovery
+- Deadlines, budgets, operational guardrails
+
+The harness keeps changing (and increasingly comes from vendor runtimes), but
+your agent definition should not. WINK makes the definition a first-class
+artifact you can version, review, test, and port across runtimes.
+
+### The Prompt is the Agent
+
+Most frameworks treat prompts as afterthoughts—templates glued to separately
+registered tool lists. WINK inverts this: you define an agent as a single
+hierarchical document where each section bundles its own instructions and tools.
+
+```text
+PromptTemplate[ReviewResponse]
+├── MarkdownSection (guidance)
+├── WorkspaceDigestSection     ← auto-generated codebase summary
+├── MarkdownSection (reference docs, progressive disclosure)
+├── PlanningToolsSection       ← contributes planning_* tools
+│   └── (nested planning docs)
+├── VfsToolsSection            ← contributes ls/read_file/write_file/...
+│   └── (nested filesystem docs)
+└── MarkdownSection (user request)
+```
+
+**Why this matters:**
+
+1. **Co-location** - Instructions and tools live together. The section that
+   explains filesystem navigation provides the `read_file` tool. Documentation
+   can't drift from implementation.
+
+1. **Progressive disclosure** - Nest child sections to reveal advanced
+   capabilities when relevant. The LLM sees numbered, hierarchical headings.
+
+1. **Dynamic scoping** - Each section has an `enabled` predicate. Disable a
+   section and its entire subtree—tools included—disappears from the prompt.
+
+1. **Typed all the way down** - Sections are parameterized with dataclasses.
+   Placeholders are validated at construction time. Tools declare typed params
+   and results.
+
+### Policies Over Workflows
+
+**Prefer declarative policies over prescriptive workflows.**
+
+A workflow encodes *how* to accomplish a goal—a predetermined sequence that
+fractures when encountering unexpected situations. A policy encodes *what* the
+goal requires—constraints the agent must satisfy while remaining free to find
+any valid path.
+
+```text
+Workflow (brittle):              Policy (flexible):
+1. Read the file                 - File must be read before overwriting
+2. Parse the AST                 - Tests must pass before deployment
+3. Generate patch                - Sensitive ops require confirmation
+4. Write file
+5. Run tests
+```
+
+When workflow step 3 fails, the agent is stuck. When a policy check fails, the
+agent can reason about alternatives that satisfy the constraint.
+
+**Key policy characteristics:**
+
+- **Declarative** - State what must be true, not how to make it true
+- **Composable** - Policies combine via conjunction (all must allow)
+- **Fail-closed** - When uncertain, deny; let the agent adapt
+- **Observable** - Explain denials to enable self-correction
+
+### Transactional Tools
+
+Tool calls are atomic transactions. When a tool fails:
+
+1. Session state rolls back to pre-call state
+1. Filesystem changes revert
+1. Error result returned to LLM with guidance
+
+Failed tools don't leave partial state. This enables aggressive retry and
+recovery strategies.
+
+### One Sentence Summary
+
+> "You write the agent definition (prompt, tools, policies, feedback); the
+> runtime owns the harness (planning loop, sandboxing, orchestration). WINK
+> keeps the definition portable while runtimes evolve."
+
+______________________________________________________________________
+
 ## Accessing Documentation
 
 After installing WINK, use `wink docs` to access bundled documentation:
