@@ -61,7 +61,7 @@ cleaned up on context exit. Adapters access via `prompt.resources`.
 class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
     def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
         prompt = Prompt(self._template).bind(ReviewParams.from_request(request))
-        session = Session(dispatcher=self._dispatcher)
+        session = Session()
         return prompt, session
 ```
 
@@ -73,6 +73,7 @@ def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session
         ReviewParams.from_request(request),
         resources={GitClient: GitClient(repo=request.repo_path)},
     )
+    session = Session()
     return prompt, session
 ```
 

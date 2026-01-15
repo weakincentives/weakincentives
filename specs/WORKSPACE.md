@@ -68,6 +68,7 @@ hydrate initial content at section construction:
 
 ```python
 section = VfsToolsSection(
+    session=session,
     mounts=(HostMount(host_path="docs/", include_glob=("*.md",)),),
     allowed_host_roots=("/path/to/project",),
 )

@@ -20,6 +20,7 @@ correctness.
 | INV-4 | DeliveryCountMonotonic | Delivery count never decreases |
 | INV-4b | DeliveryCountPersistence | Counts persist across redelivery |
 | INV-5 | NoMessageLoss | Every message eventually acked or queued |
+| INV-6 | VisibilityTimeoutCorrectness | Expired invisible messages return to pending |
 | INV-7 | HandleUniqueness | Each delivery gets unique handle |
 | INV-8 | PendingNoDuplicates | No duplicate IDs in pending queue |
 | INV-9 | DataIntegrity | Every queued message has associated data |

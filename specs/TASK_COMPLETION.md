@@ -54,7 +54,7 @@ Combines multiple checkers with configurable logic.
 ```python
 # All must pass
 checker = CompositeChecker(
-    checkers=(PlanBasedChecker(plan_type=Plan), TestPassingChecker()),
+    checkers=(PlanBasedChecker(plan_type=Plan), FileExistsChecker(("output.txt",))),
     all_must_pass=True,
 )
 

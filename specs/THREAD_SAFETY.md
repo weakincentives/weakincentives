@@ -18,7 +18,7 @@ state.
 | Component | Protection | Notes |
 |-----------|------------|-------|
 | `InProcessDispatcher` | RLock on `_handlers` | Handler snapshots taken under lock |
-| `Session` | RLock on `_state`, `_reducers` | Copy-on-write inside critical section |
+| `Session` | RLock on `_slices`, `_reducers` | Copy-on-write inside critical section |
 | `LocalPromptOverridesStore` | Per-file locks | Atomic file writes |
 
 ## Session Thread Safety

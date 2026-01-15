@@ -23,7 +23,7 @@ At `prompt/tool.py` (`Tool` class):
 | --- | --- |
 | `name` | `^[a-z0-9_-]{1,64}$` |
 | `description` | 1-200 chars |
-| `handler` | `ToolHandler[ParamsT, ResultT]` |
+| `handler` | `ToolHandler[ParamsT, ResultT] \| None` |
 | `accepts_overrides` | Whether description overridable |
 | `examples` | `tuple[ToolExample, ...]` |
 
