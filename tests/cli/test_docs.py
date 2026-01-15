@@ -78,6 +78,7 @@ def test_docs_no_flags_returns_error(capsys: pytest.CaptureFixture[str]) -> None
     captured = capsys.readouterr()
     assert "--reference" in captured.out
     assert "--guide" in captured.out
+    assert "--spec" in captured.out
     assert "--specs" in captured.out
     assert "--changelog" in captured.out
 
@@ -199,3 +200,78 @@ def test_docs_no_flags_mentions_example(capsys: pytest.CaptureFixture[str]) -> N
     assert exit_code == 1
     captured = capsys.readouterr()
     assert "--example" in captured.out
+
+
+def test_docs_spec_outputs_single_spec(capsys: pytest.CaptureFixture[str]) -> None:
+    """--spec NAME prints a single spec file."""
+    exit_code = wink.main(["docs", "--spec", "ADAPTERS"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "<!-- specs/ADAPTERS.md -->" in captured.out
+    # Should contain ADAPTERS content
+    assert "Provider integrations" in captured.out or "Adapter" in captured.out
+
+
+def test_docs_spec_with_md_extension(capsys: pytest.CaptureFixture[str]) -> None:
+    """--spec NAME.md works with explicit .md extension."""
+    exit_code = wink.main(["docs", "--spec", "ADAPTERS.md"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "<!-- specs/ADAPTERS.md -->" in captured.out
+
+
+def test_docs_spec_not_found_shows_available(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--spec with invalid name shows available specs."""
+    exit_code = wink.main(["docs", "--spec", "NONEXISTENT"])
+
+    assert exit_code == 2
+    captured = capsys.readouterr()
+    assert "not found" in captured.err
+    assert "Available specs:" in captured.err
+    assert "ADAPTERS" in captured.err
+
+
+def test_docs_spec_combined_with_other_flags(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--spec can be combined with other flags."""
+    exit_code = wink.main(["docs", "--spec", "ADAPTERS", "--changelog"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    # Both outputs should be present with separator
+    assert "<!-- specs/ADAPTERS.md -->" in captured.out
+    assert "# Changelog" in captured.out
+    assert "\n---\n" in captured.out
+
+
+def test_read_spec_reads_single_spec() -> None:
+    """_read_spec reads a single spec file with header."""
+    content = wink._read_spec("ADAPTERS")
+
+    assert isinstance(content, str)
+    assert "<!-- specs/ADAPTERS.md -->" in content
+    # Header should be at the start
+    assert content.startswith("<!-- specs/ADAPTERS.md -->")
+
+
+def test_read_spec_with_md_extension() -> None:
+    """_read_spec works with explicit .md extension."""
+    content = wink._read_spec("ADAPTERS.md")
+
+    assert isinstance(content, str)
+    assert "<!-- specs/ADAPTERS.md -->" in content
+
+
+def test_read_spec_not_found_raises() -> None:
+    """_read_spec raises FileNotFoundError for unknown specs."""
+    with pytest.raises(FileNotFoundError) as exc_info:
+        wink._read_spec("NONEXISTENT")
+
+    assert "not found" in str(exc_info.value)
+    assert "Available specs:" in str(exc_info.value)
+    assert "ADAPTERS" in str(exc_info.value)

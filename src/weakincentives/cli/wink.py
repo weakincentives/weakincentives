@@ -76,6 +76,42 @@ python code_reviewer_example.py --optimize
     return f"{intro}{source}\n```\n"
 
 
+def _read_spec(name: str) -> str:
+    """Read a single spec file by name.
+
+    Args:
+        name: Spec filename with or without .md extension (e.g., "ADAPTERS" or "ADAPTERS.md")
+
+    Returns:
+        Spec content with header comment
+
+    Raises:
+        FileNotFoundError: If spec file does not exist
+    """
+    specs_dir = files("weakincentives.docs.specs")
+
+    # Normalize name to include .md extension
+    filename = name if name.endswith(".md") else f"{name}.md"
+
+    # Check if the spec file exists
+    spec_path = specs_dir.joinpath(filename)
+    try:
+        content = spec_path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        # List available specs for helpful error message
+        available = sorted(
+            entry.name.removesuffix(".md")
+            for entry in specs_dir.iterdir()
+            if entry.name.endswith(".md")
+        )
+        available_list = ", ".join(available)
+        msg = f"Spec '{name}' not found. Available specs: {available_list}"
+        raise FileNotFoundError(msg) from None
+
+    header = f"<!-- specs/{filename} -->"
+    return f"{header}\n{content}"
+
+
 def _read_specs() -> str:
     """Read all spec files, concatenated with headers."""
     specs_dir = files("weakincentives.docs.specs")
@@ -95,32 +131,45 @@ def _read_specs() -> str:
     return "\n\n".join(parts)
 
 
+def _load_docs(args: argparse.Namespace) -> list[str]:
+    """Load documentation content based on args."""
+    parts: list[str] = []
+    if args.reference:
+        parts.append(_read_doc("llms.md"))
+    if args.guide:
+        parts.append(_read_doc("WINK_GUIDE.md"))
+    if args.spec:
+        parts.append(_read_spec(args.spec))
+    if args.specs:
+        parts.append(_read_specs())
+    if args.changelog:
+        parts.append(_read_doc("CHANGELOG.md"))
+    if args.example:
+        parts.append(_read_example())
+    return parts
+
+
 def _handle_docs(args: argparse.Namespace) -> int:
     """Handle the docs subcommand."""
-    if not (
-        args.reference or args.guide or args.specs or args.changelog or args.example
-    ):
+    has_flag = (
+        args.reference
+        or args.guide
+        or args.spec
+        or args.specs
+        or args.changelog
+        or args.example
+    )
+    if not has_flag:
         print(
-            "Error: At least one of --reference, --guide, --specs, --changelog, or --example required"
+            "Error: At least one of --reference, --guide, --spec, --specs, --changelog, or --example required"
         )
         print(
-            "Usage: wink docs [--reference] [--guide] [--specs] [--changelog] [--example]"
+            "Usage: wink docs [--reference] [--guide] [--spec NAME] [--specs] [--changelog] [--example]"
         )
         return 1
 
-    parts: list[str] = []
-
     try:
-        if args.reference:
-            parts.append(_read_doc("llms.md"))
-        if args.guide:
-            parts.append(_read_doc("WINK_GUIDE.md"))
-        if args.specs:
-            parts.append(_read_specs())
-        if args.changelog:
-            parts.append(_read_doc("CHANGELOG.md"))
-        if args.example:
-            parts.append(_read_example())
+        parts = _load_docs(args)
     except FileNotFoundError as e:
         print(f"Error: Documentation not found: {e}", file=sys.stderr)
         print("This may indicate a packaging error.", file=sys.stderr)
@@ -212,6 +261,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--guide",
         action="store_true",
         help="Print usage guide (WINK_GUIDE.md)",
+    )
+    _ = docs_parser.add_argument(
+        "--spec",
+        metavar="NAME",
+        help="Print a single spec by name (e.g., ADAPTERS or ADAPTERS.md)",
     )
     _ = docs_parser.add_argument(
         "--specs",
