@@ -2,82 +2,102 @@
 
 ## Purpose
 
-A DebugBundle is a self-contained SQLite database that captures all debugging
-information from a long-running agent task into a single portable artifact.
-Backed by Datasette for interactive exploration, it consolidates session events,
-logs, tool invocations, file artifacts, and execution metadata that would
-otherwise be scattered across multiple files and formats.
+A DebugBundle is a self-contained SQLite database assembled from existing
+debugging artifacts into a single queryable file. It consolidates session
+snapshots, log files, and filesystem archives produced by the existing
+`weakincentives.debug` tools into a format explorable via Datasette.
 
-This specification complements `specs/DEBUGGING.md` by defining how to aggregate
-all debugging surfaces into one queryable, shareable package.
+This specification complements `specs/DEBUGGING.md` by defining how to transform
+existing artifacts into one queryable, shareable package.
 
-## Motivation
+## Guiding Principles
 
-Long-running agent tasks generate debugging data across multiple surfaces:
+- **Build on existing tools**: Collection uses `dump_session`, `collect_all_logs`,
+  and `archive_filesystem`—DebugBundle only handles assembly and exploration
+- **Post-hoc assembly**: Bundles are created after task completion from artifacts
+  on disk, not during execution
+- **SQL-first exploration**: The primary interface is SQL queries via Datasette,
+  not custom APIs
+- **Lossless import**: All data from source artifacts is preserved and queryable
 
-| Surface | Current Format | Location |
-| ----------------- | -------------- | -------------------------------- |
-| Session events | JSONL | `<session_id>.jsonl` |
-| Log messages | JSONL | `<session_id>.log` |
-| Filesystem state | ZIP | `<uuid>.zip` |
-| Tool invocations | Session slice | In-memory or JSONL slice |
-| Prompt renders | Session slice | In-memory or JSONL slice |
-| Token usage | Event fields | Scattered across events |
-| Run context | Event fields | Scattered across events |
-
-**Problems with the current approach:**
-
-1. **Fragmentation**: Debugging data is split across 3+ files per task
-2. **Correlation**: Joining data across files requires custom scripts
-3. **Querying**: JSONL files don't support SQL-style queries
-4. **Sharing**: Multiple files are awkward to share or archive
-5. **Exploration**: No unified interface for browsing all data
-
-**DebugBundle solves these by:**
-
-1. **Consolidation**: Single SQLite file with all data
-2. **Correlation**: Foreign keys link related records
-3. **Querying**: Full SQL support via SQLite
-4. **Sharing**: One file to transfer or archive
-5. **Exploration**: Datasette provides immediate web UI
-
-## Architecture
+## Workflow
 
 ```mermaid
-flowchart TB
-    subgraph Collection["Data Collection"]
-        Session["Session<br/>events, slices"]
-        Logs["Log Collector<br/>structured logs"]
-        FS["Filesystem<br/>file contents"]
-        RC["RunContext<br/>execution metadata"]
+flowchart LR
+    subgraph Collection["Collection (Existing Tools)"]
+        DS["dump_session()"]
+        CL["collect_all_logs()"]
+        AF["archive_filesystem()"]
     end
 
-    subgraph Bundle["DebugBundle (SQLite)"]
-        Meta["bundle_meta"]
-        Runs["runs"]
-        Events["events"]
-        LogsTable["logs"]
-        Tools["tool_invocations"]
-        Prompts["prompt_renders"]
-        Files["files"]
-        Slices["slice_snapshots"]
+    subgraph Artifacts["Artifacts on Disk"]
+        JSONL["session.jsonl"]
+        LOG["session.log"]
+        ZIP["files.zip"]
+    end
+
+    subgraph Assembly["DebugBundle Assembly"]
+        Create["DebugBundle.from_artifacts()"]
+        DB["bundle.db"]
     end
 
     subgraph Exploration["Exploration"]
-        Datasette["Datasette<br/>Web UI"]
+        Datasette["Datasette"]
         SQL["SQL Queries"]
-        Export["CSV/JSON Export"]
+        CLI["wink debug-bundle"]
     end
 
-    Session --> Events
-    Session --> Slices
-    Logs --> LogsTable
-    FS --> Files
-    RC --> Runs
+    DS --> JSONL
+    CL --> LOG
+    AF --> ZIP
 
-    Bundle --> Datasette
-    Bundle --> SQL
-    Bundle --> Export
+    JSONL --> Create
+    LOG --> Create
+    ZIP --> Create
+    Create --> DB
+
+    DB --> Datasette
+    DB --> SQL
+    DB --> CLI
+```
+
+## Recommended Debug Capture Pattern
+
+Use the existing debugging tools during execution:
+
+```python
+from weakincentives.debug import (
+    archive_filesystem,
+    collect_all_logs,
+    dump_session,
+)
+
+debug_dir = Path(f"./debug/{session.session_id}")
+
+# Capture logs during evaluation
+with collect_all_logs(debug_dir / "session.log"):
+    response = adapter.evaluate(prompt, session=session)
+
+# Dump session state
+dump_session(session, debug_dir)
+
+# Archive filesystem contents
+if fs := prompt.resources.get(Filesystem, None):
+    archive_filesystem(fs, debug_dir)
+
+# Debug directory now contains:
+# - session.log (JSONL logs)
+# - <session_id>.jsonl (session snapshots)
+# - <uuid>.zip (filesystem archive)
+```
+
+Then assemble into a bundle for exploration:
+
+```python
+from weakincentives.debug import DebugBundle
+
+bundle = DebugBundle.from_directory(debug_dir)
+bundle.serve()  # Launch Datasette
 ```
 
 ## Database Schema
@@ -94,68 +114,35 @@ CREATE TABLE bundle_meta (
     wink_version TEXT NOT NULL,        -- e.g., "0.1.0"
     schema_version INTEGER NOT NULL,   -- Schema version for migrations
     root_session_id TEXT,              -- Root session UUID
-    experiment_name TEXT,              -- Experiment name if applicable
-    experiment_tag TEXT,               -- Overrides tag if applicable
+    source_directory TEXT,             -- Original artifact directory
     description TEXT,                  -- User-provided description
     tags TEXT                          -- JSON object of custom tags
 );
 ```
 
-### `runs`
+### `sessions`
 
-Execution runs with RunContext metadata:
-
-```sql
-CREATE TABLE runs (
-    run_id TEXT PRIMARY KEY,           -- UUID
-    request_id TEXT NOT NULL,          -- Correlates retries
-    session_id TEXT,                   -- Session UUID
-    attempt INTEGER NOT NULL DEFAULT 1,
-    worker_id TEXT,
-    trace_id TEXT,                     -- OpenTelemetry trace
-    span_id TEXT,                      -- OpenTelemetry span
-    started_at TEXT NOT NULL,          -- ISO 8601
-    ended_at TEXT,                     -- ISO 8601, NULL if incomplete
-    status TEXT NOT NULL,              -- 'running', 'completed', 'failed'
-    error_type TEXT,                   -- Exception class if failed
-    error_message TEXT                 -- Exception message if failed
-);
-
-CREATE INDEX idx_runs_session ON runs(session_id);
-CREATE INDEX idx_runs_request ON runs(request_id);
-CREATE INDEX idx_runs_trace ON runs(trace_id);
-```
-
-### `events`
-
-Session events (dispatched dataclass instances):
+Session metadata extracted from snapshots:
 
 ```sql
-CREATE TABLE events (
-    event_id TEXT PRIMARY KEY,         -- UUID
-    run_id TEXT REFERENCES runs(run_id),
-    session_id TEXT NOT NULL,
-    event_type TEXT NOT NULL,          -- Qualified class name
-    timestamp TEXT NOT NULL,           -- ISO 8601
-    sequence INTEGER NOT NULL,         -- Order within session
-    payload TEXT NOT NULL              -- JSON serialization
+CREATE TABLE sessions (
+    session_id TEXT PRIMARY KEY,
+    parent_session_id TEXT REFERENCES sessions(session_id),
+    created_at TEXT NOT NULL,          -- ISO 8601
+    tags TEXT                          -- JSON object of session tags
 );
 
-CREATE INDEX idx_events_session ON events(session_id);
-CREATE INDEX idx_events_type ON events(event_type);
-CREATE INDEX idx_events_run ON events(run_id);
-CREATE INDEX idx_events_timestamp ON events(timestamp);
+CREATE INDEX idx_sessions_parent ON sessions(parent_session_id);
 ```
 
 ### `logs`
 
-Structured log records:
+Structured log records imported from JSONL log files:
 
 ```sql
 CREATE TABLE logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id TEXT REFERENCES runs(run_id),
-    session_id TEXT,
+    session_id TEXT REFERENCES sessions(session_id),
     timestamp TEXT NOT NULL,           -- ISO 8601
     level TEXT NOT NULL,               -- DEBUG, INFO, WARNING, ERROR, CRITICAL
     logger TEXT NOT NULL,              -- Logger name
@@ -167,24 +154,41 @@ CREATE TABLE logs (
 CREATE INDEX idx_logs_session ON logs(session_id);
 CREATE INDEX idx_logs_level ON logs(level);
 CREATE INDEX idx_logs_event ON logs(event);
-CREATE INDEX idx_logs_run ON logs(run_id);
 CREATE INDEX idx_logs_timestamp ON logs(timestamp);
+```
+
+### `slice_items`
+
+All items from session slices, denormalized for querying:
+
+```sql
+CREATE TABLE slice_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id),
+    slice_type TEXT NOT NULL,          -- Qualified class name
+    item_index INTEGER NOT NULL,       -- Position in slice
+    item_type TEXT NOT NULL,           -- Qualified class name of item
+    payload TEXT NOT NULL              -- JSON serialization
+);
+
+CREATE INDEX idx_slice_items_session ON slice_items(session_id);
+CREATE INDEX idx_slice_items_type ON slice_items(slice_type);
+CREATE INDEX idx_slice_items_item_type ON slice_items(item_type);
 ```
 
 ### `tool_invocations`
 
-Tool calls with params and results:
+Tool calls extracted from ToolInvoked events in slices:
 
 ```sql
 CREATE TABLE tool_invocations (
-    invocation_id TEXT PRIMARY KEY,    -- UUID (event_id from ToolInvoked)
-    run_id TEXT REFERENCES runs(run_id),
-    session_id TEXT NOT NULL,
+    event_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id),
     prompt_name TEXT NOT NULL,
+    adapter TEXT NOT NULL,
     tool_name TEXT NOT NULL,
     call_id TEXT,                      -- Provider's tool call ID
     timestamp TEXT NOT NULL,           -- ISO 8601
-    duration_ms INTEGER,               -- Execution duration
     params TEXT NOT NULL,              -- JSON params
     result_success INTEGER NOT NULL,   -- 0 or 1
     result_message TEXT,
@@ -196,126 +200,130 @@ CREATE TABLE tool_invocations (
 
 CREATE INDEX idx_tools_session ON tool_invocations(session_id);
 CREATE INDEX idx_tools_name ON tool_invocations(tool_name);
-CREATE INDEX idx_tools_run ON tool_invocations(run_id);
 CREATE INDEX idx_tools_success ON tool_invocations(result_success);
+CREATE INDEX idx_tools_timestamp ON tool_invocations(timestamp);
 ```
 
-### `prompt_renders`
+### `prompt_events`
 
-Prompt rendering events:
+Prompt lifecycle events extracted from slices:
 
 ```sql
-CREATE TABLE prompt_renders (
-    render_id TEXT PRIMARY KEY,        -- UUID (event_id from PromptRendered)
-    run_id TEXT REFERENCES runs(run_id),
-    session_id TEXT NOT NULL,
-    prompt_ns TEXT NOT NULL,
-    prompt_key TEXT NOT NULL,
+CREATE TABLE prompt_events (
+    event_id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL REFERENCES sessions(session_id),
+    event_type TEXT NOT NULL,          -- 'rendered' or 'executed'
+    prompt_ns TEXT,
+    prompt_key TEXT,
     prompt_name TEXT,
     adapter TEXT NOT NULL,
     timestamp TEXT NOT NULL,           -- ISO 8601
-    rendered_text TEXT NOT NULL,       -- Full rendered prompt
-    char_count INTEGER NOT NULL,
-    tool_count INTEGER NOT NULL,
+    -- PromptRendered fields
+    rendered_text TEXT,
+    char_count INTEGER,
+    tool_count INTEGER,
     tool_names TEXT,                   -- JSON array
-    has_structured_output INTEGER,     -- 0 or 1
-    output_type TEXT,                  -- Qualified class name
-    override_tag TEXT                  -- Overrides tag used
-);
-
-CREATE INDEX idx_renders_session ON prompt_renders(session_id);
-CREATE INDEX idx_renders_prompt ON prompt_renders(prompt_ns, prompt_key);
-CREATE INDEX idx_renders_run ON prompt_renders(run_id);
-```
-
-### `prompt_executions`
-
-Prompt execution results:
-
-```sql
-CREATE TABLE prompt_executions (
-    execution_id TEXT PRIMARY KEY,     -- UUID (event_id from PromptExecuted)
-    run_id TEXT REFERENCES runs(run_id),
-    session_id TEXT NOT NULL,
-    prompt_name TEXT NOT NULL,
-    adapter TEXT NOT NULL,
-    timestamp TEXT NOT NULL,           -- ISO 8601
-    duration_ms INTEGER,
-    result_type TEXT,                  -- 'success', 'error', 'timeout'
-    output TEXT,                       -- JSON serialized output
-    error_type TEXT,
-    error_message TEXT,
+    -- PromptExecuted fields
+    result TEXT,                       -- JSON serialized output
     input_tokens INTEGER,
     output_tokens INTEGER,
-    total_tokens INTEGER,
-    cache_read_tokens INTEGER,
-    cache_write_tokens INTEGER
+    total_tokens INTEGER
 );
 
-CREATE INDEX idx_executions_session ON prompt_executions(session_id);
-CREATE INDEX idx_executions_run ON prompt_executions(run_id);
-CREATE INDEX idx_executions_result ON prompt_executions(result_type);
+CREATE INDEX idx_prompt_events_session ON prompt_events(session_id);
+CREATE INDEX idx_prompt_events_type ON prompt_events(event_type);
+CREATE INDEX idx_prompt_events_timestamp ON prompt_events(timestamp);
 ```
 
 ### `files`
 
-Filesystem contents at capture time:
+Files imported from filesystem archives:
 
 ```sql
 CREATE TABLE files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    run_id TEXT REFERENCES runs(run_id),
+    archive_id TEXT NOT NULL,          -- UUID of source archive
+    session_id TEXT REFERENCES sessions(session_id),
     path TEXT NOT NULL,
     size_bytes INTEGER NOT NULL,
-    content_type TEXT,                 -- MIME type or 'binary'
     content TEXT,                      -- Text content (NULL for binary)
-    content_hash TEXT,                 -- SHA-256 for deduplication
-    captured_at TEXT NOT NULL          -- ISO 8601
+    is_binary INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX idx_files_session ON files(session_id);
 CREATE INDEX idx_files_path ON files(path);
-CREATE INDEX idx_files_run ON files(run_id);
-CREATE UNIQUE INDEX idx_files_dedup ON files(session_id, path, content_hash);
+CREATE INDEX idx_files_archive ON files(archive_id);
 ```
 
-### `slice_snapshots`
-
-Session slice state at various points:
+### Pre-Built Views
 
 ```sql
-CREATE TABLE slice_snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    run_id TEXT REFERENCES runs(run_id),
-    snapshot_at TEXT NOT NULL,         -- ISO 8601
-    slice_type TEXT NOT NULL,          -- Qualified class name
-    item_count INTEGER NOT NULL,
-    items TEXT NOT NULL,               -- JSON array of serialized items
-    trigger TEXT                       -- What caused the snapshot
-);
+-- Execution timeline combining prompt and tool events
+CREATE VIEW execution_timeline AS
+SELECT
+    timestamp,
+    'prompt_rendered' as event_type,
+    prompt_name as name,
+    session_id,
+    char_count as detail,
+    NULL as success
+FROM prompt_events WHERE event_type = 'rendered'
+UNION ALL
+SELECT
+    timestamp,
+    'tool_invoked' as event_type,
+    tool_name as name,
+    session_id,
+    NULL as detail,
+    result_success as success
+FROM tool_invocations
+UNION ALL
+SELECT
+    timestamp,
+    'prompt_executed' as event_type,
+    prompt_name as name,
+    session_id,
+    total_tokens as detail,
+    CASE WHEN result IS NOT NULL THEN 1 ELSE 0 END as success
+FROM prompt_events WHERE event_type = 'executed'
+ORDER BY timestamp;
 
-CREATE INDEX idx_slices_session ON slice_snapshots(session_id);
-CREATE INDEX idx_slices_type ON slice_snapshots(slice_type);
-CREATE INDEX idx_slices_run ON slice_snapshots(run_id);
-```
+-- Token usage summary per session
+CREATE VIEW token_summary AS
+SELECT
+    session_id,
+    SUM(input_tokens) as total_input_tokens,
+    SUM(output_tokens) as total_output_tokens,
+    SUM(total_tokens) as total_tokens,
+    COUNT(*) as prompt_count
+FROM prompt_events
+WHERE event_type = 'executed'
+GROUP BY session_id;
 
-### `token_usage`
+-- Tool success rates
+CREATE VIEW tool_summary AS
+SELECT
+    session_id,
+    tool_name,
+    COUNT(*) as call_count,
+    SUM(result_success) as success_count,
+    ROUND(100.0 * SUM(result_success) / COUNT(*), 1) as success_rate
+FROM tool_invocations
+GROUP BY session_id, tool_name;
 
-Aggregated token usage per run:
-
-```sql
-CREATE TABLE token_usage (
-    run_id TEXT PRIMARY KEY REFERENCES runs(run_id),
-    total_input_tokens INTEGER NOT NULL DEFAULT 0,
-    total_output_tokens INTEGER NOT NULL DEFAULT 0,
-    total_tokens INTEGER NOT NULL DEFAULT 0,
-    cache_read_tokens INTEGER NOT NULL DEFAULT 0,
-    cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-    prompt_count INTEGER NOT NULL DEFAULT 0,
-    tool_count INTEGER NOT NULL DEFAULT 0
-);
+-- Errors and warnings from logs
+CREATE VIEW error_log AS
+SELECT
+    timestamp,
+    level,
+    logger,
+    event,
+    message,
+    json_extract(context, '$.error') as error_detail,
+    session_id
+FROM logs
+WHERE level IN ('ERROR', 'WARNING', 'CRITICAL')
+ORDER BY timestamp;
 ```
 
 ## Core Types
@@ -325,83 +333,88 @@ CREATE TABLE token_usage (
 ```python
 @dataclass(slots=True)
 class DebugBundle:
-    """Self-contained debugging artifact backed by SQLite.
+    """SQLite database assembled from debugging artifacts.
 
-    A DebugBundle consolidates all debugging data from a long-running agent
-    task into a single queryable file. It can be created during execution
-    (live capture) or assembled post-hoc from existing artifacts.
+    DebugBundle consolidates session snapshots, log files, and filesystem
+    archives into a single queryable file. It does not capture data during
+    execution—use the existing debugging tools for that.
 
     Usage::
 
-        # Create during execution
-        with DebugBundle.create("./debug/task-001.db") as bundle:
-            bundle.bind_session(session)
-            bundle.bind_logs(log_collector)
-            # ... run agent ...
+        # Assemble from a debug directory
+        bundle = DebugBundle.from_directory("./debug/abc123/")
 
-        # Open for exploration
-        bundle = DebugBundle.open("./debug/task-001.db")
-        bundle.serve()  # Launch Datasette
+        # Or from specific artifacts
+        bundle = DebugBundle.from_artifacts(
+            output="./bundle.db",
+            session_snapshots=["./debug/session.jsonl"],
+            log_files=["./debug/session.log"],
+            filesystem_archives=["./debug/files.zip"],
+        )
+
+        # Explore with Datasette
+        bundle.serve()
+
+        # Or query directly
+        for row in bundle.query("SELECT * FROM tool_invocations"):
+            print(row)
     """
 
     path: Path
     _conn: sqlite3.Connection
-    _session: Session | None = None
-    _run_context: RunContext | None = None
 
     @classmethod
-    def create(
+    def from_directory(
         cls,
-        path: str | Path,
+        directory: str | Path,
         *,
+        output: str | Path | None = None,
         description: str | None = None,
-        tags: Mapping[str, str] | None = None,
     ) -> "DebugBundle":
-        """Create a new debug bundle at the given path."""
+        """Assemble a bundle from all artifacts in a directory.
+
+        Discovers and imports:
+        - *.jsonl files as session snapshots
+        - *.log files as log records
+        - *.zip files as filesystem archives
+
+        Args:
+            directory: Directory containing debug artifacts.
+            output: Output path for bundle. Defaults to <directory>/bundle.db.
+            description: Optional description stored in bundle metadata.
+
+        Returns:
+            Assembled DebugBundle ready for exploration.
+        """
+        ...
+
+    @classmethod
+    def from_artifacts(
+        cls,
+        output: str | Path,
+        *,
+        session_snapshots: Sequence[str | Path] = (),
+        log_files: Sequence[str | Path] = (),
+        filesystem_archives: Sequence[str | Path] = (),
+        description: str | None = None,
+    ) -> "DebugBundle":
+        """Assemble a bundle from specific artifact files.
+
+        Args:
+            output: Output path for the bundle database.
+            session_snapshots: JSONL files from dump_session().
+            log_files: JSONL files from collect_all_logs().
+            filesystem_archives: ZIP files from archive_filesystem().
+            description: Optional description stored in bundle metadata.
+
+        Returns:
+            Assembled DebugBundle ready for exploration.
+        """
         ...
 
     @classmethod
     def open(cls, path: str | Path) -> "DebugBundle":
-        """Open an existing debug bundle for reading or appending."""
-        ...
-
-    def bind_session(self, session: Session) -> None:
-        """Bind a session for automatic event capture.
-
-        Events dispatched to the session are automatically recorded to
-        the bundle. Call this before starting agent execution.
-        """
-        ...
-
-    def bind_run_context(self, run_context: RunContext) -> None:
-        """Bind run context for correlation metadata."""
-        ...
-
-    def record_log(self, record: logging.LogRecord) -> None:
-        """Record a log entry to the bundle."""
-        ...
-
-    def record_file(
-        self,
-        path: str,
-        content: bytes | str,
-        *,
-        content_type: str | None = None,
-    ) -> None:
-        """Record a file to the bundle."""
-        ...
-
-    def snapshot_slices(self, trigger: str = "manual") -> None:
-        """Capture current state of all session slices."""
-        ...
-
-    def finalize(
-        self,
-        *,
-        status: Literal["completed", "failed"] = "completed",
-        error: Exception | None = None,
-    ) -> None:
-        """Finalize the bundle, recording end state."""
+        """Open an existing bundle for exploration."""
         ...
 
     def serve(
@@ -411,12 +424,40 @@ class DebugBundle:
         port: int = 8001,
         open_browser: bool = True,
     ) -> None:
-        """Launch Datasette to explore the bundle."""
+        """Launch Datasette to explore the bundle.
+
+        Args:
+            host: Host interface to bind.
+            port: Port to bind.
+            open_browser: Whether to open browser automatically.
+        """
+        ...
+
+    def query(self, sql: str, params: tuple[object, ...] = ()) -> sqlite3.Cursor:
+        """Execute a SQL query and return cursor."""
+        return self._conn.execute(sql, params)
+
+    def export_csv(self, table: str, output: str | Path) -> Path:
+        """Export a table to CSV format."""
+        ...
+
+    def export_json(self, sql: str, output: str | Path) -> Path:
+        """Export query results to JSON format."""
+        ...
+
+    @property
+    def session_ids(self) -> list[str]:
+        """List all session IDs in the bundle."""
+        ...
+
+    @property
+    def statistics(self) -> BundleStatistics:
+        """Get bundle statistics."""
         ...
 
     def close(self) -> None:
         """Close the database connection."""
-        ...
+        self._conn.close()
 
     def __enter__(self) -> "DebugBundle":
         return self
@@ -425,363 +466,122 @@ class DebugBundle:
         self.close()
 ```
 
-### BundleConfig
+### BundleStatistics
 
 ```python
 @FrozenDataclass()
-class BundleConfig:
-    """Configuration for debug bundle capture.
+class BundleStatistics:
+    """Summary statistics for a debug bundle."""
 
-    Controls what data is captured and how. Useful for reducing bundle
-    size in production or enabling verbose capture for debugging.
-    """
-
-    capture_logs: bool = True
-    capture_files: bool = True
-    capture_slice_snapshots: bool = True
-    log_level: int = logging.DEBUG
-    max_file_size_bytes: int = 10 * 1024 * 1024  # 10MB
-    snapshot_interval_events: int | None = None  # Auto-snapshot every N events
-    exclude_log_events: frozenset[str] = frozenset()
-    exclude_slice_types: frozenset[str] = frozenset()
+    session_count: int
+    log_count: int
+    tool_invocation_count: int
+    prompt_event_count: int
+    file_count: int
+    total_input_tokens: int
+    total_output_tokens: int
+    size_bytes: int
 ```
 
-## Collection Patterns
+## Import Procedures
 
-### Live Capture
+### Session Snapshot Import
 
-Capture data during agent execution:
+Session snapshots (from `dump_session`) are JSONL files where each line is a
+serialized `Snapshot`. The import procedure:
+
+1. Parse each line as JSON
+2. Extract session metadata into `sessions` table
+3. For each slice in the snapshot:
+   - Insert items into `slice_items` table
+   - If slice contains `ToolInvoked` events, also insert into `tool_invocations`
+   - If slice contains `PromptRendered`/`PromptExecuted`, also insert into `prompt_events`
 
 ```python
-from weakincentives.debug import DebugBundle, BundleConfig
+def _import_session_snapshot(self, path: Path) -> None:
+    """Import a session snapshot JSONL file."""
+    with path.open() as f:
+        for line in f:
+            if not line.strip():
+                continue
+            payload = json.loads(line)
+            session_id = payload["tags"]["session_id"]
 
-config = BundleConfig(
-    capture_logs=True,
-    capture_files=True,
-    snapshot_interval_events=100,
-)
+            # Insert session
+            self._conn.execute(
+                "INSERT OR IGNORE INTO sessions (session_id, created_at, tags) VALUES (?, ?, ?)",
+                (session_id, payload["created_at"], json.dumps(payload.get("tags", {}))),
+            )
 
-with DebugBundle.create(
-    f"./debug/{session.session_id}.db",
-    description="Code review task",
-    tags={"task": "review", "pr": "123"},
-) as bundle:
-    # Bind session for automatic event capture
-    bundle.bind_session(session)
-    bundle.bind_run_context(run_context)
-
-    # Capture logs during execution
-    with bundle.capture_logs():
-        response = adapter.evaluate(prompt, session=session)
-
-    # Capture filesystem state
-    if fs := prompt.resources.get(Filesystem, None):
-        bundle.capture_filesystem(fs)
-
-    # Finalize with status
-    bundle.finalize(status="completed")
-
-# Bundle is now ready for exploration
-print(f"Debug bundle: {bundle.path}")
+            # Insert slice items
+            for slice_type, items in payload.get("slices", {}).items():
+                for idx, item in enumerate(items):
+                    self._insert_slice_item(session_id, slice_type, idx, item)
 ```
 
-### Post-Hoc Assembly
+### Log File Import
 
-Assemble a bundle from existing artifacts:
+Log files (from `collect_all_logs`) are JSONL files with structured log records:
 
 ```python
-from weakincentives.debug import DebugBundle
+def _import_log_file(self, path: Path) -> None:
+    """Import a log JSONL file."""
+    session_id = self._infer_session_id(path)
 
-# Create bundle from existing files
-bundle = DebugBundle.from_artifacts(
-    output_path="./debug/assembled.db",
-    session_snapshot="./debug/session.jsonl",
-    log_file="./debug/session.log",
-    filesystem_archive="./debug/files.zip",
-    description="Assembled from artifacts",
-)
-
-# Or assemble incrementally
-with DebugBundle.create("./debug/assembled.db") as bundle:
-    bundle.import_session_snapshot(Path("./debug/session.jsonl"))
-    bundle.import_logs(Path("./debug/session.log"))
-    bundle.import_filesystem_archive(Path("./debug/files.zip"))
+    with path.open() as f:
+        for line in f:
+            if not line.strip():
+                continue
+            record = json.loads(line)
+            self._conn.execute(
+                """INSERT INTO logs
+                   (session_id, timestamp, level, logger, event, message, context)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    session_id,
+                    record["timestamp"],
+                    record["level"],
+                    record["logger"],
+                    record.get("event"),
+                    record["message"],
+                    json.dumps(record.get("context", {})),
+                ),
+            )
 ```
 
-### Context Manager Protocol
+### Filesystem Archive Import
 
-The bundle supports context manager protocol for automatic cleanup:
+Filesystem archives (from `archive_filesystem`) are ZIP files:
 
 ```python
-with DebugBundle.create("./debug/task.db") as bundle:
-    bundle.bind_session(session)
-    try:
-        response = adapter.evaluate(prompt, session=session)
-        bundle.finalize(status="completed")
-    except Exception as e:
-        bundle.finalize(status="failed", error=e)
-        raise
-# Connection closed automatically
-```
+def _import_filesystem_archive(self, path: Path) -> None:
+    """Import a filesystem ZIP archive."""
+    archive_id = path.stem  # UUID from archive_filesystem
+    session_id = self._infer_session_id(path)
 
-## Log Integration
+    with zipfile.ZipFile(path) as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
 
-### Automatic Log Capture
+            content = None
+            is_binary = 1
 
-The bundle provides a logging handler for automatic capture:
+            # Attempt text decode for small files
+            if info.file_size < 1024 * 1024:  # 1MB
+                try:
+                    raw = zf.read(info.filename)
+                    content = raw.decode("utf-8")
+                    is_binary = 0
+                except UnicodeDecodeError:
+                    pass
 
-```python
-with DebugBundle.create("./debug/task.db") as bundle:
-    bundle.bind_session(session)
-
-    # Capture logs automatically
-    with bundle.capture_logs(level=logging.DEBUG):
-        response = adapter.evaluate(prompt, session=session)
-```
-
-### Manual Log Recording
-
-For custom logging pipelines:
-
-```python
-bundle = DebugBundle.open("./debug/task.db")
-
-# Record individual log entries
-bundle.record_log(log_record)
-
-# Import from existing JSONL file
-bundle.import_logs(Path("./logs/session.log"))
-```
-
-### Log Queries
-
-Common log queries via Datasette or SQL:
-
-```sql
--- Errors and warnings
-SELECT timestamp, level, event, message
-FROM logs
-WHERE level IN ('ERROR', 'WARNING')
-ORDER BY timestamp;
-
--- Tool execution timeline
-SELECT timestamp, event, json_extract(context, '$.tool_name') as tool
-FROM logs
-WHERE event LIKE 'tool.%'
-ORDER BY timestamp;
-
--- Log frequency by event
-SELECT event, COUNT(*) as count
-FROM logs
-GROUP BY event
-ORDER BY count DESC;
-```
-
-## Session Integration
-
-### Event Subscription
-
-The bundle subscribes to session events for automatic capture:
-
-```python
-def bind_session(self, session: Session) -> None:
-    """Bind session for automatic event capture."""
-    self._session = session
-    self._record_meta(session)
-
-    # Subscribe to all dispatched events
-    session.dispatcher.subscribe_all(self._on_event)
-
-    # Subscribe to specific event types for structured capture
-    session.dispatcher.subscribe(PromptRendered, self._on_prompt_rendered)
-    session.dispatcher.subscribe(ToolInvoked, self._on_tool_invoked)
-    session.dispatcher.subscribe(PromptExecuted, self._on_prompt_executed)
-```
-
-### Slice Snapshots
-
-Capture slice state at key points:
-
-```python
-# Manual snapshot
-bundle.snapshot_slices(trigger="before_tool_call")
-
-# Auto-snapshot every N events
-config = BundleConfig(snapshot_interval_events=100)
-
-# Snapshot specific slices
-bundle.snapshot_slice(Plan, trigger="plan_updated")
-```
-
-### Session Queries
-
-```sql
--- All events for a session
-SELECT event_type, timestamp, payload
-FROM events
-WHERE session_id = ?
-ORDER BY sequence;
-
--- Tool invocation summary
-SELECT tool_name,
-       COUNT(*) as calls,
-       SUM(CASE WHEN result_success THEN 1 ELSE 0 END) as successes,
-       AVG(duration_ms) as avg_duration_ms
-FROM tool_invocations
-WHERE session_id = ?
-GROUP BY tool_name;
-
--- Slice evolution over time
-SELECT snapshot_at, item_count, items
-FROM slice_snapshots
-WHERE session_id = ? AND slice_type = ?
-ORDER BY snapshot_at;
-```
-
-## Filesystem Integration
-
-### Capture Patterns
-
-```python
-# Capture entire filesystem
-bundle.capture_filesystem(fs)
-
-# Capture specific paths
-bundle.capture_file(fs, "/workspace/output.json")
-
-# Capture with filters
-bundle.capture_filesystem(
-    fs,
-    include_patterns=["*.py", "*.json"],
-    exclude_patterns=["__pycache__/*", "*.pyc"],
-    max_file_size=1024 * 1024,  # 1MB
-)
-```
-
-### Import from Archive
-
-```python
-# Import from existing zip archive
-bundle.import_filesystem_archive(Path("./debug/files.zip"))
-```
-
-### File Queries
-
-```sql
--- All files in a session
-SELECT path, size_bytes, content_type
-FROM files
-WHERE session_id = ?
-ORDER BY path;
-
--- Large files
-SELECT path, size_bytes
-FROM files
-WHERE size_bytes > 100000
-ORDER BY size_bytes DESC;
-
--- File contents (text files only)
-SELECT path, content
-FROM files
-WHERE session_id = ? AND content IS NOT NULL;
-```
-
-## Datasette Integration
-
-### Launching Datasette
-
-```python
-# From bundle instance
-bundle = DebugBundle.open("./debug/task.db")
-bundle.serve(port=8001, open_browser=True)
-
-# From CLI
-# wink debug-bundle serve ./debug/task.db --port 8001
-```
-
-### Datasette Configuration
-
-The bundle generates a `metadata.json` for Datasette:
-
-```json
-{
-  "title": "Debug Bundle: task-001",
-  "description": "Code review task for PR #123",
-  "databases": {
-    "bundle": {
-      "tables": {
-        "tool_invocations": {
-          "label_column": "tool_name",
-          "description": "Tool calls with parameters and results"
-        },
-        "logs": {
-          "label_column": "event",
-          "description": "Structured log records"
-        }
-      }
-    }
-  }
-}
-```
-
-### Pre-Built Views
-
-The bundle includes SQL views for common queries:
-
-```sql
--- Execution timeline
-CREATE VIEW execution_timeline AS
-SELECT
-    timestamp,
-    'prompt_render' as event_type,
-    prompt_name as name,
-    NULL as success,
-    char_count as detail
-FROM prompt_renders
-UNION ALL
-SELECT
-    timestamp,
-    'tool_call' as event_type,
-    tool_name as name,
-    result_success as success,
-    duration_ms as detail
-FROM tool_invocations
-UNION ALL
-SELECT
-    timestamp,
-    'prompt_execute' as event_type,
-    prompt_name as name,
-    CASE result_type WHEN 'success' THEN 1 ELSE 0 END as success,
-    duration_ms as detail
-FROM prompt_executions
-ORDER BY timestamp;
-
--- Token usage summary
-CREATE VIEW token_summary AS
-SELECT
-    r.run_id,
-    r.request_id,
-    r.status,
-    t.total_input_tokens,
-    t.total_output_tokens,
-    t.total_tokens,
-    t.prompt_count,
-    t.tool_count
-FROM runs r
-LEFT JOIN token_usage t ON r.run_id = t.run_id;
-
--- Error summary
-CREATE VIEW error_summary AS
-SELECT
-    run_id,
-    timestamp,
-    level,
-    event,
-    message,
-    json_extract(context, '$.error_type') as error_type
-FROM logs
-WHERE level IN ('ERROR', 'CRITICAL')
-ORDER BY timestamp;
+            self._conn.execute(
+                """INSERT INTO files
+                   (archive_id, session_id, path, size_bytes, content, is_binary)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (archive_id, session_id, info.filename, info.file_size, content, is_binary),
+            )
 ```
 
 ## CLI Integration
@@ -792,131 +592,193 @@ ORDER BY timestamp;
 wink debug-bundle <subcommand> [options]
 
 Subcommands:
-  create    Create a new debug bundle from artifacts
+  create    Assemble a bundle from artifacts
   serve     Launch Datasette to explore a bundle
-  export    Export bundle data to CSV/JSON
   info      Display bundle metadata and statistics
-  merge     Merge multiple bundles into one
+  query     Execute SQL query and print results
+  export    Export table or query to CSV/JSON
 ```
 
-### Create from Artifacts
+### Create Bundle
 
 ```bash
+# From a directory (auto-discovers artifacts)
+wink debug-bundle create ./debug/abc123/
+
+# From specific files
 wink debug-bundle create \
-    --output ./debug/bundle.db \
+    --output ./bundle.db \
     --session ./debug/session.jsonl \
     --logs ./debug/session.log \
     --files ./debug/files.zip \
-    --description "Task execution debug data"
+    --description "Code review task"
 ```
 
 ### Serve Bundle
 
 ```bash
-wink debug-bundle serve ./debug/bundle.db --port 8001
+wink debug-bundle serve ./bundle.db
 # Opens browser to http://127.0.0.1:8001
 ```
 
-### Export Data
+### Query Bundle
 
 ```bash
-# Export to CSV
-wink debug-bundle export ./debug/bundle.db \
-    --format csv \
-    --tables tool_invocations,logs \
-    --output ./export/
+# Interactive query
+wink debug-bundle query ./bundle.db \
+    "SELECT tool_name, COUNT(*) FROM tool_invocations GROUP BY tool_name"
 
-# Export to JSON
-wink debug-bundle export ./debug/bundle.db \
+# Output as JSON
+wink debug-bundle query ./bundle.db \
     --format json \
-    --query "SELECT * FROM tool_invocations WHERE result_success = 0"
+    "SELECT * FROM error_log LIMIT 10"
 ```
 
 ### Bundle Info
 
 ```bash
-wink debug-bundle info ./debug/bundle.db
+wink debug-bundle info ./bundle.db
 
 # Output:
-# Bundle: ./debug/bundle.db
+# Bundle: ./bundle.db (2.3 MB)
 # Created: 2024-01-15T10:30:00+00:00
-# Session: abc123-def456
-# Description: Code review task
+# Source: ./debug/abc123/
+#
+# Sessions: 1
+#   - abc123-def456-... (root)
 #
 # Statistics:
-#   Runs: 1
-#   Events: 247
-#   Logs: 1,432
+#   Log records: 1,432
 #   Tool invocations: 23
-#   Prompt renders: 5
+#   Prompt events: 10
 #   Files: 12
-#   Total size: 2.3 MB
+#   Total tokens: 45,230
 ```
 
-## Performance Considerations
+### Export Data
 
-### Write Performance
+```bash
+# Export table to CSV
+wink debug-bundle export ./bundle.db tool_invocations --format csv
 
-- Uses WAL mode for concurrent reads during writes
-- Batches inserts in transactions (configurable batch size)
-- Defers index creation until finalization for large imports
-
-```python
-config = BundleConfig(
-    write_batch_size=1000,  # Commit every 1000 records
-    defer_indexes=True,      # Create indexes at finalization
-)
+# Export query to JSON
+wink debug-bundle export ./bundle.db \
+    --format json \
+    --query "SELECT * FROM error_log"
 ```
 
-### Read Performance
+## Datasette Integration
 
-- Indexes on all foreign keys and common query columns
-- Pre-built views for common queries
-- Datasette caching for repeated queries
+### Automatic Metadata
 
-### Size Management
-
-- Text content stored as-is; binary content excluded by default
-- File deduplication via content hash
-- Configurable max file size limits
-- Optional compression for large text fields
+The bundle generates Datasette metadata for better exploration:
 
 ```python
-config = BundleConfig(
-    max_file_size_bytes=10 * 1024 * 1024,  # 10MB
-    compress_content=True,                   # gzip text > 10KB
-    exclude_binary_files=True,               # Skip binary files
-)
+def _generate_datasette_metadata(self) -> dict:
+    """Generate metadata.json for Datasette."""
+    return {
+        "title": f"Debug Bundle: {self._get_root_session_id()}",
+        "description": self._get_description(),
+        "databases": {
+            "bundle": {
+                "tables": {
+                    "logs": {
+                        "label_column": "event",
+                        "description": "Structured log records from collect_all_logs()",
+                    },
+                    "tool_invocations": {
+                        "label_column": "tool_name",
+                        "description": "Tool calls with parameters and results",
+                    },
+                    "prompt_events": {
+                        "label_column": "prompt_name",
+                        "description": "Prompt render and execution events",
+                    },
+                    "files": {
+                        "label_column": "path",
+                        "description": "Files from archive_filesystem()",
+                    },
+                    "slice_items": {
+                        "description": "Raw slice contents from session snapshots",
+                    },
+                },
+            }
+        },
+    }
+```
+
+### Recommended Queries
+
+Include as canned queries in Datasette:
+
+```sql
+-- What tools were called and how often did they succeed?
+SELECT
+    tool_name,
+    call_count,
+    success_count,
+    success_rate || '%' as success_rate
+FROM tool_summary
+ORDER BY call_count DESC;
+
+-- What errors occurred?
+SELECT timestamp, level, event, message
+FROM error_log
+ORDER BY timestamp DESC
+LIMIT 50;
+
+-- Execution timeline
+SELECT timestamp, event_type, name, success
+FROM execution_timeline
+ORDER BY timestamp;
+
+-- Token usage by session
+SELECT * FROM token_summary;
+
+-- Files created by the agent
+SELECT path, size_bytes, is_binary
+FROM files
+ORDER BY path;
 ```
 
 ## Error Handling
 
-### Collection Errors
+### Import Errors
 
-Errors during data collection are logged but don't fail the bundle:
+Malformed artifacts log warnings but don't fail the bundle:
 
 ```python
-def record_file(self, path: str, content: bytes | str, ...) -> None:
-    try:
-        self._insert_file(path, content, ...)
-    except sqlite3.Error as e:
-        logger.warning(
-            "Failed to record file to bundle",
-            extra={"path": path, "error": str(e)},
-        )
-        # Continue without failing
+def _import_log_file(self, path: Path) -> None:
+    with path.open() as f:
+        for line_num, line in enumerate(f, 1):
+            try:
+                record = json.loads(line)
+                self._insert_log(record)
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    "Skipping malformed log line",
+                    extra={"path": str(path), "line": line_num, "error": str(e)},
+                )
 ```
 
-### Corrupt Bundles
+### Missing Artifacts
 
-Opening a corrupt bundle raises `BundleCorruptError`:
+`from_directory` skips missing artifact types gracefully:
 
 ```python
-try:
-    bundle = DebugBundle.open("./debug/corrupt.db")
-except BundleCorruptError as e:
-    print(f"Bundle corrupt: {e.reason}")
-    # Attempt recovery or report
+@classmethod
+def from_directory(cls, directory: str | Path, ...) -> "DebugBundle":
+    dir_path = Path(directory)
+
+    session_snapshots = list(dir_path.glob("*.jsonl"))
+    log_files = list(dir_path.glob("*.log"))
+    archives = list(dir_path.glob("*.zip"))
+
+    if not any([session_snapshots, log_files, archives]):
+        raise BundleError(f"No artifacts found in {directory}")
+
+    # Proceed with whatever artifacts exist
+    ...
 ```
 
 ### Schema Migration
@@ -924,13 +786,13 @@ except BundleCorruptError as e:
 Bundles include schema version for forward compatibility:
 
 ```python
+CURRENT_SCHEMA_VERSION = 1
+
 def open(cls, path: str | Path) -> "DebugBundle":
     conn = sqlite3.connect(path)
     version = cls._get_schema_version(conn)
 
-    if version < CURRENT_SCHEMA_VERSION:
-        cls._migrate_schema(conn, version, CURRENT_SCHEMA_VERSION)
-    elif version > CURRENT_SCHEMA_VERSION:
+    if version > CURRENT_SCHEMA_VERSION:
         raise BundleVersionError(
             f"Bundle schema v{version} is newer than supported v{CURRENT_SCHEMA_VERSION}"
         )
@@ -938,109 +800,71 @@ def open(cls, path: str | Path) -> "DebugBundle":
     return cls(path=Path(path), _conn=conn)
 ```
 
-## Thread Safety
-
-### Single-Writer Model
-
-DebugBundle uses SQLite's WAL mode with a single-writer model:
-
-- One thread writes to the bundle (typically the main execution thread)
-- Multiple threads can read concurrently (Datasette, queries)
-- Event subscription callbacks are queued and processed by the writer thread
-
-```python
-class DebugBundle:
-    _write_queue: queue.Queue[Callable[[], None]]
-    _writer_thread: threading.Thread
-
-    def _on_event(self, event: object) -> None:
-        # Queue write operation for writer thread
-        self._write_queue.put(lambda: self._record_event(event))
-```
-
-### Read-Only Access
-
-For pure exploration, open in read-only mode:
-
-```python
-bundle = DebugBundle.open("./debug/task.db", mode="ro")
-# Only read operations allowed; safe for concurrent access
-```
-
-## Integration with Existing Tools
-
-### Log Collector Integration
-
-```python
-from weakincentives.debug import collect_all_logs, DebugBundle
-
-# Use both for maximum flexibility
-with DebugBundle.create("./debug/task.db") as bundle:
-    with collect_all_logs("./debug/task.log") as collector:
-        with bundle.capture_logs():
-            response = adapter.evaluate(prompt, session=session)
-
-# Now have both:
-# - ./debug/task.db (queryable bundle)
-# - ./debug/task.log (raw JSONL for other tools)
-```
-
-### Session Dump Integration
-
-```python
-from weakincentives.debug import dump_session, DebugBundle
-
-# Dump session to JSONL (for wink debug compatibility)
-dump_session(session, "./debug/")
-
-# Also create bundle (for SQL queries)
-bundle = DebugBundle.from_artifacts(
-    output_path="./debug/bundle.db",
-    session_snapshot=f"./debug/{session.session_id}.jsonl",
-)
-```
-
-### Archive Integration
-
-```python
-from weakincentives.debug import archive_filesystem, DebugBundle
-
-# Archive to ZIP (for sharing)
-archive_path = archive_filesystem(fs, "./debug/")
-
-# Import into bundle (for queries)
-bundle.import_filesystem_archive(archive_path)
-```
-
 ## Logging Events
 
 | Event | Level | Context |
-| ------------------------------ | ----- | ---------------------------------------- |
-| `debug_bundle.create` | INFO | `path`, `bundle_id` |
-| `debug_bundle.open` | INFO | `path`, `schema_version` |
-| `debug_bundle.bind_session` | DEBUG | `session_id` |
-| `debug_bundle.record_event` | DEBUG | `event_type`, `event_id` |
-| `debug_bundle.record_log` | DEBUG | `level`, `event` |
-| `debug_bundle.record_file` | DEBUG | `path`, `size_bytes` |
-| `debug_bundle.snapshot_slices` | DEBUG | `slice_count`, `trigger` |
-| `debug_bundle.finalize` | INFO | `status`, `event_count`, `log_count` |
+| --------------------------------- | ----- | ------------------------------------------ |
+| `debug_bundle.create` | INFO | `path`, `bundle_id`, `source_directory` |
+| `debug_bundle.import_snapshot` | DEBUG | `path`, `session_count`, `slice_count` |
+| `debug_bundle.import_logs` | DEBUG | `path`, `record_count` |
+| `debug_bundle.import_archive` | DEBUG | `path`, `file_count` |
+| `debug_bundle.import_error` | WARNING | `path`, `line`, `error` |
 | `debug_bundle.serve` | INFO | `url` |
-| `debug_bundle.migrate` | INFO | `from_version`, `to_version` |
-| `debug_bundle.error` | ERROR | `operation`, `error` |
+| `debug_bundle.open` | INFO | `path`, `schema_version` |
 
 ## Limitations
 
-- **SQLite size limits**: Bundles over 1GB may experience slower queries
-- **Binary content**: Large binary files excluded by default to manage size
-- **Real-time updates**: Datasette doesn't auto-refresh; manual reload needed
-- **No remote storage**: Bundles are local files; use separate tools for S3/GCS
-- **Single writer**: Concurrent writes from multiple processes not supported
+- **Post-hoc only**: DebugBundle does not capture data during execution; use
+  `collect_all_logs`, `dump_session`, and `archive_filesystem` for that
+- **SQLite size**: Bundles over 1GB may experience slower Datasette performance
+- **Binary files**: Large binary files are stored without content (metadata only)
+- **Session correlation**: Log files are correlated to sessions by filename
+  heuristics; explicit session IDs in log context improve accuracy
+
+## Example Workflow
+
+Complete example of capturing and exploring debug data:
+
+```python
+from pathlib import Path
+from weakincentives.debug import (
+    DebugBundle,
+    archive_filesystem,
+    collect_all_logs,
+    dump_session,
+)
+
+# 1. Capture during execution (existing tools)
+debug_dir = Path(f"./debug/{session.session_id}")
+debug_dir.mkdir(parents=True, exist_ok=True)
+
+with collect_all_logs(debug_dir / "session.log"):
+    response = adapter.evaluate(prompt, session=session)
+
+dump_session(session, debug_dir)
+
+if fs := prompt.resources.get(Filesystem, None):
+    archive_filesystem(fs, debug_dir)
+
+# 2. Assemble into bundle (new)
+bundle = DebugBundle.from_directory(debug_dir)
+
+# 3. Explore
+print(bundle.statistics)
+# BundleStatistics(session_count=1, log_count=1432, tool_invocation_count=23, ...)
+
+# Query directly
+for row in bundle.query("SELECT tool_name, COUNT(*) FROM tool_invocations GROUP BY tool_name"):
+    print(row)
+
+# Or launch Datasette
+bundle.serve()
+```
 
 ## Related Specifications
 
-- `specs/DEBUGGING.md` - Individual debugging surfaces this consolidates
-- `specs/WINK_DEBUG.md` - Debug web UI for JSONL snapshots
-- `specs/SESSIONS.md` - Session events captured in bundles
-- `specs/LOGGING.md` - Log schema stored in bundles
-- `specs/RUN_CONTEXT.md` - Execution metadata for correlation
-- `specs/SLICES.md` - Slice storage captured in snapshots
+- `specs/DEBUGGING.md` - Source artifact tools (`dump_session`, `collect_all_logs`, `archive_filesystem`)
+- `specs/WINK_DEBUG.md` - Alternative JSONL-based debug UI
+- `specs/SESSIONS.md` - Session snapshot format
+- `specs/LOGGING.md` - Log record schema
+- `specs/SLICES.md` - Slice storage and JSONL format
