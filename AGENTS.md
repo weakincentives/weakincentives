@@ -80,6 +80,10 @@ a goal at any time.
   dataclass models or serialization.
 - **DBC.md**: Design-by-contract patterns—mandatory before editing DbC-covered
   modules.
+- **DEBUGGING.md**: Log collector, session event slices, debug web UI, and
+  structured logging—when working on debug utilities or observability.
+- **DEBUG_BUNDLE.md**: DebugBundle archive format and object storage
+  integration—when consolidating debug artifacts for storage/retrieval.
 - **EVALS.md**: Evaluation framework—when implementing evals, datasets,
   evaluators, or metrics aggregation.
 - **EXHAUSTIVENESS.md**: Union type totality and `assert_never` patterns—when

@@ -153,6 +153,7 @@ Consult these specs before modifying related code:
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | Editing DbC-decorated modules (required) |
 | `specs/DEBUGGING.md` | Log collector, session event slices, debug web UI, structured logging |
+| `specs/DEBUG_BUNDLE.md` | DebugBundle archive format, object storage integration, bundle CLI |
 | `specs/DLQ.md` | Dead letter queues, poison message handling, MainLoop/EvalLoop DLQ config |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, session evaluators |
 | `specs/EXAMPLES.md` | Code review agent reference implementation |
