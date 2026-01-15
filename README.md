@@ -176,11 +176,11 @@ template = PromptTemplate[ReviewResponse](
     key="code-review-session",
     name="code_review_agent",
     sections=(
-        MarkdownSection(...),                          # guidance
+        MarkdownSection(title="Guide", key="guide", template="Review code."),
         WorkspaceDigestSection(session=session),       # auto-generated summary
         PlanningToolsSection(session=session),         # planning tools
-        VfsToolsSection(session=session, mounts=...),  # sandboxed files
-        MarkdownSection[ReviewTurnParams](...),        # user input
+        VfsToolsSection(session=session, mounts=mounts),  # sandboxed files
+        MarkdownSection(title="Request", key="request", template="${request}"),
     ),
 )
 

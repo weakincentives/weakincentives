@@ -570,27 +570,35 @@ class Answer:
 
 # 2. Define a tool
 @dataclass(slots=True, frozen=True)
-class SearchParams:
+class SearchToolParams:
     query: str
 
+
 @dataclass(slots=True, frozen=True)
-class SearchResult:
+class SearchToolOutput:
     snippets: tuple[str, ...]
+
     def render(self) -> str:
         return "\n".join(f"- {s}" for s in self.snippets)
 
-def search_handler(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
+
+def search_handler(
+    params: SearchToolParams, *, context: ToolContext
+) -> ToolResult[SearchToolOutput]:
     # In a real agent, this would call a search API
     del context
     return ToolResult.ok(
-        SearchResult(snippets=(
-            f"Result 1 about {params.query}",
-            f"Result 2 about {params.query}",
-        )),
+        SearchToolOutput(
+            snippets=(
+                f"Result 1 about {params.query}",
+                f"Result 2 about {params.query}",
+            )
+        ),
         message=f"Found results for: {params.query}",
     )
 
-search_tool = Tool[SearchParams, SearchResult](
+
+search_tool = Tool[SearchToolParams, SearchToolOutput](
     name="search",
     description="Search for information about a topic.",
     handler=search_handler,
@@ -846,22 +854,20 @@ set.
 
 ```python
 from dataclasses import dataclass
+
 from weakincentives.prompt import MarkdownSection
-from weakincentives.runtime import Session
+
 
 @dataclass(slots=True, frozen=True)
 class DebugFlag:
     enabled: bool
 
-def debug_enabled(flag: DebugFlag, *, session: Session) -> bool:
-    del session
-    return flag.enabled
 
-debug_section = MarkdownSection(
+debug_section = MarkdownSection[DebugFlag](
     title="Debug",
     key="debug",
     template="If something fails, include stack traces and hypotheses.",
-    enabled=debug_enabled,
+    default_params=DebugFlag(enabled=False),
 )
 ```
 
@@ -898,7 +904,7 @@ def build_prompt_template(*, session: Session) -> PromptTemplate[Any]:
         ns="example",
         key="session-bound",
         sections=(
-            MarkdownSection(title="Instructions", key="instructions"),
+            MarkdownSection(title="Instructions", key="instructions", template="Follow the plan."),
             PlanningToolsSection(session=session),
             VfsToolsSection(session=session),
         ),
@@ -1021,21 +1027,47 @@ Resources are bound to `Prompt` via the `bind()` method. Pass a mapping of
 protocol types to instances or Binding objects:
 
 ```python
+from typing import Any
+
 from weakincentives.resources import Binding, Scope
 from weakincentives.prompt import Prompt
-from myapp.http import HTTPClient, Config
+
+
+# Example resource types (define your own in your application)
+class Config:
+    def __init__(self) -> None:
+        self.url: str = "https://api.example.com"
+
+
+class HTTPClient:
+    def __init__(self, url: str = "") -> None:
+        self.url = url
+
+
+class Tracer:
+    pass
+
+
+# Type stubs (defined in your application)
+template: Any = ...  # type: ignore[assignment]
+params: Any = ...  # type: ignore[assignment]
+adapter: Any = ...  # type: ignore[assignment]
+session: Any = ...  # type: ignore[assignment]
 
 # Simple case: pre-constructed instances (pass a dict)
-http_client = HTTPClient(base_url="https://api.example.com")
+http_client = HTTPClient(url="https://api.example.com")
 prompt = Prompt(template).bind(params, resources={HTTPClient: http_client})
 
 # Advanced: lazy construction with dependencies and scopes
 # Pass Binding objects in the mapping for custom providers/scopes
-prompt = Prompt(template).bind(params, resources={
-    Config: Binding(Config, lambda r: Config.from_env()),
-    HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-    Tracer: Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
-})
+prompt = Prompt(template).bind(
+    params,
+    resources={
+        Config: Binding(Config, lambda r: Config()),
+        HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(url=r.get(Config).url)),  # type: ignore[attr-defined]
+        Tracer: Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
+    },
+)
 
 # Use prompt.resources context manager for lifecycle management
 with prompt.resources:
@@ -1048,14 +1080,41 @@ with prompt.resources:
 `MainLoop.execute()` handles resource binding and lifecycle automatically:
 
 ```python
-from weakincentives.resources import Binding, Scope
+from typing import Any
+
+from weakincentives.resources import Binding
 from weakincentives.runtime import MainLoopConfig
 
+
+# Example resource types (from previous example)
+class Config:
+    def __init__(self) -> None:
+        self.url: str = "https://api.example.com"
+
+
+class HTTPClient:
+    def __init__(self, url: str = "") -> None:
+        self.url = url
+
+
+class Tracer:
+    pass
+
+
+# Type stubs (defined in your application)
+MyLoop: Any = ...  # type: ignore[assignment]
+adapter: Any = ...  # type: ignore[assignment]
+dispatcher: Any = ...  # type: ignore[assignment]
+request: Any = ...  # type: ignore[assignment]
+tracer: Any = ...  # type: ignore[assignment]
+
 # Configure resources at the loop level (pass a mapping, not a ResourceRegistry)
-config = MainLoopConfig(resources={
-    Config: Binding(Config, lambda r: Config.from_env()),
-    HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-})
+config = MainLoopConfig(
+    resources={
+        Config: Binding(Config, lambda r: Config()),
+        HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(url=r.get(Config).url)),  # type: ignore[attr-defined]
+    }
+)
 loop = MyLoop(adapter=adapter, dispatcher=dispatcher, config=config)
 
 # Resources are bound to prompt automatically
@@ -1079,13 +1138,27 @@ function receives a resolver that can look up other resources:
 ```python
 from weakincentives.resources import Binding, ResourceRegistry, Scope
 
+
+# Example resource types (from previous example)
+class Config:
+    def __init__(self) -> None:
+        self.url: str = "https://api.example.com"
+
+
+class HTTPClient:
+    def __init__(self, url: str = "") -> None:
+        self.url = url
+
+
+class Tracer:
+    pass
+
+
 resources = ResourceRegistry.of(
     # Config is constructed first (no dependencies)
-    Binding(Config, lambda r: Config.from_env()),
-
+    Binding(Config, lambda r: Config()),
     # HTTPClient depends on Config
-    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-
+    Binding(HTTPClient, lambda r: HTTPClient(url=r.get(Config).url)),  # type: ignore[attr-defined]
     # Tracer is fresh per tool call
     Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
 )
@@ -1285,6 +1358,8 @@ corrupt your agent's world model.
 For advanced use cases, you can use the transaction API directly:
 
 ```python
+from typing import Any
+
 from weakincentives.runtime import (
     CompositeSnapshot,
     create_snapshot,
@@ -1293,11 +1368,25 @@ from weakincentives.runtime import (
     PendingToolTracker,
 )
 
+
+# Type stubs (defined in your application)
+session: Any = ...  # type: ignore[assignment]
+resources: Any = ...  # type: ignore[assignment]
+
+
+def risky_operation() -> bool:
+    return True
+
+
+def do_work() -> None:
+    pass
+
+
 # Option 1: Context manager (auto-rollback on exception)
 with tool_transaction(session, resources, tag="my_operation") as snapshot:
     # Do work that might fail
-    result = risky_operation()
-    if not result.success:
+    success = risky_operation()
+    if not success:
         restore_snapshot(session, resources, snapshot)  # Manual rollback
 
 # Option 2: Manual snapshot/restore
@@ -2280,16 +2369,37 @@ and re-evaluates the prompt. You don't have to handle this yourself.
 You can inject custom resources at the loop level via `MainLoopConfig`:
 
 ```python
-from weakincentives.resources import Binding, ResourceRegistry, Scope
+from typing import Any
+
+from weakincentives.resources import Binding, ResourceRegistry
 from weakincentives.runtime import MainLoopConfig
+
+
+# Example resource types (from previous example)
+class Config:
+    def __init__(self) -> None:
+        self.url: str = "https://api.example.com"
+
+
+class HTTPClient:
+    def __init__(self, url: str = "") -> None:
+        self.url = url
+
+
+# Type stubs (defined in your application)
+MyLoop: Any = ...  # type: ignore[assignment]
+adapter: Any = ...  # type: ignore[assignment]
+dispatcher: Any = ...  # type: ignore[assignment]
+request: Any = ...  # type: ignore[assignment]
+http_client: Any = ...  # type: ignore[assignment]
 
 # Simple case: pre-constructed instances
 resources = ResourceRegistry.of(Binding.instance(HTTPClient, http_client))
 
 # Or with lazy construction and scopes
 resources = ResourceRegistry.of(
-    Binding(Config, lambda r: Config.from_env()),
-    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+    Binding(Config, lambda r: Config()),
+    Binding(HTTPClient, lambda r: HTTPClient(url=r.get(Config).url)),  # type: ignore[attr-defined]
 )
 
 config = MainLoopConfig(resources=resources)
@@ -2309,10 +2419,17 @@ deadline. `BudgetTracker` accumulates usage across retries.
 **Typical pattern:**
 
 ```python
-from datetime import timedelta
+from datetime import datetime, timedelta, UTC
+from typing import Any
+
 from weakincentives import Deadline, Budget
 
-deadline = Deadline.from_timeout(timedelta(seconds=30))
+
+# Type stubs (defined in your application)
+loop: Any = ...  # type: ignore[assignment]
+request: Any = ...  # type: ignore[assignment]
+
+deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=30))
 budget = Budget(max_total_tokens=20_000)
 
 response, session = loop.execute(request, deadline=deadline, budget=budget)
@@ -2574,8 +2691,8 @@ print(f"Mean score: {report.mean_score:.2f}")
 print(f"Mean latency: {report.mean_latency_ms:.0f}ms")
 
 # Review failures
-for result in report.failed_samples():
-    print(f"Failed: {result.sample_id} - {result.score.reason}")
+for failed in report.failed_samples():
+    print(f"Failed: {failed.sample_id} - {failed.score.reason}")
 ```
 
 ### 8.6 Production deployment pattern
