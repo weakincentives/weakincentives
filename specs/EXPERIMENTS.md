@@ -8,23 +8,56 @@ optimization runs, and controlled rollouts.
 
 **Implementation:**
 
-- `src/weakincentives/evals/_experiment.py` - Experiment class
+- `src/weakincentives/evals/_experiment.py` - Experiment class, BASELINE, CONTROL
 - `src/weakincentives/evals/_types.py` - EvalRequest, EvalResult, EvalReport, ExperimentComparison
 
-## Core Type
+## Core Types
 
 ### Experiment
 
 | Field | Type | Default | Description |
-|-------|------|---------|-------------|
+| --------------- | ----------------------- | ---------- | ------------------------ |
 | `name` | `str` | - | Unique identifier |
 | `overrides_tag` | `str` | `"latest"` | Tag for prompt overrides |
 | `flags` | `Mapping[str, object]` | `{}` | Feature flags |
 | `owner` | `str \| None` | `None` | Owner identifier |
 | `description` | `str \| None` | `None` | Human-readable description |
 
-Methods: `with_flag(key, value)`, `with_tag(tag)`, `get_flag(key, default)`,
-`has_flag(key)`
+**Methods:**
+
+| Method | Returns | Description |
+| ------------------------- | ------------ | -------------------------------- |
+| `with_flag(key, value)` | `Experiment` | New experiment with flag added |
+| `with_tag(tag)` | `Experiment` | New experiment with new tag |
+| `get_flag(key, default?)` | `object` | Get flag value or default |
+| `has_flag(key)` | `bool` | Check if flag exists |
+
+### Sentinel Experiments
+
+```python
+from weakincentives.evals import BASELINE, CONTROL, Experiment
+
+# Pre-defined experiments for common patterns
+BASELINE  # name="baseline", overrides_tag="latest", no flags
+CONTROL   # name="control", overrides_tag="latest", no flags (alias)
+```
+
+Use `BASELINE` or `CONTROL` as the control group in A/B tests.
+
+### ExperimentComparison
+
+Returned by `EvalReport.compare_experiments(baseline, treatment)`:
+
+| Field/Property | Type | Description |
+| ---------------------- | --------------------------- | ------------------------------- |
+| `baseline_name` | `str` | Baseline experiment name |
+| `treatment_name` | `str` | Treatment experiment name |
+| `baseline_results` | `tuple[EvalResult, ...]` | Results from baseline |
+| `treatment_results` | `tuple[EvalResult, ...]` | Results from treatment |
+| `baseline_pass_rate` | `float` (property) | Pass rate for baseline |
+| `treatment_pass_rate` | `float` (property) | Pass rate for treatment |
+| `pass_rate_delta` | `float` (property) | Treatment - baseline |
+| `relative_improvement` | `float \| None` (property) | Delta / baseline (None if 0) |
 
 ## Request Integration
 
@@ -54,7 +87,7 @@ Includes `experiment_name` for downstream aggregation.
 `prepare()` receives experiment to configure prompt and session:
 
 | Integration Point | Pattern |
-|-------------------|---------|
+| ----------------- | ------------------------------------------------------- |
 | Prompt overrides | `Prompt(template, overrides_tag=experiment.overrides_tag)` |
 | Session tracking | `session[Experiment].seed(experiment)` |
 | Feature flags | `if experiment.get_flag("verbose"): ...` |
@@ -62,42 +95,70 @@ Includes `experiment_name` for downstream aggregation.
 ## Feature Flags
 
 | Flag Type | Example |
-|-----------|---------|
+| --------- | ----------------------------------------- |
 | Boolean | `{"verbose_logging": True}` |
 | Numeric | `{"max_retries": 5}` |
 | String | `{"model_override": "gpt-4o-mini"}` |
 | Composite | `{"tool_policy": {"allow": ["read"]}}` |
 
-## Dataset Submission Patterns
+## A/B Testing Workflow
 
-### Single Experiment
+### 1. Define Experiments
 
 ```python
-for sample in dataset:
-    mailbox.send(EvalRequest(sample=sample, experiment=experiment))
+from weakincentives.evals import BASELINE, Experiment
+
+baseline = BASELINE  # or Experiment(name="baseline")
+treatment = Experiment(
+    name="v2-concise",
+    overrides_tag="v2",
+    flags={"max_tokens": 2000},
+    description="Test shorter prompts with token limit",
+)
 ```
 
-### Multi-Experiment (A/B)
+### 2. Submit Dataset for Both
 
 ```python
+experiments = [baseline, treatment]
 for experiment in experiments:
     for sample in dataset:
         mailbox.send(EvalRequest(sample=sample, experiment=experiment))
+```
+
+### 3. Analyze Results
+
+```python
+report = await collect_results(mailbox, expected=len(dataset) * 2)
+
+# Per-experiment metrics
+for name, rate in report.pass_rate_by_experiment().items():
+    print(f"{name}: {rate:.1%}")
+
+# Statistical comparison
+comparison = report.compare_experiments("baseline", "v2-concise")
+print(f"Baseline: {comparison.baseline_pass_rate:.1%}")
+print(f"Treatment: {comparison.treatment_pass_rate:.1%}")
+print(f"Delta: {comparison.pass_rate_delta:+.1%}")
+if comparison.relative_improvement:
+    print(f"Relative: {comparison.relative_improvement:+.1%}")
 ```
 
 ## Result Aggregation
 
 `EvalReport` provides:
 
-- `by_experiment()` - Group by name
-- `pass_rate_by_experiment()` - Pass rates
-- `mean_score_by_experiment()` - Mean scores
-- `compare_experiments(baseline, treatment)` - Statistical comparison
+| Method | Returns | Description |
+| ---------------------------------------- | ----------------------------- | ------------------------ |
+| `by_experiment()` | `dict[str, tuple[EvalResult]]`| Group by name |
+| `pass_rate_by_experiment()` | `dict[str, float]` | Pass rates |
+| `mean_score_by_experiment()` | `dict[str, float]` | Mean scores |
+| `compare_experiments(baseline, treatment)`| `ExperimentComparison` | Statistical comparison |
 
 ## Relationship to RunContext
 
 | Concept | Purpose | Affects Behavior |
-|---------|---------|------------------|
+| ------------ | ---------------------- | ----------------------- |
 | `Experiment` | Configuration variant | Yes (prompts, flags) |
 | `RunContext` | Execution metadata | No (tracing only) |
 
@@ -118,7 +179,7 @@ Experiments reference prompt overrides in:
 1. Flags not validated (invalid silently ignored)
 1. Experiments are immutable (use `with_*` methods)
 1. EvalRequest requires experiment
-1. Equality is value-based
+1. Equality is value-based (dataclass)
 
 ## Related Specifications
 
