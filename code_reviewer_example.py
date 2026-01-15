@@ -81,6 +81,7 @@ from weakincentives.prompt.overrides import (
     PromptOverridesError,
 )
 from weakincentives.runtime import (
+    DLQPolicy,
     InMemoryMailbox,
     LeaseExtenderConfig,
     MainLoop,
@@ -188,6 +189,9 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     It maintains a persistent session across all requests and optionally
     runs workspace digest optimization on first use when enabled.
 
+    Supports optional dead letter queue (DLQ) configuration for handling
+    poison messages that fail repeatedly.
+
     Example::
 
         responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
@@ -203,6 +207,18 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         # Send request with reply_to mailbox instance
         params = ReviewTurnParams(request="Review the latest changes")
         requests.send(MainLoopRequest(request=params), reply_to=responses)
+
+    Example with DLQ::
+
+        from weakincentives.runtime import DeadLetter, DLQPolicy
+
+        # Create a DLQ mailbox for failed messages
+        dlq_mailbox = InMemoryMailbox(name="review-dlq")
+        dlq = DLQPolicy(
+            mailbox=dlq_mailbox,
+            max_delivery_count=3,  # Dead-letter after 3 failures
+        )
+        loop = CodeReviewLoop(adapter=adapter, requests=requests, dlq=dlq)
     """
 
     _persistent_session: Session
@@ -227,6 +243,10 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         use_claude_agent: bool = False,
         workspace_section: ClaudeAgentWorkspaceSection | None = None,
         enable_optimization: bool = False,
+        dlq: DLQPolicy[
+            MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
+        ]
+        | None = None,
     ) -> None:
         # Configure lease extender to extend message visibility during long tool execution.
         # Extends by 5 minutes every 60 seconds of active work (heartbeats from tools).
@@ -236,7 +256,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
                 extension=300,  # Extend by 5 minutes on each extension
             ),
         )
-        super().__init__(adapter=adapter, requests=requests, config=config)
+        super().__init__(adapter=adapter, requests=requests, config=config, dlq=dlq)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()
         self._override_tag = resolve_override_tag(
             override_tag, env_var=PROMPT_OVERRIDES_TAG_ENV

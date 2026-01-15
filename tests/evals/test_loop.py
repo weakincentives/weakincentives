@@ -37,6 +37,7 @@ from weakincentives.evals import (
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
+from weakincentives.runtime.dlq import DeadLetter, DLQPolicy
 from weakincentives.runtime.mailbox import (
     Mailbox,
     ReceiptHandleExpiredError,
@@ -913,3 +914,304 @@ def test_eval_loop_with_session_aware_evaluator() -> None:
     finally:
         requests.close()
         results.close()
+
+
+# =============================================================================
+# EvalLoop DLQ Integration Tests
+# =============================================================================
+
+
+def test_eval_loop_error_reply_without_dlq() -> None:
+    """EvalLoop sends error reply without DLQ configured (original behavior)."""
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+
+    try:
+        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
+
+        eval_loop.run(max_iterations=1)
+
+        # Message should be acknowledged (removed from queue)
+        assert requests.approximate_count() == 0
+
+        # Error reply should be sent
+        assert results.approximate_count() == 1
+        msgs = results.receive(max_messages=1)
+        assert not msgs[0].body.score.passed
+        assert "failure" in (msgs[0].body.error or "")
+        msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+
+
+def test_eval_loop_nacks_with_dlq_before_threshold() -> None:
+    """EvalLoop nacks failed messages with DLQ before threshold is reached."""
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+    dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
+        InMemoryMailbox(name="eval-requests-dlq")
+    )
+
+    try:
+        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
+            mailbox=dlq_mailbox, max_delivery_count=5
+        )
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            dlq=dlq,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
+
+        # Run once - should nack for retry (below threshold)
+        eval_loop.run(max_iterations=1)
+
+        # Message should be nacked (still in queue)
+        assert requests.approximate_count() == 1
+
+        # No error reply sent on retry path
+        assert results.approximate_count() == 0
+
+        # Not dead-lettered yet
+        assert dlq_mailbox.approximate_count() == 0
+    finally:
+        requests.close()
+        results.close()
+        dlq_mailbox.close()
+
+
+def test_eval_loop_sends_to_dlq_after_threshold() -> None:
+    """EvalLoop sends to DLQ when delivery count equals threshold."""
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+    dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
+        InMemoryMailbox(name="eval-requests-dlq")
+    )
+
+    try:
+        main_loop = _create_test_loop(error=RuntimeError("persistent failure"))
+        # Use max_delivery_count=1 to trigger DLQ on first failure
+        dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
+            mailbox=dlq_mailbox, max_delivery_count=1
+        )
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            dlq=dlq,
+        )
+
+        sample = Sample(id="sample-1", input="test input", expected="correct")
+        request = EvalRequest(sample=sample, experiment=BASELINE)
+        requests.send(request, reply_to=results)
+
+        # Run once - should dead-letter immediately (delivery_count=1 >= max=1)
+        eval_loop.run(max_iterations=1)
+
+        # Message should be dead-lettered
+        assert requests.approximate_count() == 0
+        assert dlq_mailbox.approximate_count() == 1
+
+        # Check dead letter content
+        dlq_msgs = dlq_mailbox.receive(max_messages=1)
+        assert len(dlq_msgs) == 1
+        dead_letter = dlq_msgs[0].body
+        assert dead_letter.body.sample.id == "sample-1"
+        assert dead_letter.source_mailbox == "eval-requests"
+        assert dead_letter.delivery_count == 1
+        assert "persistent failure" in dead_letter.last_error
+        dlq_msgs[0].acknowledge()
+
+        # Error reply should be sent
+        result_msgs = results.receive(max_messages=1)
+        assert len(result_msgs) == 1
+        assert not result_msgs[0].body.score.passed
+        assert "Dead-lettered" in (result_msgs[0].body.error or "")
+        result_msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+        dlq_mailbox.close()
+
+
+def test_eval_loop_immediate_dlq_for_included_error() -> None:
+    """EvalLoop immediately dead-letters included error types."""
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+    dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
+        InMemoryMailbox(name="eval-requests-dlq")
+    )
+
+    try:
+        main_loop = _create_test_loop(error=ValueError("validation error"))
+        dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
+            mailbox=dlq_mailbox,
+            max_delivery_count=5,
+            include_errors=frozenset({ValueError}),
+        )
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            dlq=dlq,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
+
+        # Run once - should immediately dead-letter
+        eval_loop.run(max_iterations=1)
+
+        # Message should be dead-lettered on first attempt
+        assert requests.approximate_count() == 0
+        assert dlq_mailbox.approximate_count() == 1
+
+        # Check delivery count is 1 (immediate dead-letter)
+        dlq_msgs = dlq_mailbox.receive(max_messages=1)
+        assert dlq_msgs[0].body.delivery_count == 1
+        dlq_msgs[0].acknowledge()
+    finally:
+        requests.close()
+        results.close()
+        dlq_mailbox.close()
+
+
+def test_eval_loop_never_dlq_for_excluded_error() -> None:
+    """EvalLoop never dead-letters excluded error types."""
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+    dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
+        InMemoryMailbox(name="eval-requests-dlq")
+    )
+
+    try:
+        main_loop = _create_test_loop(error=TimeoutError("transient timeout"))
+        dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
+            mailbox=dlq_mailbox,
+            max_delivery_count=2,
+            exclude_errors=frozenset({TimeoutError}),
+        )
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            dlq=dlq,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
+
+        # Run many times - should never dead-letter
+        for _ in range(5):
+            eval_loop.run(max_iterations=1)
+
+        # Message should still be in queue (nacked, not dead-lettered)
+        assert requests.approximate_count() == 1
+        assert dlq_mailbox.approximate_count() == 0
+    finally:
+        requests.close()
+        results.close()
+        dlq_mailbox.close()
+
+
+def test_eval_loop_dlq_handles_reply_error() -> None:
+    """EvalLoop DLQ handles errors when sending reply."""
+    from weakincentives.runtime.mailbox import FakeMailbox, MailboxConnectionError
+
+    results: FakeMailbox[EvalResult, None] = FakeMailbox(name="eval-results")
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+    dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
+        InMemoryMailbox(name="eval-requests-dlq")
+    )
+
+    try:
+        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
+            mailbox=dlq_mailbox, max_delivery_count=1
+        )
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            dlq=dlq,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
+
+        # Make reply send fail
+        results.set_connection_error(MailboxConnectionError("connection lost"))
+
+        eval_loop.run(max_iterations=1)
+
+        # Message should still be dead-lettered despite reply failure
+        assert requests.approximate_count() == 0
+        assert dlq_mailbox.approximate_count() == 1
+    finally:
+        requests.close()
+        dlq_mailbox.close()
+
+
+def test_eval_loop_dlq_without_reply_to() -> None:
+    """EvalLoop DLQ handles messages without reply_to."""
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+    dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
+        InMemoryMailbox(name="eval-requests-dlq")
+    )
+
+    try:
+        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
+            mailbox=dlq_mailbox, max_delivery_count=1
+        )
+        eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
+            loop=main_loop,
+            evaluator=_output_to_str,
+            requests=requests,
+            dlq=dlq,
+        )
+
+        sample = Sample(id="1", input="test input", expected="correct")
+        # Send without reply_to
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE))
+
+        eval_loop.run(max_iterations=1)
+
+        # Message should be dead-lettered
+        assert requests.approximate_count() == 0
+        assert dlq_mailbox.approximate_count() == 1
+
+        # reply_to should be None in dead letter
+        dlq_msgs = dlq_mailbox.receive(max_messages=1)
+        assert dlq_msgs[0].body.reply_to is None
+        dlq_msgs[0].acknowledge()
+    finally:
+        requests.close()
+        dlq_mailbox.close()
