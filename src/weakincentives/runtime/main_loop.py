@@ -68,6 +68,7 @@ from .watchdog import Heartbeat
 
 if TYPE_CHECKING:
     from ..adapters.core import PromptResponse, ProviderAdapter
+    from ..evals._experiment import Experiment
     from ..prompt import Prompt
 
 _logger = logging.getLogger(__name__)
@@ -127,6 +128,7 @@ class MainLoopRequest[UserRequestT]:
     """Request for MainLoop execution with optional constraints.
 
     The ``budget``, ``deadline``, and ``resources`` fields override config defaults.
+    The ``experiment`` field specifies a configuration variant for A/B testing.
     """
 
     request: UserRequestT
@@ -137,6 +139,8 @@ class MainLoopRequest[UserRequestT]:
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     run_context: RunContext | None = None
     """Optional execution context. If not provided, MainLoop creates one."""
+    experiment: Experiment | None = None
+    """Optional experiment for A/B testing. When provided, prepare() receives it."""
 
 
 class MainLoop[UserRequestT, OutputT](ABC):
@@ -242,7 +246,12 @@ class MainLoop[UserRequestT, OutputT](ABC):
         return self._worker_id
 
     @abstractmethod
-    def prepare(self, request: UserRequestT) -> tuple[Prompt[OutputT], Session]:
+    def prepare(
+        self,
+        request: UserRequestT,
+        *,
+        experiment: Experiment | None = None,
+    ) -> tuple[Prompt[OutputT], Session]:
         """Prepare prompt and session for the given request.
 
         Subclasses must implement this method to construct the prompt
@@ -250,6 +259,11 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
         Args:
             request: The user request to process.
+            experiment: Optional experiment configuration. When provided,
+                implementations should:
+                1. Use experiment.overrides_tag for prompt construction
+                2. Pass experiment to session for tracking
+                3. Check experiment.flags for behavior changes
 
         Returns:
             A tuple of (prompt, session) ready for evaluation.
@@ -268,7 +282,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """
         _ = (self, prompt, session)
 
-    def execute(
+    def execute(  # noqa: PLR0913
         self,
         request: UserRequestT,
         *,
@@ -276,6 +290,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         deadline: Deadline | None = None,
         resources: Mapping[type[object], object] | None = None,
         heartbeat: Heartbeat | None = None,
+        experiment: Experiment | None = None,
     ) -> tuple[PromptResponse[OutputT], Session]:
         """Execute directly without mailbox routing.
 
@@ -291,6 +306,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 heartbeat is used for adapter evaluation instead of the loop's
                 internal heartbeat. Use this when EvalLoop needs to extend its
                 own message lease based on MainLoop work.
+            experiment: Optional experiment for A/B testing. Passed to prepare().
 
         Returns:
             Tuple of (PromptResponse, Session) from the evaluation.
@@ -300,6 +316,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             budget=budget,
             deadline=deadline,
             resources=resources,
+            experiment=experiment,
         )
         return self._execute(request_event, heartbeat=heartbeat)
 
@@ -320,7 +337,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 instead of self._heartbeat for adapter evaluation.
             run_context: Optional execution context for distributed tracing.
         """
-        prompt, session = self.prepare(request_event.request)
+        prompt, session = self.prepare(
+            request_event.request,
+            experiment=request_event.experiment,
+        )
 
         effective_budget = (
             request_event.budget

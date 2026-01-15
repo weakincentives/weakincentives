@@ -15,9 +15,11 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Sequence
 from typing import TypeVar
 
 from ..runtime.mailbox import Mailbox
+from ._experiment import Experiment
 from ._types import Dataset, EvalReport, EvalRequest, EvalResult
 
 InputT = TypeVar("InputT")
@@ -26,24 +28,69 @@ ExpectedT = TypeVar("ExpectedT")
 
 def submit_dataset(
     dataset: Dataset[InputT, ExpectedT],
+    experiment: Experiment,
     requests: Mailbox[EvalRequest[InputT, ExpectedT], None],
-) -> None:
-    """Submit all samples in a dataset for evaluation.
+) -> int:
+    """Submit all samples in a dataset for evaluation under an experiment.
 
-    Sends each sample to the requests mailbox as an EvalRequest.
-    This function is synchronous and blocks until all samples
-    are enqueued.
+    Sends each sample to the requests mailbox as an EvalRequest with the
+    specified experiment. This function is synchronous and blocks until
+    all samples are enqueued.
 
     Args:
         dataset: The dataset containing samples to evaluate.
+        experiment: The experiment to run samples under.
         requests: Mailbox to send EvalRequest messages to.
 
+    Returns:
+        Number of samples submitted.
+
     Example:
+        >>> from weakincentives.evals import BASELINE
         >>> dataset = Dataset.load(Path("qa.jsonl"), str, str)
-        >>> submit_dataset(dataset, requests_mailbox)
+        >>> count = submit_dataset(dataset, BASELINE, requests_mailbox)
+        >>> print(f"Submitted {count} samples")
     """
+    count = 0
     for sample in dataset:
-        _ = requests.send(EvalRequest(sample=sample))
+        _ = requests.send(EvalRequest(sample=sample, experiment=experiment))
+        count += 1
+    return count
+
+
+def submit_experiments(
+    dataset: Dataset[InputT, ExpectedT],
+    experiments: Sequence[Experiment],
+    requests: Mailbox[EvalRequest[InputT, ExpectedT], None],
+) -> int:
+    """Submit dataset under multiple experiments for comparison.
+
+    Submits each sample under each experiment, allowing A/B testing
+    and multi-variant comparison. The order is experiments-then-samples,
+    meaning all samples for the first experiment are submitted before
+    moving to the next experiment.
+
+    Args:
+        dataset: The dataset containing samples to evaluate.
+        experiments: Sequence of experiments to run samples under.
+        requests: Mailbox to send EvalRequest messages to.
+
+    Returns:
+        Total number of requests submitted (len(dataset) * len(experiments)).
+
+    Example:
+        >>> from weakincentives.evals import BASELINE, Experiment
+        >>> baseline = BASELINE
+        >>> treatment = Experiment(name="v2-prompts", overrides_tag="v2")
+        >>> count = submit_experiments(dataset, [baseline, treatment], requests)
+        >>> print(f"Submitted {count} total requests")
+    """
+    count = 0
+    for experiment in experiments:
+        for sample in dataset:
+            _ = requests.send(EvalRequest(sample=sample, experiment=experiment))
+            count += 1
+    return count
 
 
 def collect_results(
@@ -90,4 +137,5 @@ def collect_results(
 __all__ = [
     "collect_results",
     "submit_dataset",
+    "submit_experiments",
 ]

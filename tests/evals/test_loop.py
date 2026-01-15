@@ -22,6 +22,8 @@ from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.evals import (
+    BASELINE,
+    CONTROL,
     Dataset,
     EvalLoop,
     EvalRequest,
@@ -31,6 +33,7 @@ from weakincentives.evals import (
     collect_results,
     exact_match,
     submit_dataset,
+    submit_experiments,
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
@@ -117,7 +120,13 @@ class _TestLoop(MainLoop[str, _Output]):
             ],
         )
 
-    def prepare(self, request: str) -> tuple[Prompt[_Output], Session]:
+    def prepare(
+        self,
+        request: str,
+        *,
+        experiment: object = None,
+    ) -> tuple[Prompt[_Output], Session]:
+        _ = experiment
         prompt = Prompt(self._template).bind(_Params(content=request))
         session = Session(tags={"loop": "test"})
         return prompt, session
@@ -164,7 +173,7 @@ def test_eval_loop_processes_sample() -> None:
 
         # Submit a sample with reply_to
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=results)
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run single iteration
         eval_loop.run(max_iterations=1)
@@ -200,7 +209,7 @@ def test_eval_loop_handles_failure() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=results)
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         eval_loop.run(max_iterations=1)
 
@@ -234,7 +243,9 @@ def test_eval_loop_respects_max_iterations() -> None:
         # Submit multiple samples
         for i in range(5):
             sample = Sample(id=str(i), input=f"input-{i}", expected="success")
-            requests.send(EvalRequest(sample=sample), reply_to=results)
+            requests.send(
+                EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
+            )
 
         # Run only 2 iterations
         eval_loop.run(max_iterations=2)
@@ -262,7 +273,7 @@ def test_eval_loop_failing_score() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=results)
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         eval_loop.run(max_iterations=1)
 
@@ -297,7 +308,7 @@ def test_submit_dataset() -> None:
         )
         dataset = Dataset(samples=samples)
 
-        submit_dataset(dataset, requests)
+        submit_dataset(dataset, BASELINE, requests)
 
         assert requests.approximate_count() == 3
 
@@ -320,8 +331,44 @@ def test_submit_dataset_empty() -> None:
 
     try:
         dataset: Dataset[str, str] = Dataset(samples=())
-        submit_dataset(dataset, requests)
+        submit_dataset(dataset, BASELINE, requests)
         assert requests.approximate_count() == 0
+    finally:
+        requests.close()
+
+
+# =============================================================================
+# submit_experiments Tests
+# =============================================================================
+
+
+def test_submit_experiments() -> None:
+    """submit_experiments sends all samples under each experiment."""
+    requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
+        name="eval-requests"
+    )
+
+    try:
+        samples = (
+            Sample(id="1", input="a", expected="b"),
+            Sample(id="2", input="c", expected="d"),
+        )
+        dataset = Dataset(samples=samples)
+        experiments = [BASELINE, CONTROL]
+
+        count = submit_experiments(dataset, experiments, requests)
+
+        # 2 samples * 2 experiments = 4 requests
+        assert count == 4
+        assert requests.approximate_count() == 4
+
+        # Verify experiment distribution
+        msgs = requests.receive(max_messages=4)
+        experiments_sent = [msg.body.experiment.name for msg in msgs]
+        assert experiments_sent.count("baseline") == 2
+        assert experiments_sent.count("control") == 2
+        for msg in msgs:
+            msg.acknowledge()
     finally:
         requests.close()
 
@@ -341,6 +388,7 @@ def test_collect_results() -> None:
             results.send(
                 EvalResult(
                     sample_id=str(i),
+                    experiment_name="baseline",
                     score=Score(value=1.0 if i < 2 else 0.5, passed=i < 2),
                     latency_ms=100 + i * 50,
                 )
@@ -363,6 +411,7 @@ def test_collect_results_timeout() -> None:
         results.send(
             EvalResult(
                 sample_id="1",
+                experiment_name="baseline",
                 score=Score(value=1.0, passed=True),
                 latency_ms=100,
             )
@@ -420,7 +469,9 @@ def test_end_to_end_evaluation() -> None:
 
         # Submit with reply_to and evaluate
         for sample in dataset:
-            requests.send(EvalRequest(sample=sample), reply_to=results)
+            requests.send(
+                EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
+            )
         eval_loop.run(max_iterations=5)
 
         # Collect results
@@ -486,7 +537,13 @@ class _NoneOutputLoop(MainLoop[str, _Output]):
             ],
         )
 
-    def prepare(self, request: str) -> tuple[Prompt[_Output], Session]:
+    def prepare(
+        self,
+        request: str,
+        *,
+        experiment: object = None,
+    ) -> tuple[Prompt[_Output], Session]:
+        _ = experiment
         prompt = Prompt(self._template).bind(_Params(content=request))
         session = Session(tags={"loop": "test"})
         return prompt, session
@@ -512,7 +569,7 @@ def test_eval_loop_none_output() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=results)
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         eval_loop.run(max_iterations=1)
 
@@ -570,7 +627,9 @@ def test_eval_loop_nacks_on_send_failure() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=failing_mailbox)
+        requests.send(
+            EvalRequest(sample=sample, experiment=BASELINE), reply_to=failing_mailbox
+        )
 
         # Run - evaluation succeeds, but send fails, should nack
         eval_loop.run(max_iterations=1)
@@ -602,7 +661,9 @@ def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=failing_mailbox)
+        requests.send(
+            EvalRequest(sample=sample, experiment=BASELINE), reply_to=failing_mailbox
+        )
 
         # Run - evaluation fails, send also fails, should nack
         eval_loop.run(max_iterations=1)
@@ -641,7 +702,9 @@ def test_eval_loop_handles_expired_receipt_on_send() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=expired_mailbox)
+        requests.send(
+            EvalRequest(sample=sample, experiment=BASELINE), reply_to=expired_mailbox
+        )
 
         # Run - should handle ReceiptHandleExpiredError gracefully (pass, not raise)
         eval_loop.run(max_iterations=1)
@@ -722,7 +785,9 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=failing_mailbox)
+        requests.send(
+            EvalRequest(sample=sample, experiment=BASELINE), reply_to=failing_mailbox
+        )
 
         # Run - send fails, nack raises ReceiptHandleExpiredError, should handle gracefully
         eval_loop.run(max_iterations=1)
@@ -790,7 +855,7 @@ def test_eval_loop_handles_no_reply_to() -> None:
 
         sample = Sample(id="1", input="test input", expected="correct")
         # Send without reply_to
-        requests.send(EvalRequest(sample=sample))
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE))
 
         # Run - should handle missing reply_to gracefully (log warning, ack)
         eval_loop.run(max_iterations=1)
@@ -830,7 +895,7 @@ def test_eval_loop_with_session_aware_evaluator() -> None:
 
         # Submit a sample with reply_to
         sample = Sample(id="1", input="test input", expected="correct")
-        requests.send(EvalRequest(sample=sample), reply_to=results)
+        requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run single iteration
         eval_loop.run(max_iterations=1)

@@ -73,7 +73,8 @@ Session-aware evaluation example:
 from __future__ import annotations
 
 from ._evaluators import adapt, all_of, any_of, contains, exact_match, is_session_aware
-from ._helpers import collect_results, submit_dataset
+from ._experiment import BASELINE, CONTROL, Experiment
+from ._helpers import collect_results, submit_dataset, submit_experiments
 from ._judge import (
     JUDGE_TEMPLATE,
     PASSING_RATINGS,
@@ -98,12 +99,15 @@ from ._types import (
     EvalRequest,
     EvalResult,
     Evaluator,
+    ExperimentComparison,
     Sample,
     Score,
     SessionEvaluator,
 )
 
 __all__ = [  # noqa: RUF022
+    "BASELINE",
+    "CONTROL",
     "Dataset",
     "EvalLoop",
     "EvalLoopConfig",
@@ -111,6 +115,8 @@ __all__ = [  # noqa: RUF022
     "EvalRequest",
     "EvalResult",
     "Evaluator",
+    "Experiment",
+    "ExperimentComparison",
     "JUDGE_TEMPLATE",
     "JudgeOutput",
     "JudgeParams",
@@ -131,6 +137,7 @@ __all__ = [  # noqa: RUF022
     "llm_judge",
     "slice_contains",
     "submit_dataset",
+    "submit_experiments",
     "token_usage_under",
     "tool_call_count",
     "tool_called",

@@ -128,7 +128,13 @@ class _TestLoop(MainLoop[_Request, _Output]):
             ],
         )
 
-    def prepare(self, request: _Request) -> tuple[Prompt[_Output], Session]:
+    def prepare(
+        self,
+        request: _Request,
+        *,
+        experiment: object = None,
+    ) -> tuple[Prompt[_Output], Session]:
+        _ = experiment
         prompt = Prompt(self._template).bind(_Params(content=request.message))
         session = Session(tags={"loop": "test"})
         return prompt, session
@@ -983,7 +989,14 @@ def test_eval_loop_shutdown_stops_loop() -> None:
 
 def test_eval_loop_shutdown_nacks_unprocessed() -> None:
     """EvalLoop.shutdown() nacks unprocessed messages."""
-    from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Sample, Score
+    from weakincentives.evals import (
+        BASELINE,
+        EvalLoop,
+        EvalRequest,
+        EvalResult,
+        Sample,
+        Score,
+    )
 
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
@@ -1010,7 +1023,9 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
         # Send multiple samples
         for i in range(3):
             sample = Sample(id=str(i), input=f"input-{i}", expected="success")
-            requests.send(EvalRequest(sample=sample), reply_to=results)
+            requests.send(
+                EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
+            )
 
         thread = threading.Thread(
             target=eval_loop.run,
@@ -1103,7 +1118,14 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
     """EvalLoop nacks remaining messages in batch when shutdown is triggered mid-batch."""
     from collections.abc import Sequence
 
-    from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Sample, Score
+    from weakincentives.evals import (
+        BASELINE,
+        EvalLoop,
+        EvalRequest,
+        EvalResult,
+        Sample,
+        Score,
+    )
     from weakincentives.runtime.mailbox import Message
 
     class _MultiMessageMailbox(InMemoryMailbox[EvalRequest[_Request, str], EvalResult]):
@@ -1156,7 +1178,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
                 input=_Request(message=f"input-{i}"),
                 expected="success",
             )
-            requests.send(EvalRequest(sample=sample))
+            requests.send(EvalRequest(sample=sample, experiment=BASELINE))
 
         # Run the loop - it will process first sample, then shutdown triggers,
         # then remaining messages in batch get nacked
