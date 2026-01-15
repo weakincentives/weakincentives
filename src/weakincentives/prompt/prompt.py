@@ -90,6 +90,28 @@ def _resolve_output_spec(
     )
 
 
+def _validate_workspace_sections(
+    sections: tuple[Section[SupportsDataclass], ...],
+) -> None:
+    """Validate that workspace sections share a single filesystem.
+
+    Raises PromptValidationError if multiple workspace sections have distinct
+    filesystem instances.
+    """
+    # Import here to avoid circular imports; the protocol is runtime_checkable
+    from ..prompt.protocols import WorkspaceSection
+
+    workspace_sections = [s for s in sections if isinstance(s, WorkspaceSection)]
+    if len(workspace_sections) > 1:
+        filesystems = {id(s.filesystem) for s in workspace_sections}
+        if len(filesystems) > 1:
+            msg = (
+                f"PromptTemplate has {len(workspace_sections)} workspace sections with "
+                f"{len(filesystems)} distinct filesystems, but at most one filesystem is allowed."
+            )
+            raise PromptValidationError(msg)
+
+
 @FrozenDataclass(slots=False)
 class PromptTemplate[OutputT]:
     """Coordinate prompt sections and their parameter bindings.
@@ -203,6 +225,8 @@ class PromptTemplate[OutputT]:
             raise PromptValidationError("Prompt key must be a non-empty string.")
 
         sections_tuple = tuple(sections_input or ())
+        _validate_workspace_sections(sections_tuple)
+
         registry = PromptRegistry()
         registry.register_sections(sections_tuple)
 
@@ -486,6 +510,10 @@ class Prompt[OutputT]:
         WorkspaceSection and returns its filesystem property.
 
         Returns None if no workspace section exists in the template.
+
+        Note:
+            If multiple workspace sections exist, they must share the same
+            filesystem (validated during PromptTemplate construction).
         """
         from .protocols import WorkspaceSection
 
