@@ -124,7 +124,521 @@ logger.addHandler(EventRouter())
 
 See [specs/LOGGING.md](../specs/LOGGING.md) for the full logging surface specification.
 
-## 13.2 Session Events
+## 13.2 Log Collection
+
+> **Canonical Reference**: See [specs/DEBUGGING.md](../specs/DEBUGGING.md) for the complete log collection specification.
+
+The `collect_all_logs` context manager captures all log records emitted during prompt evaluation and writes them to a JSONL file for later analysis. This is essential for debugging production failures and analyzing agent behavior over time.
+
+### Basic Usage
+
+```python
+from weakincentives.debug import collect_all_logs
+
+with collect_all_logs("./logs/session.log") as collector:
+    response = adapter.evaluate(prompt, session=session)
+
+print(f"Logs written to: {collector.path}")
+```
+
+### Why Log Collection Matters
+
+Agent debugging often requires understanding the full timeline of events—what tools were called, in what order, with what parameters, and what the model saw at each turn. Console logs scroll past and disappear. Log collection gives you a persistent,  analyzable record.
+
+**Key use cases:**
+
+- **Post-mortem analysis**: When an agent fails, inspect the complete log timeline
+- **Performance profiling**: Identify slow operations and bottlenecks
+- **Compliance**: Maintain audit trails for regulated environments
+- **A/B testing**: Compare behavior across prompt variants
+- **Integration testing**: Assert on specific log events during tests
+
+### File Format
+
+Logs are written in JSONL format (one JSON object per line):
+
+```json
+{"timestamp": "2025-01-15T10:30:00+00:00", "level": "INFO", "logger": "weakincentives.adapters.openai", "event": "tool.execution.complete", "message": "Tool execution completed", "context": {"tool_name": "read_file", "success": true}}
+{"timestamp": "2025-01-15T10:30:01+00:00", "level": "DEBUG", "logger": "weakincentives.prompt", "event": "prompt.render.complete", "message": "Prompt rendered", "context": {"char_count": 1234}}
+```
+
+Each line contains:
+
+| Field       | Type     | Description                                                    |
+| ----------- | -------- | -------------------------------------------------------------- |
+| `timestamp` | `string` | ISO 8601 timestamp (UTC)                                       |
+| `level`     | `string` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`)    |
+| `logger`    | `string` | Logger name (e.g., `weakincentives.adapters.openai`)           |
+| `event`     | `string` | Structured event name (e.g., `tool.execution.complete`)        |
+| `message`   | `string` | Human-readable message                                         |
+| `context`   | `object` | Structured payload with event-specific data                    |
+
+### Configuration Options
+
+```python
+collect_all_logs(
+    target: str | Path,
+    *,
+    level: int = logging.DEBUG,
+)
+```
+
+**Parameters:**
+
+- `target` (required): Path to output JSONL file
+  - Appends if file exists
+  - Creates parent directories automatically
+- `level` (default: `logging.DEBUG`): Minimum log level to capture
+
+**Example with custom level:**
+
+```python
+from weakincentives.debug import collect_all_logs
+import logging
+
+# Only capture INFO and above (skip DEBUG logs)
+with collect_all_logs("./logs/prod.log", level=logging.INFO):
+    response = adapter.evaluate(prompt, session=session)
+```
+
+### Per-Session Log Files
+
+A common pattern is one log file per session:
+
+```python
+from weakincentives.debug import collect_all_logs
+
+log_path = f"./logs/{session.session_id}.log"
+with collect_all_logs(log_path):
+    response = adapter.evaluate(prompt, session=session)
+
+# Later: analyze logs by session ID
+# ls logs/<session-id>.log
+```
+
+This makes it easy to:
+
+- Correlate logs with session snapshots
+- Debug specific failed executions
+- Organize logs by agent run
+- Clean up old logs by session ID
+
+### Error Handling
+
+The log collector guarantees cleanup even when exceptions occur:
+
+```python
+from weakincentives.debug import collect_all_logs
+
+log_path = f"./logs/{session.session_id}.log"
+with collect_all_logs(log_path):
+    try:
+        response = adapter.evaluate(prompt, session=session)
+    except Exception as e:
+        # Logs are already persisted for post-mortem
+        print(f"Error occurred. Logs at: {log_path}")
+        raise
+```
+
+The `try/finally` pattern ensures the log handler is removed from Python's logging system even if the agent crashes mid-execution.
+
+### Analyzing Collected Logs
+
+JSONL format is designed for command-line analysis:
+
+```bash
+# Count events by type
+cat logs/session.log | jq -r '.event' | sort | uniq -c
+
+# Filter to tool execution events
+cat logs/session.log | jq 'select(.event == "tool.execution.complete")'
+
+# Extract all error logs
+cat logs/session.log | jq 'select(.level == "ERROR")'
+
+# Timeline of tool calls
+cat logs/session.log | jq -r 'select(.event | startswith("tool.")) | "\(.timestamp) \(.event) \(.context.tool_name)"'
+```
+
+For Python analysis:
+
+```python
+import json
+from pathlib import Path
+
+# Load all log entries
+logs = [json.loads(line) for line in Path("logs/session.log").read_text().splitlines()]
+
+# Find all tool invocations
+tool_calls = [log for log in logs if log["event"] == "tool.execution.complete"]
+
+# Measure tool execution times
+for log in tool_calls:
+    print(f"{log['context']['tool_name']}: {log['context']['duration_ms']}ms")
+```
+
+### Integration with Observability Platforms
+
+The structured JSONL format integrates with log aggregation platforms:
+
+**Datadog:**
+
+```python
+import logging
+from weakincentives.debug import collect_all_logs
+
+# Collect to file, then ship to Datadog
+with collect_all_logs("./logs/session.log"):
+    response = adapter.evaluate(prompt, session=session)
+
+# Ship logs (separate process or Lambda)
+# datadog-agent tail -f ./logs/session.log
+```
+
+**Elastic/Logstash:**
+
+```json
+# logstash.conf
+input {
+  file {
+    path => "/app/logs/*.log"
+    codec => "json"
+  }
+}
+```
+
+**CloudWatch Logs:**
+
+```python
+import boto3
+import json
+from pathlib import Path
+
+client = boto3.client('logs')
+
+for line in Path("logs/session.log").read_text().splitlines():
+    log_entry = json.loads(line)
+    client.put_log_events(
+        logGroupName='/wink/agents',
+        logStreamName=session.session_id.hex,
+        logEvents=[{
+            'timestamp': int(log_entry['timestamp']),
+            'message': json.dumps(log_entry),
+        }],
+    )
+```
+
+### Thread Safety
+
+The collector uses Python's logging infrastructure, which is thread-safe. The handler is attached only for the duration of the context manager and safely removed on exit, even in multi-threaded environments.
+
+### Performance Considerations
+
+Log collection adds minimal overhead:
+
+- Logs are written synchronously (blocking)
+- File I/O happens on each log emit (no buffering)
+- For high-throughput scenarios, consider buffering or async log shipping
+
+**Tip**: Use `level=logging.INFO` in production to reduce log volume while still capturing important events.
+
+### Combining with Session Dumps
+
+For complete debugging, combine log collection with session snapshots:
+
+```python
+from weakincentives.debug import collect_all_logs, dump_session
+
+debug_dir = f"./debug/{session.session_id}"
+
+# Capture logs during evaluation
+with collect_all_logs(f"{debug_dir}/prompt.log"):
+    response = adapter.evaluate(prompt, session=session)
+
+# Dump session state
+dump_session(session, debug_dir)
+
+# Debug directory now contains:
+# - prompt.log: detailed log timeline (JSONL)
+# - <session_id>.jsonl: session state snapshots
+```
+
+This pattern gives you both:
+
+- **Logs**: Timeline of events with timestamps and context
+- **State**: Snapshots of session slices at key moments
+
+See [Chapter 13.5](#135-dumping-snapshots-to-jsonl) for session dump details.
+
+## 13.3 Filesystem Archive
+
+When agents use virtual filesystems (VFS) to create, modify, and organize files during execution, capturing the complete state of that filesystem is essential for debugging. The `archive_filesystem` function creates a zip archive of all files in a `Filesystem` instance, preserving the full directory structure and file contents.
+
+### Basic Usage
+
+```python
+from weakincentives.debug import archive_filesystem
+from weakincentives.contrib.tools import VirtualFilesystem
+
+# After agent execution with VFS
+vfs = VirtualFilesystem()
+# ... agent writes files to vfs ...
+
+# Archive the filesystem
+archive_path = archive_filesystem(vfs, "./snapshots/")
+if archive_path:
+    print(f"Filesystem archived to: {archive_path}")
+else:
+    print("No files to archive (empty filesystem)")
+```
+
+### Why Filesystem Archives Matter
+
+Virtual filesystems are common in agent workflows:
+
+- **Code generation**: Agent creates multiple source files, tests, configs
+- **Data processing**: Agent transforms input files into output artifacts
+- **Multi-file edits**: Agent refactors codebases with coordinated changes
+- **Build artifacts**: Agent generates compiled outputs, documentation, reports
+
+When these workflows fail or produce unexpected results, you need to inspect exactly what files the agent created. Filesystem archives provide that snapshot.
+
+**Example debugging scenario**:
+
+```python
+from weakincentives.debug import archive_filesystem, collect_all_logs
+
+session_id = session.session_id
+debug_dir = f"./debug/{session_id}"
+
+with collect_all_logs(f"{debug_dir}/execution.log"):
+    try:
+        response = adapter.evaluate(code_gen_prompt, session=session)
+    except Exception:
+        # Capture VFS state at failure
+        vfs = code_gen_prompt.resources.get(VirtualFilesystem)
+        archive_path = archive_filesystem(vfs, debug_dir)
+        print(f"VFS snapshot: {archive_path}")
+        print(f"Logs: {debug_dir}/execution.log")
+        raise
+```
+
+Now you can examine the partial file state that led to the failure.
+
+### Function Signature
+
+```python
+archive_filesystem(
+    fs: Filesystem,
+    target: str | Path,
+    *,
+    archive_id: UUID | None = None,
+) -> Path | None
+```
+
+**Parameters**:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `fs` | `Filesystem` | Yes | Filesystem instance to archive |
+| `target` | `str \| Path` | Yes | Target directory (or file path whose parent is used) |
+| `archive_id` | `UUID \| None` | No | UUID for archive filename; auto-generated if not provided |
+
+**Return Value**:
+
+- Returns `Path` to the created `.zip` file: `<target_dir>/<archive_id>.zip`
+- Returns `None` if the filesystem is empty (no files to archive)
+
+### Archive Contents
+
+The zip archive preserves the complete directory structure:
+
+```
+<archive_id>.zip
+├── src/
+│   ├── main.py
+│   └── utils.py
+├── tests/
+│   └── test_main.py
+└── README.md
+```
+
+All relative paths from the VFS are maintained within the archive.
+
+### Error Handling
+
+The function handles errors gracefully:
+
+```python
+archive_path = archive_filesystem(vfs, "./snapshots/")
+if archive_path is None:
+    print("No files in VFS to archive")
+else:
+    print(f"Archived {archive_path}")
+```
+
+**Error cases**:
+
+- **Empty filesystem**: Returns `None` (not an error)
+- **Unreadable files**: Skipped with warning log, archive continues
+- **Permission denied**: Raises `OSError`, partial archive cleaned up
+- **Disk full**: Raises `OSError`, partial archive cleaned up
+
+### Per-Session Archives
+
+Archive VFS state for each session to track agent file output over time:
+
+```python
+from weakincentives.debug import archive_filesystem
+
+# Archive pattern: ./vfs-snapshots/<session_id>/<uuid>.zip
+archive_dir = f"./vfs-snapshots/{session.session_id}"
+archive_path = archive_filesystem(vfs, archive_dir)
+
+print(f"Session {session.session_id} VFS: {archive_path}")
+```
+
+This pattern makes it easy to correlate VFS state with session logs and dumps.
+
+### Custom Archive IDs
+
+Provide meaningful archive IDs for easier identification:
+
+```python
+from uuid import uuid4
+
+# Use prompt name or task ID
+archive_id = uuid4()  # Or derive from task context
+archive_path = archive_filesystem(
+    vfs,
+    "./snapshots/",
+    archive_id=archive_id
+)
+
+# Archive name: snapshots/<archive_id>.zip
+```
+
+### Inspecting Archives
+
+Standard zip tools work with archives:
+
+```bash
+# List contents
+unzip -l snapshots/abc123.zip
+
+# Extract to directory
+unzip snapshots/abc123.zip -d extracted/
+
+# View specific file
+unzip -p snapshots/abc123.zip src/main.py
+```
+
+Python inspection:
+
+```python
+import zipfile
+
+with zipfile.ZipFile("snapshots/abc123.zip") as zf:
+    # List all files
+    for info in zf.infolist():
+        print(f"{info.filename}: {info.file_size} bytes")
+
+    # Read specific file
+    content = zf.read("src/main.py")
+    print(content.decode("utf-8"))
+```
+
+### Thread Safety
+
+The `archive_filesystem` function is thread-safe:
+
+- File reads are atomic per file
+- Archive creation uses temporary files with unique names
+- Cleanup happens in `try/finally` blocks
+
+You can safely archive multiple VFS instances concurrently:
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+from weakincentives.debug import archive_filesystem
+
+def archive_session_vfs(session_id: str, vfs: Filesystem) -> Path | None:
+    return archive_filesystem(vfs, f"./snapshots/{session_id}/")
+
+with ThreadPoolExecutor(max_workers=4) as executor:
+    futures = [
+        executor.submit(archive_session_vfs, sid, vfs)
+        for sid, vfs in session_vfs_pairs
+    ]
+    archives = [f.result() for f in futures]
+```
+
+### Combining with Log Collection
+
+Capture both logs and VFS state for complete debugging context:
+
+```python
+from weakincentives.debug import archive_filesystem, collect_all_logs
+
+session_id = session.session_id
+debug_dir = f"./debug/{session_id}"
+
+# Logs + VFS snapshot
+with collect_all_logs(f"{debug_dir}/execution.log"):
+    response = adapter.evaluate(prompt, session=session)
+
+# Archive VFS after execution
+vfs = prompt.resources.get(VirtualFilesystem)
+archive_path = archive_filesystem(vfs, debug_dir)
+
+print(f"Debug artifacts for {session_id}:")
+print(f"  Logs: {debug_dir}/execution.log")
+print(f"  VFS:  {archive_path}")
+```
+
+This gives you both the execution timeline (logs) and the file artifacts (VFS).
+
+### Complete Debug Capture Pattern
+
+Combine all three debug utilities—logs, session dumps, and filesystem archives—for comprehensive post-mortem analysis:
+
+```python
+from weakincentives.debug import (
+    archive_filesystem,
+    collect_all_logs,
+    dump_session,
+)
+from weakincentives.contrib.tools import VirtualFilesystem
+
+debug_dir = f"./debug/{session.session_id}"
+
+# Capture logs during evaluation
+with collect_all_logs(f"{debug_dir}/prompt.log"):
+    response = adapter.evaluate(prompt, session=session)
+
+# Dump session state
+dump_session(session, debug_dir)
+
+# Archive VFS contents
+vfs = prompt.resources.get(VirtualFilesystem)
+if vfs:
+    archive_filesystem(vfs, debug_dir)
+
+# Debug directory now contains:
+# - prompt.log: detailed log timeline (JSONL)
+# - <session_id>.jsonl: session state snapshots
+# - <uuid>.zip: complete VFS archive
+```
+
+This pattern captures:
+
+- **Logs**: Every structured event with timestamps and context
+- **Session state**: All slice data, events, and reducers
+- **File artifacts**: Every file the agent created or modified
+
+When debugging fails, you have a complete forensic snapshot.
+
+## 13.4 Session Events
 
 Sessions subscribe to the event bus and capture telemetry events automatically. These events provide fine-grained insight into what happened during execution.
 
@@ -240,7 +754,7 @@ This pattern lets you route events to external systems (Datadog, Honeycomb, Prom
 
 See [Chapter 5](05-sessions.md) for more on event dispatching and [Chapter 7](07-main-loop.md) for event loop integration.
 
-## 13.3 Dumping Snapshots to JSONL
+## 13.5 Dumping Snapshots to JSONL
 
 Session snapshots let you persist complete execution traces to disk. Each snapshot includes:
 
@@ -325,111 +839,8 @@ Restored sessions are fully functional. You can:
 
 See [Chapter 8](08-evaluation.md) for how evaluators use snapshots to test against real execution traces.
 
-## 13.4 The Debug UI
 
-The debug UI provides visual inspection of session execution timelines. It's invaluable for understanding what the model saw, which tools it called, and how state evolved.
-
-### Installation
-
-The debug UI is part of the `wink` CLI extras:
-
-```bash
-pip install "weakincentives[wink]"
-```
-
-This installs the `wink` command-line tool with the `debug` subcommand.
-
-### Running the Debug UI
-
-```bash
-wink debug snapshots/<session_id>.jsonl
-```
-
-This starts a local web server (default: `http://localhost:8080`) that renders an interactive timeline.
-
-### UI Features
-
-```mermaid
-graph LR
-    subgraph UI["Debug UI"]
-        Timeline["Event Timeline
-        - Prompt renders
-        - Tool calls
-        - State updates"]
-
-        Inspector["Detail Inspector
-        - Full prompt text
-        - Tool params/results
-        - Slice contents"]
-
-        Search["Search & Filter
-        - By event type
-        - By tool name
-        - By time range"]
-    end
-
-    Timeline --> Inspector
-    Search --> Timeline
-
-    style UI fill:#f0f9ff
-```
-
-#### Event Timeline
-
-The timeline shows every event in chronological order:
-
-1. **Prompt renders**: See exactly what was sent to the model, including all sections and tool definitions
-1. **Tool invocations**: Expand to see params, results, and execution time
-1. **State changes**: See which reducers fired and how slices changed
-
-#### Detail Inspector
-
-Click any event to see full details:
-
-- **Prompts**: Full markdown with syntax highlighting
-- **Tools**: JSON-formatted params and results with schema validation
-- **State**: Current slice contents at that point in time
-
-#### Search & Filter
-
-Filter the timeline by:
-
-- Event type (`PromptRendered`, `ToolInvoked`, etc.)
-- Tool name
-- Time range
-- Session tags
-
-### Typical Workflow
-
-When debugging an agent failure:
-
-1. **Capture the snapshot** during or after the run:
-
-   ```python
-   dump_session(session, target="snapshots/")
-   ```
-
-1. **Open the debug UI**:
-
-   ```bash
-   wink debug snapshots/<session_id>.jsonl
-   ```
-
-1. **Navigate the timeline** to find where things went wrong:
-
-   - Did the prompt include the right context?
-   - Did the model call the expected tools?
-   - Did reducers update state correctly?
-
-1. **Iterate** on prompts, tools, or reducers based on findings
-
-1. **Re-run** with fixes and compare new snapshots
-
-The debug UI makes it easy to see what the model "thought" it was doing and why it made specific choices.
-
-See [specs/WINK_DEBUG.md](../specs/WINK_DEBUG.md) for the complete debug UI specification.
-
-## 13.5 The Debug UI
+## 13.6 The Debug UI
 
 The WINK debug UI is a browser-based snapshot explorer that provides visual inspection of session execution traces. Unlike traditional debuggers that step through code, the debug UI lets you examine what the agent "thought" it was doing—what context it saw, which tools it called, how state evolved over time, and where semantic drift occurred.
 
@@ -1044,639 +1455,6 @@ Download the artifact and use `wink debug` to inspect failures without local rep
 - [specs/SLICES.md](../specs/SLICES.md) - Slice storage and JSONL format
 
 ______________________________________________________________________
-
-## 13.6 Structured Logging
-
-WINK's logging framework provides structured, event-driven logging across all runtime modules. Unlike traditional logging that emits human-readable strings, structured logging emits machine-parseable JSON records with stable event names and typed context fields. This makes WINK agents observable at scale—you can route logs to different backends, build dashboards, set up alerts, and correlate events across distributed systems.
-
-### Design Philosophy
-
-The logging framework is built on three principles:
-
-**1. Event-driven taxonomy:**
-
-Every log record carries an `event` field that categorizes the record. Instead of searching log messages for keywords, you filter by event type:
-
-```python
-# Traditional logging
-logger.info(f"Tool {tool_name} completed in {duration}ms")
-
-# Structured logging
-logger.info(
-    "Tool execution completed",
-    event="tool.execution.complete",
-    context={"tool_name": tool_name, "duration_ms": duration}
-)
-```
-
-Downstream consumers (log aggregators, dashboards, alerting) can subscribe to specific events without fragile regex parsing.
-
-**2. Module isolation:**
-
-Each module owns its logger instance via `get_logger(__name__)`. This keeps loggers scoped to their module without a global registry:
-
-```python
-from weakincentives.runtime.logging import get_logger
-
-logger = get_logger(__name__)
-```
-
-The logger name appears in every record, making it easy to trace logs back to their source.
-
-**3. Structured-first payloads:**
-
-Log records favor key/value pairs (`extra`) over message formatting. Messages can change without breaking observability pipelines:
-
-```python
-# Message can evolve ("completed" → "finished" → "succeeded")
-logger.info(
-    "Tool execution completed",
-    event="tool.execution.complete",
-    context={
-        "tool_name": tool_name,
-        "duration_ms": duration,
-        "success": True,
-    }
-)
-```
-
-Consumers filter on `event="tool.execution.complete"` and extract `context.duration_ms`, ignoring the message text.
-
-### Logging Architecture
-
-```mermaid
-flowchart TB
-    subgraph Modules["WINK Runtime Modules"]
-        Session["Session
-        session.dispatch
-        session.reducer_applied"]
-        Adapter["Adapters
-        prompt_execution_started
-        tool_handler_completed"]
-        Tools["Tools
-        tool.execution.start
-        tool.execution.complete"]
-        Resources["Resources
-        resource.construct.start
-        resource.close"]
-    end
-
-    subgraph Framework["Logging Framework"]
-        GetLogger["get_logger(__name__)"]
-        StructuredLogger["StructuredLogger
-        (LoggerAdapter)"]
-    end
-
-    subgraph Handlers["Log Handlers"]
-        Console["Console Handler
-        (human-readable)"]
-        JSON["JSON Handler
-        (machine-parseable)"]
-        Custom["Custom Handlers
-        (event routing)"]
-    end
-
-    subgraph Backends["Backends"]
-        Stdout["stdout/stderr"]
-        Files["Log Files"]
-        Aggregators["Log Aggregators
-        (Datadog, Splunk)"]
-        Metrics["Metrics Backends
-        (Prometheus, Datadog)"]
-    end
-
-    Session --> GetLogger
-    Adapter --> GetLogger
-    Tools --> GetLogger
-    Resources --> GetLogger
-    GetLogger --> StructuredLogger
-    StructuredLogger --> Console
-    StructuredLogger --> JSON
-    StructuredLogger --> Custom
-    Console --> Stdout
-    JSON --> Files
-    Custom --> Aggregators
-    Custom --> Metrics
-
-    style Modules fill:#e1f5ff
-    style Framework fill:#f0f9ff
-    style Handlers fill:#fff4e6
-    style Backends fill:#f0fff4
-```
-
-### Configuration and Setup
-
-Configure logging once at application startup:
-
-```python
-from weakincentives.runtime import configure_logging, get_logger
-
-# Configure with JSON output for production
-configure_logging(level="INFO", json_mode=True)
-
-# Get a logger in your modules
-logger = get_logger(__name__)
-
-# Log with structured fields
-logger.info(
-    "Agent initialized",
-    event="agent.init",
-    context={"model": "gpt-4o", "max_turns": 10}
-)
-```
-
-**Arguments to `configure_logging`:**
-
-| Argument | Type | Default | Description |
-|----------|------|---------|-------------|
-| `level` | `str \| int` | `"INFO"` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`) |
-| `json_mode` | `bool` | `False` | Emit JSON records instead of human-readable strings |
-| `format` | `str \| None` | `None` | Custom format string (only used when `json_mode=False`) |
-
-**Environment variable overrides:**
-
-```bash
-# Override log level
-WEAKINCENTIVES_LOG_LEVEL=DEBUG python my_agent.py
-
-# Force JSON mode
-WEAKINCENTIVES_JSON_LOGS=1 python my_agent.py
-```
-
-### Log Schema
-
-**JSON mode output:**
-
-When `json_mode=True`, every log record is a single JSON object:
-
-```json
-{
-  "timestamp": "2025-01-09T12:34:56.789Z",
-  "level": "INFO",
-  "logger": "weakincentives.runtime.session",
-  "message": "Session dispatch completed",
-  "event": "session.dispatch",
-  "context": {
-    "session_id": "abc123",
-    "event_type": "AddStep",
-    "reducer_count": 3
-  }
-}
-```
-
-**Field descriptions:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `timestamp` | `string` | ISO 8601 timestamp with timezone |
-| `level` | `string` | Log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`) |
-| `logger` | `string` | Logger name (module path) |
-| `message` | `string` | Human-readable message |
-| `event` | `string` | Event identifier (dotted notation) |
-| `context` | `object` | Structured context fields (varies by event) |
-
-**Human-readable mode output:**
-
-When `json_mode=False` (default for local development):
-
-```
-2025-01-09 12:34:56 INFO weakincentives.runtime.session: Session dispatch completed [event=session.dispatch session_id=abc123 event_type=AddStep reducer_count=3]
-```
-
-This is easier to read during development but harder to parse in production.
-
-### Logging Surfaces
-
-WINK emits structured logs from all runtime modules. The tables below document the complete logging surface area—these are the events you can subscribe to, filter, and route.
-
-#### Runtime Events
-
-Core session and event bus operations:
-
-| Module | Event | Level | Context Fields |
-|--------|-------|-------|----------------|
-| `runtime/events/__init__.py` | `event_delivery_failed` | `ERROR` | `event_type`, `handler` |
-| `runtime/session/session.py` | `session_reducer_failed` | `ERROR` | `reducer`, `data_type`, `slice_type` |
-| `runtime/session/session.py` | `session_observer_failed` | `ERROR` | `observer`, `slice_type` |
-
-#### Session Dispatch (DEBUG)
-
-Detailed session state mutation tracking (only visible with `DEBUG` level):
-
-| Event | Context Fields |
-|-------|----------------|
-| `session.dispatch` | `session_id`, `event_type` |
-| `session.dispatch_data_event` | `session_id`, `data_type`, `reducer_count` |
-| `session.reducer_applied` | `session_id`, `reducer`, `slice_type`, `operation` |
-| `session.register_reducer` | `session_id`, `data_type`, `slice_type`, `reducer`, `policy` |
-| `session.initialize_slice` | `session_id`, `slice_type`, `value_count` |
-| `session.clear_slice` | `session_id`, `slice_type`, `has_predicate` |
-| `session.reset` | `session_id`, `slice_count`, `slice_types` |
-| `session.restore` | `session_id`, `preserve_logs`, `snapshot_slice_count`, `registered_slice_count` |
-
-Use these events to debug reducer behavior and state mutations.
-
-#### Adapter Logging
-
-Shared adapter events (all adapters):
-
-| Event | Level | Context Fields |
-|-------|-------|----------------|
-| `prompt_execution_started` | `INFO` | `tool_count` |
-| `prompt_execution_succeeded` | `INFO` | `tool_count`, `has_output`, `text_length`, `structured_output`, `handler_count` |
-| `prompt_execution_publish_failed` | `ERROR` | `failure_count`, `failed_handlers` |
-| `prompt_rendered_published` | `DEBUG` | `handler_count` |
-| `prompt_rendered_publish_failed` | `ERROR` | `failure_count`, `failed_handlers` |
-| `prompt_tool_calls_detected` | `DEBUG` | `count` |
-| `tool_handler_completed` | `INFO` | `success`, `has_value` |
-| `tool_validation_failed` | `WARNING` | `reason` |
-| `prompt_throttled` | `WARNING` | `kind`, `delay_seconds`, `attempt`, `retry_after_seconds` |
-| `tool_handler_exception` | `ERROR` | `provider_payload` |
-
-**Claude Agent SDK adapter (DEBUG):**
-
-The Claude Agent SDK adapter provides extensive DEBUG logging due to its subprocess-based execution model:
-
-| Event | Context Fields (subset—see specs/LOGGING.md for full list) |
-|-------|-------------------------------------------------------------|
-| `adapter.init` | `model`, `permission_mode`, `cwd`, `max_turns`, `max_budget_usd` |
-| `evaluate.entry` | `prompt_name`, `has_deadline`, `deadline_remaining_seconds` |
-| `evaluate.rendered` | `prompt_text_length`, `tool_count`, `tool_names`, `output_type` |
-| `sdk_query.executing` | `prompt_name` |
-| `sdk_query.message_received` | `role`, `content`, `usage`, `thinking_preview`, `cumulative_input_tokens` |
-| `sdk_query.complete` | `message_count`, `stats_tool_count`, `stats_turn_count`, `stats_input_tokens` |
-| `sdk_query.stderr` | `line` (captures Claude Code stderr output) |
-
-The SDK adapter logs **full message content** (text, tool uses, results, structured output) without truncation, providing complete visibility into the conversation flow.
-
-**OpenAI adapter (DEBUG):**
-
-| Event | Context Fields |
-|-------|----------------|
-| `adapter.init` | `model`, `tool_choice`, `temperature`, `max_tokens` |
-| `evaluate.entry` | `prompt_name`, `has_deadline`, `has_budget` |
-| `provider.request` | `model`, `message_count`, `tool_count`, `tool_names` |
-| `provider.response` | `response_type`, `has_output`, `has_usage` |
-| `provider.error` | `error_type`, `error_message`, `status_code`, `code` |
-
-**LiteLLM adapter (DEBUG):**
-
-| Event | Context Fields |
-|-------|----------------|
-| `adapter.init` | `model`, `tool_choice`, `temperature`, `max_tokens` |
-| `provider.request` | `model`, `message_count`, `tool_count` |
-| `throttle.analyzing` | `error_type`, `error_message`, `status_code` |
-| `throttle.detected` | `throttle_kind`, `retry_after_seconds` |
-
-#### Tool Execution (DEBUG)
-
-| Event | Context Fields |
-|-------|----------------|
-| `tool.execution.start` | `tool_name`, `call_id`, `prompt_name`, `arguments` |
-| `tool.execution.complete` | `tool_name`, `success`, `message`, `value`, `value_type` |
-| `tool_handler_completed` | `success`, `has_value` |
-| `tool_event_dispatched` | `handler_count` |
-| `tool_event_dispatch_failed` | `failure_count`, `failed_handlers` |
-
-#### Resource Lifecycle (DEBUG)
-
-| Event | Context Fields |
-|-------|----------------|
-| `resource.construct.start` | `protocol`, `scope` |
-| `resource.construct.complete` | `protocol`, `scope`, `instance_type` |
-| `resource.close` | `protocol`, `scope` |
-| `resource.context.close.start` | `resource_count` |
-| `resource.tool_scope.enter` | (none) |
-| `resource.tool_scope.exit` | `closed_count` |
-
-#### Mailbox Operations (DEBUG)
-
-| Event | Context Fields |
-|-------|----------------|
-| `mailbox.send` | `mailbox`, `message_id`, `reply_to`, `body_type` |
-| `mailbox.receive` | `mailbox`, `message_count`, `message_ids` |
-| `mailbox.acknowledge` | `mailbox`, `message_id`, `receipt_handle` |
-
-#### Prompt Overrides
-
-| Event | Level | Context Fields |
-|-------|-------|----------------|
-| `prompt_override_resolved` | `INFO` | `ns`, `prompt_key`, `tag` |
-| `prompt_override_persisted` | `INFO` | `ns`, `prompt_key`, `tag` |
-| `prompt_override_missing` | `DEBUG` | `ns`, `prompt_key`, `tag` |
-
-### Event Routing
-
-Route logs to different backends based on event type:
-
-```python
-import logging
-from weakincentives.runtime import get_logger
-
-class EventRouter(logging.Handler):
-    def emit(self, record):
-        event = getattr(record, "event", None)
-        if not event:
-            return
-
-        if event.startswith("tool."):
-            # Route tool events to tool-specific backend
-            self.send_to_datadog(record, tags=["source:tools"])
-
-        elif event.startswith("model.") or event.startswith("prompt_"):
-            # Route model events to LLM observability platform
-            self.send_to_langsmith(record)
-
-        elif event.startswith("session."):
-            # Route session events to metrics backend
-            self.send_to_prometheus(record)
-
-        else:
-            # Default handler
-            self.send_to_stdout(record)
-
-    def send_to_datadog(self, record, tags=None):
-        # Implementation for Datadog integration
-        pass
-
-    def send_to_langsmith(self, record):
-        # Implementation for LangSmith integration
-        pass
-
-    def send_to_prometheus(self, record):
-        # Implementation for Prometheus metrics
-        pass
-
-    def send_to_stdout(self, record):
-        print(self.format(record))
-
-# Register the custom handler
-root_logger = logging.getLogger("weakincentives")
-root_logger.addHandler(EventRouter())
-```
-
-### Integration with Observability Platforms
-
-```mermaid
-flowchart LR
-    subgraph WINK["WINK Runtime"]
-        Logs["Structured Logs
-        (JSON)"]
-    end
-
-    subgraph Aggregation["Log Aggregation"]
-        Filebeat["Filebeat"]
-        Fluentd["Fluentd"]
-        Vector["Vector"]
-    end
-
-    subgraph Platforms["Observability Platforms"]
-        Datadog["Datadog
-        - Logs
-        - Metrics
-        - APM"]
-        Splunk["Splunk
-        - Log Search
-        - Alerts"]
-        Elastic["Elasticsearch
-        - Kibana
-        - Dashboards"]
-        Honeycomb["Honeycomb
-        - Traces
-        - Queries"]
-    end
-
-    Logs --> Filebeat
-    Logs --> Fluentd
-    Logs --> Vector
-    Filebeat --> Datadog
-    Filebeat --> Elastic
-    Fluentd --> Splunk
-    Vector --> Honeycomb
-
-    style WINK fill:#e1f5ff
-    style Aggregation fill:#fff4e6
-    style Platforms fill:#f0fff4
-```
-
-**Datadog integration example:**
-
-```python
-import logging
-from datadog import statsd
-from weakincentives.runtime import get_logger, configure_logging
-
-configure_logging(level="INFO", json_mode=True)
-
-class DatadogHandler(logging.Handler):
-    def emit(self, record):
-        event = getattr(record, "event", None)
-        context = getattr(record, "context", {})
-
-        # Send logs to Datadog
-        if record.levelno >= logging.ERROR:
-            statsd.increment(f"wink.errors.{event}", tags=[f"logger:{record.name}"])
-
-        # Extract metrics from context
-        if "duration_ms" in context:
-            statsd.histogram(f"wink.{event}.duration", context["duration_ms"])
-
-        if "tool_count" in context:
-            statsd.gauge(f"wink.{event}.tool_count", context["tool_count"])
-
-# Register handler
-logger = get_logger("weakincentives")
-logger.addHandler(DatadogHandler())
-```
-
-### Production Patterns
-
-#### Pattern 1: Correlation IDs
-
-Track requests across distributed systems:
-
-```python
-import contextvars
-from weakincentives.runtime import get_logger
-
-correlation_id = contextvars.ContextVar("correlation_id", default=None)
-
-class CorrelationFilter(logging.Filter):
-    def filter(self, record):
-        cid = correlation_id.get()
-        if cid:
-            record.correlation_id = cid
-        return True
-
-logger = get_logger(__name__)
-logger.addFilter(CorrelationFilter())
-
-# In your request handler
-def handle_request(request):
-    correlation_id.set(request.headers.get("X-Correlation-ID"))
-    # All logs from this request will include correlation_id
-    logger.info("Processing request", event="request.start")
-```
-
-#### Pattern 2: Sampling and Rate Limiting
-
-Reduce log volume in production:
-
-```python
-import random
-from weakincentives.runtime import get_logger
-
-class SamplingHandler(logging.Handler):
-    def __init__(self, sample_rate=0.1):
-        super().__init__()
-        self.sample_rate = sample_rate
-
-    def emit(self, record):
-        # Always log errors
-        if record.levelno >= logging.ERROR:
-            self.forward(record)
-            return
-
-        # Sample INFO/DEBUG logs
-        if random.random() < self.sample_rate:
-            self.forward(record)
-
-    def forward(self, record):
-        # Send to actual backend
-        pass
-
-logger = get_logger("weakincentives")
-logger.addHandler(SamplingHandler(sample_rate=0.1))  # Keep 10% of INFO/DEBUG logs
-```
-
-#### Pattern 3: Error Tracking
-
-Send errors to Sentry:
-
-```python
-import sentry_sdk
-from weakincentives.runtime import get_logger
-
-sentry_sdk.init(dsn="https://...")
-
-class SentryHandler(logging.Handler):
-    def emit(self, record):
-        if record.levelno >= logging.ERROR:
-            event = getattr(record, "event", None)
-            context = getattr(record, "context", {})
-
-            with sentry_sdk.push_scope() as scope:
-                scope.set_tag("event", event)
-                scope.set_context("wink", context)
-                sentry_sdk.capture_exception(record.exc_info)
-
-logger = get_logger("weakincentives")
-logger.addHandler(SentryHandler())
-```
-
-### Performance Considerations
-
-**DEBUG logging overhead:**
-
-DEBUG logs are verbose (full message content, arguments, state). Enable only during development or troubleshooting:
-
-```python
-# Production: INFO level (fewer logs)
-configure_logging(level="INFO", json_mode=True)
-
-# Development: DEBUG level (all logs)
-configure_logging(level="DEBUG", json_mode=False)
-```
-
-**Conditional logging:**
-
-Avoid expensive operations when DEBUG is disabled:
-
-```python
-logger = get_logger(__name__)
-
-# Bad: always serializes state (even when DEBUG is off)
-logger.debug(f"State: {json.dumps(state)}")
-
-# Good: only serializes when DEBUG is enabled
-if logger.isEnabledFor(logging.DEBUG):
-    logger.debug("State updated", event="state.update", context={"state": state})
-```
-
-**Async handlers:**
-
-For high-throughput systems, use async handlers to avoid blocking:
-
-```python
-from logging.handlers import QueueHandler, QueueListener
-import queue
-
-log_queue = queue.Queue()
-queue_handler = QueueHandler(log_queue)
-listener = QueueListener(log_queue, DatadogHandler(), SentryHandler())
-
-logger = get_logger("weakincentives")
-logger.addHandler(queue_handler)
-
-# Start listener in background thread
-listener.start()
-
-# Logs are queued and processed asynchronously
-logger.info("Non-blocking log", event="async.log")
-```
-
-### Best Practices
-
-**Use event names consistently:**
-
-- Use dotted notation: `session.dispatch`, `tool.execution.complete`
-- Namespace by module: `adapter.*`, `session.*`, `tool.*`
-- Keep names stable across versions (consumers depend on them)
-
-**Include relevant context:**
-
-- Add `session_id` for correlating events within a session
-- Add `tool_name` for tool-specific events
-- Add `prompt_name` for prompt-specific events
-- Add `duration_ms` for timing metrics
-
-**Set appropriate log levels:**
-
-| Level | Use For |
-|-------|---------|
-| `DEBUG` | Detailed diagnostics (state dumps, full messages) |
-| `INFO` | High-level lifecycle events (session start, prompt execution) |
-| `WARNING` | Recoverable issues (throttling, fallbacks) |
-| `ERROR` | Unexpected failures (reducer errors, tool crashes) |
-| `CRITICAL` | Unrecoverable failures (process termination) |
-
-**Avoid logging secrets:**
-
-- Redact API keys, tokens, passwords
-- Sanitize user data (PII)
-- Use `repr()` carefully (can expose internal state)
-
-**Test log output:**
-
-```python
-import logging
-from weakincentives.runtime import get_logger
-
-def test_logging():
-    with LogCapture() as logs:
-        logger = get_logger(__name__)
-        logger.info("Test", event="test.event", context={"foo": "bar"})
-
-        assert logs.event == "test.event"
-        assert logs.context["foo"] == "bar"
-```
-
-### Cross-References
-
-- [Chapter 5: Sessions](05-sessions.md) - Session events and dispatching
-- [Chapter 9: Lifecycle Management](09-lifecycle.md) - Production logging patterns
-- [specs/LOGGING.md](../specs/LOGGING.md) - Complete logging specification
-- [specs/HEALTH.md](../specs/HEALTH.md) - Health check logging
 
 ______________________________________________________________________
 
