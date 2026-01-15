@@ -325,52 +325,15 @@ def reducer[S: SupportsDataclass](
 
 ### Built-in Reducers
 
-```python
-def append_all[S: SupportsDataclass](
-    view: SliceView[S],
-    event: S,
-    *,
-    context: ReducerContext,
-) -> Append[S]:
-    """Append event to slice (ledger semantics).
+The following built-in reducers are available in `weakincentives.runtime.session`:
 
-    Never accesses view - O(1) for file-backed slices.
-    """
-    return Append(event)
+| Reducer | Description | View Access | Performance |
+|---------|-------------|-------------|-------------|
+| `append_all` | Append event to slice (ledger semantics) | None | O(1) for file-backed |
+| `replace_latest` | Keep only the most recent value | None | O(1) all backends |
+| `upsert_by(key_fn)` | Upsert by derived key | Full | O(n) all backends |
 
-
-def replace_latest[S: SupportsDataclass](
-    view: SliceView[S],
-    event: S,
-    *,
-    context: ReducerContext,
-) -> Replace[S]:
-    """Keep only the most recent value.
-
-    Never accesses view - always replaces with singleton.
-    """
-    return Replace((event,))
-
-
-def upsert_by[S: SupportsDataclass](
-    key_fn: Callable[[S], object],
-) -> Callable[[SliceView[S], S, ReducerContext], SliceOp[S]]:
-    """Create reducer that upserts by derived key.
-
-    Must access view to find existing item - O(n) for any backend.
-    """
-    def reducer(
-        view: SliceView[S],
-        event: S,
-        *,
-        context: ReducerContext,
-    ) -> Replace[S]:
-        event_key = key_fn(event)
-        items = [item for item in view if key_fn(item) != event_key]
-        items.append(event)
-        return Replace(tuple(items))
-    return reducer
-```
+**Implementation:** See `src/weakincentives/runtime/session/reducers.py`
 
 ### Declarative Reducers
 
@@ -467,330 +430,53 @@ file-backed slices because they never access the view.
 
 ### MemorySlice
 
-In-memory tuple-backed slice providing the current default behavior.
-MemorySlice implements both `Slice` and `SliceView` protocols, serving
-as its own view since all data is already in memory:
+In-memory tuple-backed slice providing O(1) reads and O(n) appends. Implements both `Slice` and `SliceView` protocols, serving as its own view since all data is already in memory. All operations are performed on immutable tuples, matching current Session semantics.
 
-```python
-from dataclasses import dataclass
-from collections.abc import Callable, Iterable, Iterator
-from weakincentives.types.dataclass import SupportsDataclass
+**Implementation:** `src/weakincentives/runtime/session/slices.py`
 
-@dataclass(slots=True)
-class MemorySlice[T: SupportsDataclass]:
-    """In-memory tuple-backed slice.
+**Key characteristics:**
 
-    Provides O(1) reads and O(n) appends. All operations are performed
-    on immutable tuples, matching current Session semantics.
-
-    Implements both Slice (mutable) and SliceView (readonly) protocols.
-    """
-
-    _data: tuple[T, ...] = ()
-
-    # --- SliceView protocol (readonly) ---
-
-    @property
-    def is_empty(self) -> bool:
-        return len(self._data) == 0
-
-    def __len__(self) -> int:
-        return len(self._data)
-
-    def __iter__(self) -> Iterator[T]:
-        return iter(self._data)
-
-    def all(self) -> tuple[T, ...]:
-        return self._data
-
-    def latest(self) -> T | None:
-        return self._data[-1] if self._data else None
-
-    def where(self, predicate: Callable[[T], bool]) -> Iterator[T]:
-        return (item for item in self._data if predicate(item))
-
-    # --- Slice protocol (mutable) ---
-
-    def append(self, item: T) -> None:
-        self._data = (*self._data, item)
-
-    def extend(self, items: Iterable[T]) -> None:
-        self._data = (*self._data, *items)
-
-    def replace(self, items: tuple[T, ...]) -> None:
-        self._data = items
-
-    def clear(self, predicate: Callable[[T], bool] | None = None) -> None:
-        if predicate is None:
-            self._data = ()
-        else:
-            self._data = tuple(v for v in self._data if not predicate(v))
-
-    def snapshot(self) -> tuple[T, ...]:
-        return self._data
-
-    def view(self) -> "MemorySlice[T]":
-        # MemorySlice is its own view - all data in memory
-        return self
-```
+- Zero I/O overhead
+- Backed by Python tuples (immutable)
+- Serves as its own SliceView
+- Default backend for all slice policies
 
 ### MemorySliceFactory
 
-```python
-@dataclass(slots=True, frozen=True)
-class MemorySliceFactory:
-    """Factory that creates in-memory slices."""
+Factory that creates in-memory slices. Takes no configuration parameters and returns fresh `MemorySlice` instances for each slice type.
 
-    def create[T: SupportsDataclass](self, slice_type: type[T]) -> MemorySlice[T]:
-        return MemorySlice()
-```
+**Implementation:** `src/weakincentives/runtime/session/slices.py`
 
 ### JsonlSlice
 
-JSONL file-backed slice for persistent storage. Uses a separate
-`JsonlSliceView` for lazy access to avoid loading data when not needed:
+JSONL file-backed slice for persistent storage. Each item stored as a single JSON line. Reads load the entire file; appends are O(1) file operations. Uses separate `JsonlSliceView` for lazy access to avoid loading data when not needed. Includes type information (`__type__` field) for polymorphic deserialization.
 
-```python
-from dataclasses import dataclass
-from pathlib import Path
-from collections.abc import Callable, Iterable, Iterator
-import json
-import fcntl
-from weakincentives.serde import dump, parse
-from weakincentives.types.dataclass import SupportsDataclass
+**Implementation:** `src/weakincentives/runtime/session/slices.py`
 
+**Key characteristics:**
 
-@dataclass(slots=True)
-class JsonlSliceView[T: SupportsDataclass]:
-    """Lazy readonly view of a JsonlSlice.
+- File-based persistence with append-optimized I/O
+- Lazy view with optimized `is_empty`, `latest()`, streaming iteration
+- Write-through cache invalidation
+- Thread safety via `fcntl.flock` (POSIX) or `msvcrt.locking` (Windows)
+- Uses `weakincentives.serde` for serialization
 
-    Provides optimized access patterns that avoid loading the entire
-    file when not necessary. Key optimizations:
-    - is_empty: O(1) file stat
-    - latest(): Can read just the last line (seek to end)
-    - __iter__: Streams items without loading all into memory
-    """
+**View optimizations:**
 
-    path: Path
-    item_type: type[T]
-    _slice: "JsonlSlice[T]"
-
-    @property
-    def is_empty(self) -> bool:
-        """O(1) check using file existence and size."""
-        if not self.path.exists():
-            return True
-        return self.path.stat().st_size == 0
-
-    def __len__(self) -> int:
-        """Count items. Uses cache if available, else counts lines."""
-        if self._slice._cache is not None:
-            return len(self._slice._cache)
-        if not self.path.exists():
-            return 0
-        # Count newlines without parsing
-        with self.path.open("rb") as f:
-            return sum(1 for _ in f)
-
-    def __iter__(self) -> Iterator[T]:
-        """Stream items lazily without loading all into memory."""
-        if not self.path.exists():
-            return
-        with self.path.open() as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-            try:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        data = json.loads(line)
-                        yield parse(
-                            self.item_type, data, allow_dataclass_type=True
-                        )
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-
-    def all(self) -> tuple[T, ...]:
-        """Load all items. Uses slice's cache for efficiency."""
-        return self._slice.all()
-
-    def latest(self) -> T | None:
-        """Return last item. Can be optimized to read only last line."""
-        # Use cache if available
-        if self._slice._cache is not None:
-            cache = self._slice._cache
-            return cache[-1] if cache else None
-        # Optimization: read last line only (seek from end)
-        if not self.path.exists():
-            return None
-        if self.path.stat().st_size == 0:
-            return None
-        # For simplicity, fall back to full read with caching
-        # A production impl could seek to find last newline
-        items = self._slice.all()
-        return items[-1] if items else None
-
-    def where(self, predicate: Callable[[T], bool]) -> Iterator[T]:
-        """Stream filtered items."""
-        return (item for item in self if predicate(item))
-
-
-@dataclass(slots=True)
-class JsonlSlice[T: SupportsDataclass]:
-    """JSONL file-backed slice for persistence.
-
-    Each item is stored as a single JSON line. Reads load the entire file;
-    appends are O(1) file operations. Includes type information for
-    polymorphic deserialization.
-
-    Thread safety: Uses file locking (fcntl.flock) for concurrent access.
-    Cache invalidation: Cache cleared on any write operation.
-    """
-
-    path: Path
-    item_type: type[T]
-    _cache: tuple[T, ...] | None = None
-
-    def _read_all(self) -> tuple[T, ...]:
-        """Read all items from the JSONL file."""
-        if not self.path.exists():
-            return ()
-        items: list[T] = []
-        with self.path.open() as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_SH)
-            try:
-                for line in f:
-                    line = line.strip()
-                    if line:
-                        data = json.loads(line)
-                        items.append(
-                            parse(self.item_type, data, allow_dataclass_type=True)
-                        )
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        return tuple(items)
-
-    def all(self) -> tuple[T, ...]:
-        if self._cache is not None:
-            return self._cache
-        result = self._read_all()
-        self._cache = result
-        return result
-
-    def latest(self) -> T | None:
-        items = self.all()
-        return items[-1] if items else None
-
-    def _write_item(self, f, item: T) -> None:
-        """Write a single item as a JSON line."""
-        data = dump(item, include_dataclass_type=True)
-        f.write(json.dumps(data, separators=(",", ":")) + "\n")
-
-    def append(self, item: T) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                self._write_item(f, item)
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        self._cache = None
-
-    def extend(self, items: Iterable[T]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("a") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                for item in items:
-                    self._write_item(f, item)
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        self._cache = None
-
-    def replace(self, items: tuple[T, ...]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        with self.path.open("w") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
-                for item in items:
-                    self._write_item(f, item)
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        self._cache = items
-
-    def clear(self, predicate: Callable[[T], bool] | None = None) -> None:
-        if predicate is None:
-            self.path.unlink(missing_ok=True)
-            self._cache = ()
-        else:
-            remaining = tuple(v for v in self.all() if not predicate(v))
-            self.replace(remaining)
-
-    def __len__(self) -> int:
-        return len(self.all())
-
-    def snapshot(self) -> tuple[T, ...]:
-        # Ensure cache is populated for consistent snapshot
-        return self.all()
-
-    def view(self) -> JsonlSliceView[T]:
-        """Return a lazy readonly view for reducer input."""
-        return JsonlSliceView(
-            path=self.path,
-            item_type=self.item_type,
-            _slice=self,
-        )
-```
+- `is_empty`: O(1) file stat check
+- `latest()`: Can seek to last line (implementation uses cache)
+- `__iter__`: Streams items without loading all into memory
 
 ### JsonlSliceFactory
 
-```python
-from dataclasses import dataclass, field
-from pathlib import Path
-import tempfile
+Factory that creates JSONL file-backed slices. Each slice type gets its own file based on qualified class name. When `base_dir` is not provided, creates a temporary directory that persists for the factory lifetime.
 
-@dataclass(slots=True)
-class JsonlSliceFactory:
-    """Factory that creates JSONL file-backed slices.
+**Implementation:** `src/weakincentives/runtime/session/slices.py`
 
-    Each slice type gets its own file based on the qualified class name.
-    When base_dir is not provided, creates a temporary directory that
-    persists for the lifetime of the factory.
+**Configuration:**
 
-    Example::
-
-        # Explicit directory for persistent storage
-        factory = JsonlSliceFactory(base_dir=Path("./logs"))
-
-        # Temporary directory (auto-created, useful for debugging/testing)
-        factory = JsonlSliceFactory()
-    """
-
-    base_dir: Path | None = None
-    _resolved_dir: Path = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        if self.base_dir is not None:
-            object.__setattr__(self, "_resolved_dir", self.base_dir)
-        else:
-            # Create a temporary directory that persists for factory lifetime
-            temp_dir = tempfile.mkdtemp(prefix="wink_slices_")
-            object.__setattr__(self, "_resolved_dir", Path(temp_dir))
-
-    def create[T: SupportsDataclass](self, slice_type: type[T]) -> JsonlSlice[T]:
-        # Use qualified name for unique file paths
-        filename = f"{slice_type.__module__}.{slice_type.__qualname__}.jsonl"
-        # Sanitize module path for filesystem
-        safe_filename = filename.replace(":", "_")
-        return JsonlSlice(
-            path=self._resolved_dir / safe_filename,
-            item_type=slice_type,
-        )
-
-    @property
-    def directory(self) -> Path:
-        """Return the resolved directory path (useful for debugging)."""
-        return self._resolved_dir
-```
+- `base_dir: Path | None` - Directory for slice files (temp dir if None)
+- `directory` property - Returns resolved directory path for debugging
 
 ## Session Integration
 
@@ -851,41 +537,17 @@ existing = self._state.get(slice_type, EMPTY_SLICE)
 existing = self._get_or_create_slice(slice_type).all()
 ```
 
-## Usage Examples
+## Usage Patterns
 
-### Default Configuration (Backward Compatible)
+Full usage examples are available in the test suite at `tests/runtime/test_slices.py`. The following patterns are demonstrated:
 
-```python
-from weakincentives.runtime.session import Session
+- **Default configuration**: All slices use in-memory storage (backward compatible)
+- **Temporary logs for debugging**: JsonlSliceFactory with auto-generated temp directory
+- **Persistent logs with in-memory state**: STATE uses memory, LOG uses JSONL files
+- **All slices persistent**: Both STATE and LOG use JSONL files
+- **Custom factory per slice type**: Extend SliceFactoryConfig for per-type overrides
 
-# All slices use in-memory storage (current behavior)
-session = Session(dispatcher=dispatcher)
-```
-
-### Temporary Logs for Debugging
-
-```python
-from weakincentives.runtime.session import Session
-from weakincentives.runtime.session.slices import (
-    MemorySliceFactory,
-    JsonlSliceFactory,
-    SliceFactoryConfig,
-)
-
-# JsonlSliceFactory() with no arguments uses a temporary directory
-log_factory = JsonlSliceFactory()
-config = SliceFactoryConfig(
-    state_factory=MemorySliceFactory(),
-    log_factory=log_factory,
-)
-
-session = Session(dispatcher=dispatcher, slice_config=config)
-
-# Logs written to temp directory (e.g., /tmp/wink_slices_abc123/)
-print(f"Logs at: {log_factory.directory}")
-```
-
-### Persistent Logs with In-Memory State
+**Quick example:**
 
 ```python
 from pathlib import Path
@@ -902,43 +564,6 @@ config = SliceFactoryConfig(
 )
 
 session = Session(dispatcher=dispatcher, slice_config=config)
-
-# ToolInvoked, PromptRendered, PromptExecuted write to JSONL files
-# Plan, custom state slices stay in memory
-```
-
-### All Slices Persistent
-
-```python
-jsonl_factory = JsonlSliceFactory(base_dir=Path("./session_data"))
-
-config = SliceFactoryConfig(
-    state_factory=jsonl_factory,
-    log_factory=jsonl_factory,
-)
-
-session = Session(dispatcher=dispatcher, slice_config=config)
-```
-
-### Custom Factory per Slice Type
-
-For advanced use cases, extend `SliceFactoryConfig`:
-
-```python
-from dataclasses import dataclass, field
-
-@dataclass(slots=True, frozen=True)
-class CustomSliceFactoryConfig(SliceFactoryConfig):
-    """Factory config with per-type overrides."""
-
-    overrides: dict[type, SliceFactory] = field(default_factory=dict)
-
-    def factory_for_type(
-        self, slice_type: type, policy: SlicePolicy
-    ) -> SliceFactory:
-        if slice_type in self.overrides:
-            return self.overrides[slice_type]
-        return self.factory_for_policy(policy)
 ```
 
 ## Snapshot and Restore Behavior

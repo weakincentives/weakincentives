@@ -190,81 +190,94 @@ class MainLoop[UserRequestT, OutputT](ABC):
 
 ### Implementation Pattern
 
+MainLoop implementations integrate experiments in `prepare()`:
+
+| Integration Point | Pattern | Example |
+|-------------------|---------|---------|
+| **Prompt overrides** | Extract `overrides_tag` from experiment and pass to `Prompt()` constructor | `Prompt(template, overrides_tag=experiment.overrides_tag)` |
+| **Session tracking** | Seed experiment into session slice for observability | `session[Experiment].seed(experiment)` |
+| **Feature flags** | Check `experiment.flags` to conditionally modify behavior | `if experiment.get_flag("verbose"): ...` |
+
+The base `MainLoop._execute()` automatically passes the experiment from the request
+to `prepare()`, so implementations only need to handle it in their `prepare()` method.
+
+**Reference implementation**: See `CodeReviewLoop.prepare()` in
+`code_reviewer_example.py` for a complete example (lines 266-290).
+
+### Backward Compatibility
+
+The `experiment` parameter defaults to `None`, so existing implementations continue
+to work:
+
 ```python
-class CodeReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
-    def __init__(
-        self,
-        *,
-        adapter: ProviderAdapter[ReviewResult],
-        dispatcher: ControlDispatcher,
-        overrides_store: PromptOverridesStore | None = None,
-    ) -> None:
-        super().__init__(adapter=adapter, dispatcher=dispatcher)
-        self._overrides_store = overrides_store
-        self._template = PromptTemplate[ReviewResult](
-            ns="reviews",
-            key="code-review",
-            sections=[...],
-        )
+# Old signature still works
+def prepare(self, request: Request) -> tuple[Prompt, Session]:
+    ...
 
-    def prepare(
-        self,
-        request: ReviewRequest,
-        *,
-        experiment: Experiment | None = None,
-    ) -> tuple[Prompt[ReviewResult], Session]:
-        # Determine overrides tag from experiment or default
-        overrides_tag = (
-            experiment.overrides_tag if experiment else "latest"
-        )
-
-        # Create prompt with experiment's overrides tag
-        prompt = Prompt(
-            self._template,
-            overrides_store=self._overrides_store,
-            overrides_tag=overrides_tag,
-        ).bind(ReviewParams.from_request(request))
-
-        # Create session with experiment reference
-        session = Session(
-            dispatcher=self._dispatcher,
-            tags={"loop": "code-review"},
-        )
-
-        # Seed session with experiment for tracking
-        if experiment:
-            session[Experiment].seed(experiment)
-
-        # Check feature flags for behavior changes
-        if experiment and experiment.get_flag("verbose_logging"):
-            session[LogLevel].seed(LogLevel.DEBUG)
-
-        return prompt, session
+# New signature adds optional parameter
+def prepare(self, request: Request, *, experiment: Experiment | None = None) -> tuple[Prompt, Session]:
+    overrides_tag = experiment.overrides_tag if experiment else "latest"
+    ...
 ```
 
-### Execute Flow
+## Feature Flags
 
-The execute method passes experiment to prepare:
+### Design
+
+Feature flags allow runtime behavior changes without code modifications. Flags are
+arbitrary key-value pairs checked by agent implementations:
+
+| Flag Type | Example | Usage |
+|-----------|---------|-------|
+| **Boolean** | `{"verbose_logging": True}` | Enable/disable features |
+| **Numeric** | `{"max_retries": 5}` | Tune thresholds |
+| **String** | `{"model_override": "gpt-4o-mini"}` | Switch variants |
+| **Composite** | `{"tool_policy": {"allow": ["read"]}}` | Structured config |
+
+### Access Pattern
 
 ```python
-def _execute(
-    self,
-    request_event: MainLoopRequest[UserRequestT],
-    *,
-    heartbeat: Heartbeat | None = None,
-) -> tuple[PromptResponse[OutputT], Session]:
-    # Pass experiment to prepare
-    prompt, session = self.prepare(
-        request_event.request,
-        experiment=request_event.experiment,
-    )
+# Get flag with default
+max_retries = experiment.get_flag("max_retries", 3) if experiment else 3
 
-    # ... rest of execution unchanged
+# Check boolean flag
+if experiment and experiment.get_flag("enable_caching"):
+    # ... enable feature
+
+# Check flag existence (handles False/None values)
+if experiment and experiment.has_flag("model_override"):
+    model = experiment.get_flag("model_override")
+```
+
+**Important**: Flags are not validated. Invalid flag names are silently ignored
+unless implementations explicitly check them.
+
+## Session Tracking
+
+Experiments can be seeded into sessions for observability and evaluation:
+
+```python
+if experiment:
+    session[Experiment].seed(experiment)
+```
+
+Session-aware evaluators can then inspect which experiment a session ran under:
+
+```python
+def experiment_matches(expected_name: str) -> SessionEvaluator[Any, Any]:
+    """Assert the sample ran under the expected experiment."""
+    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
+        experiment = session[Experiment].latest()
+        passed = experiment is not None and experiment.name == expected_name
+        return Score(value=1.0 if passed else 0.0, passed=passed)
+    return evaluate
 ```
 
 ## EvalLoop Integration
 
 ### Configuration
+
+EvalLoop can specify a default experiment for requests that don't provide one:
 
 ```python
 @FrozenDataclass()
@@ -272,158 +285,29 @@ class EvalLoopConfig:
     """Configuration for EvalLoop execution defaults."""
 
     lease_extender: LeaseExtenderConfig | None = None
-    default_experiment: Experiment | None = None  # NEW: Fallback if not in request
+    default_experiment: Experiment | None = None  # Fallback if not in request
 ```
 
 ### Execution
 
-EvalLoop passes the experiment from request to MainLoop:
+EvalLoop passes the experiment from `EvalRequest` to MainLoop and includes the
+experiment name in `EvalResult` for downstream aggregation. See
+`EvalLoop._evaluate_sample()` implementation for details.
+
+## Dataset Submission Patterns
+
+### Single Experiment
+
+Submit all samples under one experiment:
 
 ```python
-def _evaluate_sample(
-    self,
-    request: EvalRequest[InputT, ExpectedT],
-) -> EvalResult:
-    sample = request.sample
-    experiment = request.experiment
-    start = time.monotonic()
-
-    # Execute with experiment context
-    response, session = self._loop.execute(
-        sample.input,
-        experiment=experiment,
-        heartbeat=self._heartbeat,
-    )
-    latency_ms = int((time.monotonic() - start) * 1000)
-
-    # ... scoring logic ...
-
-    return EvalResult(
-        sample_id=sample.id,
-        experiment_name=experiment.name,
-        score=score,
-        latency_ms=latency_ms,
-    )
+for sample in dataset:
+    mailbox.send(EvalRequest(sample=sample, experiment=experiment))
 ```
 
-## Feature Flags
+### Multi-Experiment (A/B Testing)
 
-### Common Flag Patterns
-
-```python
-# Boolean flags
-experiment = Experiment(
-    name="verbose-mode",
-    flags={"verbose_logging": True, "debug_tools": True},
-)
-
-# Numeric flags
-experiment = Experiment(
-    name="aggressive-retry",
-    flags={"max_retries": 5, "retry_delay_ms": 100},
-)
-
-# String flags
-experiment = Experiment(
-    name="alt-model",
-    flags={"model_override": "gpt-4o-mini"},
-)
-
-# Composite flags
-experiment = Experiment(
-    name="custom-behavior",
-    flags={
-        "tool_policy": {"allow": ["search", "read"], "deny": ["write"]},
-        "budget_multiplier": 1.5,
-    },
-)
-```
-
-### Flag Checking in Handlers
-
-```python
-def prepare(
-    self,
-    request: Request,
-    *,
-    experiment: Experiment | None = None,
-) -> tuple[Prompt[Output], Session]:
-    prompt = Prompt(self._template)
-
-    # Check flag with default
-    max_retries = (
-        experiment.get_flag("max_retries", 3)
-        if experiment else 3
-    )
-
-    # Check boolean flag
-    if experiment and experiment.get_flag("enable_caching"):
-        prompt = prompt.bind(resources={Cache: Cache()})
-
-    # Check flag existence (flag might be False)
-    if experiment and experiment.has_flag("model_override"):
-        model = experiment.get_flag("model_override")
-        # ... use alternate model
-
-    return prompt, Session(dispatcher=self._dispatcher)
-```
-
-## Session Tracking
-
-### Seeding Pattern
-
-```python
-def prepare(
-    self,
-    request: Request,
-    *,
-    experiment: Experiment | None = None,
-) -> tuple[Prompt[Output], Session]:
-    session = Session(dispatcher=self._dispatcher)
-
-    if experiment:
-        # Seed experiment into session for tracking
-        session[Experiment].seed(experiment)
-
-    return Prompt(self._template), session
-```
-
-### Session-Aware Evaluation
-
-Evaluators can access experiment from session:
-
-```python
-def experiment_matches(expected_name: str) -> SessionEvaluator[Any, Any]:
-    """Assert the sample ran under the expected experiment."""
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        experiment = session[Experiment].latest()
-        if experiment is None:
-            return Score(value=0.0, passed=False, reason="No experiment in session")
-        passed = experiment.name == expected_name
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"experiment={experiment.name}, expected={expected_name}",
-        )
-    return evaluate
-```
-
-## Dataset Submission
-
-### Per-Experiment Submission
-
-```python
-def submit_dataset_with_experiment(
-    dataset: Dataset[InputT, ExpectedT],
-    experiment: Experiment,
-    requests: Mailbox[EvalRequest[InputT, ExpectedT]],
-) -> None:
-    """Submit all samples with a specific experiment."""
-    for sample in dataset:
-        requests.send(EvalRequest(sample=sample, experiment=experiment))
-```
-
-### Multi-Experiment Submission
+Submit the same dataset under multiple experiments for comparison:
 
 ```python
 def submit_experiments(
@@ -431,9 +315,9 @@ def submit_experiments(
     experiments: Sequence[Experiment],
     requests: Mailbox[EvalRequest[InputT, ExpectedT]],
 ) -> int:
-    """Submit dataset under multiple experiments for comparison.
+    """Submit dataset under multiple experiments.
 
-    Returns total number of requests submitted.
+    Returns total number of requests submitted (len(dataset) * len(experiments)).
     """
     count = 0
     for experiment in experiments:
@@ -443,9 +327,13 @@ def submit_experiments(
     return count
 ```
 
+Helper utilities for dataset submission are provided in `weakincentives.evals`.
+
 ## Result Aggregation
 
 ### EvalReport Extensions
+
+`EvalReport` provides methods to group and compare results by experiment:
 
 ```python
 @dataclass(slots=True, frozen=True)
@@ -456,32 +344,15 @@ class EvalReport:
 
     def by_experiment(self) -> dict[str, tuple[EvalResult, ...]]:
         """Group results by experiment name."""
-        groups: dict[str, list[EvalResult]] = {}
-        for result in self.results:
-            groups.setdefault(result.experiment_name, []).append(result)
-        return {k: tuple(v) for k, v in groups.items()}
+        ...
 
     def pass_rate_by_experiment(self) -> dict[str, float]:
         """Compute pass rate for each experiment."""
-        rates = {}
-        for name, results in self.by_experiment().items():
-            successful = [r for r in results if r.error is None]
-            if successful:
-                rates[name] = sum(1 for r in successful if r.score.passed) / len(successful)
-            else:
-                rates[name] = 0.0
-        return rates
+        ...
 
     def mean_score_by_experiment(self) -> dict[str, float]:
         """Compute mean score for each experiment."""
-        scores = {}
-        for name, results in self.by_experiment().items():
-            successful = [r for r in results if r.error is None]
-            if successful:
-                scores[name] = sum(r.score.value for r in successful) / len(successful)
-            else:
-                scores[name] = 0.0
-        return scores
+        ...
 
     def compare_experiments(
         self,
@@ -489,17 +360,12 @@ class EvalReport:
         treatment: str,
     ) -> ExperimentComparison:
         """Compare two experiments statistically."""
-        by_exp = self.by_experiment()
-        baseline_results = by_exp.get(baseline, ())
-        treatment_results = by_exp.get(treatment, ())
-        return ExperimentComparison(
-            baseline_name=baseline,
-            treatment_name=treatment,
-            baseline_results=baseline_results,
-            treatment_results=treatment_results,
-        )
+        ...
+```
 
+### ExperimentComparison
 
+```python
 @dataclass(slots=True, frozen=True)
 class ExperimentComparison:
     """Statistical comparison between two experiments."""
@@ -511,127 +377,50 @@ class ExperimentComparison:
 
     @property
     def baseline_pass_rate(self) -> float:
-        successful = [r for r in self.baseline_results if r.error is None]
-        if not successful:
-            return 0.0
-        return sum(1 for r in successful if r.score.passed) / len(successful)
+        """Pass rate for baseline experiment."""
+        ...
 
     @property
     def treatment_pass_rate(self) -> float:
-        successful = [r for r in self.treatment_results if r.error is None]
-        if not successful:
-            return 0.0
-        return sum(1 for r in successful if r.score.passed) / len(successful)
+        """Pass rate for treatment experiment."""
+        ...
 
     @property
     def pass_rate_delta(self) -> float:
         """Treatment pass rate minus baseline pass rate."""
-        return self.treatment_pass_rate - self.baseline_pass_rate
+        ...
 
     @property
     def relative_improvement(self) -> float | None:
         """Percentage improvement over baseline. None if baseline is 0."""
-        if self.baseline_pass_rate == 0:
-            return None
-        return self.pass_rate_delta / self.baseline_pass_rate
+        ...
 ```
 
-## Usage Examples
+## Common Workflows
 
 ### Basic A/B Test
 
-```python
-from weakincentives.evals import (
-    Dataset, EvalLoop, Experiment, BASELINE,
-    submit_experiments, collect_results,
-)
-
-# Define experiments
-baseline = BASELINE
-treatment = Experiment(
-    name="concise-prompts",
-    overrides_tag="v2-concise",
-    flags={"max_response_tokens": 500},
-    owner="alice@example.com",
-    description="Test shorter, more direct prompt phrasing",
-)
-
-# Load dataset
-dataset = Dataset.load(Path("qa.jsonl"), str, str)
-
-# Submit under both experiments
-submit_experiments(dataset, [baseline, treatment], requests)
-
-# Run workers and collect results
-eval_loop.run(max_iterations=len(dataset) * 2)
-report = collect_results(results, expected_count=len(dataset) * 2)
-
-# Compare
-comparison = report.compare_experiments("baseline", "concise-prompts")
-print(f"Baseline pass rate: {comparison.baseline_pass_rate:.1%}")
-print(f"Treatment pass rate: {comparison.treatment_pass_rate:.1%}")
-print(f"Delta: {comparison.pass_rate_delta:+.1%}")
-```
+1. Define baseline and treatment experiments
+1. Submit dataset under both experiments using `submit_experiments()`
+1. Run EvalLoop to process all requests
+1. Collect results into `EvalReport`
+1. Use `report.compare_experiments()` to compute deltas
 
 ### Feature Flag Experiment
 
-```python
-# Test different tool policies
-conservative = Experiment(
-    name="conservative-tools",
-    flags={"tool_policy": "conservative", "max_tool_calls": 3},
-)
+1. Create experiments with different flag values
+1. In `MainLoop.prepare()`, check flags and modify behavior accordingly
+1. Submit and evaluate as above
 
-aggressive = Experiment(
-    name="aggressive-tools",
-    flags={"tool_policy": "aggressive", "max_tool_calls": 10},
-)
+### Prompt Optimization
 
-submit_experiments(dataset, [conservative, aggressive], requests)
-```
+1. Seed baseline overrides to `PromptOverridesStore`
+1. Create variant tags (copy/modify override files)
+1. Create experiments pointing to different tags
+1. Submit dataset under all experiment variants
+1. Compare results to identify best-performing prompts
 
-### Prompt Optimization Workflow
-
-```python
-# Seed baseline overrides
-store = LocalPromptOverridesStore()
-store.seed(prompt, tag="baseline")
-
-# Create variant
-store.copy_tag(
-    ns=prompt.descriptor.ns,
-    prompt_key=prompt.descriptor.key,
-    from_tag="baseline",
-    to_tag="variant-1",
-)
-
-# Edit variant via store.store() or direct JSON editing
-
-# Run comparison
-baseline_exp = Experiment(name="baseline", overrides_tag="baseline")
-variant_exp = Experiment(name="variant-1", overrides_tag="variant-1")
-
-submit_experiments(dataset, [baseline_exp, variant_exp], requests)
-```
-
-### Multi-Dimensional Experiment
-
-```python
-# Test combinations of prompt + flags
-experiments = [
-    Experiment(name="baseline", overrides_tag="latest"),
-    Experiment(name="v2-prompts", overrides_tag="v2"),
-    Experiment(name="v2-prompts+caching", overrides_tag="v2", flags={"enable_cache": True}),
-    Experiment(name="v2-prompts+verbose", overrides_tag="v2", flags={"verbose": True}),
-]
-
-submit_experiments(dataset, experiments, requests)
-report = collect_results(results, expected_count=len(dataset) * len(experiments))
-
-# Analyze all variants
-for name, rate in report.pass_rate_by_experiment().items():
-    print(f"{name}: {rate:.1%}")
-```
+See `specs/PROMPT_OPTIMIZATION.md` for detailed override workflow.
 
 ## Storage Layout
 
@@ -669,43 +458,8 @@ through requests. The prompt overrides they reference are persisted:
    is optional (for backward compatibility), EvalRequest requires an experiment
    to ensure all eval results are attributable.
 
-## Backward Compatibility
-
-MainLoopRequest.experiment is optional with None default. Existing code that
-doesn't use experiments continues to work:
-
-```python
-# Old code still works
-dispatcher.dispatch(MainLoopRequest(request=my_request))
-
-# New code can specify experiment
-dispatcher.dispatch(MainLoopRequest(
-    request=my_request,
-    experiment=Experiment(name="test", overrides_tag="v2"),
-))
-```
-
-MainLoop implementations should handle `experiment=None` gracefully:
-
-```python
-def prepare(
-    self,
-    request: Request,
-    *,
-    experiment: Experiment | None = None,
-) -> tuple[Prompt[Output], Session]:
-    # Safe handling of None experiment
-    overrides_tag = experiment.overrides_tag if experiment else "latest"
-    # ...
-```
-
-## Related Specifications
-
-- `specs/PROMPT_OPTIMIZATION.md` - Override system that experiments reference
-- `specs/EVALS.md` - Evaluation framework that experiments enable
-- `specs/MAIN_LOOP.md` - MainLoop integration for experiment execution
-- `specs/RUN_CONTEXT.md` - Execution metadata (orthogonal to experiments)
-- `specs/SESSIONS.md` - Session tracking for experiment observability
+1. **Experiment equality is value-based**: Two experiments with identical fields
+   are considered equal, even if constructed separately.
 
 ## Relationship to RunContext
 
@@ -728,3 +482,57 @@ request = MainLoopRequest(
 
 `Experiment` affects prompt rendering and agent behavior. `RunContext` provides
 correlation IDs for tracing and debugging. Neither depends on the other.
+
+## Related Specifications
+
+- **`specs/PROMPT_OPTIMIZATION.md`** - Override system that experiments reference
+  via `overrides_tag`. Covers override storage, seeding, and rendering.
+
+- **`specs/EVALS.md`** - Evaluation framework using experiments as the primary unit
+  of comparison. Covers datasets, evaluators, and EvalLoop.
+
+- **`specs/MAIN_LOOP.md`** - MainLoop orchestration and `prepare()` method where
+  experiments are applied to prompts and sessions.
+
+- **`specs/RUN_CONTEXT.md`** - Execution metadata (orthogonal to experiments).
+
+- **`specs/SESSIONS.md`** - Session tracking for experiment observability.
+  Experiments can be seeded into sessions as a slice.
+
+## Migration Notes
+
+Existing code without experiment support continues to work:
+
+```python
+# Old code - still works
+dispatcher.dispatch(MainLoopRequest(request=my_request))
+
+# New code - with experiment
+dispatcher.dispatch(MainLoopRequest(
+    request=my_request,
+    experiment=Experiment(name="test", overrides_tag="v2"),
+))
+```
+
+MainLoop implementations should add the `experiment` parameter to their `prepare()`
+method signature with a default of `None`, then handle it gracefully:
+
+```python
+def prepare(
+    self,
+    request: Request,
+    *,
+    experiment: Experiment | None = None,
+) -> tuple[Prompt[Output], Session]:
+    # Safe handling of None experiment
+    overrides_tag = experiment.overrides_tag if experiment else "latest"
+    prompt = Prompt(self._template, overrides_tag=overrides_tag)
+
+    session = Session(dispatcher=self._dispatcher)
+    if experiment:
+        session[Experiment].seed(experiment)
+
+    return prompt, session
+```
+
+This allows incremental adoption without breaking existing code.

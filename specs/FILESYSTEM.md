@@ -57,7 +57,7 @@ flowchart TB
 
 ## Protocol Definition
 
-### Filesystem Protocol
+### Result Types
 
 ```python
 from typing import Protocol, Literal
@@ -186,8 +186,11 @@ class WriteResult(Protocol):
 
     @property
     def mode(self) -> Literal["create", "overwrite", "append"]: ...
+```
 
+### Filesystem Protocol
 
+```python
 class Filesystem(Protocol):
     """Unified filesystem protocol for workspace operations."""
 
@@ -431,7 +434,9 @@ class ToolContext:
     filesystem: Filesystem | None = None  # New field
 ```
 
-### Handler Usage
+### Handler Usage Pattern
+
+Tool handlers access the filesystem through `context.filesystem`:
 
 ```python
 def read_file_handler(
@@ -487,7 +492,9 @@ class WorkspaceSection(Protocol):
         ...
 ```
 
-### Section Implementation
+### Section Implementation Pattern
+
+Workspace sections create and manage their filesystem instance:
 
 ```python
 class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
@@ -577,136 +584,45 @@ def _build_tool_context(
 
 ## Backend Implementations
 
-### InMemoryFilesystem
+The filesystem protocol is implemented by multiple backends, each optimized for
+different workspace strategies. All backends implement the same protocol,
+ensuring tools remain portable.
 
-Session-scoped in-memory storage. State is managed internally by the backend.
+| Backend | Description | Implementation |
+|---------|-------------|----------------|
+| **InMemoryFilesystem** | Session-scoped in-memory storage with structural sharing for snapshots. State is managed internally by the backend without session slice coupling. Supports hydration from host mounts at initialization. | `src/weakincentives/filesystem/inmemory.py` |
+| **HostFilesystem** | Sandboxed access to a host directory with path validation. Uses git for copy-on-write snapshots, storing the git repository outside the workspace root to prevent agent access. | `src/weakincentives/filesystem/host.py` |
+| **PodmanSandboxSection** | Containerized workspace tools using an overlay directory on the host that is bind-mounted into containers. Internally uses `HostFilesystem` rooted at the overlay path, with git-based snapshots. | `src/weakincentives/contrib/tools/podman.py` |
 
-```python
-@dataclass(slots=True)
-class InMemoryFilesystem:
-    """In-memory filesystem implementation."""
+### Design Characteristics
 
-    _files: dict[str, _InMemoryFile] = field(default_factory=dict)
-    _directories: set[str] = field(default_factory=set)
-    _read_only: bool = False
+All backends share these characteristics:
 
-    @property
-    def root(self) -> str:
-        return "/"
+- **Exception mapping**: Map internal errors to standard Python exceptions
+  (`FileNotFoundError`, `PermissionError`, etc.)
+- **Path normalization**: Normalize and validate paths relative to workspace root
+- **Limit enforcement**: Enforce backend-specific limits on file size, path depth,
+  and operation results
+- **Read-only mode**: Support read-only flag to prevent modifications
 
-    @property
-    def read_only(self) -> bool:
-        return self._read_only
+### PodmanSandboxSection Architecture
 
-    def read(self, path: str, *, offset: int = 0, limit: int | None = None, encoding: str = "utf-8") -> ReadResult:
-        normalized = self._normalize_path(path)
-        if normalized not in self._files:
-            raise FileNotFoundError(path)
-        file = self._files[normalized]
-        lines = file.content.splitlines(keepends=True)
-        # ... pagination logic
-        return _InMemoryReadResult(...)
+`PodmanSandboxSection` manages an overlay directory that serves as the workspace
+root. This directory is:
 
-    def write(self, path: str, content: str, *, mode: Literal["create", "overwrite", "append"] = "overwrite", create_parents: bool = True) -> WriteResult:
-        if self._read_only:
-            raise PermissionError("Filesystem is read-only")
-        # ... write logic
-        return _InMemoryWriteResult(...)
+1. Created on the host filesystem at initialization
+1. Hydrated with host mounts (files copied in eagerly)
+1. Bind-mounted into containers at `/workspace`
+1. Backed by a `HostFilesystem` instance for protocol compliance
 
-    # ... remaining methods
-```
+This design ensures:
 
-### PodmanSandboxSection
+- Filesystem operations work before containers are started
+- Changes persist across container restarts
+- Both host and container have consistent filesystem views
+- Snapshots capture the full workspace state
 
-`PodmanSandboxSection` provides containerized workspace tools. It manages an
-overlay directory on the host that is bind-mounted into the Podman container.
-Filesystem operations use a `HostFilesystem` instance rooted at the overlay
-path, with a mount point set to `/workspace` so that paths like
-`/workspace/file.txt` are correctly interpreted as relative paths.
-
-```python
-class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
-    """Prompt section providing containerized workspace tools."""
-
-    def __init__(
-        self,
-        *,
-        session: Session,
-        config: PodmanSandboxConfig | None = None,
-    ) -> None:
-        config = config or PodmanSandboxConfig()
-        self._session = session
-        self._image = config.image
-
-        # Create overlay directory for bind-mounting into container
-        self._overlay_path = self._overlay_root / str(self._session.session_id)
-        self._overlay_path.mkdir(parents=True, exist_ok=True)
-
-        # Hydrate host mounts into overlay eagerly
-        for mount in self._resolved_mounts:
-            self._copy_mount_into_overlay(overlay=self._overlay_path, mount=mount)
-
-        # Use HostFilesystem rooted at overlay
-        self._filesystem = HostFilesystem(
-            _root=str(self._overlay_path),
-        )
-        ...
-
-    @property
-    def filesystem(self) -> Filesystem:
-        """Return the filesystem managed by this section."""
-        return self._filesystem
-```
-
-The overlay directory is bind-mounted into the container at `/workspace`. When
-agents write files via filesystem tools, those changes appear both on the host
-(in the overlay) and inside the container. This design ensures filesystem
-operations work before a container is started and persist across container
-restarts.
-
-### HostFilesystem
-
-Provides sandboxed access to a host directory with path restrictions.
-
-```python
-@dataclass(slots=True)
-class HostFilesystem:
-    """Filesystem backed by a host directory with path restrictions."""
-
-    _root: str
-    _read_only: bool = False
-
-    @property
-    def root(self) -> str:
-        return self._root
-
-    @property
-    def read_only(self) -> bool:
-        return self._read_only
-
-    def _resolve_path(self, path: str) -> Path:
-        """Resolve a relative path to an absolute path within root.
-
-        Raises:
-            PermissionError: If resolved path escapes root directory.
-        """
-        root_path = Path(self._root).resolve()
-        if not path or path in {".", "/"}:
-            return root_path
-        candidate = (root_path / path).resolve()
-        try:
-            _ = candidate.relative_to(root_path)
-        except ValueError:
-            raise PermissionError(f"Path escapes root directory: {path}") from None
-        return candidate
-
-    def read(self, path: str, **kwargs) -> ReadResult:
-        resolved = self._resolve_path(path)
-        # ... standard file read
-        return _HostReadResult(...)
-
-    # ... remaining methods
-```
+Implementation: `src/weakincentives/contrib/tools/podman.py`
 
 ## Limits
 
@@ -755,100 +671,6 @@ def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
     return ToolResult(message="Success", value=Result(...))
 ```
 
-## Testing
-
-### Protocol Compliance
-
-Backend implementations must pass the `FilesystemProtocolTests` suite:
-
-```python
-class FilesystemProtocolTests:
-    """Abstract test suite for Filesystem implementations."""
-
-    @abstractmethod
-    def create_filesystem(self) -> Filesystem:
-        """Factory method for the filesystem under test."""
-        ...
-
-    def test_read_nonexistent_raises(self):
-        fs = self.create_filesystem()
-        with pytest.raises(FileNotFoundError):
-            fs.read("does_not_exist.txt")
-
-    def test_write_and_read_roundtrip(self):
-        fs = self.create_filesystem()
-        fs.write("test.txt", "hello world")
-        result = fs.read("test.txt")
-        assert result.content == "hello world"
-
-    # ... comprehensive test coverage
-```
-
-### Mock Filesystem
-
-For unit testing tools without a real backend:
-
-```python
-class MockFilesystem:
-    """Test double for filesystem operations."""
-
-    def __init__(self, files: dict[str, str] | None = None):
-        self._files = files or {}
-        self.read_calls: list[str] = []
-        self.write_calls: list[tuple[str, str]] = []
-
-    def read(self, path: str, **kwargs) -> ReadResult:
-        self.read_calls.append(path)
-        if path not in self._files:
-            raise FileNotFoundError(path)
-        return MockReadResult(content=self._files[path], path=path)
-
-    # ... other methods
-```
-
-## Usage Example
-
-```python
-from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
-from weakincentives.contrib.tools import VfsToolsSection, HostMount
-
-# Build prompt with workspace section
-# The section owns and manages its filesystem
-vfs_section = VfsToolsSection(
-    mounts=(
-        HostMount(host_path="src/", include_glob=("*.py",)),
-        HostMount(host_path="docs/", include_glob=("*.md",)),
-    ),
-    allowed_host_roots=("/path/to/project",),
-)
-
-template = PromptTemplate(
-    ns="agents/coder",
-    key="edit-files",
-    sections=[
-        MarkdownSection(
-            title="Instructions",
-            key="instructions",
-            template="Edit files as requested.",
-        ),
-        vfs_section,
-    ],
-)
-
-prompt = Prompt(template)
-
-# Access filesystem via prompt (delegates to workspace section)
-fs = prompt.filesystem()
-assert fs is vfs_section.filesystem  # Same instance
-
-# Pre-populate or inspect before evaluation
-fs.write("scratch/notes.txt", "Working notes...")
-assert fs.exists("src/main.py")  # Hydrated from host mount
-
-# During evaluation, tools receive the same filesystem via context
-# context.filesystem.read("src/main.py") works in tool handlers
-```
-
 ## Filesystem Snapshots
 
 Filesystem snapshots capture the state of a workspace at a point in time,
@@ -882,13 +704,9 @@ class FilesystemSnapshot:
     tag: str | None = None  # Optional human-readable label
 ```
 
-The `commit_ref` field stores a git commit hash for `HostFilesystem` (including
-when used by `PodmanSandboxSection`), or an internal version identifier for
-`InMemoryFilesystem`.
-
-The `git_dir` field stores the path to the external git repository for
-`HostFilesystem`, enabling cross-session restore when the filesystem instance
-is recreated.
+The `commit_ref` field stores a git commit hash for `HostFilesystem`, or an
+internal version identifier for `InMemoryFilesystem`. The `git_dir` field
+enables cross-session restore when filesystem instances are recreated.
 
 ### SnapshotableFilesystem Protocol
 
@@ -950,212 +768,40 @@ flowchart LR
 - **Well-understood**: Standard tooling for inspection and debugging
 - **Atomic commits**: Snapshot creation is atomic
 
-### InMemoryFilesystem Implementation
+### Implementation Strategies
 
-For in-memory filesystems, we use Python's structural sharing rather than git:
+#### InMemoryFilesystem
 
-```python
-@dataclass(slots=True)
-class InMemoryFilesystem:
-    """In-memory filesystem with snapshot support via structural sharing."""
+Uses Python's structural sharing via frozen dictionaries. Each snapshot freezes
+the current file dictionary using `types.MappingProxyType`, preserving string
+references. Only modified files allocate new memory. The `commit_ref` is an
+internal version number (e.g., `mem-1`, `mem-2`).
 
-    _files: dict[str, _InMemoryFile]
-    _directories: set[str]
-    _snapshots: dict[str, _InMemoryState]  # commit_ref -> frozen state
-    _version: int = 0
+Implementation: `src/weakincentives/filesystem/inmemory.py`
 
-    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
-        """Capture state by freezing current dict references."""
-        self._version += 1
-        commit_ref = f"mem-{self._version}"
+#### HostFilesystem
 
-        # Freeze current state (O(n) dict copy, but values are shared refs)
-        frozen_state = _InMemoryState(
-            files=types.MappingProxyType(dict(self._files)),
-            directories=frozenset(self._directories),
-        )
-        self._snapshots[commit_ref] = frozen_state
+Uses git to manage snapshots. The git repository is stored **outside** the
+workspace root in a temporary directory (e.g., `/tmp/wink-git-abc12345`) to
+prevent agents from accessing or modifying snapshot internals. Git commands use
+`--git-dir` and `--work-tree` flags to separate storage from workspace. The
+`snapshot()` method stages all changes and creates a commit. The `restore()`
+method uses `git reset --hard` followed by `git clean -xfd` for strict rollback.
 
-        return FilesystemSnapshot(
-            snapshot_id=uuid4(),
-            created_at=datetime.now(UTC),
-            commit_ref=commit_ref,
-            root_path="/",
-            tag=tag,
-        )
+Implementation: `src/weakincentives/filesystem/host.py`
 
-    def restore(self, snapshot: FilesystemSnapshot) -> None:
-        """Restore from frozen state."""
-        if snapshot.commit_ref not in self._snapshots:
-            raise SnapshotRestoreError(f"Unknown snapshot: {snapshot.commit_ref}")
+#### PodmanSandboxSection
 
-        frozen = self._snapshots[snapshot.commit_ref]
-        self._files = dict(frozen.files)  # Mutable copy, shared values
-        self._directories = set(frozen.directories)
-```
+Delegates to its internal `HostFilesystem` on the overlay directory. Since the
+overlay is bind-mounted into containers, git commits capture the workspace
+state as seen by both host and container. Changes made by containerized tools
+are captured when `snapshot()` is called.
 
-File content strings are shared between the active filesystem and snapshots.
-Only modified files allocate new memory.
-
-### HostFilesystem Implementation
-
-The host filesystem uses git to manage snapshots. The git repository is stored
-**outside** the workspace root to prevent agents from accessing or modifying
-the snapshot internals. By default, a temporary directory is created using
-Python's `tempfile.mkdtemp()` (e.g., `/tmp/wink-git-abc12345`).
-
-```python
-@dataclass(slots=True)
-class HostFilesystem:
-    """Host filesystem with git-based snapshots."""
-
-    _root: str
-    _read_only: bool = False
-    _git_initialized: bool = False
-    _git_dir: str | None = None  # External git directory path
-
-    def _run_git(
-        self,
-        args: Sequence[str],
-        *,
-        check: bool = True,
-        text: bool = False,
-    ) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
-        """Run git command with external git-dir and work-tree."""
-        cmd = [
-            "git",
-            f"--git-dir={self._git_dir}",
-            f"--work-tree={self._root}",
-            *args,
-        ]
-        return subprocess.run(cmd, cwd=self._root, check=check, capture_output=True, text=text)
-
-    def _ensure_git(self) -> None:
-        """Initialize git repository if needed."""
-        if self._git_initialized:
-            return
-
-        # Create external git directory if not specified
-        needs_init = False
-        if self._git_dir is None:
-            self._git_dir = tempfile.mkdtemp(prefix="wink-git-")
-            needs_init = True
-
-        git_path = Path(self._git_dir)
-        if not git_path.exists():
-            git_path.mkdir(parents=True, exist_ok=True)
-            needs_init = True
-
-        if needs_init:
-            # Initialize bare repository in external directory
-            subprocess.run(["git", "init", "--bare"], cwd=self._git_dir, check=True, capture_output=True)
-            # Configure for snapshot use
-            subprocess.run(["git", "--git-dir", self._git_dir, "config", "user.email", "wink@localhost"], check=True, capture_output=True)
-            subprocess.run(["git", "--git-dir", self._git_dir, "config", "user.name", "WINK Snapshots"], check=True, capture_output=True)
-        self._git_initialized = True
-
-    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
-        """Create snapshot as a git commit."""
-        self._ensure_git()
-
-        # Stage all changes
-        self._run_git(["add", "-A"])
-
-        # Commit (allow empty for idempotent snapshots)
-        message = tag or f"snapshot-{datetime.now(UTC).isoformat()}"
-        self._run_git(["commit", "-m", message, "--allow-empty", "--no-gpg-sign"], check=False)
-
-        # Get commit hash
-        result = self._run_git(["rev-parse", "HEAD"], text=True)
-        commit_ref = str(result.stdout).strip()
-
-        return FilesystemSnapshot(
-            snapshot_id=uuid4(),
-            created_at=datetime.now(UTC),
-            commit_ref=commit_ref,
-            root_path=self._root,
-            git_dir=self._git_dir,
-            tag=tag,
-        )
-
-    def restore(self, snapshot: FilesystemSnapshot) -> None:
-        """Restore to a git commit."""
-        # Use git_dir from snapshot if available
-        if snapshot.git_dir is not None and self._git_dir is None:
-            self._git_dir = snapshot.git_dir
-
-        self._ensure_git()
-
-        # Hard reset to the commit (restores tracked files)
-        result = self._run_git(["reset", "--hard", snapshot.commit_ref], check=False, text=True)
-        if result.returncode != 0:
-            raise SnapshotRestoreError(f"Failed to restore snapshot: {result.stderr}")
-
-        # Remove untracked files and directories for strict rollback
-        # -x removes ignored files too for full restore
-        self._run_git(["clean", "-xfd"], check=False)
-
-    def cleanup(self) -> None:
-        """Remove the external git directory.
-
-        Call this when the filesystem is no longer needed to clean up
-        the snapshot storage. Safe to call multiple times.
-        """
-        if self._git_dir is not None and Path(self._git_dir).exists():
-            shutil.rmtree(self._git_dir)
-            self._git_initialized = False
-
-    @property
-    def git_dir(self) -> str | None:
-        """External git directory path, if initialized."""
-        return self._git_dir
-```
-
-**Key design points:**
-
-- The git repository is a **bare repository** initialized with `git init --bare`
-- All git commands use `--git-dir` and `--work-tree` flags to separate storage
-  from workspace
-- The `cleanup()` method removes the external git directory when no longer needed
-- Snapshots include `git_dir` to enable cross-session restore
-- The `restore()` method can use `git_dir` from a snapshot if the filesystem
-  instance doesn't have one set
-
-### PodmanSandboxSection Snapshots
-
-`PodmanSandboxSection` uses the same git strategy via its internal
-`HostFilesystem` on the overlay directory. Since the overlay directory is
-bind-mounted into the container, git commits capture the workspace state as
-seen by both the host and container.
-
-```python
-class PodmanSandboxSection:
-    """Podman section with git-based overlay snapshots."""
-
-    def __init__(self, ...):
-        # Overlay directory is a HostFilesystem with git snapshots
-        self._overlay_path = self._create_overlay()
-        self._filesystem = HostFilesystem(
-            _root=str(self._overlay_path),
-        )
-
-    def snapshot(self, *, tag: str | None = None) -> FilesystemSnapshot:
-        """Snapshot the overlay directory via git."""
-        return self._filesystem.snapshot(tag=tag)
-
-    def restore(self, snapshot: FilesystemSnapshot) -> None:
-        """Restore overlay directory from git commit."""
-        self._filesystem.restore(snapshot)
-```
-
-**Granularity note**: Container modifications between tool invocations are
-captured when `snapshot()` is called. Changes made during a tool invocation
-are not tracked at finer granularity—this is intentional, as tool-invocation
-boundaries are the meaningful restore points.
+Implementation: `src/weakincentives/contrib/tools/podman.py`
 
 ### Session Integration
 
-`FilesystemSnapshot` is a frozen dataclass designed for session storage:
+`FilesystemSnapshot` is designed for session storage:
 
 ```python
 # Register reducer for filesystem snapshots
@@ -1234,14 +880,32 @@ assert fs.exists("tests.py")
 - **Tool-level granularity**: Sub-operation changes within a tool invocation
   are not tracked
 
-## Limitations
+## Testing
 
-- **No symlinks**: Symbolic links are not followed by default.
-- **No permissions model**: Beyond read-only flag, no Unix-style permissions.
-- **Single-threaded**: Backends are not thread-safe; use one per session.
-- **No streaming**: Large files are loaded entirely into memory.
-- **Path normalization**: Backends normalize paths; original casing may not be
-  preserved.
+### Protocol Compliance
+
+Backend implementations must pass the `FilesystemProtocolTests` suite, which
+validates all protocol methods including read/write operations, error handling,
+path normalization, and pagination behavior. The test suite uses abstract
+factory methods so concrete backends can be tested against the same contract.
+
+Test suite: `tests/test_filesystem/test_protocol_compliance.py`
+
+### Mock Filesystem
+
+For unit testing tools without a real backend, use `MockFilesystem` which
+records method calls and allows pre-configured responses. This test double
+enables fast, isolated tool handler tests.
+
+Implementation: `tests/helpers/mock_filesystem.py`
+
+### Integration Tests
+
+Integration tests verify host mounts, containerized execution, and snapshot
+restore across session boundaries. These tests use temporary directories and
+may spawn containers.
+
+Test location: `tests/test_filesystem/`
 
 ## Binary File Support
 
@@ -1254,3 +918,55 @@ The filesystem protocol supports both text and binary operations:
 
 For file copying, always prefer `read_bytes()` / `write_bytes()` as they
 preserve content exactly without encoding overhead or potential data loss.
+
+## Limitations
+
+- **No symlinks**: Symbolic links are not followed by default.
+- **No permissions model**: Beyond read-only flag, no Unix-style permissions.
+- **Single-threaded**: Backends are not thread-safe; use one per session.
+- **No streaming**: Large files are loaded entirely into memory.
+- **Path normalization**: Backends normalize paths; original casing may not be
+  preserved.
+
+## Usage Example
+
+```python
+from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
+from weakincentives.contrib.tools import VfsToolsSection, HostMount
+
+# Build prompt with workspace section
+# The section owns and manages its filesystem
+vfs_section = VfsToolsSection(
+    mounts=(
+        HostMount(host_path="src/", include_glob=("*.py",)),
+        HostMount(host_path="docs/", include_glob=("*.md",)),
+    ),
+    allowed_host_roots=("/path/to/project",),
+)
+
+template = PromptTemplate(
+    ns="agents/coder",
+    key="edit-files",
+    sections=[
+        MarkdownSection(
+            title="Instructions",
+            key="instructions",
+            template="Edit files as requested.",
+        ),
+        vfs_section,
+    ],
+)
+
+prompt = Prompt(template)
+
+# Access filesystem via prompt (delegates to workspace section)
+fs = prompt.filesystem()
+assert fs is vfs_section.filesystem  # Same instance
+
+# Pre-populate or inspect before evaluation
+fs.write("scratch/notes.txt", "Working notes...")
+assert fs.exists("src/main.py")  # Hydrated from host mount
+
+# During evaluation, tools receive the same filesystem via context
+# context.filesystem.read("src/main.py") works in tool handlers
+```

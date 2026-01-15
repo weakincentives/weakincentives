@@ -26,6 +26,9 @@ retry orchestration.
 **Not for:** Transient failures (use visibility backoff), rate limiting (use
 throttling), validation errors (reject immediately).
 
+**Related specifications**: See `specs/MAILBOX.md` for message visibility and
+redelivery mechanics. See `specs/MAIN_LOOP.md` for failure handling integration.
+
 ## Core Types
 
 ### DLQPolicy
