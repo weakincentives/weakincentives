@@ -151,13 +151,12 @@ Consult these specs before modifying related code:
 | `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging, skill mounting |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
-| `specs/DBC.md` | Editing DbC-decorated modules (required) |
-| `specs/DEBUGGING.md` | Log collector, session event slices, debug web UI, structured logging |
+| `specs/DBC.md` | DbC decorators, exhaustiveness checking, `assert_never` patterns |
+| `specs/DEBUGGING.md` | Log collector, session slices, debug web UI, snapshot explorer |
 | `specs/DLQ.md` | Dead letter queues, poison message handling, MainLoop/EvalLoop DLQ config |
 | `specs/EVALS.md` | Evaluation framework, datasets, evaluators, session evaluators |
 | `specs/EXAMPLES.md` | Code review agent reference implementation |
 | `specs/EXPERIMENTS.md` | Experiment configuration for A/B testing, prompt overrides tags, feature flags |
-| `specs/EXHAUSTIVENESS.md` | Union type totality, `assert_never` patterns, match statement coverage |
 | `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
 | `specs/FORMAL_VERIFICATION.md` | Embedding TLA+ in Python, `@formal_spec` decorator, TLC verification |
 | `specs/HEALTH.md` | Health endpoints, watchdog, stuck worker detection, process termination |
@@ -168,8 +167,7 @@ Consult these specs before modifying related code:
 | `specs/MAILBOX_RESOLVER.md` | Mailbox routing, reply-to patterns, resolver configuration |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
 | `specs/POLICIES_OVER_WORKFLOWS.md` | Philosophy of declarative policies vs rigid workflows for unattended agents |
-| `specs/PROMPTS.md` | Prompt system, composition, structured output, resource lifecycle |
-| `specs/PROMPT_OPTIMIZATION.md` | Override system or optimizer logic |
+| `specs/PROMPTS.md` | Prompt system, composition, overrides, structured output, resources |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |
 | `specs/RUN_CONTEXT.md` | Execution metadata, request correlation, distributed tracing |
 | `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
@@ -182,7 +180,6 @@ Consult these specs before modifying related code:
 | `specs/TOOL_POLICIES.md` | Sequential dependencies, read-before-write, keyed constraints |
 | `specs/FEEDBACK_PROVIDERS.md` | Ongoing progress feedback, stall/drift detection, context injection |
 | `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |
-| `specs/WINK_DEBUG.md` | Debug web UI, snapshot explorer, session inspection |
 | `specs/WINK_DOCS.md` | CLI docs command, bundled documentation access |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 

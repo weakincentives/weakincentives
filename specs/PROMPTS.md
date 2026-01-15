@@ -516,6 +516,150 @@ appropriate tool:
 [This section is summarized. To view full content, call `read_section` with key "context".]
 ```
 
+## Prompt Overrides
+
+The override system enables prompt iteration without source file changes. Every
+string literal affecting model behavior is overridable via hash-validated
+patches.
+
+### Override Targets
+
+| Target | Identifier | Hash Basis | Override Type |
+| ---------------------- | ----------------- | ------------------------ | --------------------------------- |
+| Section body | `(path,)` | Template text | `SectionOverride` |
+| Tool description | `tool_name` | Contract (desc + schema) | `ToolOverride` |
+| Tool param description | `tool_name.param` | Contract hash | `ToolOverride.param_descriptions` |
+| Tool example | `tool_name#index` | Example content hash | `ToolExampleOverride` |
+| Task example | `path#index` | Example content hash | `TaskExampleOverride` |
+
+**Overridable:** Section templates, section summaries, tool descriptions, tool
+parameter descriptions, tool examples (add/modify/remove), task examples
+(add/modify/remove).
+
+**Not overridable:** Tool names, tool parameter types/constraints, section
+structure (add/remove sections), tool availability.
+
+### Descriptor System
+
+```python
+@dataclass(slots=True, frozen=True)
+class SectionDescriptor:
+    path: tuple[str, ...]
+    content_hash: HexDigest  # SHA-256 of original body template
+    number: str
+
+@dataclass(slots=True, frozen=True)
+class ToolDescriptor:
+    path: tuple[str, ...]
+    name: str
+    contract_hash: HexDigest  # hash(description :: params_schema :: result_schema)
+    example_hashes: tuple[HexDigest, ...]
+
+@dataclass(slots=True, frozen=True)
+class PromptDescriptor:
+    ns: str
+    key: str
+    sections: list[SectionDescriptor]
+    tools: list[ToolDescriptor]
+    task_examples: list[TaskExampleDescriptor]
+```
+
+Hash mismatches indicate source drift; stale overrides are filtered on load.
+
+### Override Models
+
+```python
+@dataclass(slots=True, frozen=True)
+class SectionOverride:
+    path: tuple[str, ...]
+    expected_hash: HexDigest
+    body: str
+
+@dataclass(slots=True, frozen=True)
+class ToolExampleOverride:
+    index: int  # -1 for append
+    expected_hash: HexDigest | None  # None for new examples
+    action: Literal["modify", "remove", "append"]
+    description: str | None = None
+    input_json: str | None = None
+    output_json: str | None = None
+
+@dataclass(slots=True, frozen=True)
+class ToolOverride:
+    name: str
+    expected_contract_hash: HexDigest
+    description: str | None = None
+    param_descriptions: dict[str, str] = field(default_factory=dict)
+    example_overrides: tuple[ToolExampleOverride, ...] = ()
+
+@dataclass(slots=True, frozen=True)
+class PromptOverride:
+    ns: str
+    prompt_key: str
+    tag: str
+    sections: dict[tuple[str, ...], SectionOverride] = field(default_factory=dict)
+    tool_overrides: dict[str, ToolOverride] = field(default_factory=dict)
+    task_example_overrides: tuple[TaskExampleOverride, ...] = ()
+```
+
+### Store Protocol
+
+```python
+class PromptOverridesStore(Protocol):
+    def resolve(self, descriptor: PromptDescriptor, tag: str = "latest") -> PromptOverride | None:
+        """Load override, filtering stale entries (hash mismatch)."""
+
+    def upsert(self, descriptor: PromptDescriptor, override: PromptOverride) -> PromptOverride:
+        """Persist override; raises PromptOverridesError if hashes don't match."""
+
+    def seed(self, prompt: PromptLike, *, tag: str = "latest") -> PromptOverride:
+        """Bootstrap override file from current prompt state."""
+
+    def store(self, descriptor: PromptDescriptor, override: SectionOverride | ToolOverride | TaskExampleOverride, *, tag: str = "latest") -> PromptOverride:
+        """Store a single override, dispatching by type."""
+```
+
+Storage layout:
+
+```
+.weakincentives/prompts/overrides/{ns_segments...}/{prompt_key}/{tag}.json
+```
+
+### Override Usage
+
+```python
+from weakincentives.prompt.overrides import LocalPromptOverridesStore
+
+store = LocalPromptOverridesStore()
+
+# Apply overrides from a specific tag
+prompt = Prompt(template, overrides_store=store, overrides_tag="stable").bind(params)
+
+# Bootstrap and iterate
+override = store.seed(prompt, tag="latest")
+descriptor = PromptDescriptor.from_prompt(prompt)
+store.store(descriptor, SectionOverride(
+    path=("system",),
+    expected_hash=descriptor.sections[0].content_hash,
+    body="Updated system prompt content.",
+))
+```
+
+### Override Application Order
+
+1. Load `PromptOverride` from store for descriptor and tag
+1. Filter stale entries (hash mismatches)
+1. Apply section overrides to `render_override()` calls
+1. Apply tool description/param overrides during tool rendering
+1. Apply tool/task example overrides during example rendering
+
+### Validation Rules
+
+- Section paths must use canonical keys (not titles)
+- Hash mismatches are logged and skipped on read; raise on write
+- Disabled sections stay disabled even with overrides
+- Example indices must be valid for modify/remove actions
+
 ## Cloning
 
 Sections expose `clone(**kwargs)` for insertion into new prompts:

@@ -62,13 +62,11 @@ src/weakincentives/
         ├── LOGGING.md
         ├── MAILBOX.md
         ├── MAIN_LOOP.md
-        ├── PROMPT_OPTIMIZATION.md
         ├── PROMPTS.md
         ├── SESSIONS.md
         ├── TESTING.md
         ├── THREAD_SAFETY.md
         ├── TOOLS.md
-        ├── WINK_DEBUG.md
         ├── WINK_DOCS.md
         └── WORKSPACE.md
 ```
