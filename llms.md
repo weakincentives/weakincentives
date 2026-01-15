@@ -16,7 +16,7 @@ typed events. State is immutable and inspectable via snapshots.
 **Provider-agnostic.** Same agent definition works across OpenAI, LiteLLM, and
 Claude Agent SDK via adapter abstraction.
 
----
+______________________________________________________________________
 
 ## Accessing Documentation
 
@@ -37,12 +37,13 @@ wink docs --guide | llm "Summarize key concepts"
 ```
 
 **Available documentation:**
+
 - `--reference` - Dense API reference (this file)
 - `--guide` - Step-by-step usage guide with examples
 - `--specs` - Design specifications (adapters, sessions, tools, etc.)
 - `--changelog` - Version history and breaking changes
 
----
+______________________________________________________________________
 
 ## Module Map
 
@@ -71,7 +72,7 @@ weakincentives.skills             # Agent Skills support
 weakincentives.types              # JSON type aliases
 ```
 
----
+______________________________________________________________________
 
 ## Import Cheatsheet
 
@@ -124,7 +125,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 )
 ```
 
----
+______________________________________________________________________
 
 ## Minimal Working Example
 
@@ -164,7 +165,7 @@ response = adapter.evaluate(prompt, session=session)
 result: TaskResult = response.output
 ```
 
----
+______________________________________________________________________
 
 ## Core Patterns
 
@@ -284,6 +285,7 @@ section = MarkdownSection(
 ```
 
 **ToolResult constructors**:
+
 - `ToolResult.ok(value, message="...")` - Success with typed value
 - `ToolResult.error("message")` - Failure, value=None
 
@@ -333,6 +335,7 @@ child = Session(dispatcher=dispatcher, parent=session)
 ```
 
 **Built-in reducers** (from `weakincentives.runtime.session`):
+
 - `append_all` - Always append (default)
 - `replace_latest` - Keep only most recent
 - `upsert_by(key_fn)` - Replace by key
@@ -473,6 +476,7 @@ workspace.cleanup()
 ```
 
 **Isolation modes**:
+
 - `NetworkPolicy.no_network()` - API access only
 - `NetworkPolicy(allowed_domains=("docs.python.org",))` - Specific domains
 - `SandboxConfig(enabled=True)` - OS-level sandboxing
@@ -613,6 +617,7 @@ def handler(params, *, context: ToolContext) -> ToolResult:
 ```
 
 **Scopes**:
+
 - `Scope.SINGLETON` - Once per context (default)
 - `Scope.TOOL_CALL` - Fresh per tool invocation
 - `Scope.PROTOTYPE` - Fresh every resolution
@@ -640,8 +645,8 @@ copy = clone(my_dataclass)
 ```python
 from weakincentives.dbc import require, ensure, invariant, pure
 
-@require(lambda x: x > 0, "x must be positive")
-@ensure(lambda result: result >= 0, "result non-negative")
+@require(lambda x: x > 0)
+@ensure(lambda result: result >= 0)
 def compute(x: int) -> int:
     return x * 2
 
@@ -654,7 +659,7 @@ def hash_value(x: str) -> int:
     return hash(x)
 ```
 
----
+______________________________________________________________________
 
 ## Decision Trees
 
@@ -691,20 +696,20 @@ Runtime deps (HTTP, DB)?       → ResourceRegistry
 Filesystem state?              → Filesystem via resources
 ```
 
----
+______________________________________________________________________
 
 ## Common Pitfalls
 
 1. **Forgetting `slots=True, frozen=True`** on dataclasses - breaks serde
-2. **Missing `${}` in templates** - use `${field}` not `{field}`
-3. **Tool handler signature** - must be `(params, *, context: ToolContext)`
-4. **ToolResult return** - use `.ok()` or `.error()`, not raw constructor
-5. **Session mutations** - all go through `dispatch()`, use accessor methods
-6. **Resource access outside context** - use `with prompt.resources:` block
-7. **Duplicate tool names** - raises `PromptValidationError`
-8. **Hash mismatch in overrides** - stale overrides silently filtered
+1. **Missing `${}` in templates** - use `${field}` not `{field}`
+1. **Tool handler signature** - must be `(params, *, context: ToolContext)`
+1. **ToolResult return** - use `.ok()` or `.error()`, not raw constructor
+1. **Session mutations** - all go through `dispatch()`, use accessor methods
+1. **Resource access outside context** - use `with prompt.resources:` block
+1. **Duplicate tool names** - raises `PromptValidationError`
+1. **Hash mismatch in overrides** - stale overrides silently filtered
 
----
+______________________________________________________________________
 
 ## Event Types
 
@@ -720,7 +725,7 @@ from weakincentives.runtime import (
 session.dispatcher.subscribe(ToolInvoked, lambda e: print(e.name))
 ```
 
----
+______________________________________________________________________
 
 ## Error Hierarchy
 
@@ -738,7 +743,7 @@ WinkError                       # Base for all WINK errors
 └── TransactionError            # Transaction failed
 ```
 
----
+______________________________________________________________________
 
 ## Development Commands
 
@@ -756,7 +761,7 @@ make deptry      # Dependency analysis
 make pip-audit   # Vulnerability scan
 ```
 
----
+______________________________________________________________________
 
 ## File Layout
 
@@ -789,7 +794,7 @@ src/weakincentives/
 └── types/              # JSONValue, type aliases
 ```
 
----
+______________________________________________________________________
 
 ## Key Specs
 
@@ -808,13 +813,13 @@ Read before modifying related code:
 | `specs/MAIN_LOOP.md` | MainLoop orchestration |
 | `specs/MAILBOX.md` | Message queue abstraction |
 
----
+______________________________________________________________________
 
 ## Quick Reference
 
 ### PromptTemplate
 
-```python
+```text
 PromptTemplate[OutputT](
     ns: str,                    # Namespace (required)
     key: str,                   # Unique key (required)
@@ -826,7 +831,7 @@ PromptTemplate[OutputT](
 
 ### MarkdownSection
 
-```python
+```text
 MarkdownSection[ParamsT](
     title: str,                 # Heading text
     key: str,                   # Unique key
@@ -843,7 +848,7 @@ MarkdownSection[ParamsT](
 
 ### Tool
 
-```python
+```text
 Tool[ParamsT, ResultT](
     name: str,                  # ^[a-z0-9_-]{1,64}$
     description: str,           # 1-200 chars
@@ -858,7 +863,7 @@ def handler(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]
 
 ### ToolContext
 
-```python
+```text
 context.session           # Session
 context.deadline          # Deadline | None
 context.budget_tracker    # BudgetTracker | None
@@ -871,7 +876,7 @@ context.adapter           # ProviderAdapterProtocol
 
 ### Session
 
-```python
+```text
 session[T].latest()       # T | None
 session[T].all()          # tuple[T, ...]
 session[T].where(pred)    # tuple[T, ...]
@@ -887,7 +892,7 @@ session.restore(snap)     # Restore from snapshot
 
 ### Budget
 
-```python
+```text
 Budget(
     deadline: Deadline | None,
     max_total_tokens: int | None,
@@ -900,11 +905,12 @@ tracker.record_cumulative(eval_id, usage)
 tracker.check()  # Raises BudgetExceededError
 ```
 
----
+______________________________________________________________________
 
 ## Example: Complete Agent
 
 See `code_reviewer_example.py` for production patterns:
+
 - Structured output types
 - VFS/Planning tool sections
 - MainLoop implementation
@@ -912,14 +918,14 @@ See `code_reviewer_example.py` for production patterns:
 - Prompt overrides
 - Claude Agent SDK mode
 
----
+______________________________________________________________________
 
 ## Alpha Status
 
 All APIs may change without backward compatibility. No deprecation warnings;
 unused code is deleted completely.
 
----
+______________________________________________________________________
 
 ## License
 
