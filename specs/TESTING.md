@@ -11,7 +11,8 @@ must be tested.
 
 #### Strict Requirements
 
-1. **No `pragma: no branch`**: Simplify code to eliminate untestable branches
+1. **Minimize `pragma: no branch`**: Prefer simplifying code; use sparingly for
+   framework boundary code where branches depend on external state
 1. **Test all conditionals**: `if`, `elif`, `else`, `for`, `while`, ternary
 1. **Simplify over exclude**: Remove defensive code or prove branch reachable
 
@@ -64,9 +65,6 @@ test            → 100% line+branch coverage
 | Type errors | 0 | `make check` |
 | Lint errors | 0 | `make check` |
 | Security issues | 0 high/critical | `make check` |
-| Mutation (session) | 90% | CI only |
-| Mutation (serde) | 85% | CI only |
-| Mutation (dbc) | 85% | CI only |
 
 ## Test Organization
 

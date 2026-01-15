@@ -25,9 +25,21 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 | `permission_mode` | `PermissionMode` | `"bypassPermissions"` | Permission handling |
 | `cwd` | `str \| None` | `None` | Working directory |
 | `max_turns` | `int \| None` | `None` | Maximum conversation turns |
+| `max_budget_usd` | `float \| None` | `None` | Maximum budget in USD |
 | `suppress_stderr` | `bool` | `True` | Suppress stderr output |
 | `stop_on_structured_output` | `bool` | `True` | Stop after structured output |
+| `task_completion_checker` | `TaskCompletionChecker \| None` | `None` | Task completion verification |
 | `isolation` | `IsolationConfig \| None` | `None` | Isolation configuration |
+| `betas` | `tuple[str, ...] \| None` | `None` | Beta features to enable |
+
+### ClaudeAgentSDKModelConfig
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `model` | `str` | `"claude-sonnet-4-5-20250929"` | Claude model identifier |
+| `max_thinking_tokens` | `int \| None` | `None` | Extended thinking mode tokens |
+
+**Note:** `seed`, `stop`, `presence_penalty`, `frequency_penalty` not supported—raises `ValueError`.
 
 ### IsolationConfig
 

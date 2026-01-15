@@ -52,11 +52,14 @@ state.
 def bad_reducer(state, event):
     time.sleep(10)  # Blocks all dispatches
 
-# WRONG: Recursive dispatch
+# WRONG: Recursive dispatch (infinite loop risk)
 @reducer(on=MyEvent)
 def bad_reducer(state, event):
-    session.dispatch(OtherEvent())  # Deadlock
+    session.dispatch(OtherEvent())  # May cause stack overflow or infinite loop
 ```
+
+**Note:** Session uses `RLock` so recursive dispatch won't deadlock, but it
+can cause unbounded recursion or unexpected state interleaving.
 
 ## Recommendations
 

@@ -82,8 +82,9 @@ class AgentPlan:
     steps: tuple[str, ...] = ()
 
     @reducer(on=AddStep)
-    def add_step(self, event: AddStep) -> "AgentPlan":
-        return replace(self, steps=(*self.steps, event.step))
+    def add_step(self, event: AddStep) -> Replace["AgentPlan"]:
+        new_plan = replace(self, steps=(*self.steps, event.step))
+        return Replace((new_plan,))
 ```
 
 Install with `session.install(AgentPlan)` to auto-register all `@reducer` methods.

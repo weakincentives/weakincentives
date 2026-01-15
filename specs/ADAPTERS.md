@@ -145,15 +145,13 @@ Failed or aborted tools leave no trace in mutable state.
 
 ### Exception Hierarchy
 
-At `adapters/core.py`:
-
-| Exception | Description |
-| --- | --- |
-| `PromptEvaluationError` | Base for evaluation failures |
-| `ThrottleError` | Retryable provider errors |
-| `PromptRenderError` | Template/section failures |
-| `OutputParseError` | Structured output validation |
-| `DeadlineExceededError` | Time budget exhausted |
+| Exception | Location | Description |
+| --- | --- | --- |
+| `PromptEvaluationError` | `adapters/core.py` | Base for evaluation failures |
+| `ThrottleError` | `adapters/throttle.py` | Retryable provider errors |
+| `PromptRenderError` | `prompt/errors.py` | Template/section failures |
+| `OutputParseError` | `prompt/structured_output.py` | Structured output validation |
+| `DeadlineExceededError` | `errors.py` | Time budget exhausted |
 
 ### Error Propagation
 

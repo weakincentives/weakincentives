@@ -15,12 +15,11 @@ correctness.
 
 | ID | Name | Description |
 |----|------|-------------|
-| INV-1 | MessageExclusivity | Message in exactly one state (pending/invisible/deleted) |
-| INV-2 | ReceiptHandleFreshness | Each delivery generates unique handle |
-| INV-3 | StaleHandleRejection | Operations with old handles fail |
-| INV-4 | DeliveryCountMonotonicity | Delivery count never decreases |
+| INV-1 | MessageStateExclusive | Message in exactly one state (pending/invisible/deleted) |
+| INV-2-3 | HandleValidity | Valid handle required; stale handles rejected |
+| INV-4 | DeliveryCountMonotonic | Delivery count never decreases |
+| INV-4b | DeliveryCountPersistence | Counts persist across redelivery |
 | INV-5 | NoMessageLoss | Every message eventually acked or queued |
-| INV-6 | VisibilityTimeoutCorrectness | Expired messages return to pending |
 | INV-7 | HandleUniqueness | Each delivery gets unique handle |
 | INV-8 | PendingNoDuplicates | No duplicate IDs in pending queue |
 | INV-9 | DataIntegrity | Every queued message has associated data |
@@ -44,8 +43,11 @@ correctness.
 | `Send` | Add message to pending |
 | `Receive` | Move pending to invisible with new handle |
 | `Acknowledge` | Remove from invisible, mark deleted |
+| `AcknowledgeFail` | Ack fails with stale handle |
 | `Nack` | Return to pending |
+| `NackFail` | Nack fails with stale handle |
 | `Extend` | Extend visibility timeout |
+| `ExtendFail` | Extend fails with stale/invalid handle |
 | `ReapExpired` | Move expired messages to pending |
 | `TimeAdvance` | Model time passage |
 
@@ -61,8 +63,9 @@ Complements TLC by testing actual Python implementation:
 ## Running Verification
 
 ```bash
-make verify-mailbox      # TLC model check
-make test-redis-properties  # Property tests
+make verify-mailbox      # TLC model check + property tests
+make verify-formal       # TLC model check only
+make property-tests      # Property tests only
 ```
 
 ## Redis Guarantees Assumed

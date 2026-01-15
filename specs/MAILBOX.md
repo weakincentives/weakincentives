@@ -93,8 +93,9 @@ for msg in requests.receive():
 `reply_to` serializes to mailbox name. `MailboxResolver` reconstructs instance:
 
 ```python
-resolver = CompositeResolver(registry={}, factory=RedisMailboxFactory(client))
-requests = RedisMailbox(name="requests", reply_resolver=resolver)
+factory = RedisMailboxFactory(client=redis_client)
+resolver = CompositeResolver(registry={}, factory=factory)
+requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
 
 for msg in requests.receive():
     msg.reply(process(msg.body))  # Resolver reconstructs mailbox from name
@@ -132,15 +133,14 @@ def create(self, identifier: str) -> Mailbox[R, None]:
 ### Backend Factories
 
 ```python
-class RedisMailboxFactory[T]:
-    client: RedisClient
-    prefix: str = "wink:queue:"
+class RedisMailboxFactory[R]:
+    client: Redis[bytes] | RedisCluster[bytes]
+    body_type: type[R] | None = None
+    default_ttl: int = 259200  # 3 days
 
-    def create(self, identifier: str) -> RedisMailbox[T]:
-        return RedisMailbox(name=identifier, client=self.client)
+    def create(self, identifier: str) -> Mailbox[R, None]:
+        return RedisMailbox(name=identifier, client=self.client, ...)
 ```
-
-URI-based factory for scheme selection: `memory://`, `redis://`, `sqs://`
 
 ### Dynamic Reply Queues
 
@@ -155,11 +155,12 @@ requests.send(Request(...), reply_to=client_responses)
 ### Multi-Tenant
 
 ```python
-def tenant_resolver(tenant_id: str) -> CompositeResolver:
+def tenant_resolver(tenant_id: str, client: Redis) -> CompositeResolver:
     return CompositeResolver(
         registry={},
-        factory=RedisMailboxFactory(prefix=f"tenant-{tenant_id}:"),
+        factory=RedisMailboxFactory(client=client),
     )
+# Use queue naming convention for tenant isolation: f"tenant-{tenant_id}:requests"
 ```
 
 ### Comparison with ResourceResolver

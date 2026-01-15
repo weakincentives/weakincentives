@@ -8,7 +8,7 @@ Core at `runtime/main_loop.py`.
 
 ## Principles
 
-- **Event-driven**: Requests via dispatcher; results return same way
+- **Mailbox-driven**: Requests via mailbox; results return via `msg.reply()`
 - **Factory-based**: Subclasses own prompt and session construction
 - **Prompt-owned resources**: Lifecycle managed by prompt context
 - **Visibility-transparent**: Expansion exceptions retry automatically
@@ -95,15 +95,18 @@ Use `visibility=SectionVisibility.SUMMARY` on sections with `summary` text.
 
 ## Usage
 
-### Bus-Driven
+### Mailbox-Driven
 
 ```python
-loop = MyMainLoop(adapter=adapter, dispatcher=dispatcher)
-dispatcher.dispatch(MainLoopRequest(request=MyRequest(...)))
-```
+requests = InMemoryMailbox[MainLoopRequest[MyRequest], MainLoopResult](name="requests")
+loop = MyMainLoop(adapter=adapter, requests=requests)
 
-**Note:** `InProcessDispatcher` dispatches by `type(event)`. Filter by request
-type in handler or use separate dispatchers for multiple loop types.
+# Client sends request
+requests.send(MainLoopRequest(request=MyRequest(...)), reply_to=responses)
+
+# Start processing (blocking)
+loop.run()
+```
 
 ### Direct
 
