@@ -1,176 +1,72 @@
-# TESTING.md
+# Testing Specification
 
-Testing standards for weakincentives.
+Testing standards and coverage requirements.
+
+**Source:** `pyproject.toml`, `tests/`
 
 ## Coverage Requirements
 
-### Line + Branch Coverage
-
-**100% line and branch coverage is strictly enforced.** Every conditional branch
-must be tested - no exceptions.
+**100% line and branch coverage strictly enforced.**
 
 ```toml
-# pyproject.toml
 [tool.coverage.run]
 branch = true
-source = ["src/weakincentives"]
-
-[tool.coverage.report]
 fail_under = 100
-exclude_lines = [
-    "pragma: no cover",
-    "if TYPE_CHECKING:",
-    "@overload",
-    "@abstractmethod",
-    "^\\s*\\.\\.\\.\\s*$",
-    ":\\s*\\.\\.\\.\\s*$",
-]
 ```
 
-#### Strict Requirements
+### Rules
 
-1. **No `pragma: no branch`**: Do not use branch exclusion pragmas. If a branch
-   cannot be tested, simplify the code to eliminate the branch.
+- No `pragma: no branch` - simplify code instead
+- Test all conditionals (`if`, `elif`, `else`, ternary)
+- Trust type annotations over defensive branches
 
-1. **Test all conditionals**: Every `if`, `elif`, `else`, `for`, `while`, and
-   ternary expression must have both branches exercised by tests.
+### Excluded Patterns
 
-1. **Simplify over exclude**: If a branch is defensive code that "should never
-   happen", either:
-
-   - Remove it (trust type annotations and upstream validation)
-   - Add a test that proves the branch can be reached
-   - Simplify the code to eliminate the branch
-
-#### Excluded Patterns
-
-The following patterns are automatically excluded from coverage:
-
-- `pragma: no cover` - For genuine impossibilities (e.g., `assert False`)
+- `pragma: no cover` - Genuine impossibilities
 - `if TYPE_CHECKING:` - Type-only imports
-- `@overload` - Typing overloads
-- `@abstractmethod` - Abstract method declarations
-- `...` - Protocol/abstract method stubs (both inline and standalone)
+- `@overload`, `@abstractmethod`, `...` stubs
 
 ## Regression Test Policy
 
-Every bug fix requires a regression test:
-
-1. Test MUST fail before the fix, pass after
-1. Test MUST be named `test_regression_<issue>_<description>`
-1. Test MUST include docstring linking to the issue
+Every bug fix requires a test:
 
 ```python
-# tests/regression/test_issue_42.py
 def test_regression_42_session_deadlock():
     """
     Regression for #42: Session deadlocks on concurrent broadcast.
     https://github.com/org/weakincentives/issues/42
     """
-    # Reproduce exact conditions from bug report
-    ...
 ```
 
-## Snapshot Integrity Tests
+- Test MUST fail before fix, pass after
+- Name: `test_regression_<issue>_<description>`
+- Docstring links to issue
 
-Snapshots are critical for rollback correctness. Test:
-
-1. **Round-trip integrity**: `snapshot() → rollback() → snapshot()` produces identical state
-1. **Corruption detection**: Tampered snapshots raise `SnapshotCorruptionError`
-1. **Partial rollback**: Interrupted rollback leaves session in recoverable state
-
-```python
-def test_snapshot_roundtrip_integrity(session_factory):
-    """Snapshot and rollback preserve exact state."""
-    session, _ = session_factory()
-    session.dispatch(SomeEvent(...))
-
-    snapshot1 = session.snapshot()
-    session.dispatch(AnotherEvent(...))
-    session.restore(snapshot1)
-    snapshot2 = session.snapshot()
-
-    assert snapshot1 == snapshot2
-```
-
-## CI Pipeline Integration
-
-### Makefile Targets
-
-```makefile
-# Fast checks (pre-commit, local dev)
-check: format-check lint typecheck bandit vulture deptry pip-audit markdown-check test
-
-```
+## CI Pipeline
 
 ### `make check` Sequence
 
-Fast gates run in `make check`. Failures block commits via pre-commit hook:
-
 ```
-format-check    → Code style (ruff format --check)
-lint            → Static analysis (ruff --preview)
-typecheck       → Type correctness (pyright strict + ty)
-bandit          → Security scanning
-vulture         → Dead code detection
-deptry          → Dependency hygiene
-pip-audit       → Vulnerability scanning
-markdown-check  → Doc formatting
-test            → 100% line+branch coverage
+format-check → lint → typecheck → bandit → vulture → deptry → pip-audit → markdown-check → test
 ```
 
-### CI-Only Gates
+### Gate Thresholds
 
-`mutation-check` runs separately in CI (too slow for local dev):
-
-```yaml
-# .github/workflows/ci.yml
-jobs:
-  check:
-    steps:
-      - run: make check
-  mutation:
-    steps:
-      - run: make mutation-check
-```
-
-### Gate Enforcement
-
-| Gate | Threshold | Where |
-| ------------------ | --------------- | ------------ |
-| Line coverage | 100% | `make check` |
-| Branch coverage | 100% | `make check` |
-| Type errors | 0 | `make check` |
-| Lint errors | 0 | `make check` |
-| Security issues | 0 high/critical | `make check` |
-| Mutation (session) | 90% | CI only |
-| Mutation (serde) | 85% | CI only |
-| Mutation (dbc) | 85% | CI only |
+| Gate | Threshold |
+|------|-----------|
+| Line/branch coverage | 100% |
+| Type errors | 0 |
+| Lint errors | 0 |
+| Security issues | 0 high/critical |
+| Mutation (CI only) | 85-90% |
 
 ## Test Organization
 
 ```
 tests/
-├── unit/           # Fast isolated tests (existing)
-├── property/       # Hypothesis tests (existing, expand)
-├── regression/     # Bug reproduction tests (new)
+├── unit/           # Fast isolated tests
+├── property/       # Hypothesis tests
+├── regression/     # Bug reproduction
 ├── helpers/        # Shared fixtures
-└── plugins/        # pytest plugins
+└── plugins/        # pytest plugins (dbc, threadstress)
 ```
-
-No separate fault injection, fuzz, or stress directories needed - these concerns fold into existing structure:
-
-- **Fuzz testing**: Already covered by Hypothesis in `tests/property/`
-- **Stress testing**: Already covered by threadstress plugin
-- **Fault injection**: Add specific fixtures to `tests/helpers/` as needed
-
-## What This Spec Does NOT Include
-
-Explicitly excluded as over-engineering for this library:
-
-- OOM simulation (Python's GC handles memory; not a database)
-- I/O error injection (adapters handle their own transport errors)
-- Crash recovery testing beyond snapshot integrity
-- Separate fuzz corpus management (Hypothesis handles this)
-- Release checklists (CI gates are sufficient)
-- Test-to-code ratio tracking (100% coverage + mutation is enough)
