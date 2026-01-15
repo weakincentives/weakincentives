@@ -19,6 +19,7 @@ from pathlib import Path
 import pytest
 
 import weakincentives.contrib.tools.podman as podman_module
+import weakincentives.contrib.tools.podman_lifecycle as podman_lifecycle_module
 import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.podman_test_helpers import (
     prepare_resolved_mount,
@@ -29,7 +30,7 @@ from weakincentives.contrib.tools import HostMount
 
 def test_host_mount_resolver_rejects_empty_path(tmp_path: Path) -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._resolve_single_host_mount(
+        podman_lifecycle_module.resolve_single_host_mount(
             HostMount(host_path=""),
             (tmp_path,),
         )
@@ -37,18 +38,18 @@ def test_host_mount_resolver_rejects_empty_path(tmp_path: Path) -> None:
 
 def test_resolve_host_path_requires_allowed_roots() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._resolve_host_path("docs", ())
+        podman_lifecycle_module.resolve_host_path("docs", ())
 
 
 def test_resolve_host_path_rejects_outside_root(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     with pytest.raises(ToolValidationError):
-        podman_module._resolve_host_path("../outside", (root,))
+        podman_lifecycle_module.resolve_host_path("../outside", (root,))
 
 
 def test_normalize_mount_globs_discards_empty_entries() -> None:
-    result = podman_module._normalize_mount_globs(
+    result = podman_lifecycle_module.normalize_mount_globs(
         (" *.py ", " ", "*.md"),
         "include_glob",
     )
@@ -56,7 +57,7 @@ def test_normalize_mount_globs_discards_empty_entries() -> None:
 
 
 def test_container_path_for_root() -> None:
-    assert podman_module._container_path_for(vfs_module.VfsPath(())) == "/workspace"
+    assert podman_lifecycle_module.container_path_for(vfs_module.VfsPath(())) == "/workspace"
 
 
 def test_assert_within_overlay_raises_for_outside(tmp_path: Path) -> None:
@@ -65,7 +66,7 @@ def test_assert_within_overlay_raises_for_outside(tmp_path: Path) -> None:
     outside = root.parent / "other"
     outside.mkdir()
     with pytest.raises(ToolValidationError):
-        podman_module._assert_within_overlay(root, outside)
+        podman_lifecycle_module.assert_within_overlay(root, outside)
 
 
 def test_assert_within_overlay_handles_missing_paths(
@@ -82,7 +83,7 @@ def test_assert_within_overlay_handles_missing_paths(
         return original(self, strict=strict)
 
     monkeypatch.setattr(Path, "resolve", _fake_resolve)
-    podman_module._assert_within_overlay(root, missing)
+    podman_lifecycle_module.assert_within_overlay(root, missing)
 
 
 def test_copy_mount_respects_include_glob(tmp_path: Path) -> None:
@@ -154,7 +155,7 @@ def test_resolve_host_path_finds_file_in_allowed_root() -> None:
         # Should find the file in the allowed root (branch 411: candidate.exists())
         # Use resolved path to avoid symlink resolution mismatches
         allowed_roots = (resolved_tmpdir,)
-        resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
+        resolved = podman_lifecycle_module.resolve_host_path("test.txt", allowed_roots)
         assert resolved == test_file
 
 
@@ -174,5 +175,5 @@ def test_resolve_host_path_continues_when_file_not_in_first_root() -> None:
 
             # First root doesn't have file, should continue to second root
             allowed_roots = (resolved_first, resolved_second)
-            resolved = podman_module._resolve_host_path("test.txt", allowed_roots)
+            resolved = podman_lifecycle_module.resolve_host_path("test.txt", allowed_roots)
             assert resolved == test_file

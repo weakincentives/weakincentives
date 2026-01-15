@@ -10,26 +10,39 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Podman-backed tool surface exposing the ``shell_execute`` command."""
+"""Podman-backed tool surface exposing the ``shell_execute`` command.
+
+This module provides the ``PodmanSandboxSection`` which manages an isolated
+Linux container for shell commands and file operations. It delegates to
+specialized modules for connection handling, shell execution, lifecycle
+management, evaluation, and tool definitions.
+
+Example usage::
+
+    from weakincentives.contrib.tools import PodmanSandboxSection, PodmanSandboxConfig
+    from weakincentives.runtime import Session, InProcessDispatcher
+
+    dispatcher = InProcessDispatcher()
+    session = Session(dispatcher=dispatcher)
+    config = PodmanSandboxConfig(mounts=(HostMount(host_path="src"),))
+    section = PodmanSandboxSection(session=session, config=config)
+"""
 
 from __future__ import annotations
 
-import fnmatch
-import math
 import os
 import posixpath
 import shutil
 import subprocess  # nosec: B404
 import tempfile
 import threading
-import time
 import weakref
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import suppress
-from dataclasses import dataclass, field, replace
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Final, Protocol, cast, override, runtime_checkable
+from typing import Final, Protocol, cast, override, runtime_checkable
 
 from weakincentives.filesystem import Filesystem, HostFilesystem
 
@@ -37,80 +50,44 @@ from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
 from ...prompt.markdown import MarkdownSection
 from ...prompt.policy import ReadBeforeWritePolicy
-from ...prompt.tool import Tool, ToolContext, ToolExample, ToolResult
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.session import Session, replace_latest
 from . import vfs as vfs_module
-from ._context import ensure_context_uses_session
-from .asteval import (
-    EvalParams,
-    EvalResult,
-)
 from .podman_connection import (
     resolve_connection_settings,
     resolve_podman_connection,
 )
 from .podman_eval import PodmanEvalSuite
+from .podman_lifecycle import (
+    ClientFactory as _ClientFactory,
+    PodmanClient as _PodmanClient,
+    PodmanWorkspace,
+    ResolvedHostMount as _ResolvedHostMount,
+    WorkspaceHandle as _WorkspaceHandle,
+    build_client_factory as _build_client_factory,
+    container_path_for as _container_path_for,
+    copy_mount_into_overlay,
+    default_cache_root as _default_cache_root,
+    host_path_for as _host_path_for,
+    resolve_podman_host_mounts as _resolve_podman_host_mounts,
+)
+from .podman_shell import (
+    PodmanShellParams,
+    PodmanShellResult,
+    PodmanShellSuite as _PodmanShellSuite,
+    ShellExecConfig as _ExecConfig,
+)
+from .podman_tools import build_podman_tools
 from .vfs import (
-    DeleteEntry,
-    EditFileParams,
-    FileInfo,
     FilesystemToolHandlers,
-    GlobMatch,
-    GlobParams,
-    GrepMatch,
-    GrepParams,
     HostMount,
-    ListDirectoryParams,
-    ReadFileParams,
-    ReadFileResult,
-    RemoveParams,
     VfsPath,
-    WriteFile,
-    WriteFileParams,
 )
 
 _LOGGER: StructuredLogger = get_logger(__name__, context={"component": "tools.podman"})
 
 _DEFAULT_IMAGE: Final[str] = "python:3.12-bookworm"
 _DEFAULT_WORKDIR: Final[str] = "/workspace"
-_DEFAULT_USER: Final[str] = "65534:65534"
-_TMPFS_SIZE: Final[int] = 268_435_456
-_TMPFS_TARGET: Final[str] = tempfile.gettempdir()
-_MAX_STDIO_CHARS: Final[int] = 32 * 1024
-_MAX_COMMAND_LENGTH: Final[int] = 4_096
-_MAX_ENV_LENGTH: Final[int] = 512
-_MAX_ENV_VARS: Final[int] = 64
-_MAX_TIMEOUT: Final[float] = 120.0
-_MIN_TIMEOUT: Final[float] = 1.0
-_DEFAULT_TIMEOUT: Final[float] = 30.0
-_MAX_PATH_DEPTH: Final[int] = 16
-_MAX_PATH_SEGMENT: Final[int] = 80
-_ASCII: Final[str] = "ascii"
-_CAPTURE_DISABLED: Final[str] = "capture disabled"
-_CACHE_ENV: Final[str] = "WEAKINCENTIVES_CACHE"
-_CPU_PERIOD: Final[int] = 100_000
-_CPU_QUOTA: Final[int] = 100_000
-_MEMORY_LIMIT: Final[str] = "1g"
-_MISSING_DEPENDENCY_MESSAGE: Final[str] = (
-    "Install weakincentives[podman] to enable the Podman tool suite."
-)
-_MAX_MATCH_RESULTS: Final[int] = 2_000
-_REMOVE_PATH_SCRIPT: Final[str] = """
-import shutil
-import sys
-from pathlib import Path
-
-target = Path(sys.argv[1])
-if not target.exists():
-    raise SystemExit(3)
-if target.is_symlink():
-    target.unlink()
-elif target.is_dir():
-    shutil.rmtree(target)
-else:
-    target.unlink()
-"""
 _PODMAN_TEMPLATE: Final[str] = """\
 You have access to an isolated Linux container powered by Podman. The `ls`,
 `read_file`, `write_file`, `glob`, `grep`, and `rm` tools mirror the virtual
@@ -119,19 +96,6 @@ filesystem interface but operate on `/workspace` inside the container. The
 and edit files directly from the workspace. `shell_execute` runs short commands
 (≤120 seconds) in the shared environment. No network access or privileged
 operations are available. Do not assume files outside `/workspace` exist."""
-
-
-@runtime_checkable
-class _PodmanClient(Protocol):
-    """Subset of :class:`podman.PodmanClient` used by the section."""
-
-    containers: Any
-    images: Any
-
-    def close(self) -> None: ...
-
-
-type _ClientFactory = Callable[[], _PodmanClient]
 
 
 @runtime_checkable
@@ -145,16 +109,6 @@ class _ExecRunner(Protocol):
         capture_output: bool | None = None,
         timeout: float | None = None,
     ) -> subprocess.CompletedProcess[str]: ...
-
-
-@FrozenDataclass()
-class _ExecConfig:
-    command: Sequence[str]
-    stdin: str | None = None
-    cwd: str | None = None
-    environment: Mapping[str, str] | None = None
-    timeout: float | None = None
-    capture_output: bool = True
 
 
 @FrozenDataclass()
@@ -189,187 +143,6 @@ class PodmanSandboxConfig:
     accepts_overrides: bool = False
 
 
-@FrozenDataclass()
-class PodmanShellParams:
-    """Parameter payload accepted by the ``shell_execute`` tool."""
-
-    command: tuple[str, ...]
-    cwd: str | None = None
-    env: Mapping[str, str] = field(default_factory=lambda: dict[str, str]())
-    stdin: str | None = None
-    timeout_seconds: float = _DEFAULT_TIMEOUT
-    capture_output: bool = True
-
-
-@FrozenDataclass()
-class PodmanShellResult:
-    """Structured command summary returned by the ``shell_execute`` tool."""
-
-    command: tuple[str, ...]
-    cwd: str
-    exit_code: int
-    stdout: str
-    stderr: str
-    duration_ms: int
-    timed_out: bool
-
-    def render(self) -> str:
-        command_str = " ".join(self.command)
-        lines = [
-            "Shell command result:",
-            f"Command: {command_str}",
-            f"CWD: {self.cwd}",
-            f"Exit code: {self.exit_code}",
-            f"Timed out: {self.timed_out}",
-            f"Duration: {self.duration_ms} ms",
-            "STDOUT:",
-            self.stdout or "<empty>",
-            "STDERR:",
-            self.stderr or "<empty>",
-        ]
-        return "\n".join(lines)
-
-
-@FrozenDataclass()
-class PodmanWorkspace:
-    """Active Podman container backing the session."""
-
-    container_id: str
-    container_name: str
-    image: str
-    workdir: str
-    overlay_path: str
-    env: tuple[tuple[str, str], ...]
-    started_at: datetime
-    last_used_at: datetime
-
-
-@dataclass(slots=True)
-class _WorkspaceHandle:
-    descriptor: PodmanWorkspace
-    overlay_path: Path
-
-
-@FrozenDataclass()
-class _ResolvedHostMount:
-    source_label: str
-    resolved_host: Path
-    mount_path: VfsPath
-    include_glob: tuple[str, ...]
-    exclude_glob: tuple[str, ...]
-    max_bytes: int | None
-    follow_symlinks: bool
-    preview: vfs_module.HostMountPreview
-
-
-def _default_cache_root() -> Path:
-    override = os.environ.get(_CACHE_ENV)
-    if override:
-        return Path(override).expanduser()
-    return Path.home() / ".cache" / "weakincentives" / "podman"
-
-
-def _resolve_podman_host_mounts(
-    mounts: Sequence[HostMount],
-    allowed_roots: Sequence[Path],
-) -> tuple[tuple[_ResolvedHostMount, ...], tuple[vfs_module.HostMountPreview, ...]]:
-    if not mounts:
-        return (), ()
-    resolved: list[_ResolvedHostMount] = []
-    previews: list[vfs_module.HostMountPreview] = []
-    for mount in mounts:
-        spec = _resolve_single_host_mount(mount, allowed_roots)
-        resolved.append(spec)
-        previews.append(spec.preview)
-    return tuple(resolved), tuple(previews)
-
-
-def _resolve_single_host_mount(
-    mount: HostMount,
-    allowed_roots: Sequence[Path],
-) -> _ResolvedHostMount:
-    host_path = mount.host_path.strip()
-    if not host_path:
-        raise ToolValidationError("Host mount path must not be empty.")
-    vfs_module.ensure_ascii(host_path, "host path")
-    resolved_host = _resolve_host_path(host_path, allowed_roots)
-    include_glob = _normalize_mount_globs(mount.include_glob, "include_glob")
-    exclude_glob = _normalize_mount_globs(mount.exclude_glob, "exclude_glob")
-    mount_path = (
-        vfs_module.normalize_path(mount.mount_path)
-        if mount.mount_path is not None
-        else VfsPath(())
-    )
-    preview_entries = _preview_mount_entries(resolved_host)
-    preview = vfs_module.HostMountPreview(
-        host_path=host_path,
-        resolved_host=resolved_host,
-        mount_path=mount_path,
-        entries=preview_entries,
-        is_directory=resolved_host.is_dir(),
-    )
-    return _ResolvedHostMount(
-        source_label=host_path,
-        resolved_host=resolved_host,
-        mount_path=mount_path,
-        include_glob=include_glob,
-        exclude_glob=exclude_glob,
-        max_bytes=mount.max_bytes,
-        follow_symlinks=mount.follow_symlinks,
-        preview=preview,
-    )
-
-
-def _resolve_host_path(host_path: str, allowed_roots: Sequence[Path]) -> Path:
-    if not allowed_roots:
-        raise ToolValidationError("No allowed host roots configured for mounts.")
-    for root in allowed_roots:
-        candidate = (root / host_path).expanduser().resolve()
-        try:
-            _ = candidate.relative_to(root)
-        except ValueError:
-            continue
-        if candidate.exists():
-            return candidate
-    raise ToolValidationError("Host path is outside the allowed roots or missing.")
-
-
-def _normalize_mount_globs(patterns: Sequence[str], field: str) -> tuple[str, ...]:
-    normalized: list[str] = []
-    for pattern in patterns:
-        stripped = pattern.strip()
-        if not stripped:
-            continue
-        vfs_module.ensure_ascii(stripped, field)
-        normalized.append(stripped)
-    return tuple(normalized)
-
-
-def _preview_mount_entries(root: Path) -> tuple[str, ...]:
-    if root.is_file():
-        return (root.name,)
-    try:
-        children = sorted(root.iterdir(), key=lambda path: path.name.lower())
-    except OSError as error:
-        raise ToolValidationError(f"Failed to inspect host mount {root}.") from error
-    labels: list[str] = []
-    for child in children:
-        suffix = "/" if child.is_dir() else ""
-        labels.append(f"{child.name}{suffix}")
-    return tuple(labels)
-
-
-def _iter_host_mount_files(root: Path, follow_symlinks: bool) -> Iterator[Path]:
-    if root.is_file():
-        yield root
-        return
-    for current, _dirnames, filenames in root.walk(
-        follow_symlinks=follow_symlinks,
-    ):
-        for name in filenames:
-            yield current / name
-
-
 def _default_exec_runner(
     cmd: list[str],
     *,
@@ -386,109 +159,6 @@ def _default_exec_runner(
         timeout=timeout,
     )
     return cast(subprocess.CompletedProcess[str], completed)
-
-
-def _build_client_factory(
-    *,
-    base_url: str | None,
-    identity: str | None,
-) -> _ClientFactory:
-    def _factory() -> _PodmanClient:
-        try:
-            from podman import PodmanClient
-        except ModuleNotFoundError as error:  # pragma: no cover - configuration guard
-            raise RuntimeError(_MISSING_DEPENDENCY_MESSAGE) from error
-
-        kwargs: dict[str, str] = {}
-        if base_url is not None:
-            kwargs["base_url"] = base_url
-        if identity is not None:
-            kwargs["identity"] = identity
-        return PodmanClient(**kwargs)
-
-    return _factory
-
-
-def _ensure_ascii(value: str, *, field: str) -> str:
-    try:
-        _ = value.encode(_ASCII)
-    except UnicodeEncodeError as error:
-        raise ToolValidationError(f"{field} must be ASCII.") from error
-    return value
-
-
-def _normalize_command(command: tuple[str, ...]) -> tuple[str, ...]:
-    if not command:
-        raise ToolValidationError("command must contain at least one entry.")
-    total_length = 0
-    normalized: list[str] = []
-    for index, entry in enumerate(command):
-        if not entry:
-            raise ToolValidationError(f"command[{index}] must not be empty.")
-        normalized_entry = _ensure_ascii(entry, field="command")
-        total_length += len(normalized_entry)
-        if total_length > _MAX_COMMAND_LENGTH:
-            raise ToolValidationError("command is too long (limit 4,096 characters).")
-        normalized.append(normalized_entry)
-    return tuple(normalized)
-
-
-def _normalize_env(env: Mapping[str, str]) -> dict[str, str]:
-    if len(env) > _MAX_ENV_VARS:
-        raise ToolValidationError("env contains too many entries (max 64).")
-    normalized: dict[str, str] = {}
-    for key, value in env.items():
-        normalized_key = _ensure_ascii(key, field="env key").upper()
-        if not normalized_key:
-            raise ToolValidationError("env keys must not be empty.")
-        if len(normalized_key) > _MAX_PATH_SEGMENT:
-            raise ToolValidationError(
-                f"env key {normalized_key!r} is longer than {_MAX_PATH_SEGMENT} characters."
-            )
-        normalized_value = _ensure_ascii(value, field="env value")
-        if len(normalized_value) > _MAX_ENV_LENGTH:
-            raise ToolValidationError(
-                f"env value for {normalized_key!r} exceeds {_MAX_ENV_LENGTH} characters."
-            )
-        normalized[normalized_key] = normalized_value
-    return normalized
-
-
-def _normalize_timeout(timeout_seconds: float) -> float:
-    if math.isnan(timeout_seconds):
-        raise ToolValidationError("timeout_seconds must be a real number.")
-    return max(_MIN_TIMEOUT, min(_MAX_TIMEOUT, timeout_seconds))
-
-
-def _normalize_cwd(path: str | None) -> str:
-    if path is None or path == "":
-        return _DEFAULT_WORKDIR
-    stripped = path.strip()
-    if stripped.startswith("/"):
-        raise ToolValidationError("cwd must be relative to /workspace.")
-    parts = [segment for segment in stripped.split("/") if segment]
-    if len(parts) > _MAX_PATH_DEPTH:
-        raise ToolValidationError("cwd exceeds maximum depth of 16 segments.")
-    normalized_segments: list[str] = []
-    for segment in parts:
-        if segment in {".", ".."}:
-            raise ToolValidationError("cwd must not contain '.' or '..' segments.")
-        if len(segment) > _MAX_PATH_SEGMENT:
-            raise ToolValidationError(
-                f"cwd segment {segment!r} exceeds {_MAX_PATH_SEGMENT} characters."
-            )
-        normalized_segment = _ensure_ascii(segment, field="cwd")
-        normalized_segments.append(normalized_segment)
-    if not normalized_segments:
-        return _DEFAULT_WORKDIR
-    return posixpath.join(_DEFAULT_WORKDIR, *normalized_segments)
-
-
-def _truncate_stream(value: str) -> str:
-    if len(value) <= _MAX_STDIO_CHARS:
-        return value
-    truncated = value[: _MAX_STDIO_CHARS - len("[truncated]")]
-    return f"{truncated}[truncated]"
 
 
 class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
@@ -589,237 +259,14 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         self._shell_suite = _PodmanShellSuite(section=self)
         self._eval_suite = PodmanEvalSuite(section=self)
         accepts_overrides = config.accepts_overrides
-        tools = (
-            Tool[ListDirectoryParams, tuple[FileInfo, ...]](
-                name="ls",
-                description="List directory entries under a relative path.",
-                handler=self._fs_handlers.list_directory,
-                examples=(
-                    ToolExample[ListDirectoryParams, tuple[FileInfo, ...]](
-                        description="List the workspace root",
-                        input=ListDirectoryParams(path="/workspace"),
-                        output=(
-                            FileInfo(
-                                path=VfsPath(("workspace", "README.md")),
-                                kind="file",
-                                size_bytes=4_096,
-                                version=1,
-                                updated_at=datetime(2024, 1, 1, tzinfo=UTC),
-                            ),
-                            FileInfo(
-                                path=VfsPath(("workspace", "src")),
-                                kind="directory",
-                                size_bytes=None,
-                                version=None,
-                                updated_at=None,
-                            ),
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
-            Tool[ReadFileParams, ReadFileResult](
-                name="read_file",
-                description="Read UTF-8 file contents with pagination support.",
-                handler=self._fs_handlers.read_file,
-                examples=(
-                    ToolExample[ReadFileParams, ReadFileResult](
-                        description="Read the top of README.md",
-                        input=ReadFileParams(
-                            file_path="/workspace/README.md", offset=0, limit=3
-                        ),
-                        output=ReadFileResult(
-                            path=VfsPath(("workspace", "README.md")),
-                            content=(
-                                "   1 | # weakincentives\n"
-                                "   2 | Open source automation harness\n"
-                                "   3 | for safe agents"
-                            ),
-                            offset=0,
-                            limit=3,
-                            total_lines=120,
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
-            Tool[WriteFileParams, WriteFile](
-                name="write_file",
-                description="Create a new UTF-8 text file.",
-                handler=self._fs_handlers.write_file,
-                examples=(
-                    ToolExample[WriteFileParams, WriteFile](
-                        description="Create a notes file in the container",
-                        input=WriteFileParams(
-                            file_path="/workspace/notes.txt",
-                            content="Remember to run make check",
-                        ),
-                        output=WriteFile(
-                            path=VfsPath(("workspace", "notes.txt")),
-                            content="Remember to run make check",
-                            mode="create",
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
-            Tool[EditFileParams, WriteFile](
-                name="edit_file",
-                description="Replace occurrences of a string within a file.",
-                handler=self._fs_handlers.edit_file,
-                examples=(
-                    ToolExample[EditFileParams, WriteFile](
-                        description="Update a TODO entry",
-                        input=EditFileParams(
-                            file_path="/workspace/notes.txt",
-                            old_string="TODO: add tests",
-                            new_string="TODO: add integration tests",
-                            replace_all=False,
-                        ),
-                        output=WriteFile(
-                            path=VfsPath(("workspace", "notes.txt")),
-                            content="Completed: scaffold\nTODO: add integration tests",
-                            mode="overwrite",
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
-            Tool[GlobParams, tuple[GlobMatch, ...]](
-                name="glob",
-                description="Match files beneath a directory using shell patterns.",
-                handler=self._fs_handlers.glob,
-                examples=(
-                    ToolExample[GlobParams, tuple[GlobMatch, ...]](
-                        description="Find Python files under src",
-                        input=GlobParams(pattern="**/*.py", path="/workspace/src"),
-                        output=(
-                            GlobMatch(
-                                path=VfsPath(("workspace", "src", "__init__.py")),
-                                size_bytes=128,
-                                version=1,
-                                updated_at=datetime(2024, 1, 1, tzinfo=UTC),
-                            ),
-                            GlobMatch(
-                                path=VfsPath(
-                                    (
-                                        "workspace",
-                                        "src",
-                                        "weakincentives",
-                                        "__init__.py",
-                                    )
-                                ),
-                                size_bytes=256,
-                                version=2,
-                                updated_at=datetime(2024, 1, 2, tzinfo=UTC),
-                            ),
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
-            Tool[GrepParams, tuple[GrepMatch, ...]](
-                name="grep",
-                description="Search files for a regular expression pattern.",
-                handler=self._fs_handlers.grep,
-                examples=(
-                    ToolExample[GrepParams, tuple[GrepMatch, ...]](
-                        description="Search for TODO comments",
-                        input=GrepParams(
-                            pattern="TODO", path="/workspace/src", glob="**/*.py"
-                        ),
-                        output=(
-                            GrepMatch(
-                                path=VfsPath(
-                                    (
-                                        "workspace",
-                                        "src",
-                                        "weakincentives",
-                                        "tools",
-                                        "podman.py",
-                                    )
-                                ),
-                                line_number=42,
-                                line="# TODO: improve sandbox docs",
-                            ),
-                            GrepMatch(
-                                path=VfsPath(
-                                    (
-                                        "workspace",
-                                        "src",
-                                        "weakincentives",
-                                        "runtime",
-                                        "__init__.py",
-                                    )
-                                ),
-                                line_number=10,
-                                line="TODO: replace placeholder logger",
-                            ),
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
-            Tool[RemoveParams, DeleteEntry](
-                name="rm",
-                description="Remove files or directories recursively.",
-                handler=self._fs_handlers.remove,
-                examples=(
-                    ToolExample[RemoveParams, DeleteEntry](
-                        description="Delete a stale build artifact",
-                        input=RemoveParams(path="/workspace/build/output"),
-                        output=DeleteEntry(
-                            path=VfsPath(("workspace", "build", "output"))
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
-            Tool[PodmanShellParams, PodmanShellResult](
-                name="shell_execute",
-                description="Run a short command inside the Podman workspace.",
-                handler=self._shell_suite.run_shell,
-                examples=(
-                    ToolExample[PodmanShellParams, PodmanShellResult](
-                        description="Check the current working directory",
-                        input=PodmanShellParams(command=("pwd",), cwd=None),
-                        output=PodmanShellResult(
-                            command=("pwd",),
-                            cwd="/workspace",
-                            exit_code=0,
-                            stdout="/workspace",
-                            stderr="",
-                            duration_ms=12,
-                            timed_out=False,
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
-            Tool[EvalParams, EvalResult](
-                name="evaluate_python",
-                description=(
-                    "Run a short Python script via `python3 -c` inside the Podman workspace. "
-                    "Captures stdout/stderr and reports the exit code."
-                ),
-                handler=self._eval_suite.evaluate_python,
-                examples=(
-                    ToolExample[EvalParams, EvalResult](
-                        description="Run a small calculation",
-                        input=EvalParams(code="print(3 * 7)"),
-                        output=EvalResult(
-                            value_repr=None,
-                            stdout="21\n",
-                            stderr="",
-                            globals={},
-                            reads=(),
-                            writes=(),
-                        ),
-                    ),
-                ),
-                accepts_overrides=accepts_overrides,
-            ),
+
+        tools = build_podman_tools(
+            fs_handlers=self._fs_handlers,
+            shell_suite=self._shell_suite,
+            eval_suite=self._eval_suite,
+            accepts_overrides=accepts_overrides,
         )
+
         template = _PODMAN_TEMPLATE
         mounts_block = vfs_module.render_host_mounts_block(self._mount_previews)
         if mounts_block:
@@ -884,75 +331,31 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         }
 
     def _ensure_workspace(self) -> _WorkspaceHandle:
+        from .podman_lifecycle import create_container
+
         with self._lock:
             if self._workspace_handle is not None:
                 return self._workspace_handle
-            handle = self._create_workspace()
+            handle = self._create_workspace(create_container)
             self._workspace_handle = handle
             self._session[PodmanWorkspace].seed(handle.descriptor)
             return handle
 
-    def _create_workspace(self) -> _WorkspaceHandle:
+    def _create_workspace(
+        self, create_fn: Callable[..., _WorkspaceHandle]
+    ) -> _WorkspaceHandle:
         client = self._client_factory()
         overlay = self._workspace_overlay_path()
         overlay.mkdir(parents=True, exist_ok=True)
         self._hydrate_overlay_mounts(overlay)
-        _LOGGER.info(
-            "Creating Podman workspace",
-            event="podman.workspace.create",
-            context={"overlay": str(overlay), "image": self._image},
-        )
-        _ = client.images.pull(self._image)
-        env = _normalize_env(dict(self._base_env))
-        name = f"wink-{self._session.session_id}"
-        container = client.containers.create(
+        return create_fn(
+            client=client,
+            session_id=str(self._session.session_id),
             image=self._image,
-            command=["sleep", "infinity"],
-            name=name,
-            workdir=_DEFAULT_WORKDIR,
-            user=_DEFAULT_USER,
-            mem_limit=_MEMORY_LIMIT,
-            memswap_limit=_MEMORY_LIMIT,
-            cpu_period=_CPU_PERIOD,
-            cpu_quota=_CPU_QUOTA,
-            environment=env,
-            network_mode="none",
-            mounts=[
-                {
-                    "Target": _TMPFS_TARGET,
-                    "Type": "tmpfs",
-                    "TmpfsOptions": {"SizeBytes": _TMPFS_SIZE},
-                },
-                {
-                    "Target": _DEFAULT_WORKDIR,
-                    "Source": str(overlay),
-                    "Type": "bind",
-                    "Options": ["rbind", "rw"],
-                },
-            ],
-            remove=True,
+            overlay=overlay,
+            base_env=self._base_env,
+            clock=self._clock,
         )
-        container.start()
-        exit_code, _output = container.exec_run(
-            ["test", "-d", _DEFAULT_WORKDIR],
-            stdout=True,
-            stderr=True,
-            demux=True,
-        )
-        if exit_code != 0:
-            raise ToolValidationError("Podman workspace failed readiness checks.")
-        now = self._clock().astimezone(UTC)
-        descriptor = PodmanWorkspace(
-            container_id=container.id,
-            container_name=name,
-            image=self._image,
-            workdir=_DEFAULT_WORKDIR,
-            overlay_path=str(overlay),
-            env=tuple(sorted(env.items())),
-            started_at=now,
-            last_used_at=now,
-        )
-        return _WorkspaceHandle(descriptor=descriptor, overlay_path=overlay)
 
     def _workspace_overlay_path(self) -> Path:
         return self._overlay_path
@@ -992,46 +395,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         overlay: Path,
         mount: _ResolvedHostMount,
     ) -> None:
-        base_target = _host_path_for(overlay, mount.mount_path)
-        consumed_bytes = 0
-        source = mount.resolved_host
-        for file_path in _iter_host_mount_files(source, mount.follow_symlinks):
-            relative = (
-                Path(file_path.name)
-                if source.is_file()
-                else file_path.relative_to(source)
-            )
-            relative_label = relative.as_posix()
-            if mount.include_glob and not any(
-                fnmatch.fnmatchcase(relative_label, pattern)
-                for pattern in mount.include_glob
-            ):
-                continue
-            if any(
-                fnmatch.fnmatchcase(relative_label, pattern)
-                for pattern in mount.exclude_glob
-            ):
-                continue
-            target = base_target / relative
-            _assert_within_overlay(overlay, target)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                size = file_path.stat().st_size
-            except OSError as error:
-                raise ToolValidationError(
-                    f"Failed to stat mounted file {file_path}."
-                ) from error
-            if mount.max_bytes is not None and consumed_bytes + size > mount.max_bytes:
-                raise ToolValidationError(
-                    "Host mount exceeded the configured byte budget."
-                )
-            consumed_bytes += size
-            try:
-                _ = shutil.copy2(file_path, target)
-            except OSError as error:
-                raise ToolValidationError(
-                    "Failed to materialize host mounts inside the Podman workspace."
-                ) from error
+        copy_mount_into_overlay(overlay=overlay, mount=mount)
 
     def _touch_workspace(self) -> None:
         with self._lock:
@@ -1047,27 +411,17 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._session[PodmanWorkspace].seed(updated_descriptor)
 
     def _teardown_workspace(self) -> None:
+        from .podman_lifecycle import teardown_container
+
         with self._lock:
             handle = self._workspace_handle
             self._workspace_handle = None
         if handle is None:
             return
-        try:
-            client = self._client_factory()
-        except Exception:
-            return
-        try:
-            try:
-                container = client.containers.get(handle.descriptor.container_id)
-            except Exception:
-                return
-            with suppress(Exception):
-                container.stop(timeout=1)
-            with suppress(Exception):
-                container.remove(force=True)
-        finally:
-            with suppress(Exception):
-                client.close()
+        teardown_container(
+            client_factory=self._client_factory,
+            container_id=handle.descriptor.container_id,
+        )
 
     def ensure_workspace(self) -> _WorkspaceHandle:
         return self._ensure_workspace()
@@ -1214,121 +568,12 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             section._teardown_workspace()
 
 
-def _host_path_for(root: Path, path: VfsPath) -> Path:
-    host = root
-    for segment in path.segments:
-        host /= segment
-    return host
-
-
-def _container_path_for(path: VfsPath) -> str:
-    if not path.segments:
-        return _DEFAULT_WORKDIR
-    return posixpath.join(_DEFAULT_WORKDIR, *path.segments)
-
-
-def _assert_within_overlay(root: Path, candidate: Path) -> None:
-    try:
-        resolved = candidate.resolve()
-    except FileNotFoundError:
-        try:
-            resolved = candidate.parent.resolve()
-        except FileNotFoundError as error:  # pragma: no cover - defensive guard
-            raise ToolValidationError("Workspace path is unavailable.") from error
-    try:
-        _ = resolved.relative_to(root)
-    except ValueError as error:
-        raise ToolValidationError("Path escapes the workspace boundary.") from error
-
-
-class _PodmanShellSuite:
-    """Handler collection bound to a :class:`PodmanSandboxSection`."""
-
-    def __init__(self, *, section: PodmanSandboxSection) -> None:
-        super().__init__()
-        self._section = section
-
-    def run_shell(
-        self, params: PodmanShellParams, *, context: ToolContext
-    ) -> ToolResult[PodmanShellResult]:
-        ensure_context_uses_session(context=context, session=self._section.session)
-        command = _normalize_command(params.command)
-        cwd = _normalize_cwd(params.cwd)
-        env_overrides = _normalize_env(params.env)
-        timeout_seconds = _normalize_timeout(params.timeout_seconds)
-        if params.stdin:
-            _ = _ensure_ascii(params.stdin, field="stdin")
-        _ = self._section.ensure_workspace()
-
-        return self._run_shell_via_cli(
-            params=params,
-            command=command,
-            cwd=cwd,
-            environment=env_overrides,
-            timeout_seconds=timeout_seconds,
-        )
-
-    def _run_shell_via_cli(
-        self,
-        *,
-        params: PodmanShellParams,
-        command: tuple[str, ...],
-        cwd: str,
-        environment: Mapping[str, str],
-        timeout_seconds: float,
-    ) -> ToolResult[PodmanShellResult]:
-        exec_cmd = list(command)
-        start = time.perf_counter()
-        try:
-            completed = self._section.run_cli_exec(
-                config=_ExecConfig(
-                    command=exec_cmd,
-                    stdin=params.stdin if params.stdin else None,
-                    cwd=cwd,
-                    environment=environment,
-                    timeout=timeout_seconds,
-                    capture_output=params.capture_output,
-                )
-            )
-            timed_out = False
-            exit_code = completed.returncode
-            stdout_text = completed.stdout
-            stderr_text = completed.stderr
-        except subprocess.TimeoutExpired as error:
-            timed_out = True
-            exit_code = 124
-            stdout_text = str(error.stdout or "")
-            stderr_text = str(error.stderr or "")
-        except FileNotFoundError as error:
-            raise ToolValidationError(
-                "Podman CLI is required to execute commands over SSH connections."
-            ) from error
-        duration_ms = int((time.perf_counter() - start) * 1_000)
-        self._section.touch_workspace()
-        stdout_text_clean = str(stdout_text or "").rstrip()
-        stderr_text_clean = str(stderr_text or "").rstrip()
-        if not params.capture_output:
-            stdout_text_final = _CAPTURE_DISABLED
-            stderr_text_final = _CAPTURE_DISABLED
-        else:
-            stdout_text_final = _truncate_stream(stdout_text_clean)
-            stderr_text_final = _truncate_stream(stderr_text_clean)
-        result = PodmanShellResult(
-            command=command,
-            cwd=cwd,
-            exit_code=exit_code,
-            stdout=stdout_text_final,
-            stderr=stderr_text_final,
-            duration_ms=duration_ms,
-            timed_out=timed_out,
-        )
-        message = f"`shell_execute` exited with {exit_code}."
-        if timed_out:
-            message = "`shell_execute` exceeded the configured timeout."
-        return ToolResult(message=message, value=result)
+# Re-export shutil for tests that patch copy operations
+shutil = shutil
 
 
 __all__ = [
+    "PodmanSandboxConfig",
     "PodmanSandboxSection",
     "PodmanShellParams",
     "PodmanShellResult",

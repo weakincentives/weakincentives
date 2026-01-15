@@ -23,6 +23,8 @@ from typing import IO, Any, cast
 import pytest
 
 import weakincentives.contrib.tools.podman as podman_module
+import weakincentives.contrib.tools.podman_lifecycle as podman_lifecycle_module
+import weakincentives.contrib.tools.podman_shell as podman_shell_module
 import weakincentives.filesystem._host as filesystem_host_module
 import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool
@@ -145,7 +147,7 @@ def test_host_mount_materializes_overlay(
 def test_preview_mount_entries_handles_file(tmp_path: Path) -> None:
     file_path = tmp_path / "item.txt"
     file_path.write_text("payload", encoding="utf-8")
-    result = podman_module._preview_mount_entries(file_path)
+    result = podman_lifecycle_module.preview_mount_entries(file_path)
     assert result == ("item.txt",)
 
 
@@ -163,13 +165,13 @@ def test_preview_mount_entries_raises_on_oserror(
 
     monkeypatch.setattr(Path, "iterdir", _raise)
     with pytest.raises(ToolValidationError):
-        podman_module._preview_mount_entries(directory)
+        podman_lifecycle_module.preview_mount_entries(directory)
 
 
 def test_iter_host_mount_files_handles_file(tmp_path: Path) -> None:
     file_path = tmp_path / "item.txt"
     file_path.write_text("payload", encoding="utf-8")
-    entries = tuple(podman_module._iter_host_mount_files(file_path, False))
+    entries = tuple(podman_lifecycle_module.iter_host_mount_files(file_path, False))
     assert entries == (file_path,)
 
 
@@ -351,7 +353,7 @@ def test_write_via_container_appends_existing_content(
     cp_payloads: list[str] = []
 
     def _fake_exec(
-        self: podman_module.PodmanSandboxSection, *, config: podman_module._ExecConfig
+        self: podman_module.PodmanSandboxSection, *, config: podman_shell_module.ShellExecConfig
     ) -> CompletedProcess[str]:
         del self
         _ = (
@@ -399,7 +401,7 @@ def test_write_via_container_reports_mkdir_failure(
     cp_calls = 0
 
     def _fail_exec(
-        self: podman_module.PodmanSandboxSection, *, config: podman_module._ExecConfig
+        self: podman_module.PodmanSandboxSection, *, config: podman_shell_module.ShellExecConfig
     ) -> CompletedProcess[str]:
         del self
         _ = (
@@ -447,7 +449,7 @@ def test_write_via_container_rejects_non_utf8_append(
     target.write_bytes(b"\xff\xff")
 
     def _unexpected(
-        self: podman_module.PodmanSandboxSection, *, config: podman_module._ExecConfig
+        self: podman_module.PodmanSandboxSection, *, config: podman_shell_module.ShellExecConfig
     ) -> CompletedProcess[str]:
         raise AssertionError("run_cli_exec should not be called")
 
@@ -496,7 +498,7 @@ def test_write_via_container_propagates_read_oserror(
     monkeypatch.setattr(Path, "read_text", _raise)
 
     def _unexpected(
-        self: podman_module.PodmanSandboxSection, *, config: podman_module._ExecConfig
+        self: podman_module.PodmanSandboxSection, *, config: podman_shell_module.ShellExecConfig
     ) -> CompletedProcess[str]:
         raise AssertionError("run_cli_exec should not be called")
 

@@ -23,6 +23,7 @@ from typing import Any
 from uuid import uuid4
 
 import weakincentives.contrib.tools.podman as podman_module
+import weakincentives.contrib.tools.podman_lifecycle as podman_lifecycle_module
 import weakincentives.contrib.tools.vfs as vfs_module
 from weakincentives.contrib.tools import (
     HostMount,
@@ -245,7 +246,7 @@ def prepare_resolved_mount(
     include_glob: tuple[str, ...] = (),
     exclude_glob: tuple[str, ...] = (),
     max_bytes: int | None = None,
-) -> tuple[podman_module._ResolvedHostMount, Path, Path]:
+) -> tuple[podman_lifecycle_module.ResolvedHostMount, Path, Path]:
     host_root = tmp_path / "resolved-root"
     repo = host_root / "sunfish"
     repo.mkdir(parents=True, exist_ok=True)
@@ -258,7 +259,7 @@ def prepare_resolved_mount(
         exclude_glob=exclude_glob,
         max_bytes=max_bytes,
     )
-    resolved = podman_module._resolve_single_host_mount(mount, (host_root,))
+    resolved = podman_lifecycle_module.resolve_single_host_mount(mount, (host_root,))
     overlay = tmp_path / "overlay"
     overlay.mkdir()
     return resolved, file_path, overlay

@@ -25,6 +25,7 @@ import pytest
 
 import weakincentives.contrib.tools.podman as podman_module
 import weakincentives.contrib.tools.podman_eval as podman_eval_module
+import weakincentives.contrib.tools.podman_shell as podman_shell_module
 import weakincentives.contrib.tools.vfs as vfs_module
 from tests.tools.helpers import build_tool_context, find_tool, invoke_tool
 from tests.tools.podman_test_helpers import (
@@ -460,44 +461,44 @@ def test_podman_shell_result_renders_human_readable() -> None:
 
 def test_command_validation_rejects_blank_entry() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_command(("",))
+        podman_shell_module.normalize_command(("",))
 
 
 def test_command_validation_rejects_long_entry() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_command(("x" * 5_000,))
+        podman_shell_module.normalize_command(("x" * 5_000,))
 
 
 def test_env_validation_guards_limits() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_env({str(index): "x" for index in range(70)})
+        podman_shell_module.normalize_env({str(index): "x" for index in range(70)})
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_env({"": "value"})
+        podman_shell_module.normalize_env({"": "value"})
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_env({"k" * 100: "value"})
+        podman_shell_module.normalize_env({"k" * 100: "value"})
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_env({"KEY": "v" * 600})
+        podman_shell_module.normalize_env({"KEY": "v" * 600})
 
 
 def test_timeout_validation_rejects_nan() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_timeout(float("nan"))
+        podman_shell_module.normalize_timeout(float("nan"))
 
 
 def test_cwd_validation_guards_paths() -> None:
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_cwd("/tmp")
+        podman_shell_module.normalize_cwd("/tmp")
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_cwd("/".join(str(index) for index in range(20)))
+        podman_shell_module.normalize_cwd("/".join(str(index) for index in range(20)))
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_cwd("a/../b")
+        podman_shell_module.normalize_cwd("a/../b")
     with pytest.raises(ToolValidationError):
-        podman_module._normalize_cwd("x" * 90)
-    assert podman_module._normalize_cwd("   ") == "/workspace"
+        podman_shell_module.normalize_cwd("x" * 90)
+    assert podman_shell_module.normalize_cwd("   ") == "/workspace"
 
 
 def test_truncate_stream_marks_output() -> None:
-    truncated = podman_module._truncate_stream("a" * (35_000))
+    truncated = podman_shell_module.truncate_stream("a" * (35_000))
     assert truncated.endswith("[truncated]")
 
 
