@@ -15,7 +15,7 @@
 MailboxResolver provides dynamic reply routing via string identifiers,
 enabling Message.reply() to resolve destination mailboxes internally.
 
-See ``specs/MAILBOX_RESOLVER.md`` for the complete specification.
+See ``specs/MAILBOX.md`` for the complete specification.
 """
 
 from __future__ import annotations

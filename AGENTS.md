@@ -95,10 +95,8 @@ a goal at any time.
   persistence—when modifying slice storage or adding persistence backends.
 - **THREAD_SAFETY.md**: Thread safety guarantees—when touching concurrency
   helpers or shared state.
-- **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
-  modifying tools.
-- **TOOL_POLICIES.md**: Sequential tool dependencies (read-before-write, keyed
-  constraints)—when adding policy enforcement to tools.
+- **TOOLS.md**: Tool runtime, policies, sequential dependencies, planning
+  tools—before adding or modifying tools.
 - **FEEDBACK_PROVIDERS.md**: Ongoing progress feedback for unattended
   agents—stall detection, drift monitoring, and context injection.
 - **FORMAL_VERIFICATION.md**: Embedding TLA+ specifications in Python using

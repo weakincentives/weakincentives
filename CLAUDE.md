@@ -163,8 +163,7 @@ Consult these specs before modifying related code:
 | `specs/LIFECYCLE.md` | LoopGroup, ShutdownCoordinator, graceful shutdown patterns |
 | `specs/LEASE_EXTENDER.md` | Automatic message visibility extension during processing |
 | `specs/LOGGING.md` | Logging surfaces |
-| `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, MainLoop integration |
-| `specs/MAILBOX_RESOLVER.md` | Mailbox routing, reply-to patterns, resolver configuration |
+| `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, reply patterns, resolver |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
 | `specs/POLICIES_OVER_WORKFLOWS.md` | Philosophy of declarative policies vs rigid workflows for unattended agents |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides, structured output, resources |
@@ -176,8 +175,7 @@ Consult these specs before modifying related code:
 | `specs/TASK_COMPLETION.md` | Task completion checking, PlanBasedChecker, composite verification |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
-| `specs/TOOLS.md` | Adding/modifying tools, planning tools |
-| `specs/TOOL_POLICIES.md` | Sequential dependencies, read-before-write, keyed constraints |
+| `specs/TOOLS.md` | Tool runtime, policies, sequential dependencies, planning tools |
 | `specs/FEEDBACK_PROVIDERS.md` | Ongoing progress feedback, stall/drift detection, context injection |
 | `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |
 | `specs/WINK_DOCS.md` | CLI docs command, bundled documentation access |

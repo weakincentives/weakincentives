@@ -2,8 +2,8 @@
 
 ## Purpose
 
-Tool registration, context injection, failure semantics, and planning tools.
-Core at `prompt/tool.py`.
+Tool registration, context injection, failure semantics, policy enforcement,
+and planning tools. Core at `prompt/tool.py`.
 
 ## Principles
 
@@ -11,6 +11,7 @@ Core at `prompt/tool.py`.
 - **Single source of truth**: Definitions alongside documenting sections
 - **Type-safe**: Dataclass-based params and results
 - **Predictable failures**: Never abort evaluation; return structured errors
+- **Policy-governed**: Sequential dependencies enforced before execution
 
 ## Core Schemas
 
@@ -103,6 +104,7 @@ section = MarkdownSection[Params](
     key="guidance",
     template="Use tools when needed.",
     tools=[lookup_tool, search_tool],
+    policies=[ReadBeforeWritePolicy()],
 )
 ```
 
@@ -116,19 +118,131 @@ Validates:
 
 `RenderedPrompt.tools` contains ordered tuple from enabled sections.
 
+## Tool Policies
+
+**Implementation:** `src/weakincentives/prompt/policy.py`
+
+Policies enforce sequential dependencies between tool invocations. Declares
+that tool B requires tool A first—unconditionally or keyed by parameter.
+
+### Guiding Principles
+
+- **Prompt-scoped declaration**: Bound to prompts alongside tools
+- **Session-scoped state**: Invocation history in session slices
+- **Composable**: Multiple policies can govern same tool; all must allow
+- **Fail-closed**: Denied calls return error without executing
+
+### ToolPolicy Protocol
+
+| Method/Property | Description |
+|-----------------|-------------|
+| `name` | Unique identifier |
+| `check(tool, params, *, context)` | Returns `PolicyDecision` |
+| `on_result(tool, params, result, *, context)` | Update state after success |
+
+### PolicyDecision
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `allowed` | `bool` | Whether to proceed |
+| `reason` | `str \| None` | Denial explanation |
+
+### PolicyState (Session Slice)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `policy_name` | `str` | Policy identifier |
+| `invoked_tools` | `frozenset[str]` | Successfully invoked tools |
+| `invoked_keys` | `frozenset[tuple[str, str]]` | (tool, key) pairs |
+
+### Built-in Policies
+
+#### SequentialDependencyPolicy
+
+Unconditional tool ordering: tool B requires tool A to have succeeded.
+
+```python
+policy = SequentialDependencyPolicy(
+    dependencies={
+        "deploy": frozenset({"test", "build"}),
+        "build": frozenset({"lint"}),
+    }
+)
+```
+
+#### ReadBeforeWritePolicy
+
+Parameter-keyed dependency for filesystem tools. Existing files must be read
+before overwritten. New files can be created freely.
+
+```python
+policy = ReadBeforeWritePolicy()
+# write_file("new.txt")      → OK (doesn't exist)
+# write_file("config.yaml")  → DENIED (exists, not read)
+# read_file("config.yaml")   → OK (records path)
+# write_file("config.yaml")  → OK (was read)
+```
+
+### Policy Integration
+
+```python
+template = PromptTemplate(
+    sections=[
+        MarkdownSection(
+            tools=[read_file, write_file],
+            policies=[ReadBeforeWritePolicy()],
+        ),
+        MarkdownSection(
+            tools=[lint, test, build, deploy],
+            policies=[SequentialDependencyPolicy(dependencies={...})],
+        ),
+    ],
+    policies=[...],  # Prompt-level policies
+)
+```
+
 ## Runtime Dispatch
 
 Via `ToolExecutor` at `adapters/tool_executor.py`:
 
 1. **Registry lookup** - Resolve tool name
 1. **Argument parsing** - `serde.parse(..., extra="forbid")`
+1. **Policy check** - All policies must allow (fail-closed)
 1. **Deadline check** - Refuse if elapsed
 1. **Context construction** - Build `ToolContext`
 1. **Snapshot** - Capture session and resource state
 1. **Handler execution** - Run with params/context
+1. **Policy update** - Call `on_result` for successful invocations
 1. **Restore on failure** - Rollback state
 1. **Telemetry** - Publish `ToolInvoked` to `session.dispatcher`
 1. **Response assembly** - Return result
+
+### Execution Flow (Pseudocode)
+
+```python
+def execute_tool(call, *, context):
+    tool, params = resolve_and_parse(call)
+    policies = [*section.policies, *prompt.policies]
+
+    for policy in policies:
+        decision = policy.check(tool, params, context=context)
+        if not decision.allowed:
+            return ToolResult.error(decision.reason)
+
+    result = tool.handler(params, context=context)
+
+    if result.success:
+        for policy in policies:
+            policy.on_result(tool, params, result, context=context)
+
+    return result
+```
+
+### Policy State Management
+
+- **Snapshot/restore**: State captured with session snapshots
+- **Reset**: `session.reset()` clears policy state
+- **Isolation**: Each session has independent state
 
 ## Planning Tool Suite
 
@@ -224,3 +338,12 @@ Tool failures forward error messages to LLM via `role: "tool"` response.
 - **Dataclass-only schemas**: No TypedDict or arbitrary mappings
 - **Payload visibility**: `exclude_value_from_context` not security boundary
 - **Deadline enforcement**: Checked before entry, not per-invocation
+- **Policy synchronous**: Policy checks run on tool execution thread
+- **Policy session-scoped**: No cross-session persistence
+- **No policy rollback notification**: Policies not notified on restore
+
+## Related Specifications
+
+- `specs/POLICIES_OVER_WORKFLOWS.md` - Design philosophy
+- `specs/PROMPTS.md` - Prompt system and sections
+- `specs/SESSIONS.md` - Session state

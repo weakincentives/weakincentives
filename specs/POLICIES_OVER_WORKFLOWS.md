@@ -66,7 +66,7 @@ Expose reasoning. Denial feedback enables self-correction.
 
 | Mechanism | Description | Spec |
 |-----------|-------------|------|
-| Tool Policies | Gate tool invocations | `TOOL_POLICIES.md` |
+| Tool Policies | Gate tool invocations | `TOOLS.md` |
 | Feedback Providers | Soft guidance over time | `FEEDBACK_PROVIDERS.md` |
 | Budget Constraints | Resource limits | `SESSIONS.md` |
 | Task Completion | Goal verification | `TASK_COMPLETION.md` |
