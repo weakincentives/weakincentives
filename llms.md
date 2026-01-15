@@ -18,6 +18,32 @@ Claude Agent SDK via adapter abstraction.
 
 ---
 
+## Accessing Documentation
+
+After installing WINK, use `wink docs` to access bundled documentation:
+
+```bash
+wink docs --reference   # This file (API reference)
+wink docs --guide       # Usage guide with tutorials
+wink docs --specs       # All specification documents
+wink docs --changelog   # Release history
+
+# Combine flags for multiple sections
+wink docs --reference --specs
+
+# Pipe to clipboard or other tools
+wink docs --specs | pbcopy
+wink docs --guide | llm "Summarize key concepts"
+```
+
+**Available documentation:**
+- `--reference` - Dense API reference (this file)
+- `--guide` - Step-by-step usage guide with examples
+- `--specs` - Design specifications (adapters, sessions, tools, etc.)
+- `--changelog` - Version history and breaking changes
+
+---
+
 ## Module Map
 
 ```
