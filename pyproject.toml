@@ -218,6 +218,8 @@ source = ["src/weakincentives"]
 omit = [
     # Redis mailbox requires integration tests with a real Redis server
     "src/weakincentives/contrib/mailbox/_redis.py",
+    # Docs directory contains bundled example files for documentation, not library code
+    "src/weakincentives/docs/*",
 ]
 
 [tool.coverage.report]
@@ -249,6 +251,7 @@ exclude = [
     ".ruff_cache",
     "dist",
     "src/weakincentives/adapters/claude_agent_sdk",
+    "src/weakincentives/docs",
 ]
 deprecateTypingAliases = true
 reportCallInDefaultInitializer = "error"

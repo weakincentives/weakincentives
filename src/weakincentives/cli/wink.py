@@ -30,6 +30,52 @@ def _read_doc(name: str) -> str:
     return doc_files.joinpath(name).read_text(encoding="utf-8")
 
 
+def _read_example() -> str:
+    """Read the code review example and format as markdown documentation.
+
+    Converts the code_reviewer_example.py into a markdown document with
+    a brief introduction explaining the example's purpose and structure.
+    """
+    doc_files = files("weakincentives.docs")
+    source = doc_files.joinpath("code_reviewer_example.py").read_text(encoding="utf-8")
+
+    intro = """\
+# Code Review Agent Example
+
+This example demonstrates a complete code review agent built with WINK.
+It showcases several key features of the library:
+
+- **MainLoop integration**: Background worker processing requests from a mailbox
+- **Prompt composition**: Structured prompts with multiple sections and tools
+- **Session management**: Persistent state across multiple review requests
+- **Provider adapters**: Support for OpenAI and Claude Agent SDK
+- **Planning tools**: Plan-Act-Reflect workflow for structured investigations
+- **Workspace tools**: VFS, Podman, and Claude Agent SDK sandbox modes
+
+## Running the Example
+
+```bash
+# With OpenAI adapter (default)
+OPENAI_API_KEY=... python code_reviewer_example.py
+
+# With Podman sandbox
+OPENAI_API_KEY=... python code_reviewer_example.py --podman
+
+# With Claude Agent SDK
+ANTHROPIC_API_KEY=... python code_reviewer_example.py --claude-agent
+
+# With workspace optimization
+python code_reviewer_example.py --optimize
+```
+
+## Source Code
+
+```python
+"""
+
+    return f"{intro}{source}\n```\n"
+
+
 def _read_specs() -> str:
     """Read all spec files, concatenated with headers."""
     specs_dir = files("weakincentives.docs.specs")
@@ -51,11 +97,15 @@ def _read_specs() -> str:
 
 def _handle_docs(args: argparse.Namespace) -> int:
     """Handle the docs subcommand."""
-    if not (args.reference or args.guide or args.specs or args.changelog):
+    if not (
+        args.reference or args.guide or args.specs or args.changelog or args.example
+    ):
         print(
-            "Error: At least one of --reference, --guide, --specs, or --changelog required"
+            "Error: At least one of --reference, --guide, --specs, --changelog, or --example required"
         )
-        print("Usage: wink docs [--reference] [--guide] [--specs] [--changelog]")
+        print(
+            "Usage: wink docs [--reference] [--guide] [--specs] [--changelog] [--example]"
+        )
         return 1
 
     parts: list[str] = []
@@ -69,6 +119,8 @@ def _handle_docs(args: argparse.Namespace) -> int:
             parts.append(_read_specs())
         if args.changelog:
             parts.append(_read_doc("CHANGELOG.md"))
+        if args.example:
+            parts.append(_read_example())
     except FileNotFoundError as e:
         print(f"Error: Documentation not found: {e}", file=sys.stderr)
         print("This may indicate a packaging error.", file=sys.stderr)
@@ -170,6 +222,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--changelog",
         action="store_true",
         help="Print changelog (CHANGELOG.md)",
+    )
+    _ = docs_parser.add_argument(
+        "--example",
+        action="store_true",
+        help="Print code review example as markdown documentation",
     )
 
     return parser

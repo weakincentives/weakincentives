@@ -155,3 +155,47 @@ def test_read_specs_concatenates_with_headers() -> None:
     assert "<!-- specs/SESSIONS.md -->" in content
     # Verify separation between specs
     assert "\n\n" in content
+
+
+def test_docs_example_outputs_formatted_markdown(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """--example prints code review example as formatted markdown."""
+    exit_code = wink.main(["docs", "--example"])
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    # Check for the markdown introduction
+    assert "# Code Review Agent Example" in captured.out
+    # Check for key sections
+    assert "## Running the Example" in captured.out
+    assert "## Source Code" in captured.out
+    # Check that Python code is wrapped in code block
+    assert "```python" in captured.out
+    # Check that actual example content is present
+    assert "CodeReviewLoop" in captured.out
+    assert "def main()" in captured.out
+
+
+def test_read_example_formats_as_markdown() -> None:
+    """_read_example formats the example as markdown with introduction."""
+    content = wink._read_example()
+
+    assert isinstance(content, str)
+    # Check introduction is present
+    assert "# Code Review Agent Example" in content
+    assert "MainLoop integration" in content
+    # Check code block structure
+    assert "```python" in content
+    assert content.strip().endswith("```")
+    # Check actual code content
+    assert "class CodeReviewLoop" in content
+
+
+def test_docs_no_flags_mentions_example(capsys: pytest.CaptureFixture[str]) -> None:
+    """No flags error message mentions --example option."""
+    exit_code = wink.main(["docs"])
+
+    assert exit_code == 1
+    captured = capsys.readouterr()
+    assert "--example" in captured.out

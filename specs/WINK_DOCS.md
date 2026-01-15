@@ -14,6 +14,7 @@ wink docs --reference   # Print llms.md (API reference)
 wink docs --guide       # Print WINK_GUIDE.md (usage guide)
 wink docs --specs       # Print all specs concatenated
 wink docs --changelog   # Print CHANGELOG.md (release history)
+wink docs --example     # Print code review example as markdown
 ```
 
 ## Motivation
@@ -37,6 +38,9 @@ wink docs --guide | llm "Summarize the key concepts"
 
 # Export all specs to a file
 wink docs --specs > all-specs.md
+
+# View the code review example with introduction
+wink docs --example | less
 ```
 
 ## Package Structure
@@ -47,10 +51,11 @@ installation. The following structure is required:
 ```
 src/weakincentives/
 └── docs/
-    ├── __init__.py          # Empty, marks as package
-    ├── llms.md              # API reference (copy of root llms.md)
-    ├── WINK_GUIDE.md        # Usage guide (copy of root WINK_GUIDE.md)
-    ├── CHANGELOG.md         # Release history (copy of root CHANGELOG.md)
+    ├── __init__.py               # Empty, marks as package
+    ├── llms.md                   # API reference (copy of root llms.md)
+    ├── WINK_GUIDE.md             # Usage guide (copy of root WINK_GUIDE.md)
+    ├── CHANGELOG.md              # Release history (copy of root CHANGELOG.md)
+    ├── code_reviewer_example.py  # Code review example (copy of root example)
     └── specs/
         ├── ADAPTERS.md
         ├── CLAUDE_AGENT_SDK.md
@@ -101,6 +106,10 @@ class DocsSyncHook(BuildHookInterface):
         shutil.copy(root / "llms.md", docs_dir / "llms.md")
         shutil.copy(root / "WINK_GUIDE.md", docs_dir / "WINK_GUIDE.md")
         shutil.copy(root / "CHANGELOG.md", docs_dir / "CHANGELOG.md")
+        shutil.copy(
+            root / "code_reviewer_example.py",
+            docs_dir / "code_reviewer_example.py",
+        )
 
         # Copy all spec files
         for spec_file in (root / "specs").glob("*.md"):
@@ -134,6 +143,7 @@ sync-docs:
 	@cp llms.md src/weakincentives/docs/
 	@cp WINK_GUIDE.md src/weakincentives/docs/
 	@cp CHANGELOG.md src/weakincentives/docs/
+	@cp code_reviewer_example.py src/weakincentives/docs/
 	@cp specs/*.md src/weakincentives/docs/specs/
 	@touch src/weakincentives/docs/__init__.py
 ```
@@ -145,17 +155,18 @@ This is useful for testing `wink docs` locally without a full build cycle.
 ### Command Signature
 
 ```
-wink docs [--reference] [--guide] [--specs] [--changelog]
+wink docs [--reference] [--guide] [--specs] [--changelog] [--example]
 ```
 
 ### Arguments
 
 | Argument | Type | Description |
-| ------------- | ---- | ------------------------------------------ |
+| ------------- | ---- | ----------------------------------------------- |
 | `--reference` | flag | Print the API reference (`llms.md`) |
 | `--guide` | flag | Print the usage guide (`WINK_GUIDE.md`) |
 | `--specs` | flag | Print all specification files concatenated |
 | `--changelog` | flag | Print the changelog (`CHANGELOG.md`) |
+| `--example` | flag | Print code review example as markdown with intro |
 
 ### Behavior
 
@@ -163,7 +174,7 @@ wink docs [--reference] [--guide] [--specs] [--changelog]
    and exit with code 1.
 
 1. **Multiple flags allowed**: Flags can be combined. Output is printed in
-   order: reference, guide, specs, changelog.
+   order: reference, guide, specs, changelog, example.
 
 1. **Separator between sections**: When multiple flags are used, print a
    separator line between sections:
@@ -226,7 +237,7 @@ $ wink docs --specs | grep -A5 "## Invariants"
 
 Use `importlib.resources` for reliable access to bundled files:
 
-```python
+````python
 from importlib.resources import files, as_file
 from pathlib import Path
 
@@ -255,7 +266,49 @@ def _read_specs() -> str:
         parts.append(f"{header}\n{content}")
 
     return "\n\n".join(parts)
-```
+
+
+def _read_example() -> str:
+    """Read the code review example and format as markdown documentation."""
+    doc_files = files("weakincentives.docs")
+    source = doc_files.joinpath("code_reviewer_example.py").read_text(encoding="utf-8")
+
+    intro = """\
+# Code Review Agent Example
+
+This example demonstrates a complete code review agent built with WINK.
+It showcases several key features of the library:
+
+- **MainLoop integration**: Background worker processing requests from a mailbox
+- **Prompt composition**: Structured prompts with multiple sections and tools
+- **Session management**: Persistent state across multiple review requests
+- **Provider adapters**: Support for OpenAI and Claude Agent SDK
+- **Planning tools**: Plan-Act-Reflect workflow for structured investigations
+- **Workspace tools**: VFS, Podman, and Claude Agent SDK sandbox modes
+
+## Running the Example
+
+\```bash
+# With OpenAI adapter (default)
+OPENAI_API_KEY=... python code_reviewer_example.py
+
+# With Podman sandbox
+OPENAI_API_KEY=... python code_reviewer_example.py --podman
+
+# With Claude Agent SDK
+ANTHROPIC_API_KEY=... python code_reviewer_example.py --claude-agent
+
+# With workspace optimization
+python code_reviewer_example.py --optimize
+\```
+
+## Source Code
+
+\```python
+"""
+
+    return f"{intro}{source}\n\```\n"
+````
 
 ### Subcommand Registration
 
@@ -289,14 +342,19 @@ def register_docs_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Print changelog (CHANGELOG.md)",
     )
+    docs_parser.add_argument(
+        "--example",
+        action="store_true",
+        help="Print code review example as markdown documentation",
+    )
     docs_parser.set_defaults(func=handle_docs)
 
 
 def handle_docs(args: argparse.Namespace) -> int:
     """Handle the docs subcommand."""
-    if not (args.reference or args.guide or args.specs or args.changelog):
-        print("Error: At least one of --reference, --guide, --specs, or --changelog required")
-        print("Usage: wink docs [--reference] [--guide] [--specs] [--changelog]")
+    if not (args.reference or args.guide or args.specs or args.changelog or args.example):
+        print("Error: At least one of --reference, --guide, --specs, --changelog, or --example required")
+        print("Usage: wink docs [--reference] [--guide] [--specs] [--changelog] [--example]")
         return 1
 
     parts: list[str] = []
@@ -310,6 +368,8 @@ def handle_docs(args: argparse.Namespace) -> int:
             parts.append(_read_specs())
         if args.changelog:
             parts.append(_read_doc("CHANGELOG.md"))
+        if args.example:
+            parts.append(_read_example())
     except FileNotFoundError as e:
         print(f"Error: Documentation not found: {e}", file=sys.stderr)
         print("This may indicate a packaging error.", file=sys.stderr)

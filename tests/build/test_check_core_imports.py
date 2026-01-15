@@ -263,12 +263,16 @@ class TestIntegration:
         project_root = Path(__file__).resolve().parent.parent.parent
         src_path = project_root / "src" / "weakincentives"
         contrib_path = src_path / "contrib"
+        docs_path = src_path / "docs"
 
         violations: list[str] = []
 
         for filepath in src_path.rglob("*.py"):
             # Skip contrib directory
             if contrib_path in filepath.parents or filepath.parent == contrib_path:
+                continue
+            # Skip docs directory - contains bundled example files, not core library code
+            if docs_path in filepath.parents or filepath.parent == docs_path:
                 continue
             violations.extend(_check_file(filepath))
 
