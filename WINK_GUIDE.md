@@ -1406,7 +1406,7 @@ tracker.end_tool_execution(tool_use_id="abc", success=False)  # Auto-rollback
 
 ### 4.7 Tool policies
 
-_Canonical spec: [specs/TOOL_POLICIES.md](specs/TOOL_POLICIES.md)_
+_Canonical spec: [specs/TOOLS.md](specs/TOOLS.md)_
 
 Tool policies provide declarative constraints that govern when tools can be
 invoked. Rather than embedding validation logic in each tool handler, policies
@@ -2856,7 +2856,7 @@ for msg in requests.receive():
     msg.acknowledge()
 ```
 
-See `specs/MAILBOX_RESOLVER.md` for the full resolver protocol and advanced
+See `specs/MAILBOX.md` for the full resolver protocol and advanced
 patterns like multi-tenant isolation.
 
 ______________________________________________________________________
@@ -4042,8 +4042,7 @@ ______________________________________________________________________
 ## Where to go deeper
 
 - **Prompts**: [specs/PROMPTS.md](specs/PROMPTS.md)
-- **Tools**: [specs/TOOLS.md](specs/TOOLS.md)
-- **Tool Policies**: [specs/TOOL_POLICIES.md](specs/TOOL_POLICIES.md)
+- **Tools & Policies**: [specs/TOOLS.md](specs/TOOLS.md)
 - **Sessions**: [specs/SESSIONS.md](specs/SESSIONS.md)
 - **MainLoop**: [specs/MAIN_LOOP.md](specs/MAIN_LOOP.md)
 - **Evals**: [specs/EVALS.md](specs/EVALS.md)

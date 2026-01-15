@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules all clean
 
 # Format code with ruff
 format:
@@ -44,6 +44,10 @@ pip-audit:
 markdown-check:
 	@uv run python build/run_mdformat.py
 	@uv run python build/check_md_links.py
+
+# Validate spec file references point to existing files
+validate-spec-refs:
+	@uv run python scripts/validate_spec_references.py
 
 # Verify Python code examples in documentation
 verify-doc-examples:
@@ -212,7 +216,7 @@ demo-claude-agent:
 
 # Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, check-core-imports, validate-modules, pip-audit, markdown, doc-examples, validate-integration-tests, test)
 # Note: validate-modules is commented out pending fixes for existing violations
-check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports pip-audit markdown-check verify-doc-examples validate-integration-tests test
+check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports pip-audit markdown-check validate-spec-refs verify-doc-examples validate-integration-tests test
 # Uncomment after fixing module boundary violations:
 # check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports validate-modules pip-audit markdown-check verify-doc-examples validate-integration-tests test
 

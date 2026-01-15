@@ -2,389 +2,306 @@
 
 ## Purpose
 
-Large language model runtimes expect prompts to advertise structured "tools"
-that can be invoked mid-interaction. This specification covers the tool
-registration lifecycle, context injection, failure semantics, and the planning
-tool suite.
+Tool registration, context injection, failure semantics, policy enforcement,
+and planning tools. Core at `prompt/tool.py`.
 
-## Guiding Principles
+## Principles
 
-- **Section-first integration**: Tooling lives within the section hierarchy so
-  enablement and ordering align with rendered instructions.
-- **Single source of truth**: Tool definitions live alongside the sections that
-  document them.
-- **Type-safe tooling**: Dataclass-based params and result payloads keep schemas
-  explicit and validated.
-- **Predictable failure semantics**: Tool failures never abort evaluation; they
-  return structured error results.
-
-```mermaid
-flowchart TB
-    subgraph Invocation["Tool Invocation"]
-        LLM["LLM Response"] --> Parse["Parse tool_call"]
-        Parse --> Validate["Validate params<br/>(serde.parse)"]
-        Validate --> BuildCtx["Build ToolContext"]
-        BuildCtx --> Handler["Execute handler"]
-    end
-
-    subgraph Result["Result Handling"]
-        Handler --> ToolResult["ToolResult"]
-        ToolResult --> Render["render()"]
-        Render --> Message["Message to LLM"]
-        ToolResult --> Event["ToolInvoked event"]
-    end
-
-    subgraph Failure["Failure Path"]
-        Validate -->|invalid| ErrorResult["ToolResult(success=False)"]
-        Handler -->|exception| ErrorResult
-        ErrorResult --> Message
-    end
-```
+- **Section-first**: Tools live within section hierarchy
+- **Single source of truth**: Definitions alongside documenting sections
+- **Type-safe**: Dataclass-based params and results
+- **Predictable failures**: Never abort evaluation; return structured errors
+- **Policy-governed**: Sequential dependencies enforced before execution
 
 ## Core Schemas
 
 ### Tool
 
-`Tool[ParamsT, ResultT]` describes a callable affordance:
+At `prompt/tool.py` (`Tool` class):
 
-```python
-@dataclass
-class Tool(Generic[ParamsT, ResultT]):
-    name: str                                    # ^[a-z0-9_-]{1,64}$
-    description: str                             # 1-200 chars
-    handler: ToolHandler[ParamsT, ResultT] | None
-    accepts_overrides: bool = True
-    examples: tuple[ToolExample[ParamsT, ResultT], ...] = ()
-```
+| Field | Description |
+| --- | --- |
+| `name` | `^[a-z0-9_-]{1,64}$` |
+| `description` | 1-200 chars |
+| `handler` | `ToolHandler[ParamsT, ResultT] \| None` |
+| `accepts_overrides` | Whether description overridable |
+| `examples` | `tuple[ToolExample, ...]` |
 
 Handler signature:
 
 ```python
-def handle_tool(
-    params: ParamsT,
-    *,
-    context: ToolContext,
-) -> ToolResult[ResultT]: ...
+def handle(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]: ...
 ```
 
 ### ToolResult
 
-`ToolResult[PayloadT]` models the data returned to orchestrators and the LLM:
+At `prompt/tool_result.py` (`ToolResult` class):
 
-```python
-@dataclass
-class ToolResult(Generic[PayloadT]):
-    message: str                           # Text forwarded to model
-    value: PayloadT | None                 # Typed payload (may be None)
-    success: bool = True                   # Normal vs. failure
-    exclude_value_from_context: bool = False  # Hide from provider
-```
+| Field | Description |
+| --- | --- |
+| `message` | Text forwarded to model |
+| `value` | Typed payload (may be None) |
+| `success` | Normal vs. failure |
+| `exclude_value_from_context` | Hide from provider |
 
-**Convenience Constructors:**
+**Factories:**
 
-Use these for common cases instead of the full constructor:
+- `ToolResult.ok(value, message)` - Success
+- `ToolResult.error(message)` - Failure
 
-```python
-# Success with typed value (most common)
-ToolResult.ok(MyResult(...), message="Done")
-
-# Failure with no value
-ToolResult.error("Something went wrong")
-```
-
-The full constructor form is needed when `exclude_value_from_context=True`.
-
-**Result Rendering Protocol:**
-
-```python
-class ToolRenderableResult(Protocol):
-    def render(self) -> str: ...
-```
-
-Default implementation serializes via `weakincentives.serde.dump`.
+Rendering via `render()` uses `serde.dump`.
 
 ### ToolContext
 
-Immutable snapshot passed to every handler:
+At `prompt/tool.py` (`ToolContext` class):
 
-```python
-@dataclass(slots=True, frozen=True)
-class ToolContext:
-    prompt: PromptProtocol[Any]
-    rendered_prompt: RenderedPromptProtocol[Any] | None
-    adapter: ProviderAdapterProtocol[Any]
-    session: SessionProtocol
-    deadline: Deadline | None = None
-    budget_tracker: BudgetTracker | None = None
+| Field | Description |
+| --- | --- |
+| `prompt` | Active prompt |
+| `rendered_prompt` | Rendered state |
+| `adapter` | Provider adapter |
+| `session` | Session for state |
+| `deadline` | Optional deadline |
+| `budget_tracker` | Optional budget tracker |
 
-    @property
-    def resources(self) -> ScopedResourceContext:
-        """Access resources from the prompt's resource context."""
-        return self.prompt.resources
+| Property | Description |
+| --- | --- |
+| `resources` | Access prompt's resource context |
+| `filesystem` | Shortcut for Filesystem resource |
+| `beat()` | Heartbeat for long operations |
 
-    @property
-    def filesystem(self) -> Filesystem | None:
-        """Shortcut for accessing the Filesystem resource."""
-        return self.resources.get_optional(Filesystem)
-```
-
-Tool handlers that need an event dispatcher should publish via `context.session.dispatcher`.
+Tool handlers publish events via `context.session.dispatcher`.
 
 ### Resource Access
 
-Tools access resources through the prompt's resource context:
+Tools access resources through prompt:
 
 ```python
 def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
-    # Access via resources property
     fs = context.resources.get(Filesystem)
-    http = context.resources.get(HTTPClient)
-
-    # Common resources have sugar properties
-    fs = context.filesystem  # Shorthand for context.resources.get_optional(Filesystem)
-
-    if fs is None:
-        return ToolResult(message="No filesystem available", value=None, success=False)
-
-    # Use resources...
-    content = fs.read("config.yaml")
-    return ToolResult(message="Done", value=Result(...), success=True)
+    # Or shorthand: fs = context.filesystem
 ```
-
-**Design rationale**: Resources are owned by the prompt and accessed via its
-resource context. The `ToolContext.resources` property delegates to
-`context.prompt.resources`. This ensures:
-
-- Single ownership (prompt owns lifecycle)
-- Consistent access pattern
-- Automatic cleanup when prompt context exits
 
 ### ToolExample
 
-Representative invocation for documentation:
+At `prompt/tool.py` (`ToolExample` class):
 
-```python
-@dataclass(slots=True, frozen=True)
-class ToolExample(Generic[ParamsT, ResultT]):
-    description: str   # <= 200 chars
-    input: ParamsT     # Params dataclass instance
-    output: ResultT    # Result dataclass instance
-```
+| Field | Description |
+| --- | --- |
+| `description` | ≤200 chars |
+| `input` | Params dataclass instance |
+| `output` | Result dataclass instance |
 
 ## Registration Lifecycle
 
 ### Section Integration
 
-`Section.__init__` accepts an optional `tools` sequence:
+Tools declared on sections:
 
 ```python
 section = MarkdownSection[Params](
     title="Guidance",
-    template="Use tools when needed.",
     key="guidance",
+    template="Use tools when needed.",
     tools=[lookup_tool, search_tool],
+    policies=[ReadBeforeWritePolicy()],
 )
 ```
 
 ### Prompt Rendering
 
-`Prompt` walks the section tree depth-first to validate tools:
+Validates:
 
-1. Duplicate names trigger `PromptValidationError`
-1. Examples validated against params/result dataclasses
-1. Declaration order cached for stable retrieval
+1. Duplicate names → `PromptValidationError`
+1. Examples against params/result dataclasses
+1. Declaration order cached
 
 `RenderedPrompt.tools` contains ordered tuple from enabled sections.
 
+## Tool Policies
+
+**Implementation:** `src/weakincentives/prompt/policy.py`
+
+Policies enforce sequential dependencies between tool invocations. Declares
+that tool B requires tool A first—unconditionally or keyed by parameter.
+
+### Guiding Principles
+
+- **Prompt-scoped declaration**: Bound to prompts alongside tools
+- **Session-scoped state**: Invocation history in session slices
+- **Composable**: Multiple policies can govern same tool; all must allow
+- **Fail-closed**: Denied calls return error without executing
+
+### ToolPolicy Protocol
+
+| Method/Property | Description |
+|-----------------|-------------|
+| `name` | Unique identifier |
+| `check(tool, params, *, context)` | Returns `PolicyDecision` |
+| `on_result(tool, params, result, *, context)` | Update state after success |
+
+### PolicyDecision
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `allowed` | `bool` | Whether to proceed |
+| `reason` | `str \| None` | Denial explanation |
+
+### PolicyState (Session Slice)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `policy_name` | `str` | Policy identifier |
+| `invoked_tools` | `frozenset[str]` | Successfully invoked tools |
+| `invoked_keys` | `frozenset[tuple[str, str]]` | (tool, key) pairs |
+
+### Built-in Policies
+
+#### SequentialDependencyPolicy
+
+Unconditional tool ordering: tool B requires tool A to have succeeded.
+
+```python
+policy = SequentialDependencyPolicy(
+    dependencies={
+        "deploy": frozenset({"test", "build"}),
+        "build": frozenset({"lint"}),
+    }
+)
+```
+
+#### ReadBeforeWritePolicy
+
+Parameter-keyed dependency for filesystem tools. Existing files must be read
+before overwritten. New files can be created freely.
+
+```python
+policy = ReadBeforeWritePolicy()
+# write_file("new.txt")      → OK (doesn't exist)
+# write_file("config.yaml")  → DENIED (exists, not read)
+# read_file("config.yaml")   → OK (records path)
+# write_file("config.yaml")  → OK (was read)
+```
+
+### Policy Integration
+
+```python
+template = PromptTemplate(
+    sections=[
+        MarkdownSection(
+            tools=[read_file, write_file],
+            policies=[ReadBeforeWritePolicy()],
+        ),
+        MarkdownSection(
+            tools=[lint, test, build, deploy],
+            policies=[SequentialDependencyPolicy(dependencies={...})],
+        ),
+    ],
+    policies=[...],  # Prompt-level policies
+)
+```
+
 ## Runtime Dispatch
 
-Adapters drive tool invocation using a shared dispatcher:
+Via `ToolExecutor` at `adapters/tool_executor.py`:
 
-1. **Registry lookup** - Resolve tool name against rendered prompt
-1. **Argument parsing** - Decode via `serde.parse(..., extra="forbid")`
-1. **Deadline check** - Refuse invocation if deadline elapsed
-1. **Context construction** - Build `ToolContext` from active state
-1. **Snapshot** - Capture session and resource state before execution
-1. **Handler execution** - Run with params/context pair
-1. **Restore on failure** - Rollback state if handler fails or raises
-1. **Telemetry** - Publish `ToolInvoked` event to `session.dispatcher`
-1. **Response assembly** - Return result to calling loop
+1. **Registry lookup** - Resolve tool name
+1. **Argument parsing** - `serde.parse(..., extra="forbid")`
+1. **Policy check** - All policies must allow (fail-closed)
+1. **Deadline check** - Refuse if elapsed
+1. **Context construction** - Build `ToolContext`
+1. **Snapshot** - Capture session and resource state
+1. **Handler execution** - Run with params/context
+1. **Policy update** - Call `on_result` for successful invocations
+1. **Restore on failure** - Rollback state
+1. **Telemetry** - Publish `ToolInvoked` to `session.dispatcher`
+1. **Response assembly** - Return result
 
-### Exception Handling
+### Execution Flow (Pseudocode)
 
-- Unexpected exceptions convert to `ToolResult(success=False, value=None)`
-- State is restored before returning error result
-- `ToolResult.message` contains error guidance for the LLM
+```python
+def execute_tool(call, *, context):
+    tool, params = resolve_and_parse(call)
+    policies = [*section.policies, *prompt.policies]
+
+    for policy in policies:
+        decision = policy.check(tool, params, context=context)
+        if not decision.allowed:
+            return ToolResult.error(decision.reason)
+
+    result = tool.handler(params, context=context)
+
+    if result.success:
+        for policy in policies:
+            policy.on_result(tool, params, result, context=context)
+
+    return result
+```
+
+### Policy State Management
+
+- **Snapshot/restore**: State captured with session snapshots
+- **Reset**: `session.reset()` clears policy state
+- **Isolation**: Each session has independent state
 
 ## Planning Tool Suite
 
-The planning tools let background agents maintain a session-scoped todo list.
+Session-scoped todo list at `contrib/tools/planning.py`.
 
 ### Data Model
 
-```python
-StepStatus = Literal["pending", "in_progress", "done"]
-PlanStatus = Literal["active", "completed"]
+At `contrib/tools/planning.py`:
 
-@dataclass(slots=True, frozen=True)
-class PlanStep:
-    step_id: int
-    title: str
-    status: StepStatus
-
-@dataclass(slots=True, frozen=True)
-class Plan:
-    objective: str
-    status: PlanStatus
-    steps: tuple[PlanStep, ...] = ()
-```
+| Type | Description |
+| --- | --- |
+| `StepStatus` | `"pending"`, `"in_progress"`, `"done"` |
+| `PlanStatus` | `"active"`, `"completed"` |
+| `PlanStep` | step_id, title, status |
+| `Plan` | objective, status, steps |
 
 ### Tools
 
 | Tool | Purpose |
-| ---------------------- | --------------------------- |
-| `planning_setup_plan` | Create or replace the plan |
-| `planning_add_step` | Append steps to active plan |
-| `planning_update_step` | Modify step title or status |
-| `planning_read_plan` | Retrieve current plan state |
+| --- | --- |
+| `planning_setup_plan` | Create or replace plan |
+| `planning_add_step` | Append steps |
+| `planning_update_step` | Modify step title/status |
+| `planning_read_plan` | Retrieve current state |
 
-### Tool Parameters
+### Parameters
 
-```python
-@dataclass(slots=True, frozen=True)
-class SetupPlan:
-    objective: str
-    initial_steps: tuple[str, ...] = ()
+At `contrib/tools/planning.py`:
 
-@dataclass(slots=True, frozen=True)
-class AddStep:
-    steps: tuple[str, ...]
-
-@dataclass(slots=True, frozen=True)
-class UpdateStep:
-    step_id: int
-    title: str | None = None
-    status: StepStatus | None = None
-
-@dataclass(slots=True, frozen=True)
-class ReadPlan:
-    pass
-```
+| Event | Fields |
+| --- | --- |
+| `SetupPlan` | objective, initial_steps |
+| `AddStep` | steps |
+| `UpdateStep` | step_id, title, status |
+| `ReadPlan` | (none) |
 
 ### Behavior
 
-- **Plan lifecycle**: `setup_plan` creates or replaces; others require existing
-- **Step IDs**: Incrementing integers (1, 2, 3...); never reused
-- **Auto-completion**: All steps `done` sets plan to `completed`
-- **Validation**: Titles non-empty and \<= 500 chars
+- `setup_plan` creates/replaces; others require existing plan
+- Step IDs: incrementing integers, never reused
+- All steps `done` → plan `completed`
+- Titles: non-empty, ≤500 chars
 
 ### Session Integration
 
-```python
-session = Session(dispatcher=dispatcher)
-section = PlanningToolsSection(session=session, accepts_overrides=False)
-# ... after tool calls ...
-plan = session[Plan].latest()
-```
-
-Note: `PlanningToolsSection` automatically registers reducers for `Plan`,
-`SetupPlan`, `AddStep`, and `UpdateStep` on the provided session. The
-`planning_read_plan` tool returns the `Plan` object (not `ReadPlan`).
+`PlanningToolsSection` at `contrib/tools/planning.py` auto-registers
+reducers for `Plan`, `SetupPlan`, `AddStep`, `UpdateStep`.
 
 ## Planning Strategies
 
-Strategies tune the instructional copy for different reasoning styles.
+At `contrib/tools/planning.py` (`PlanningStrategy` enum):
 
-### Strategy Enum
+| Strategy | Description |
+| --- | --- |
+| `REACT` | Alternate reasoning, tool calls, observations |
+| `PLAN_ACT_REFLECT` | Outline first, execute with reflections |
+| `GOAL_DECOMPOSE_ROUTE_SYNTHESISE` | Restate goal, decompose, route, synthesize |
 
-```python
-class PlanningStrategy(Enum):
-    REACT = "react"
-    PLAN_ACT_REFLECT = "plan_act_reflect"
-    GOAL_DECOMPOSE_ROUTE_SYNTHESISE = "goal_decompose_route_synthesise"
-```
-
-### Usage
-
-```python
-section = PlanningToolsSection(
-    session=session,
-    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
-)
-```
-
-### Strategy Descriptions
-
-**ReAct** (default):
-
-- Alternate between reasoning bursts, tool calls, and observations
-- Capture observations as plan step notes
-
-**Plan -> Act -> Reflect (PAR)**:
-
-- Outline entire plan first
-- Execute steps with reflections after each
-- Append reflections as plan notes
-
-**Goal -> Decompose -> Route -> Synthesize**:
-
-- Restate goal in own words
-- Break into sub-problems before tool routing
-- Synthesize results into cohesive answer
-
-### Rendering Rules
-
-- Same markdown structure across strategies
-- Only mindset paragraphs vary
-- Tool usage references unchanged
-
-## Example Registration
-
-```python
-@dataclass
-class LookupParams:
-    entity_id: str = field(metadata={"description": "ID to fetch"})
-
-@dataclass
-class LookupResult:
-    entity_id: str
-    url: str
-
-def lookup_handler(
-    params: LookupParams,
-    *,
-    context: ToolContext,
-) -> ToolResult[LookupResult]:
-    result = LookupResult(entity_id=params.entity_id, url="https://...")
-    return ToolResult(message=f"Fetched {result.entity_id}", value=result)
-
-lookup_tool = Tool[LookupParams, LookupResult](
-    name="lookup_entity",
-    description="Fetch information for an entity ID.",
-    handler=lookup_handler,
-    examples=(
-        ToolExample(
-            description="Basic lookup",
-            input=LookupParams(entity_id="abc-123"),
-            output=LookupResult(entity_id="abc-123", url="https://..."),
-        ),
-    ),
-)
-
-template = PromptTemplate(
-    ns="examples/tooling",
-    key="demo",
-    sections=[
-        MarkdownSection(
-            title="Guidance",
-            key="guidance",
-            template="Use tools for context.",
-            tools=[lookup_tool],
-        ),
-    ],
-)
-prompt = Prompt(template)
-```
+Same markdown structure; only mindset paragraphs vary.
 
 ## Failure Semantics
 
@@ -393,49 +310,40 @@ prompt = Prompt(template)
 - `success=True`: Normal payload in `value`
 - `success=False`: Error condition; `value=None` unless error payload
 
-### Adapter Behavior
+### Exception Handling
 
-Exception handling is nuanced by exception type:
-
-- `ToolValidationError` → Wrap as `ToolResult(success=False)`
-- `VisibilityExpansionRequired` → Re-raise (not wrapped)
-- `PromptEvaluationError` → Re-raise (not wrapped)
-- `DeadlineExceededError` → Convert to `PromptEvaluationError`
-- `TypeError` → Wrap as `ToolResult(success=False)` with descriptive message
-- Other exceptions → Wrap as `ToolResult(success=False)`
+| Exception | Behavior |
+| --- | --- |
+| `ToolValidationError` | Wrap as `ToolResult(success=False)` |
+| `VisibilityExpansionRequired` | Re-raise |
+| `PromptEvaluationError` | Re-raise |
+| `DeadlineExceededError` | Convert to `PromptEvaluationError` |
+| `TypeError` | Wrap with descriptive message |
+| Other | Wrap as `ToolResult(success=False)` |
 
 All failure paths restore session and resource state before returning.
 
-### Handler Signature Validation
+### Handler Validation
 
-Tool handlers are validated using a **fail-fast** approach:
+Fail-fast approach:
 
-- **Development time**: pyright strict mode catches signature mismatches
-- **Runtime**: TypeErrors during execution are caught and converted to
-  `ToolResult(success=False)` with an informative error message
+- **Development**: pyright strict mode catches mismatches
+- **Runtime**: TypeErrors converted to failed results
 
-This approach eliminates redundant runtime validation while ensuring type safety
-through static analysis. The handler signature must match:
-
-```python
-def handler(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]: ...
-```
-
-If a handler with an incorrect signature is invoked at runtime, the resulting
-TypeError is logged and returned as a failed tool result.
-
-Tool failures forward error messages to the LLM via `role: "tool"` response.
-Original exceptions are logged for observability.
-
-### Session and Telemetry
-
-- Reducers tolerate `ToolResult.value is None`
-- `ToolInvoked` events fire for all outcomes
-- `success` flag determines slice routing
+Tool failures forward error messages to LLM via `role: "tool"` response.
 
 ## Limitations
 
 - **Synchronous handlers**: Execute on provider loop thread
 - **Dataclass-only schemas**: No TypedDict or arbitrary mappings
-- **Payload visibility**: `exclude_value_from_context` not a security boundary
+- **Payload visibility**: `exclude_value_from_context` not security boundary
 - **Deadline enforcement**: Checked before entry, not per-invocation
+- **Policy synchronous**: Policy checks run on tool execution thread
+- **Policy session-scoped**: No cross-session persistence
+- **No policy rollback notification**: Policies not notified on restore
+
+## Related Specifications
+
+- `specs/POLICIES_OVER_WORKFLOWS.md` - Design philosophy
+- `specs/PROMPTS.md` - Prompt system and sections
+- `specs/SESSIONS.md` - Session state

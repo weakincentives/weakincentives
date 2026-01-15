@@ -95,10 +95,8 @@ a goal at any time.
   persistence—when modifying slice storage or adding persistence backends.
 - **THREAD_SAFETY.md**: Thread safety guarantees—when touching concurrency
   helpers or shared state.
-- **TOOLS.md**: Tool catalog, planning tools, and strategies—before adding or
-  modifying tools.
-- **TOOL_POLICIES.md**: Sequential tool dependencies (read-before-write, keyed
-  constraints)—when adding policy enforcement to tools.
+- **TOOLS.md**: Tool runtime, policies, sequential dependencies, planning
+  tools—before adding or modifying tools.
 - **FEEDBACK_PROVIDERS.md**: Ongoing progress feedback for unattended
   agents—stall detection, drift monitoring, and context injection.
 - **FORMAL_VERIFICATION.md**: Embedding TLA+ specifications in Python using
@@ -108,6 +106,21 @@ a goal at any time.
   and property-based tests—when modifying mailbox implementations.
 - **WORKSPACE.md**: VFS, Podman sandbox, asteval, and workspace digest—when
   editing workspace tooling.
+
+## Spec Writing Conventions
+
+When maintaining specs:
+
+- **File references**: Use `path/to/file.py` without line numbers (line numbers
+  drift during refactors). Run `make validate-spec-refs` to verify references.
+- **Code examples**: Include when showing non-obvious usage patterns, type
+  relationships, or integration points. Omit for straightforward APIs where the
+  type table suffices.
+- **Tables over prose**: Use tables for type fields, method signatures, and
+  configuration options. Reserve prose for constraints, invariants, and flow
+  descriptions.
+- **Keep concise**: Specs are reference material, not tutorials. Link to
+  `guides/` for walkthroughs.
 
 ## Guides Index (how-to material)
 
