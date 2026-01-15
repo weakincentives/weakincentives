@@ -401,24 +401,24 @@ class ExperimentComparison:
 ### Basic A/B Test
 
 1. Define baseline and treatment experiments
-2. Submit dataset under both experiments using `submit_experiments()`
-3. Run EvalLoop to process all requests
-4. Collect results into `EvalReport`
-5. Use `report.compare_experiments()` to compute deltas
+1. Submit dataset under both experiments using `submit_experiments()`
+1. Run EvalLoop to process all requests
+1. Collect results into `EvalReport`
+1. Use `report.compare_experiments()` to compute deltas
 
 ### Feature Flag Experiment
 
 1. Create experiments with different flag values
-2. In `MainLoop.prepare()`, check flags and modify behavior accordingly
-3. Submit and evaluate as above
+1. In `MainLoop.prepare()`, check flags and modify behavior accordingly
+1. Submit and evaluate as above
 
 ### Prompt Optimization
 
 1. Seed baseline overrides to `PromptOverridesStore`
-2. Create variant tags (copy/modify override files)
-3. Create experiments pointing to different tags
-4. Submit dataset under all experiment variants
-5. Compare results to identify best-performing prompts
+1. Create variant tags (copy/modify override files)
+1. Create experiments pointing to different tags
+1. Submit dataset under all experiment variants
+1. Compare results to identify best-performing prompts
 
 See `specs/PROMPT_OPTIMIZATION.md` for detailed override workflow.
 
@@ -444,21 +444,21 @@ through requests. The prompt overrides they reference are persisted:
 1. **Experiment names are unique within an eval run**: Results are grouped by
    `experiment_name`; duplicates would conflate results.
 
-2. **Overrides tags must exist**: If `experiment.overrides_tag` references a
+1. **Overrides tags must exist**: If `experiment.overrides_tag` references a
    non-existent tag, prompt rendering falls back to source content (no override
    applied). This is silent—check tag existence explicitly if needed.
 
-3. **Flags are not validated**: Flag names and values are arbitrary. Invalid
+1. **Flags are not validated**: Flag names and values are arbitrary. Invalid
    flags are silently ignored unless implementations explicitly check them.
 
-4. **Experiments are immutable**: Use `with_flag()` and `with_tag()` to create
+1. **Experiments are immutable**: Use `with_flag()` and `with_tag()` to create
    modified copies rather than mutating.
 
-5. **EvalRequest requires experiment**: Unlike MainLoopRequest where experiment
+1. **EvalRequest requires experiment**: Unlike MainLoopRequest where experiment
    is optional (for backward compatibility), EvalRequest requires an experiment
    to ensure all eval results are attributable.
 
-6. **Experiment equality is value-based**: Two experiments with identical fields
+1. **Experiment equality is value-based**: Two experiments with identical fields
    are considered equal, even if constructed separately.
 
 ## Relationship to RunContext

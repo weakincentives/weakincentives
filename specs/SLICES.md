@@ -435,6 +435,7 @@ In-memory tuple-backed slice providing O(1) reads and O(n) appends. Implements b
 **Implementation:** `src/weakincentives/runtime/session/slices.py`
 
 **Key characteristics:**
+
 - Zero I/O overhead
 - Backed by Python tuples (immutable)
 - Serves as its own SliceView
@@ -453,6 +454,7 @@ JSONL file-backed slice for persistent storage. Each item stored as a single JSO
 **Implementation:** `src/weakincentives/runtime/session/slices.py`
 
 **Key characteristics:**
+
 - File-based persistence with append-optimized I/O
 - Lazy view with optimized `is_empty`, `latest()`, streaming iteration
 - Write-through cache invalidation
@@ -460,6 +462,7 @@ JSONL file-backed slice for persistent storage. Each item stored as a single JSO
 - Uses `weakincentives.serde` for serialization
 
 **View optimizations:**
+
 - `is_empty`: O(1) file stat check
 - `latest()`: Can seek to last line (implementation uses cache)
 - `__iter__`: Streams items without loading all into memory
@@ -471,6 +474,7 @@ Factory that creates JSONL file-backed slices. Each slice type gets its own file
 **Implementation:** `src/weakincentives/runtime/session/slices.py`
 
 **Configuration:**
+
 - `base_dir: Path | None` - Directory for slice files (temp dir if None)
 - `directory` property - Returns resolved directory path for debugging
 

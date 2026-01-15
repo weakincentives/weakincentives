@@ -206,6 +206,7 @@ class Heartbeat:
 ```
 
 **Observer Pattern**: The callback mechanism allows the same heartbeat to:
+
 - Extend message visibility (see `specs/LEASE_EXTENDER.md`)
 - Update metrics
 - Trigger custom monitoring logic

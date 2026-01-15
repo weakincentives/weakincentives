@@ -14,7 +14,7 @@ The verification framework provides two complementary layers:
    implementation using the `@formal_spec` decorator. The spec is extracted and
    exhaustively checked by the TLC model checker for safety invariants.
 
-2. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
+1. **Property-Based Testing**: Hypothesis-based stateful tests that verify the
    actual Python implementation against the same invariants, and also verify
    liveness properties (e.g., eventual requeue) that TLC cannot check.
 
@@ -286,9 +286,9 @@ These are covered by property-based testing.
 Property-based tests complement TLC verification by:
 
 1. Testing the actual Python implementation (not just the model)
-2. Verifying liveness properties (eventual redelivery, no deadlocks)
-3. Running unbounded scenarios (hundreds of messages, long-running workers)
-4. Testing integration with real Redis (network failures, script errors)
+1. Verifying liveness properties (eventual redelivery, no deadlocks)
+1. Running unbounded scenarios (hundreds of messages, long-running workers)
+1. Testing integration with real Redis (network failures, script errors)
 
 ### Test Structure
 
@@ -355,10 +355,10 @@ pytest tests/contrib/mailbox/test_redis_mailbox_properties.py --hypothesis-seed=
 ### Development Workflow
 
 1. **Design changes**: Update embedded `@formal_spec` in `_redis.py`
-2. **Extract TLA+**: Run `make extract-tla` to generate `.tla` files
-3. **Model check**: Run `make verify-mailbox` (TLC checks invariants)
-4. **Property tests**: Run `make test-redis-properties` (Hypothesis checks implementation)
-5. **Full test suite**: Run `make test` (includes unit tests + property tests)
+1. **Extract TLA+**: Run `make extract-tla` to generate `.tla` files
+1. **Model check**: Run `make verify-mailbox` (TLC checks invariants)
+1. **Property tests**: Run `make test-redis-properties` (Hypothesis checks implementation)
+1. **Full test suite**: Run `make test` (includes unit tests + property tests)
 
 ### CI Pipeline
 
@@ -385,9 +385,9 @@ See `.github/workflows/verify.yml` for complete CI configuration.
 Update the embedded `@formal_spec` when:
 
 1. **Lua script changes**: Any modification to `_LUA_SEND`, `_LUA_RECEIVE`, etc.
-2. **State structure changes**: Adding/removing Redis keys, changing data types
-3. **Invariant changes**: New invariants or relaxed constraints
-4. **Atomicity changes**: Operations that were separate become atomic or vice versa
+1. **State structure changes**: Adding/removing Redis keys, changing data types
+1. **Invariant changes**: New invariants or relaxed constraints
+1. **Atomicity changes**: Operations that were separate become atomic or vice versa
 
 **Critical**: The embedded spec must stay in sync with Lua script implementation.
 
@@ -396,9 +396,9 @@ Update the embedded `@formal_spec` when:
 Update `test_redis_mailbox_properties.py` when:
 
 1. **New operations**: Added mailbox methods (e.g., `peek()`, `purge()`)
-2. **New invariants**: Corresponding property checks needed
-3. **Bug fixes**: Add regression test for the specific failure case
-4. **Performance changes**: Timeout values, reaper intervals
+1. **New invariants**: Corresponding property checks needed
+1. **Bug fixes**: Add regression test for the specific failure case
+1. **Performance changes**: Timeout values, reaper intervals
 
 ### Verification Checklist
 
@@ -418,16 +418,17 @@ Before merging changes to `RedisMailbox`:
 The verification relies on these Redis guarantees:
 
 1. **Lua script atomicity**: Scripts execute atomically, no interleaving
-2. **LIST operations**: LPUSH/RPOP are atomic
-3. **HSET/HGET/HDEL**: Hash operations are atomic
-4. **ZADD/ZREM/ZRANGEBYSCORE**: Sorted set operations are atomic
-5. **No clock skew**: Redis TIME returns monotonic timestamps
+1. **LIST operations**: LPUSH/RPOP are atomic
+1. **HSET/HGET/HDEL**: Hash operations are atomic
+1. **ZADD/ZREM/ZRANGEBYSCORE**: Sorted set operations are atomic
+1. **No clock skew**: Redis TIME returns monotonic timestamps
 
 ### Cluster Mode Assumptions
 
 **Current scope**: Verification assumes single Redis instance or Redis Sentinel.
 
 **Redis Cluster limitations**:
+
 - Multi-key operations require keys to hash to same slot
 - Current implementation uses a common prefix (`{mailbox:queue_id}`) to ensure
   slot locality

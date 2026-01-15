@@ -245,6 +245,7 @@ notifications when work is happening. See `specs/HEALTH.md` for the complete
 `Heartbeat` definition and usage.
 
 **Key integration points**:
+
 - `LeaseExtender._attach()` registers `_on_beat` callback via
   `heartbeat.add_callback()`
 - `LeaseExtender._detach()` unregisters via `heartbeat.remove_callback()`

@@ -136,6 +136,7 @@ class Binding[T]:
 ```
 
 **Provider signature:**
+
 ```python
 def my_provider(resolver: ResourceResolver) -> MyService:
     config = resolver.get(Config)
@@ -213,6 +214,7 @@ class ResourceRegistry:
 ```
 
 **Key methods:**
+
 - `of(*bindings)` - Create registry from bindings
 - `build(mapping)` - Create from pre-constructed instances
 - `merge(other, strict=False)` - Compose registries
@@ -352,17 +354,20 @@ class ProviderError(ResourceError):
 Prompts own their resource lifecycle via context manager protocol:
 
 **Pattern:**
+
 1. Template defines base resources via `PromptTemplate.resources`
-2. Sections contribute resources via their `resources()` method
-3. Bind-time resources override via `prompt.bind(resources=...)`
-4. Access resources within `with prompt.resources:` context
+1. Sections contribute resources via their `resources()` method
+1. Bind-time resources override via `prompt.bind(resources=...)`
+1. Access resources within `with prompt.resources:` context
 
 **Resource collection precedence (lowest to highest):**
+
 1. Template resources - `PromptTemplate.resources`
-2. Section resources - Each section's `resources()` method (depth-first)
-3. Bind-time resources - Passed to `prompt.bind(resources=...)` (highest)
+1. Section resources - Each section's `resources()` method (depth-first)
+1. Bind-time resources - Passed to `prompt.bind(resources=...)` (highest)
 
 **Example structure:**
+
 ```python
 # 1. Define template with resources
 template = PromptTemplate[Output](
@@ -385,6 +390,7 @@ with prompt.resources:
 ```
 
 **Conflict detection:**
+
 - Use `registry.conflicts(other)` to inspect overlaps
 - Use `registry.merge(other, strict=True)` to enforce uniqueness during development
 
@@ -395,11 +401,13 @@ See `src/weakincentives/prompt/prompt.py` for full implementation.
 ### Provider Patterns
 
 **Simple provider:**
+
 ```python
 Binding(Config, lambda r: Config.from_env())
 ```
 
 **Provider with dependencies:**
+
 ```python
 Binding(Service, lambda r: Service(
     config=r.get(Config),
@@ -408,6 +416,7 @@ Binding(Service, lambda r: Service(
 ```
 
 **Pre-constructed instance:**
+
 ```python
 Binding.instance(Filesystem, InMemoryFilesystem())
 # Or use convenience method:
@@ -415,6 +424,7 @@ ResourceRegistry.build({Filesystem: InMemoryFilesystem()})
 ```
 
 **Eager initialization (validate at startup):**
+
 ```python
 Binding(
     Config,
@@ -426,6 +436,7 @@ Binding(
 ### Resolution Patterns
 
 **Basic resolution:**
+
 ```python
 registry = ResourceRegistry.of(bindings...)
 with registry.open() as ctx:
@@ -433,6 +444,7 @@ with registry.open() as ctx:
 ```
 
 **Tool-call scope:**
+
 ```python
 with registry.open() as ctx:
     with ctx.tool_scope() as resolver:
@@ -440,6 +452,7 @@ with registry.open() as ctx:
 ```
 
 **Optional resolution:**
+
 ```python
 fs = ctx.get_optional(Filesystem)
 if fs is not None:
@@ -469,6 +482,7 @@ for implementation.
 The resource registry supports testing via:
 
 **Test doubles:**
+
 ```python
 # Replace real implementations with mocks
 test_registry = ResourceRegistry.build({
@@ -478,6 +492,7 @@ test_registry = ResourceRegistry.build({
 ```
 
 **Cache inspection:**
+
 ```python
 with registry.open() as ctx:
     service = ctx.get(Service)
@@ -485,6 +500,7 @@ with registry.open() as ctx:
 ```
 
 **Lifecycle verification:**
+
 ```python
 resource = CloseableResource()
 registry = ResourceRegistry.of(Binding.instance(CloseableResource, resource))

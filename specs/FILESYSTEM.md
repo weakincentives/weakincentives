@@ -611,11 +611,12 @@ All backends share these characteristics:
 root. This directory is:
 
 1. Created on the host filesystem at initialization
-2. Hydrated with host mounts (files copied in eagerly)
-3. Bind-mounted into containers at `/workspace`
-4. Backed by a `HostFilesystem` instance for protocol compliance
+1. Hydrated with host mounts (files copied in eagerly)
+1. Bind-mounted into containers at `/workspace`
+1. Backed by a `HostFilesystem` instance for protocol compliance
 
 This design ensures:
+
 - Filesystem operations work before containers are started
 - Changes persist across container restarts
 - Both host and container have consistent filesystem views
