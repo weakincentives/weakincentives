@@ -109,6 +109,21 @@ a goal at any time.
 - **WORKSPACE.md**: VFS, Podman sandbox, asteval, and workspace digest—when
   editing workspace tooling.
 
+## Spec Writing Conventions
+
+When maintaining specs:
+
+- **File references**: Use `path/to/file.py` without line numbers (line numbers
+  drift during refactors). Run `make validate-spec-refs` to verify references.
+- **Code examples**: Include when showing non-obvious usage patterns, type
+  relationships, or integration points. Omit for straightforward APIs where the
+  type table suffices.
+- **Tables over prose**: Use tables for type fields, method signatures, and
+  configuration options. Reserve prose for constraints, invariants, and flow
+  descriptions.
+- **Keep concise**: Specs are reference material, not tutorials. Link to
+  `guides/` for walkthroughs.
+
 ## Guides Index (how-to material)
 
 - **guides/code-review-agent.md**: End-to-end walkthrough of building a code
