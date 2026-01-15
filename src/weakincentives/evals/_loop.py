@@ -35,7 +35,6 @@ from ..runtime.mailbox import (
 )
 from ..runtime.watchdog import Heartbeat
 from ._evaluators import is_session_aware
-from ._experiment import Experiment
 from ._types import EvalRequest, EvalResult, Evaluator, Score, SessionEvaluator
 
 if TYPE_CHECKING:
@@ -53,14 +52,9 @@ class EvalLoopConfig:
     and after each sample extend the message lease, preventing timeout during
     long evaluation runs. EvalLoop's heartbeat is passed to MainLoop.execute()
     so that all tool/adapter beats extend the evaluation message's lease.
-
-    The ``default_experiment`` field provides a fallback experiment if not
-    specified in the request. Note that EvalRequest.experiment is required,
-    so this is only used when constructing results if request data is malformed.
     """
 
     lease_extender: LeaseExtenderConfig | None = None
-    default_experiment: Experiment | None = None
 
 
 class EvalLoop[InputT, OutputT, ExpectedT]:
