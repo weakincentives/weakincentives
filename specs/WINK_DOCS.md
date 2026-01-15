@@ -5,7 +5,8 @@
 The `wink docs` CLI subcommand provides access to bundled documentation for
 users who install WINK as a package, enabling LLM-assisted workflows.
 
-**Implementation:** `src/weakincentives/cli/docs.py`
+**Implementation:** `src/weakincentives/cli/wink.py` (`_read_doc`, `_read_example`,
+`_read_specs`, `_handle_docs`)
 
 ## CLI Interface
 

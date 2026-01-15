@@ -13,7 +13,7 @@ Core at `runtime/mailbox/`.
 
 ### Mailbox Protocol
 
-At `runtime/mailbox/protocol.py`:
+At `runtime/mailbox/_types.py`:
 
 | Method | Description |
 | --- | --- |
@@ -110,17 +110,16 @@ MainLoop receives requests mailbox; response routing derives from `reply_to`.
 | --- | --- | --- |
 | `InMemoryMailbox` | Dict | Testing, single process |
 | `RedisMailbox` | Redis | Multi-process, self-hosted |
-| `SQSMailbox` | AWS SQS | Production, managed |
 
 ### Backend Comparison
 
-| Aspect | SQS Standard | SQS FIFO | Redis | InMemory |
-| --- | --- | --- | --- | --- |
-| Ordering | Best-effort | Strict | FIFO | FIFO |
-| Long poll max | 20s | 20s | ∞ | ∞ |
-| Visibility max | 12h | 12h | ∞ | ∞ |
-| Count accuracy | ~1min lag | ~1min | Exact | Exact |
-| Durability | Replicated | Replicated | Config | None |
+| Aspect | Redis | InMemory |
+| --- | --- | --- |
+| Ordering | FIFO | FIFO |
+| Long poll max | ∞ | ∞ |
+| Visibility max | ∞ | ∞ |
+| Count accuracy | Exact | Exact |
+| Durability | Config | None |
 
 ### RedisMailbox Data Structures
 
@@ -144,8 +143,8 @@ Hash tags ensure co-location in Redis Cluster.
 ## Limitations
 
 - **At-least-once only**: No exactly-once; consumers must be idempotent
-- **Ordering varies**: SQS Standard best-effort; use FIFO or Redis for strict
-- **No built-in DLQ**: Configure via `DLQConfig`; see `specs/DLQ.md`
+- **FIFO ordering only**: Both implementations provide strict ordering
+- **No built-in DLQ**: See `specs/DLQ.md` for planned design
 - **No deduplication**: Handle at application level
 - **No transactions**: Send and receive independent
 

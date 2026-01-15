@@ -6,7 +6,9 @@ Enable systematic evaluation of agent behavior variants through named
 experiments. Bundles prompt overrides tag with feature flags for A/B testing,
 optimization runs, and controlled rollouts.
 
-**Implementation:** `src/weakincentives/evals/_types.py`
+**Implementation:**
+- `src/weakincentives/evals/_experiment.py` - Experiment class
+- `src/weakincentives/evals/_types.py` - EvalRequest, EvalResult, EvalReport, ExperimentComparison
 
 ## Core Type
 

@@ -6,7 +6,7 @@
 distributed systems. Used by Redis mailboxes where `reply_to` references
 serialize to names, not actual mailbox instances.
 
-**Implementation:** `src/weakincentives/runtime/mailbox/resolver.py`
+**Implementation:** `src/weakincentives/runtime/mailbox/_resolver.py`
 
 **Use for:** Redis/distributed backends where mailbox names are serialized.
 

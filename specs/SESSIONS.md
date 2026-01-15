@@ -17,18 +17,18 @@ lifecycle. Core implementation in `src/weakincentives/runtime/session/session.py
 
 ### Session Class
 
-Core container at `runtime/session/session.py:159-952`:
+Core container at `runtime/session/session.py`:
 
-| Method | Line | Description |
-| --- | --- | --- |
-| `__init__` | 186-236 | Initialize with dispatcher, parent, session_id, tags |
-| `dispatch()` | 442-472 | Broadcast event to all matching reducers |
-| `__getitem__()` | 368-396 | Slice accessor via `session[Plan]` |
-| `install()` | 399-435 | Install declarative state slice with @reducer methods |
-| `snapshot()` | 696-750 | Capture immutable state snapshot |
-| `reset()` | 480-506 | Clear all slices |
-| `restore()` | 509-562 | Restore from snapshot |
-| `clone()` | 566-610 | Create new session with different dispatcher/parent |
+| Method | Description |
+| --- | --- |
+| `__init__` | Initialize with dispatcher, parent, session_id, tags |
+| `dispatch()` | Broadcast event to all matching reducers |
+| `__getitem__()` | Slice accessor via `session[Plan]` |
+| `install()` | Install declarative state slice with @reducer methods |
+| `snapshot()` | Capture immutable state snapshot |
+| `reset()` | Clear all slices |
+| `restore()` | Restore from snapshot |
+| `clone()` | Create new session with different dispatcher/parent |
 
 ### Reducers
 
@@ -63,7 +63,7 @@ Convenience methods dispatch internally:
 
 ### System Mutation Events
 
-Defined at `runtime/session/slices/_ops.py`:
+Defined at `runtime/session/slice_mutations.py`:
 
 | Event | Purpose |
 | --- | --- |
@@ -72,7 +72,7 @@ Defined at `runtime/session/slices/_ops.py`:
 
 ## Declarative State Slices
 
-The `@reducer` decorator at `runtime/session/session.py:85-156` enables co-located
+The `@reducer` decorator at `runtime/session/state_slice.py` enables co-located
 reducers on dataclasses:
 
 ```python
@@ -99,7 +99,7 @@ Optional `initial` factory enables handling events when slice is empty.
 
 ### InProcessDispatcher
 
-At `runtime/events/__init__.py:56-105`:
+At `runtime/events/__init__.py`:
 
 - `subscribe(event_type, handler)` - Register handler
 - `dispatch(event)` → `DispatchResult` with handler results/errors
@@ -108,15 +108,15 @@ At `runtime/events/__init__.py:56-105`:
 
 At `runtime/events/types.py` and `runtime/events/__init__.py`:
 
-| Event | Line | When Emitted |
-| --- | --- | --- |
-| `PromptRendered` | `__init__.py:123-136` | After render, before provider call |
-| `PromptExecuted` | `__init__.py:109-119` | After all tools and parsing |
-| `ToolInvoked` | `types.py:128-154` | After each tool handler |
+| Event | When Emitted |
+| --- | --- |
+| `PromptRendered` | After render, before provider call |
+| `PromptExecuted` | After all tools and parsing |
+| `ToolInvoked` | After each tool handler |
 
 ### DispatchResult
 
-At `runtime/events/types.py:79-109`:
+At `runtime/events/types.py`:
 - `ok` property - True if no handler errors
 - `raise_if_errors()` - Optional strict mode
 
@@ -128,7 +128,7 @@ At `runtime/events/types.py:79-109`:
 
 ## Snapshots
 
-Capture/restore at `runtime/session/session.py:696-750`:
+Capture/restore at `runtime/session/session.py`:
 
 - `session.snapshot()` → `Snapshot`
 - `snapshot.to_json()` / `Snapshot.from_json()`

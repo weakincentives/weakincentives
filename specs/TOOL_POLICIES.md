@@ -5,7 +5,7 @@
 Tool policies enforce sequential dependencies between tool invocations. Declares
 that tool B requires tool A first—unconditionally or keyed by parameter.
 
-**Implementation:** `src/weakincentives/prompt/policies.py`
+**Implementation:** `src/weakincentives/prompt/policy.py`
 
 ## Guiding Principles
 

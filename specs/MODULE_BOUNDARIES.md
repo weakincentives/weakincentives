@@ -103,18 +103,19 @@ make validate-modules
 
 ## Migration Patterns
 
-**Fixing layer violations:**
+**Fixing layer violations** (illustrative pattern):
 ```python
+# Use TYPE_CHECKING to import higher-layer types for annotations only
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from weakincentives.adapters.core import ProviderAdapter
+    from weakincentives.adapters.core import SomeAdapter
 ```
 
-**Fixing circular dependencies:**
+**Fixing circular dependencies** (illustrative pattern):
 ```python
-class SessionProtocol(Protocol):
-    """Minimal interface."""
-    ...
+# Define a protocol with minimal interface instead of importing concrete class
+class SomeProtocol(Protocol):
+    def method(self) -> Result: ...
 ```
 
 ## Related Specifications

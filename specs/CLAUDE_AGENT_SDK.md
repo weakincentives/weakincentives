@@ -8,7 +8,7 @@
 CLI) while maintaining orchestration state in a Session. Provides Claude Code
 native tools, MCP tool bridging, structured output, and optional isolation.
 
-**Implementation:** `src/weakincentives/adapters/claude_agent_sdk.py`
+**Implementation:** `src/weakincentives/adapters/claude_agent_sdk/`
 
 ## Requirements
 
@@ -128,7 +128,7 @@ adapter = ClaudeAgentSDKAdapter(
 ### MCP Tool Exposure
 
 Attach `Tool` to sections; they're automatically bridged as MCP tools under
-`"wink"` server. See `prompt/tool.py:91-658` for Tool definition.
+`"wink"` server. See `prompt/tool.py` for `Tool` definition.
 
 ## Operational Notes
 

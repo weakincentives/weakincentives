@@ -138,8 +138,8 @@ MainLoop, scores with evaluator, sends `EvalResult` to results mailbox.
 
 | Function | Description |
 |----------|-------------|
-| `submit_dataset(dataset, requests)` | Submit all samples |
-| `collect_results(results, count, timeout)` | Collect into report |
+| `submit_dataset(dataset, experiment, requests)` | Submit all samples |
+| `collect_results(results, expected_count, *, timeout_seconds)` | Collect into report |
 
 ## Distributed Deployment
 

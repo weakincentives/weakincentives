@@ -7,7 +7,7 @@ implementations (in-memory, file-backed) while maintaining Redux-style semantics
 Factories configure per `SlicePolicy`, allowing logs to persist to disk while
 keeping working state in memory.
 
-**Implementation:** `src/weakincentives/runtime/session/slices.py`
+**Implementation:** `src/weakincentives/runtime/session/slices/`
 
 ## Guiding Principles
 
@@ -86,7 +86,7 @@ reducer(view: SliceView[S], event: Event, *, context: ReducerContext) -> SliceOp
 ### Declarative Reducers
 
 The `@reducer` decorator enables method-style reducers on frozen dataclasses.
-Methods return `SliceOp` directly. See `runtime/session/reducers.py:39-89`.
+Methods return `SliceOp` directly. See `runtime/session/state_slice.py`.
 
 ## Implementations
 

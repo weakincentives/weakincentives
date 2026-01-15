@@ -7,7 +7,8 @@ processing by extending the lease when heartbeats occur. Ties lease extension to
 proof-of-work: if the worker beats, the lease extends; if stuck (no beats), the
 lease expires naturally.
 
-**Implementation:** `src/weakincentives/runtime/main_loop.py`
+**Implementation:** `src/weakincentives/runtime/lease_extender.py` (LeaseExtender,
+LeaseExtenderConfig); `main_loop.py` for integration
 
 ## Core Types
 

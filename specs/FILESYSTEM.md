@@ -78,8 +78,8 @@ Adapters construct `ToolContext` with filesystem from prompt.
 
 | Backend | Description | Implementation |
 |---------|-------------|----------------|
-| `InMemoryFilesystem` | Session-scoped in-memory with structural sharing | `filesystem/inmemory.py` |
-| `HostFilesystem` | Sandboxed host directory with path validation, git snapshots | `filesystem/host.py` |
+| `InMemoryFilesystem` | Session-scoped in-memory with structural sharing | `contrib/tools/filesystem_memory.py` |
+| `HostFilesystem` | Sandboxed host directory with path validation, git snapshots | `filesystem/_host.py` |
 | `PodmanSandboxSection` | Containerized workspace using overlay + HostFilesystem | `contrib/tools/podman.py` |
 
 ### Design Characteristics
@@ -160,16 +160,16 @@ For copying, always prefer `read_bytes()` / `write_bytes()`.
 
 ### Protocol Compliance
 
-`FilesystemProtocolTests` validates all protocol methods. Uses abstract factory
+`FilesystemValidationSuite` validates all protocol methods. Uses abstract factory
 for concrete backend testing.
 
-**Test suite:** `tests/test_filesystem/test_protocol_compliance.py`
+**Test suite:** `tests/tools/test_filesystem.py`
 
-### Mock Filesystem
+### Test Helpers
 
-`MockFilesystem` records calls and allows pre-configured responses.
+Test fixtures and utilities for filesystem testing.
 
-**Implementation:** `tests/helpers/mock_filesystem.py`
+**Implementation:** `tests/helpers/filesystem.py`
 
 ## Limitations
 

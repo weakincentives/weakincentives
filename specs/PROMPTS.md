@@ -18,7 +18,7 @@ resource lifecycle management. Core at `prompt/prompt.py`.
 
 ### PromptTemplate
 
-At `prompt/prompt.py:94-278`:
+At `prompt/prompt.py` (`PromptTemplate` class):
 
 | Field | Description |
 | --- | --- |
@@ -32,7 +32,7 @@ Section keys must match: `^[a-z0-9][a-z0-9._-]{0,63}$`
 
 ### Prompt
 
-At `prompt/prompt.py:280-562`:
+At `prompt/prompt.py` (`Prompt` class):
 
 | Method | Description |
 | --- | --- |
@@ -201,7 +201,7 @@ Hash mismatches indicate stale overrides; filtered on load.
 
 ### Store Protocol
 
-`PromptOverridesStore` at `prompt/overrides/store.py`:
+`PromptOverridesStore` at `prompt/overrides/versioning.py`:
 - `resolve(descriptor, tag)` - Load, filter stale
 - `upsert(descriptor, override)` - Persist
 - `seed(prompt, tag)` - Bootstrap from current state

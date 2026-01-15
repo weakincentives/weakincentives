@@ -15,7 +15,7 @@ response parsing, rate limiting, and error recovery. Core at `adapters/core.py`.
 
 ## Adapter Protocol
 
-All adapters implement `ProviderAdapter` at `adapters/core.py:41-82`:
+All adapters implement `ProviderAdapter` at `adapters/core.py`:
 
 | Parameter | Description |
 | --- | --- |
@@ -25,7 +25,7 @@ All adapters implement `ProviderAdapter` at `adapters/core.py:41-82`:
 | `budget` | Optional token/time budget |
 | `budget_tracker` | Optional shared budget tracker |
 
-Returns `PromptResponse[OutputT]` at `adapters/core.py:33-38`.
+Returns `PromptResponse[OutputT]` at `adapters/core.py`.
 
 ### Configuration
 
@@ -46,12 +46,12 @@ Provider-specific configs extend this.
 
 ### OpenAI Adapter
 
-At `adapters/openai.py:558-892`:
+At `adapters/openai.py`:
 
-| Config | Lines | Description |
-| --- | --- | --- |
-| `OpenAIClientConfig` | `config.py:82` | api_key, base_url, organization, timeout, max_retries |
-| `OpenAIModelConfig` | `config.py:118` | logprobs, top_logprobs, parallel_tool_calls, store, user |
+| Config | Description |
+| --- | --- |
+| `OpenAIClientConfig` | api_key, base_url, organization, timeout, max_retries |
+| `OpenAIModelConfig` | logprobs, top_logprobs, parallel_tool_calls, store, user |
 
 **Note:** `max_tokens` renamed to `max_output_tokens` for Responses API. `seed`,
 `stop`, `presence_penalty`, `frequency_penalty` not accepted—raises `ValueError`.
@@ -60,12 +60,12 @@ At `adapters/openai.py:558-892`:
 
 ### LiteLLM Adapter
 
-At `adapters/litellm.py:243-483`:
+At `adapters/litellm.py`:
 
-| Config | Lines | Description |
-| --- | --- | --- |
-| `LiteLLMClientConfig` | `config.py:199` | api_key, api_base, timeout, num_retries |
-| `LiteLLMModelConfig` | `config.py:231` | Model parameters |
+| Config | Description |
+| --- | --- |
+| `LiteLLMClientConfig` | api_key, api_base, timeout, num_retries |
+| `LiteLLMModelConfig` | Model parameters |
 
 **Caveats:** Tool calling/structured output varies by provider. LiteLLM exceptions
 normalized to `ThrottleError` or `PromptEvaluationError`. Always sets
@@ -73,7 +73,7 @@ normalized to `ThrottleError` or `PromptEvaluationError`. Always sets
 
 ### Claude Agent SDK Adapter
 
-At `adapters/claude_agent_sdk/adapter.py:179+`:
+At `adapters/claude_agent_sdk/adapter.py`:
 - Async execution with MCP tool bridging
 - Skill mounting support
 
@@ -81,7 +81,7 @@ At `adapters/claude_agent_sdk/adapter.py:179+`:
 
 ### ThrottlePolicy
 
-At `adapters/shared.py` via `new_throttle_policy()`:
+At `adapters/throttle.py` via `new_throttle_policy()`:
 
 | Field | Default | Description |
 | --- | --- | --- |
@@ -192,4 +192,4 @@ Logs: `prompt.render.start`, `prompt.render.complete`, `prompt.call.start`,
 
 - **Unit**: Mock provider responses; verify backoff; test structured output parsing
 - **Integration**: Provider test endpoints; tool dispatch round-trips; throttle recovery
-- **Fixtures**: `tests/helpers/adapters.py` provides `MockAdapter`; sample payloads in `tests/fixtures/responses/`
+- **Fixtures**: `tests/helpers/adapters.py` provides adapter name constants; mock adapters are created ad-hoc in test files

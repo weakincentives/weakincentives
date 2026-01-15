@@ -53,7 +53,7 @@ Returns `Path` to created zip, or `None` if filesystem empty.
 
 | Event Type | When | Key Fields |
 |------------|------|------------|
-| `PromptRendered` | Before sending | `rendered_prompt`, `tool_count` |
+| `PromptRendered` | Before sending | `rendered_prompt`, `prompt_ns`, `prompt_key` |
 | `ToolInvoked` | After tool execution | `name`, `params`, `result` |
 | `PromptExecuted` | After evaluation | `result`, `usage` |
 

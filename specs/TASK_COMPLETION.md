@@ -5,7 +5,7 @@
 Verify agents complete all assigned tasks before stopping. Critical for ensuring
 agents don't prematurely terminate with work incomplete.
 
-**Implementation:** `src/weakincentives/adapters/task_completion.py`
+**Implementation:** `src/weakincentives/adapters/claude_agent_sdk/_task_completion.py`
 
 ## Core Types
 

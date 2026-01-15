@@ -28,7 +28,6 @@ from explicit host mounts at section construction.
 |------|--------|-------------|
 | `VfsPath` | `segments: tuple[str, ...]` | Path as tuple |
 | `VfsFile` | `path`, `content`, `encoding`, `size_bytes`, `version`, timestamps | File metadata |
-| `VirtualFileSystem` | `files: tuple[VfsFile, ...]` | Session state |
 
 ### Tools
 
@@ -62,15 +61,16 @@ from explicit host mounts at section construction.
 | `max_bytes` | `int \| None` | Size limit |
 | `follow_symlinks` | `bool` | Follow symlinks |
 
-### Session Integration
+### Backend Integration
+
+VFS tools operate through a backend that handles file operations. Host mounts
+hydrate initial content at section construction:
 
 ```python
 section = VfsToolsSection(
-    session=session,
     mounts=(HostMount(host_path="docs/", include_glob=("*.md",)),),
     allowed_host_roots=("/path/to/project",),
 )
-vfs = session[VirtualFileSystem].latest()
 ```
 
 ## Podman Sandbox
@@ -152,7 +152,7 @@ pip install weakincentives[asteval]
 
 Task-agnostic repository summaries.
 
-**Implementation:** `src/weakincentives/contrib/tools/workspace_digest.py`
+**Implementation:** `src/weakincentives/contrib/optimizers/workspace_digest.py`
 
 ### Resolution Order
 

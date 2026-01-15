@@ -65,8 +65,10 @@ next to implementation, verified via TLC model checker.
 | Field | Description |
 |-------|-------------|
 | `passed` | All invariants held |
-| `violations` | Violation traces |
 | `states_generated` | States checked |
+| `stdout` | TLC stdout output |
+| `stderr` | TLC stderr output |
+| `returncode` | Process exit code |
 
 ## State Space Optimization
 

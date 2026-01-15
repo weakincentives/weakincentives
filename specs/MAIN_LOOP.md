@@ -26,29 +26,29 @@ At `runtime/main_loop.py`:
 | `finalize(prompt, session)` | Post-processing hook |
 | `execute(request)` | Full execution returning `(PromptResponse, Session)` |
 
-### Events
+### Request and Result Types
 
-| Event | Fields |
-| --- | --- |
-| `MainLoopRequest[T]` | request, budget, deadline, request_id, created_at |
-| `MainLoopCompleted[T]` | request_id, response, session_id, completed_at |
-| `MainLoopFailed` | request_id, error, session_id, failed_at |
+`MainLoopRequest[T]`: `request`, `budget`, `deadline`, `resources`, `request_id`,
+`created_at`, `run_context`, `experiment`. Request-level fields override config.
+
+`MainLoopResult[T]`: `request_id`, `output`, `error`, `session_id`, `run_context`,
+`completed_at`. Check `success` property for outcome.
 
 ### Configuration
 
-`MainLoopConfig`: `deadline`, `budget`. Request-level overrides config defaults.
-Fresh `BudgetTracker` per execution.
+`MainLoopConfig`: `deadline`, `budget`, `resources`, `lease_extender`.
+Request-level overrides config defaults. Fresh `BudgetTracker` per execution.
 
 ## Execution Flow
 
 1. Receive `MainLoopRequest` or direct `execute()` call
-2. `prepare(request)` → `(Prompt, Session)`
-3. Enter `with prompt.resources:` context
-4. Evaluate with adapter
-5. On `VisibilityExpansionRequired`: apply overrides to session, retry step 4
-6. `finalize(prompt, session)`
-7. Exit context (cleanup)
-8. Publish `MainLoopCompleted` or `MainLoopFailed`
+1. `prepare(request)` → `(Prompt, Session)`
+1. Enter `with prompt.resources:` context
+1. Evaluate with adapter
+1. On `VisibilityExpansionRequired`: apply overrides to session, retry step 4
+1. `finalize(prompt, session)`
+1. Exit context (cleanup)
+1. Return `MainLoopResult` (with `output` on success, `error` on failure)
 
 ### Resource Lifecycle
 
@@ -91,7 +91,7 @@ Use `visibility=SectionVisibility.SUMMARY` on sections with `summary` text.
 | Exception | Behavior |
 | --- | --- |
 | `VisibilityExpansionRequired` | Retry with updated overrides |
-| All others | Publish `MainLoopFailed`, re-raise |
+| All others | Return `MainLoopResult` with `error` set |
 
 ## Usage
 

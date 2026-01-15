@@ -16,7 +16,7 @@ Core at `prompt/tool.py`.
 
 ### Tool
 
-At `prompt/tool.py:213-658`:
+At `prompt/tool.py` (`Tool` class):
 
 | Field | Description |
 | --- | --- |
@@ -33,7 +33,7 @@ def handle(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]: ...
 
 ### ToolResult
 
-At `prompt/tool_result.py:32-68`:
+At `prompt/tool_result.py` (`ToolResult` class):
 
 | Field | Description |
 | --- | --- |
@@ -50,7 +50,7 @@ Rendering via `render()` uses `serde.dump`.
 
 ### ToolContext
 
-At `prompt/tool.py:91-177`:
+At `prompt/tool.py` (`ToolContext` class):
 
 | Field | Description |
 | --- | --- |
@@ -61,11 +61,11 @@ At `prompt/tool.py:91-177`:
 | `deadline` | Optional deadline |
 | `budget_tracker` | Optional budget tracker |
 
-| Property | Line | Description |
-| --- | --- | --- |
-| `resources` | 133-139 | Access prompt's resource context |
-| `filesystem` | 142-150 | Shortcut for Filesystem resource |
-| `beat()` | 160-176 | Heartbeat for long operations |
+| Property | Description |
+| --- | --- |
+| `resources` | Access prompt's resource context |
+| `filesystem` | Shortcut for Filesystem resource |
+| `beat()` | Heartbeat for long operations |
 
 Tool handlers publish events via `context.session.dispatcher`.
 
@@ -81,7 +81,7 @@ def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
 
 ### ToolExample
 
-At `prompt/tool.py:82-87`:
+At `prompt/tool.py` (`ToolExample` class):
 
 | Field | Description |
 | --- | --- |
@@ -133,14 +133,14 @@ Session-scoped todo list at `contrib/tools/planning.py`.
 
 ### Data Model
 
-At `contrib/tools/planning.py:39-202`:
+At `contrib/tools/planning.py`:
 
-| Type | Line | Description |
-| --- | --- | --- |
-| `StepStatus` | - | `"pending"`, `"in_progress"`, `"done"` |
-| `PlanStatus` | - | `"active"`, `"completed"` |
-| `PlanStep` | 39-57 | step_id, title, status |
-| `Plan` | 121-195 | objective, status, steps |
+| Type | Description |
+| --- | --- |
+| `StepStatus` | `"pending"`, `"in_progress"`, `"done"` |
+| `PlanStatus` | `"active"`, `"completed"` |
+| `PlanStep` | step_id, title, status |
+| `Plan` | objective, status, steps |
 
 ### Tools
 
@@ -153,7 +153,7 @@ At `contrib/tools/planning.py:39-202`:
 
 ### Parameters
 
-At `contrib/tools/planning.py:81-202`:
+At `contrib/tools/planning.py`:
 
 | Event | Fields |
 | --- | --- |
@@ -171,12 +171,12 @@ At `contrib/tools/planning.py:81-202`:
 
 ### Session Integration
 
-`PlanningToolsSection` at `contrib/tools/planning.py:280-379` auto-registers
+`PlanningToolsSection` at `contrib/tools/planning.py` auto-registers
 reducers for `Plan`, `SetupPlan`, `AddStep`, `UpdateStep`.
 
 ## Planning Strategies
 
-At `contrib/tools/planning.py:210-217`:
+At `contrib/tools/planning.py` (`PlanningStrategy` enum):
 
 | Strategy | Description |
 | --- | --- |

@@ -8,7 +8,9 @@ probes and automatic termination of stuck workers. Two complementary mechanisms:
 1. **Health endpoints**: HTTP for Kubernetes liveness/readiness probes
 2. **Watchdog**: Internal monitor terminating unresponsive workers
 
-**Implementation:** `src/weakincentives/runtime/health.py`
+**Implementation:**
+- `src/weakincentives/runtime/watchdog.py` - Heartbeat, Watchdog, HealthServer
+- `src/weakincentives/runtime/lifecycle.py` - LoopGroup
 
 ## Guiding Principles
 
