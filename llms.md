@@ -109,6 +109,31 @@ from weakincentives.serde import dump, parse, schema, clone
 
 # Resources
 from weakincentives.resources import Binding, Scope, ResourceRegistry
+
+# Tool policies
+from weakincentives.prompt import (
+    ReadBeforeWritePolicy,
+    SequentialDependencyPolicy,
+    PolicyDecision,
+)
+
+# Feedback providers
+from weakincentives.prompt import (
+    DeadlineFeedback,
+    Feedback,
+    FeedbackProvider,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
+)
+
+# Task completion (Claude Agent SDK)
+from weakincentives.adapters.claude_agent_sdk import (
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+    PlanBasedChecker,
+    CompositeChecker,
+)
 ```
 
 ### Claude Agent SDK
@@ -659,6 +684,338 @@ def hash_value(x: str) -> int:
     return hash(x)
 ```
 
+### 13. Tool Policies
+
+Enforce sequential dependencies between tool invocations. Policies gate tool
+calls and track state in session slices.
+
+```python
+from weakincentives.prompt import (
+    ReadBeforeWritePolicy,
+    SequentialDependencyPolicy,
+    PolicyDecision,
+)
+
+# Read-before-write: must read existing files before overwriting
+rbw_policy = ReadBeforeWritePolicy(
+    read_tools=frozenset({"read_file"}),
+    write_tools=frozenset({"write_file", "edit_file"}),
+)
+
+# Sequential dependency: enforce tool ordering
+seq_policy = SequentialDependencyPolicy(
+    dependencies={
+        "deploy": frozenset({"test", "build"}),  # deploy requires test AND build
+        "build": frozenset({"lint"}),            # build requires lint
+    }
+)
+
+# Attach policies to sections
+section = MarkdownSection(
+    title="Filesystem",
+    key="filesystem",
+    template="Read and write files.",
+    tools=(read_file, write_file, edit_file),
+    policies=(rbw_policy,),  # Section-level policy
+)
+
+# Or attach to entire prompt
+template = PromptTemplate(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    policies=(seq_policy,),  # Prompt-level policy (all tools)
+)
+```
+
+**Policy behavior**:
+
+- `ReadBeforeWritePolicy`: New files can be created freely; existing files must
+  be read first. Tracks read paths in session `PolicyState` slice.
+- `SequentialDependencyPolicy`: Tool B requires tool A to have succeeded.
+  Tracks invoked tools in session `PolicyState` slice.
+
+**Custom policies** implement the `ToolPolicy` protocol:
+
+```python
+from weakincentives.prompt import PolicyDecision
+
+class ApprovalRequiredPolicy:
+    """Require approval tool before destructive operations."""
+
+    @property
+    def name(self) -> str:
+        return "approval_required"
+
+    def check(self, tool, params, *, context) -> PolicyDecision:
+        if tool.name not in {"delete_file", "deploy"}:
+            return PolicyDecision.allow()
+
+        state = context.session[PolicyState].latest()
+        if state and "approve" in state.invoked_tools:
+            return PolicyDecision.allow()
+        return PolicyDecision.deny("Call 'approve' tool first")
+
+    def on_result(self, tool, params, result, *, context) -> None:
+        if result.success and tool.name == "approve":
+            # Record approval in session state
+            state = context.session[PolicyState].latest() or PolicyState(
+                policy_name=self.name
+            )
+            new_state = PolicyState(
+                policy_name=self.name,
+                invoked_tools=state.invoked_tools | {"approve"},
+                invoked_keys=state.invoked_keys,
+            )
+            context.session[PolicyState].seed(new_state)
+```
+
+### 14. Feedback Providers
+
+Deliver ongoing progress feedback during unattended execution. Providers
+analyze patterns and inject guidance into the agent's context.
+
+```python
+from weakincentives.prompt import (
+    DeadlineFeedback,
+    Feedback,
+    FeedbackProvider,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
+)
+
+# Built-in: deadline feedback (warns about remaining time)
+deadline_config = FeedbackProviderConfig(
+    provider=DeadlineFeedback(warning_threshold_seconds=120),
+    trigger=FeedbackTrigger(every_n_seconds=30),  # Check every 30 seconds
+)
+
+# Attach to prompt template
+template = PromptTemplate(
+    ns="my-agent",
+    key="main",
+    sections=[...],
+    feedback_providers=(deadline_config,),
+)
+```
+
+**Trigger conditions** (OR'd together):
+
+- `every_n_calls` - Run after N tool calls since last feedback
+- `every_n_seconds` - Run after N seconds elapsed
+
+**Custom feedback provider**:
+
+```python
+@dataclass(frozen=True)
+class ToolUsageMonitor:
+    """Warn when too many tool calls without apparent progress."""
+
+    max_calls_without_progress: int = 20
+
+    @property
+    def name(self) -> str:
+        return "ToolUsageMonitor"
+
+    def should_run(self, *, context) -> bool:
+        return True  # Always run when triggered
+
+    def provide(self, *, context) -> Feedback:
+        count = context.tool_call_count
+        if count > self.max_calls_without_progress:
+            return Feedback(
+                provider_name=self.name,
+                summary=f"You have made {count} tool calls.",
+                suggestions=(
+                    "Review what you've accomplished so far.",
+                    "Check if you're making progress toward the goal.",
+                ),
+                severity="caution",
+            )
+        return Feedback(
+            provider_name=self.name,
+            summary=f"Progress check: {count} tool calls made.",
+            severity="info",
+        )
+
+# Register with trigger
+config = FeedbackProviderConfig(
+    provider=ToolUsageMonitor(max_calls_without_progress=15),
+    trigger=FeedbackTrigger(every_n_calls=10),
+)
+```
+
+**Feedback delivery**: Injected immediately after tool execution via adapter
+hooks. First matching provider wins.
+
+### 15. Task Completion Checkers
+
+Verify agents complete all tasks before stopping. Critical for ensuring agents
+don't prematurely terminate while work remains incomplete.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    PlanBasedChecker,
+    CompositeChecker,
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+)
+from weakincentives.contrib.tools.planning import Plan
+
+# Plan-based: ensure all plan steps are "done"
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+    ),
+)
+
+# Composite: combine multiple checkers (all must pass)
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        task_completion_checker=CompositeChecker(
+            checkers=(PlanBasedChecker(plan_type=Plan), TestPassingChecker()),
+            all_must_pass=True,  # Both must pass
+        ),
+    ),
+)
+```
+
+**Custom completion checker**:
+
+```python
+class TestPassingChecker:
+    """Ensure all tests pass before allowing completion."""
+
+    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+        test_results = context.session[TestResult].latest()
+
+        if test_results is None:
+            return TaskCompletionResult.incomplete(
+                "No test results found. Please run the test suite."
+            )
+
+        if test_results.failed > 0:
+            return TaskCompletionResult.incomplete(
+                f"{test_results.failed} tests failing. Fix before completing."
+            )
+
+        return TaskCompletionResult.ok(f"All {test_results.passed} tests passing.")
+
+
+class FileExistsChecker:
+    """Ensure required output files exist."""
+
+    def __init__(self, required_files: tuple[str, ...]) -> None:
+        self._required = required_files
+
+    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
+        if context.filesystem is None:
+            return TaskCompletionResult.ok("No filesystem to check.")
+
+        missing = [f for f in self._required if not context.filesystem.exists(f)]
+
+        if missing:
+            return TaskCompletionResult.incomplete(
+                f"Missing required files: {', '.join(missing)}"
+            )
+
+        return TaskCompletionResult.ok("All required files exist.")
+```
+
+**Hook integration** (Claude Agent SDK):
+
+1. **PostToolUse Hook**: After `StructuredOutput`, checker verifies completion.
+   If incomplete, adds feedback to encourage continuation.
+1. **Stop Hook**: Before allowing stop, checker verifies. If incomplete, signals
+   `needsMoreTurns: True`.
+1. **Final verification**: After SDK completes, raises `PromptEvaluationError`
+   if tasks remain incomplete.
+
+### 16. Tool Examples
+
+Provide representative invocations for documentation and few-shot learning.
+
+```python
+from weakincentives import Tool
+from weakincentives.prompt import ToolExample
+
+@dataclass(slots=True, frozen=True)
+class LookupParams:
+    entity_id: str = field(metadata={"description": "ID to fetch"})
+
+@dataclass(slots=True, frozen=True)
+class LookupResult:
+    entity_id: str
+    url: str
+
+def lookup_handler(params: LookupParams, *, context: ToolContext) -> ToolResult[LookupResult]:
+    result = LookupResult(entity_id=params.entity_id, url="https://example.com/...")
+    return ToolResult.ok(result, message=f"Fetched {result.entity_id}")
+
+lookup_tool = Tool[LookupParams, LookupResult](
+    name="lookup_entity",
+    description="Fetch information for an entity ID.",
+    handler=lookup_handler,
+    examples=(
+        ToolExample(
+            description="Basic lookup",
+            input=LookupParams(entity_id="abc-123"),
+            output=LookupResult(entity_id="abc-123", url="https://example.com/abc-123"),
+        ),
+        ToolExample(
+            description="Lookup with special characters",
+            input=LookupParams(entity_id="user@domain"),
+            output=LookupResult(entity_id="user@domain", url="https://example.com/user%40domain"),
+        ),
+    ),
+)
+```
+
+**Example constraints**:
+
+- `description` must be ≤ 200 characters
+- `input` must be an instance of the params dataclass
+- `output` must be an instance of the result dataclass
+- Examples are validated during prompt rendering
+
+______________________________________________________________________
+
+## Best Practices
+
+### Agent Design
+
+1. **Plan first**: Use `PlanningToolsSection` to structure work before acting
+1. **Verify completion**: Enable `TaskCompletionChecker` for unattended agents
+1. **Set budgets**: Always configure `Budget` with token limits
+1. **Use deadlines**: Set wall-clock limits via `Deadline`
+1. **Provide feedback**: Configure `FeedbackProvider` for long-running tasks
+
+### Tool Implementation
+
+1. **Type everything**: Use `@dataclass(slots=True, frozen=True)` for params/results
+1. **Document params**: Add `metadata={"description": "..."}` to all fields
+1. **Handle failures gracefully**: Return `ToolResult.error()`, don't raise
+1. **Check deadlines**: Early-exit if `context.deadline.remaining()` is low
+1. **Access resources properly**: Use `context.resources.get(Protocol)`
+
+### Session Management
+
+1. **Snapshot before risky operations**: `session.snapshot()` enables rollback
+1. **Use typed slices**: Query via `session[Type].latest()`, not raw access
+1. **Dispatch events**: Never mutate state directly; use `session.dispatch()`
+1. **Register reducers early**: Call `session[Type].register()` before dispatching
+
+### Prompt Authoring
+
+1. **Keep sections focused**: One concern per section
+1. **Use progressive disclosure**: Set `visibility=SUMMARY` for verbose content
+1. **Attach tools to relevant sections**: Tools should be near their instructions
+1. **Apply policies at appropriate level**: Section-level for local constraints,
+   prompt-level for global ones
+
 ______________________________________________________________________
 
 ## Decision Trees
@@ -805,6 +1162,9 @@ Read before modifying related code:
 | `specs/PROMPTS.md` | Prompt system, composition, overrides |
 | `specs/SESSIONS.md` | Session lifecycle, events, budgets |
 | `specs/TOOLS.md` | Tool registration, planning tools |
+| `specs/TOOL_POLICIES.md` | Sequential dependencies, read-before-write |
+| `specs/FEEDBACK_PROVIDERS.md` | Trajectory feedback, stall detection |
+| `specs/TASK_COMPLETION.md` | Task completion verification |
 | `specs/ADAPTERS.md` | Provider adapters, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | SDK adapter, isolation, MCP |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval |
