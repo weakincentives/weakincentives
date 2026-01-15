@@ -4,10 +4,214 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-### Debug: Filesystem Archiving
+### Experiments for A/B Testing and Evaluation
 
-New `archive_filesystem()` function in the debug module creates zip archives of
-filesystem contents for post-mortem analysis:
+A new **Experiment** concept enables systematic evaluation of agent behavior
+variants through named configuration bundles. An experiment combines a prompt
+overrides tag with feature flags, allowing coordinated changes to both prompt
+content and runtime behavior.
+
+```python
+from weakincentives.evals import Experiment, BASELINE, submit_experiments
+
+# Define experiments
+baseline = BASELINE
+treatment = Experiment(
+    name="concise-prompts",
+    overrides_tag="v2-concise",
+    flags={"max_response_tokens": 500},
+    owner="alice@example.com",
+    description="Test shorter, more direct prompt phrasing",
+)
+
+# Submit dataset under both experiments for comparison
+submit_experiments(dataset, [baseline, treatment], requests)
+```
+
+**Key features:**
+
+- **Single source of variance**: One experiment definition controls all dimensions
+- **Request-level binding**: Experiments flow through requests via
+  `MainLoopRequest.experiment` and `EvalRequest.experiment`
+- **Session tracking**: Experiments can be seeded into sessions for observability
+- **Feature flags**: Runtime behavior toggles via `experiment.flags`
+- **Evaluation integration**: `EvalReport` supports grouping and comparing
+  results by experiment name
+
+See `specs/EXPERIMENTS.md` for the full specification.
+
+### RunContext for Distributed Tracing
+
+`RunContext` provides immutable execution metadata that flows through the system
+from `MainLoop` to tool handlers and telemetry events. It enables distributed
+tracing, request correlation, and debugging across the execution lifecycle.
+
+```python
+from weakincentives.runtime import RunContext
+
+ctx = RunContext(
+    worker_id="worker-42",
+    trace_id="abc-123",
+    span_id="xyz-789",
+)
+
+# Log context binding
+log = logger.bind(**ctx.to_log_context())
+```
+
+**Integration points:**
+
+- `MainLoopRequest` / `MainLoopResult` - carry context through processing
+- `ToolContext.run_context` - tool handlers access execution metadata
+- `PromptRendered`, `PromptExecuted`, `ToolInvoked` - telemetry events include context
+- `StructuredLogger.bind()` - correlate logs via `to_log_context()`
+
+**Field semantics:**
+
+| Field | Purpose |
+| ------------ | ----------------------------------- |
+| `run_id` | Unique execution identifier (fresh per run) |
+| `request_id` | Logical request correlation (stable across retries) |
+| `session_id` | Session correlation |
+| `attempt` | Retry count from mailbox delivery |
+| `worker_id` | Worker identification |
+| `trace_id` | Distributed trace correlation |
+| `span_id` | Span within trace |
+
+See `specs/RUN_CONTEXT.md` for the full specification.
+
+### Lease Extender for Message Visibility
+
+`LeaseExtender` prevents message visibility timeout during long-running request
+processing by extending the lease whenever a heartbeat occurs. Unlike a
+background daemon thread, this approach ties lease extension directly to
+proof-of-work: if the worker is actively processing (beating), the lease
+extends; if the worker is stuck (no beats), the lease expires naturally.
+
+```python
+from weakincentives.runtime import LeaseExtenderConfig, MainLoopConfig
+
+config = MainLoopConfig(
+    lease_extender=LeaseExtenderConfig(
+        interval=60.0,   # Rate-limit extensions to once per minute
+        extension=300,   # Extend by 5 minutes each time
+        enabled=True,    # Enable automatic extension
+    ),
+)
+```
+
+**Key features:**
+
+- **Proof-of-work based**: Extension only happens when actual work occurs
+- **Observer pattern**: `Heartbeat` class supports multiple callbacks
+- **Tool integration**: `ToolContext.beat()` propagates to heartbeat
+- **EvalLoop support**: Evaluation samples benefit from lease extension
+- **Claude Agent SDK**: Native tools trigger heartbeats via hooks
+
+**Heartbeat flow:**
+
+1. `MainLoop` attaches `LeaseExtender` to heartbeat before processing
+1. Adapter passes heartbeat to tool execution
+1. Tool handlers call `context.beat()` during long operations
+1. Each beat potentially extends message visibility
+1. Stuck workers allow lease to expire naturally (correct behavior)
+
+See `specs/LEASE_EXTENDER.md` for the full specification.
+
+### Task Completion Checking
+
+Task completion checking provides a generic mechanism for verifying that an
+agent has completed all assigned tasks before allowing it to stop or produce
+final output.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    PlanBasedChecker,
+    CompositeChecker,
+)
+from weakincentives.contrib.tools.planning import Plan
+
+# Enable plan-based completion checking
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+    ),
+)
+
+# Or combine multiple strategies
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        task_completion_checker=CompositeChecker(
+            checkers=(PlanBasedChecker(plan_type=Plan), TestPassingChecker()),
+            all_must_pass=True,
+        ),
+    ),
+)
+```
+
+**Built-in checkers:**
+
+- `PlanBasedChecker`: Verifies all plan steps have `status == "done"`
+- `CompositeChecker`: Combines multiple checkers with configurable logic
+
+**Claude Agent SDK integration:**
+
+- `PostToolUse` hook on `StructuredOutput` verifies completion
+- `Stop` hook prevents premature termination when tasks remain
+- Budget/deadline exhaustion bypasses checking (agent can't do more work)
+
+See `specs/TASK_COMPLETION.md` for the full specification.
+
+### Tool Policies for Sequential Dependencies
+
+A new **Tool Policy** system enables declarative constraints on tool invocation
+sequences, preventing unsafe operations without hardcoding logic into handlers.
+Policies are declared at prompt and section levels, track state in session
+slices, and survive snapshot/restore cycles.
+
+```python
+from weakincentives.prompt import SequentialDependencyPolicy, ReadBeforeWritePolicy
+
+# Enforce deployment pipeline: lint → build → test → deploy
+policy = SequentialDependencyPolicy(
+    dependencies={"deploy": frozenset({"test", "build"})}
+)
+
+# Prevent file overwrites without reading first
+read_first = ReadBeforeWritePolicy()
+```
+
+**Built-in policies:**
+
+- `SequentialDependencyPolicy`: Enforce unconditional tool ordering
+- `ReadBeforeWritePolicy`: Prevent overwriting files without reading first;
+  new files can be created freely
+
+**Section defaults:** `VFSToolsSection` and `PodmanSandboxSection` now have
+`ReadBeforeWritePolicy` enabled by default.
+
+See `specs/TOOL_POLICIES.md` for the full specification.
+
+### Debug: Log Collection and Filesystem Archiving
+
+New debugging utilities for capturing execution artifacts:
+
+**Log collector** (`collect_all_logs`): Captures all log records during prompt
+evaluation to a JSONL file for analysis.
+
+```python
+from weakincentives.debug import collect_all_logs
+
+with collect_all_logs("./logs/session.log") as collector:
+    response = adapter.evaluate(prompt, session=session)
+
+print(f"Logs written to: {collector.path}")
+```
+
+**Filesystem archive** (`archive_filesystem`): Creates zip archives of virtual
+filesystem contents for post-mortem analysis.
 
 ```python
 from weakincentives.debug import archive_filesystem
@@ -19,10 +223,8 @@ archive_path = archive_filesystem(
 )
 ```
 
-The function recursively collects all files from a `Filesystem` instance and
-writes them to a compressed zip archive. Useful for capturing workspace state
-during debugging sessions. The code reviewer example now automatically archives
-the workspace filesystem on exit when running in Claude Agent mode.
+The code reviewer example now automatically archives the workspace filesystem
+on exit when running in Claude Agent mode.
 
 ### Feedback Providers for Agent Progress Assessment
 
@@ -65,26 +267,6 @@ Key components:
 Feedback is delivered via the adapter's hook mechanism and stored in the
 session's Feedback slice for history tracking.
 
-### Removed: Notification from Claude Agent SDK Public API
-
-The `Notification` and `NotificationSource` types have been removed from the
-`weakincentives.adapters.claude_agent_sdk` public API. These were previously
-used to store SDK hook events in the session but are no longer needed.
-
-**Migration:** If you were accessing `session[Notification]` to inspect hook
-events, this data is no longer stored. Hook events are still logged for
-debugging purposes.
-
-### Documentation: Dead Letter Queue Specification
-
-Added `specs/DLQ.md` covering dead letter queue configuration for MainLoop and
-EvalLoop. The spec documents:
-
-- `DLQPolicy` combining destination mailbox with decision logic (subclass for custom behavior)
-- `DeadLetter` envelope preserving original message with failure metadata
-- `DLQConsumer` runnable for LoopGroup integration
-- Replay, alerting, and observability patterns
-
 ### RedisMailbox: Default TTL for Redis Keys
 
 RedisMailbox now applies a default 3-day TTL to all Redis keys, preventing
@@ -109,6 +291,48 @@ The `DEFAULT_TTL_SECONDS` constant (259200 seconds = 3 days) is exported for
 reference. The reaper thread always refreshes TTL regardless of whether any
 messages expired, ensuring queues with long visibility timeouts don't lose
 data.
+
+### Documentation
+
+- Added `specs/EXPERIMENTS.md` covering experiment configuration for A/B testing
+- Added `specs/RUN_CONTEXT.md` covering execution metadata and distributed tracing
+- Added `specs/LEASE_EXTENDER.md` covering automatic message visibility extension
+- Added `specs/TASK_COMPLETION.md` covering task completion checking patterns
+- Added `specs/TOOL_POLICIES.md` covering sequential dependencies and read-before-write
+- Added `specs/DLQ.md` covering dead letter queue configuration for MainLoop and EvalLoop
+- Added `specs/POLICIES_OVER_WORKFLOWS.md` documenting the philosophy of declarative
+  policies vs rigid workflows for unattended agents
+- Added `IDENTITY.md` with WINK project description
+- Updated README with agent definition layer content
+
+### Breaking Changes
+
+**Removed Notification from Claude Agent SDK public API:** The `Notification`
+and `NotificationSource` types have been removed. These were previously used to
+store SDK hook events in the session but are no longer needed.
+
+**Migration:** If you were accessing `session[Notification]` to inspect hook
+events, this data is no longer stored. Hook events are still logged for
+debugging purposes.
+
+**PromptOverridesStore API refactored to use PromptDescriptor:** The override
+store API now uses `PromptDescriptor` for identifying prompts instead of
+separate namespace/key parameters.
+
+**Mailbox reply_to parameter refactored:** The `reply_to` parameter now accepts
+a `Mailbox` instance instead of a string identifier for type-safe routing.
+
+**Local prompt override paths simplified:** Removed the redundant prefix from
+local override file paths.
+
+### Internal
+
+- Renamed `Dispatcher` references to `ControlDispatcher` throughout codebase
+  for clarity
+- Improved library modularity with import validation (`make check-core-imports`)
+- Dependency upgrades: aiohttp, anyio, certifi, filelock, huggingface-hub,
+  hypothesis, sse-starlette, textual, tokenizers, typer-slim
+- Fixed task completion checker wiring issue in Claude Agent SDK adapter
 
 ## v0.19.0 - 2026-01-07
 
