@@ -80,8 +80,8 @@ PromptTemplate[ReviewResponse]
 
 **Prefer declarative policies over prescriptive workflows.**
 
-A workflow encodes *how* to accomplish a goal—a predetermined sequence that
-fractures when encountering unexpected situations. A policy encodes *what* the
+A workflow encodes _how_ to accomplish a goal—a predetermined sequence that
+fractures when encountering unexpected situations. A policy encodes _what_ the
 goal requires—constraints the agent must satisfy while remaining free to find
 any valid path.
 
@@ -152,7 +152,7 @@ ______________________________________________________________________
 
 ## Module Map
 
-```
+```text
 weakincentives                    # Top-level exports
 weakincentives.prompt             # Prompt authoring, sections, tools
 weakincentives.prompt.overrides   # Hash-based prompt iteration
@@ -184,29 +184,61 @@ ______________________________________________________________________
 ### Essential Imports
 
 ```python
-# Prompt authoring
-from weakincentives import Prompt, MarkdownSection, Tool, ToolContext, ToolResult
-from weakincentives.prompt import PromptTemplate, SectionVisibility
+# Top-level exports
+from weakincentives import (
+    Prompt,
+    MarkdownSection,
+    Tool,
+    ToolContext,
+    ToolResult,
+    Budget,
+    BudgetTracker,
+    Deadline,
+)
+
+# Prompt system
+from weakincentives.prompt import (
+    PromptTemplate,
+    Section,
+    SectionVisibility,
+    ToolExample,
+    RenderedPrompt,
+)
 
 # Runtime
-from weakincentives.runtime import Session, MainLoop, MainLoopConfig
-from weakincentives.runtime import InProcessDispatcher, PromptExecuted, ToolInvoked
+from weakincentives.runtime import (
+    Session,
+    InProcessDispatcher,
+    MainLoop,
+    MainLoopConfig,
+    MainLoopRequest,
+    PromptExecuted,
+    ToolInvoked,
+    Snapshot,
+    append_all,
+    replace_latest,
+    upsert_by,
+)
 
 # Adapters
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.adapters.litellm import LiteLLMAdapter
-from weakincentives.adapters import PromptResponse, PromptEvaluationError
-
-# Constraints
-from weakincentives import Budget, BudgetTracker, Deadline
+from weakincentives.adapters import PromptResponse
 
 # Contrib tools
 from weakincentives.contrib.tools import (
-    PlanningToolsSection, Plan, PlanStep,
-    VfsToolsSection, HostMount, VfsPath,
-    WorkspaceDigestSection, WorkspaceDigest,
+    PlanningToolsSection,
+    PlanningStrategy,
+    Plan,
+    PlanStep,
+    VfsToolsSection,
+    HostMount,
+    VfsPath,
+    WorkspaceDigestSection,
+    WorkspaceDigest,
     AstevalSection,
-    PodmanSandboxSection, PodmanSandboxConfig,
+    PodmanSandboxSection,
+    PodmanSandboxConfig,
 )
 
 # Serde
@@ -220,6 +252,8 @@ from weakincentives.prompt import (
     ReadBeforeWritePolicy,
     SequentialDependencyPolicy,
     PolicyDecision,
+    PolicyState,
+    ToolPolicy,
 )
 
 # Feedback providers
@@ -229,15 +263,6 @@ from weakincentives.prompt import (
     FeedbackProvider,
     FeedbackProviderConfig,
     FeedbackTrigger,
-)
-
-# Task completion (Claude Agent SDK)
-from weakincentives.adapters.claude_agent_sdk import (
-    TaskCompletionChecker,
-    TaskCompletionContext,
-    TaskCompletionResult,
-    PlanBasedChecker,
-    CompositeChecker,
 )
 ```
 
@@ -252,6 +277,12 @@ from weakincentives.adapters.claude_agent_sdk import (
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    # Task completion
+    TaskCompletionChecker,
+    TaskCompletionContext,
+    TaskCompletionResult,
+    PlanBasedChecker,
+    CompositeChecker,
 )
 ```
 
@@ -261,19 +292,23 @@ ______________________________________________________________________
 
 ```python
 from dataclasses import dataclass
+
 from weakincentives import Prompt, MarkdownSection
 from weakincentives.prompt import PromptTemplate
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.runtime import Session
 
+
 @dataclass(slots=True, frozen=True)
 class TaskParams:
     objective: str
+
 
 @dataclass(slots=True, frozen=True)
 class TaskResult:
     summary: str
     steps: list[str]
+
 
 template = PromptTemplate[TaskResult](
     ns="myapp",
@@ -301,31 +336,36 @@ ______________________________________________________________________
 
 ### 1. Prompt Construction
 
-**PromptTemplate** is the immutable blueprint. **Prompt** wraps it with bindings.
+**PromptTemplate** is the immutable blueprint. **Prompt** wraps it with
+bindings.
 
 ```python
-from weakincentives.prompt import PromptTemplate, MarkdownSection, Prompt
+from dataclasses import dataclass
+
+from weakincentives import Prompt
+from weakincentives.prompt import PromptTemplate, MarkdownSection
+
 
 @dataclass(slots=True, frozen=True)
 class OutputType:
     answer: str
 
+
 # Template: defines structure, typed output
 template = PromptTemplate[OutputType](
-    ns="namespace",       # Required: grouping
-    key="prompt-key",     # Required: unique identifier
-    name="prompt_name",   # Optional: display name
-    sections=(...),       # Ordered sections
+    ns="namespace",  # Required: grouping
+    key="prompt-key",  # Required: unique identifier
+    name="prompt_name",  # Optional: display name
+    sections=(MarkdownSection(title="Task", key="task", template="Do something"),),
 )
 
 # Prompt: wraps template, binds parameters
-prompt = Prompt(template).bind(MyParams(...))
+prompt = Prompt(template)
 
 # Render to inspect
 rendered = prompt.render()
-print(rendered.text)       # Markdown content
-print(rendered.tools)      # Tool tuple
-print(rendered.output_type)  # OutputType class
+print(rendered.text)  # Markdown content
+print(rendered.tools)  # Tool tuple
 ```
 
 ### 2. Sections
@@ -333,23 +373,26 @@ print(rendered.output_type)  # OutputType class
 All sections inherit from `Section`. Most common: `MarkdownSection`.
 
 ```python
+from dataclasses import dataclass
+
 from weakincentives.prompt import MarkdownSection, SectionVisibility
+
 
 @dataclass(slots=True, frozen=True)
 class ReviewParams:
     focus: str
 
+
 section = MarkdownSection[ReviewParams](
-    title="Review Guidelines",        # Rendered as heading
-    key="review-guidelines",          # Unique within prompt
-    template="Focus on: ${focus}",    # Template.substitute syntax
+    title="Review Guidelines",  # Rendered as heading
+    key="review-guidelines",  # Unique within prompt
+    template="Focus on: ${focus}",  # Template.substitute syntax
     default_params=ReviewParams(focus="correctness"),
-    tools=(my_tool,),                 # Tools attached to section
-    children=(...),                   # Nested sections
+    tools=(),  # Tools attached to section
+    children=(),  # Nested sections
     visibility=SectionVisibility.FULL,  # Or SUMMARY for progressive disclosure
     summary="Guidelines available.",  # Shown when visibility=SUMMARY
-    enabled=lambda p: p.focus != "",  # Conditional enablement
-    accepts_overrides=True,           # Allow prompt overrides
+    accepts_overrides=True,  # Allow prompt overrides
 )
 ```
 
@@ -362,17 +405,21 @@ section = MarkdownSection[ReviewParams](
 Tools are typed with params and result dataclasses.
 
 ```python
-from weakincentives import Tool, ToolContext, ToolResult
 from dataclasses import dataclass, field
+
+from weakincentives import Tool, ToolContext, ToolResult
+
 
 @dataclass(slots=True, frozen=True)
 class SearchParams:
     query: str = field(metadata={"description": "Search query"})
     limit: int = field(default=10, metadata={"description": "Max results"})
 
+
 @dataclass(slots=True, frozen=True)
 class SearchResult:
     matches: list[str]
+
 
 def search_handler(
     params: SearchParams,
@@ -380,10 +427,10 @@ def search_handler(
     context: ToolContext,
 ) -> ToolResult[SearchResult]:
     # Access session state
-    plan = context.session[Plan].latest()
+    # plan = context.session[Plan].latest()
 
     # Access resources
-    fs = context.filesystem  # Shorthand for context.resources.get(Filesystem)
+    fs = context.filesystem  # Shorthand for context.resources.get_optional(Filesystem)
 
     # Check deadline
     if context.deadline and context.deadline.remaining().total_seconds() < 5:
@@ -395,22 +442,12 @@ def search_handler(
     # Return typed result
     return ToolResult.ok(SearchResult(matches=matches), message="Found 2 matches")
 
+
 # Create tool
 search_tool = Tool[SearchParams, SearchResult](
     name="search",
     description="Search for content",
     handler=search_handler,
-)
-
-# Alternative: wrap function (uses __name__ and docstring)
-search_tool = Tool.wrap(search_handler)
-
-# Attach to section
-section = MarkdownSection(
-    title="Search",
-    key="search",
-    template="Use search tool when needed.",
-    tools=(search_tool,),
 )
 ```
 
@@ -419,92 +456,83 @@ section = MarkdownSection(
 - `ToolResult.ok(value, message="...")` - Success with typed value
 - `ToolResult.error("message")` - Failure, value=None
 
-### 4. Sessions
+### 4. Tool Examples
+
+Provide representative invocations for documentation and few-shot learning.
+
+```python
+from dataclasses import dataclass, field
+
+from weakincentives import Tool, ToolContext, ToolResult
+from weakincentives.prompt import ToolExample
+
+
+@dataclass(slots=True, frozen=True)
+class LookupParams:
+    entity_id: str = field(metadata={"description": "ID to fetch"})
+
+
+@dataclass(slots=True, frozen=True)
+class LookupResult:
+    entity_id: str
+    url: str
+
+
+def lookup_handler(
+    params: LookupParams, *, context: ToolContext
+) -> ToolResult[LookupResult]:
+    result = LookupResult(entity_id=params.entity_id, url="https://example.com/...")
+    return ToolResult.ok(result, message=f"Fetched {result.entity_id}")
+
+
+lookup_tool = Tool[LookupParams, LookupResult](
+    name="lookup_entity",
+    description="Fetch information for an entity ID.",
+    handler=lookup_handler,
+    examples=(
+        ToolExample(
+            description="Basic lookup",
+            input=LookupParams(entity_id="abc-123"),
+            output=LookupResult(entity_id="abc-123", url="https://example.com/abc-123"),
+        ),
+    ),
+)
+```
+
+### 5. Sessions
 
 Redux-style immutable state container with typed slices.
 
 ```python
-from weakincentives.runtime import Session, InProcessDispatcher
-from weakincentives.runtime.session import replace_latest, append_all
+from weakincentives.runtime import Session, InProcessDispatcher, Snapshot
+from weakincentives.runtime import replace_latest, append_all
+from weakincentives.contrib.tools import Plan
 
 # Create session
 session = Session()  # Creates InProcessDispatcher internally
-# Or with explicit dispatcher:
-dispatcher = InProcessDispatcher()
-session = Session(dispatcher=dispatcher)
 
 # Query state
-plan = session[Plan].latest()           # Most recent or None
-all_plans = session[Plan].all()         # All values as tuple
+plan = session[Plan].latest()  # Most recent or None
+all_plans = session[Plan].all()  # All values as tuple
 active = session[Plan].where(lambda p: p.status == "active")
-exists = session[Plan].exists()         # Boolean
+exists = session[Plan].exists()  # Boolean
 
 # Mutations (all dispatch events internally)
-session[Plan].seed(initial_plan)        # Initialize/replace slice
-session[Plan].append(new_plan)          # Append via default reducer
-session[Plan].clear()                   # Clear all
-session[Plan].clear(lambda p: p.done)   # Clear matching predicate
-
-# Register custom reducer
-def my_reducer(values: tuple[Plan, ...], event: UpdatePlan, *, context) -> tuple[Plan, ...]:
-    # Return new tuple
-    return values + (updated_plan,)
-
-session[Plan].register(UpdatePlan, my_reducer)
-
-# Dispatch events
-session.dispatch(UpdatePlan(step_id=1, status="done"))
+# session[Plan].seed(initial_plan)  # Initialize/replace slice
+# session[Plan].append(new_plan)    # Append via default reducer
+session[Plan].clear()  # Clear all
 
 # Snapshots
 snapshot = session.snapshot()
-json_str = snapshot.to_json()
-session.restore(Snapshot.from_json(json_str))
-
-# Session hierarchy
-child = Session(dispatcher=dispatcher, parent=session)
+session.restore(snapshot)
 ```
 
-**Built-in reducers** (from `weakincentives.runtime.session`):
+**Built-in reducers** (from `weakincentives.runtime`):
 
 - `append_all` - Always append (default)
 - `replace_latest` - Keep only most recent
 - `upsert_by(key_fn)` - Replace by key
 - `replace_latest_by(key_fn)` - Latest per key
-
-### 5. Declarative State Slices
-
-Co-locate reducers with state using `@reducer` decorator:
-
-```python
-from dataclasses import dataclass, replace
-from weakincentives.runtime.session import reducer
-
-@dataclass(frozen=True)
-class AddStep:
-    step: str
-
-@dataclass(frozen=True)
-class CompleteStep:
-    step_id: int
-
-@dataclass(frozen=True)
-class AgentPlan:
-    steps: tuple[str, ...] = ()
-    current: int = 0
-
-    @reducer(on=AddStep)
-    def add(self, event: AddStep) -> "AgentPlan":
-        return replace(self, steps=self.steps + (event.step,))
-
-    @reducer(on=CompleteStep)
-    def complete(self, event: CompleteStep) -> "AgentPlan":
-        return replace(self, current=self.current + 1)
-
-# Install on session
-session.install(AgentPlan)
-session[AgentPlan].seed(AgentPlan())
-session.dispatch(AddStep(step="Research"))
-```
 
 ### 6. Adapters
 
@@ -513,19 +541,11 @@ Provider-agnostic evaluation interface.
 ```python
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.adapters.litellm import LiteLLMAdapter
-from weakincentives.adapters import OpenAIModelConfig, ThrottleError
+from weakincentives.adapters import PromptResponse
+from weakincentives.errors import DeadlineExceededError
 
 # Basic
 adapter = OpenAIAdapter(model="gpt-4o")
-
-# With config
-adapter = OpenAIAdapter(
-    model="gpt-4o",
-    model_config=OpenAIModelConfig(
-        temperature=0.7,
-        max_tokens=4096,
-    ),
-)
 
 # LiteLLM (multi-provider)
 adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")
@@ -534,26 +554,15 @@ adapter = LiteLLMAdapter(model="claude-3-sonnet-20240229")
 response = adapter.evaluate(
     prompt,
     session=session,
-    deadline=deadline,        # Optional
-    budget=budget,            # Optional
-    budget_tracker=tracker,   # Optional
+    deadline=deadline,  # Optional
+    budget=budget,  # Optional
+    budget_tracker=tracker,  # Optional
 )
 
 # Response fields
-response.output       # Parsed dataclass (OutputType)
-response.text         # Raw text
+response.output  # Parsed dataclass (OutputType)
+response.text  # Raw text
 response.prompt_name  # Prompt identifier
-
-# Error handling
-try:
-    response = adapter.evaluate(prompt, session=session)
-except PromptEvaluationError as e:
-    # e.phase: "request" | "response" | "tool" | "budget" | "deadline"
-    # e.prompt_name: str
-    print(f"Failed at {e.phase}: {e}")
-except ThrottleError as e:
-    # e.retry_after: float
-    print(f"Throttled, retry in {e.retry_after}s")
 ```
 
 ### 7. Claude Agent SDK Adapter
@@ -561,6 +570,8 @@ except ThrottleError as e:
 Native Claude Code capabilities with hermetic isolation.
 
 ```python
+import os
+
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
@@ -570,6 +581,9 @@ from weakincentives.adapters.claude_agent_sdk import (
     NetworkPolicy,
     SandboxConfig,
 )
+from weakincentives.runtime import Session
+
+session = Session()
 
 # Create workspace (materializes files to temp dir)
 workspace = ClaudeAgentWorkspaceSection(
@@ -601,7 +615,7 @@ adapter = ClaudeAgentSDKAdapter(
 )
 
 # Use and cleanup
-response = adapter.evaluate(prompt, session=session)
+# response = adapter.evaluate(prompt, session=session)
 workspace.cleanup()
 ```
 
@@ -611,57 +625,102 @@ workspace.cleanup()
 - `NetworkPolicy(allowed_domains=("docs.python.org",))` - Specific domains
 - `SandboxConfig(enabled=True)` - OS-level sandboxing
 
-### 8. MainLoop Orchestration
+### 8. Tool Policies
 
-Standardized request/response workflow with visibility expansion handling.
+Enforce sequential dependencies between tool invocations.
 
 ```python
-from weakincentives.runtime import MainLoop, MainLoopConfig, MainLoopRequest, Session
-from weakincentives.runtime import InMemoryMailbox
-from weakincentives.prompt import Prompt
-
-class ReviewLoop(MainLoop[ReviewRequest, ReviewResult]):
-    def __init__(self, adapter, requests):
-        super().__init__(
-            adapter=adapter,
-            requests=requests,
-            config=MainLoopConfig(
-                budget=Budget(max_total_tokens=50000),
-            ),
-        )
-        self._template = build_template()
-
-    def prepare(self, request: ReviewRequest) -> tuple[Prompt[ReviewResult], Session]:
-        prompt = Prompt(self._template).bind(request)
-        session = Session()
-        return prompt, session
-
-# Direct execution
-loop = ReviewLoop(adapter=adapter, requests=mailbox)
-response, session = loop.execute(ReviewRequest(...))
-
-# Mailbox-driven
-requests = InMemoryMailbox(name="requests")
-responses = InMemoryMailbox(name="responses")
-
-requests.send(
-    MainLoopRequest(request=ReviewRequest(...)),
-    reply_to=responses,
+from weakincentives.prompt import (
+    ReadBeforeWritePolicy,
+    SequentialDependencyPolicy,
+    PolicyDecision,
 )
 
-# Run loop (blocks, processes from mailbox)
-loop.run(max_iterations=None)
+# Read-before-write: must read existing files before overwriting
+rbw_policy = ReadBeforeWritePolicy(
+    read_tools=frozenset({"read_file"}),
+    write_tools=frozenset({"write_file", "edit_file"}),
+)
 
-# Graceful shutdown
-loop.shutdown(timeout=5.0)
+# Sequential dependency: enforce tool ordering
+seq_policy = SequentialDependencyPolicy(
+    dependencies={
+        "deploy": frozenset({"test", "build"}),  # deploy requires test AND build
+        "build": frozenset({"lint"}),  # build requires lint
+    }
+)
 ```
 
-### 9. Contrib Tools
+**Policy behavior**:
+
+- `ReadBeforeWritePolicy`: New files can be created freely; existing files must
+  be read first. Tracks read paths in session `PolicyState` slice.
+- `SequentialDependencyPolicy`: Tool B requires tool A to have succeeded.
+  Tracks invoked tools in session `PolicyState` slice.
+
+### 9. Feedback Providers
+
+Deliver ongoing progress feedback during unattended execution.
+
+```python
+from weakincentives.prompt import (
+    DeadlineFeedback,
+    FeedbackProviderConfig,
+    FeedbackTrigger,
+)
+
+# Built-in: deadline feedback (warns about remaining time)
+deadline_config = FeedbackProviderConfig(
+    provider=DeadlineFeedback(warning_threshold_seconds=120),
+    trigger=FeedbackTrigger(every_n_seconds=30),  # Check every 30 seconds
+)
+```
+
+**Trigger conditions** (OR'd together):
+
+- `every_n_calls` - Run after N tool calls since last feedback
+- `every_n_seconds` - Run after N seconds elapsed
+
+### 10. Task Completion Checkers
+
+Verify agents complete all tasks before stopping. Critical for unattended
+agents.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    PlanBasedChecker,
+    CompositeChecker,
+)
+from weakincentives.contrib.tools import Plan
+
+# Plan-based: ensure all plan steps are "done"
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+    ),
+)
+```
+
+**Hook integration** (Claude Agent SDK):
+
+1. **PostToolUse Hook**: After `StructuredOutput`, checker verifies completion.
+   If incomplete, adds feedback to encourage continuation.
+1. **Stop Hook**: Before allowing stop, checker verifies. If incomplete, signals
+   `needsMoreTurns: True`.
+
+### 11. Contrib Tools
 
 **VFS (Virtual Filesystem)**:
 
 ```python
+from pathlib import Path
+
 from weakincentives.contrib.tools import VfsToolsSection, HostMount, VfsPath
+from weakincentives.runtime import Session
+
+session = Session()
 
 vfs = VfsToolsSection(
     session=session,
@@ -683,8 +742,13 @@ vfs = VfsToolsSection(
 
 ```python
 from weakincentives.contrib.tools import (
-    PlanningToolsSection, PlanningStrategy, Plan, PlanStep
+    PlanningToolsSection,
+    PlanningStrategy,
+    Plan,
 )
+from weakincentives.runtime import Session
+
+session = Session()
 
 planning = PlanningToolsSection(
     session=session,
@@ -694,56 +758,32 @@ planning = PlanningToolsSection(
 
 # Query plan state
 plan = session[Plan].latest()
-for step in plan.steps:
-    print(f"[{step.status}] {step.title}")
+if plan:
+    for step in plan.steps:
+        print(f"[{step.status}] {step.title}")
 ```
 
-**Workspace Digest**:
-
-```python
-from weakincentives.contrib.tools import WorkspaceDigestSection, WorkspaceDigest
-
-digest_section = WorkspaceDigestSection(session=session)
-# Auto-renders workspace summary from session[WorkspaceDigest]
-```
-
-### 10. Resources
+### 12. Resources
 
 Dependency injection with scoped lifecycles.
 
 ```python
 from weakincentives.resources import Binding, Scope, ResourceRegistry
 
+
+class Config:
+    pass
+
+
+class HTTPClient:
+    pass
+
+
 # Build registry
 registry = ResourceRegistry.of(
-    Binding(Config, lambda r: Config.from_env()),
-    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-    Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),  # Fresh per call
+    Binding(Config, lambda r: Config()),
+    Binding(HTTPClient, lambda r: HTTPClient()),
 )
-
-# Use with prompt
-prompt = Prompt(template).bind(
-    params,
-    resources={HTTPClient: http_client},  # Direct instance
-)
-# Or with bindings
-prompt = Prompt(template).bind(
-    params,
-    resources={
-        Config: Binding(Config, lambda r: Config()),
-    },
-)
-
-# Lifecycle management
-with prompt.resources:
-    http = prompt.resources.get(HTTPClient)
-    response = adapter.evaluate(prompt, session=session)
-# Cleaned up automatically
-
-# In tool handlers
-def handler(params, *, context: ToolContext) -> ToolResult:
-    http = context.resources.get(HTTPClient)
-    fs = context.filesystem  # Shorthand
 ```
 
 **Scopes**:
@@ -752,339 +792,55 @@ def handler(params, *, context: ToolContext) -> ToolResult:
 - `Scope.TOOL_CALL` - Fresh per tool invocation
 - `Scope.PROTOTYPE` - Fresh every resolution
 
-### 11. Serialization
+### 13. Serialization
 
 ```python
+from dataclasses import dataclass
+
 from weakincentives.serde import dump, parse, schema, clone
 
+
+@dataclass(frozen=True)
+class MyData:
+    value: int
+
+
+data = MyData(value=42)
+
 # Serialize dataclass to dict
-data = dump(my_dataclass)
+d = dump(data)
 
 # Parse dict to dataclass
-obj = parse(MyDataclass, data)
+obj = parse(MyData, d)
 
 # JSON schema
-json_schema = schema(MyDataclass)
+json_schema = schema(MyData)
 
 # Deep clone
-copy = clone(my_dataclass)
+copy = clone(data)
 ```
 
-### 12. Design-by-Contract
+### 14. Design-by-Contract
 
 ```python
 from weakincentives.dbc import require, ensure, invariant, pure
+
 
 @require(lambda x: x > 0)
 @ensure(lambda result: result >= 0)
 def compute(x: int) -> int:
     return x * 2
 
+
 @invariant(lambda self: self.count >= 0)
 class Counter:
     count: int = 0
+
 
 @pure  # Validates no side effects
 def hash_value(x: str) -> int:
     return hash(x)
 ```
-
-### 13. Tool Policies
-
-Enforce sequential dependencies between tool invocations. Policies gate tool
-calls and track state in session slices.
-
-```python
-from weakincentives.prompt import (
-    ReadBeforeWritePolicy,
-    SequentialDependencyPolicy,
-    PolicyDecision,
-)
-
-# Read-before-write: must read existing files before overwriting
-rbw_policy = ReadBeforeWritePolicy(
-    read_tools=frozenset({"read_file"}),
-    write_tools=frozenset({"write_file", "edit_file"}),
-)
-
-# Sequential dependency: enforce tool ordering
-seq_policy = SequentialDependencyPolicy(
-    dependencies={
-        "deploy": frozenset({"test", "build"}),  # deploy requires test AND build
-        "build": frozenset({"lint"}),            # build requires lint
-    }
-)
-
-# Attach policies to sections
-section = MarkdownSection(
-    title="Filesystem",
-    key="filesystem",
-    template="Read and write files.",
-    tools=(read_file, write_file, edit_file),
-    policies=(rbw_policy,),  # Section-level policy
-)
-
-# Or attach to entire prompt
-template = PromptTemplate(
-    ns="my-agent",
-    key="main",
-    sections=[...],
-    policies=(seq_policy,),  # Prompt-level policy (all tools)
-)
-```
-
-**Policy behavior**:
-
-- `ReadBeforeWritePolicy`: New files can be created freely; existing files must
-  be read first. Tracks read paths in session `PolicyState` slice.
-- `SequentialDependencyPolicy`: Tool B requires tool A to have succeeded.
-  Tracks invoked tools in session `PolicyState` slice.
-
-**Custom policies** implement the `ToolPolicy` protocol:
-
-```python
-from weakincentives.prompt import PolicyDecision
-
-class ApprovalRequiredPolicy:
-    """Require approval tool before destructive operations."""
-
-    @property
-    def name(self) -> str:
-        return "approval_required"
-
-    def check(self, tool, params, *, context) -> PolicyDecision:
-        if tool.name not in {"delete_file", "deploy"}:
-            return PolicyDecision.allow()
-
-        state = context.session[PolicyState].latest()
-        if state and "approve" in state.invoked_tools:
-            return PolicyDecision.allow()
-        return PolicyDecision.deny("Call 'approve' tool first")
-
-    def on_result(self, tool, params, result, *, context) -> None:
-        if result.success and tool.name == "approve":
-            # Record approval in session state
-            state = context.session[PolicyState].latest() or PolicyState(
-                policy_name=self.name
-            )
-            new_state = PolicyState(
-                policy_name=self.name,
-                invoked_tools=state.invoked_tools | {"approve"},
-                invoked_keys=state.invoked_keys,
-            )
-            context.session[PolicyState].seed(new_state)
-```
-
-### 14. Feedback Providers
-
-Deliver ongoing progress feedback during unattended execution. Providers
-analyze patterns and inject guidance into the agent's context.
-
-```python
-from weakincentives.prompt import (
-    DeadlineFeedback,
-    Feedback,
-    FeedbackProvider,
-    FeedbackProviderConfig,
-    FeedbackTrigger,
-)
-
-# Built-in: deadline feedback (warns about remaining time)
-deadline_config = FeedbackProviderConfig(
-    provider=DeadlineFeedback(warning_threshold_seconds=120),
-    trigger=FeedbackTrigger(every_n_seconds=30),  # Check every 30 seconds
-)
-
-# Attach to prompt template
-template = PromptTemplate(
-    ns="my-agent",
-    key="main",
-    sections=[...],
-    feedback_providers=(deadline_config,),
-)
-```
-
-**Trigger conditions** (OR'd together):
-
-- `every_n_calls` - Run after N tool calls since last feedback
-- `every_n_seconds` - Run after N seconds elapsed
-
-**Custom feedback provider**:
-
-```python
-@dataclass(frozen=True)
-class ToolUsageMonitor:
-    """Warn when too many tool calls without apparent progress."""
-
-    max_calls_without_progress: int = 20
-
-    @property
-    def name(self) -> str:
-        return "ToolUsageMonitor"
-
-    def should_run(self, *, context) -> bool:
-        return True  # Always run when triggered
-
-    def provide(self, *, context) -> Feedback:
-        count = context.tool_call_count
-        if count > self.max_calls_without_progress:
-            return Feedback(
-                provider_name=self.name,
-                summary=f"You have made {count} tool calls.",
-                suggestions=(
-                    "Review what you've accomplished so far.",
-                    "Check if you're making progress toward the goal.",
-                ),
-                severity="caution",
-            )
-        return Feedback(
-            provider_name=self.name,
-            summary=f"Progress check: {count} tool calls made.",
-            severity="info",
-        )
-
-# Register with trigger
-config = FeedbackProviderConfig(
-    provider=ToolUsageMonitor(max_calls_without_progress=15),
-    trigger=FeedbackTrigger(every_n_calls=10),
-)
-```
-
-**Feedback delivery**: Injected immediately after tool execution via adapter
-hooks. First matching provider wins.
-
-### 15. Task Completion Checkers
-
-Verify agents complete all tasks before stopping. Critical for ensuring agents
-don't prematurely terminate while work remains incomplete.
-
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    PlanBasedChecker,
-    CompositeChecker,
-    TaskCompletionChecker,
-    TaskCompletionContext,
-    TaskCompletionResult,
-)
-from weakincentives.contrib.tools.planning import Plan
-
-# Plan-based: ensure all plan steps are "done"
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(plan_type=Plan),
-    ),
-)
-
-# Composite: combine multiple checkers (all must pass)
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=CompositeChecker(
-            checkers=(PlanBasedChecker(plan_type=Plan), TestPassingChecker()),
-            all_must_pass=True,  # Both must pass
-        ),
-    ),
-)
-```
-
-**Custom completion checker**:
-
-```python
-class TestPassingChecker:
-    """Ensure all tests pass before allowing completion."""
-
-    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
-        test_results = context.session[TestResult].latest()
-
-        if test_results is None:
-            return TaskCompletionResult.incomplete(
-                "No test results found. Please run the test suite."
-            )
-
-        if test_results.failed > 0:
-            return TaskCompletionResult.incomplete(
-                f"{test_results.failed} tests failing. Fix before completing."
-            )
-
-        return TaskCompletionResult.ok(f"All {test_results.passed} tests passing.")
-
-
-class FileExistsChecker:
-    """Ensure required output files exist."""
-
-    def __init__(self, required_files: tuple[str, ...]) -> None:
-        self._required = required_files
-
-    def check(self, context: TaskCompletionContext) -> TaskCompletionResult:
-        if context.filesystem is None:
-            return TaskCompletionResult.ok("No filesystem to check.")
-
-        missing = [f for f in self._required if not context.filesystem.exists(f)]
-
-        if missing:
-            return TaskCompletionResult.incomplete(
-                f"Missing required files: {', '.join(missing)}"
-            )
-
-        return TaskCompletionResult.ok("All required files exist.")
-```
-
-**Hook integration** (Claude Agent SDK):
-
-1. **PostToolUse Hook**: After `StructuredOutput`, checker verifies completion.
-   If incomplete, adds feedback to encourage continuation.
-1. **Stop Hook**: Before allowing stop, checker verifies. If incomplete, signals
-   `needsMoreTurns: True`.
-1. **Final verification**: After SDK completes, raises `PromptEvaluationError`
-   if tasks remain incomplete.
-
-### 16. Tool Examples
-
-Provide representative invocations for documentation and few-shot learning.
-
-```python
-from weakincentives import Tool
-from weakincentives.prompt import ToolExample
-
-@dataclass(slots=True, frozen=True)
-class LookupParams:
-    entity_id: str = field(metadata={"description": "ID to fetch"})
-
-@dataclass(slots=True, frozen=True)
-class LookupResult:
-    entity_id: str
-    url: str
-
-def lookup_handler(params: LookupParams, *, context: ToolContext) -> ToolResult[LookupResult]:
-    result = LookupResult(entity_id=params.entity_id, url="https://example.com/...")
-    return ToolResult.ok(result, message=f"Fetched {result.entity_id}")
-
-lookup_tool = Tool[LookupParams, LookupResult](
-    name="lookup_entity",
-    description="Fetch information for an entity ID.",
-    handler=lookup_handler,
-    examples=(
-        ToolExample(
-            description="Basic lookup",
-            input=LookupParams(entity_id="abc-123"),
-            output=LookupResult(entity_id="abc-123", url="https://example.com/abc-123"),
-        ),
-        ToolExample(
-            description="Lookup with special characters",
-            input=LookupParams(entity_id="user@domain"),
-            output=LookupResult(entity_id="user@domain", url="https://example.com/user%40domain"),
-        ),
-    ),
-)
-```
-
-**Example constraints**:
-
-- `description` must be ≤ 200 characters
-- `input` must be an instance of the params dataclass
-- `output` must be an instance of the result dataclass
-- Examples are validated during prompt rendering
 
 ______________________________________________________________________
 
@@ -1100,7 +856,8 @@ ______________________________________________________________________
 
 ### Tool Implementation
 
-1. **Type everything**: Use `@dataclass(slots=True, frozen=True)` for params/results
+1. **Type everything**: Use `@dataclass(slots=True, frozen=True)` for
+   params/results
 1. **Document params**: Add `metadata={"description": "..."}` to all fields
 1. **Handle failures gracefully**: Return `ToolResult.error()`, don't raise
 1. **Check deadlines**: Early-exit if `context.deadline.remaining()` is low
@@ -1111,13 +868,15 @@ ______________________________________________________________________
 1. **Snapshot before risky operations**: `session.snapshot()` enables rollback
 1. **Use typed slices**: Query via `session[Type].latest()`, not raw access
 1. **Dispatch events**: Never mutate state directly; use `session.dispatch()`
-1. **Register reducers early**: Call `session[Type].register()` before dispatching
+1. **Register reducers early**: Call `session[Type].register()` before
+   dispatching
 
 ### Prompt Authoring
 
 1. **Keep sections focused**: One concern per section
 1. **Use progressive disclosure**: Set `visibility=SUMMARY` for verbose content
-1. **Attach tools to relevant sections**: Tools should be near their instructions
+1. **Attach tools to relevant sections**: Tools should be near their
+   instructions
 1. **Apply policies at appropriate level**: Section-level for local constraints,
    prompt-level for global ones
 
@@ -1127,7 +886,7 @@ ______________________________________________________________________
 
 ### Which Adapter?
 
-```
+```text
 Need Claude Code native tools? → ClaudeAgentSDKAdapter
 Need multi-provider support?   → LiteLLMAdapter
 OpenAI only?                   → OpenAIAdapter
@@ -1135,7 +894,7 @@ OpenAI only?                   → OpenAIAdapter
 
 ### Which Workspace Tool?
 
-```
+```text
 Claude Agent SDK mode?         → ClaudeAgentWorkspaceSection
 Need shell execution?          → PodmanSandboxSection
 Standard file ops only?        → VfsToolsSection
@@ -1143,7 +902,7 @@ Standard file ops only?        → VfsToolsSection
 
 ### Which Reducer?
 
-```
+```text
 Recording every event?         → append_all (default)
 Only latest value matters?     → replace_latest
 Keyed upsert (like cache)?     → upsert_by(key_fn)
@@ -1152,7 +911,7 @@ Complex state transitions?     → @reducer decorator on dataclass
 
 ### Session vs Resource State?
 
-```
+```text
 Agent state (plans, results)?  → Session slices
 Runtime deps (HTTP, DB)?       → ResourceRegistry
 Filesystem state?              → Filesystem via resources
@@ -1177,21 +936,18 @@ ______________________________________________________________________
 
 ```python
 from weakincentives.runtime import (
-    PromptRendered,    # After render, before provider call
-    PromptExecuted,    # After all tools and parsing
-    ToolInvoked,       # After each tool handler
-    TokenUsage,        # Token consumption data
+    PromptRendered,  # After render, before provider call
+    PromptExecuted,  # After all tools and parsing
+    ToolInvoked,  # After each tool handler
+    TokenUsage,  # Token consumption data
 )
-
-# Subscribe
-session.dispatcher.subscribe(ToolInvoked, lambda e: print(e.name))
 ```
 
 ______________________________________________________________________
 
 ## Error Hierarchy
 
-```
+```text
 WinkError                       # Base for all WINK errors
 ├── DeadlineExceededError       # Wall-clock limit hit
 ├── BudgetExceededError         # Token limit breached
@@ -1227,7 +983,7 @@ ______________________________________________________________________
 
 ## File Layout
 
-```
+```text
 src/weakincentives/
 ├── adapters/           # OpenAI, LiteLLM, Claude Agent SDK
 │   └── claude_agent_sdk/
@@ -1263,7 +1019,7 @@ ______________________________________________________________________
 Read before modifying related code:
 
 | Spec | Topic |
-|------|-------|
+| --------------------------- | ---------------------------------------- |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides |
 | `specs/SESSIONS.md` | Session lifecycle, events, budgets |
 | `specs/TOOLS.md` | Tool registration, planning tools |
@@ -1290,7 +1046,6 @@ PromptTemplate[OutputT](
     key: str,                   # Unique key (required)
     name: str | None,           # Display name
     sections: tuple[Section],   # Ordered sections
-    resources: ResourceRegistry,
 )
 ```
 
