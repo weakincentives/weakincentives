@@ -20,6 +20,8 @@ captures latency, throughput, error rates, and queue health across all layers.
   automatically. Opt-out rather than opt-in.
 - **Type-safe queries**: Metric slices support the standard `where()`,
   `latest()`, and `all()` patterns for analysis.
+- **RunContext correlation**: Metrics integrate with `RunContext` for
+  distributed tracing and request correlation across workers.
 
 ## Architecture Overview
 
@@ -300,6 +302,9 @@ class MailboxMetrics:
     messages_expired: Counter = field(
         default_factory=lambda: Counter(name="mailbox.expired")
     )
+    messages_dead_lettered: Counter = field(
+        default_factory=lambda: Counter(name="mailbox.dead_lettered")
+    )
     # Retry tracking
     total_retries: Counter = field(
         default_factory=lambda: Counter(name="mailbox.retries")
@@ -385,6 +390,10 @@ class MetricsCollector(Protocol):
 
     def record_message_nack(self, queue_name: str) -> None:
         """Record message negative acknowledgment (will retry)."""
+        ...
+
+    def record_message_dead_lettered(self, queue_name: str) -> None:
+        """Record message sent to dead letter queue."""
         ...
 
     def record_queue_depth(self, queue_name: str, depth: int) -> None:
@@ -585,6 +594,18 @@ class SessionMetricsCollector:
         metrics = replace(
             metrics,
             messages_nacked=metrics.messages_nacked.inc(),
+            last_updated=datetime.now(UTC),
+        )
+        self._mailboxes[queue_name] = metrics
+        self._flush()
+
+    def record_message_dead_lettered(self, queue_name: str) -> None:
+        metrics = self._mailboxes.get(queue_name) or MailboxMetrics(
+            queue_name=queue_name
+        )
+        metrics = replace(
+            metrics,
+            messages_dead_lettered=metrics.messages_dead_lettered.inc(),
             last_updated=datetime.now(UTC),
         )
         self._mailboxes[queue_name] = metrics
@@ -941,6 +962,104 @@ class HealthEndpoint:
         }
 ```
 
+## RunContext Integration
+
+Metrics correlate with `RunContext` for distributed tracing. The collector
+accepts optional context for request-level correlation.
+
+```python
+from weakincentives.runtime import RunContext
+
+class MetricsCollector(Protocol):
+    def record_adapter_call(
+        self,
+        adapter: AdapterName,
+        *,
+        render_ms: int,
+        call_ms: int,
+        parse_ms: int,
+        tool_ms: int,
+        usage: TokenUsage | None = None,
+        error: str | None = None,
+        throttled: bool = False,
+        run_context: RunContext | None = None,  # For correlation
+    ) -> None:
+        ...
+```
+
+When `RunContext` is provided, implementations can:
+
+- Tag metrics with `trace_id` and `span_id` for distributed tracing
+- Use `worker_id` for per-worker aggregation
+- Track `attempt` (delivery count) for retry analysis
+- Correlate with `request_id` for end-to-end request tracking
+
+```python
+# Example: MainLoop passes RunContext to metrics
+async def _process_request(self, request: MainLoopRequest) -> MainLoopResult:
+    run_context = RunContext(
+        request_id=request.request_id,
+        attempt=message.delivery_count,
+        worker_id=self._worker_id,
+        trace_id=request.trace_id,
+    )
+
+    # ... execute prompt ...
+
+    if self._metrics:
+        self._metrics.record_adapter_call(
+            adapter=self._adapter.name,
+            render_ms=render_ms,
+            call_ms=call_ms,
+            parse_ms=parse_ms,
+            tool_ms=tool_ms,
+            usage=response.usage,
+            run_context=run_context,
+        )
+```
+
+## Experiment Labels
+
+For A/B testing with `Experiment`, metrics can be tagged by experiment name
+to enable comparison across variants.
+
+```python
+from weakincentives.evals import Experiment
+
+@FrozenDataclass()
+class AdapterMetrics:
+    adapter: AdapterName
+    experiment: str | None = None  # Optional experiment tag
+    # ... other fields
+```
+
+When processing requests with experiments:
+
+```python
+# MainLoop with experiment
+async def _process_request(self, request: MainLoopRequest) -> MainLoopResult:
+    experiment_name = request.experiment.name if request.experiment else None
+
+    # Metrics tagged by experiment for A/B comparison
+    if self._metrics:
+        self._metrics.record_adapter_call(
+            adapter=self._adapter.name,
+            # ... timing fields ...
+            experiment=experiment_name,
+        )
+```
+
+Query metrics by experiment:
+
+```python
+# Compare latency across experiment variants
+baseline = [m for m in snapshot.adapters if m.experiment == "baseline"]
+variant = [m for m in snapshot.adapters if m.experiment == "v2-concise"]
+
+baseline_p99 = baseline[0].call_latency.percentile(0.99) if baseline else None
+variant_p99 = variant[0].call_latency.percentile(0.99) if variant else None
+```
+
 ## Limitations
 
 - **No distributed aggregation**: Metrics are session-local. For cross-worker
@@ -957,6 +1076,9 @@ class HealthEndpoint:
 - `specs/SESSIONS.md` - Session slice storage patterns
 - `specs/ADAPTERS.md` - Adapter lifecycle and token usage
 - `specs/MAILBOX.md` - Message delivery metadata
+- `specs/DLQ.md` - Dead letter queue handling and poison message isolation
 - `specs/TOOLS.md` - Tool execution patterns
 - `specs/HEALTH.md` - Health endpoints and watchdog integration
 - `specs/SLICES.md` - Slice storage backends
+- `specs/RUN_CONTEXT.md` - Execution metadata and distributed tracing
+- `specs/EXPERIMENTS.md` - A/B testing and experiment configuration
