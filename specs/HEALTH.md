@@ -141,28 +141,76 @@ Workers signal liveness by calling `heartbeat.beat()` at regular intervals.
 The watchdog tracks the last heartbeat time per loop and flags loops that
 exceed the stall threshold.
 
+The `Heartbeat` class supports an observer pattern, allowing multiple
+components (lease extension, metrics, logging) to react to heartbeats without
+coupling.
+
 ```python
 import threading
 import time
 from dataclasses import dataclass, field
+from collections.abc import Callable
 
 @dataclass(slots=True)
 class Heartbeat:
-    """Thread-safe heartbeat tracker for a single loop."""
+    """Thread-safe heartbeat tracker with observer callbacks.
+
+    Workers call ``beat()`` at regular intervals to prove liveness.
+    The watchdog calls ``elapsed()`` to check for stalls. Multiple
+    callbacks can be registered to observe beats (e.g., lease extension,
+    metrics, logging).
+
+    Implementation location: src/weakincentives/runtime/heartbeat.py
+    """
 
     _last_beat: float = field(default_factory=time.monotonic)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _callbacks: list[Callable[[], None]] = field(default_factory=list)
 
     def beat(self) -> None:
-        """Record a heartbeat. Called by the worker loop."""
+        """Record a heartbeat and invoke all registered callbacks."""
         with self._lock:
             self._last_beat = time.monotonic()
+            callbacks = list(self._callbacks)  # Snapshot under lock
+
+        # Invoke outside lock to avoid deadlock
+        for callback in callbacks:
+            try:
+                callback()
+            except Exception:
+                # Log but continue - one failing callback shouldn't break others
+                ...
 
     def elapsed(self) -> float:
         """Seconds since last heartbeat."""
         with self._lock:
             return time.monotonic() - self._last_beat
+
+    def add_callback(self, callback: Callable[[], None]) -> None:
+        """Add a callback to be invoked on each beat.
+
+        Callbacks are invoked outside the lock in registration order.
+        Exceptions in callbacks are logged but do not prevent other
+        callbacks from running.
+        """
+        with self._lock:
+            self._callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable[[], None]) -> None:
+        """Remove a previously added callback.
+
+        Raises ValueError if callback was not registered.
+        """
+        with self._lock:
+            self._callbacks.remove(callback)
 ```
+
+**Observer Pattern**: The callback mechanism allows the same heartbeat to:
+- Extend message visibility (see `specs/LEASE_EXTENDER.md`)
+- Update metrics
+- Trigger custom monitoring logic
+
+All without modifying the `Heartbeat` class or coupling components together.
 
 ### Watchdog
 

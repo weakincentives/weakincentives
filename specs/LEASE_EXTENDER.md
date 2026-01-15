@@ -9,6 +9,10 @@ proof-of-work: if the worker is actively processing (beating), the lease
 extends; if the worker is stuck (no beats), the lease expires naturally and
 the message becomes visible for another worker.
 
+**Related specifications**: See `specs/HEALTH.md` for the complete `Heartbeat`
+class definition and observer pattern design. See `specs/MAILBOX.md` for
+message visibility semantics.
+
 This design unifies two concerns:
 
 - **Watchdog liveness**: Heartbeats prove the worker isn't stuck
@@ -234,62 +238,21 @@ class LeaseExtender:
                 )
 ```
 
-### Heartbeat Extension
+### Heartbeat Integration
 
-The `Heartbeat` class is extended to support multiple callbacks via an
-observer pattern:
+LeaseExtender leverages the `Heartbeat` class's observer pattern to receive
+notifications when work is happening. See `specs/HEALTH.md` for the complete
+`Heartbeat` definition and usage.
 
-```python
-@dataclass(slots=True)
-class Heartbeat:
-    """Thread-safe heartbeat tracker with observer callbacks.
+**Key integration points**:
+- `LeaseExtender._attach()` registers `_on_beat` callback via
+  `heartbeat.add_callback()`
+- `LeaseExtender._detach()` unregisters via `heartbeat.remove_callback()`
+- `_on_beat()` is invoked automatically whenever tools call `heartbeat.beat()`
 
-    Workers call ``beat()`` at regular intervals to prove liveness.
-    The watchdog calls ``elapsed()`` to check for stalls. Multiple
-    callbacks can be registered to observe beats (lease extension,
-    metrics, logging, etc.).
-    """
-
-    _last_beat: float = field(default_factory=time.monotonic)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
-    _callbacks: list[Callable[[], None]] = field(default_factory=list)
-
-    def beat(self) -> None:
-        """Record a heartbeat and invoke all registered callbacks."""
-        with self._lock:
-            self._last_beat = time.monotonic()
-            callbacks = list(self._callbacks)  # Snapshot under lock
-
-        # Invoke outside lock to avoid deadlock
-        for callback in callbacks:
-            try:
-                callback()
-            except Exception:
-                _logger.exception("Heartbeat callback failed")
-
-    def elapsed(self) -> float:
-        """Seconds since last heartbeat."""
-        with self._lock:
-            return time.monotonic() - self._last_beat
-
-    def add_callback(self, callback: Callable[[], None]) -> None:
-        """Add a callback to be invoked on each beat.
-
-        Callbacks are invoked outside the lock in registration order.
-        Exceptions in callbacks are logged but do not prevent other
-        callbacks from running.
-        """
-        with self._lock:
-            self._callbacks.append(callback)
-
-    def remove_callback(self, callback: Callable[[], None]) -> None:
-        """Remove a previously added callback.
-
-        Raises ValueError if callback was not registered.
-        """
-        with self._lock:
-            self._callbacks.remove(callback)
-```
+This observer pattern decouples lease extension from heartbeat tracking—tools
+beat to prove liveness, and LeaseExtender observes those beats to extend
+visibility. Neither component needs to know about the other.
 
 ## Heartbeat Propagation
 

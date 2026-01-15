@@ -164,54 +164,16 @@ without allowing mutations.
 
 ## Built-in Evaluators
 
-### exact_match
+The library provides basic evaluators and combinators for common scoring tasks.
 
-Strict equality check:
+**Implementation:** `src/weakincentives/evals/_evaluators.py`
 
-```python
-def exact_match[T](output: T, expected: T) -> Score:
-    """Exact equality check."""
-    passed = output == expected
-    return Score(value=1.0 if passed else 0.0, passed=passed)
-```
-
-### contains
-
-Substring presence check:
-
-```python
-def contains(output: str, expected: str) -> Score:
-    """Check if expected appears in output."""
-    passed = expected in output
-    return Score(value=1.0 if passed else 0.0, passed=passed)
-```
-
-### Combinators
-
-Combine evaluators for multi-criteria scoring:
-
-```python
-def all_of(*evaluators: Evaluator[O, E]) -> Evaluator[O, E]:
-    """All evaluators must pass. Score is the mean."""
-    def evaluate(output: O, expected: E) -> Score:
-        scores = [e(output, expected) for e in evaluators]
-        passed = all(s.passed for s in scores)
-        value = sum(s.value for s in scores) / len(scores)
-        reasons = [s.reason for s in scores if s.reason]
-        return Score(value=value, passed=passed, reason="; ".join(reasons))
-    return evaluate
-
-
-def any_of(*evaluators: Evaluator[O, E]) -> Evaluator[O, E]:
-    """At least one evaluator must pass. Score is the max."""
-    def evaluate(output: O, expected: E) -> Score:
-        scores = [e(output, expected) for e in evaluators]
-        passed = any(s.passed for s in scores)
-        value = max(s.value for s in scores)
-        reasons = [s.reason for s in scores if s.reason]
-        return Score(value=value, passed=passed, reason="; ".join(reasons))
-    return evaluate
-```
+| Evaluator | Purpose | Signature |
+|-----------|---------|-----------|
+| `exact_match` | Strict equality check | `(output: T, expected: T) -> Score` |
+| `contains` | Substring presence check | `(output: str, expected: str) -> Score` |
+| `all_of` | All evaluators must pass, score is mean | `(*evaluators) -> Evaluator` |
+| `any_of` | At least one must pass, score is max | `(*evaluators) -> Evaluator` |
 
 ### Custom Evaluators
 
@@ -241,6 +203,8 @@ def json_subset(output: dict, expected: dict) -> Score:
 Session-aware evaluators enable behavioral assertions—checking not just _what_
 the agent produced, but _how_ it got there. This includes verifying tool usage
 patterns, token budgets, and custom state invariants.
+
+**Implementation:** `src/weakincentives/evals/_session_evaluators.py`
 
 ### SessionView Protocol
 
@@ -282,194 +246,14 @@ class SliceView(Protocol[T]):
 
 ### Built-in Session Evaluators
 
-#### tool_called
-
-Assert that a specific tool was invoked:
-
-```python
-def tool_called(name: str) -> SessionEvaluator[Any, Any]:
-    """Assert that a tool was called at least once.
-
-    Args:
-        name: The tool name to check for.
-
-    Returns:
-        SessionEvaluator that passes if the tool was called.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        calls = session[ToolInvoked].all()
-        matching = [c for c in calls if c.name == name]
-        passed = len(matching) > 0
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"tool '{name}' called {len(matching)} time(s)",
-        )
-    return evaluate
-```
-
-#### tool_not_called
-
-Assert that a tool was NOT invoked:
-
-```python
-def tool_not_called(name: str) -> SessionEvaluator[Any, Any]:
-    """Assert that a tool was never called.
-
-    Args:
-        name: The tool name that should not appear.
-
-    Returns:
-        SessionEvaluator that passes if the tool was not called.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        calls = session[ToolInvoked].all()
-        matching = [c for c in calls if c.name == name]
-        passed = len(matching) == 0
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"tool '{name}' called {len(matching)} time(s)" if not passed else "",
-        )
-    return evaluate
-```
-
-#### tool_call_count
-
-Assert tool was called within count bounds:
-
-```python
-def tool_call_count(
-    name: str,
-    *,
-    min_count: int = 0,
-    max_count: int | None = None,
-) -> SessionEvaluator[Any, Any]:
-    """Assert tool call count is within bounds.
-
-    Args:
-        name: The tool name to count.
-        min_count: Minimum number of calls required (inclusive).
-        max_count: Maximum number of calls allowed (inclusive). None = no limit.
-
-    Returns:
-        SessionEvaluator that passes if count is within bounds.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        calls = session[ToolInvoked].all()
-        count = sum(1 for c in calls if c.name == name)
-        passed = count >= min_count and (max_count is None or count <= max_count)
-
-        if max_count is None:
-            bounds = f">= {min_count}"
-        else:
-            bounds = f"{min_count}-{max_count}"
-
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"tool '{name}' called {count} times (expected {bounds})",
-        )
-    return evaluate
-```
-
-#### all_tools_succeeded
-
-Assert all tool calls returned success:
-
-```python
-def all_tools_succeeded() -> SessionEvaluator[Any, Any]:
-    """Assert all tool invocations succeeded.
-
-    Checks the 'success' field in each ToolInvoked.result dict.
-    Tools without a 'success' field are assumed to have succeeded.
-
-    Returns:
-        SessionEvaluator that passes if no tool failures occurred.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        calls = session[ToolInvoked].all()
-        if not calls:
-            return Score(value=1.0, passed=True)
-
-        failures = []
-        for call in calls:
-            result = call.result
-            if isinstance(result, dict) and result.get("success") is False:
-                failures.append(call.name)
-
-        passed = len(failures) == 0
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"failed tools: {failures}" if failures else "",
-        )
-    return evaluate
-```
-
-#### token_usage_under
-
-Assert total token usage stayed under budget:
-
-```python
-def token_usage_under(max_tokens: int) -> SessionEvaluator[Any, Any]:
-    """Assert total token usage is under budget.
-
-    Sums input_tokens + output_tokens across all PromptExecuted events.
-
-    Args:
-        max_tokens: Maximum total tokens allowed.
-
-    Returns:
-        SessionEvaluator that passes if usage is under budget.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        executions = session[PromptExecuted].all()
-        total = 0
-        for ex in executions:
-            if ex.usage:
-                total += (ex.usage.input_tokens or 0) + (ex.usage.output_tokens or 0)
-
-        passed = total <= max_tokens
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"used {total} tokens (limit: {max_tokens})",
-        )
-    return evaluate
-```
-
-#### slice_contains
-
-Assert a custom slice contains expected values:
-
-```python
-def slice_contains[T](
-    slice_type: type[T],
-    predicate: Callable[[T], bool],
-    *,
-    min_count: int = 1,
-) -> SessionEvaluator[Any, Any]:
-    """Assert slice contains items matching predicate.
-
-    Args:
-        slice_type: The slice type to query.
-        predicate: Function to test each item.
-        min_count: Minimum matching items required.
-
-    Returns:
-        SessionEvaluator that passes if enough items match.
-    """
-    def evaluate(output: Any, expected: Any, session: SessionView) -> Score:
-        items = session[slice_type].where(predicate)
-        passed = len(items) >= min_count
-        return Score(
-            value=1.0 if passed else 0.0,
-            passed=passed,
-            reason=f"found {len(items)} matching items (need >= {min_count})",
-        )
-    return evaluate
-```
+| Evaluator | Purpose | What It Checks |
+|-----------|---------|----------------|
+| `tool_called(name)` | Assert tool was invoked | Tool appears in ToolInvoked slice |
+| `tool_not_called(name)` | Assert tool was NOT invoked | Tool does not appear in ToolInvoked slice |
+| `tool_call_count(name, min_count, max_count)` | Assert tool call count within bounds | Number of ToolInvoked events for tool |
+| `all_tools_succeeded()` | Assert all tool calls returned success | No ToolInvoked.result has success=False |
+| `token_usage_under(max_tokens)` | Assert total token usage under budget | Sum of input_tokens + output_tokens across PromptExecuted events |
+| `slice_contains(slice_type, predicate, min_count)` | Assert custom slice contains items | Slice contains at least min_count matching items |
 
 ### Adapting Standard Evaluators
 
@@ -490,59 +274,10 @@ def adapt[O, E](evaluator: Evaluator[O, E]) -> SessionEvaluator[O, E]:
 
 ### Combinators
 
-The `all_of` and `any_of` combinators work with both evaluator types:
+The `all_of` and `any_of` combinators work with both evaluator types,
+automatically adapting standard evaluators to session-aware signatures.
 
-```python
-def all_of[O, E](
-    *evaluators: Evaluator[O, E] | SessionEvaluator[O, E],
-) -> SessionEvaluator[O, E]:
-    """All evaluators must pass. Score is the mean.
-
-    Automatically adapts standard evaluators to session-aware signature.
-    """
-    adapted = [
-        e if _is_session_aware(e) else adapt(e)
-        for e in evaluators
-    ]
-
-    def evaluate(output: O, expected: E, session: SessionView) -> Score:
-        scores = [e(output, expected, session) for e in adapted]
-        passed = all(s.passed for s in scores)
-        value = sum(s.value for s in scores) / len(scores)
-        reasons = [s.reason for s in scores if s.reason]
-        return Score(value=value, passed=passed, reason="; ".join(reasons))
-    return evaluate
-
-
-def any_of[O, E](
-    *evaluators: Evaluator[O, E] | SessionEvaluator[O, E],
-) -> SessionEvaluator[O, E]:
-    """At least one evaluator must pass. Score is the max.
-
-    Automatically adapts standard evaluators to session-aware signature.
-    """
-    adapted = [
-        e if _is_session_aware(e) else adapt(e)
-        for e in evaluators
-    ]
-
-    def evaluate(output: O, expected: E, session: SessionView) -> Score:
-        scores = [e(output, expected, session) for e in adapted]
-        passed = any(s.passed for s in scores)
-        value = max(s.value for s in scores)
-        reasons = [s.reason for s in scores if s.reason]
-        return Score(value=value, passed=passed, reason="; ".join(reasons))
-    return evaluate
-
-
-def _is_session_aware(fn: Callable[..., Score]) -> bool:
-    """Check if evaluator accepts session parameter."""
-    import inspect
-    sig = inspect.signature(fn)
-    return len(sig.parameters) >= 3
-```
-
-### Usage Example
+### Composition Example
 
 ```python
 from weakincentives.evals import (
@@ -558,12 +293,6 @@ evaluator = all_of(
     all_tools_succeeded(),              # No tool failures
     token_usage_under(5000),            # Stay under budget
 )
-
-eval_loop = EvalLoop(
-    loop=main_loop,
-    evaluator=evaluator,
-    requests=requests,
-)
 ```
 
 ## LLM-as-Judge
@@ -572,105 +301,17 @@ For subjective criteria, use an LLM to score outputs. Rather than asking for
 numerical scores (which LLMs calibrate poorly), the judge selects from a fixed
 set of rating labels that map to values.
 
-### Rating Scale
+**Implementation:** `src/weakincentives/evals/_judge.py`
 
-```python
-Rating = Literal["excellent", "good", "fair", "poor", "wrong"]
+### Design
 
-RATING_VALUES: dict[Rating, float] = {
-    "excellent": 1.0,   # Fully meets criterion
-    "good": 0.75,       # Meets criterion with minor issues
-    "fair": 0.5,        # Partially meets criterion
-    "poor": 0.25,       # Mostly fails criterion
-    "wrong": 0.0,       # Completely fails criterion
-}
+- **Rating Scale:** Categorical labels (`excellent`, `good`, `fair`, `poor`, `wrong`) map to values (1.0, 0.75, 0.5, 0.25, 0.0)
+- **Pass Threshold:** `excellent` and `good` ratings count as passing
+- **Structured Output:** `JudgeOutput` dataclass with `rating: Rating` and `reason: str`
+- **Judge Prompt:** Template presents criterion, output, reference, and rating scale
+- **Factory Function:** `llm_judge(adapter, criterion)` returns an `Evaluator[str, str]`
 
-PASSING_RATINGS: frozenset[Rating] = frozenset({"excellent", "good"})
-```
-
-### Judge Output
-
-```python
-@dataclass(slots=True, frozen=True)
-class JudgeOutput:
-    """Structured output from judge prompt."""
-    rating: Rating  # Categorical label
-    reason: str     # Brief explanation
-
-
-@dataclass(slots=True, frozen=True)
-class JudgeParams:
-    """Parameters for the judge prompt."""
-    criterion: str
-    output: str
-    expected: str
-
-
-JUDGE_TEMPLATE = PromptTemplate[JudgeOutput](
-    ns="wink.evals",
-    key="llm-judge",
-    name="llm_judge",
-    sections=[
-        MarkdownSection[JudgeParams](
-            title="Evaluation Task",
-            template="""You are an evaluation judge. Rate the output on the given criterion.
-
-## Criterion
-$criterion
-
-## Output to Evaluate
-$output
-
-## Reference Answer
-$expected
-
-## Rating Scale
-- **excellent**: Fully meets the criterion
-- **good**: Meets the criterion with minor issues
-- **fair**: Partially meets the criterion
-- **poor**: Mostly fails the criterion
-- **wrong**: Completely fails the criterion
-
-Select one rating and explain your reasoning briefly.""",
-            key="task",
-        ),
-    ],
-)
-```
-
-### llm_judge Factory
-
-```python
-def llm_judge(
-    adapter: ProviderAdapter[JudgeOutput],
-    criterion: str,
-) -> Evaluator[str, str]:
-    """Create evaluator that uses LLM to judge output.
-
-    Args:
-        adapter: Provider adapter configured for JudgeOutput
-        criterion: What to evaluate (e.g., "factual accuracy", "clarity")
-
-    Returns:
-        Evaluator function that scores string outputs
-    """
-    def evaluate(output: str, expected: str) -> Score:
-        prompt = Prompt(JUDGE_TEMPLATE).bind(JudgeParams(
-            criterion=criterion,
-            output=output,
-            expected=expected,
-        ))
-        response = adapter.evaluate(prompt)
-        rating = response.output.rating
-        return Score(
-            value=RATING_VALUES[rating],
-            passed=rating in PASSING_RATINGS,
-            reason=response.output.reason,
-        )
-    return evaluate
-```
-
-**Usage:**
+### Usage Pattern
 
 ```python
 # Use a smaller/cheaper model for judging
@@ -682,6 +323,9 @@ evaluator = all_of(
     llm_judge(judge_adapter, "No hallucinated information"),
 )
 ```
+
+The judge adapter must be configured with the `JudgeOutput` type for structured
+output parsing.
 
 ## Running Evals
 
@@ -770,6 +414,8 @@ class EvalRequest(Generic[InputT, ExpectedT]):
 Mailbox-driven evaluation loop. Follows the same two-mailbox pattern as
 `MainLoop` for distributed deployments:
 
+**Implementation:** `src/weakincentives/evals/_loop.py`
+
 ```python
 class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
     """Mailbox-driven evaluation loop.
@@ -790,10 +436,7 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
         requests: Mailbox[EvalRequest[InputT, ExpectedT]],
         results: Mailbox[EvalResult],
     ) -> None:
-        self._loop = loop
-        self._evaluator = evaluator
-        self._requests = requests
-        self._results = results
+        ...
 
     def run(self, *, max_iterations: int | None = None) -> None:
         """Process evaluation requests from mailbox.
@@ -804,63 +447,12 @@ class EvalLoop(Generic[InputT, OutputT, ExpectedT]):
         Args:
             max_iterations: Stop after N iterations (None = run forever)
         """
-        iterations = 0
-        while max_iterations is None or iterations < max_iterations:
-            for msg in self._requests.receive(
-                visibility_timeout=300,  # 5 min - must exceed max execution time
-                wait_time_seconds=20,    # Long poll for efficiency
-            ):
-                try:
-                    result = self._evaluate_sample(msg.body)
-                    self._results.send(result)
-                    msg.acknowledge()
-                except Exception as e:
-                    self._handle_failure(msg, e)
-            iterations += 1
-
-    def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
-        """Execute and score a single sample."""
-        sample = request.sample
-        start = time.monotonic()
-
-        response, session = self._loop.execute(sample.input)
-        latency_ms = int((time.monotonic() - start) * 1000)
-
-        # Invoke evaluator with session if session-aware
-        if _is_session_aware(self._evaluator):
-            score = self._evaluator(response.output, sample.expected, session)
-        else:
-            score = self._evaluator(response.output, sample.expected)
-
-        return EvalResult(
-            sample_id=sample.id,
-            score=score,
-            latency_ms=latency_ms,
-        )
-
-    def _handle_failure(
-        self,
-        msg: Message[EvalRequest[InputT, ExpectedT]],
-        error: Exception,
-    ) -> None:
-        """Handle evaluation failure with backoff retry."""
-        latency_ms = 0  # Unknown on failure
-        try:
-            self._results.send(EvalResult(
-                sample_id=msg.body.sample.id,
-                score=Score(value=0.0, passed=False, reason=str(error)),
-                latency_ms=latency_ms,
-                error=str(error),
-            ))
-            msg.acknowledge()  # Error result sent - don't retry
-        except Exception:
-            # Result send failed - nack for retry with backoff
-            msg.nack(visibility_timeout=min(60 * msg.delivery_count, 900))
+        ...
 ```
 
-### Submitting Samples
+### Helper Functions
 
-Submit samples to the requests mailbox for evaluation:
+**Implementation:** `src/weakincentives/evals/_helpers.py`
 
 ```python
 def submit_dataset(
@@ -870,13 +462,8 @@ def submit_dataset(
     """Submit all samples in a dataset for evaluation."""
     for sample in dataset:
         requests.send(EvalRequest(sample=sample))
-```
 
-### Collecting Results
 
-Collect results from the results mailbox:
-
-```python
 def collect_results(
     results: Mailbox[EvalResult],
     expected_count: int,
@@ -893,288 +480,37 @@ def collect_results(
     Returns:
         EvalReport with all collected results
     """
-    collected: list[EvalResult] = []
-    deadline = time.time() + timeout_seconds
-
-    while len(collected) < expected_count and time.time() < deadline:
-        remaining = timeout_seconds - (deadline - time.time())
-        wait_time = min(20, max(1, int(remaining)))
-
-        for msg in results.receive(wait_time_seconds=wait_time):
-            collected.append(msg.body)
-            msg.acknowledge()
-
-    return EvalReport(results=tuple(collected))
+    ...
 ```
 
 ## Usage Examples
 
-### Basic Evaluation
+Complete working examples demonstrate the evaluation framework in practice.
 
-```python
-from dataclasses import dataclass
-from weakincentives import MainLoop, PromptTemplate, Prompt, Session
-from weakincentives.adapters.openai import OpenAIAdapter
-from weakincentives.runtime import ControlDispatcher, InMemoryMailbox, Mailbox
-from weakincentives.evals import (
-    Dataset, EvalLoop, EvalRequest, EvalResult,
-    exact_match, submit_dataset, collect_results,
-)
+**Reference Implementation:** `code_reviewer_example.py`
 
+This example shows:
 
-@dataclass(slots=True, frozen=True)
-class QAParams:
-    """Parameters for the QA prompt."""
-    question: str
+- Creating a custom MainLoop subclass with domain-specific prompts
+- Loading datasets from JSONL files
+- Composing multiple evaluators (exact match, session-aware assertions)
+- Running EvalLoop with max_iterations for local development
+- Submitting datasets and collecting results
+- Inspecting EvalReport metrics (pass rate, mean score, latency)
+- Reviewing failed samples with reasons
 
+For multi-criteria evaluation with LLM-as-judge, see the `llm_judge` factory
+in `src/weakincentives/evals/_judge.py`.
 
-# Define the MainLoop for QA
-class QALoop(MainLoop[str, str]):
-    def __init__(self, *, adapter: OpenAIAdapter[str], dispatcher: ControlDispatcher) -> None:
-        super().__init__(adapter=adapter, dispatcher=dispatcher)
-        self._template = PromptTemplate[str](
-            ns="qa",
-            key="answer",
-            name="qa",
-            sections=[
-                MarkdownSection[QAParams](
-                    title="Question",
-                    template="Answer concisely: $question",
-                    key="q",
-                ),
-            ],
-        )
-
-    def initialize(self, question: str) -> tuple[Prompt[str], Session]:
-        prompt = Prompt(self._template).bind(QAParams(question=question))
-        session = Session(dispatcher=self._dispatcher)
-        return prompt, session
-
-
-# Load dataset
-dataset = Dataset.load(Path("tests/fixtures/qa.jsonl"), str, str)
-
-# Create mailboxes
-requests: Mailbox[EvalRequest[str, str]] = InMemoryMailbox(name="eval-requests")
-results: Mailbox[EvalResult] = InMemoryMailbox(name="eval-results")
-
-# Create MainLoop and EvalLoop
-adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
-dispatcher = ControlDispatcher()
-main_loop = QALoop(adapter=adapter, dispatcher=dispatcher)
-eval_loop = EvalLoop(
-    loop=main_loop,
-    evaluator=exact_match,
-    requests=requests,
-    results=results,
-)
-
-# Submit samples and run worker
-submit_dataset(dataset, requests)
-eval_loop.run(max_iterations=1)
-
-# Collect results
-report = collect_results(results, expected_count=len(dataset))
-
-# Inspect results
-print(f"Pass rate: {report.pass_rate:.1%}")
-print(f"Mean score: {report.mean_score:.2f}")
-print(f"Mean latency: {report.mean_latency_ms:.0f}ms")
-
-# Review failures
-for result in report.failed_samples():
-    print(f"Failed: {result.sample_id} - {result.score.reason}")
-```
-
-### Multi-Criteria Evaluation
-
-```python
-from weakincentives.evals import EvalLoop, all_of, llm_judge, contains
-
-# Create judge adapter
-judge_adapter: OpenAIAdapter[JudgeOutput] = OpenAIAdapter(model="gpt-4o-mini")
-
-# Compose multiple criteria
-evaluator = all_of(
-    contains,  # Must contain expected substring
-    llm_judge(judge_adapter, "Factually accurate"),
-    llm_judge(judge_adapter, "Well-structured response"),
-)
-
-# Create EvalLoop with composite evaluator
-eval_loop = EvalLoop(
-    loop=main_loop,
-    evaluator=evaluator,
-    requests=requests,
-    results=results,
-)
-
-submit_dataset(dataset, requests)
-eval_loop.run(max_iterations=1)
-report = collect_results(results, expected_count=len(dataset))
-```
-
-### Programmatic Dataset
-
-```python
-from weakincentives.evals import Dataset, Sample
-
-# Build dataset in code
-samples = tuple(
-    Sample(
-        id=str(i),
-        input=f"What is {a} + {b}?",
-        expected=str(a + b),
-    )
-    for i, (a, b) in enumerate([(1, 1), (2, 3), (10, 20)])
-)
-dataset = Dataset(samples=samples)
-
-# Submit and evaluate
-submit_dataset(dataset, requests)
-eval_loop.run(max_iterations=1)
-report = collect_results(results, expected_count=len(dataset))
-```
-
-### Session-Aware Evaluation
-
-Evaluate both outputs and agent behavior:
-
-```python
-from weakincentives.evals import (
-    EvalLoop, all_of, exact_match,
-    tool_called, tool_not_called, all_tools_succeeded,
-    token_usage_under, slice_contains,
-)
-
-# Compose output and behavioral assertions
-evaluator = all_of(
-    exact_match,                             # Correct answer
-    tool_called("calculator"),               # Must use calculator
-    tool_not_called("web_search"),           # No external lookups for math
-    all_tools_succeeded(),                   # No tool errors
-    token_usage_under(2000),                 # Efficient execution
-)
-
-eval_loop = EvalLoop(
-    loop=math_loop,
-    evaluator=evaluator,
-    requests=requests,
-    results=results,
-)
-
-submit_dataset(math_dataset, requests)
-eval_loop.run(max_iterations=1)
-report = collect_results(results, expected_count=len(math_dataset))
-
-# Report includes behavioral failure reasons
-for result in report.failed_samples():
-    print(f"Failed: {result.sample_id}")
-    print(f"  Reason: {result.score.reason}")
-```
-
-### Custom Slice Assertions
-
-Assert against application-specific state:
-
-```python
-from dataclasses import dataclass
-from weakincentives.evals import slice_contains
-
-@dataclass(slots=True, frozen=True)
-class PlanStep:
-    """Step in the agent's plan."""
-    name: str
-    status: str  # "pending", "completed", "failed"
-
-# Assert plan was fully executed
-evaluator = all_of(
-    exact_match,
-    slice_contains(
-        PlanStep,
-        lambda step: step.status == "completed",
-        min_count=1,  # At least one step completed
-    ),
-)
-```
+For session-aware behavioral assertions (tool usage, token budgets, custom
+slices), see session evaluator examples in
+`tests/evals/test_session_evaluators.py`.
 
 ## Distributed Deployment
 
-### Worker Process
+EvalLoop supports distributed evaluation using Redis or SQS mailboxes.
 
-EvalLoop workers run alongside MainLoop workers, polling the requests mailbox:
-
-```python
-from redis import Redis
-from weakincentives.runtime import RedisMailbox, ControlDispatcher
-from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match
-
-# Redis-backed mailboxes for cross-process durability
-redis_client = Redis(host="localhost", port=6379)
-requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
-    name="eval-requests",
-    client=redis_client,
-)
-results: Mailbox[EvalResult] = RedisMailbox(
-    name="eval-results",
-    client=redis_client,
-)
-
-# Create MainLoop (same as basic example)
-adapter: OpenAIAdapter[str] = OpenAIAdapter(model="gpt-4o")
-dispatcher = ControlDispatcher()
-main_loop = QALoop(adapter=adapter, dispatcher=dispatcher)
-
-# Create and run worker (runs forever)
-eval_loop = EvalLoop(
-    loop=main_loop,
-    evaluator=exact_match,
-    requests=requests,
-    results=results,
-)
-eval_loop.run()  # Blocks, processing requests
-```
-
-### Client Process
-
-Submit samples and collect results from a separate process:
-
-```python
-from redis import Redis
-from weakincentives.runtime import RedisMailbox, Mailbox
-from weakincentives.evals import (
-    Dataset, EvalRequest, EvalResult, submit_dataset, collect_results,
-)
-
-# Connect to same Redis mailboxes
-redis_client = Redis(host="localhost", port=6379)
-requests: Mailbox[EvalRequest[str, str]] = RedisMailbox(
-    name="eval-requests",
-    client=redis_client,
-)
-results: Mailbox[EvalResult] = RedisMailbox(
-    name="eval-results",
-    client=redis_client,
-)
-
-# Submit dataset
-dataset = Dataset.load(Path("qa.jsonl"), str, str)
-submit_dataset(dataset, requests)
-
-# Wait for results (workers process in background)
-report = collect_results(
-    results,
-    expected_count=len(dataset),
-    timeout_seconds=600,  # 10 minute timeout
-)
-
-print(f"Completed {report.total} evaluations")
-print(f"Pass rate: {report.pass_rate:.1%}")
-```
-
-### Multiple Workers
-
-Scale horizontally by running multiple EvalLoop workers:
+### Architecture Pattern
 
 ```
                     ┌─────────────────┐
@@ -1196,12 +532,42 @@ Scale horizontally by running multiple EvalLoop workers:
                     └─────────────────┘
 ```
 
-Visibility timeout ensures each sample is processed by exactly one worker.
-Failed evaluations retry automatically with exponential backoff.
+### Deployment Modes
+
+**Worker Process:**
+
+- Runs `EvalLoop.run()` with no max_iterations (blocks forever)
+- Polls requests mailbox with long polling (20s wait_time)
+- Executes each sample through MainLoop
+- Sends EvalResult to results mailbox
+- Acknowledges successful completions, nacks failures with backoff
+
+**Client Process:**
+
+- Submits samples via `submit_dataset(dataset, requests)`
+- Collects results via `collect_results(results, expected_count, timeout_seconds)`
+- Aggregates into EvalReport for analysis
+
+**Scaling:**
+
+- Run multiple worker processes for horizontal scaling
+- Visibility timeout ensures exactly-once processing per sample
+- Failed evaluations retry automatically with exponential backoff
+- Workers can run on different machines for distributed load
+
+**Implementation Example:**
+
+For Redis-backed distributed evaluation, configure RedisMailbox for both
+requests and results queues. See `specs/MAILBOX.md` for mailbox configuration
+and `code_reviewer_example.py` for local development patterns.
+
+For production deployments with health checks and graceful shutdown, see
+`specs/LIFECYCLE.md` for LoopGroup coordination and `specs/HEALTH.md` for
+watchdog configuration.
 
 ## Testing Evaluators
 
-Evaluators are pure functions—test them directly:
+Evaluators are pure functions—test them directly without session infrastructure:
 
 ```python
 def test_exact_match_pass():
@@ -1238,72 +604,9 @@ def test_any_of_requires_one():
 
 ### Testing Session Evaluators
 
-Session evaluators require a mock session with the appropriate slices:
-
-```python
-from unittest.mock import Mock
-from weakincentives.evals import tool_called, all_tools_succeeded, token_usage_under
-from weakincentives.runtime.events import ToolInvoked, PromptExecuted, TokenUsage
-
-
-def make_mock_session(tool_invocations: list[ToolInvoked]) -> Mock:
-    """Create a mock session with ToolInvoked slice."""
-    session = Mock()
-    slice_view = Mock()
-    slice_view.all.return_value = tuple(tool_invocations)
-    session.__getitem__ = Mock(return_value=slice_view)
-    return session
-
-
-def test_tool_called_pass():
-    invocation = ToolInvoked(
-        prompt_name="test",
-        adapter="openai",
-        name="search",
-        params={"query": "test"},
-        result={"success": True},
-        session_id=None,
-        created_at=datetime.now(UTC),
-    )
-    session = make_mock_session([invocation])
-
-    evaluator = tool_called("search")
-    score = evaluator(None, None, session)
-
-    assert score.passed is True
-    assert "called 1 time" in score.reason
-
-
-def test_tool_called_fail():
-    session = make_mock_session([])  # No invocations
-
-    evaluator = tool_called("search")
-    score = evaluator(None, None, session)
-
-    assert score.passed is False
-    assert "called 0 time" in score.reason
-
-
-def test_all_tools_succeeded_with_failure():
-    invocations = [
-        ToolInvoked(
-            prompt_name="test",
-            adapter="openai",
-            name="search",
-            params={},
-            result={"success": False, "error": "not found"},
-            session_id=None,
-            created_at=datetime.now(UTC),
-        ),
-    ]
-    session = make_mock_session(invocations)
-
-    evaluator = all_tools_succeeded()
-    score = evaluator(None, None, session)
-
-    assert score.passed is False
-    assert "search" in score.reason
-```
+Session evaluators require a mock session with the appropriate slices.
+See `tests/evals/test_session_evaluators.py` for complete examples using
+mock sessions with `ToolInvoked`, `PromptExecuted`, and custom slices.
 
 ## Limitations
 
@@ -1317,3 +620,5 @@ def test_all_tools_succeeded_with_failure():
 - `specs/DLQ.md` - Dead letter queue configuration for failed samples
 - `specs/MAIN_LOOP.md` - MainLoop orchestration that EvalLoop wraps
 - `specs/MAILBOX.md` - Mailbox protocol for distributed evaluation
+- `specs/LIFECYCLE.md` - LoopGroup for coordinating multiple evaluation workers
+- `specs/HEALTH.md` - Health checks and watchdog for production deployments
