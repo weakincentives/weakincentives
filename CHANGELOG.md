@@ -8,28 +8,14 @@ _No changes yet._
 
 ## v0.20.0 - 2026-01-16
 
-### Revamped `wink docs` CLI for AI Agent Exploration
-
-The `wink docs` command has been completely redesigned with a subcommand
-structure optimized for AI coding agents exploring documentation efficiently.
-
-**New subcommands:**
-
-- `wink docs list [specs|guides]` — List available documents with descriptions
-- `wink docs search PATTERN` — Search documentation with context snippets
-- `wink docs toc {spec,guide} NAME` — Preview document structure (headings only)
-- `wink docs read {reference,changelog,example,spec,guide} [NAME]` — Read documents
-
-**Key features:**
-
-- **Progressive disclosure**: List → Search → TOC → Read workflow minimizes
-  context usage
-- **Search with context**: Case-insensitive substring matching with `--context`,
-  `--max-results`, and `--regex` options
-- **Table of contents**: Preview document headings before loading full content
-- **Document descriptions**: List output includes descriptions for each spec/guide
-
-See `specs/WINK_DOCS.md` for the full specification.
+This release focuses on production observability and agent reliability.
+**Experiments** enable systematic A/B testing of prompt variants with integrated
+evaluation reporting. **RunContext** provides distributed tracing with
+correlation IDs flowing through the entire request lifecycle. **Feedback
+Providers** give unattended agents soft course-correction signals, while **Task
+Completion Checking** ensures agents finish all assigned work before stopping.
+**LeaseExtender** prevents message timeout during long operations, and new
+**Debug Utilities** simplify post-mortem analysis.
 
 ### Experiments for A/B Testing
 
@@ -101,76 +87,6 @@ Key features:
 All adapters and telemetry events (`PromptRendered`, `ToolInvoked`,
 `PromptExecuted`) now include `run_context`. See `specs/RUN_CONTEXT.md`.
 
-### Automatic Message Lease Extension
-
-`LeaseExtender` prevents message visibility timeout during long-running request
-processing by extending the lease whenever a heartbeat occurs. This ties lease
-extension to proof-of-work: if the worker is actively processing (beating), the
-lease extends; if stuck (no beats), the lease expires naturally.
-
-```python
-from weakincentives.runtime import MainLoopConfig, LeaseExtenderConfig
-
-config = MainLoopConfig(
-    lease_extender=LeaseExtenderConfig(
-        interval=60.0,   # Rate-limit to once per minute
-        extension=300,   # Extend by 5 minutes on each beat
-    ),
-)
-```
-
-Key features:
-
-- **Heartbeat-based**: Extension piggybacks on tool execution beats
-- **Fail-safe**: Stuck workers let leases expire (correct behavior)
-- **EvalLoop support**: Both MainLoop and EvalLoop support automatic extension
-- **Claude Agent SDK**: Native tools trigger beats via hook system
-
-See `specs/LEASE_EXTENDER.md` for the full specification.
-
-### Task Completion Checking
-
-Task completion checking verifies that an agent has completed all assigned tasks
-before allowing it to stop or produce final output.
-
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    PlanBasedChecker,
-)
-from weakincentives.contrib.tools.planning import Plan
-
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(
-        task_completion_checker=PlanBasedChecker(plan_type=Plan),
-    ),
-)
-```
-
-Built-in checkers:
-
-- `PlanBasedChecker`: Verifies all plan steps have `status == "done"`
-- `CompositeChecker`: Combines multiple checkers with configurable logic
-
-See `specs/TASK_COMPLETION.md` for the full specification.
-
-### Adapter-Specific Exception Classes
-
-Provider adapters now raise typed exceptions for better error handling:
-
-```python
-from weakincentives.adapters import OpenAIError, LiteLLMError, ClaudeAgentSDKError
-
-try:
-    response = adapter.evaluate(prompt, session=session)
-except OpenAIError as e:
-    print(f"OpenAI failed: {e.message}, status: {e.status_code}")
-```
-
-All exceptions inherit from `PromptEvaluationError` and include `message`,
-`status_code` (if applicable), and `original_error`.
-
 ### Feedback Providers for Agent Progress Assessment
 
 A new **Feedback Provider** system enables ongoing progress assessment for
@@ -206,6 +122,76 @@ Key components:
 - **DeadlineFeedback**: Built-in provider that warns as deadlines approach
 
 See `specs/FEEDBACK_PROVIDERS.md` for the full specification.
+
+### Task Completion Checking
+
+Task completion checking verifies that an agent has completed all assigned tasks
+before allowing it to stop or produce final output.
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    PlanBasedChecker,
+)
+from weakincentives.contrib.tools.planning import Plan
+
+adapter = ClaudeAgentSDKAdapter(
+    client_config=ClaudeAgentSDKClientConfig(
+        task_completion_checker=PlanBasedChecker(plan_type=Plan),
+    ),
+)
+```
+
+Built-in checkers:
+
+- `PlanBasedChecker`: Verifies all plan steps have `status == "done"`
+- `CompositeChecker`: Combines multiple checkers with configurable logic
+
+See `specs/TASK_COMPLETION.md` for the full specification.
+
+### Automatic Message Lease Extension
+
+`LeaseExtender` prevents message visibility timeout during long-running request
+processing by extending the lease whenever a heartbeat occurs. This ties lease
+extension to proof-of-work: if the worker is actively processing (beating), the
+lease extends; if stuck (no beats), the lease expires naturally.
+
+```python
+from weakincentives.runtime import MainLoopConfig, LeaseExtenderConfig
+
+config = MainLoopConfig(
+    lease_extender=LeaseExtenderConfig(
+        interval=60.0,   # Rate-limit to once per minute
+        extension=300,   # Extend by 5 minutes on each beat
+    ),
+)
+```
+
+Key features:
+
+- **Heartbeat-based**: Extension piggybacks on tool execution beats
+- **Fail-safe**: Stuck workers let leases expire (correct behavior)
+- **EvalLoop support**: Both MainLoop and EvalLoop support automatic extension
+- **Claude Agent SDK**: Native tools trigger beats via hook system
+
+See `specs/LEASE_EXTENDER.md` for the full specification.
+
+### Adapter-Specific Exception Classes
+
+Provider adapters now raise typed exceptions for better error handling:
+
+```python
+from weakincentives.adapters import OpenAIError, LiteLLMError, ClaudeAgentSDKError
+
+try:
+    response = adapter.evaluate(prompt, session=session)
+except OpenAIError as e:
+    print(f"OpenAI failed: {e.message}, status: {e.status_code}")
+```
+
+All exceptions inherit from `PromptEvaluationError` and include `message`,
+`status_code` (if applicable), and `original_error`.
 
 ### Debug Utilities
 
@@ -246,6 +232,29 @@ mailbox = RedisMailbox(name="events", client=redis_client)  # 3-day default
 mailbox = RedisMailbox(name="events", client=redis_client, default_ttl=86400)  # 1 day
 mailbox = RedisMailbox(name="events", client=redis_client, default_ttl=0)  # Disabled
 ```
+
+### Revamped `wink docs` CLI for AI Agent Exploration
+
+The `wink docs` command has been completely redesigned with a subcommand
+structure optimized for AI coding agents exploring documentation efficiently.
+
+**New subcommands:**
+
+- `wink docs list [specs|guides]` — List available documents with descriptions
+- `wink docs search PATTERN` — Search documentation with context snippets
+- `wink docs toc {spec,guide} NAME` — Preview document structure (headings only)
+- `wink docs read {reference,changelog,example,spec,guide} [NAME]` — Read documents
+
+**Key features:**
+
+- **Progressive disclosure**: List → Search → TOC → Read workflow minimizes
+  context usage
+- **Search with context**: Case-insensitive substring matching with `--context`,
+  `--max-results`, and `--regex` options
+- **Table of contents**: Preview document headings before loading full content
+- **Document descriptions**: List output includes descriptions for each spec/guide
+
+See `specs/WINK_DOCS.md` for the full specification.
 
 ### Documentation
 
