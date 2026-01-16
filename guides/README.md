@@ -30,6 +30,7 @@ debug issues when they arise.
 | Guide | What You'll Learn |
 | --- | --- |
 | [Adapters](adapters.md) | Connect to OpenAI, LiteLLM, and Claude Agent SDK |
+| [Claude Agent SDK](claude-agent-sdk.md) | Production integration with Claude Code's native tooling |
 
 ## Production Patterns
 

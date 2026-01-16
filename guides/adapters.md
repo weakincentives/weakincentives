@@ -81,228 +81,33 @@ adapter = LiteLLMAdapter(
 
 **Install:** `pip install "weakincentives[claude-agent-sdk]"`
 
-The Claude Agent SDK adapter is fundamentally different from OpenAI/LiteLLM.
-Instead of WINK executing tools itself, it delegates to Claude Code's native
-tool execution. This gives you Claude's native tooling (Read, Write, Bash, Glob,
-Grep) with WINK's prompt composition and session management.
-
-### Requirements
-
-- **Python package:** `pip install 'weakincentives[claude-agent-sdk]'`
-- **Claude Code CLI:** `npm install -g @anthropic-ai/claude-code`
-- **Linux sandboxing:** bubblewrap (`bwrap`) available on PATH
-
-### Basic Usage
+The Claude Agent SDK adapter is WINK's recommended integration for production
+applications. Instead of WINK executing tools itself, it delegates to Claude
+Code's native tool execution—giving you Claude's battle-tested tooling (Read,
+Write, Bash, Glob, Grep) with WINK's prompt composition and session management.
 
 ```python
-from dataclasses import dataclass
-
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
-from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
-from weakincentives.runtime import InProcessDispatcher, Session
 
-
-@dataclass(frozen=True)
-class Hello:
-    message: str
-
-
-session = Session(dispatcher=InProcessDispatcher())
-
-template = PromptTemplate[Hello](
-    ns="demo",
-    key="hello",
-    sections=[
-        MarkdownSection(
-            title="Task",
-            key="task",
-            template="Say hello. Return JSON with a single field: message.",
-        ),
-    ],
-)
-
-response = ClaudeAgentSDKAdapter().evaluate(Prompt(template), session=session)
-print(response.output)  # Hello(message="...")
+adapter = ClaudeAgentSDKAdapter()
+response = adapter.evaluate(prompt, session=session)
 ```
 
-### Client Configuration
+The adapter provides:
 
-`ClaudeAgentSDKClientConfig` controls how the SDK subprocess operates:
+- **Native tooling quality**: Claude Code's tools handle edge cases that custom
+  implementations often miss
+- **Built-in sandboxing**: Hermetic isolation prevents access to host
+  configuration and credentials
+- **MCP bridging**: Your WINK tools are automatically exposed as MCP tools
+- **Workspace management**: `ClaudeAgentWorkspaceSection` provides structured
+  access to host files with security boundaries
 
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-)
+**See [Claude Agent SDK Guide](claude-agent-sdk.md) for complete documentation**
+covering workspace sections, isolation configuration, tool bridging, skill
+mounting, and production patterns.
 
-config = ClaudeAgentSDKClientConfig(
-    permission_mode="bypassPermissions",
-    cwd="/path/to/workspace",
-    max_turns=10,
-    max_budget_usd=1.0,
-    suppress_stderr=True,
-    stop_on_structured_output=True,
-)
-
-adapter = ClaudeAgentSDKAdapter(client_config=config)
-```
-
-### Workspace Management
-
-`ClaudeAgentWorkspaceSection` creates an isolated workspace with host files
-mounted in:
-
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentWorkspaceSection,
-    HostMount,
-)
-
-workspace = ClaudeAgentWorkspaceSection(
-    session=session,
-    mounts=(
-        HostMount(
-            host_path="/abs/path/to/repo",
-            mount_path="repo",
-            exclude_glob=(".git/*", "*.pyc"),
-            max_bytes=5_000_000,
-        ),
-    ),
-    allowed_host_roots=("/abs/path/to",),
-)
-```
-
-The `allowed_host_roots` parameter restricts which host paths can be mounted—a
-security boundary that prevents accidental exposure.
-
-### Isolation Configuration
-
-The adapter **always runs in hermetic isolation by default**. This prevents the
-SDK from accessing the host's `~/.claude` configuration, credentials, and
-session state.
-
-```python
-from weakincentives.adapters.claude_agent_sdk import (
-    ClaudeAgentSDKAdapter,
-    ClaudeAgentSDKClientConfig,
-    IsolationConfig,
-    NetworkPolicy,
-    SandboxConfig,
-)
-
-isolation = IsolationConfig(
-    network_policy=NetworkPolicy.no_network(),  # Block tool network access
-    sandbox=SandboxConfig(enabled=True),
-    api_key="sk-ant-...",
-    include_host_env=False,
-)
-
-adapter = ClaudeAgentSDKAdapter(
-    client_config=ClaudeAgentSDKClientConfig(isolation=isolation),
-)
-```
-
-**NetworkPolicy** controls which network resources tools can access:
-
-```python
-# Block all tool network access
-policy = NetworkPolicy.no_network()
-
-# Allow specific domains
-policy = NetworkPolicy.with_domains("docs.python.org", "pypi.org")
-```
-
-### Tool Bridging via MCP
-
-WINK tools attached to prompt sections are automatically exposed to Claude Code
-as MCP tools under the server key `"wink"`. This lets you keep side effects and
-validation in Python while Claude uses the tools natively.
-
-```python
-@dataclass(frozen=True)
-class SearchResult:
-    matches: int
-
-    def render(self) -> str:
-        return f"Found {self.matches} matches"
-
-
-def mcp_search(params: SearchParams, *, context: ToolContext) -> ToolResult[SearchResult]:
-    return ToolResult(message="ok", value=SearchResult(matches=3))
-
-
-mcp_search_tool = Tool[SearchParams, SearchResult](
-    name="search",
-    description="Search the internal index",
-    handler=mcp_search,
-)
-
-# Attach to a section - Claude Code will see it as an MCP tool
-section = MarkdownSection(
-    title="Task",
-    key="task",
-    template="Use the search tool.",
-    tools=(mcp_search_tool,),
-)
-```
-
-### Skill Mounting
-
-Mount skills into the hermetic environment for domain-specific instructions:
-
-```python
-from pathlib import Path
-from weakincentives.skills import SkillConfig, SkillMount
-
-isolation = IsolationConfig(
-    skills=SkillConfig(
-        skills=(
-            SkillMount(source=Path("skills/code-review.md")),
-            SkillMount(source=Path("skills/testing"), enabled=False),
-        ),
-    ),
-)
-```
-
-**What is a skill?** A skill is a directory containing a `SKILL.md` file with
-domain-specific instructions for Claude Code. Skills follow the
-[Agent Skills specification](https://agentskills.io).
-
-**Skill structure:**
-
-```
-skills/code-review/
-├── SKILL.md         # Required: instructions with optional YAML frontmatter
-├── scripts/         # Optional: helper scripts
-└── references/      # Optional: reference documents
-```
-
-**SKILL.md format:**
-
-```markdown
----
-name: code-review
-description: Thorough code review for Python projects
----
-
-# Code Review Skill
-
-When reviewing code, follow these steps:
-1. Check for security vulnerabilities
-2. Verify error handling
-3. Ensure tests cover new functionality
-```
-
-Skills are validated at mount time. Validation checks:
-
-- Directory exists and contains SKILL.md
-- YAML frontmatter is valid (if present)
-- Name follows naming rules (lowercase, hyphens, 1-64 chars)
-- Total size is under 10 MiB
-
-See [specs/SKILLS.md](../specs/SKILLS.md) for full validation rules.
-
-### Adapter Events
+## Adapter Events
 
 All adapters publish events to the session's dispatcher:
 
@@ -350,7 +155,6 @@ policy = ThrottlePolicy(
 
 ## Next Steps
 
+- [Claude Agent SDK](claude-agent-sdk.md): Production integration guide
 - [Orchestration](orchestration.md): Use MainLoop for request handling
 - [Evaluation](evaluation.md): Test agents with datasets
-- [Claude Agent SDK Spec](../specs/CLAUDE_AGENT_SDK.md): Full configuration
-  reference

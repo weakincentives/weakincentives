@@ -197,6 +197,7 @@ full table of contents.
 | `guides/tools.md` | Define tool contracts and handlers |
 | `guides/sessions.md` | Manage state with reducers |
 | `guides/adapters.md` | Connect to OpenAI, LiteLLM, Claude Agent SDK |
+| `guides/claude-agent-sdk.md` | Production integration with Claude Code |
 | `guides/orchestration.md` | Use MainLoop for request handling |
 | `guides/evaluation.md` | Test agents with datasets and evaluators |
 | `guides/lifecycle.md` | Manage shutdown, health checks, and watchdogs |
