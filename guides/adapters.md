@@ -148,8 +148,8 @@ policy = ThrottlePolicy(
 **How throttling works:**
 
 1. When a rate limit is hit, the adapter backs off exponentially
-2. If `Retry-After` header is present, it's respected
-3. `ThrottleError` is raised if all attempts fail
+1. If `Retry-After` header is present, it's respected
+1. `ThrottleError` is raised if all attempts fail
 
 ## Next Steps
 
