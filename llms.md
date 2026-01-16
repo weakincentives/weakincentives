@@ -418,7 +418,10 @@ class SearchParams:
 
 @dataclass(slots=True, frozen=True)
 class SearchResult:
-    matches: list[str]
+    snippets: tuple[str, ...]
+
+    def render(self) -> str:
+        return "\n".join(f"- {s}" for s in self.snippets)
 
 
 def search_handler(
@@ -437,10 +440,10 @@ def search_handler(
         return ToolResult.error("Deadline too close")
 
     # Do work...
-    matches = ["result1", "result2"]
+    snippets = ("result1", "result2")
 
     # Return typed result
-    return ToolResult.ok(SearchResult(matches=matches), message="Found 2 matches")
+    return ToolResult.ok(SearchResult(snippets=snippets), message="Found 2 results")
 
 
 # Create tool

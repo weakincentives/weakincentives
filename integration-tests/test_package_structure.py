@@ -96,7 +96,9 @@ class TestDocsPackaging:
         """All guide files from guides/ directory must be bundled in the wheel."""
         # Get all .md files from source guides/ directory
         source_guides = {f.name for f in (project_root / "guides").glob("*.md")}
-        assert len(source_guides) > 0, "No guide files found in source guides/ directory"
+        assert len(source_guides) > 0, (
+            "No guide files found in source guides/ directory"
+        )
 
         # Get all .md files bundled in the wheel
         bundled_guides = {

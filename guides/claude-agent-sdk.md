@@ -271,10 +271,10 @@ class SearchParams:
 
 @dataclass(frozen=True)
 class SearchResult:
-    matches: list[str]
+    snippets: tuple[str, ...]
 
     def render(self) -> str:
-        return f"Found {len(self.matches)} matches: {', '.join(self.matches)}"
+        return "\n".join(f"- {s}" for s in self.snippets)
 
 
 def search_handler(
@@ -282,7 +282,7 @@ def search_handler(
 ) -> ToolResult[SearchResult]:
     # Your search logic here
     results = perform_search(params.query)
-    return ToolResult.ok(SearchResult(matches=results))
+    return ToolResult.ok(SearchResult(snippets=tuple(results)))
 
 
 search_tool = Tool[SearchParams, SearchResult](
@@ -393,7 +393,7 @@ All adapter operations publish events to the session's dispatcher:
 | Event | When | Key Fields |
 |-------|------|------------|
 | `PromptRendered` | After prompt render, before API call | `rendered_prompt`, `adapter` |
-| `ToolInvoked` | Each tool call (native + bridged) | `tool_name`, `params`, `result`, `duration_ms` |
+| `ToolInvoked` | Each tool call (native + bridged) | `name`, `params`, `result`, `usage` |
 | `PromptExecuted` | After evaluation completes | `result`, `usage` (TokenUsage) |
 
 Native Claude Code tools (Read, Write, Bash) are tracked via SDK hooks and also
@@ -401,11 +401,10 @@ publish `ToolInvoked` events. This gives you complete visibility into what the
 agent is doing.
 
 ```python
-from weakincentives.runtime import InProcessDispatcher
-from weakincentives.adapters import ToolInvoked
+from weakincentives.runtime import InProcessDispatcher, ToolInvoked
 
 def log_tool_calls(event: ToolInvoked) -> None:
-    print(f"Tool: {event.tool_name}, Duration: {event.duration_ms}ms")
+    print(f"Tool: {event.name}, Params: {event.params}")
 
 dispatcher = InProcessDispatcher()
 dispatcher.subscribe(ToolInvoked, log_tool_calls)

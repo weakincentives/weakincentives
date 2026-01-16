@@ -114,7 +114,7 @@ All adapters publish events to the session's dispatcher:
 | Event | When | Fields |
 | --- | --- | --- |
 | `PromptRendered` | After prompt render, before API call | `rendered_prompt`, `adapter` |
-| `ToolInvoked` | Each tool call (native + bridged) | `tool_name`, `params`, `result`, `duration_ms` |
+| `ToolInvoked` | Each tool call (native + bridged) | `name`, `params`, `result`, `usage` |
 | `PromptExecuted` | After evaluation completes | `result`, `usage` (TokenUsage) |
 
 For Claude Agent SDK, native tools (Read, Write, Bash) are tracked via SDK hooks
