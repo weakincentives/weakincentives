@@ -62,9 +62,11 @@ from weakincentives.contrib.tools import (
 from weakincentives.deadlines import Deadline
 from weakincentives.debug import (
     archive_filesystem,
+    archive_metrics,
     collect_all_logs,
     dump_session as dump_session_tree,
 )
+from weakincentives.metrics import InMemoryMetricsCollector
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
@@ -374,6 +376,7 @@ class CodeReviewApp:
     _enable_optimization: bool
     _workspace_section: ClaudeAgentWorkspaceSection | None
     _shutdown_requested: bool
+    _metrics: InMemoryMetricsCollector
 
     def __init__(  # noqa: PLR0913
         self,
@@ -392,6 +395,8 @@ class CodeReviewApp:
         self._worker_thread = None
         self._pending_requests = {}
         self._shutdown_requested = False
+        # Create metrics collector for observability
+        self._metrics = InMemoryMetricsCollector(worker_id="code-reviewer")
         # Create mailboxes with reply routing
         self._responses = InMemoryMailbox(name="code-review-responses")
         self._requests = InMemoryMailbox(name="code-review-requests")
@@ -518,11 +523,15 @@ class CodeReviewApp:
         print(f"Debug artifacts saved to {SNAPSHOT_DIR}/:")
         print(f"  - {session_id}.jsonl (session snapshots)")
         print(f"  - {session_id}.log (prompt evaluation logs)")
+        print("  - .weakincentives/debug/metrics/*.json (metrics snapshots)")
 
     def _cleanup(self) -> None:
         """Clean up resources."""
         # Archive workspace before cleanup removes the temp directory
         self._archive_workspace()
+
+        # Archive metrics snapshot
+        self._archive_metrics()
 
         # Gracefully shutdown the loop - completes in-flight work
         if self._loop.shutdown(timeout=5.0):
@@ -541,6 +550,12 @@ class CodeReviewApp:
         if self._workspace_section is not None:
             self._workspace_section.cleanup()
             _LOGGER.info("Cleaned up Claude Agent workspace.")
+
+    def _archive_metrics(self) -> None:
+        """Archive the metrics snapshot to the debug directory."""
+        snapshot = self._metrics.snapshot()
+        archive_path = archive_metrics(snapshot, base_dir=SNAPSHOT_DIR.parent)
+        _LOGGER.info("Metrics archived to %s", archive_path)
 
     def _archive_workspace(self) -> None:
         """Archive the workspace filesystem to a zip file.
@@ -1005,6 +1020,7 @@ def _build_intro(
             - Skills: Auto-discovered from demo-skills/ (code-review, python-style, ascii-art)
             - Network: Access to peps.python.org, docs.python.org for code quality reference
             - Optimization: {optimization_status}
+            - Metrics: Enabled (archived to .weakincentives/debug/metrics/)
             - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
 
             Note: Custom MCP tools are bridged via streaming mode for full feature parity.
@@ -1018,6 +1034,7 @@ def _build_intro(
         - Repository: test-repositories/sunfish mounted under virtual path 'sunfish/'.
         - Workspace: {workspace_mode} (use --podman flag to enable Podman sandbox).
         - Optimization: {optimization_status}
+        - Metrics: Enabled (archived to .weakincentives/debug/metrics/)
         - Overrides: Using tag '{override_tag}' (set {PROMPT_OVERRIDES_TAG_ENV} to change).
 
         Note: Full prompt text and tool calls will be logged to the console for observability.
