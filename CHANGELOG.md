@@ -31,42 +31,6 @@ structure optimized for AI coding agents exploring documentation efficiently.
 
 See `specs/WINK_DOCS.md` for the full specification.
 
-### Metrics Abstraction for Observability
-
-A new metrics collection system provides in-memory observability without
-external dependencies. Metrics capture latency, throughput, error rates, and
-queue health across adapters, tools, and the mailbox layer.
-
-```python
-from weakincentives.resources import Binding, Scope
-
-metrics_binding = Binding(
-    MetricsCollector,
-    lambda r: InMemoryMetricsCollector(
-        worker_id=os.getenv("WORKER_ID"),
-        sinks=[StatsdSink(host="localhost", port=8125)] if STATSD_ENABLED else [],
-    ),
-    scope=Scope.SINGLETON,
-)
-```
-
-**Key features:**
-
-- **In-memory storage**: Metrics accumulate in collector without session
-  bloat—observability is separate from application state
-- **Pluggable sinks**: Optional export to StatsD, Prometheus, or debug files
-- **Compact histograms**: Fixed exponential buckets bound memory regardless
-  of volume
-- **RunContext correlation**: Integrates with distributed tracing
-
-**Built-in metric types:**
-
-- `AdapterMetrics`: Latency histograms, token counts, error/throttle rates
-- `ToolMetrics`: Execution latency, call counts, failure rates by error code
-- `MailboxMetrics`: Queue lag, delivery count distribution, DLQ counts
-
-See `specs/METRICS.md` for the full specification.
-
 ### Experiments for A/B Testing
 
 A new **Experiment** concept enables systematic evaluation of agent behavior
@@ -300,7 +264,6 @@ New guides include: `philosophy.md`, `quickstart.md`, `prompts.md`, `tools.md`,
 
 **Specification additions:**
 
-- Added `specs/METRICS.md` covering in-memory metrics collection and export
 - Added `specs/EXPERIMENTS.md` covering experiment configuration for A/B testing
 - Added `specs/RUN_CONTEXT.md` covering execution metadata and distributed tracing
 - Added `specs/LEASE_EXTENDER.md` covering automatic message visibility extension
