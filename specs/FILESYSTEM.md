@@ -80,7 +80,7 @@ Adapters construct `ToolContext` with filesystem from prompt.
 | Backend | Description | Implementation |
 |---------|-------------|----------------|
 | `InMemoryFilesystem` | Session-scoped in-memory with structural sharing | `contrib/tools/filesystem_memory.py` |
-| `HostFilesystem` | Sandboxed host directory with path validation, git snapshots | `filesystem/_host.py` |
+| `HostFilesystem` | Sandboxed host directory with path validation, git snapshots | `src/weakincentives/filesystem/_host.py` |
 | `PodmanSandboxSection` | Containerized workspace using overlay + HostFilesystem | `contrib/tools/podman.py` |
 
 ### Design Characteristics

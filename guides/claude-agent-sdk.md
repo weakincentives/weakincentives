@@ -247,7 +247,7 @@ sandbox = SandboxConfig(
 
 When `isolation` is set:
 
-1. Creates ephemeral `HOME` directory with `.claude/settings.json`
+1. Creates ephemeral `HOME` directory with `$HOME/.claude/settings.json`
 1. Passes `env` and `setting_sources=["user"]` to SDK
 1. API key is injected into the isolated environment
 1. Host environment variables are excluded unless `include_host_env=True`

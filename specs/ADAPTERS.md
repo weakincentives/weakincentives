@@ -3,7 +3,7 @@
 ## Purpose
 
 Adapters bridge prompts and external LLM services, handling request formatting,
-response parsing, rate limiting, and error recovery. Core at `adapters/core.py`.
+response parsing, rate limiting, and error recovery. Core at `src/weakincentives/adapters/core.py`.
 
 ## Principles
 
@@ -15,7 +15,7 @@ response parsing, rate limiting, and error recovery. Core at `adapters/core.py`.
 
 ## Adapter Protocol
 
-All adapters implement `ProviderAdapter` at `adapters/core.py`:
+All adapters implement `ProviderAdapter` at `src/weakincentives/adapters/core.py`:
 
 | Parameter | Description |
 | --- | --- |
@@ -25,11 +25,11 @@ All adapters implement `ProviderAdapter` at `adapters/core.py`:
 | `budget` | Optional token/time budget |
 | `budget_tracker` | Optional shared budget tracker |
 
-Returns `PromptResponse[OutputT]` at `adapters/core.py`.
+Returns `PromptResponse[OutputT]` at `src/weakincentives/adapters/core.py`.
 
 ### Configuration
 
-Base config `LLMConfig` at `adapters/config.py` with fields: `temperature`,
+Base config `LLMConfig` at `src/weakincentives/adapters/config.py` with fields: `temperature`,
 `max_tokens`, `top_p`, `presence_penalty`, `frequency_penalty`, `stop`, `seed`.
 Provider-specific configs extend this.
 
@@ -46,7 +46,7 @@ Provider-specific configs extend this.
 
 ### OpenAI Adapter
 
-At `adapters/openai.py`:
+At `src/weakincentives/adapters/openai.py`:
 
 | Config | Description |
 | --- | --- |
@@ -60,7 +60,7 @@ At `adapters/openai.py`:
 
 ### LiteLLM Adapter
 
-At `adapters/litellm.py`:
+At `src/weakincentives/adapters/litellm.py`:
 
 | Config | Description |
 | --- | --- |
@@ -73,7 +73,7 @@ normalized to `ThrottleError` or `PromptEvaluationError`. Always sets
 
 ### Claude Agent SDK Adapter
 
-At `adapters/claude_agent_sdk/adapter.py`:
+At `src/weakincentives/adapters/claude_agent_sdk/adapter.py`:
 
 - Async execution with MCP tool bridging
 - Skill mounting support
@@ -82,7 +82,7 @@ At `adapters/claude_agent_sdk/adapter.py`:
 
 ### ThrottlePolicy
 
-At `adapters/throttle.py` via `new_throttle_policy()`:
+At `src/weakincentives/adapters/throttle.py` via `new_throttle_policy()`:
 
 | Field | Default | Description |
 | --- | --- | --- |
@@ -102,7 +102,7 @@ At `adapters/throttle.py` via `new_throttle_policy()`:
 
 ### ThrottleError
 
-At `adapters/throttle.py`:
+At `src/weakincentives/adapters/throttle.py`:
 
 - `kind`: rate_limit, quota_exhausted, timeout, unknown
 - `retry_after`: Provider-suggested delay
@@ -133,7 +133,7 @@ Shared `InnerLoop` at `adapters/inner_loop.py` drives request/response:
 
 ### Transactional Tool Execution
 
-Tool execution is transactional via `runtime/transactions.py`:
+Tool execution is transactional via `src/weakincentives/runtime/transactions.py`:
 
 - `create_snapshot(session, resource_context, tag)` - Capture state
 - `restore_snapshot(session, resource_context, snapshot)` - Rollback
@@ -147,8 +147,8 @@ Failed or aborted tools leave no trace in mutable state.
 
 | Exception | Location | Description |
 | --- | --- | --- |
-| `PromptEvaluationError` | `adapters/core.py` | Base for evaluation failures |
-| `ThrottleError` | `adapters/throttle.py` | Retryable provider errors |
+| `PromptEvaluationError` | `src/weakincentives/adapters/core.py` | Base for evaluation failures |
+| `ThrottleError` | `src/weakincentives/adapters/throttle.py` | Retryable provider errors |
 | `PromptRenderError` | `prompt/errors.py` | Template/section failures |
 | `OutputParseError` | `prompt/structured_output.py` | Structured output validation |
 | `DeadlineExceededError` | `errors.py` | Time budget exhausted |

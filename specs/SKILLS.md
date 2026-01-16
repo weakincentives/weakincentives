@@ -69,10 +69,10 @@ description: Extract text and tables from PDF files.
 - Errors: `SkillError`, `SkillValidationError`, `SkillNotFoundError`, `SkillMountError`
 - Constants: `MAX_SKILL_FILE_BYTES` (1 MiB), `MAX_SKILL_TOTAL_BYTES` (10 MiB)
 
-**Adapter (`adapters/claude_agent_sdk`):**
+**Adapter (`src/weakincentives/adapters/claude_agent_sdk`):**
 
 - `IsolationConfig.skills`: Integration point
-- `EphemeralHome._mount_skills()`: Copies to `.claude/skills/`
+- `EphemeralHome._mount_skills()`: Copies to `$HOME/.claude/skills/`
 
 ### Data Model
 

@@ -4,7 +4,7 @@
 
 `MainLoop` standardizes agent workflow: receive request, build prompt, evaluate
 within resource context, handle visibility expansion, publish result.
-Core at `runtime/main_loop.py`.
+Core at `src/weakincentives/runtime/main_loop.py`.
 
 ## Principles
 
@@ -18,7 +18,7 @@ Core at `runtime/main_loop.py`.
 
 ### MainLoop
 
-At `runtime/main_loop.py`:
+At `src/weakincentives/runtime/main_loop.py`:
 
 | Method | Description |
 | --- | --- |

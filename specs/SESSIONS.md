@@ -3,7 +3,7 @@
 ## Purpose
 
 Sessions provide deterministic, side-effect-free containers for prompt run
-lifecycle. Core implementation in `src/weakincentives/runtime/session/session.py`.
+lifecycle. Core implementation in `src/weakincentives/src/weakincentives/runtime/session/session.py`.
 
 ## Principles
 
@@ -17,7 +17,7 @@ lifecycle. Core implementation in `src/weakincentives/runtime/session/session.py
 
 ### Session Class
 
-Core container at `runtime/session/session.py`:
+Core container at `src/weakincentives/runtime/session/session.py`:
 
 | Method | Description |
 | --- | --- |
@@ -32,7 +32,7 @@ Core container at `runtime/session/session.py`:
 
 ### Reducers
 
-Pure functions producing new slices from events at `runtime/session/reducers.py`:
+Pure functions producing new slices from events at `src/weakincentives/runtime/session/reducers.py`:
 
 | Reducer | Purpose |
 | --- | --- |
@@ -43,7 +43,7 @@ Pure functions producing new slices from events at `runtime/session/reducers.py`
 
 ### Query API
 
-Via `SliceAccessor` at `runtime/session/slice_accessor.py`:
+Via `SliceAccessor` at `src/weakincentives/runtime/session/slice_accessor.py`:
 
 - `session[Plan].latest()` - Most recent value
 - `session[Plan].all()` - All items as tuple
@@ -64,7 +64,7 @@ Convenience methods dispatch internally:
 
 ### System Mutation Events
 
-Defined at `runtime/session/slice_mutations.py`:
+Defined at `src/weakincentives/runtime/session/slice_mutations.py`:
 
 | Event | Purpose |
 | --- | --- |
@@ -73,7 +73,7 @@ Defined at `runtime/session/slice_mutations.py`:
 
 ## Declarative State Slices
 
-The `@reducer` decorator at `runtime/session/state_slice.py` enables co-located
+The `@reducer` decorator at `src/weakincentives/runtime/session/state_slice.py` enables co-located
 reducers on dataclasses:
 
 ```python
@@ -131,7 +131,7 @@ At `runtime/events/types.py`:
 
 ## Snapshots
 
-Capture/restore at `runtime/session/session.py`:
+Capture/restore at `src/weakincentives/runtime/session/session.py`:
 
 - `session.snapshot()` → `Snapshot`
 - `snapshot.to_json()` / `Snapshot.from_json()`

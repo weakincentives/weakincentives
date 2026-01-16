@@ -3,7 +3,7 @@
 ## Purpose
 
 Graceful shutdown coordination for `MainLoop` and `EvalLoop` instances.
-Core at `runtime/lifecycle.py`.
+Core at `src/weakincentives/runtime/lifecycle.py`.
 
 ## Principles
 
@@ -27,7 +27,7 @@ Both `MainLoop` and `EvalLoop` implement:
 
 ### ShutdownCoordinator
 
-Singleton managing signal handlers at `runtime/lifecycle.py`:
+Singleton managing signal handlers at `src/weakincentives/runtime/lifecycle.py`:
 
 | Method | Description |
 | --- | --- |
@@ -42,7 +42,7 @@ Thread-safe: `_callbacks` protected by lock, `_triggered` is `threading.Event`.
 
 ### LoopGroup
 
-Coordinates multiple loops at `runtime/lifecycle.py`:
+Coordinates multiple loops at `src/weakincentives/runtime/lifecycle.py`:
 
 | Method | Description |
 | --- | --- |

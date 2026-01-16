@@ -275,7 +275,7 @@ read_first = ReadBeforeWritePolicy(mount_point="/workspace")
   new files can be created freely
 
 **Integration:** `VFSToolsSection` and `PodmanSandboxSection` now have
-`ReadBeforeWritePolicy` enabled by default. See `specs/TOOL_POLICIES.md`.
+`ReadBeforeWritePolicy` enabled by default. See `specs/TOOLS.md#tool-policies`.
 
 ### Exhaustiveness Checking for Union Types
 
@@ -594,7 +594,7 @@ at-least-once message delivery between processes. Unlike the pub/sub
 and explicit acknowledgment.
 
 ```python
-from weakincentives.mailbox import InMemoryMailbox, Message
+from weakincentives.runtime.mailbox import InMemoryMailbox, Message
 
 # Create a typed mailbox
 mailbox: Mailbox[WorkRequest] = InMemoryMailbox()

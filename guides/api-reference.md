@@ -14,18 +14,36 @@ Import from `weakincentives` when you want the "90% API":
 
 **Prompt primitives:**
 
-- `PromptTemplate`, `Prompt`, `RenderedPrompt`
-- `Section`, `MarkdownSection`
-- `Tool`, `ToolContext`, `ToolResult`, `ResourceRegistry`
-- `SectionVisibility`
-- `parse_structured_output`, `OutputParseError`
+- `Prompt`, `MarkdownSection`
+- `Tool`, `ToolContext`, `ToolHandler`, `ToolResult`
+- `parse_structured_output`
 
-**Runtime primitives:**
+**Adapters:**
 
-- `Session`, `InProcessDispatcher`
-- `MainLoop`, `MainLoopConfig`
-- Reducer helpers (`append_all`, `replace_latest`, `upsert_by`, ...)
-- Logging helpers (`configure_logging`, `get_logger`)
+- `PromptResponse`
+
+**Skills:**
+
+- `Skill`, `SkillConfig`, `SkillMount`
+- `SkillError`, `SkillValidationError`, `SkillNotFoundError`, `SkillMountError`
+
+**Logging:**
+
+- `StructuredLogger`, `configure_logging`, `get_logger`
+
+**Types:**
+
+- `JSONValue`, `SupportsDataclass`
+
+**Dataclasses:**
+
+- `FrozenDataclass`
+
+**Errors:**
+
+- `WinkError`, `ToolValidationError`
+
+For everything else (e.g., `PromptTemplate`, `RenderedPrompt`, `Section`, `SectionVisibility`, `OutputParseError`, `Session`, `InProcessDispatcher`, `MainLoop`, `MainLoopConfig`, reducer helpers), import from the relevant subpackage: `weakincentives.prompt`, `weakincentives.runtime`, etc.
 
 ## weakincentives.prompt
 

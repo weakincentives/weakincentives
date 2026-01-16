@@ -4,7 +4,7 @@
 
 `Mailbox[T, R]` provides typed message queue with SQS-compatible semantics:
 point-to-point delivery, visibility timeout, explicit acknowledgment.
-Core at `runtime/mailbox/`.
+Core at `src/weakincentives/runtime/mailbox/`.
 
 **Use Mailbox for:** Durable processing, work distribution, cross-process communication.
 **Use Dispatcher for:** Telemetry, in-process events, fire-and-forget.
@@ -13,7 +13,7 @@ Core at `runtime/mailbox/`.
 
 ### Mailbox Protocol
 
-At `runtime/mailbox/_types.py`:
+At `src/weakincentives/runtime/mailbox/_types.py`:
 
 | Method | Description |
 | --- | --- |
@@ -104,7 +104,7 @@ for msg in requests.receive():
 
 ## Service Discovery: MailboxResolver
 
-**Implementation:** `src/weakincentives/runtime/mailbox/_resolver.py`
+**Implementation:** `src/weakincentives/src/weakincentives/runtime/mailbox/_resolver.py`
 
 **Use for:** Redis/distributed backends where mailbox names are serialized.
 **Not for:** In-memory mailboxes (store direct references).

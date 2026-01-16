@@ -313,20 +313,22 @@ Sessions subscribe to an event dispatcher to capture telemetry. The dispatcher
 routes events to registered handlers.
 
 ```python
-from weakincentives.runtime import InProcessDispatcher
+from weakincentives.runtime import InProcessDispatcher, Session, ToolInvoked
 
 dispatcher = InProcessDispatcher()
 
-# Subscribe to events
-def log_tool_calls(event):
-    if hasattr(event, 'tool_name'):
-        print(f"Tool called: {event.tool_name}")
+def log_tool_calls(event: ToolInvoked) -> None:
+    print(f"Tool called: {event.name}")
 
-dispatcher.subscribe(log_tool_calls)
+# Subscribe to a specific event type
+dispatcher.subscribe(ToolInvoked, log_tool_calls)
 
-# Events are dispatched automatically during evaluation
+# Sessions record telemetry via the dispatcher
 session = Session(dispatcher=dispatcher)
 ```
+
+`subscribe()` always takes an event type; use `ToolInvoked`, `PromptRendered`, or
+`PromptExecuted` depending on what you want to observe.
 
 **Key event types:**
 

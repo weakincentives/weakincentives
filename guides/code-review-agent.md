@@ -317,7 +317,7 @@ The example imports several helpers from the `examples` package:
 | `examples/` | Shared example utilities |
 | `test-repositories/sunfish/` | Mounted repository fixture |
 | `snapshots/` | Session dump output directory |
-| `~/.weakincentives/prompts/` | Default overrides storage |
+| `.weakincentives/prompts/overrides/` | Default overrides storage (created in current project directory) |
 
 ## Next Steps
 

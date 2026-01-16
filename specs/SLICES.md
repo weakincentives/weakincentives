@@ -87,7 +87,7 @@ reducer(view: SliceView[S], event: Event, *, context: ReducerContext) -> SliceOp
 ### Declarative Reducers
 
 The `@reducer` decorator enables method-style reducers on frozen dataclasses.
-Methods return `SliceOp` directly. See `runtime/session/state_slice.py`.
+Methods return `SliceOp` directly. See `src/weakincentives/runtime/session/state_slice.py`.
 
 ## Implementations
 

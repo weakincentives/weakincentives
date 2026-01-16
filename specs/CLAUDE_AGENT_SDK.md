@@ -73,7 +73,7 @@ native tools, MCP tool bridging, structured output, and optional isolation.
 
 When `isolation` is set:
 
-- Creates ephemeral `HOME` with `.claude/settings.json`
+- Creates ephemeral `HOME` with `$HOME/.claude/settings.json`
 - Passes `env` and `setting_sources=["user"]` to SDK
 
 **Notes:**
