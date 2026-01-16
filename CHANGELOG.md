@@ -220,6 +220,8 @@ mailbox = RedisMailbox(name="events", client=redis_client, default_ttl=0)  # Dis
 
 ### Documentation
 
+- Added `specs/OTEL.md` covering OpenTelemetry integration for distributed tracing,
+  metrics export, and log correlation
 - Added `specs/EXPERIMENTS.md` covering experiment configuration for A/B testing
 - Added `specs/RUN_CONTEXT.md` covering execution metadata and distributed tracing
 - Added `specs/LEASE_EXTENDER.md` covering automatic message visibility extension

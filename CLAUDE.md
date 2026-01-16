@@ -166,6 +166,7 @@ Consult these specs before modifying related code:
 | `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, reply patterns, resolver |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
 | `specs/METRICS.md` | Metrics primitives, in-memory collection, debug persistence |
+| `specs/OTEL.md` | OpenTelemetry integration, distributed tracing, metrics export |
 | `specs/POLICIES_OVER_WORKFLOWS.md` | Philosophy of declarative policies vs rigid workflows for unattended agents |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides, structured output, resources |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |

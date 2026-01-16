@@ -85,6 +85,8 @@ a goal at any time.
 - **FILESYSTEM.md**: Filesystem protocol, backend implementations, and
   ToolContext integration—when adding or modifying filesystem operations.
 - **LOGGING.md**: Logging expectations—when adjusting logging surfaces.
+- **OTEL.md**: OpenTelemetry integration—when adding distributed tracing,
+  metrics export, or log correlation features.
 - **POLICIES_OVER_WORKFLOWS.md**: Design philosophy—preferring declarative
   policies over rigid workflows for unattended agent autonomy.
 - **PROMPTS.md**: Prompt abstraction, structured output, composition, overrides,
