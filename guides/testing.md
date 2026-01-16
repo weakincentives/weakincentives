@@ -93,16 +93,17 @@ No model needed. You're testing the business logic in isolation.
 Reducers are pure functions. Test them directly:
 
 ```python
-from weakincentives.runtime.session import SliceView, Append
+from weakincentives.runtime.session import Append
 
 def test_add_step_reducer():
-    initial_state = SliceView((Plan(steps=()),))
+    # Provide the current slice contents as a tuple
+    current_state = (Plan(steps=()),)
     event = AddStep(step="read README")
 
-    result = add_step_reducer(initial_state, event)
+    result = add_step_reducer(current_state, event)
 
     assert isinstance(result, Append)
-    assert result.value.steps == ("read README",)
+    assert result.item.steps == ("read README",)
 ```
 
 Given this slice and this event, expect this new slice. Pure functions are easy

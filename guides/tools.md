@@ -84,13 +84,13 @@ from weakincentives.resources import Binding, Scope
 from weakincentives.prompt import Prompt
 
 # Simple case: pre-constructed instances
-http_client = HTTPClient(base_url="https://api.example.com")
+http_client = HTTPClient()
 prompt = Prompt(template).bind(params, resources={HTTPClient: http_client})
 
 # Advanced: lazy construction with dependencies and scopes
 prompt = Prompt(template).bind(params, resources={
-    Config: Binding(Config, lambda r: Config.from_env()),
-    HTTPClient: Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+    Config: Binding(Config, lambda r: Config()),
+    HTTPClient: Binding(HTTPClient, lambda r: HTTPClient()),
     Tracer: Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
 })
 

@@ -70,7 +70,7 @@ def my_handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult
 
     try:
         result = fs.read(params.path, offset=0, limit=100)
-        return ToolResult.ok(MyResult(content=result.content))
+        return ToolResult.ok(MyResult(answer=result.content))
     except FileNotFoundError:
         return ToolResult.error(f"File not found: {params.path}")
 ```

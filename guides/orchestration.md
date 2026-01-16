@@ -37,16 +37,16 @@ the prompt. You don't have to handle this yourself.
 You can inject custom resources at the loop level via `MainLoopConfig`:
 
 ```python
-from weakincentives.resources import Binding, ResourceRegistry, Scope
+from weakincentives.resources import Binding, ResourceRegistry
 from weakincentives.runtime import MainLoopConfig
 
 # Simple case: pre-constructed instances
 resources = ResourceRegistry.of(Binding.instance(HTTPClient, http_client))
 
-# Or with lazy construction and scopes
+# Or with lazy construction
 resources = ResourceRegistry.of(
-    Binding(Config, lambda r: Config.from_env()),
-    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
+    Binding(Config, lambda r: Config()),
+    Binding(HTTPClient, lambda r: HTTPClient()),
 )
 
 config = MainLoopConfig(resources=resources)

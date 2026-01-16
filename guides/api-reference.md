@@ -163,10 +163,8 @@ adapt(evaluator) -> SessionEvaluator
 
 **Loop:**
 
-```python
-EvalLoop(loop, evaluator, requests)
-    .run(max_iterations=None)
-
+```text
+EvalLoop(loop, evaluator, requests).run(max_iterations=None)
 submit_dataset(dataset, requests)
 collect_results(results, expected_count, timeout_seconds=300)
 ```

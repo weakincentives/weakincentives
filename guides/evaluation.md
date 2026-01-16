@@ -68,7 +68,7 @@ def my_evaluator(output: str, expected: str) -> Score:
 
 **Built-in evaluators:**
 
-```python
+```text
 from weakincentives.evals import exact_match, contains, all_of, any_of
 
 # Strict equality
@@ -86,7 +86,7 @@ evaluator = any_of(exact_match, fuzzy_match)   # At least one must pass
 
 For subjective criteria, use an LLM to score outputs:
 
-```python
+```text
 from weakincentives.evals import llm_judge, all_of
 from weakincentives.adapters.openai import OpenAIAdapter
 
@@ -169,10 +169,11 @@ eval_loop = EvalLoop(
 **Submit samples and collect results:**
 
 ```python
-from weakincentives.evals import submit_dataset, collect_results
+from weakincentives.evals import submit_dataset, collect_results, Experiment
 
-# Submit all samples with reply_to for result routing
-submit_dataset(dataset, eval_requests, reply_to=eval_results)
+# Submit all samples to the evaluation mailbox
+experiment = Experiment(name="my-eval")
+submit_dataset(dataset, experiment=experiment, requests=eval_requests)
 
 # Run the evaluation worker
 eval_loop.run(max_iterations=1)
@@ -186,8 +187,9 @@ print(f"Mean score: {report.mean_score:.2f}")
 print(f"Mean latency: {report.mean_latency_ms:.0f}ms")
 
 # Review failures
-for result in report.failed_samples():
-    print(f"Failed: {result.sample_id} - {result.score.reason}")
+for eval_result in report.results:
+    if not eval_result.score.passed:
+        print(f"Failed: {eval_result.sample_id} - {eval_result.score.reason}")
 ```
 
 ## Production Deployment Pattern

@@ -242,7 +242,7 @@ budget = Budget(
 )
 
 # Tracker accumulates across calls
-tracker = BudgetTracker()
+tracker = BudgetTracker(budget=budget)
 
 try:
     response = adapter.evaluate(

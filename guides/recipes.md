@@ -30,7 +30,7 @@ from weakincentives.contrib.tools import (
     VfsConfig,
     WorkspaceDigestSection,
 )
-from weakincentives.prompt import PromptTemplate, MarkdownSection, SectionVisibility
+from weakincentives.prompt import PromptTemplate, MarkdownSection
 
 
 def build_qa_template(*, session):
@@ -47,10 +47,7 @@ def build_qa_template(*, session):
                     "Use grep and read_file to find specific details."
                 ),
             ),
-            WorkspaceDigestSection(
-                session=session,
-                visibility=SectionVisibility.SUMMARY,  # Start summarized
-            ),
+            WorkspaceDigestSection(session=session),
             VfsToolsSection(
                 session=session,
                 config=VfsConfig(

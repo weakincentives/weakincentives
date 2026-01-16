@@ -181,7 +181,7 @@ def apply_op(op: SliceOp) -> None:
 **Coverage note:** The `assert_never(op)` line is unreachable in correct code.
 Add `# pragma: no cover` to exclude it from coverage requirements:
 
-```python
+```text
 case _:
     assert_never(op)  # pragma: no cover
 ```

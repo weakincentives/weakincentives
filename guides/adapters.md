@@ -122,36 +122,34 @@ and also publish `ToolInvoked` events.
 
 ## Throttling
 
-Adapters support throttle policies for rate limiting:
+Adapters support throttle policies for retry handling on rate limits:
 
 ```python
 from weakincentives.adapters import new_throttle_policy
 
-policy = new_throttle_policy(requests_per_minute=60)
+policy = new_throttle_policy(max_attempts=5)
 adapter = OpenAIAdapter(model="gpt-4o", throttle_policy=policy)
 ```
 
 **Full throttle configuration:**
 
 ```python
+from datetime import timedelta
 from weakincentives.adapters import ThrottlePolicy
 
 policy = ThrottlePolicy(
-    requests_per_minute=60,
-    max_attempts=5,           # Total attempts before giving up
-    base_delay=1.0,           # Initial backoff delay (seconds)
-    max_delay=60.0,           # Maximum backoff delay
-    max_total_delay=300.0,    # Total time budget for retries
-    jitter=0.1,               # Randomization factor (0-1)
+    max_attempts=5,                        # Total attempts before giving up
+    base_delay=timedelta(milliseconds=500),  # Initial backoff delay
+    max_delay=timedelta(seconds=8),        # Maximum backoff delay
+    max_total_delay=timedelta(seconds=30), # Total time budget for retries
 )
 ```
 
 **How throttling works:**
 
 1. When a rate limit is hit, the adapter backs off exponentially
-1. Jitter prevents thundering herd when multiple workers retry
-1. If `Retry-After` header is present, it's respected
-1. `ThrottleError` is raised if all attempts fail
+2. If `Retry-After` header is present, it's respected
+3. `ThrottleError` is raised if all attempts fail
 
 ## Next Steps
 
