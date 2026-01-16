@@ -318,3 +318,12 @@ The example imports several helpers from the `examples` package:
 | `test-repositories/sunfish/` | Mounted repository fixture |
 | `snapshots/` | Session dump output directory |
 | `~/.weakincentives/prompts/` | Default overrides storage |
+
+## Next Steps
+
+- [Workspace Tools](workspace-tools.md): Deep dive into VFS, Podman, planning
+- [Progressive Disclosure](progressive-disclosure.md): Understand visibility
+  management
+- [Prompt Overrides](prompt-overrides.md): Customize prompts without code
+  changes
+- [Orchestration](orchestration.md): Scale with MainLoop
