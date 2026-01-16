@@ -1,10 +1,13 @@
 # Weak Incentives (Is All You Need)
 
-WINK is the agent-definition layer for building unattended/background agents.
-You define the prompt, tools, policies, and feedback that stay stable while
-runtimes change. The planning loop, sandboxing, retries, and orchestration live
-in the execution harness—often a vendor runtime. WINK keeps your agent
-definition portable.
+**WINK: The part of your agent that survives when runtimes change.**
+
+Agent frameworks will commoditize. Vendor runtimes will handle planning loops,
+sandboxing, and orchestration. What survives is your agent definition: the
+prompt, tools, policies, and completion checks that make your agent yours.
+
+WINK makes that definition a first-class artifact you can version, test, and
+port.
 
 > **New to WINK?** Read the [guides](guides/README.md) for a comprehensive
 > introduction—philosophy, quickstart, and practical patterns for building agents.
