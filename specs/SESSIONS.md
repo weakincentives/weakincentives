@@ -3,7 +3,7 @@
 ## Purpose
 
 Sessions provide deterministic, side-effect-free containers for prompt run
-lifecycle. Core implementation in `src/weakincentives/src/weakincentives/runtime/session/session.py`.
+lifecycle. Core implementation in `src/weakincentives/runtime/session/session.py`.
 
 ## Principles
 

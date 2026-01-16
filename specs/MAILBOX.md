@@ -104,7 +104,7 @@ for msg in requests.receive():
 
 ## Service Discovery: MailboxResolver
 
-**Implementation:** `src/weakincentives/src/weakincentives/runtime/mailbox/_resolver.py`
+**Implementation:** `src/weakincentives/runtime/mailbox/_resolver.py`
 
 **Use for:** Redis/distributed backends where mailbox names are serialized.
 **Not for:** In-memory mailboxes (store direct references).
