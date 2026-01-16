@@ -3,7 +3,7 @@
 ## Purpose
 
 Tool registration, context injection, failure semantics, policy enforcement,
-and planning tools. Core at `prompt/tool.py`.
+and planning tools. Core at `src/weakincentives/prompt/tool.py`.
 
 ## Principles
 
@@ -17,7 +17,7 @@ and planning tools. Core at `prompt/tool.py`.
 
 ### Tool
 
-At `prompt/tool.py` (`Tool` class):
+At `src/weakincentives/prompt/tool.py` (`Tool` class):
 
 | Field | Description |
 | --- | --- |
@@ -35,7 +35,7 @@ def handle(params: ParamsT, *, context: ToolContext) -> ToolResult[ResultT]: ...
 
 ### ToolResult
 
-At `prompt/tool_result.py` (`ToolResult` class):
+At `src/weakincentives/prompt/tool_result.py` (`ToolResult` class):
 
 | Field | Description |
 | --- | --- |
@@ -53,7 +53,7 @@ Rendering via `render()` uses `serde.dump`.
 
 ### ToolContext
 
-At `prompt/tool.py` (`ToolContext` class):
+At `src/weakincentives/prompt/tool.py` (`ToolContext` class):
 
 | Field | Description |
 | --- | --- |
@@ -84,7 +84,7 @@ def my_handler(params: Params, *, context: ToolContext) -> ToolResult[Result]:
 
 ### ToolExample
 
-At `prompt/tool.py` (`ToolExample` class):
+At `src/weakincentives/prompt/tool.py` (`ToolExample` class):
 
 | Field | Description |
 | --- | --- |
@@ -246,11 +246,11 @@ def execute_tool(call, *, context):
 
 ## Planning Tool Suite
 
-Session-scoped todo list at `contrib/tools/planning.py`.
+Session-scoped todo list at `src/weakincentives/contrib/tools/planning.py`.
 
 ### Data Model
 
-At `contrib/tools/planning.py`:
+At `src/weakincentives/contrib/tools/planning.py`:
 
 | Type | Description |
 | --- | --- |
@@ -270,7 +270,7 @@ At `contrib/tools/planning.py`:
 
 ### Parameters
 
-At `contrib/tools/planning.py`:
+At `src/weakincentives/contrib/tools/planning.py`:
 
 | Event | Fields |
 | --- | --- |
@@ -288,12 +288,12 @@ At `contrib/tools/planning.py`:
 
 ### Session Integration
 
-`PlanningToolsSection` at `contrib/tools/planning.py` auto-registers
+`PlanningToolsSection` at `src/weakincentives/contrib/tools/planning.py` auto-registers
 reducers for `Plan`, `SetupPlan`, `AddStep`, `UpdateStep`.
 
 ## Planning Strategies
 
-At `contrib/tools/planning.py` (`PlanningStrategy` enum):
+At `src/weakincentives/contrib/tools/planning.py` (`PlanningStrategy` enum):
 
 | Strategy | Description |
 | --- | --- |

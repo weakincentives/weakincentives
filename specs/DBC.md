@@ -4,7 +4,7 @@
 
 Internal-only DbC framework for `weakincentives`. Decorators describe
 preconditions, postconditions, invariants, and purity expectations. Active in
-tests only; zero-cost in production. Implementation at `dbc/__init__.py`.
+tests only; zero-cost in production. Implementation at `src/weakincentives/dbc/__init__.py`.
 
 ## Principles
 
@@ -18,7 +18,7 @@ tests only; zero-cost in production. Implementation at `dbc/__init__.py`.
 
 ### @require
 
-At `dbc/__init__.py:157-182`. Preconditions on function entry.
+At `src/weakincentives/dbc/__init__.py`. Preconditions on function entry.
 
 Callables receive `*args`, `**kwargs`, optionally bound `self`/`cls`.
 All must return truthy; falsy or exception fails test with descriptive assertion.
@@ -31,7 +31,7 @@ def withdraw(account: Account, amount: int) -> None: ...
 
 ### @ensure
 
-At `dbc/__init__.py:185-225`. Postconditions after return or raise.
+At `src/weakincentives/dbc/__init__.py`. Postconditions after return or raise.
 
 Callables receive original arguments plus `result` or `exception` keyword.
 Supports `(bool, message)` tuples for custom diagnostics.
@@ -43,7 +43,7 @@ def withdraw(account: Account, amount: int) -> Account: ...
 
 ### @invariant
 
-At `dbc/__init__.py:323-333`. Class invariants checked before/after public methods.
+At `src/weakincentives/dbc/__init__.py`. Class invariants checked before/after public methods.
 
 Wraps `__init__` and public methods (excludes `_`-prefixed, static, class methods).
 Use `skip_invariant()` to exclude specific methods.
@@ -57,19 +57,19 @@ class Account:
 
 Implementation details:
 
-- `_wrap_init_with_invariants()` at `dbc/__init__.py:264-277`
-- `_wrap_methods_with_invariants()` at `dbc/__init__.py:308-320`
+- `_wrap_init_with_invariants()` at `src/weakincentives/dbc/__init__.py`
+- `_wrap_methods_with_invariants()` at `src/weakincentives/dbc/__init__.py`
 
 ### @pure
 
-At `dbc/__init__.py:475-500`. Documents side-effect-free functions.
+At `src/weakincentives/dbc/__init__.py`. Documents side-effect-free functions.
 
 Enforcement (best-effort via `deepcopy` + equality):
 
 - No mutation of arguments
 - No calls to `builtins.open`, `Path.write_text/bytes`, `logging`
 
-Patching at `_activate_pure_patches()` (`dbc/__init__.py:390-409`).
+Patching at `_activate_pure_patches()` (`src/weakincentives/dbc/__init__.py`).
 
 ## Runtime Behavior
 
@@ -84,14 +84,14 @@ and formatted argument dump.
 
 ### Control Functions
 
-At `dbc/__init__.py`:
+Defined in `src/weakincentives/dbc/__init__.py`:
 
-| Function | Line | Description |
-| --- | --- | --- |
-| `dbc_active()` | 50-55 | Check if DbC enabled |
-| `enable_dbc()` | 62-66 | Force enable |
-| `disable_dbc()` | 69-73 | Force disable |
-| `dbc_enabled()` | 76-86 | Context manager for temporary override |
+| Function | Description |
+| --- | --- |
+| `dbc_active()` | Check if DbC enabled |
+| `enable_dbc()` | Force enable |
+| `disable_dbc()` | Force disable |
+| `dbc_enabled()` | Context manager for temporary override |
 
 ### Pytest Integration
 

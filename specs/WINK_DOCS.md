@@ -50,6 +50,8 @@ src/weakincentives/docs/
     ├── ...
 ```
 
+**Note:** The `src/weakincentives/docs/` directory is generated during builds by `hatch_build.py` and is intentionally not committed (listed in `.gitignore`). When browsing the repository, you will not see this directory unless you run the build.
+
 ## Build-Time Synchronization
 
 Hatch build hook synchronizes docs from repository root into package:

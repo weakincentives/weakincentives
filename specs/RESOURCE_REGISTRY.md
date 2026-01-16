@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Dependency injection with scope-aware lifecycle management. Core at `resources/`.
+Dependency injection with scope-aware lifecycle management. Core at `src/weakincentives/resources/`.
 
 ## Principles
 
@@ -16,7 +16,7 @@ Dependency injection with scope-aware lifecycle management. Core at `resources/`
 ## Module Structure
 
 ```
-resources/
+src/weakincentives/resources/
 ├── __init__.py     # Public API
 ├── scope.py        # Scope enum
 ├── binding.py      # Binding dataclass, Provider type
@@ -28,7 +28,7 @@ resources/
 
 ## Scopes
 
-At `resources/scope.py`:
+At `src/weakincentives/resources/scope.py`:
 
 | Scope | Lifetime |
 | --- | --- |
@@ -48,7 +48,7 @@ At `resources/scope.py`:
 
 ### Binding
 
-At `resources/binding.py`:
+At `src/weakincentives/resources/binding.py`:
 
 | Field | Description |
 | --- | --- |
@@ -61,7 +61,7 @@ Factory: `Binding.instance(protocol, value)` for pre-constructed instances.
 
 ### ResourceResolver Protocol
 
-At `resources/protocols.py`:
+At `src/weakincentives/resources/protocols.py`:
 
 | Method | Description |
 | --- | --- |
@@ -70,7 +70,7 @@ At `resources/protocols.py`:
 
 ### ResourceRegistry
 
-At `resources/registry.py`:
+At `src/weakincentives/resources/registry.py`:
 
 | Method | Description |
 | --- | --- |
@@ -82,7 +82,7 @@ At `resources/registry.py`:
 
 ### ScopedResourceContext
 
-At `resources/context.py`:
+At `src/weakincentives/resources/context.py`:
 
 | Method | Description |
 | --- | --- |
@@ -96,7 +96,7 @@ At `resources/context.py`:
 
 ### Snapshotable
 
-At `resources/protocols.py`:
+At `src/weakincentives/resources/protocols.py`:
 
 ```python
 class Snapshotable(Protocol[SnapshotT]):

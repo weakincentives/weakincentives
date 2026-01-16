@@ -3,7 +3,7 @@
 ## Purpose
 
 The `Prompt` abstraction centralizes string templates flowing to LLMs with
-resource lifecycle management. Core at `prompt/prompt.py`.
+resource lifecycle management. Core at `src/weakincentives/prompt/prompt.py`.
 
 ## Principles
 
@@ -18,7 +18,7 @@ resource lifecycle management. Core at `prompt/prompt.py`.
 
 ### PromptTemplate
 
-At `prompt/prompt.py` (`PromptTemplate` class):
+At `src/weakincentives/prompt/prompt.py` (`PromptTemplate` class):
 
 | Field | Description |
 | --- | --- |
@@ -32,7 +32,7 @@ Section keys must match: `^[a-z0-9][a-z0-9._-]{0,63}$`
 
 ### Prompt
 
-At `prompt/prompt.py` (`Prompt` class):
+At `src/weakincentives/prompt/prompt.py` (`Prompt` class):
 
 | Method | Description |
 | --- | --- |
@@ -45,7 +45,7 @@ replaces; providing same type twice in single call rejected.
 
 ### Section
 
-Abstract base at `prompt/section.py`:
+Abstract base at `src/weakincentives/prompt/section.py`:
 
 | Field | Description |
 | --- | --- |
@@ -61,7 +61,7 @@ Sections must be specialized: `MarkdownSection[MyParams]`
 
 ### MarkdownSection
 
-At `prompt/markdown.py`: Dedents, strips, runs `Template.substitute`.
+At `src/weakincentives/prompt/markdown.py`: Dedents, strips, runs `Template.substitute`.
 
 | Field | Description |
 | --- | --- |
@@ -84,7 +84,7 @@ Resources collected from (lowest to highest precedence):
 
 ### Context Manager Protocol
 
-At `prompt/prompt.py` via `PromptResources`:
+At `src/weakincentives/prompt/prompt.py` via `PromptResources`:
 
 ```python
 with prompt.resources:

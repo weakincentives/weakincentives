@@ -101,7 +101,7 @@ with prompt.resources:
 
 **Scopes control instance lifetime:**
 
-- `Scope.SINGLETON`: One instance per session (default)
+- `Scope.SINGLETON`: One instance per active resource context (default, i.e., per `with prompt.resources:` block)
 - `Scope.TOOL_CALL`: Fresh instance per tool invocation
 - `Scope.PROTOTYPE`: Fresh instance on every access
 

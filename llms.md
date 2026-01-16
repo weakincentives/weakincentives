@@ -1025,8 +1025,7 @@ Read before modifying related code:
 | --------------------------- | ---------------------------------------- |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides |
 | `specs/SESSIONS.md` | Session lifecycle, events, budgets |
-| `specs/TOOLS.md` | Tool registration, planning tools |
-| `specs/TOOL_POLICIES.md` | Sequential dependencies, read-before-write |
+| `specs/TOOLS.md` | Tool registration, planning tools, policies |
 | `specs/FEEDBACK_PROVIDERS.md` | Trajectory feedback, stall detection |
 | `specs/TASK_COMPLETION.md` | Task completion verification |
 | `specs/ADAPTERS.md` | Provider adapters, throttling |
