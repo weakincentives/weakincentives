@@ -7,13 +7,38 @@ with WINK.
 
 ## How to Read These Guides
 
-If you're new to WINK, start with the **Quickstart** to get something running,
-then read **Philosophy** to understand the design principles. From there, follow
-the guides in order or jump to specific topics as needed.
-
 The guides assume you'll be delegating much of the coding to AI assistants. They
 focus on building understanding so you can effectively direct that work and
 debug issues when they arise.
+
+### For Beginners
+
+1. [Quickstart](quickstart.md) - Get something running first
+1. [Philosophy](philosophy.md) - Understand *why* WINK works this way
+1. [Prompts](prompts.md) - Learn the core abstraction
+1. [Tools](tools.md) - Add capabilities to your agent
+1. [Sessions](sessions.md) - Manage state correctly
+1. [Adapters](adapters.md) - Connect to your preferred provider
+
+### For Production Deployments
+
+1. [Claude Agent SDK](claude-agent-sdk.md) - Recommended adapter for production
+1. [Orchestration](orchestration.md) - Handle requests at scale
+1. [Lifecycle](lifecycle.md) - Health checks, shutdown, watchdogs
+1. [Debugging](debugging.md) - Inspect and troubleshoot sessions
+
+### For Advanced Users
+
+1. [Progressive Disclosure](progressive-disclosure.md) - Manage context size
+1. [Workspace Tools](workspace-tools.md) - VFS, Podman, sandboxed execution
+1. [Prompt Overrides](prompt-overrides.md) - A/B test prompts without deploys
+1. [Formal Verification](formal-verification.md) - TLA+ for critical code
+
+### For Contributors
+
+1. [Code Quality](code-quality.md) - Standards and tooling
+1. [Testing](testing.md) - How to test prompts, tools, reducers
+1. See also: `AGENTS.md` for the canonical contributor handbook
 
 ## Core Concepts
 

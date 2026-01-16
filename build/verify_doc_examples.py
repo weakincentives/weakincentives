@@ -15,7 +15,7 @@
 Extracts Python code blocks from Markdown documentation and runs them through
 pyright type checking to catch broken imports, undefined names, and type errors.
 
-Target files: README.md, WINK_GUIDE.md, llms.md
+Target files: README.md, llms.md, and all guides/*.md files
 Excluded: specs/ directory (internal design docs), CHANGELOG.md (release notes)
 """
 
