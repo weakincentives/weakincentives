@@ -2,38 +2,32 @@
 
 **WINK: The part of your agent that survives when runtimes change.**
 
-Agent frameworks will commoditize. Vendor runtimes will handle planning loops,
-sandboxing, and orchestration. What survives is your agent definition: the
-prompt, tools, policies, and completion checks that make your agent yours.
+Most agent frameworks compete at the orchestration layer—planning loops, routing
+graphs, tool sequencing. But that's commoditizing fast; Claude and OpenAI are
+shipping native runtimes that do all of it. What's not commoditizing is your
+agent's definition: the specific prompt structure, tool contracts, and
+completion criteria that encode your domain.
 
-WINK makes that definition a first-class artifact you can version, test, and
-port.
+WINK treats that definition as a portable, testable, versionable artifact. You
+keep your agent logic; swap runtimes as vendors improve.
 
 > **New to WINK?** Read the [guides](guides/README.md) for a comprehensive
 > introduction—philosophy, quickstart, and practical patterns for building agents.
 
 ## Definition vs. Harness
 
-A high-quality unattended agent has two parts:
+An unattended agent has two parts:
 
-**Agent definition (you own):**
+| You own (definition) | Runtime owns (harness) |
+| ------------------------------------ | ------------------------------------------ |
+| Prompt structure | Planning/act loop |
+| Tools + typed I/O contracts | Sandboxing, permissions |
+| Policies (gates on tool use) | Retries, throttling, lifecycle |
+| Completion checks, drift detection | Scheduling, budgets, crash recovery |
 
-- Prompt structure (context engineering)
-- Tools + typed I/O contracts (the side-effect boundary)
-- Policies (gates on tool use and state transitions)
-- Feedback ("done" criteria, drift detection)
-
-**Execution harness (runtime-owned):**
-
-- Planning/act loop and tool-call sequencing
-- Sandboxing/permissions (filesystem/shell/network)
-- Retries/backoff, throttling, and lifecycle management
-- Scheduling, budgets/deadlines, crash recovery
-- Multi-agent orchestration (when used)
-
-The harness will keep changing—and increasingly comes from vendor runtimes—but
-your agent definition should not. WINK makes the definition a first-class
-artifact you can version, review, test, and port across runtimes via adapters.
+The harness changes—and increasingly comes from vendor runtimes. Your definition
+shouldn't. WINK makes it an artifact you can version, test, and port via
+adapters.
 
 ## The Prompt is the Agent
 
