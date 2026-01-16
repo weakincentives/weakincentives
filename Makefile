@@ -223,11 +223,12 @@ check: format-check lint typecheck type-coverage bandit vulture deptry check-cor
 # Synchronize documentation files into package
 sync-docs:
 	@mkdir -p src/weakincentives/docs/specs
+	@mkdir -p src/weakincentives/docs/guides
 	@cp llms.md src/weakincentives/docs/
-	@cp WINK_GUIDE.md src/weakincentives/docs/
 	@cp CHANGELOG.md src/weakincentives/docs/
 	@cp code_reviewer_example.py src/weakincentives/docs/
 	@cp specs/*.md src/weakincentives/docs/specs/
+	@cp guides/*.md src/weakincentives/docs/guides/
 	@touch src/weakincentives/docs/__init__.py
 
 # Run all checks and fixes

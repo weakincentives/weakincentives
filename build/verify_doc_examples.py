@@ -15,7 +15,7 @@
 Extracts Python code blocks from Markdown documentation and runs them through
 pyright type checking to catch broken imports, undefined names, and type errors.
 
-Target files: README.md, WINK_GUIDE.md, llms.md
+Target files: README.md, llms.md, and all guides/*.md files
 Excluded: specs/ directory (internal design docs), CHANGELOG.md (release notes)
 """
 
@@ -37,8 +37,12 @@ from pathlib import Path
 # removed APIs intentionally (to document breaking changes)
 DOC_FILES = [
     "README.md",
-    "WINK_GUIDE.md",
     "llms.md",
+]
+
+# Directories containing documentation with code examples
+DOC_DIRS = [
+    "guides",
 ]
 
 # Builtins that don't need to be defined
@@ -677,6 +681,11 @@ def main() -> int:
         files = [Path(f) for f in args.files]
     else:
         files = [project_root / f for f in DOC_FILES]
+        # Add all markdown files from documentation directories
+        for doc_dir in DOC_DIRS:
+            dir_path = project_root / doc_dir
+            if dir_path.exists():
+                files.extend(sorted(dir_path.glob("*.md")))
 
     return verify_files(files, quiet=args.quiet)
 

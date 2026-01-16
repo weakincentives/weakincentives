@@ -131,13 +131,32 @@ def _read_specs() -> str:
     return "\n\n".join(parts)
 
 
+def _read_guides() -> str:
+    """Read all guide files, concatenated with headers."""
+    guides_dir = files("weakincentives.docs.guides")
+    parts: list[str] = []
+
+    # Get all .md files, sorted alphabetically by name
+    guide_entries = sorted(
+        (entry for entry in guides_dir.iterdir() if entry.name.endswith(".md")),
+        key=lambda entry: entry.name,
+    )
+
+    for entry in guide_entries:
+        header = f"<!-- guides/{entry.name} -->"
+        content = entry.read_text(encoding="utf-8")
+        parts.append(f"{header}\n{content}")
+
+    return "\n\n".join(parts)
+
+
 def _load_docs(args: argparse.Namespace) -> list[str]:
     """Load documentation content based on args."""
     parts: list[str] = []
     if args.reference:
         parts.append(_read_doc("llms.md"))
     if args.guide:
-        parts.append(_read_doc("WINK_GUIDE.md"))
+        parts.append(_read_guides())
     if args.spec:
         parts.append(_read_spec(args.spec))
     if args.specs:
@@ -260,7 +279,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _ = docs_parser.add_argument(
         "--guide",
         action="store_true",
-        help="Print usage guide (WINK_GUIDE.md)",
+        help="Print usage guides (guides/*.md)",
     )
     _ = docs_parser.add_argument(
         "--spec",
