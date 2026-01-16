@@ -165,7 +165,7 @@ Consult these specs before modifying related code:
 | `specs/LOGGING.md` | Logging surfaces |
 | `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, reply patterns, resolver |
 | `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
-| `specs/METRICS.md` | Metrics primitives, Session-native storage, adapter/tool/mailbox integration |
+| `specs/METRICS.md` | Metrics primitives, in-memory collection, debug persistence |
 | `specs/POLICIES_OVER_WORKFLOWS.md` | Philosophy of declarative policies vs rigid workflows for unattended agents |
 | `specs/PROMPTS.md` | Prompt system, composition, overrides, structured output, resources |
 | `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |

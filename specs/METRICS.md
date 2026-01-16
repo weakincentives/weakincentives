@@ -1,27 +1,24 @@
-# Metrics Abstraction Specification
+# Metrics Specification
 
 ## Purpose
 
-This specification defines a provider-agnostic metrics abstraction for WINK.
-Metrics are first-class citizens stored in the Session as immutable event
-ledgers, enabling observability without external dependencies. The system
-captures latency, throughput, error rates, and queue health across all layers.
+In-memory metrics collection for observability. Captures latency, throughput,
+error rates, and queue health across adapters, tools, and mailbox.
 
-## Guiding Principles
+**Use metrics for:** Latency analysis, token tracking, failure rates, queue health.
 
-- **In-memory by default**: Metrics accumulate in the collector during execution
-  without persisting to Session slices. This avoids session bloat and lifecycle
-  mismatch—metrics are observability, not application state.
-- **Resource-scoped lifecycle**: Collectors are bound via `ResourceRegistry` with
-  `Scope.SINGLETON`, surviving across requests within a worker process.
-- **Optional persistence**: The `weakincentives.debug` module provides utilities
-  to dump metrics to disk for post-hoc analysis when needed.
-- **Compact representation**: Use fixed-size histogram buckets and periodic
-  rollups to bound memory usage while preserving distribution information.
-- **Zero-config wiring**: Adapters, tools, and mailbox emit metrics
-  automatically. Opt-out rather than opt-in.
-- **RunContext correlation**: Metrics integrate with `RunContext` for
-  distributed tracing and request correlation across workers.
+**Not for:** Billing (use session token budgets), alerting (export to external systems).
+
+## Design Principles
+
+- **In-memory storage**: Metrics accumulate in collector without Session persistence.
+  Avoids session bloat—metrics are observability, not application state.
+- **Resource-scoped lifecycle**: Bound via `ResourceRegistry` with `Scope.SINGLETON`,
+  surviving across requests within a worker process.
+- **Optional persistence**: `weakincentives.debug` provides `dump_metrics()` for
+  post-hoc analysis.
+- **Compact histograms**: Fixed exponential buckets bound memory regardless of volume.
+- **RunContext correlation**: Integrates with distributed tracing.
 
 ## Architecture Overview
 
