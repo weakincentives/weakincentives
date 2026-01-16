@@ -15,13 +15,16 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Iterator, Sequence
+from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
 
 from ..runtime.logging import StructuredLogger, configure_logging, get_logger
 from . import debug_app
+from .docs_metadata import GUIDE_DESCRIPTIONS, SPEC_DESCRIPTIONS
 
 
 def _read_doc(name: str) -> str:
@@ -31,11 +34,7 @@ def _read_doc(name: str) -> str:
 
 
 def _read_example() -> str:
-    """Read the code review example and format as markdown documentation.
-
-    Converts the code_reviewer_example.py into a markdown document with
-    a brief introduction explaining the example's purpose and structure.
-    """
+    """Read the code review example and format as markdown documentation."""
     doc_files = files("weakincentives.docs")
     source = doc_files.joinpath("code_reviewer_example.py").read_text(encoding="utf-8")
 
@@ -76,135 +75,340 @@ python code_reviewer_example.py --optimize
     return f"{intro}{source}\n```\n"
 
 
-def _read_spec(name: str) -> str:
-    """Read a single spec file by name.
+def _normalize_doc_name(name: str, available: list[str]) -> str | None:
+    """Find the actual document name using case-insensitive matching.
 
-    Args:
-        name: Spec filename with or without .md extension (e.g., "ADAPTERS" or "ADAPTERS.md")
-
-    Returns:
-        Spec content with header comment
-
-    Raises:
-        FileNotFoundError: If spec file does not exist
+    Returns the correctly-cased name if found, None otherwise.
     """
+    # Strip .md extension if present for comparison
+    lookup = name.removesuffix(".md").casefold()
+    for doc_name in available:
+        if doc_name.casefold() == lookup:
+            return doc_name
+    return None
+
+
+def _read_spec(name: str) -> str:
+    """Read a single spec file by name (case-insensitive)."""
     specs_dir = files("weakincentives.docs.specs")
+    available = sorted(
+        entry.name.removesuffix(".md")
+        for entry in specs_dir.iterdir()
+        if entry.name.endswith(".md")
+    )
 
-    # Normalize name to include .md extension
-    filename = name if name.endswith(".md") else f"{name}.md"
-
-    # Check if the spec file exists
-    spec_path = specs_dir.joinpath(filename)
-    try:
-        content = spec_path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        # List available specs for helpful error message
-        available = sorted(
-            entry.name.removesuffix(".md")
-            for entry in specs_dir.iterdir()
-            if entry.name.endswith(".md")
-        )
+    normalized = _normalize_doc_name(name, available)
+    if normalized is None:
         available_list = ", ".join(available)
         msg = f"Spec '{name}' not found. Available specs: {available_list}"
-        raise FileNotFoundError(msg) from None
+        raise FileNotFoundError(msg)
 
+    filename = f"{normalized}.md"
+    content = specs_dir.joinpath(filename).read_text(encoding="utf-8")
     header = f"<!-- specs/{filename} -->"
     return f"{header}\n{content}"
 
 
-def _read_specs() -> str:
-    """Read all spec files, concatenated with headers."""
-    specs_dir = files("weakincentives.docs.specs")
-    parts: list[str] = []
-
-    # Get all .md files, sorted alphabetically by name
-    spec_entries = sorted(
-        (entry for entry in specs_dir.iterdir() if entry.name.endswith(".md")),
-        key=lambda entry: entry.name,
-    )
-
-    for entry in spec_entries:
-        header = f"<!-- specs/{entry.name} -->"
-        content = entry.read_text(encoding="utf-8")
-        parts.append(f"{header}\n{content}")
-
-    return "\n\n".join(parts)
-
-
-def _read_guides() -> str:
-    """Read all guide files, concatenated with headers."""
+def _read_guide(name: str) -> str:
+    """Read a single guide file by name (case-insensitive)."""
     guides_dir = files("weakincentives.docs.guides")
-    parts: list[str] = []
-
-    # Get all .md files, sorted alphabetically by name
-    guide_entries = sorted(
-        (entry for entry in guides_dir.iterdir() if entry.name.endswith(".md")),
-        key=lambda entry: entry.name,
+    available = sorted(
+        entry.name.removesuffix(".md")
+        for entry in guides_dir.iterdir()
+        if entry.name.endswith(".md")
     )
 
-    for entry in guide_entries:
-        header = f"<!-- guides/{entry.name} -->"
-        content = entry.read_text(encoding="utf-8")
-        parts.append(f"{header}\n{content}")
+    normalized = _normalize_doc_name(name, available)
+    if normalized is None:
+        available_list = ", ".join(available)
+        msg = f"Guide '{name}' not found. Available guides: {available_list}"
+        raise FileNotFoundError(msg)
 
-    return "\n\n".join(parts)
+    filename = f"{normalized}.md"
+    content = guides_dir.joinpath(filename).read_text(encoding="utf-8")
+    header = f"<!-- guides/{filename} -->"
+    return f"{header}\n{content}"
 
 
-def _load_docs(args: argparse.Namespace) -> list[str]:
-    """Load documentation content based on args."""
-    parts: list[str] = []
-    if args.reference:
-        parts.append(_read_doc("llms.md"))
-    if args.guide:
-        parts.append(_read_guides())
-    if args.spec:
-        parts.append(_read_spec(args.spec))
-    if args.specs:
-        parts.append(_read_specs())
-    if args.changelog:
-        parts.append(_read_doc("CHANGELOG.md"))
-    if args.example:
-        parts.append(_read_example())
-    return parts
+def _list_specs() -> list[str]:
+    """List all available spec names."""
+    specs_dir = files("weakincentives.docs.specs")
+    return sorted(
+        entry.name.removesuffix(".md")
+        for entry in specs_dir.iterdir()
+        if entry.name.endswith(".md")
+    )
+
+
+def _list_guides() -> list[str]:
+    """List all available guide names."""
+    guides_dir = files("weakincentives.docs.guides")
+    return sorted(
+        entry.name.removesuffix(".md")
+        for entry in guides_dir.iterdir()
+        if entry.name.endswith(".md")
+    )
+
+
+def _format_doc_list(
+    names: list[str], descriptions: dict[str, str], category: str
+) -> str:
+    """Format a list of documents with descriptions."""
+    lines = [f"{category} ({len(names)} documents)", "─" * len(category)]
+
+    max_name_len = max(len(name) for name in names) if names else 0
+    for name in names:
+        desc = descriptions.get(name, "")
+        lines.append(f"{name:<{max_name_len}}  {desc}")
+
+    return "\n".join(lines)
+
+
+def _handle_list(args: argparse.Namespace) -> int:
+    """Handle the list subcommand."""
+    category = args.category if hasattr(args, "category") else None
+
+    if category == "specs":
+        specs = _list_specs()
+        print(_format_doc_list(specs, SPEC_DESCRIPTIONS, "SPECS"))
+    elif category == "guides":
+        guides = _list_guides()
+        print(_format_doc_list(guides, GUIDE_DESCRIPTIONS, "GUIDES"))
+    else:
+        # List all
+        specs = _list_specs()
+        guides = _list_guides()
+        print(_format_doc_list(specs, SPEC_DESCRIPTIONS, "SPECS"))
+        print()
+        print(_format_doc_list(guides, GUIDE_DESCRIPTIONS, "GUIDES"))
+
+    return 0
+
+
+def _extract_headings(content: str) -> list[str]:
+    """Extract markdown headings from content."""
+    return [line for line in content.splitlines() if line.startswith("#")]
+
+
+def _handle_toc(args: argparse.Namespace) -> int:
+    """Handle the toc subcommand."""
+    doc_type = args.type
+    name = args.name
+
+    try:
+        content = _read_spec(name) if doc_type == "spec" else _read_guide(name)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+
+    # Extract path from the header comment (e.g., "<!-- specs/SESSIONS.md -->")
+    first_line = content.split("\n", 1)[0]
+    path = first_line.removeprefix("<!-- ").removesuffix(" -->")
+
+    headings = _extract_headings(content)
+    print(f"{path} - Table of Contents")
+    print("─" * len(path))
+    for heading in headings:
+        print(heading)
+
+    return 0
+
+
+def _iter_all_docs() -> Iterator[tuple[str, str, str]]:
+    """Iterate over all documents yielding (path, name, content)."""
+    specs_dir = files("weakincentives.docs.specs")
+    for entry in specs_dir.iterdir():
+        if entry.name.endswith(".md"):  # pragma: no branch
+            content = entry.read_text(encoding="utf-8")
+            yield f"specs/{entry.name}", entry.name.removesuffix(".md"), content
+
+    guides_dir = files("weakincentives.docs.guides")
+    for entry in guides_dir.iterdir():
+        if entry.name.endswith(".md"):  # pragma: no branch
+            content = entry.read_text(encoding="utf-8")
+            yield f"guides/{entry.name}", entry.name.removesuffix(".md"), content
+
+
+def _iter_specs() -> Iterator[tuple[str, str, str]]:
+    """Iterate over spec documents yielding (path, name, content)."""
+    specs_dir = files("weakincentives.docs.specs")
+    for entry in specs_dir.iterdir():  # pragma: no branch
+        if entry.name.endswith(".md"):  # pragma: no branch
+            content = entry.read_text(encoding="utf-8")
+            yield f"specs/{entry.name}", entry.name.removesuffix(".md"), content
+
+
+def _iter_guides() -> Iterator[tuple[str, str, str]]:
+    """Iterate over guide documents yielding (path, name, content)."""
+    guides_dir = files("weakincentives.docs.guides")
+    for entry in guides_dir.iterdir():
+        if entry.name.endswith(".md"):  # pragma: no branch
+            content = entry.read_text(encoding="utf-8")
+            yield f"guides/{entry.name}", entry.name.removesuffix(".md"), content
+
+
+def _build_match_fn(
+    pattern: str, use_regex: bool
+) -> tuple[Callable[[str], bool], None] | tuple[None, str]:
+    """Build a match function for the given pattern.
+
+    Returns (match_fn, None) on success or (None, error_message) on failure.
+    """
+    if use_regex:
+        try:
+            regex = re.compile(pattern, re.IGNORECASE)
+        except re.error as e:
+            return None, f"Invalid regex pattern: {e}"
+        return (lambda line: regex.search(line) is not None), None
+    pattern_lower = pattern.lower()
+    return (lambda line: pattern_lower in line.lower()), None
+
+
+def _select_doc_iterator(
+    specs_only: bool, guides_only: bool
+) -> Iterator[tuple[str, str, str]]:
+    """Select the appropriate document iterator based on flags."""
+    if specs_only:
+        return _iter_specs()
+    if guides_only:
+        return _iter_guides()
+    return _iter_all_docs()
+
+
+@dataclass(slots=True, frozen=True)
+class SearchOptions:
+    """Options for document search."""
+
+    specs_only: bool = False
+    guides_only: bool = False
+    context_lines: int = 2
+    max_results: int = 20
+    use_regex: bool = False
+
+
+def _search_docs(
+    pattern: str,
+    opts: SearchOptions,
+) -> list[tuple[str, int, list[str]]]:
+    """Search documents for pattern.
+
+    Returns list of (path, line_number, context_lines) tuples.
+    """
+    match_fn, error = _build_match_fn(pattern, opts.use_regex)
+    if error:
+        raise ValueError(error)
+    assert match_fn is not None  # Type narrowing: error was None  # nosec B101
+
+    results: list[tuple[str, int, list[str]]] = []
+    doc_iter = _select_doc_iterator(opts.specs_only, opts.guides_only)
+
+    for path, _name, content in doc_iter:
+        lines = content.splitlines()
+        for i, line in enumerate(lines):
+            if match_fn(line):
+                start = max(0, i - opts.context_lines)
+                end = min(len(lines), i + opts.context_lines + 1)
+                results.append((path, i + 1, lines[start:end]))
+                if len(results) >= opts.max_results:
+                    return results
+
+    return results
+
+
+def _handle_search(args: argparse.Namespace) -> int:
+    """Handle the search subcommand."""
+    opts = SearchOptions(
+        specs_only=args.specs,
+        guides_only=args.guides,
+        context_lines=args.context,
+        max_results=args.max_results,
+        use_regex=args.regex,
+    )
+
+    try:
+        results = _search_docs(args.pattern, opts)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
+
+    if not results:
+        print(f'No matches found for "{args.pattern}"')
+        return 0
+
+    print(f'Found {len(results)} matches for "{args.pattern}"')
+    print()
+
+    for path, line_num, context in results:
+        print(f"{path}:{line_num}")
+        for ctx_line in context:
+            print(f"  {ctx_line}")
+        print()
+
+    return 0
+
+
+def _read_named_doc(args: argparse.Namespace, doc_type: str) -> str | None:
+    """Read a named document (spec or guide), returning content or None on error."""
+    if not hasattr(args, "name") or args.name is None:
+        print(f"Error: {doc_type} name required", file=sys.stderr)
+        return None
+    return _read_spec(args.name) if doc_type == "spec" else _read_guide(args.name)
+
+
+def _handle_read(args: argparse.Namespace) -> int:
+    """Handle the read subcommand."""
+    doc_type = args.type
+    readers = {
+        "reference": lambda: _read_doc("llms.md"),
+        "changelog": lambda: _read_doc("CHANGELOG.md"),
+        "example": _read_example,
+    }
+
+    try:
+        if doc_type in readers:
+            print(readers[doc_type]())
+        else:  # spec or guide
+            content = _read_named_doc(args, doc_type)
+            if content is None:
+                return 1
+            print(content)
+    except FileNotFoundError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 2
+
+    return 0
 
 
 def _handle_docs(args: argparse.Namespace) -> int:
     """Handle the docs subcommand."""
-    has_flag = (
-        args.reference
-        or args.guide
-        or args.spec
-        or args.specs
-        or args.changelog
-        or args.example
-    )
-    if not has_flag:
-        print(
-            "Error: At least one of --reference, --guide, --spec, --specs, --changelog, or --example required"
-        )
-        print(
-            "Usage: wink docs [--reference] [--guide] [--spec NAME] [--specs] [--changelog] [--example]"
-        )
-        return 1
+    docs_command = getattr(args, "docs_command", None)
 
-    try:
-        parts = _load_docs(args)
-    except FileNotFoundError as e:
-        print(f"Error: Documentation not found: {e}", file=sys.stderr)
-        print("This may indicate a packaging error.", file=sys.stderr)
-        return 2
+    handlers = {
+        "list": _handle_list,
+        "search": _handle_search,
+        "toc": _handle_toc,
+        "read": _handle_read,
+    }
 
-    print("\n---\n".join(parts))
-    return 0
+    if docs_command in handlers:
+        return handlers[docs_command](args)
+
+    print("Usage: wink docs {list,search,toc,read} ...")
+    print()
+    print("Subcommands:")
+    print("  list    List available documents with descriptions")
+    print("  search  Search documentation for a pattern")
+    print("  toc     Show table of contents for a document")
+    print("  read    Read a specific document")
+    return 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the wink CLI."""
-
     parser = _build_parser()
     try:
         args = parser.parse_args(list(argv) if argv is not None else None)
-    except SystemExit as exc:  # argparse exits with code 2 on errors
+    except SystemExit as exc:
         code = exc.code if isinstance(exc.code, int) else 2
         return int(code)
 
@@ -266,43 +470,102 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Open the default browser to the UI (disable with --no-open-browser).",
     )
 
-    docs_parser = subcommands.add_parser(
-        "docs",
-        help="Print bundled documentation",
-        description="Access WINK documentation from the command line.",
-    )
-    _ = docs_parser.add_argument(
-        "--reference",
-        action="store_true",
-        help="Print API reference (llms.md)",
-    )
-    _ = docs_parser.add_argument(
-        "--guide",
-        action="store_true",
-        help="Print usage guides (guides/*.md)",
-    )
-    _ = docs_parser.add_argument(
-        "--spec",
-        metavar="NAME",
-        help="Print a single spec by name (e.g., ADAPTERS or ADAPTERS.md)",
-    )
-    _ = docs_parser.add_argument(
-        "--specs",
-        action="store_true",
-        help="Print all specification files",
-    )
-    _ = docs_parser.add_argument(
-        "--changelog",
-        action="store_true",
-        help="Print changelog (CHANGELOG.md)",
-    )
-    _ = docs_parser.add_argument(
-        "--example",
-        action="store_true",
-        help="Print code review example as markdown documentation",
-    )
+    _build_docs_parser(subcommands)
 
     return parser
+
+
+def _build_docs_parser(
+    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
+) -> None:
+    """Build the docs subcommand parser."""
+    docs_parser = subcommands.add_parser(
+        "docs",
+        help="Access bundled documentation",
+        description="Search and read WINK documentation from the command line.",
+    )
+
+    docs_subcommands = docs_parser.add_subparsers(dest="docs_command")
+
+    # list subcommand
+    list_parser = docs_subcommands.add_parser(
+        "list",
+        help="List available documents with descriptions",
+    )
+    _ = list_parser.add_argument(
+        "category",
+        nargs="?",
+        choices=["specs", "guides"],
+        help="Category to list (specs or guides). Lists all if omitted.",
+    )
+
+    # search subcommand
+    search_parser = docs_subcommands.add_parser(
+        "search",
+        help="Search documentation for a pattern",
+    )
+    _ = search_parser.add_argument(
+        "pattern",
+        help="Pattern to search for",
+    )
+    _ = search_parser.add_argument(
+        "--specs",
+        action="store_true",
+        help="Search only specs",
+    )
+    _ = search_parser.add_argument(
+        "--guides",
+        action="store_true",
+        help="Search only guides",
+    )
+    _ = search_parser.add_argument(
+        "--context",
+        type=int,
+        default=2,
+        help="Number of context lines to show (default: 2)",
+    )
+    _ = search_parser.add_argument(
+        "--max-results",
+        type=int,
+        default=20,
+        help="Maximum number of results (default: 20)",
+    )
+    _ = search_parser.add_argument(
+        "--regex",
+        action="store_true",
+        help="Treat pattern as a regular expression",
+    )
+
+    # toc subcommand
+    toc_parser = docs_subcommands.add_parser(
+        "toc",
+        help="Show table of contents for a document",
+    )
+    _ = toc_parser.add_argument(
+        "type",
+        choices=["spec", "guide"],
+        help="Document type (spec or guide)",
+    )
+    _ = toc_parser.add_argument(
+        "name",
+        help="Document name (e.g., SESSIONS or quickstart)",
+    )
+
+    # read subcommand
+    read_parser = docs_subcommands.add_parser(
+        "read",
+        help="Read a specific document",
+    )
+    _ = read_parser.add_argument(
+        "type",
+        choices=["reference", "changelog", "example", "spec", "guide"],
+        help="Document type to read",
+    )
+    _ = read_parser.add_argument(
+        "name",
+        nargs="?",
+        help="Document name (required for spec and guide types)",
+    )
 
 
 def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:

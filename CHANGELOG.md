@@ -2,6 +2,31 @@
 
 Release highlights for weakincentives.
 
+## Unreleased
+
+### Revamped `wink docs` CLI for AI Agent Exploration
+
+The `wink docs` command has been redesigned with a subcommand structure
+optimized for AI coding agents exploring documentation efficiently.
+
+**New subcommands:**
+
+- `wink docs list [specs|guides]` — List available documents with descriptions
+- `wink docs search PATTERN` — Search documentation with context snippets
+- `wink docs toc {spec,guide} NAME` — Preview document structure (headings only)
+- `wink docs read {reference,changelog,example,spec,guide} [NAME]` — Read documents
+
+**Key features:**
+
+- **Progressive disclosure**: List → Search → TOC → Read workflow minimizes
+  context usage
+- **Search with context**: Case-insensitive substring matching with `--context`,
+  `--max-results`, and `--regex` options
+- **Table of contents**: Preview document headings before loading full content
+- **Document descriptions**: List output includes descriptions for each spec/guide
+
+See `specs/WINK_DOCS.md` for the full specification.
+
 ## v0.20.0 - 2026-01-16
 
 ### Experiments for A/B Testing
