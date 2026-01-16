@@ -20,9 +20,12 @@ import logging.config
 import os
 from collections.abc import Mapping, MutableMapping
 from datetime import UTC, datetime
-from typing import Protocol, cast, override
+from typing import TYPE_CHECKING, Protocol, cast, override
 
 from ..types import JSONValue
+
+if TYPE_CHECKING:
+    from .run_context import RunContext
 
 type StructuredLogPayload = Mapping[str, JSONValue]
 
@@ -39,6 +42,7 @@ __all__ = [
     "StructuredLogPayload",
     "StructuredLogger",
     "SupportsLogMessage",
+    "bind_run_context",
     "configure_logging",
     "get_logger",
 ]
@@ -166,6 +170,40 @@ def get_logger(
         base_logger = logging.getLogger(name)
 
     return StructuredLogger(base_logger, context=base_context)
+
+
+def bind_run_context(
+    logger: StructuredLogger,
+    run_context: RunContext | None,
+) -> StructuredLogger:
+    """Bind RunContext fields to a logger for request-scoped tracing.
+
+    When run_context is provided, returns a new logger with run_id, request_id,
+    attempt, worker_id, and trace context bound. When run_context is None,
+    returns the original logger unchanged.
+
+    This enables consistent correlation of logs across the entire request
+    lifecycle: mailbox receipt -> prompt render -> provider call -> tool calls
+    -> completion -> reply/DLQ.
+
+    Args:
+        logger: The structured logger to bind context to.
+        run_context: Optional execution context with correlation identifiers.
+
+    Returns:
+        Logger with run context fields bound, or original logger if no context.
+
+    Example:
+        >>> from weakincentives.runtime import RunContext, get_logger
+        >>> from weakincentives.runtime.logging import bind_run_context
+        >>> base_log = get_logger(__name__)
+        >>> run_ctx = RunContext(worker_id="worker-1")
+        >>> log = bind_run_context(base_log, run_ctx)
+        >>> log.info("Processing request", event="request.start")
+    """
+    if run_context is None:
+        return logger
+    return logger.bind(**run_context.to_log_context())
 
 
 def configure_logging(

@@ -25,12 +25,19 @@ tool handlers and telemetry events.
 ```
 MainLoop._handle_message()
   └─ _build_run_context()
+  └─ bind_run_context(logger, run_context)  → log with run_id/request_id/...
   └─ _execute(run_context=...)
        └─ adapter.evaluate(run_context=...)
+            └─ InnerLoopConfig(
+                 logger_override=bind_run_context(logger, run_context),
+                 run_context=run_context
+               )
+            └─ InnerLoop._prepare() → uses logger_override with context
             └─ PromptRendered(run_context=...)
             └─ ToolExecutor → ToolContext(run_context=...)
             └─ ToolInvoked(run_context=...)
             └─ PromptExecuted(run_context=...)
+  └─ _dead_letter() → logs with run_context bound
   └─ MainLoopResult(run_context=...)
 ```
 
@@ -40,6 +47,24 @@ MainLoop._handle_message()
 
 Requests include optional `run_context` with trace context. MainLoop builds
 full context with execution-specific values.
+
+### Logger Binding
+
+The `bind_run_context` helper binds RunContext fields to a structured logger,
+enabling consistent tracing across the entire request lifecycle:
+
+```python
+from weakincentives.runtime.logging import bind_run_context, get_logger
+
+logger = get_logger(__name__)
+log = bind_run_context(logger, run_context)
+log.info("Processing request", event="request.start", context={...})
+# Log output includes: run_id, request_id, attempt, worker_id, trace_id
+```
+
+**Adapter Integration**: Adapters bind run_context to `logger_override` when
+creating `InnerLoopConfig`. All downstream logging (InnerLoop, ToolExecutor,
+tool handlers) automatically inherits the run context fields.
 
 ### ToolContext
 
@@ -80,6 +105,7 @@ with tracer.start_as_current_span("process_request") as span:
 1. **Fresh run_id per execution**: Never reused across attempts
 1. **Stable run_id during execution**: Same across all events in one execution
 1. **Preserved trace context**: `trace_id`/`span_id` pass through unchanged
+1. **Logger binding**: Adapters bind run_context to logger_override for consistent tracing
 
 ## Related Specifications
 
