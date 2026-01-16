@@ -455,3 +455,46 @@ def test_normalize_doc_name_case_insensitive() -> None:
     assert wink._normalize_doc_name("QUICKSTART", available) == "quickstart"
     assert wink._normalize_doc_name("adapters.md", available) == "ADAPTERS"
     assert wink._normalize_doc_name("NONEXISTENT", available) is None
+
+
+# =============================================================================
+# Metadata synchronization tests
+# =============================================================================
+
+
+def test_spec_metadata_covers_all_spec_files() -> None:
+    """SPEC_DESCRIPTIONS must have an entry for every spec file."""
+    from pathlib import Path
+
+    from weakincentives.cli.docs_metadata import SPEC_DESCRIPTIONS
+
+    specs_dir = Path(__file__).parent.parent.parent / "specs"
+    actual_specs = {p.stem for p in specs_dir.glob("*.md")}
+    metadata_specs = set(SPEC_DESCRIPTIONS.keys())
+
+    missing = actual_specs - metadata_specs
+    extra = metadata_specs - actual_specs
+
+    assert not missing, f"Specs missing from SPEC_DESCRIPTIONS: {sorted(missing)}"
+    assert not extra, (
+        f"Extra specs in SPEC_DESCRIPTIONS (files removed?): {sorted(extra)}"
+    )
+
+
+def test_guide_metadata_covers_all_guide_files() -> None:
+    """GUIDE_DESCRIPTIONS must have an entry for every guide file."""
+    from pathlib import Path
+
+    from weakincentives.cli.docs_metadata import GUIDE_DESCRIPTIONS
+
+    guides_dir = Path(__file__).parent.parent.parent / "guides"
+    actual_guides = {p.stem for p in guides_dir.glob("*.md")}
+    metadata_guides = set(GUIDE_DESCRIPTIONS.keys())
+
+    missing = actual_guides - metadata_guides
+    extra = metadata_guides - actual_guides
+
+    assert not missing, f"Guides missing from GUIDE_DESCRIPTIONS: {sorted(missing)}"
+    assert not extra, (
+        f"Extra guides in GUIDE_DESCRIPTIONS (files removed?): {sorted(extra)}"
+    )
