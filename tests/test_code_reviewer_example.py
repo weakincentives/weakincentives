@@ -287,7 +287,7 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
         requests.send(request_event, reply_to=responses)
 
         # Process one iteration
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Verify optimization was called (adapter recorded the call)
         assert any("workspace-digest" in call for call in adapter.calls)
@@ -333,7 +333,7 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
             ),
             reply_to=responses,
         )
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         requests.send(
             MainLoopRequest(
@@ -342,7 +342,7 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
             ),
             reply_to=responses,
         )
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         assert len(adapter.deadlines) == 2
         recorded_first, recorded_second = adapter.deadlines

@@ -201,8 +201,8 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
         ] = InMemoryMailbox(name="requests")
         loop = CodeReviewLoop(adapter=adapter, requests=requests)
-        # Run in background thread
-        thread = threading.Thread(target=lambda: loop.run(max_iterations=None))
+        # Run in background thread (runs indefinitely until shutdown)
+        thread = threading.Thread(target=loop.run)
         thread.start()
         # Send request with reply_to mailbox instance
         params = ReviewTurnParams(request="Review the latest changes")
@@ -410,7 +410,7 @@ class CodeReviewApp:
         log_path = SNAPSHOT_DIR / f"{self._loop.session.session_id}.log"
         with collect_all_logs(log_path):
             # Run indefinitely until mailbox is closed
-            self._loop.run(max_iterations=None, wait_time_seconds=5)
+            self._loop.run(wait_time_seconds=5)
         _LOGGER.debug("Worker thread exiting")
 
     def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:

@@ -33,7 +33,7 @@ from weakincentives.runtime import (
     MainLoop,
     MainLoopRequest,
     MainLoopResult,
-    Runnable,
+    RunnableLoop,
     Session,
     ShutdownCoordinator,
     wait_until,
@@ -154,7 +154,7 @@ def _create_test_loop(
 
 
 class _MockRunnable:
-    """Mock implementation of Runnable for testing LoopGroup."""
+    """Mock implementation of RunnableLoop for testing LoopGroup."""
 
     def __init__(self, *, run_delay: float = 0.0) -> None:
         self._run_delay = run_delay
@@ -167,11 +167,11 @@ class _MockRunnable:
     def run(
         self,
         *,
-        max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
-        del max_iterations, visibility_timeout, wait_time_seconds
+        del max_turns, visibility_timeout, wait_time_seconds
         with self._lock:
             self._running = True
         self.run_called = True
@@ -479,7 +479,7 @@ def test_main_loop_shutdown_stops_loop() -> None:
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 1, "max_iterations": None}
+            target=loop.run, kwargs={"wait_time_seconds": 1, "max_turns": None}
         )
         thread.start()
 
@@ -511,7 +511,7 @@ def test_main_loop_shutdown_completes_in_flight() -> None:
         requests.send(MainLoopRequest(request=_Request(message="test")))
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+            target=loop.run, kwargs={"wait_time_seconds": 0, "max_turns": 1}
         )
         thread.start()
 
@@ -544,7 +544,7 @@ def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
             requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": None}
+            target=loop.run, kwargs={"wait_time_seconds": 0, "max_turns": None}
         )
         thread.start()
 
@@ -574,7 +574,7 @@ def test_main_loop_running_property() -> None:
         assert not loop.running
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+            target=loop.run, kwargs={"wait_time_seconds": 0, "max_turns": 1}
         )
         thread.start()
 
@@ -601,7 +601,7 @@ def test_main_loop_context_manager() -> None:
 
         with loop:
             thread = threading.Thread(
-                target=loop.run, kwargs={"wait_time_seconds": 1, "max_iterations": None}
+                target=loop.run, kwargs={"wait_time_seconds": 1, "max_turns": None}
             )
             thread.start()
             time.sleep(0.05)
@@ -627,7 +627,7 @@ def test_main_loop_shutdown_timeout_returns_false() -> None:
         requests.send(MainLoopRequest(request=_Request(message="slow")))
 
         thread = threading.Thread(
-            target=loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+            target=loop.run, kwargs={"wait_time_seconds": 0, "max_turns": 1}
         )
         thread.start()
 
@@ -657,12 +657,12 @@ def test_main_loop_can_restart_after_shutdown() -> None:
 
         # First run
         requests.send(MainLoopRequest(request=_Request(message="first")))
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
         assert adapter.call_count == 1
 
         # Second run
         requests.send(MainLoopRequest(request=_Request(message="second")))
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         assert adapter.call_count == 2
     finally:
@@ -745,7 +745,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
 
         # Run - first message will trigger shutdown, remaining should be nacked
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # First message should be processed
         assert adapter.call_count == 1
@@ -849,7 +849,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             requests.send(MainLoopRequest(request=_Request(message=f"msg-{i}")))
 
         # Run - should handle ReceiptHandleExpiredError gracefully during nack
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # First message should have been processed
         assert adapter.call_count == 1
@@ -858,12 +858,12 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
 
 
 # =============================================================================
-# Runnable Protocol Tests
+# RunnableLoop Protocol Tests
 # =============================================================================
 
 
-def test_main_loop_implements_runnable() -> None:
-    """MainLoop conforms to Runnable protocol."""
+def test_main_loop_implements_runnable_loop() -> None:
+    """MainLoop conforms to RunnableLoop protocol."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
@@ -872,8 +872,8 @@ def test_main_loop_implements_runnable() -> None:
         adapter = _MockAdapter()
         loop = _TestLoop(adapter=adapter, requests=requests)
 
-        # Type check - MainLoop should be usable where Runnable is expected
-        runnable: Runnable = loop
+        # Type check - MainLoop should be usable where RunnableLoop is expected
+        runnable: RunnableLoop = loop
         assert hasattr(runnable, "run")
         assert hasattr(runnable, "shutdown")
         assert hasattr(runnable, "running")
@@ -969,7 +969,7 @@ def test_eval_loop_shutdown_stops_loop() -> None:
 
         thread = threading.Thread(
             target=eval_loop.run,
-            kwargs={"wait_time_seconds": 1, "max_iterations": None},
+            kwargs={"wait_time_seconds": 1},
         )
         thread.start()
 
@@ -1029,7 +1029,7 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
 
         thread = threading.Thread(
             target=eval_loop.run,
-            kwargs={"wait_time_seconds": 0, "max_iterations": None},
+            kwargs={"wait_time_seconds": 0, "max_turns": None},
         )
         thread.start()
 
@@ -1068,7 +1068,7 @@ def test_eval_loop_context_manager() -> None:
         with eval_loop:
             thread = threading.Thread(
                 target=eval_loop.run,
-                kwargs={"wait_time_seconds": 1, "max_iterations": None},
+                kwargs={"wait_time_seconds": 1, "max_turns": None},
             )
             thread.start()
             time.sleep(0.05)
@@ -1101,7 +1101,7 @@ def test_eval_loop_running_property() -> None:
         assert not eval_loop.running
 
         thread = threading.Thread(
-            target=eval_loop.run, kwargs={"wait_time_seconds": 0, "max_iterations": 1}
+            target=eval_loop.run, kwargs={"wait_time_seconds": 0, "max_turns": 1}
         )
         thread.start()
 
@@ -1182,7 +1182,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
 
         # Run the loop - it will process first sample, then shutdown triggers,
         # then remaining messages in batch get nacked
-        eval_loop.run(wait_time_seconds=0, max_iterations=1)
+        eval_loop.run(wait_time_seconds=0, max_turns=1)
 
         # Should have processed exactly one sample (others were nacked/skipped)
         assert eval_count == 1
@@ -1466,7 +1466,7 @@ def test_loop_group_health_server_stops_on_shutdown(reset_coordinator: None) -> 
 
 
 class _MockRunnableWithHeartbeat(_MockRunnable):
-    """Mock implementation of Runnable with heartbeat for testing watchdog."""
+    """Mock implementation of RunnableLoop with heartbeat for testing watchdog."""
 
     def __init__(self, *, run_delay: float = 0.0) -> None:
         super().__init__(run_delay=run_delay)
@@ -1482,14 +1482,14 @@ class _MockRunnableWithHeartbeat(_MockRunnable):
     def run(
         self,
         *,
-        max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
         # Beat the heartbeat before calling parent run
         self._heartbeat.beat()
         super().run(
-            max_iterations=max_iterations,
+            max_turns=max_turns,
             visibility_timeout=visibility_timeout,
             wait_time_seconds=wait_time_seconds,
         )

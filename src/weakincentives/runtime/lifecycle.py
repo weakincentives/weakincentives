@@ -59,29 +59,33 @@ if TYPE_CHECKING:
     from types import FrameType
 
 
-class Runnable(Protocol):
-    """Protocol for loops that support graceful shutdown.
+class RunnableLoop(Protocol):
+    """Protocol for loops that support graceful shutdown and turn control.
 
     Both MainLoop and EvalLoop implement this protocol, enabling them to be
     managed by LoopGroup and ShutdownCoordinator.
+
+    A "turn" represents one iteration through the loop's main processing cycle,
+    typically consisting of receiving a batch of messages and processing them.
     """
 
     def run(
         self,
         *,
-        max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int = 300,
         wait_time_seconds: int = 20,
     ) -> None:
         """Run the loop, processing messages until stopped.
 
         Exits when:
-        - max_iterations reached
+        - max_turns reached
         - shutdown() called
         - Mailbox closed
 
         Args:
-            max_iterations: Maximum polling iterations (None = unlimited).
+            max_turns: Maximum number of turns to execute (None = unlimited).
+                A turn is one iteration through the loop's main processing cycle.
             visibility_timeout: Seconds messages remain invisible during
                 processing. Must exceed maximum expected execution time.
             wait_time_seconds: Long poll duration (0-20 seconds).
@@ -254,11 +258,17 @@ class LoopGroup:
         - Health endpoints for Kubernetes liveness/readiness probes
         - Watchdog monitoring to detect and terminate stuck workers
         - Coordinated graceful shutdown via signals
+        - Turn control for bounded execution
 
     Example::
 
         group = LoopGroup(loops=[main_loop, eval_loop])
         group.run()  # Blocks until shutdown signal or all loops exit
+
+    Example with turn control::
+
+        group = LoopGroup(loops=[main_loop, eval_loop])
+        group.run(max_turns=100)  # Run each loop for 100 turns
 
     Example with health and watchdog::
 
@@ -283,7 +293,7 @@ class LoopGroup:
 
     def __init__(  # noqa: PLR0913
         self,
-        loops: Sequence[Runnable],
+        loops: Sequence[RunnableLoop],
         *,
         shutdown_timeout: float = 30.0,
         health_port: int | None = None,
@@ -294,7 +304,7 @@ class LoopGroup:
         """Initialize the LoopGroup.
 
         Args:
-            loops: Sequence of Runnable loops to coordinate.
+            loops: Sequence of RunnableLoop instances to coordinate.
             shutdown_timeout: Maximum seconds to wait for each loop during shutdown.
             health_port: Port for health endpoints. None disables health server.
             health_host: Host for health endpoint. Defaults to all interfaces.
@@ -319,6 +329,7 @@ class LoopGroup:
         self,
         *,
         install_signals: bool = True,
+        max_turns: int | None = None,
         visibility_timeout: int = 1800,
         wait_time_seconds: int = 30,
     ) -> None:
@@ -329,6 +340,8 @@ class LoopGroup:
 
         Args:
             install_signals: If True, install SIGTERM/SIGINT handlers.
+            max_turns: Maximum number of turns for each loop (None = unlimited).
+                A turn is one iteration through the loop's main processing cycle.
             visibility_timeout: Passed to each loop's run() method.
                 Default 1800s (30 min) calibrated for 10-min evaluations.
             wait_time_seconds: Passed to each loop's run() method.
@@ -375,6 +388,7 @@ class LoopGroup:
             for loop in self.loops:
                 future: Future[None] = self._executor.submit(
                     loop.run,
+                    max_turns=max_turns,
                     visibility_timeout=visibility_timeout,
                     wait_time_seconds=wait_time_seconds,
                 )
@@ -473,7 +487,7 @@ def wait_until(
 
 __all__ = [
     "LoopGroup",
-    "Runnable",
+    "RunnableLoop",
     "ShutdownCoordinator",
     "wait_until",
 ]

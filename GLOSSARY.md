@@ -132,11 +132,14 @@ via `Binding`, `Scope`, and `ScopedResourceContext`. Resources are resolved via
 `context.resources.get(ResourceType)`. See
 [Resource Registry specification](specs/RESOURCE_REGISTRY.md).
 
-## Runnable
+## RunnableLoop
 
-Protocol for loops that support graceful shutdown. Defines `run()`, `shutdown()`,
-`running`, and `heartbeat` properties. Implemented by `MainLoop` and `EvalLoop`.
-See [Health specification](specs/HEALTH.md).
+Protocol for loops that support graceful shutdown and turn control. Defines
+`run()` (with `max_turns` support), `shutdown()`, `running`, and `heartbeat`
+properties. Implemented by `MainLoop` and `EvalLoop`. A "turn" represents one
+iteration through the loop's main processing cycle. See
+[Lifecycle specification](specs/LIFECYCLE.md) and
+[Health specification](specs/HEALTH.md).
 
 ## Scope
 

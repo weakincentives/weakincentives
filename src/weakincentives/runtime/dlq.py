@@ -233,14 +233,15 @@ class DLQConsumer[T]:
     def run(
         self,
         *,
-        max_iterations: int | None = None,
+        max_turns: int | None = None,
         visibility_timeout: int | None = None,
         wait_time_seconds: int = 20,
     ) -> None:
         """Process dead letters until shutdown.
 
         Args:
-            max_iterations: Maximum polling iterations. None for unlimited.
+            max_turns: Maximum number of turns to execute (None = unlimited).
+                A turn is one iteration through the loop's main processing cycle.
             visibility_timeout: Seconds messages remain invisible during
                 processing. Defaults to the value passed to __init__.
             wait_time_seconds: Long poll duration for receiving messages.
@@ -249,7 +250,7 @@ class DLQConsumer[T]:
             self._running = True
             self._shutdown_event.clear()
 
-        iterations = 0
+        turns = 0
         vt = (
             visibility_timeout
             if visibility_timeout is not None
@@ -257,7 +258,7 @@ class DLQConsumer[T]:
         )
 
         try:
-            while max_iterations is None or iterations < max_iterations:
+            while max_turns is None or turns < max_turns:
                 # Check shutdown before blocking on receive
                 if self._shutdown_event.is_set():
                     break
@@ -296,7 +297,7 @@ class DLQConsumer[T]:
 
                     self._heartbeat.beat()
 
-                iterations += 1
+                turns += 1
         finally:
             with self._lock:
                 self._running = False
