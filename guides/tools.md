@@ -222,6 +222,65 @@ This happens by default—you don't need to opt in or write rollback logic.
 - Easier debugging: when something fails, you know exactly what state you're in
 - Adapter parity: all adapters use the same transaction semantics
 
+## Planning Tools
+
+*Canonical spec: [specs/TOOLS.md](../specs/TOOLS.md) (Planning Tool Suite section)*
+
+WINK provides a built-in planning tool suite that helps agents externalize their
+reasoning. Many models plan better when they have explicit tools for managing a
+plan rather than keeping it in their context.
+
+**The four planning tools:**
+
+- `planning_setup_plan`: Create a new plan with an objective
+- `planning_add_step`: Add a step to the current plan
+- `planning_update_step`: Update a step's status or details
+- `planning_read_plan`: Read the current plan state
+
+```python
+from weakincentives.contrib.tools import PlanningToolsSection, PlanningStrategy
+
+planning = PlanningToolsSection(
+    session=session,
+    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+)
+```
+
+The plan is stored in the session as a typed slice. Each step has an ID, title,
+details, status, and notes. The agent can update steps as it works through them.
+
+## Planning Strategies
+
+Different tasks benefit from different planning styles. WINK supports two
+built-in strategies that shape the prompt instructions:
+
+**REACT (Reason-Act-Observe):**
+
+The model reasons about what to do next, takes an action, observes the result,
+then repeats. Good for exploratory tasks where the path isn't clear upfront.
+
+```python
+planning = PlanningToolsSection(
+    session=session,
+    strategy=PlanningStrategy.REACT,
+)
+```
+
+**PLAN_ACT_REFLECT:**
+
+The model creates a plan upfront, executes the steps, then reflects on results.
+Good for structured tasks where the steps are predictable.
+
+```python
+planning = PlanningToolsSection(
+    session=session,
+    strategy=PlanningStrategy.PLAN_ACT_REFLECT,
+)
+```
+
+The strategy affects the instructions rendered in the prompt, not the available
+tools. Both strategies use the same four planning tools.
+
 ## Tool Policies
 
 *Canonical spec: [specs/TOOL_POLICIES.md](../specs/TOOL_POLICIES.md)*
@@ -275,6 +334,48 @@ which policy was violated.
 
 **Default policies on contrib sections:** `VfsToolsSection` and
 `PodmanSandboxSection` apply `ReadBeforeWritePolicy` by default.
+
+## The ToolPolicy Protocol
+
+You can implement custom policies by following the `ToolPolicy` protocol:
+
+```python
+from weakincentives.prompt import ToolPolicy, PolicyDecision, PolicyState
+
+class MyCustomPolicy(ToolPolicy):
+    def check(
+        self,
+        tool_name: str,
+        params: object,
+        state: PolicyState,
+    ) -> PolicyDecision:
+        # Return PolicyDecision.allow() or PolicyDecision.deny("reason")
+        if some_condition:
+            return PolicyDecision.deny("Condition not met")
+        return PolicyDecision.allow()
+
+    def on_result(
+        self,
+        tool_name: str,
+        params: object,
+        result: ToolResult,
+        state: PolicyState,
+    ) -> None:
+        # Optional: update state after tool execution
+        pass
+```
+
+**PolicyState** tracks invocation history:
+
+- `invoked_tools`: Set of tool names that have been called
+- `invoked_keys`: Dict mapping keys to values (for keyed constraints)
+
+**Execution flow:**
+
+1. Before each tool call, all policies are checked via `check()`
+2. All policies must return `allow()` for the tool to execute
+3. After successful execution, `on_result()` is called on each policy
+4. State is snapshotted/restored with the session during transactions
 
 ## Next Steps
 

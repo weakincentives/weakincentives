@@ -264,7 +264,56 @@ isolation = IsolationConfig(
 )
 ```
 
-See [specs/SKILLS.md](../specs/SKILLS.md) for skill structure and validation.
+**What is a skill?** A skill is a directory containing a `SKILL.md` file with
+domain-specific instructions for Claude Code. Skills follow the
+[Agent Skills specification](https://agentskills.io).
+
+**Skill structure:**
+
+```
+skills/code-review/
+├── SKILL.md         # Required: instructions with optional YAML frontmatter
+├── scripts/         # Optional: helper scripts
+└── references/      # Optional: reference documents
+```
+
+**SKILL.md format:**
+
+```markdown
+---
+name: code-review
+description: Thorough code review for Python projects
+---
+
+# Code Review Skill
+
+When reviewing code, follow these steps:
+1. Check for security vulnerabilities
+2. Verify error handling
+3. Ensure tests cover new functionality
+```
+
+Skills are validated at mount time. Validation checks:
+
+- Directory exists and contains SKILL.md
+- YAML frontmatter is valid (if present)
+- Name follows naming rules (lowercase, hyphens, 1-64 chars)
+- Total size is under 10 MiB
+
+See [specs/SKILLS.md](../specs/SKILLS.md) for full validation rules.
+
+### Adapter Events
+
+All adapters publish events to the session's dispatcher:
+
+| Event | When | Fields |
+| --- | --- | --- |
+| `PromptRendered` | After prompt render, before API call | `rendered_prompt`, `adapter` |
+| `ToolInvoked` | Each tool call (native + bridged) | `tool_name`, `params`, `result`, `duration_ms` |
+| `PromptExecuted` | After evaluation completes | `result`, `usage` (TokenUsage) |
+
+For Claude Agent SDK, native tools (Read, Write, Bash) are tracked via SDK hooks
+and also publish `ToolInvoked` events.
 
 ## Throttling
 
@@ -276,6 +325,28 @@ from weakincentives.adapters import new_throttle_policy
 policy = new_throttle_policy(requests_per_minute=60)
 adapter = OpenAIAdapter(model="gpt-4o", throttle_policy=policy)
 ```
+
+**Full throttle configuration:**
+
+```python
+from weakincentives.adapters import ThrottlePolicy
+
+policy = ThrottlePolicy(
+    requests_per_minute=60,
+    max_attempts=5,           # Total attempts before giving up
+    base_delay=1.0,           # Initial backoff delay (seconds)
+    max_delay=60.0,           # Maximum backoff delay
+    max_total_delay=300.0,    # Total time budget for retries
+    jitter=0.1,               # Randomization factor (0-1)
+)
+```
+
+**How throttling works:**
+
+1. When a rate limit is hit, the adapter backs off exponentially
+2. Jitter prevents thundering herd when multiple workers retry
+3. If `Retry-After` header is present, it's respected
+4. `ThrottleError` is raised if all attempts fail
 
 ## Next Steps
 

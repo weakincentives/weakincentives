@@ -134,6 +134,58 @@ make check  # Runs: format, lint, typecheck, test, bandit, deptry, pip-audit
 **Pre-commit hooks enforce this.** After running `./install-hooks.sh`, commits
 are blocked unless `make check` passes.
 
+## Exhaustiveness Checking
+
+*Canonical spec: [specs/EXHAUSTIVENESS.md](../specs/EXHAUSTIVENESS.md)*
+
+When you have a union type like `SliceOp = Append | Extend | Replace | Clear`,
+you need to handle all cases. If someone adds a new variant later, code that
+doesn't handle it should fail loudly, not silently skip.
+
+WINK uses the `assert_never` pattern:
+
+```python
+from typing import assert_never
+from weakincentives.runtime.session import SliceOp, Append, Extend, Replace, Clear
+
+def apply_op(op: SliceOp) -> None:
+    match op:
+        case Append(value):
+            # handle append
+            pass
+        case Extend(values):
+            # handle extend
+            pass
+        case Replace(values):
+            # handle replace
+            pass
+        case Clear():
+            # handle clear
+            pass
+        case _:
+            assert_never(op)  # Type error if any case is missing
+```
+
+**Why this matters:**
+
+- Adding a new `SliceOp` variant is a breaking change. Code that doesn't handle
+  it will fail at the type level (pyright) or at runtime (`assert_never` raises).
+- Without exhaustiveness checking, new variants get silently ignored.
+- The pattern makes the code self-documenting: you can see all cases in one place.
+
+**When to use `assert_never`:**
+
+- Match statements over union types (like `SliceOp`, `DataEvent`)
+- Any branching logic where new variants might be added later
+
+**Coverage note:** The `assert_never(op)` line is unreachable in correct code.
+Add `# pragma: no cover` to exclude it from coverage requirements:
+
+```python
+case _:
+    assert_never(op)  # pragma: no cover
+```
+
 ## Why the Gates Are Strict
 
 Agent systems have compounding failure modes. A type mismatch in a tool param

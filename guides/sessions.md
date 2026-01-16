@@ -195,6 +195,148 @@ session.restore(snapshot)          # Restore from snapshot
 The unified dispatch mechanism ensures all state changes are auditable. You can
 subscribe to the dispatcher and log every event that flows through the system.
 
+## Deadlines
+
+A `Deadline` is a wall-clock time limit for agent execution. When the deadline
+expires, operations raise `DeadlineExceededError`.
+
+```python
+from datetime import timedelta
+from weakincentives import Deadline, DeadlineExceededError
+
+# Create from timeout
+deadline = Deadline.from_timeout(timedelta(seconds=30))
+
+# Or from absolute time
+from datetime import datetime, UTC
+deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
+
+# Check remaining time
+remaining = deadline.remaining()  # timedelta or None if expired
+
+# Enforcement happens at checkpoints
+try:
+    response = adapter.evaluate(prompt, session=session, deadline=deadline)
+except DeadlineExceededError:
+    # Agent ran out of time
+    pass
+```
+
+Deadlines are checked at key points: before tool calls, after tool calls, and
+during model API calls. They prevent runaway agents from consuming resources
+indefinitely.
+
+## Budgets and Token Tracking
+
+A `Budget` limits token consumption. `BudgetTracker` accumulates usage across
+multiple evaluations.
+
+```python
+from weakincentives import Budget, BudgetTracker, BudgetExceededError
+
+# Budget with token limits
+budget = Budget(
+    max_input_tokens=10_000,
+    max_output_tokens=5_000,
+    max_total_tokens=15_000,
+)
+
+# Tracker accumulates across calls
+tracker = BudgetTracker()
+
+try:
+    response = adapter.evaluate(
+        prompt,
+        session=session,
+        budget=budget,
+        budget_tracker=tracker,
+    )
+except BudgetExceededError:
+    # Token limit exceeded
+    pass
+
+# Check accumulated usage
+print(f"Total tokens used: {tracker.total_tokens}")
+print(f"Input tokens: {tracker.input_tokens}")
+print(f"Output tokens: {tracker.output_tokens}")
+```
+
+Budgets and deadlines work together. You can set both to limit time and cost:
+
+```python
+response, session = loop.execute(
+    request,
+    deadline=Deadline.from_timeout(timedelta(minutes=5)),
+    budget=Budget(max_total_tokens=20_000),
+)
+```
+
+## Slice Storage Backends
+
+By default, slices are stored in memory. For debugging or persistence, you can
+use different backends.
+
+**MemorySlice** (default): Fast, in-memory storage. Lost when the process exits.
+
+**JsonlSlice**: Persists to a JSONL file. Each line is one item.
+
+```python
+from weakincentives.runtime.session import SliceFactoryConfig, JsonlSliceFactory
+
+# Configure session with JSONL storage for logs
+config = SliceFactoryConfig(
+    log_factory=JsonlSliceFactory(directory="./logs"),
+)
+
+session = Session(dispatcher=dispatcher, slice_config=config)
+```
+
+**Common patterns:**
+
+```python
+# All state in memory, logs to JSONL (useful for debugging)
+config = SliceFactoryConfig(
+    log_factory=JsonlSliceFactory(directory="./logs"),
+)
+
+# Everything to JSONL (for full replay capability)
+jsonl_factory = JsonlSliceFactory(directory="./data")
+config = SliceFactoryConfig(
+    state_factory=jsonl_factory,
+    log_factory=jsonl_factory,
+)
+```
+
+## Event System
+
+Sessions subscribe to an event dispatcher to capture telemetry. The dispatcher
+routes events to registered handlers.
+
+```python
+from weakincentives.runtime import InProcessDispatcher
+
+dispatcher = InProcessDispatcher()
+
+# Subscribe to events
+def log_tool_calls(event):
+    if hasattr(event, 'tool_name'):
+        print(f"Tool called: {event.tool_name}")
+
+dispatcher.subscribe(log_tool_calls)
+
+# Events are dispatched automatically during evaluation
+session = Session(dispatcher=dispatcher)
+```
+
+**Key event types:**
+
+- `PromptRendered`: Emitted when a prompt is rendered (before model call)
+- `ToolInvoked`: Emitted for each tool call (params, result, timing)
+- `PromptExecuted`: Emitted when evaluation completes (token usage)
+
+These events power debugging and observability. The debug UI reads them from
+session snapshots to show what happened.
+
 ## Next Steps
 
 - [Tools](tools.md): Learn about transactional tool execution

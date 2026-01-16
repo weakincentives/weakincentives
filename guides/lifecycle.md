@@ -79,6 +79,31 @@ class Runnable(Protocol):
 
 This enables `LoopGroup` to manage any compliant loop implementation.
 
+## The Heartbeat Mechanism
+
+Workers prove liveness by calling `heartbeat.beat()` at regular intervals. The
+watchdog tracks the last heartbeat time per loop and flags loops that exceed the
+stall threshold.
+
+```python
+from weakincentives.runtime import Heartbeat
+
+hb = Heartbeat()
+
+# In your processing loop:
+hb.beat()  # Record a heartbeat
+print(hb.elapsed())  # Seconds since last heartbeat
+```
+
+**When heartbeats occur in MainLoop:**
+
+1. After successfully receiving messages from the mailbox (proves the loop isn't
+   stuck in `receive()`)
+2. After processing each message (proves processing completes)
+
+This means both idle loops (waiting on empty queues) and busy loops (processing
+messages) demonstrate liveness.
+
 ## Health and Watchdog Configuration
 
 The watchdog monitors heartbeats from loops and terminates the process if any
@@ -95,12 +120,57 @@ group = LoopGroup(
 )
 ```
 
-**Timeout calibration:**
+**Timeout calibration formulas:**
 
-- `watchdog_threshold` should exceed your maximum expected prompt evaluation
-  time
-- `visibility_timeout` (in `run()`) should exceed `watchdog_threshold` to
-  prevent message redelivery during long evaluations
+The stall threshold must be greater than:
+
+- Maximum expected message processing time (e.g., 10 minutes = 600s)
+- Mailbox long poll duration (`wait_time_seconds` = 30s)
+- Sum of the above plus safety margin
+
+```
+visibility_timeout > watchdog_threshold + max_processing_time
+    1800s > 720s + 600s ✓
+
+watchdog_threshold > wait_time_seconds + max_processing_time
+    720s > 30s + 600s ✓
+
+watchdog_interval < watchdog_threshold / 3
+    60s < 240s ✓
+```
+
+| Parameter            | Default        | Rationale                           |
+| -------------------- | -------------- | ----------------------------------- |
+| `wait_time_seconds`  | 30s            | Maximum long poll duration          |
+| `watchdog_threshold` | 720s (12 min)  | > 30s + 600s with 90s margin        |
+| `watchdog_interval`  | 60s            | < 720s / 3, checks ~12x per threshold |
+| `visibility_timeout` | 1800s (30 min) | > 720s + 600s with margin for retries |
+
+## Why the Watchdog Uses SIGKILL
+
+The watchdog uses `SIGKILL` rather than `SIGTERM` because:
+
+1. **Stuck threads cannot respond**: If a thread is deadlocked or in an infinite
+   loop, it cannot process signals or check shutdown flags.
+2. **Graceful shutdown already failed**: The stall indicates the cooperative
+   shutdown mechanism is ineffective for this failure mode.
+3. **Container restart is the recovery path**: Kubernetes and Docker will
+   restart the container. The visibility timeout ensures in-flight messages are
+   redelivered to healthy workers.
+4. **Prevent resource exhaustion**: A stuck process continues consuming CPU,
+   memory, and connections. Immediate termination releases resources.
+
+## Layered Defense with Readiness
+
+When both health endpoints and watchdog are enabled, you get layered defense:
+
+1. **Early warning**: Readiness probe fails when heartbeats are stale, removing
+   the pod from service endpoints (traffic stops flowing)
+2. **Hard stop**: Watchdog terminates the process if heartbeats remain stale
+
+This allows Kubernetes to stop routing traffic before the watchdog terminates.
+The readiness check incorporates heartbeat freshness—if any loop's heartbeat
+exceeds the threshold, `/health/ready` returns 503.
 
 ## Graceful Shutdown
 

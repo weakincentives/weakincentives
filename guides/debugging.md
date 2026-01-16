@@ -5,6 +5,8 @@ and what went wrong when things fail.
 
 ## Structured Logging
 
+*Canonical spec: [specs/LOGGING.md](../specs/LOGGING.md)*
+
 ```python
 from weakincentives.runtime import configure_logging, get_logger
 
@@ -15,6 +17,29 @@ logger.info("hello", event="demo.hello", context={"foo": "bar"})
 
 Logs include structured `event` and `context` fields for downstream routing and
 analysis. JSON mode makes logs machine-parseable.
+
+**Event taxonomy:**
+
+Every non-error log record carries an `event` key for predictable downstream
+routing. The naming convention is `module.action`:
+
+| Event Pattern | Description |
+| ----------------------------------- | ------------------------------------ |
+| `prompt.render.*` | Prompt rendering lifecycle |
+| `tool.execution.*` | Tool invocation and results |
+| `session.dispatch`, `session.reset` | Session state mutations |
+| `adapter.init`, `evaluate.*` | Provider adapter lifecycle |
+| `hook.*` | Claude Agent SDK execution hooks |
+| `bridge.*` | MCP tool bridging |
+
+**Enabling DEBUG logs:**
+
+```bash
+export WEAKINCENTIVES_LOG_LEVEL=DEBUG
+```
+
+DEBUG-level logs include full tool arguments, message content, and lifecycle
+events—invaluable for understanding exactly what happened during an evaluation.
 
 ## Session Events
 
@@ -133,6 +158,32 @@ wink docs --changelog   # Print CHANGELOG.md
 | `--no-open-browser` | - | Disable auto-open |
 | `--log-level` | `INFO` | Log verbosity |
 | `--json-logs` | `true` | Emit structured JSON logs |
+
+## Accessing Bundled Documentation
+
+*Canonical spec: [specs/WINK_DOCS.md](../specs/WINK_DOCS.md)*
+
+The `wink docs` command provides access to WINK documentation for users who
+install the package via pip. This supports LLM-assisted development workflows
+where documentation can be piped directly to tools.
+
+```bash
+# Copy API reference to clipboard
+wink docs --reference | pbcopy
+
+# Pipe to an LLM context
+wink docs --guide | llm "Summarize the key concepts"
+
+# Export all specs to a file
+wink docs --specs > all-specs.md
+
+# Combine multiple flags
+wink docs --reference --specs  # Outputs both, separated by ---
+```
+
+**Why this exists:** When you install WINK via `pip install weakincentives`, you
+don't have access to the repository's documentation files. The docs subcommand
+bundles documentation inside the package and exposes it via CLI for easy access.
 
 ## Next Steps
 

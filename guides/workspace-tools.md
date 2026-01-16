@@ -36,6 +36,48 @@ planning = PlanningToolsSection(
 - `REACT`: Plan, act, observe, repeat
 - `PLAN_ACT_REFLECT`: Plan upfront, act, reflect on results
 
+## The Filesystem Protocol
+
+*Canonical spec: [specs/FILESYSTEM.md](../specs/FILESYSTEM.md)*
+
+All workspace tools use a unified `Filesystem` protocol. This abstraction lets
+tool handlers perform file operations without coupling to a specific storage
+backend (in-memory VFS, Podman containers, or host filesystem).
+
+**Core operations:**
+
+| Operation | Description |
+| ------------- | ----------------------------------------- |
+| `read(path)` | Read file content as text with pagination |
+| `write(path)` | Write text content to a file |
+| `read_bytes()` | Read raw bytes (for copying files) |
+| `write_bytes()` | Write raw bytes (for binary content) |
+| `exists(path)` | Check if a path exists |
+| `stat(path)` | Get file metadata |
+| `list(path)` | List directory contents |
+| `glob(pattern)` | Match files by glob pattern |
+| `grep(pattern)` | Search file contents by regex |
+| `delete(path)` | Delete a file or directory |
+| `mkdir(path)` | Create a directory |
+
+**Accessing the filesystem from tool handlers:**
+
+```python
+def my_handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
+    fs = context.filesystem
+    if fs is None:
+        return ToolResult.error("No filesystem available")
+
+    try:
+        result = fs.read(params.path, offset=0, limit=100)
+        return ToolResult.ok(MyResult(content=result.content))
+    except FileNotFoundError:
+        return ToolResult.error(f"File not found: {params.path}")
+```
+
+The filesystem is propagated from the workspace section through the prompt to
+the tool context automatically.
+
 ## VfsToolsSection
 
 A copy-on-write virtual filesystem with tools:
@@ -199,6 +241,49 @@ session. Each run gets its own session with its own tool sections.
 
 Many agents use both: VFS for file operations, Podman for running tests or
 linters.
+
+## Filesystem Snapshots
+
+Filesystem backends that implement `SnapshotableFilesystem` support capturing
+and restoring workspace state. This enables rollback after failed tool
+invocations or exploratory changes.
+
+```python
+# Create a snapshot before risky operations
+snapshot = filesystem.snapshot(tag="before-refactor")
+
+# Make changes...
+filesystem.write("config.py", "NEW_CONFIG = True")
+
+# Rollback if something goes wrong
+filesystem.restore(snapshot)
+```
+
+**How snapshots work:**
+
+- **InMemoryFilesystem**: Uses Python's structural sharing—snapshot is O(n) dict
+  copy but values are shared references
+- **HostFilesystem**: Uses git's content-addressed storage for copy-on-write
+  semantics. The git repository is stored outside the workspace root to prevent
+  agents from accessing snapshot internals.
+
+**Git-based snapshots** are used by both `HostFilesystem` and
+`PodmanSandboxSection`. When files are unchanged between snapshots, they share
+the same git blob objects, making snapshots space-efficient.
+
+**Session integration:**
+
+```python
+# Store snapshot in session
+session[FilesystemSnapshot].append(fs_snapshot)
+
+# Later: coordinated rollback
+def rollback_to(session: Session, snapshot: Snapshot, fs: SnapshotableFilesystem):
+    fs_snapshots = snapshot.slices.get(FilesystemSnapshot, ())
+    if fs_snapshots:
+        fs.restore(fs_snapshots[-1])
+    session.restore(snapshot)
+```
 
 ## Next Steps
 
