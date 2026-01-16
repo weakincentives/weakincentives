@@ -142,7 +142,7 @@ fact.
 wink debug <snapshot_path> [options]
 
 # Access bundled documentation
-wink docs --guide       # Print WINK_GUIDE.md
+wink docs --guide       # Print guides (usage guide)
 wink docs --reference   # Print llms.md (API reference)
 wink docs --specs       # Print all spec files concatenated
 wink docs --changelog   # Print CHANGELOG.md
