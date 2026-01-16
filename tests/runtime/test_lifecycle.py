@@ -818,6 +818,10 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             self._inner = inner
 
         @property
+        def id(self) -> str:
+            return self._inner.id
+
+        @property
         def body(self) -> MainLoopRequest[_Request]:
             return self._inner.body
 

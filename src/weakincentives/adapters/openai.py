@@ -26,7 +26,7 @@ from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
 from ..prompt.rendering import RenderedPrompt
-from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.logging import StructuredLogger, bind_run_context, get_logger
 from ..runtime.run_context import RunContext
 from ..runtime.watchdog import Heartbeat
 from ..types import OPENAI_ADAPTER_NAME
@@ -677,7 +677,9 @@ class OpenAIAdapter(ProviderAdapter[Any]):
                 serialize_tool_message_fn=serialize_tool_message,
                 format_dispatch_failures=format_dispatch_failures,
                 parse_arguments=parse_tool_arguments,
-                logger_override=self._conversation_logger(),
+                logger_override=bind_run_context(
+                    self._conversation_logger(), run_context
+                ),
                 deadline=deadline,
                 budget_tracker=effective_tracker,
                 heartbeat=heartbeat,

@@ -31,9 +31,11 @@ from weakincentives.runtime.logging import (
     StructuredLogPayload,
     _coerce_level,
     _unwrap_logger,
+    bind_run_context,
     configure_logging,
     get_logger,
 )
+from weakincentives.runtime.run_context import RunContext
 
 
 class _CaptureHandler(logging.Handler):
@@ -484,3 +486,123 @@ def test_configure_logging_defaults_to_text_formatter_class() -> None:
     assert len(root.handlers) == 1
     handler = root.handlers[0]
     assert handler.formatter.__class__.__name__ == "_TextFormatter"
+
+
+def test_bind_run_context_with_valid_context() -> None:
+    """Verify bind_run_context binds all RunContext fields to logger."""
+    from uuid import UUID
+
+    logger = get_logger("tests.bind_run_context")
+    run_context = RunContext(
+        run_id=UUID("12345678-1234-1234-1234-123456789abc"),
+        request_id=UUID("abcdefab-abcd-abcd-abcd-abcdefabcdef"),
+        session_id=UUID("fedcbafe-dcba-dcba-dcba-fedcbafedcba"),
+        attempt=2,
+        worker_id="test-worker-1",
+        trace_id="trace-123",
+        span_id="span-456",
+    )
+
+    bound_logger = bind_run_context(logger, run_context)
+
+    # Verify the bound logger has all the expected context fields
+    assert bound_logger.extra is not None
+    assert bound_logger.extra["run_id"] == "12345678-1234-1234-1234-123456789abc"
+    assert bound_logger.extra["request_id"] == "abcdefab-abcd-abcd-abcd-abcdefabcdef"
+    assert bound_logger.extra["session_id"] == "fedcbafe-dcba-dcba-dcba-fedcbafedcba"
+    assert bound_logger.extra["attempt"] == 2
+    assert bound_logger.extra["worker_id"] == "test-worker-1"
+    assert bound_logger.extra["trace_id"] == "trace-123"
+    assert bound_logger.extra["span_id"] == "span-456"
+
+
+def test_bind_run_context_with_none_returns_original_logger() -> None:
+    """Verify bind_run_context returns original logger when run_context is None."""
+    logger = get_logger("tests.bind_run_context.none")
+
+    bound_logger = bind_run_context(logger, None)
+
+    # Should return the exact same logger instance
+    assert bound_logger is logger
+
+
+def test_bind_run_context_with_minimal_context() -> None:
+    """Verify bind_run_context works with minimal RunContext (no optional fields)."""
+    from uuid import UUID
+
+    logger = get_logger("tests.bind_run_context.minimal")
+    run_context = RunContext(
+        run_id=UUID("12345678-1234-1234-1234-123456789abc"),
+        request_id=UUID("abcdefab-abcd-abcd-abcd-abcdefabcdef"),
+        attempt=1,
+        worker_id="worker",
+    )
+
+    bound_logger = bind_run_context(logger, run_context)
+
+    # Should have required fields but not optional ones
+    assert bound_logger.extra is not None
+    assert bound_logger.extra["run_id"] == "12345678-1234-1234-1234-123456789abc"
+    assert bound_logger.extra["request_id"] == "abcdefab-abcd-abcd-abcd-abcdefabcdef"
+    assert bound_logger.extra["attempt"] == 1
+    assert bound_logger.extra["worker_id"] == "worker"
+    # Optional fields should not be present when None
+    assert "session_id" not in bound_logger.extra
+    assert "trace_id" not in bound_logger.extra
+    assert "span_id" not in bound_logger.extra
+
+
+def test_bind_run_context_preserves_existing_context() -> None:
+    """Verify bind_run_context merges with existing logger context."""
+    from uuid import UUID
+
+    logger = get_logger("tests.bind_run_context.merge").bind(component="test")
+    run_context = RunContext(
+        run_id=UUID("12345678-1234-1234-1234-123456789abc"),
+        request_id=UUID("abcdefab-abcd-abcd-abcd-abcdefabcdef"),
+    )
+
+    bound_logger = bind_run_context(logger, run_context)
+
+    # Should have both existing and run context fields
+    assert bound_logger.extra is not None
+    assert bound_logger.extra["component"] == "test"
+    assert bound_logger.extra["run_id"] == "12345678-1234-1234-1234-123456789abc"
+    assert bound_logger.extra["request_id"] == "abcdefab-abcd-abcd-abcd-abcdefabcdef"
+
+
+def test_bind_run_context_emits_structured_logs_with_context() -> None:
+    """Verify logs emitted with bound logger include run context."""
+    from uuid import UUID
+
+    logger = get_logger("tests.bind_run_context.emit")
+    base_logger = logger.logger
+    base_logger.setLevel(logging.INFO)
+
+    run_context = RunContext(
+        run_id=UUID("12345678-1234-1234-1234-123456789abc"),
+        request_id=UUID("abcdefab-abcd-abcd-abcd-abcdefabcdef"),
+        attempt=3,
+        worker_id="test-worker",
+        trace_id="trace-xyz",
+    )
+
+    bound_logger = bind_run_context(logger, run_context)
+
+    with _capture(base_logger) as records:
+        bound_logger.info(
+            "Processing request.",
+            event="test.request.start",
+            context={"extra_field": "value"},
+        )
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.event == "test.request.start"
+    # Context should include both run_context fields and inline context
+    assert record.context["run_id"] == "12345678-1234-1234-1234-123456789abc"
+    assert record.context["request_id"] == "abcdefab-abcd-abcd-abcd-abcdefabcdef"
+    assert record.context["attempt"] == 3
+    assert record.context["worker_id"] == "test-worker"
+    assert record.context["trace_id"] == "trace-xyz"
+    assert record.context["extra_field"] == "value"

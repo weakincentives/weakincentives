@@ -43,7 +43,6 @@ Example::
 from __future__ import annotations
 
 import contextlib
-import logging
 import os
 import socket
 import threading
@@ -61,6 +60,7 @@ from ..prompt.errors import VisibilityExpansionRequired
 from .dlq import DeadLetter, DLQPolicy
 from .lease_extender import LeaseExtender, LeaseExtenderConfig
 from .lifecycle import wait_until
+from .logging import StructuredLogger, bind_run_context, get_logger
 from .mailbox import Mailbox, Message, ReceiptHandleExpiredError, ReplyNotAvailableError
 from .run_context import RunContext
 from .session import Session
@@ -72,7 +72,9 @@ if TYPE_CHECKING:
     from ..evals._experiment import Experiment
     from ..prompt import Prompt
 
-_logger = logging.getLogger(__name__)
+_logger: StructuredLogger = get_logger(
+    __name__, context={"component": "runtime.main_loop"}
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,6 +450,17 @@ class MainLoop[UserRequestT, OutputT](ABC):
             request_event, msg.delivery_count, session_id=None
         )
 
+        # Create run-scoped logger for tracing this request
+        log = bind_run_context(_logger, run_context)
+        log.debug(
+            "Processing request from mailbox.",
+            event="main_loop.message_received",
+            context={
+                "message_id": msg.id,
+                "delivery_count": msg.delivery_count,
+            },
+        )
+
         # Attach lease extender to heartbeat for this message
         with self._lease_extender.attach(msg, self._heartbeat):
             try:
@@ -520,6 +533,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
         if self._dlq is None:  # pragma: no cover - defensive check
             return
 
+        # Create run-scoped logger for tracing
+        log = bind_run_context(_logger, run_context)
+
         dead_letter = DeadLetter(
             message_id=msg.id,
             body=msg.body,
@@ -546,17 +562,18 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     )
                 )
         except Exception as reply_error:  # nosec B110 - intentional: reply failure should not block dead-lettering
-            _logger.debug(
-                "Failed to send error reply during dead-lettering",
-                extra={"message_id": msg.id, "error": str(reply_error)},
+            log.debug(
+                "Failed to send error reply during dead-lettering.",
+                event="main_loop.dead_letter_reply_failed",
+                context={"message_id": msg.id, "error": str(reply_error)},
             )
 
         _ = self._dlq.mailbox.send(dead_letter)
-        _logger.warning(
-            "Message dead-lettered",
-            extra={
+        log.warning(
+            "Message dead-lettered.",
+            event="main_loop.message_dead_lettered",
+            context={
                 "message_id": msg.id,
-                "request_id": str(msg.body.request_id),
                 "delivery_count": msg.delivery_count,
                 "error_type": dead_letter.last_error_type,
             },
@@ -573,13 +590,17 @@ class MainLoop[UserRequestT, OutputT](ABC):
     ) -> None:
         """Reply with result and acknowledge message, handling expired handles gracefully."""
         _ = self  # Uses self implicitly via Message callbacks
+        # Create run-scoped logger if run_context available
+        log = bind_run_context(_logger, result.run_context)
         try:
             _ = msg.reply(result)
             msg.acknowledge()
         except ReplyNotAvailableError:
             # No reply_to specified - log and acknowledge without reply
-            _logger.warning(
-                "No reply_to for message %s, acknowledging without reply", msg.id
+            log.warning(
+                "No reply_to for message, acknowledging without reply.",
+                event="main_loop.no_reply_to",
+                context={"message_id": msg.id},
             )
             with contextlib.suppress(ReceiptHandleExpiredError):
                 msg.acknowledge()

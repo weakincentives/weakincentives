@@ -23,7 +23,7 @@ from typing import Any, Final, Protocol, cast, override
 from ..budget import Budget, BudgetTracker
 from ..deadlines import Deadline
 from ..prompt.prompt import Prompt
-from ..runtime.logging import StructuredLogger, get_logger
+from ..runtime.logging import StructuredLogger, bind_run_context, get_logger
 from ..runtime.run_context import RunContext
 from ..runtime.watchdog import Heartbeat
 from ..types import LITELLM_ADAPTER_NAME
@@ -454,7 +454,7 @@ class LiteLLMAdapter(ProviderAdapter[Any]):
                 serialize_tool_message_fn=serialize_tool_message,
                 format_dispatch_failures=format_dispatch_failures,
                 parse_arguments=parse_tool_arguments,
-                logger_override=logger,
+                logger_override=bind_run_context(logger, run_context),
                 deadline=deadline,
                 budget_tracker=effective_tracker,
                 heartbeat=heartbeat,
