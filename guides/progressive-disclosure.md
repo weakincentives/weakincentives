@@ -53,14 +53,18 @@ When summarized sections exist, WINK injects builtin tools:
 - `open_sections(section_keys, reason)` → raises `VisibilityExpansionRequired`
 - `read_section(section_key)` → returns full rendered markdown for that section
 
-**open_sections** permanently expands sections. `MainLoop` handles this
-automatically by setting overrides and retrying. The model asks to expand a
-section, MainLoop applies the expansion, and evaluation continues with the full
-content visible.
+**open_sections** permanently expands sections and is used for sections that
+register tools. When a section has tools attached, the model needs those tools
+to become available—not just the content. `MainLoop` handles this automatically
+by setting overrides and retrying. The model asks to expand a section, MainLoop
+applies the expansion, and evaluation continues with the full content visible
+and the section's tools now registered.
 
-**read_section** is different: it returns the content without changing
-visibility. The section remains summarized in subsequent turns. Use this for
-reference material that the model only needs temporarily.
+**read_section** returns content without changing visibility and is used
+exclusively for sections that have no tools attached. The section remains
+summarized in subsequent turns. Use this for reference material that the model
+only needs temporarily—documentation, examples, or context that doesn't unlock
+new capabilities.
 
 ## How MainLoop Handles Expansion
 
