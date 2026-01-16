@@ -122,7 +122,7 @@ Two "novel" properties fall out of this structure:
    inputs produce the same outputs. You can write tests that assert on exact
    prompt text.
 
-2. **Safe iteration**: apply prompt tweaks via overrides that are validated
+1. **Safe iteration**: apply prompt tweaks via overrides that are validated
    against hashes. When you change a section in code, existing overrides stop
    applying until you explicitly update them. No silent drift.
 

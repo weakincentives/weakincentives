@@ -198,8 +198,8 @@ WINK solves this with **transactional tool execution**. Every tool call is
 wrapped in a transaction:
 
 1. **Snapshot**: Before the tool runs, WINK captures the current state
-2. **Execute**: The tool handler runs
-3. **Commit or rollback**: If the tool succeeds, changes are kept. If it fails,
+1. **Execute**: The tool handler runs
+1. **Commit or rollback**: If the tool succeeds, changes are kept. If it fails,
    WINK automatically restores the snapshot
 
 This happens by default—you don't need to opt in or write rollback logic.
@@ -373,9 +373,9 @@ class MyCustomPolicy(ToolPolicy):
 **Execution flow:**
 
 1. Before each tool call, all policies are checked via `check()`
-2. All policies must return `allow()` for the tool to execute
-3. After successful execution, `on_result()` is called on each policy
-4. State is snapshotted/restored with the session during transactions
+1. All policies must return `allow()` for the tool to execute
+1. After successful execution, `on_result()` is called on each policy
+1. State is snapshotted/restored with the session during transactions
 
 ## Next Steps
 

@@ -122,8 +122,8 @@ Invariant("INV-2", "NoLostMessages", "CountMessages() = InitialMessageCount")
 The challenge with model checking is state space explosion. Strategies:
 
 1. **Small constants**: Use `MaxMessages: 2` not `100`
-2. **Tight constraints**: Add `constraint="now <= 2"` to bound exploration
-3. **Narrow domains**: Use `"0..2"` not `"0..100"` for parameters
+1. **Tight constraints**: Add `constraint="now <= 2"` to bound exploration
+1. **Narrow domains**: Use `"0..2"` not `"0..100"` for parameters
 
 The RedisMailbox spec, for example, explores ~500K states in 60 seconds with
 carefully chosen bounds.

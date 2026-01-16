@@ -83,19 +83,19 @@ enforced at the adapter level, so they work consistently across providers.
 1. **Prepares the prompt**: Calls your `prepare()` method to get a bound prompt
    and session.
 
-2. **Handles progressive disclosure**: When the model calls `open_sections`,
+1. **Handles progressive disclosure**: When the model calls `open_sections`,
    MainLoop catches `VisibilityExpansionRequired`, applies visibility overrides
    to the session, and retries the evaluation.
 
-3. **Enforces deadlines**: Passes the deadline to the adapter, which will abort
+1. **Enforces deadlines**: Passes the deadline to the adapter, which will abort
    if time runs out.
 
-4. **Tracks budgets**: Passes the budget tracker to the adapter to accumulate
+1. **Tracks budgets**: Passes the budget tracker to the adapter to accumulate
    token usage.
 
-5. **Manages resources**: Binds resources to the prompt and handles lifecycle.
+1. **Manages resources**: Binds resources to the prompt and handles lifecycle.
 
-6. **Returns results**: Returns the `PromptResponse` and the session for
+1. **Returns results**: Returns the `PromptResponse` and the session for
    inspection.
 
 ## When to Use MainLoop

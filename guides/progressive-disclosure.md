@@ -67,10 +67,10 @@ reference material that the model only needs temporarily.
 When the model calls `open_sections`:
 
 1. The tool handler raises `VisibilityExpansionRequired`
-2. MainLoop catches the exception
-3. MainLoop applies visibility overrides to the session
-4. MainLoop re-renders the prompt with expanded sections
-5. Evaluation continues with the new prompt
+1. MainLoop catches the exception
+1. MainLoop applies visibility overrides to the session
+1. MainLoop re-renders the prompt with expanded sections
+1. Evaluation continues with the new prompt
 
 You don't need to handle this yourself—MainLoop does it automatically.
 

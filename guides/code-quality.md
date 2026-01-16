@@ -128,8 +128,8 @@ make check  # Runs: format, lint, typecheck, test, bandit, deptry, pip-audit
 **Before every commit:**
 
 1. Run `make check`
-2. Fix any failures
-3. Commit only when clean
+1. Fix any failures
+1. Commit only when clean
 
 **Pre-commit hooks enforce this.** After running `./install-hooks.sh`, commits
 are blocked unless `make check` passes.

@@ -112,28 +112,28 @@ fact.
 **"Why did the model do X?"**
 
 1. Dump the session snapshot
-2. Open the debug UI
-3. Look at the prompt that was sent immediately before X
-4. Check the tool results the model saw before deciding
+1. Open the debug UI
+1. Look at the prompt that was sent immediately before X
+1. Check the tool results the model saw before deciding
 
 **"Why did this tool call fail?"**
 
 1. Look at the `ToolInvoked` event
-2. Check the params the model sent
-3. Check the error message in the result
-4. Look at the tool handler code
+1. Check the params the model sent
+1. Check the error message in the result
+1. Look at the tool handler code
 
 **"Why is the agent in the wrong state?"**
 
 1. Look at the session slices
-2. Trace back through the events that modified that slice
-3. Find the event that caused the unexpected state
+1. Trace back through the events that modified that slice
+1. Find the event that caused the unexpected state
 
 **"Why did tokens spike?"**
 
 1. Look at the `PromptExecuted` events
-2. Check which prompts had large token counts
-3. Consider using progressive disclosure to reduce initial prompt size
+1. Check which prompts had large token counts
+1. Consider using progressive disclosure to reduce initial prompt size
 
 ## Debug CLI Commands
 

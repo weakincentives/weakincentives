@@ -55,9 +55,9 @@ The model sees tools but chooses not to use them.
 
 1. Make instructions clearer: "Use the search tool to find information before
    answering"
-2. Add tool examples to show correct usage
-3. Check that the tool description accurately describes what it does
-4. Verify the tool is attached to an enabled section
+1. Add tool examples to show correct usage
+1. Check that the tool description accurately describes what it does
+1. Verify the tool is attached to an enabled section
 
 ```python
 # Add explicit instruction
@@ -74,9 +74,9 @@ The agent ran past its deadline.
 **Fixes**:
 
 1. Increase the deadline
-2. Reduce prompt size (use progressive disclosure)
-3. Check for tool handlers that hang or take too long
-4. Add timeouts to external API calls in tool handlers
+1. Reduce prompt size (use progressive disclosure)
+1. Check for tool handlers that hang or take too long
+1. Add timeouts to external API calls in tool handlers
 
 ## Session State Not Persisting
 
@@ -107,8 +107,8 @@ Your override file exists but the prompt renders with the original text.
 **Possible causes**:
 
 1. **Hash mismatch**: The code changed but the override has the old hash
-2. **Wrong tag**: You're using a different tag than the override was saved with
-3. **Wrong path**: The override file isn't where the store expects it
+1. **Wrong tag**: You're using a different tag than the override was saved with
+1. **Wrong path**: The override file isn't where the store expects it
 
 **Fix**: Check the override file's `expected_hash` matches the current section
 hash. Re-seed the override if the code changed:
@@ -124,8 +124,8 @@ The model calls a tool, but nothing happens.
 **Check**:
 
 1. Is the tool attached to an enabled section?
-2. Is the handler raising an exception that gets swallowed?
-3. Are you looking at the right session slice for results?
+1. Is the handler raising an exception that gets swallowed?
+1. Are you looking at the right session slice for results?
 
 Enable debug logging to see what's happening:
 
@@ -181,9 +181,9 @@ wink debug snapshots/session.jsonl
 If you're still stuck:
 
 1. Check the relevant spec document (see the guide index in README.md)
-2. Look at `code_reviewer_example.py` for a working reference
-3. Enable debug logging to see what's happening
-4. Dump a session snapshot and inspect it
+1. Look at `code_reviewer_example.py` for a working reference
+1. Enable debug logging to see what's happening
+1. Dump a session snapshot and inspect it
 
 ## Next Steps
 

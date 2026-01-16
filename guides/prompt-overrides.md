@@ -80,10 +80,10 @@ A workflow that works well in teams:
 
 1. **Seed** override files from the current prompt
    (`store.seed(prompt, tag="v1")`)
-2. **Run** your agent and collect failures / quality notes
-3. **Edit** override sections directly (or generate them with an optimizer)
-4. **Re-run** tests/evals
-5. **Commit** override files alongside code
+1. **Run** your agent and collect failures / quality notes
+1. **Edit** override sections directly (or generate them with an optimizer)
+1. **Re-run** tests/evals
+1. **Commit** override files alongside code
 
 For "hardening", disable overrides on sensitive sections/tools with
 `accepts_overrides=False`. This prevents accidental changes to security-critical
@@ -98,7 +98,7 @@ This is intentional. You have two options:
 
 1. **Update the override**: Edit the override file to match the new hash (or
    re-seed)
-2. **Delete the override**: If the code change makes the override obsolete
+1. **Delete the override**: If the code change makes the override obsolete
 
 Either way, you're forced to acknowledge that the code changed. No silent drift.
 

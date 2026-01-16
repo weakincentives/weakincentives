@@ -264,11 +264,11 @@ if __name__ == "__main__":
 
 1. `PromptTemplate[Answer]` declares that the model must return JSON matching
    the `Answer` dataclass
-2. The `search` tool is registered on the Instructions section—the model sees
+1. The `search` tool is registered on the Instructions section—the model sees
    the tool alongside the instructions for using it
-3. `adapter.evaluate()` sends the prompt to OpenAI, executes any tool calls, and
+1. `adapter.evaluate()` sends the prompt to OpenAI, executes any tool calls, and
    parses the structured response
-4. You get back `response.output` as a typed `Answer` instance
+1. You get back `response.output` as a typed `Answer` instance
 
 This is the core loop. Everything else in WINK builds on this: sessions for
 state, sections for organization, progressive disclosure for token management.

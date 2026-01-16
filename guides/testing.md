@@ -8,9 +8,9 @@ This guide explains the testing patterns that make agents reliable.
 Most agent testing can happen without calling a model:
 
 1. **Prompt rendering tests**: Fast, deterministic, catch template regressions
-2. **Tool handler tests**: Test side-effect logic in isolation
-3. **Reducer tests**: Test state transitions as pure functions
-4. **Integration tests**: Call the model, slow and expensive, run selectively
+1. **Tool handler tests**: Test side-effect logic in isolation
+1. **Reducer tests**: Test state transitions as pure functions
+1. **Integration tests**: Call the model, slow and expensive, run selectively
 
 ## Prompt Rendering Tests
 

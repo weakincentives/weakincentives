@@ -99,7 +99,7 @@ print(hb.elapsed())  # Seconds since last heartbeat
 
 1. After successfully receiving messages from the mailbox (proves the loop isn't
    stuck in `receive()`)
-2. After processing each message (proves processing completes)
+1. After processing each message (proves processing completes)
 
 This means both idle loops (waiting on empty queues) and busy loops (processing
 messages) demonstrate liveness.
@@ -139,11 +139,11 @@ watchdog_interval < watchdog_threshold / 3
     60s < 240s ✓
 ```
 
-| Parameter            | Default        | Rationale                           |
+| Parameter | Default | Rationale |
 | -------------------- | -------------- | ----------------------------------- |
-| `wait_time_seconds`  | 30s            | Maximum long poll duration          |
-| `watchdog_threshold` | 720s (12 min)  | > 30s + 600s with 90s margin        |
-| `watchdog_interval`  | 60s            | < 720s / 3, checks ~12x per threshold |
+| `wait_time_seconds` | 30s | Maximum long poll duration |
+| `watchdog_threshold` | 720s (12 min) | > 30s + 600s with 90s margin |
+| `watchdog_interval` | 60s | < 720s / 3, checks ~12x per threshold |
 | `visibility_timeout` | 1800s (30 min) | > 720s + 600s with margin for retries |
 
 ## Why the Watchdog Uses SIGKILL
@@ -152,12 +152,12 @@ The watchdog uses `SIGKILL` rather than `SIGTERM` because:
 
 1. **Stuck threads cannot respond**: If a thread is deadlocked or in an infinite
    loop, it cannot process signals or check shutdown flags.
-2. **Graceful shutdown already failed**: The stall indicates the cooperative
+1. **Graceful shutdown already failed**: The stall indicates the cooperative
    shutdown mechanism is ineffective for this failure mode.
-3. **Container restart is the recovery path**: Kubernetes and Docker will
+1. **Container restart is the recovery path**: Kubernetes and Docker will
    restart the container. The visibility timeout ensures in-flight messages are
    redelivered to healthy workers.
-4. **Prevent resource exhaustion**: A stuck process continues consuming CPU,
+1. **Prevent resource exhaustion**: A stuck process continues consuming CPU,
    memory, and connections. Immediate termination releases resources.
 
 ## Layered Defense with Readiness
@@ -166,7 +166,7 @@ When both health endpoints and watchdog are enabled, you get layered defense:
 
 1. **Early warning**: Readiness probe fails when heartbeats are stale, removing
    the pod from service endpoints (traffic stops flowing)
-2. **Hard stop**: Watchdog terminates the process if heartbeats remain stale
+1. **Hard stop**: Watchdog terminates the process if heartbeats remain stale
 
 This allows Kubernetes to stop routing traffic before the watchdog terminates.
 The readiness check incorporates heartbeat freshness—if any loop's heartbeat
@@ -177,9 +177,9 @@ exceeds the threshold, `/health/ready` returns 503.
 When SIGTERM arrives, LoopGroup:
 
 1. Signals all loops to stop accepting new work
-2. Waits for in-flight requests to complete (up to timeout)
-3. Calls `shutdown()` on each loop
-4. Exits cleanly
+1. Waits for in-flight requests to complete (up to timeout)
+1. Calls `shutdown()` on each loop
+1. Exits cleanly
 
 This ensures you don't drop work in progress and gives long-running evaluations
 a chance to complete.

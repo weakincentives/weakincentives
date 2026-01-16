@@ -155,8 +155,8 @@ Structured output is declared by parameterizing the prompt template:
 Adapters will:
 
 1. Instruct the model to return JSON for the schema
-2. Parse the response into your dataclass type
-3. Return it as `PromptResponse.output`
+1. Parse the response into your dataclass type
+1. Return it as `PromptResponse.output`
 
 If you need to parse output yourself (or you're using a custom adapter), use
 `parse_structured_output(...)`:
