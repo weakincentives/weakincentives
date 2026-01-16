@@ -136,7 +136,7 @@ are blocked unless `make check` passes.
 
 ## Exhaustiveness Checking
 
-*Canonical spec: [specs/EXHAUSTIVENESS.md](../specs/EXHAUSTIVENESS.md)*
+*Canonical spec: [specs/DBC.md](../specs/DBC.md)*
 
 When you have a union type like `SliceOp = Append | Extend | Replace | Clear`,
 you need to handle all cases. If someone adds a new variant later, code that

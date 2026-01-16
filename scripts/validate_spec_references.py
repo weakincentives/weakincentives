@@ -116,19 +116,27 @@ def _report_errors(errors: list[tuple[Path, int, str, list[str]]]) -> None:
 
 def validate_specs(root: Path, fix: bool = False) -> int:
     """Validate all spec file references. Returns 0 on success, 1 on failure."""
-    specs_dir = root / "specs"
-    if not specs_dir.exists():
-        print(f"Error: specs directory not found at {specs_dir}", file=sys.stderr)
+    # Directories to check for file references
+    doc_dirs = [root / "specs", root / "guides"]
+
+    existing_dirs = [d for d in doc_dirs if d.exists()]
+    if not existing_dirs:
+        print("Error: no specs or guides directory found", file=sys.stderr)
         return 1
 
-    errors = _collect_errors(specs_dir, root, fix)
+    all_errors: list[tuple[Path, int, str, list[str]]] = []
+    total_files = 0
 
-    if not errors:
-        spec_count = len(list(specs_dir.glob("*.md")))
-        print(f"✓ All file references valid in {spec_count} specs")
+    for doc_dir in existing_dirs:
+        errors = _collect_errors(doc_dir, root, fix)
+        all_errors.extend(errors)
+        total_files += len(list(doc_dir.glob("*.md")))
+
+    if not all_errors:
+        print(f"✓ All file references valid in {total_files} docs")
         return 0
 
-    _report_errors(errors)
+    _report_errors(all_errors)
     return 1
 
 

@@ -6,13 +6,13 @@ The `wink docs` CLI subcommand provides access to bundled documentation for
 users who install WINK as a package, enabling LLM-assisted workflows.
 
 **Implementation:** `src/weakincentives/cli/wink.py` (`_read_doc`, `_read_example`,
-`_read_specs`, `_handle_docs`)
+`_read_specs`, `_read_guides`, `_handle_docs`)
 
 ## CLI Interface
 
 ```bash
 wink docs --reference      # Print llms.md (API reference)
-wink docs --guide          # Print WINK_GUIDE.md (usage guide)
+wink docs --guide          # Print guides/*.md (usage guides)
 wink docs --spec ADAPTERS  # Print a single spec by name
 wink docs --specs          # Print all specs concatenated
 wink docs --changelog      # Print CHANGELOG.md (release history)
@@ -39,9 +39,12 @@ wink docs --example        # Print code review example as markdown
 src/weakincentives/docs/
 ├── __init__.py
 ├── llms.md
-├── WINK_GUIDE.md
 ├── CHANGELOG.md
 ├── code_reviewer_example.py
+├── guides/
+│   ├── README.md
+│   ├── quickstart.md
+│   ├── ...
 └── specs/
     ├── ADAPTERS.md
     ├── ...
@@ -54,7 +57,7 @@ Hatch build hook synchronizes docs from repository root into package:
 ```python
 class DocsSyncHook(BuildHookInterface):
     def initialize(self, version, build_data):
-        # Copy llms.md, WINK_GUIDE.md, CHANGELOG.md, code_reviewer_example.py, specs/*.md
+        # Copy llms.md, CHANGELOG.md, code_reviewer_example.py, guides/*.md, specs/*.md
 ```
 
 ## Use Cases

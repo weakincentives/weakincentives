@@ -28,13 +28,15 @@ def test_docs_reference_outputs_llms(capsys: pytest.CaptureFixture[str]) -> None
     assert "WINK" in captured.out or "weakincentives" in captured.out.lower()
 
 
-def test_docs_guide_outputs_guide(capsys: pytest.CaptureFixture[str]) -> None:
-    """--guide prints WINK_GUIDE.md content."""
+def test_docs_guide_outputs_guides(capsys: pytest.CaptureFixture[str]) -> None:
+    """--guide prints guides/*.md content with headers."""
     exit_code = wink.main(["docs", "--guide"])
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    # Guide is substantial
+    # Guides are concatenated with headers
+    assert "<!-- guides/" in captured.out
+    # Guide content is substantial
     assert len(captured.out) > 1000
 
 
@@ -155,6 +157,17 @@ def test_read_specs_concatenates_with_headers() -> None:
     assert "<!-- specs/ADAPTERS.md -->" in content
     assert "<!-- specs/SESSIONS.md -->" in content
     # Verify separation between specs
+    assert "\n\n" in content
+
+
+def test_read_guides_concatenates_with_headers() -> None:
+    """_read_guides concatenates all guides with headers."""
+    content = wink._read_guides()
+
+    assert isinstance(content, str)
+    assert "<!-- guides/README.md -->" in content
+    assert "<!-- guides/quickstart.md -->" in content
+    # Verify separation between guides
     assert "\n\n" in content
 
 

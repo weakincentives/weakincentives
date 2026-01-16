@@ -1,6 +1,6 @@
 # Prompt Overrides and Optimization
 
-*Canonical spec: [specs/PROMPT_OPTIMIZATION.md](../specs/PROMPT_OPTIMIZATION.md)*
+*Canonical spec: [specs/PROMPTS.md](../specs/PROMPTS.md)*
 
 Overrides are how WINK supports fast iteration without code edits:
 

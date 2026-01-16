@@ -88,9 +88,30 @@ class TestDocsPackaging:
         """llms.md (API reference) must be bundled."""
         assert "weakincentives/docs/llms.md" in wheel_contents
 
-    def test_wink_guide_bundled(self, wheel_contents: frozenset[str]) -> None:
-        """WINK_GUIDE.md (usage guide) must be bundled."""
-        assert "weakincentives/docs/WINK_GUIDE.md" in wheel_contents
+    def test_guides_bundled(
+        self,
+        wheel_contents: frozenset[str],
+        project_root: Path,
+    ) -> None:
+        """All guide files from guides/ directory must be bundled in the wheel."""
+        # Get all .md files from source guides/ directory
+        source_guides = {f.name for f in (project_root / "guides").glob("*.md")}
+        assert len(source_guides) > 0, "No guide files found in source guides/ directory"
+
+        # Get all .md files bundled in the wheel
+        bundled_guides = {
+            Path(f).name
+            for f in wheel_contents
+            if f.startswith("weakincentives/docs/guides/") and f.endswith(".md")
+        }
+
+        # Every source guide must be bundled
+        missing = source_guides - bundled_guides
+        assert not missing, f"Guide files missing from wheel: {sorted(missing)}"
+
+        # Bundled guides should match source (no extra files)
+        extra = bundled_guides - source_guides
+        assert not extra, f"Unexpected guide files in wheel: {sorted(extra)}"
 
     def test_all_specs_bundled(
         self,

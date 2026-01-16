@@ -283,7 +283,7 @@ tools. Both strategies use the same four planning tools.
 
 ## Tool Policies
 
-*Canonical spec: [specs/TOOL_POLICIES.md](../specs/TOOL_POLICIES.md)*
+*Canonical spec: [specs/TOOLS.md](../specs/TOOLS.md)*
 
 Tool policies provide declarative constraints that govern when tools can be
 invoked. Rather than embedding validation logic in each tool handler, policies

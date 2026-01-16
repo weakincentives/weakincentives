@@ -36,14 +36,15 @@ class DocsSyncHook(BuildHookInterface):
         root = Path(self.root)
         docs_dir = root / "src" / "weakincentives" / "docs"
         specs_dir = docs_dir / "specs"
+        guides_dir = docs_dir / "guides"
 
         # Create directories
         docs_dir.mkdir(parents=True, exist_ok=True)
         specs_dir.mkdir(exist_ok=True)
+        guides_dir.mkdir(exist_ok=True)
 
         # Copy documentation files
         shutil.copy(root / "llms.md", docs_dir / "llms.md")
-        shutil.copy(root / "WINK_GUIDE.md", docs_dir / "WINK_GUIDE.md")
         shutil.copy(root / "CHANGELOG.md", docs_dir / "CHANGELOG.md")
         shutil.copy(
             root / "code_reviewer_example.py", docs_dir / "code_reviewer_example.py"
@@ -52,6 +53,10 @@ class DocsSyncHook(BuildHookInterface):
         # Copy all spec files
         for spec_file in (root / "specs").glob("*.md"):
             shutil.copy(spec_file, specs_dir / spec_file.name)
+
+        # Copy all guide files
+        for guide_file in (root / "guides").glob("*.md"):
+            shutil.copy(guide_file, guides_dir / guide_file.name)
 
         # Ensure __init__.py exists
         init_file = docs_dir / "__init__.py"
@@ -63,9 +68,6 @@ class DocsSyncHook(BuildHookInterface):
         force_include: dict[str, str] = build_data.setdefault("force_include", {})
         force_include[str(docs_dir / "__init__.py")] = "weakincentives/docs/__init__.py"
         force_include[str(docs_dir / "llms.md")] = "weakincentives/docs/llms.md"
-        force_include[str(docs_dir / "WINK_GUIDE.md")] = (
-            "weakincentives/docs/WINK_GUIDE.md"
-        )
         force_include[str(docs_dir / "CHANGELOG.md")] = (
             "weakincentives/docs/CHANGELOG.md"
         )
@@ -76,3 +78,7 @@ class DocsSyncHook(BuildHookInterface):
         for spec_file in specs_dir.glob("*.md"):
             target = f"weakincentives/docs/specs/{spec_file.name}"
             force_include[str(spec_file)] = target
+
+        for guide_file in guides_dir.glob("*.md"):
+            target = f"weakincentives/docs/guides/{guide_file.name}"
+            force_include[str(guide_file)] = target
