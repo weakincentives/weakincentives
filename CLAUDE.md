@@ -149,6 +149,7 @@ Consult these specs before modifying related code:
 | Spec | When to Read |
 | ------------------------------ | --------------------------------------------------------------------- |
 | `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
+| `specs/CHECKPOINTER.md` | Session/Filesystem checkpointing, S3 storage, time-based triggers |
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging, skill mounting |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | DbC decorators, exhaustiveness checking, `assert_never` patterns |
