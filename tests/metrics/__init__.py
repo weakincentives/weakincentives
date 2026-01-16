@@ -10,18 +10,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Debugging utilities for prompt evaluation and session inspection."""
-
-from __future__ import annotations
-
-from ..metrics._debug import archive_metrics, dump_metrics
-from ._dump import archive_filesystem, dump_session
-from ._log_collector import collect_all_logs
-
-__all__ = [
-    "archive_filesystem",
-    "archive_metrics",
-    "collect_all_logs",
-    "dump_metrics",
-    "dump_session",
-]
+"""Tests for the weakincentives.metrics module."""
