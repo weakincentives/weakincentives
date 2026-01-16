@@ -185,11 +185,34 @@ Full spec index in `AGENTS.md`.
 
 ## Guides
 
-User-facing how-to material lives in `guides/`:
+User-facing how-to material lives in `guides/`. See `guides/README.md` for the
+full table of contents.
 
 | Guide | Description |
-| ----------------------------- | --------------------------------------------------- |
-| `guides/code-review-agent.md` | End-to-end walkthrough of the code reviewer example |
+| ----------------------------------- | --------------------------------------------------- |
+| `guides/README.md` | Table of contents and overview |
+| `guides/philosophy.md` | The "weak incentives" approach and why WINK exists |
+| `guides/quickstart.md` | Get a working agent running quickly |
+| `guides/prompts.md` | Build typed, testable prompts |
+| `guides/tools.md` | Define tool contracts and handlers |
+| `guides/sessions.md` | Manage state with reducers |
+| `guides/adapters.md` | Connect to OpenAI, LiteLLM, Claude Agent SDK |
+| `guides/orchestration.md` | Use MainLoop for request handling |
+| `guides/evaluation.md` | Test agents with datasets and evaluators |
+| `guides/lifecycle.md` | Manage shutdown, health checks, and watchdogs |
+| `guides/progressive-disclosure.md` | Control context size with summaries |
+| `guides/prompt-overrides.md` | Iterate on prompts without code changes |
+| `guides/workspace-tools.md` | Use VFS, Podman, planning, workspace digests |
+| `guides/debugging.md` | Inspect sessions and use the debug UI |
+| `guides/testing.md` | Test prompts, tools, and reducers |
+| `guides/code-quality.md` | Types, contracts, coverage, security |
+| `guides/recipes.md` | Common patterns for agents |
+| `guides/troubleshooting.md` | Debug common errors |
+| `guides/api-reference.md` | Quick lookup for key types |
+| `guides/migration-from-langgraph.md`| Coming from LangGraph/LangChain |
+| `guides/migration-from-dspy.md` | Coming from DSPy |
+| `guides/formal-verification.md` | TLA+ specs for critical code |
+| `guides/code-review-agent.md` | End-to-end walkthrough of the code reviewer |
 
 Guides cover quickstarts, patterns, recipes, and best practices. Design specs
 (what the system guarantees) remain in `specs/`.
