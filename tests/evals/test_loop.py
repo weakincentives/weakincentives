@@ -939,7 +939,7 @@ def test_eval_loop_error_reply_without_dlq() -> None:
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Message should be acknowledged (removed from queue)
         assert requests.approximate_count() == 0
@@ -981,7 +981,7 @@ def test_eval_loop_nacks_with_dlq_before_threshold() -> None:
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run once - should nack for retry (below threshold)
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Message should be nacked (still in queue)
         assert requests.approximate_count() == 1
@@ -1025,7 +1025,7 @@ def test_eval_loop_sends_to_dlq_after_threshold() -> None:
         requests.send(request, reply_to=results)
 
         # Run once - should dead-letter immediately (delivery_count=1 >= max=1)
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Message should be dead-lettered
         assert requests.approximate_count() == 0
@@ -1081,7 +1081,7 @@ def test_eval_loop_immediate_dlq_for_included_error() -> None:
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run once - should immediately dead-letter
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Message should be dead-lettered on first attempt
         assert requests.approximate_count() == 0
@@ -1126,7 +1126,7 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
 
         # Run many times - should never dead-letter
         for _ in range(5):
-            eval_loop.run(max_iterations=1)
+            eval_loop.run(max_turns=1)
 
         # Message should still be in queue (nacked, not dead-lettered)
         assert requests.approximate_count() == 1
@@ -1167,7 +1167,7 @@ def test_eval_loop_dlq_handles_reply_error() -> None:
         # Make reply send fail
         results.set_connection_error(MailboxConnectionError("connection lost"))
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Message should still be dead-lettered despite reply failure
         assert requests.approximate_count() == 0
@@ -1202,7 +1202,7 @@ def test_eval_loop_dlq_without_reply_to() -> None:
         # Send without reply_to
         requests.send(EvalRequest(sample=sample, experiment=BASELINE))
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_turns=1)
 
         # Message should be dead-lettered
         assert requests.approximate_count() == 0

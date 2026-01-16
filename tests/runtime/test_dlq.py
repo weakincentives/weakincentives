@@ -372,7 +372,7 @@ def test_mainloop_error_reply_without_dlq() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Message should be acknowledged (removed from queue)
         assert requests.approximate_count() == 0
@@ -408,7 +408,7 @@ def test_mainloop_nacks_with_dlq_before_threshold() -> None:
         requests.send(request, reply_to=results)
 
         # Run once - should nack for retry (below threshold)
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Message should be nacked (still in queue)
         assert requests.approximate_count() == 1
@@ -445,7 +445,7 @@ def test_mainloop_sends_to_dlq_after_threshold() -> None:
         requests.send(request, reply_to=results)
 
         # Run once - should dead-letter immediately (delivery_count=1 >= max=1)
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Message should be dead-lettered
         assert requests.approximate_count() == 0
@@ -499,7 +499,7 @@ def test_mainloop_immediate_dlq_for_included_error() -> None:
         requests.send(request, reply_to=results)
 
         # Run once - should immediately dead-letter
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Message should be dead-lettered on first attempt
         assert requests.approximate_count() == 0
@@ -540,7 +540,7 @@ def test_mainloop_never_dlq_for_excluded_error() -> None:
 
         # Run many times - should never dead-letter
         for _ in range(5):
-            loop.run(max_iterations=1, wait_time_seconds=0)
+            loop.run(max_turns=1, wait_time_seconds=0)
 
         # Message should still be in queue (nacked, not dead-lettered)
         assert requests.approximate_count() == 1
@@ -570,7 +570,7 @@ def test_mainloop_dlq_preserves_request_id() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         dlq_msgs = dlq_mailbox.receive(max_messages=1)
         assert len(dlq_msgs) == 1
@@ -601,7 +601,7 @@ def test_mainloop_dlq_preserves_reply_to() -> None:
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         dlq_msgs = dlq_mailbox.receive(max_messages=1)
         assert len(dlq_msgs) == 1
@@ -630,7 +630,7 @@ def test_mainloop_dlq_without_reply_to() -> None:
         # Send without reply_to
         requests.send(request)
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Message should be dead-lettered
         assert requests.approximate_count() == 0
@@ -667,7 +667,7 @@ def test_mainloop_dlq_handles_reply_error() -> None:
         # Make reply send fail
         results.set_connection_error(MailboxConnectionError("connection lost"))
 
-        loop.run(max_iterations=1, wait_time_seconds=0)
+        loop.run(max_turns=1, wait_time_seconds=0)
 
         # Message should still be dead-lettered despite reply failure
         assert requests.approximate_count() == 0
@@ -709,7 +709,7 @@ def test_dlq_consumer_processes_dead_letters() -> None:
             )
 
         # Run consumer - multiple iterations to process all messages
-        consumer.run(max_iterations=5, wait_time_seconds=0)
+        consumer.run(max_turns=5, wait_time_seconds=0)
 
         # All dead letters should be processed
         assert len(processed) == 3
@@ -741,7 +741,7 @@ def test_dlq_consumer_nacks_on_handler_failure() -> None:
             )
         )
 
-        consumer.run(max_iterations=1, wait_time_seconds=0)
+        consumer.run(max_turns=1, wait_time_seconds=0)
 
         # Message should still be in queue (nacked)
         assert dlq_mailbox.approximate_count() == 1
@@ -770,7 +770,7 @@ def test_dlq_consumer_shutdown() -> None:
 
         # Start in background
         thread = threading.Thread(
-            target=lambda: consumer.run(max_iterations=None, wait_time_seconds=1)
+            target=lambda: consumer.run(max_turns=None, wait_time_seconds=1)
         )
         thread.start()
 
@@ -812,7 +812,7 @@ def test_dlq_consumer_running_property() -> None:
 
         # Run in background
         thread = threading.Thread(
-            target=lambda: consumer.run(max_iterations=1, wait_time_seconds=0)
+            target=lambda: consumer.run(max_turns=1, wait_time_seconds=0)
         )
         thread.start()
 
@@ -853,7 +853,7 @@ def test_dlq_consumer_respects_max_iterations() -> None:
             )
 
         # Run only 2 iterations
-        consumer.run(max_iterations=2, wait_time_seconds=0)
+        consumer.run(max_turns=2, wait_time_seconds=0)
 
         # Should have processed at least some (depends on batch size)
         assert process_count >= 1
@@ -886,7 +886,7 @@ def test_dlq_consumer_beats_heartbeat() -> None:
         initial_elapsed = consumer.heartbeat.elapsed()
 
         # Run consumer
-        consumer.run(max_iterations=1, wait_time_seconds=0)
+        consumer.run(max_turns=1, wait_time_seconds=0)
 
         # Heartbeat should have been beaten
         assert consumer.heartbeat.elapsed() < initial_elapsed
@@ -904,7 +904,7 @@ def test_dlq_consumer_exits_when_mailbox_closed() -> None:
         dlq_mailbox.close()
 
         # Run should exit immediately
-        consumer.run(max_iterations=10, wait_time_seconds=0)
+        consumer.run(max_turns=10, wait_time_seconds=0)
 
         # Should not raise, should just exit
         assert not consumer.running
@@ -941,7 +941,7 @@ def test_dlq_consumer_nacks_on_shutdown_during_messages() -> None:
             )
 
         # Run consumer - it should process one then get shutdown signal
-        consumer.run(max_iterations=10, wait_time_seconds=0)
+        consumer.run(max_turns=10, wait_time_seconds=0)
 
         # First message should have been processed
         assert len(processed) >= 1
