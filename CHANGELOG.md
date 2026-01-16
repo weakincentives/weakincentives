@@ -4,10 +4,14 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
+_No changes yet._
+
+## v0.20.0 - 2026-01-16
+
 ### Revamped `wink docs` CLI for AI Agent Exploration
 
-The `wink docs` command has been redesigned with a subcommand structure
-optimized for AI coding agents exploring documentation efficiently.
+The `wink docs` command has been completely redesigned with a subcommand
+structure optimized for AI coding agents exploring documentation efficiently.
 
 **New subcommands:**
 
@@ -27,7 +31,41 @@ optimized for AI coding agents exploring documentation efficiently.
 
 See `specs/WINK_DOCS.md` for the full specification.
 
-## v0.20.0 - 2026-01-16
+### Metrics Abstraction for Observability
+
+A new metrics collection system provides in-memory observability without
+external dependencies. Metrics capture latency, throughput, error rates, and
+queue health across adapters, tools, and the mailbox layer.
+
+```python
+from weakincentives.resources import Binding, Scope
+
+metrics_binding = Binding(
+    MetricsCollector,
+    lambda r: InMemoryMetricsCollector(
+        worker_id=os.getenv("WORKER_ID"),
+        sinks=[StatsdSink(host="localhost", port=8125)] if STATSD_ENABLED else [],
+    ),
+    scope=Scope.SINGLETON,
+)
+```
+
+**Key features:**
+
+- **In-memory storage**: Metrics accumulate in collector without session
+  bloat—observability is separate from application state
+- **Pluggable sinks**: Optional export to StatsD, Prometheus, or debug files
+- **Compact histograms**: Fixed exponential buckets bound memory regardless
+  of volume
+- **RunContext correlation**: Integrates with distributed tracing
+
+**Built-in metric types:**
+
+- `AdapterMetrics`: Latency histograms, token counts, error/throttle rates
+- `ToolMetrics`: Execution latency, call counts, failure rates by error code
+- `MailboxMetrics`: Queue lag, delivery count distribution, DLQ counts
+
+See `specs/METRICS.md` for the full specification.
 
 ### Experiments for A/B Testing
 
@@ -93,6 +131,8 @@ Key features:
 - **OpenTelemetry integration**: `trace_id` and `span_id` pass through unchanged
 - **ToolContext access**: Tool handlers access via `context.run_context`
 - **Structured logging**: `to_log_context()` for logger binding
+- **Logger binding helper**: `bind_run_context(logger, ctx)` consistently binds
+  all context fields to structured loggers throughout the request lifecycle
 
 All adapters and telemetry events (`PromptRendered`, `ToolInvoked`,
 `PromptExecuted`) now include `run_context`. See `specs/RUN_CONTEXT.md`.
@@ -245,13 +285,31 @@ mailbox = RedisMailbox(name="events", client=redis_client, default_ttl=0)  # Dis
 
 ### Documentation
 
+**Guide documentation reorganization:** Broke the monolithic WINK_GUIDE.md into
+focused, standalone guides in `guides/` designed for human consumption. Each
+guide uses a narrative style explaining design decisions and building the
+correct mental model for agent development.
+
+New guides include: `philosophy.md`, `quickstart.md`, `prompts.md`, `tools.md`,
+`sessions.md`, `adapters.md`, `claude-agent-sdk.md`, `orchestration.md`,
+`evaluation.md`, `lifecycle.md`, `progressive-disclosure.md`,
+`prompt-overrides.md`, `workspace-tools.md`, `debugging.md`, `testing.md`,
+`code-quality.md`, `recipes.md`, `troubleshooting.md`, `api-reference.md`,
+`migration-from-langgraph.md`, `migration-from-dspy.md`,
+`formal-verification.md`, and `code-review-agent.md`.
+
+**Specification additions:**
+
+- Added `specs/METRICS.md` covering in-memory metrics collection and export
 - Added `specs/EXPERIMENTS.md` covering experiment configuration for A/B testing
 - Added `specs/RUN_CONTEXT.md` covering execution metadata and distributed tracing
 - Added `specs/LEASE_EXTENDER.md` covering automatic message visibility extension
 - Added `specs/TASK_COMPLETION.md` covering task completion checking patterns
 - Added `specs/DLQ.md` covering dead letter queue configuration
 - Added `specs/POLICIES_OVER_WORKFLOWS.md` documenting declarative policies philosophy
+- Added `specs/WINK_DOCS.md` covering the redesigned docs CLI
 - Added `IDENTITY.md` with WINK project description
+- Rewrote `llms.md` as comprehensive technical guide for PyPI
 
 ### Breaking Changes
 
@@ -268,6 +326,9 @@ instead of a string identifier for type-safe routing.
 
 - Renamed `Dispatcher` references to `ControlDispatcher` for clarity
 - Improved library modularity with import validation (`make check-core-imports`)
+- Refactored specs for conciseness and clarity, focusing on design over implementation
+- Consolidated and reviewed specification documents
+- Fixed documentation broken links and incorrect references
 - Dependency upgrades: aiohttp, anyio, certifi, filelock, huggingface-hub,
   hypothesis, sse-starlette, textual, tokenizers, typer-slim
 
