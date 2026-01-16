@@ -256,9 +256,9 @@ except BudgetExceededError:
     pass
 
 # Check accumulated usage
-print(f"Total tokens used: {tracker.total_tokens}")
-print(f"Input tokens: {tracker.input_tokens}")
-print(f"Output tokens: {tracker.output_tokens}")
+print(f"Total tokens used: {tracker.consumed.total_tokens}")
+print(f"Input tokens: {tracker.consumed.input_tokens}")
+print(f"Output tokens: {tracker.consumed.output_tokens}")
 ```
 
 Budgets and deadlines work together. You can set both to limit time and cost:
