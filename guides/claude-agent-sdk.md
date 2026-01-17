@@ -211,7 +211,7 @@ adapter = ClaudeAgentSDKAdapter(
    the host environment. Works with both Anthropic API (`ANTHROPIC_API_KEY`) and
    AWS Bedrock (`CLAUDE_CODE_USE_BEDROCK=1` + AWS credentials).
 
-2. **Explicit API key**: When `api_key` is set, uses that key with Anthropic API
+1. **Explicit API key**: When `api_key` is set, uses that key with Anthropic API
    and disables Bedrock.
 
 **Factory methods** (recommended for fail-fast validation):
@@ -272,15 +272,16 @@ sandbox = SandboxConfig(
 When `isolation` is set:
 
 1. Creates ephemeral `HOME` directory with `$HOME/.claude/settings.json`
-2. Passes `env` and `setting_sources=["user"]` to SDK
-3. Copies `~/.aws` to ephemeral home for Bedrock credential access
-4. Host environment variables are excluded unless `include_host_env=True`
+1. Passes `env` and `setting_sources=["user"]` to SDK
+1. Copies `~/.aws` to ephemeral home for Bedrock credential access
+1. Host environment variables are excluded unless `include_host_env=True`
 
 **Auth inheritance** (when no explicit `api_key`):
 
 Auth vars are read from two sources (in priority order):
+
 1. Shell environment variables (highest priority)
-2. Host `~/.claude/settings.json` env section (fallback)
+1. Host `~/.claude/settings.json` env section (fallback)
 
 This ensures that if `claude` works on the host, WINK agents will too.
 
@@ -303,7 +304,7 @@ from weakincentives.adapters.claude_agent_sdk import (
 # Automatic: returns correct format based on CLAUDE_CODE_USE_BEDROCK
 model = get_default_model()
 
-adapter = ClaudeAgentSDKAdapter(model=model, ...)
+adapter = ClaudeAgentSDKAdapter(model=model)
 ```
 
 ## Tool Bridging via MCP

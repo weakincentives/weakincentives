@@ -59,7 +59,7 @@ native tools, MCP tool bridging, structured output, and optional isolation.
    from the host environment. Works with both Anthropic API (via `ANTHROPIC_API_KEY`)
    and AWS Bedrock (via `CLAUDE_CODE_USE_BEDROCK=1` + AWS credentials).
 
-2. **Explicit API key**: When `api_key` is set, uses that key with the Anthropic API
+1. **Explicit API key**: When `api_key` is set, uses that key with the Anthropic API
    and disables Bedrock.
 
 **Factory methods** (recommended for explicit intent and fail-fast validation):
@@ -167,8 +167,9 @@ When Bedrock is configured, isolation automatically inherits authentication.
 Auth detection checks both shell environment and host `~/.claude/settings.json`:
 
 **Priority order for auth vars:**
+
 1. Shell environment variables (highest priority)
-2. Host `~/.claude/settings.json` env section (fallback)
+1. Host `~/.claude/settings.json` env section (fallback)
 
 This ensures that if `claude` works on the host, WINK agents will too.
 

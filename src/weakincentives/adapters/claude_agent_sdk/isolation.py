@@ -27,8 +27,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-_logger = logging.getLogger(__name__)
-
 from ...dataclasses import FrozenDataclass
 from ...skills import (
     MAX_SKILL_TOTAL_BYTES,
@@ -39,6 +37,8 @@ from ...skills import (
     validate_skill,
     validate_skill_name,
 )
+
+_logger = logging.getLogger(__name__)
 
 __all__ = [
     "EphemeralHome",
@@ -159,7 +159,9 @@ def _read_host_claude_settings() -> dict[str, Any]:
         return {}
 
 
-def _get_effective_env_value(key: str, host_settings: dict[str, Any] | None = None) -> str | None:
+def _get_effective_env_value(
+    key: str, host_settings: dict[str, Any] | None = None
+) -> str | None:
     """Get an environment variable value from shell or host settings.json.
 
     Priority: shell environment > host settings.json env section.
@@ -362,7 +364,7 @@ class IsolationConfig:
         )
 
     @classmethod
-    def with_api_key(
+    def with_api_key(  # noqa: PLR0913
         cls,
         api_key: str,
         *,
@@ -405,7 +407,7 @@ class IsolationConfig:
         )
 
     @classmethod
-    def for_bedrock(
+    def for_bedrock(  # noqa: PLR0913
         cls,
         *,
         aws_config_path: Path | str | None = None,
@@ -487,6 +489,16 @@ _AWS_SUBPROCESS_ENV_VARS: tuple[str, ...] = (
     "AWS_WEB_IDENTITY_TOKEN_FILE",
     "CLAUDE_CODE_USE_BEDROCK",
 )
+
+# Patterns in env var names that indicate sensitive values to redact in logs
+_SENSITIVE_KEY_PATTERNS: frozenset[str] = frozenset(
+    {"SECRET", "TOKEN", "ACCESS_KEY", "KEY_ID"}
+)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """Check if an environment variable key contains sensitive data."""
+    return any(pattern in key for pattern in _SENSITIVE_KEY_PATTERNS)
 
 
 def _copy_skill(
@@ -608,7 +620,7 @@ class EphemeralHome:
         self._copy_aws_config()
         self._cleaned_up = False
 
-    def _generate_settings(self) -> None:
+    def _generate_settings(self) -> None:  # noqa: C901
         """Generate settings.json from IsolationConfig."""
         settings: dict[str, Any] = {}
 
@@ -690,8 +702,14 @@ class EphemeralHome:
                 "settings_path": str(settings_path),
                 "sandbox_enabled": settings.get("sandbox", {}).get("enabled"),
                 "env_keys": list(settings.get("env", {}).keys()),
-                "bedrock_in_settings": settings.get("env", {}).get("CLAUDE_CODE_USE_BEDROCK"),
-                "allowed_domains_count": len(settings.get("sandbox", {}).get("network", {}).get("allowedDomains", [])),
+                "bedrock_in_settings": settings.get("env", {}).get(
+                    "CLAUDE_CODE_USE_BEDROCK"
+                ),
+                "allowed_domains_count": len(
+                    settings.get("sandbox", {})
+                    .get("network", {})
+                    .get("allowedDomains", [])
+                ),
             },
         )
 
@@ -790,7 +808,7 @@ class EphemeralHome:
                 extra={"source": str(aws_dir), "error": str(e)},
             )
 
-    def get_env(self) -> dict[str, str]:
+    def get_env(self) -> dict[str, str]:  # noqa: C901, PLR0912
         """Build environment variables for SDK subprocess.
 
         Returns:
@@ -843,15 +861,20 @@ class EphemeralHome:
             for key in _AWS_SUBPROCESS_ENV_VARS:
                 if key in os.environ:
                     env[key] = os.environ[key]
-                    # Don't log secret values
-                    if "SECRET" in key or "TOKEN" in key:
-                        aws_vars_found.append(f"{key}=<redacted_from_shell>")
+                    # Don't log sensitive values
+                    if _is_sensitive_key(key):
+                        aws_vars_found.append(f"{key}=<redacted>")
                     else:
                         aws_vars_found.append(f"{key}={os.environ[key]}")
                 elif key in host_env:
                     # Fall back to host settings.json
                     env[key] = host_env[key]
-                    aws_vars_found.append(f"{key}={host_env[key]}(from_host_settings)")
+                    if _is_sensitive_key(key):
+                        aws_vars_found.append(f"{key}=<redacted>(from_host_settings)")
+                    else:
+                        aws_vars_found.append(
+                            f"{key}={host_env[key]}(from_host_settings)"
+                        )
                 else:
                     aws_vars_missing.append(key)
 
@@ -881,7 +904,11 @@ class EphemeralHome:
             extra={
                 "ephemeral_home": self._temp_dir,
                 "env_var_count": len(env),
-                "env_keys": sorted([k for k in env.keys() if "KEY" not in k and "SECRET" not in k and "TOKEN" not in k]),
+                "env_keys": sorted(
+                    k
+                    for k in env
+                    if "KEY" not in k and "SECRET" not in k and "TOKEN" not in k
+                ),
             },
         )
 

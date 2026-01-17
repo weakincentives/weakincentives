@@ -26,15 +26,18 @@ isolation = IsolationConfig(aws_config_path="/mnt/aws")
 ```
 
 New `IsolationConfig` fields:
+
 - `aws_config_path`: Path to AWS config directory for Docker containers where
   credentials are mounted at non-standard paths
 
 Factory methods for explicit intent and fail-fast validation:
+
 - `IsolationConfig.inherit_host_auth()`: Inherit auth, fail if none configured
 - `IsolationConfig.with_api_key(key)`: Use explicit API key
 - `IsolationConfig.for_bedrock()`: Require Bedrock, fail if not configured
 
 Model ID helpers for unified model selection (defaults to Opus 4.5):
+
 - `get_default_model()`: Returns model ID in the appropriate format for auth mode
 - `to_bedrock_model_id(name)`: Convert Anthropic model name to Bedrock ID
 - `to_anthropic_model_name(id)`: Convert Bedrock ID to Anthropic model name

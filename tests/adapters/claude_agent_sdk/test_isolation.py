@@ -129,7 +129,9 @@ class TestIsolationConfigFactoryMethods:
 
     def test_inherit_host_auth_with_anthropic_key(self) -> None:
         """inherit_host_auth succeeds when ANTHROPIC_API_KEY is set."""
-        with mock.patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True):
+        with mock.patch.dict(
+            os.environ, {"ANTHROPIC_API_KEY": "sk-ant-test"}, clear=True
+        ):
             config = IsolationConfig.inherit_host_auth()
             assert config.api_key is None  # Inherits from env, not stored
 

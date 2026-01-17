@@ -621,8 +621,6 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
     return cast(ProviderAdapter[ReviewResponse], OpenAIAdapter(model=model))
 
 
-
-
 def build_claude_agent_adapter() -> tuple[
     ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection
 ]:
@@ -720,7 +718,7 @@ def build_claude_agent_adapter() -> tuple[
     # Display adapter configuration
     is_bedrock = model.startswith("us.anthropic.")
     auth_mode = "AWS Bedrock" if is_bedrock else "Anthropic API"
-    print(f"\n[Claude Agent SDK Adapter]")
+    print("\n[Claude Agent SDK Adapter]")
     print(f"  Model: {model}")
     print(f"  Auth:  {auth_mode}")
     print(f"  CWD:   {workspace_section.temp_dir}")

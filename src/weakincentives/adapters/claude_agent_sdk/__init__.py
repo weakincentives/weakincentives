@@ -109,13 +109,13 @@ from .workspace import (
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
+    "DEFAULT_BEDROCK_MODEL",
+    "DEFAULT_MODEL",
     "ClaudeAgentSDKAdapter",
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
     "ClaudeAgentWorkspaceSection",
     "CompositeChecker",
-    "DEFAULT_BEDROCK_MODEL",
-    "DEFAULT_MODEL",
     "EphemeralHome",
     "HostMount",
     "HostMountPreview",
