@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
+      pull-requests: write
       issues: read
       id-token: write
 
@@ -35,6 +35,61 @@ jobs:
         uses: actions/checkout@v5
         with:
           fetch-depth: 1
+
+      - name: Hide previous Claude reviews
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get all comments on the PR and find ones from github-actions bot
+          # that look like Claude reviews (contain review-like content)
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          REPO=${{ github.repository }}
+
+          # Fetch all issue comments on the PR
+          COMMENTS=$(gh api graphql -f query='
+            query($owner: String!, $repo: String!, $pr: Int!) {
+              repository(owner: $owner, name: $repo) {
+                pullRequest(number: $pr) {
+                  comments(first: 100) {
+                    nodes {
+                      id
+                      author {
+                        login
+                      }
+                      body
+                      isMinimized
+                    }
+                  }
+                }
+              }
+            }
+          ' -f owner="${REPO%/*}" -f repo="${REPO#*/}" -F pr="$PR_NUMBER")
+
+          # Extract comment IDs from github-actions bot that appear to be Claude reviews
+          # and are not already minimized
+          COMMENT_IDS=$(echo "$COMMENTS" | jq -r '
+            .data.repository.pullRequest.comments.nodes[]
+            | select(.author.login == "github-actions")
+            | select(.isMinimized == false)
+            | select(.body | test("Code quality|Potential bugs|Performance|Security|review"; "i"))
+            | .id
+          ')
+
+          # Minimize each identified comment
+          for COMMENT_ID in $COMMENT_IDS; do
+            if [ -n "$COMMENT_ID" ]; then
+              echo "Minimizing comment: $COMMENT_ID"
+              gh api graphql -f query='
+                mutation($id: ID!) {
+                  minimizeComment(input: {subjectId: $id, classifier: OUTDATED}) {
+                    minimizedComment {
+                      isMinimized
+                    }
+                  }
+                }
+              ' -f id="$COMMENT_ID" || echo "Failed to minimize comment $COMMENT_ID"
+            fi
+          done
 
       - name: Run Claude Code Review
         id: claude-review
