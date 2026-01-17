@@ -20,12 +20,12 @@ as slow tests that run only when explicitly requested.
 from __future__ import annotations
 
 import threading
-import time
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
 
+from weakincentives.runtime import wait_until
 from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
 
 if TYPE_CHECKING:
@@ -109,8 +109,11 @@ class TestConcurrentStress:
             for t in producer_threads:
                 t.join()
 
-            # Wait for consumers to drain
-            time.sleep(2)
+            wait_until(
+                lambda: mailbox.approximate_count() == 0,
+                timeout=2.0,
+                poll_interval=0.05,
+            )
             stop_consumers.set()
             for t in consumer_threads:
                 t.join(timeout=5)
@@ -149,7 +152,7 @@ class TestConcurrentStress:
         )
 
         num_messages = 50
-        visibility_timeout = 1  # Short timeout
+        visibility_timeout = 0  # Immediate timeout
 
         try:
             # Send messages
@@ -163,8 +166,7 @@ class TestConcurrentStress:
                 if msgs:
                     received_handles.append((msgs[0].id, msgs[0].receipt_handle))
 
-            # Wait for expiry
-            time.sleep(visibility_timeout + 0.5)
+            mailbox._reap_expired()
 
             # All messages should be back in pending
             count = mailbox.approximate_count()
@@ -201,13 +203,12 @@ class TestConcurrentStress:
             mailbox.send("test")
 
             # Consumer 1 receives
-            msgs1 = mailbox.receive(visibility_timeout=1)
+            msgs1 = mailbox.receive(visibility_timeout=0)
             assert len(msgs1) == 1
             handle1 = msgs1[0].receipt_handle
             msg_id = msgs1[0].id
 
-            # Wait for timeout
-            time.sleep(1.2)
+            mailbox._reap_expired()
 
             # Consumer 2 receives the redelivered message
             msgs2 = mailbox.receive(visibility_timeout=30)

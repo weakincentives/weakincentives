@@ -85,13 +85,13 @@ def test_heartbeat_elapsed_updated_on_beat() -> None:
     """Verify elapsed() is updated when beat() is called."""
     heartbeat = Heartbeat()
 
-    time.sleep(0.1)
+    time.sleep(0.02)
     elapsed_before = heartbeat.elapsed()
 
     heartbeat.beat()
     elapsed_after = heartbeat.elapsed()
 
-    assert elapsed_before >= 0.1
+    assert elapsed_before >= 0.02
     assert elapsed_after < 0.05  # Just beat, should be near zero
 
 
@@ -164,14 +164,14 @@ def test_lease_extender_rate_limits() -> None:
     """Verify extension is rate-limited by interval."""
     msg, mock_extend = _create_test_message()
     heartbeat = Heartbeat()
-    config = LeaseExtenderConfig(interval=0.2)  # 200ms limit
+    config = LeaseExtenderConfig(interval=0.05)  # 50ms limit
     extender = LeaseExtender(config=config)
 
     with extender.attach(msg, heartbeat):
         heartbeat.beat()  # Extends
         heartbeat.beat()  # Skipped (interval not elapsed)
         heartbeat.beat()  # Skipped
-        time.sleep(0.25)
+        time.sleep(0.06)
         heartbeat.beat()  # Extends (interval elapsed)
 
     assert mock_extend.call_count == 2

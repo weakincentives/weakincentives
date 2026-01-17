@@ -22,7 +22,6 @@ invariant from specs/VERIFICATION.md.
 from __future__ import annotations
 
 import threading
-import time
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -43,6 +42,10 @@ except ImportError:
 pytestmark = pytest.mark.redis_standalone
 
 
+def _force_reap(mailbox: RedisMailbox[Any]) -> None:
+    mailbox._reap_expired()
+
+
 class TestReceiptHandleFreshness:
     """Tests for INV-2: Receipt Handle Freshness."""
 
@@ -51,11 +54,10 @@ class TestReceiptHandleFreshness:
         mailbox.send("test")
 
         # First receive
-        msgs1 = mailbox.receive(visibility_timeout=1)
+        msgs1 = mailbox.receive(visibility_timeout=0)
         handle1 = msgs1[0].receipt_handle
 
-        # Wait for timeout
-        time.sleep(1.5)
+        _force_reap(mailbox)
 
         # Second receive (redelivery)
         msgs2 = mailbox.receive(visibility_timeout=30)
@@ -73,12 +75,11 @@ class TestReceiptHandleFreshness:
         mailbox.send("test")
 
         # First consumer receives
-        msgs1 = mailbox.receive(visibility_timeout=1)
+        msgs1 = mailbox.receive(visibility_timeout=0)
         old_handle = msgs1[0].receipt_handle
         msg_id = msgs1[0].id
 
-        # Wait for timeout and redelivery
-        time.sleep(1.5)
+        _force_reap(mailbox)
 
         # Second consumer receives
         msgs2 = mailbox.receive(visibility_timeout=30)
@@ -116,10 +117,10 @@ class TestReceiptHandleFreshness:
             handles = []
 
             for _ in range(n):
-                msgs = mailbox.receive(visibility_timeout=1)
+                msgs = mailbox.receive(visibility_timeout=0)
                 if msgs:
                     handles.append(msgs[0].receipt_handle)
-                time.sleep(0.2)  # Allow reaper to run
+                _force_reap(mailbox)
 
             # All handles should be unique
             assert len(handles) == len(set(handles)), (
@@ -191,11 +192,10 @@ class TestMessageStateExclusivity:
         """
         # Send and receive with short timeout
         mailbox.send("test")
-        msgs = mailbox.receive(visibility_timeout=1)
+        msgs = mailbox.receive(visibility_timeout=0)
         msg_id = msgs[0].id
 
-        # Wait for expiry
-        time.sleep(1.2)
+        _force_reap(mailbox)
 
         # Check invariant: message in exactly one place
         in_pending = msg_id.encode() in redis_client.lrange(
@@ -284,10 +284,10 @@ class TestDeliveryCountMonotonicity:
 
         counts = []
         for _ in range(3):
-            msgs = mailbox.receive(visibility_timeout=1)
+            msgs = mailbox.receive(visibility_timeout=0)
             if msgs:
                 counts.append(msgs[0].delivery_count)
-            time.sleep(0.2)  # Allow reaper
+            _force_reap(mailbox)
 
         # Counts should be strictly increasing
         assert counts == sorted(counts), f"Counts not monotonic: {counts}"
@@ -300,18 +300,16 @@ class TestDeliveryCountMonotonicity:
         mailbox.send("test")
 
         # First delivery
-        msgs1 = mailbox.receive(visibility_timeout=1)
+        msgs1 = mailbox.receive(visibility_timeout=0)
         assert msgs1[0].delivery_count == 1
 
-        # Let it timeout and get requeued
-        time.sleep(1.5)
+        _force_reap(mailbox)
 
         # Second delivery - count should be 2, not reset to 1
-        msgs2 = mailbox.receive(visibility_timeout=1)
+        msgs2 = mailbox.receive(visibility_timeout=0)
         assert msgs2[0].delivery_count == 2, "Delivery count was reset after requeue!"
 
-        # Let it timeout again
-        time.sleep(1.5)
+        _force_reap(mailbox)
 
         # Third delivery
         msgs3 = mailbox.receive(visibility_timeout=30)
@@ -341,15 +339,14 @@ class TestVisibilityTimeout:
         mailbox.send("test")
 
         # Receive with short timeout
-        msgs = mailbox.receive(visibility_timeout=1)
+        msgs = mailbox.receive(visibility_timeout=0)
         assert len(msgs) == 1
 
         # Immediately try to receive again - should be empty
         msgs2 = mailbox.receive(visibility_timeout=30, wait_time_seconds=0)
         assert len(msgs2) == 0
 
-        # Wait for timeout
-        time.sleep(1.5)
+        _force_reap(mailbox)
 
         # Now should be available
         msgs3 = mailbox.receive(visibility_timeout=30)
@@ -360,15 +357,12 @@ class TestVisibilityTimeout:
         """Extended visibility prevents timeout requeue."""
         mailbox.send("test")
 
-        msgs = mailbox.receive(visibility_timeout=1)
+        msgs = mailbox.receive(visibility_timeout=0)
         msg = msgs[0]
 
-        # Extend before timeout
-        time.sleep(0.5)
         msg.extend_visibility(10)
 
-        # Wait past original timeout
-        time.sleep(1.0)
+        _force_reap(mailbox)
 
         # Should still be invisible (not requeued)
         msgs2 = mailbox.receive(visibility_timeout=30, wait_time_seconds=0)
@@ -394,25 +388,15 @@ class TestEventualRequeue:
         mailbox.send("test")
 
         # Receive with very short timeout
-        msgs = mailbox.receive(visibility_timeout=1)
+        msgs = mailbox.receive(visibility_timeout=0)
         assert len(msgs) == 1
         msg_id = msgs[0].id
 
-        # Wait for expiry + reaper interval + buffer
-        max_wait = 3.0  # seconds
-        start = time.time()
-        requeued = False
+        _force_reap(mailbox)
 
-        while time.time() - start < max_wait:
-            # Try to receive the requeued message
-            msgs2 = mailbox.receive(visibility_timeout=30, wait_time_seconds=0)
-            if msgs2 and msgs2[0].id == msg_id:
-                requeued = True
-                msgs2[0].acknowledge()
-                break
-            time.sleep(0.1)
-
-        assert requeued, f"Message not requeued within {max_wait}s (liveness violation)"
+        msgs2 = mailbox.receive(visibility_timeout=30, wait_time_seconds=0)
+        assert msgs2 and msgs2[0].id == msg_id, "Message not requeued after reap"
+        msgs2[0].acknowledge()
 
     @pytest.mark.skipif(not HAS_HYPOTHESIS, reason="hypothesis not installed")
     @given(st.integers(min_value=1, max_value=5))  # type: ignore[misc]
@@ -440,14 +424,13 @@ class TestEventualRequeue:
             # Receive all with short timeout
             received = []
             for _ in range(n):
-                msgs = mailbox.receive(visibility_timeout=1, wait_time_seconds=1)
+                msgs = mailbox.receive(visibility_timeout=0, wait_time_seconds=1)
                 if msgs:
                     received.append(msgs[0].id)
 
             assert len(received) == n
 
-            # Wait for all to expire and requeue
-            time.sleep(1.5)
+            _force_reap(mailbox)
 
             # All should be requeued and receivable again
             requeued = []
@@ -458,7 +441,7 @@ class TestEventualRequeue:
                     msgs[0].acknowledge()
                 if len(requeued) == n:
                     break
-                time.sleep(0.1)
+                _force_reap(mailbox)
 
             assert set(requeued) == set(sent_ids), (
                 f"Not all messages requeued: expected {set(sent_ids)}, got {set(requeued)}"

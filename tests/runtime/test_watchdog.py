@@ -38,16 +38,16 @@ def test_heartbeat_initial_elapsed_is_small() -> None:
 def test_heartbeat_elapsed_increases_over_time() -> None:
     """Heartbeat.elapsed() increases as time passes."""
     hb = Heartbeat()
-    time.sleep(0.1)
+    time.sleep(0.02)
     elapsed = hb.elapsed()
-    assert 0.1 <= elapsed < 0.3
+    assert 0.02 <= elapsed < 0.2
 
 
 def test_heartbeat_beat_resets_elapsed() -> None:
     """Heartbeat.beat() resets elapsed time to near zero."""
     hb = Heartbeat()
-    time.sleep(0.1)
-    assert hb.elapsed() >= 0.1
+    time.sleep(0.02)
+    assert hb.elapsed() >= 0.02
 
     hb.beat()
     assert hb.elapsed() < 0.05
@@ -92,23 +92,23 @@ def test_watchdog_check_heartbeats_empty_when_fresh() -> None:
 def test_watchdog_check_heartbeats_detects_stall() -> None:
     """Watchdog._check_heartbeats detects stalled heartbeats."""
     hb = Heartbeat()
-    watchdog = Watchdog([hb], stall_threshold=0.1, check_interval=0.05)
+    watchdog = Watchdog([hb], stall_threshold=0.02, check_interval=0.05)
 
     # Wait for stall
-    time.sleep(0.15)
+    time.sleep(0.03)
 
     stalled = watchdog._check_heartbeats()
     assert len(stalled) == 1
     assert stalled[0][0] == "loop-0"
-    assert stalled[0][1] > 0.1
+    assert stalled[0][1] > 0.02
 
 
 def test_watchdog_check_heartbeats_clears_after_beat() -> None:
     """Watchdog._check_heartbeats clears stall after beat."""
     hb = Heartbeat()
-    watchdog = Watchdog([hb], stall_threshold=0.1, check_interval=0.05)
+    watchdog = Watchdog([hb], stall_threshold=0.02, check_interval=0.05)
 
-    time.sleep(0.15)
+    time.sleep(0.03)
     stalled = watchdog._check_heartbeats()
     assert len(stalled) == 1
 
@@ -122,12 +122,12 @@ def test_watchdog_custom_loop_names() -> None:
     hb = Heartbeat()
     watchdog = Watchdog(
         [hb],
-        stall_threshold=0.1,
+        stall_threshold=0.02,
         check_interval=0.05,
         loop_names=["my-worker"],
     )
 
-    time.sleep(0.15)
+    time.sleep(0.03)
     stalled = watchdog._check_heartbeats()
     assert len(stalled) == 1
     assert stalled[0][0] == "my-worker"
@@ -139,13 +139,13 @@ def test_watchdog_multiple_heartbeats() -> None:
     hb2 = Heartbeat()
     watchdog = Watchdog(
         [hb1, hb2],
-        stall_threshold=0.1,
+        stall_threshold=0.02,
         check_interval=0.05,
         loop_names=["worker-1", "worker-2"],
     )
 
     # Wait for both to stall
-    time.sleep(0.15)
+    time.sleep(0.03)
 
     stalled = watchdog._check_heartbeats()
     assert len(stalled) == 2
@@ -370,10 +370,10 @@ def test_watchdog_runs_check_loop() -> None:
             check_count += 1
             return super()._check_heartbeats()
 
-    watchdog = CountingWatchdog([hb], stall_threshold=10.0, check_interval=0.05)
+    watchdog = CountingWatchdog([hb], stall_threshold=10.0, check_interval=0.01)
     watchdog.start()
 
-    time.sleep(0.2)
+    time.sleep(0.03)
     watchdog.stop()
 
     # Should have checked multiple times
@@ -383,7 +383,7 @@ def test_watchdog_runs_check_loop() -> None:
 def test_health_server_readiness_with_heartbeat() -> None:
     """HealthServer readiness check can incorporate heartbeat freshness."""
     hb = Heartbeat()
-    threshold = 0.1
+    threshold = 0.02
 
     def readiness_check() -> bool:
         return hb.elapsed() < threshold
@@ -400,7 +400,7 @@ def test_health_server_readiness_with_heartbeat() -> None:
         assert resp.status == 200
 
         # Wait for heartbeat to go stale
-        time.sleep(0.15)
+        time.sleep(0.03)
 
         # Now not ready
         with pytest.raises(urllib.error.HTTPError) as exc_info:
