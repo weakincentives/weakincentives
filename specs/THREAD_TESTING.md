@@ -153,24 +153,54 @@ Both are thin wrappers over `checkpoint()`.
 
 ## Implementation
 
-Use `greenlet` for cooperative switching:
+Use real threads with Event synchronization. Only one thread runs at a time—
+the scheduler controls who proceeds.
 
 ```python
 class DeterministicThread:
     def __init__(self, target: Callable, name: str, scheduler: Scheduler):
-        self.greenlet = greenlet(target)
         self.name = name
-        self.scheduler = scheduler
+        self._scheduler = scheduler
+        self._can_run = threading.Event()
+        self._at_checkpoint = threading.Event()
+        self._done = False
+        self._thread = threading.Thread(target=self._run, args=(target,))
 
-    def switch_to(self) -> None:
-        self.greenlet.switch()
+    def _run(self, target: Callable) -> None:
+        self._can_run.wait()
+        self._can_run.clear()
+        try:
+            target()
+        finally:
+            self._done = True
+            self._at_checkpoint.set()
 
-    def yield_control(self) -> None:
-        self.scheduler.main_greenlet.switch()
+    def resume(self) -> None:
+        """Let this thread run until next checkpoint."""
+        self._at_checkpoint.clear()
+        self._can_run.set()
+        self._at_checkpoint.wait()
+
+    def checkpoint(self) -> None:
+        """Pause here, signal scheduler."""
+        self._at_checkpoint.set()
+        self._can_run.wait()
+        self._can_run.clear()
 ```
 
-Without greenlet, fall back to real threads with Event synchronization (higher
-overhead but no dependencies).
+The scheduler runs one thread at a time:
+
+```python
+def step(self) -> bool:
+    thread = self._pick_next()
+    if thread is None:
+        return False
+    thread.resume()  # Blocks until thread hits checkpoint or finishes
+    return not all(t._done for t in self.threads.values())
+```
+
+No external dependencies. The overhead (real OS threads, context switches)
+doesn't matter—tests optimize for determinism, not speed.
 
 ## What This Spec Excludes
 
@@ -188,7 +218,6 @@ These can be added later if proven necessary.
 
 - Cannot control scheduling inside native code or system calls
 - Requires explicit checkpoint placement (or decorator instrumentation)
-- Greenlet required for efficient implementation
 
 ## Related Specifications
 
