@@ -9,8 +9,8 @@ Enable deterministic testing of concurrent code with minimal production impact.
 ## Design Principles
 
 1. **Zero prod cost**: Checkpoints compile to nothing in production
-2. **Easy schedule iteration**: Test many interleavings with one test
-3. **Automatic deadlock detection**: Fail fast when threads can't progress
+1. **Easy schedule iteration**: Test many interleavings with one test
+1. **Automatic deadlock detection**: Fail fast when threads can't progress
 
 ## Minimal Production Impact
 

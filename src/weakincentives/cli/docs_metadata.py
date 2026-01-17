@@ -48,6 +48,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "TASK_COMPLETION": "Task completion checking, PlanBasedChecker, composite verification",
     "TESTING": "Test harnesses, fault injection, fuzzing, coverage standards",
     "THREAD_SAFETY": "Concurrency and shared state",
+    "THREAD_TESTING": "Deterministic thread testing with checkpoints and schedule control",
     "TOOLS": "Tool runtime, policies, sequential dependencies, planning tools",
     "VERIFICATION": "Redis mailbox detailed specification, invariants, property tests",
     "WINK_DOCS": "CLI docs command, bundled documentation access",
