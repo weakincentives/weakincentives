@@ -327,11 +327,10 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
-            messages = mailbox.receive(max_messages=1, visibility_timeout=1)
+            messages = mailbox.receive(max_messages=1, visibility_timeout=0)
             assert len(messages) == 1
 
-            # Wait for visibility timeout to expire
-            time.sleep(1.2)
+            mailbox._reap_expired()
 
             # Message should be available again
             messages = mailbox.receive(max_messages=1)
@@ -387,7 +386,7 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         try:
 
             def sender() -> None:
-                time.sleep(0.2)
+                time.sleep(0.01)
                 mailbox.send("hello")
 
             thread = threading.Thread(target=sender)
@@ -451,9 +450,6 @@ class TestInMemoryMailbox:  # noqa: PLR0904
                 t.start()
             for t in sender_threads:
                 t.join()
-
-            # Wait for messages to be available
-            time.sleep(0.1)
 
             # Receive all messages
             total_received = 0

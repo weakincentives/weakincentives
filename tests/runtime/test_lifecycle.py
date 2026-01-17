@@ -621,7 +621,7 @@ def test_main_loop_shutdown_timeout_returns_false() -> None:
 
     try:
         # Very slow adapter
-        adapter = _MockAdapter(delay=5.0)
+        adapter = _MockAdapter(delay=0.3)
         loop = _TestLoop(adapter=adapter, requests=requests)
 
         requests.send(MainLoopRequest(request=_Request(message="slow")))
@@ -631,14 +631,14 @@ def test_main_loop_shutdown_timeout_returns_false() -> None:
         )
         thread.start()
 
-        time.sleep(0.1)
+        time.sleep(0.02)
 
         # Short timeout - should return False
         result = loop.shutdown(timeout=0.1)
 
         # Clean up - let the thread finish
         requests.close()
-        thread.join(timeout=6.0)
+        thread.join(timeout=1.0)
 
         assert result is False
     finally:
@@ -1562,7 +1562,7 @@ def test_loop_group_build_readiness_check_with_heartbeats(
     loop = _MockRunnableWithHeartbeat()
     group = LoopGroup(
         loops=[loop],
-        watchdog_threshold=0.1,  # Short threshold for testing
+        watchdog_threshold=0.02,  # Short threshold for testing
     )
 
     # Build the readiness check manually
@@ -1580,7 +1580,7 @@ def test_loop_group_build_readiness_check_with_heartbeats(
     assert check() is True
 
     # Wait for heartbeat to go stale
-    time.sleep(0.15)
+    time.sleep(0.03)
 
     # Now should be unhealthy due to stale heartbeat
     assert check() is False
@@ -1612,9 +1612,9 @@ def test_loop_group_build_readiness_check_without_threshold(
     loop._running = True
 
     # Should be healthy regardless of heartbeat age when threshold is None
-    time.sleep(0.05)  # Let heartbeat go a bit stale
+    time.sleep(0.01)  # Let heartbeat go a bit stale
     assert check() is True
 
     # Even with very stale heartbeat, still healthy (no threshold check)
-    time.sleep(0.1)
+    time.sleep(0.02)
     assert check() is True

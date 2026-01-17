@@ -296,8 +296,6 @@ class TestReaperTTLRefresh:
         This is critical to prevent data loss for queues with long visibility
         timeouts where the reaper runs but finds no expired messages.
         """
-        import time
-
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 3600
@@ -323,8 +321,7 @@ class TestReaperTTLRefresh:
             short_ttl = redis_client.ttl(mb._keys.data)
             assert short_ttl <= 100
 
-            # Wait for reaper to run (should refresh TTL even with no expired msgs)
-            time.sleep(0.3)
+            mb._reap_expired()
 
             # TTL should be refreshed back to near custom_ttl
             refreshed_ttl = redis_client.ttl(mb._keys.data)
@@ -337,8 +334,6 @@ class TestReaperTTLRefresh:
 
     def test_reaper_refreshes_all_keys(self, redis_client: Redis[bytes]) -> None:
         """Reaper should refresh TTL on all four Redis keys."""
-        import time
-
         from weakincentives.contrib.mailbox import RedisMailbox
 
         custom_ttl = 3600
@@ -361,8 +356,7 @@ class TestReaperTTLRefresh:
             redis_client.expire(mb._keys.data, 100)
             redis_client.expire(mb._keys.meta, 100)
 
-            # Wait for reaper
-            time.sleep(0.3)
+            mb._reap_expired()
 
             # All keys should have TTL refreshed
             # (pending may be empty, but others should have TTL)
