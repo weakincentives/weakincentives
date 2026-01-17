@@ -54,9 +54,17 @@ class EvalLoopConfig:
     and after each sample extend the message lease, preventing timeout during
     long evaluation runs. EvalLoop's heartbeat is passed to MainLoop.execute()
     so that all tool/adapter beats extend the evaluation message's lease.
+
+    The ``backoff_base`` field controls the base delay (in seconds) for retry
+    backoff when messages fail. The actual backoff is ``backoff_base * delivery_count``
+    capped at ``backoff_max``. Set to 0 for instant retries in tests.
     """
 
     lease_extender: LeaseExtenderConfig | None = None
+    backoff_base: int = 60
+    """Base backoff delay in seconds per delivery attempt. Default 60s."""
+    backoff_max: int = 900
+    """Maximum backoff delay in seconds. Default 900s (15 minutes)."""
 
 
 class EvalLoop[InputT, OutputT, ExpectedT]:
@@ -267,7 +275,10 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         except Exception:
             # Reply send failed - nack so message is retried
             with contextlib.suppress(ReceiptHandleExpiredError):
-                backoff = min(60 * msg.delivery_count, 900)
+                backoff = min(
+                    self._config.backoff_base * msg.delivery_count,
+                    self._config.backoff_max,
+                )
                 msg.nack(visibility_timeout=backoff)
 
     def _evaluate_sample(self, request: EvalRequest[InputT, ExpectedT]) -> EvalResult:
@@ -352,7 +363,10 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         # Retry with backoff - do NOT send error reply here.
         # The message will be redelivered and may succeed on retry.
         # Only send error replies on terminal outcomes (DLQ or final failure).
-        backoff = min(60 * msg.delivery_count, 900)
+        backoff = min(
+            self._config.backoff_base * msg.delivery_count,
+            self._config.backoff_max,
+        )
         with contextlib.suppress(ReceiptHandleExpiredError):
             msg.nack(visibility_timeout=backoff)
 

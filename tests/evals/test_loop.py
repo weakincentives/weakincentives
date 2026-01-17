@@ -26,6 +26,7 @@ from weakincentives.evals import (
     CONTROL,
     Dataset,
     EvalLoop,
+    EvalLoopConfig,
     EvalRequest,
     EvalResult,
     Sample,
@@ -473,7 +474,8 @@ def test_end_to_end_evaluation() -> None:
             requests.send(
                 EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
             )
-        eval_loop.run(max_iterations=5)
+        # Use wait_time_seconds=0 to avoid blocking on empty queue after processing
+        eval_loop.run(max_iterations=5, wait_time_seconds=0)
 
         # Collect results
         report = collect_results(results, expected_count=3, timeout_seconds=5)
@@ -791,7 +793,8 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
         )
 
         # Run - send fails, nack raises ReceiptHandleExpiredError, should handle gracefully
-        eval_loop.run(max_iterations=1)
+        # Use wait_time_seconds=0 to avoid blocking on empty queue
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Should not raise, just pass
     finally:
@@ -1114,11 +1117,14 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
             max_delivery_count=2,
             exclude_errors=frozenset({TimeoutError}),
         )
+        # Use backoff_base=0 to avoid waiting for visibility timeout between retries
+        config = EvalLoopConfig(backoff_base=0)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
+            config=config,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
@@ -1126,7 +1132,7 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
 
         # Run many times - should never dead-letter
         for _ in range(5):
-            eval_loop.run(max_iterations=1)
+            eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should still be in queue (nacked, not dead-lettered)
         assert requests.approximate_count() == 1
