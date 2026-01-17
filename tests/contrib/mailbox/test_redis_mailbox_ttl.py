@@ -250,7 +250,7 @@ class TestTTLOnOperations:
             assert len(msgs) == 1
 
             # Extend visibility
-            msgs[0].extend(60)
+            msgs[0].extend_visibility(60)
 
             # Verify TTL on data key
             ttl_data = redis_client.ttl(mb._keys.data)
@@ -324,7 +324,8 @@ class TestReaperTTLRefresh:
             assert short_ttl <= 100
 
             # Wait for reaper to run (should refresh TTL even with no expired msgs)
-            time.sleep(0.3)
+            # Sleep longer than reaper_interval to ensure reaper runs multiple times
+            time.sleep(0.5)
 
             # TTL should be refreshed back to near custom_ttl
             refreshed_ttl = redis_client.ttl(mb._keys.data)

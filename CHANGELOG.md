@@ -4,7 +4,43 @@ Release highlights for weakincentives.
 
 ## Unreleased
 
-_No changes yet._
+### AWS Bedrock Support
+
+`IsolationConfig` now supports AWS Bedrock authentication by inheriting
+credentials from the host environment. When `api_key` is `None` (the default),
+authentication is inherited transparently—this works with both Anthropic API
+(`ANTHROPIC_API_KEY`) and AWS Bedrock (`CLAUDE_CODE_USE_BEDROCK=1` + AWS
+credentials).
+
+```python
+# Inherit host auth (works with Bedrock or Anthropic API)
+adapter = ClaudeAgentSDKAdapter(
+    model="us.anthropic.claude-sonnet-4-20250514-v1:0",
+    client_config=ClaudeAgentSDKClientConfig(
+        isolation=IsolationConfig(),  # Inherits host auth
+    ),
+)
+
+# Docker: specify where AWS config is mounted
+isolation = IsolationConfig(aws_config_path="/mnt/aws")
+```
+
+New `IsolationConfig` fields:
+
+- `aws_config_path`: Path to AWS config directory for Docker containers where
+  credentials are mounted at non-standard paths
+
+Factory methods for explicit intent and fail-fast validation:
+
+- `IsolationConfig.inherit_host_auth()`: Inherit auth, fail if none configured
+- `IsolationConfig.with_api_key(key)`: Use explicit API key
+- `IsolationConfig.for_bedrock()`: Require Bedrock, fail if not configured
+
+Model ID helpers for unified model selection (defaults to Opus 4.5):
+
+- `get_default_model()`: Returns model ID in the appropriate format for auth mode
+- `to_bedrock_model_id(name)`: Convert Anthropic model name to Bedrock ID
+- `to_anthropic_model_name(id)`: Convert Bedrock ID to Anthropic model name
 
 ## v0.20.0 - 2026-01-16
 

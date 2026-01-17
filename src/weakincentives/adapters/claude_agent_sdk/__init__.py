@@ -88,10 +88,16 @@ from .config import (
     PermissionMode,
 )
 from .isolation import (
+    DEFAULT_BEDROCK_MODEL,
+    DEFAULT_MODEL,
     EphemeralHome,
+    IsolationAuthError,
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    get_default_model,
+    to_anthropic_model_name,
+    to_bedrock_model_id,
 )
 from .workspace import (
     ClaudeAgentWorkspaceSection,
@@ -103,6 +109,8 @@ from .workspace import (
 
 __all__ = [
     "CLAUDE_AGENT_SDK_ADAPTER_NAME",
+    "DEFAULT_BEDROCK_MODEL",
+    "DEFAULT_MODEL",
     "ClaudeAgentSDKAdapter",
     "ClaudeAgentSDKClientConfig",
     "ClaudeAgentSDKModelConfig",
@@ -111,6 +119,7 @@ __all__ = [
     "EphemeralHome",
     "HostMount",
     "HostMountPreview",
+    "IsolationAuthError",
     "IsolationConfig",
     "NetworkPolicy",
     "PermissionMode",
@@ -122,4 +131,7 @@ __all__ = [
     "WorkspaceBudgetExceededError",
     "WorkspaceSecurityError",
     "create_task_completion_stop_hook",
+    "get_default_model",
+    "to_anthropic_model_name",
+    "to_bedrock_model_id",
 ]

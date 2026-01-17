@@ -37,10 +37,12 @@ from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKClientConfig,
     ClaudeAgentWorkspaceSection,
     HostMount as ClaudeHostMount,
+    IsolationAuthError,
     IsolationConfig,
     NetworkPolicy,
     PlanBasedChecker,
     SandboxConfig,
+    get_default_model,
 )
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.contrib.optimizers import WorkspaceDigestOptimizer
@@ -622,31 +624,30 @@ def build_adapter() -> ProviderAdapter[ReviewResponse]:
 def build_claude_agent_adapter() -> tuple[
     ProviderAdapter[ReviewResponse], ClaudeAgentWorkspaceSection
 ]:
-    """Build the Claude Agent SDK adapter with fully hermetic isolation.
+    """Build the Claude Agent SDK adapter with hermetic isolation.
 
     Creates a workspace section with the test repository mounted, and configures
-    the adapter to use the SDK's native agentic capabilities with complete
-    hermetic isolation. The adapter operates from an isolated ephemeral home
-    directory with no access to host configuration or environment variables.
+    the adapter to use the SDK's native agentic capabilities with isolation.
 
-    Hermetic isolation guarantees:
+    Uses ``IsolationConfig.inherit_host_auth()`` to validate authentication is
+    configured and inherit it from the host environment. Supports both Anthropic
+    API (via ANTHROPIC_API_KEY) and AWS Bedrock (via CLAUDE_CODE_USE_BEDROCK=1
+    + AWS_REGION).
+
+    Isolation guarantees:
     - Ephemeral HOME directory (no access to ~/.claude)
-    - Explicit API key passed through IsolationConfig (not inherited from host)
-    - No host environment variables inherited
     - Sandboxed execution with OS-level enforcement
     - Network restricted to Python documentation domains only
     - Skills mounted from demo-skills/ directory
+    - AWS config (~/.aws) copied into ephemeral home for Bedrock authentication
 
     Returns:
         Tuple of (adapter, workspace_section). The workspace section should be
         cloned with the real session before use in prompts.
 
     Raises:
-        SystemExit: If ANTHROPIC_API_KEY is not set in the environment.
+        SystemExit: If no valid authentication method is available.
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise SystemExit("Set ANTHROPIC_API_KEY before running with --claude-agent.")
 
     _ensure_test_repository_available()
 
@@ -680,28 +681,29 @@ def build_claude_agent_adapter() -> tuple[
         else ()
     )
 
-    # Configure fully hermetic isolation:
-    # - Explicit API key (not inherited from host environment)
-    # - No host environment variables inherited
-    # - Sandboxed execution with network restrictions
-    # - Skills mounted in ephemeral home
-    isolation = IsolationConfig(
-        api_key=api_key,
-        include_host_env=False,
-        network_policy=NetworkPolicy(
-            allowed_domains=CODE_REVIEW_ALLOWED_DOMAINS,
-        ),
-        sandbox=SandboxConfig(
-            enabled=True,
-            # Allow reading the workspace directory
-            readable_paths=(str(workspace_section.temp_dir),),
-            # Auto-approve bash commands in sandbox (safe with network restrictions)
-            bash_auto_allow=True,
-        ),
-        skills=SkillConfig(skills=skill_mounts),
-    )
+    # Configure isolation with fail-fast validation
+    # IsolationConfig.inherit_host_auth() validates that auth is configured
+    try:
+        isolation = IsolationConfig.inherit_host_auth(
+            network_policy=NetworkPolicy(
+                allowed_domains=CODE_REVIEW_ALLOWED_DOMAINS,
+            ),
+            sandbox=SandboxConfig(
+                enabled=True,
+                # Allow reading workspace directory
+                readable_paths=(str(workspace_section.temp_dir),),
+                # Auto-approve bash commands in sandbox (safe with network restrictions)
+                bash_auto_allow=True,
+            ),
+            skills=SkillConfig(skills=skill_mounts),
+        )
+    except IsolationAuthError as e:
+        raise SystemExit(str(e)) from None
 
-    model = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929")
+    # Get the default model (Opus 4.5) in the appropriate format for the auth mode
+    # Environment variable CLAUDE_MODEL can override for both modes
+    model = os.getenv("CLAUDE_MODEL", get_default_model())
+
     adapter = ClaudeAgentSDKAdapter(
         model=model,
         client_config=ClaudeAgentSDKClientConfig(
@@ -712,6 +714,15 @@ def build_claude_agent_adapter() -> tuple[
             task_completion_checker=PlanBasedChecker(plan_type=Plan),
         ),
     )
+
+    # Display adapter configuration
+    is_bedrock = model.startswith("us.anthropic.")
+    auth_mode = "AWS Bedrock" if is_bedrock else "Anthropic API"
+    print("\n[Claude Agent SDK Adapter]")
+    print(f"  Model: {model}")
+    print(f"  Auth:  {auth_mode}")
+    print(f"  CWD:   {workspace_section.temp_dir}")
+
     return cast(ProviderAdapter[ReviewResponse], adapter), workspace_section
 
 
