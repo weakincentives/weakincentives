@@ -7,7 +7,7 @@ deterministic testing of concurrent code. The framework allows cooperative
 control over execution ordering while maintaining minimal overhead in
 production.
 
-**Implementation:** `src/weakincentives/testing/threads/`
+**Implementation:** `src/weakincentives/threads/`
 
 ## Problem Statement
 
@@ -274,7 +274,115 @@ def process_item(item: Item, *, ctx: ThreadContext) -> None:
 In production, `checkpoint()` is a no-op. In test mode, it yields control to
 the scheduler, enabling precise control over when each thread progresses.
 
-### Automatic Checkpoints
+### Decorator-Based Checkpoints
+
+The `@checkpointed` decorator automatically injects checkpoints at function
+entry and exit:
+
+```python
+from weakincentives.threads import checkpointed, get_context
+
+@checkpointed
+def process_item(item: Item) -> Result:
+    """Checkpoints injected at entry and exit automatically."""
+    return transform(item)
+
+@checkpointed(name="critical_section")
+def update_shared_state(value: int) -> None:
+    """Named checkpoint for targeted scheduling."""
+    shared.value = value
+```
+
+The decorator uses the thread-local context to emit checkpoints:
+
+```python
+def checkpointed(
+    fn: Callable[P, T] | None = None,
+    *,
+    name: str | None = None,
+    entry: bool = True,
+    exit: bool = True,
+) -> Callable[P, T]:
+    """Decorator that injects checkpoints at function boundaries.
+
+    Args:
+        fn: Function to wrap.
+        name: Base name for checkpoints (defaults to function name).
+        entry: Emit checkpoint on entry.
+        exit: Emit checkpoint on exit.
+
+    Checkpoint names follow pattern: "{name}:entry" and "{name}:exit"
+    """
+    ...
+```
+
+### Context Manager Checkpoints
+
+For finer-grained control within a function, use `checkpoint_region`:
+
+```python
+from weakincentives.threads import checkpoint_region
+
+def complex_operation(data: Data, *, ctx: ThreadContext) -> Result:
+    """Use context managers for checkpoints around critical regions."""
+
+    with checkpoint_region(ctx, "validation"):
+        # Checkpoint at entry: "validation:enter"
+        validate(data)
+        # Checkpoint at exit: "validation:exit"
+
+    with checkpoint_region(ctx, "transform", exit_only=True):
+        # No entry checkpoint
+        result = expensive_transform(data)
+        # Checkpoint at exit: "transform:exit"
+
+    return result
+```
+
+Context manager signature:
+
+```python
+@contextmanager
+def checkpoint_region(
+    ctx: ThreadContext,
+    name: str,
+    *,
+    entry: bool = True,
+    exit: bool = True,
+    exit_only: bool = False,
+) -> Iterator[None]:
+    """Context manager that emits checkpoints on entry and/or exit.
+
+    Args:
+        ctx: Thread context for checkpoint emission.
+        name: Base name for checkpoints.
+        entry: Emit checkpoint on entry (unless exit_only).
+        exit: Emit checkpoint on exit.
+        exit_only: Convenience flag to set entry=False.
+    """
+    ...
+```
+
+### Thread-Local Context Access
+
+For decorator-based checkpoints that don't take explicit context:
+
+```python
+from weakincentives.threads import set_context, get_context, context_scope
+
+# Global default (typically ProductionThreadContext)
+set_context(ProductionThreadContext())
+
+# Get current context (thread-local with global fallback)
+ctx = get_context()
+
+# Scoped override for testing
+with context_scope(DeterministicThreadContext(scheduler)):
+    # All @checkpointed calls in this scope use deterministic context
+    run_test()
+```
+
+### Automatic Checkpoints at Synchronization
 
 The deterministic primitives automatically yield at blocking operations:
 
@@ -490,7 +598,7 @@ def test_random_schedules(schedule):
 Complete example testing a concurrent counter:
 
 ```python
-from weakincentives.testing.threads import (
+from weakincentives.threads import (
     DeterministicThreadContext,
     Scheduler,
     ScriptedStrategy,
@@ -536,6 +644,82 @@ class TestConcurrentCounter(ThreadTestCase):
                 lambda: counter.decrement(),
             )
             self.assert_no_deadlock()
+```
+
+### Example with Decorators and Context Managers
+
+Production code using automatic checkpoints:
+
+```python
+from weakincentives.threads import (
+    checkpointed,
+    checkpoint_region,
+    get_context,
+    ThreadContext,
+)
+
+@checkpointed
+def fetch_and_process(url: str) -> Result:
+    """Entry/exit checkpoints injected automatically."""
+    data = fetch(url)
+    return process(data)
+
+@checkpointed(name="db_write")
+def persist_result(result: Result) -> None:
+    """Named checkpoint for precise test control."""
+    ctx = get_context()
+
+    with checkpoint_region(ctx, "validate"):
+        validate(result)
+
+    with checkpoint_region(ctx, "write"):
+        db.write(result)
+```
+
+Test using scripted strategy to target specific interleavings:
+
+```python
+from weakincentives.threads import (
+    DeterministicThreadContext,
+    Scheduler,
+    ScriptedStrategy,
+    context_scope,
+)
+
+def test_concurrent_persist():
+    scheduler = Scheduler()
+    ctx = DeterministicThreadContext(scheduler=scheduler)
+
+    result_1 = Result(id=1, value="first")
+    result_2 = Result(id=2, value="second")
+
+    with context_scope(ctx):
+        # Script: r1 validates, r2 validates, r1 writes, r2 writes
+        # This tests that validation and write are properly atomic
+        scheduler.strategy = ScriptedStrategy([
+            "persist_1",  # entry checkpoint
+            "persist_1",  # validate:enter
+            "persist_2",  # entry checkpoint
+            "persist_2",  # validate:enter
+            "persist_1",  # validate:exit
+            "persist_1",  # write:enter
+            "persist_2",  # validate:exit
+            "persist_2",  # write:enter
+            "persist_1",  # write:exit
+            "persist_1",  # exit checkpoint
+            "persist_2",  # write:exit
+            "persist_2",  # exit checkpoint
+        ])
+
+        t1 = ctx.spawn(lambda: persist_result(result_1), name="persist_1")
+        t2 = ctx.spawn(lambda: persist_result(result_2), name="persist_2")
+        t1.start()
+        t2.start()
+
+        scheduler.run_until_complete()
+
+        assert db.get(1).value == "first"
+        assert db.get(2).value == "second"
 ```
 
 ## Implementation Notes
