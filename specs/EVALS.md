@@ -9,7 +9,7 @@ this spec adds datasets and scoring.
 
 ## Guiding Principles
 
-- **EvalLoop wraps MainLoop** - Composition-based, event-driven, type-safe
+- **EvalLoop communicates via Mailbox** - Decoupled from MainLoop via message passing
 - **Evaluators are functions** - Pure `(output, expected) -> Score`
 - **Datasets are immutable** - Frozen dataclass with typed samples
 
@@ -146,13 +146,75 @@ MainLoop, scores with evaluator, sends `EvalResult` to results mailbox.
 
 EvalLoop supports distributed evaluation using Redis/SQS mailboxes.
 
+### Mailbox-Based Architecture
+
+EvalLoop communicates with MainLoop workers through a shared `mainloop_requests`
+mailbox rather than holding a direct MainLoop reference. This enables:
+
+- **Horizontal scaling**: Multiple MainLoop workers process requests in parallel
+- **Process isolation**: EvalLoop and MainLoop can run in separate processes
+- **Cluster deployment**: Workers distributed across machines via Redis mailbox
+
+```
+┌─────────────┐     EvalRequest      ┌─────────────────────┐
+│             │──────────────────────▶│                     │
+│   Client    │                       │  eval_requests      │
+│             │◀──────────────────────│  (mailbox)          │
+└─────────────┘     EvalResult        └──────────┬──────────┘
+                                                 │
+                                                 ▼
+                                      ┌──────────────────────┐
+                                      │    EvalLoop Worker   │
+                                      │                      │
+                                      │  1. Receive request  │
+                                      │  2. Build MainLoop-  │
+                                      │     Request          │
+                                      │  3. Send to main-    │
+                                      │     loop_requests    │
+                                      │  4. Wait for result  │
+                                      │  5. Score output     │
+                                      │  6. Reply with       │
+                                      │     EvalResult       │
+                                      └──────────┬───────────┘
+                                                 │
+                                                 │ MainLoopRequest
+                                                 ▼
+                                      ┌──────────────────────┐
+                                      │  mainloop_requests   │
+                                      │  (mailbox)           │
+                                      └──────────┬───────────┘
+                 ┌───────────────────────────────┼───────────────────────────────┐
+                 ▼                               ▼                               ▼
+      ┌──────────────────┐           ┌──────────────────┐           ┌──────────────────┐
+      │ MainLoop Worker 1│           │ MainLoop Worker 2│           │ MainLoop Worker N│
+      │                  │           │                  │           │                  │
+      │ Execute prompt   │           │ Execute prompt   │           │ Execute prompt   │
+      │ Reply with       │           │ Reply with       │           │ Reply with       │
+      │ MainLoopResult   │           │ MainLoopResult   │           │ MainLoopResult   │
+      └──────────────────┘           └──────────────────┘           └──────────────────┘
+```
+
+### Configuration
+
+```python
+# EvalLoop no longer requires a MainLoop instance
+eval_loop = EvalLoop(
+    evaluator=exact_match,
+    requests=eval_requests_mailbox,
+    mainloop_requests=mainloop_requests_mailbox,  # Target for MainLoopRequests
+    config=EvalLoopConfig(
+        mainloop_timeout=300.0,  # Max wait for MainLoop response
+    ),
+)
+```
+
 ### Deployment Modes
 
 **Worker Process:**
 
 - Runs `EvalLoop.run()` indefinitely
 - Polls with long polling (20s)
-- Executes, scores, acks/nacks
+- Sends MainLoopRequest, waits for result, scores, acks/nacks
 
 **Client Process:**
 
@@ -162,16 +224,137 @@ EvalLoop supports distributed evaluation using Redis/SQS mailboxes.
 
 **Scaling:**
 
-- Multiple workers for horizontal scaling
-- Visibility timeout ensures exactly-once
+- Multiple EvalLoop workers for horizontal eval scaling
+- Multiple MainLoop workers for horizontal execution scaling
+- Visibility timeout ensures at-least-once processing
 - Failed evaluations retry with backoff
+
+## Clustered Deployment Considerations
+
+### Reply Mailbox Routing
+
+Each EvalLoop worker creates a unique reply mailbox to receive `MainLoopResult`
+messages. This mailbox name is included in the `reply_to` field of the
+`MainLoopRequest`.
+
+**In-process (InMemoryMailbox):**
+- Reply routing uses direct object references
+- No resolver configuration needed
+
+**Distributed (RedisMailbox):**
+- Reply mailbox names serialized as strings
+- `MailboxResolver` reconstructs mailbox on MainLoop worker
+- Use `CompositeResolver` with `RedisMailboxFactory` fallback
+
+```python
+# MainLoop worker configuration
+resolver = CompositeResolver(
+    registry={},
+    factory=RedisMailboxFactory(client=redis, body_type=MainLoopResult),
+)
+mainloop = MyMainLoop(
+    adapter=adapter,
+    requests=RedisMailbox(
+        name="mainloop-requests",
+        client=redis,
+        reply_resolver=resolver,
+    ),
+)
+```
+
+### Session Access for Session-Aware Evaluators
+
+Session-aware evaluators require access to the session after MainLoop execution.
+Two strategies:
+
+**Strategy 1: Session Snapshot in Result**
+
+MainLoop includes serialized session snapshot in `MainLoopResult.session_snapshot`.
+EvalLoop deserializes for evaluator access.
+
+```python
+@dataclass(frozen=True)
+class MainLoopResult[T]:
+    # ... existing fields ...
+    session_snapshot: bytes | None = None  # Serialized session state
+```
+
+Trade-offs:
+- (+) Simple - session travels with result
+- (-) Payload size increases with session size
+- (-) Requires session serialization
+
+**Strategy 2: Shared Session Store**
+
+Sessions persisted to shared storage (Redis, database). MainLoop writes session
+after execution; EvalLoop reads by session_id.
+
+```python
+# MainLoop writes after execution
+session_store.save(session_id, session)
+
+# EvalLoop reads for evaluator
+session = session_store.load(result.session_id)
+score = evaluator(output, expected, session)
+```
+
+Trade-offs:
+- (+) Constant result payload size
+- (+) Sessions available for debugging/replay
+- (-) Additional infrastructure dependency
+- (-) Eventual consistency concerns
+
+### Heartbeat and Lease Extension
+
+With mailbox-based communication, heartbeat propagation changes:
+
+**Current (direct call):**
+- EvalLoop passes `Heartbeat` to `MainLoop.execute()`
+- Tool execution beats extend EvalLoop's message lease
+
+**Mailbox-based:**
+- EvalLoop cannot share heartbeat with remote MainLoop worker
+- Each layer manages its own lease extension independently
+
+```
+EvalLoop                          MainLoop Worker
+    │                                   │
+    │ LeaseExtender on EvalRequest      │ LeaseExtender on MainLoopRequest
+    │ extends during wait               │ extends during execution
+    ▼                                   ▼
+```
+
+Configure visibility timeouts to accommodate:
+- EvalLoop: `mainloop_timeout + scoring_time + buffer`
+- MainLoop: `max_execution_time + buffer`
+
+### Error Attribution
+
+In clustered deployment, errors can occur at multiple layers:
+
+| Error Source | Detection | Handling |
+|--------------|-----------|----------|
+| MainLoop timeout | No response within `mainloop_timeout` | Retry or DLQ |
+| MainLoop execution failure | `MainLoopResult.error` populated | Score as failure |
+| Network partition | `MailboxConnectionError` | Nack with backoff |
+| Reply mailbox unreachable | `ReplyNotAvailableError` at MainLoop | MainLoop logs, EvalLoop times out |
+
+### Ordering Guarantees
+
+Mailbox-based architecture does **not** guarantee ordering:
+
+- Multiple MainLoop workers may process requests concurrently
+- Results may arrive out of order
+- `EvalResult.sample_id` correlates results to samples
+
+If ordering matters, use single MainLoop worker or add sequence numbers.
 
 ## Limitations
 
-- **Sequential execution**: MainLoop is synchronous
 - **No caching**: Repeated samples re-execute
 - **No checkpoints**: Cannot resume interrupted runs
-- **Single loop**: One MainLoop per EvalLoop
+- **Session-aware evaluators in cluster**: Require session snapshot or shared store
+- **No ordering guarantees**: Results may arrive out of sample order
 
 ## Related Specifications
 

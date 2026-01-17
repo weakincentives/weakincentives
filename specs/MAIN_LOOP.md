@@ -127,4 +127,4 @@ response, session = loop.execute(MyRequest(...))
 - `specs/DLQ.md` - Dead letter queue configuration
 - `specs/MAILBOX.md` - Mailbox protocol
 - `specs/LIFECYCLE.md` - LoopGroup coordination
-- `specs/EVALS.md` - EvalLoop wrapping MainLoop
+- `specs/EVALS.md` - EvalLoop (communicates via mailbox)
