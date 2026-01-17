@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import os
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -56,7 +55,8 @@ def test_directory_argument_loads_latest_snapshot(
         now = datetime.now(UTC)
         _write_snapshot(older, created_at=now - timedelta(days=1))
         _write_snapshot(newer, created_at=now)
-        now_ts = time.time()
+        # Use fixed timestamps for deterministic ordering
+        now_ts = 1000000000.0  # Fixed base timestamp
         os.utime(older, (now_ts, now_ts))
         os.utime(newer, (now_ts + 1, now_ts + 1))
 

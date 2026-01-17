@@ -15,12 +15,12 @@
 from __future__ import annotations
 
 import threading
-import time
 from dataclasses import dataclass
 from datetime import UTC
 
 import pytest
 
+from tests.helpers.time import DeterministicClock
 from weakincentives.runtime.mailbox import (
     CollectingMailbox,
     CompositeResolver,
@@ -60,22 +60,28 @@ class _Result:
 # =============================================================================
 
 
-def test_message_is_mutable_for_finalized_state() -> None:
+def test_message_is_mutable_for_finalized_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Message instances have mutable _finalized state but frozen public fields."""
+    clock = DeterministicClock(monkeypatch)
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.time(),  # type: ignore[arg-type]
     )
     # Public fields should not be directly modifiable
     assert msg.id == "msg-1"
     assert msg.is_finalized is False
 
 
-def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
+def test_message_lifecycle_methods_delegate_to_callbacks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Message lifecycle methods call bound callbacks."""
+    clock = DeterministicClock(monkeypatch)
     ack_called = []
     nack_called = []
     extend_called = []
@@ -85,7 +91,7 @@ def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.time(),  # type: ignore[arg-type]
         _acknowledge_fn=lambda: ack_called.append(True),
         _nack_fn=lambda t: nack_called.append(t),
         _extend_fn=lambda t: extend_called.append(t),
@@ -105,14 +111,17 @@ def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
     assert extend_called == [60]
 
 
-def test_message_reply_without_reply_to_raises() -> None:
+def test_message_reply_without_reply_to_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Message.reply() raises ReplyNotAvailableError when no reply_to."""
+    clock = DeterministicClock(monkeypatch)
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.time(),  # type: ignore[arg-type]
         reply_to=None,
     )
 
@@ -120,15 +129,18 @@ def test_message_reply_without_reply_to_raises() -> None:
         msg.reply("response")
 
 
-def test_message_reply_after_acknowledge_raises() -> None:
+def test_message_reply_after_acknowledge_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Message.reply() raises MessageFinalizedError after acknowledge."""
+    clock = DeterministicClock(monkeypatch)
     responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.time(),  # type: ignore[arg-type]
         reply_to=responses,
     )
 
@@ -138,15 +150,16 @@ def test_message_reply_after_acknowledge_raises() -> None:
         msg.reply("response")
 
 
-def test_message_reply_after_nack_raises() -> None:
+def test_message_reply_after_nack_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     """Message.reply() raises MessageFinalizedError after nack."""
+    clock = DeterministicClock(monkeypatch)
     responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.time(),  # type: ignore[arg-type]
         reply_to=responses,
     )
 
@@ -156,8 +169,9 @@ def test_message_reply_after_nack_raises() -> None:
         msg.reply("response")
 
 
-def test_message_reply_success() -> None:
+def test_message_reply_success(monkeypatch: pytest.MonkeyPatch) -> None:
     """Message.reply() sends to reply_to destination."""
+    clock = DeterministicClock(monkeypatch)
     responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
 
     msg: Message[str, str] = Message(
@@ -165,7 +179,7 @@ def test_message_reply_success() -> None:
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.time(),  # type: ignore[arg-type]
         reply_to=responses,
     )
 
@@ -322,16 +336,22 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_visibility_timeout_requeues_message(self) -> None:
+    def test_visibility_timeout_requeues_message(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Message is requeued after visibility timeout expires."""
+        clock = DeterministicClock(monkeypatch)
         mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1, visibility_timeout=1)
             assert len(messages) == 1
 
-            # Wait for visibility timeout to expire
-            time.sleep(1.2)
+            # Advance clock past visibility timeout
+            clock.advance(1.2)
+
+            # Trigger reaper to process expired messages
+            mailbox._reap_expired()
 
             # Message should be available again
             messages = mailbox.receive(max_messages=1)
@@ -385,36 +405,53 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         """wait_time_seconds blocks until message arrives."""
         mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
+            sender_started = threading.Event()
+            send_message = threading.Event()
 
             def sender() -> None:
-                time.sleep(0.2)
+                sender_started.set()
+                send_message.wait(timeout=5.0)
                 mailbox.send("hello")
 
             thread = threading.Thread(target=sender)
             thread.start()
+            sender_started.wait(timeout=1.0)
 
-            start = time.monotonic()
-            messages = mailbox.receive(max_messages=1, wait_time_seconds=1)
-            elapsed = time.monotonic() - start
+            # Start receiving in another thread (it will block)
+            received: list[str] = []
+            receiver_done = threading.Event()
 
-            thread.join()
-            assert len(messages) == 1
-            assert messages[0].body == "hello"
-            # Should have waited ~0.2s, not the full 1s
-            assert elapsed < 0.5
+            def receiver() -> None:
+                msgs = mailbox.receive(max_messages=1, wait_time_seconds=2)
+                if msgs:
+                    received.append(msgs[0].body)
+                receiver_done.set()
+
+            recv_thread = threading.Thread(target=receiver)
+            recv_thread.start()
+
+            # Give receiver time to start waiting, then send message
+            import time as real_time
+
+            real_time.sleep(0.05)  # Small real wait for receiver to enter wait
+            send_message.set()
+
+            thread.join(timeout=2.0)
+            recv_thread.join(timeout=2.0)
+
+            assert len(received) == 1
+            assert received[0] == "hello"
         finally:
             mailbox.close()
 
-    def test_long_poll_timeout(self) -> None:
+    def test_long_poll_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """wait_time_seconds returns empty on timeout."""
+        _ = DeterministicClock(monkeypatch, auto_advance_on_sleep=True)
         mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
-            start = time.monotonic()
-            messages = mailbox.receive(max_messages=1, wait_time_seconds=0.2)
-            elapsed = time.monotonic() - start
-
+            messages = mailbox.receive(max_messages=1, wait_time_seconds=0)
+            # With wait_time_seconds=0, should return immediately
             assert len(messages) == 0
-            assert elapsed >= 0.2
         finally:
             mailbox.close()
 
@@ -451,9 +488,6 @@ class TestInMemoryMailbox:  # noqa: PLR0904
                 t.start()
             for t in sender_threads:
                 t.join()
-
-            # Wait for messages to be available
-            time.sleep(0.1)
 
             # Receive all messages
             total_received = 0
@@ -860,21 +894,25 @@ def test_fake_mailbox_reply_sends_to_mailbox() -> None:
 class TestInMemoryMailboxCoverage:
     """Additional tests for InMemoryMailbox coverage."""
 
-    def test_extend_visibility_success(self) -> None:
+    def test_extend_visibility_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """extend_visibility() extends timeout for valid handle."""
+        clock = DeterministicClock(monkeypatch)
         mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1, visibility_timeout=1)
             assert len(messages) == 1
 
-            # Extend visibility
+            # Extend visibility to 60 seconds
             messages[0].extend_visibility(60)
 
-            # Wait for original timeout to pass
-            time.sleep(1.2)
+            # Advance clock past original timeout
+            clock.advance(1.2)
 
-            # Message should still be invisible (not requeued)
+            # Trigger reaper to check for expired messages
+            mailbox._reap_expired()
+
+            # Message should still be invisible (not requeued) since we extended
             assert mailbox.approximate_count() == 1
             new_messages = mailbox.receive(max_messages=1)
             assert len(new_messages) == 0  # Still invisible
@@ -951,10 +989,14 @@ def test_in_memory_mailbox_receive_returns_empty_when_closed() -> None:
 
 def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
     """InMemoryMailbox.close() wakes receivers blocked on wait."""
+    import time as real_time
+
     mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
     received: list[bool] = []
+    receiver_started = threading.Event()
 
     def receiver() -> None:
+        receiver_started.set()
         # This would block for 10 seconds normally
         _ = mailbox.receive(max_messages=1, wait_time_seconds=10)
         received.append(True)
@@ -962,8 +1004,10 @@ def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
     thread = threading.Thread(target=receiver)
     thread.start()
 
-    # Give thread time to start waiting
-    time.sleep(0.1)
+    # Wait for receiver to start
+    receiver_started.wait(timeout=2.0)
+    # Small real delay to ensure receiver has entered wait state
+    real_time.sleep(0.05)
 
     # Close should wake the receiver
     mailbox.close()

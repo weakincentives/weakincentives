@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 import threading
-import time
 import urllib.error
 import urllib.request
 from unittest.mock import patch
 
 import pytest
 
+from tests.helpers.time import DeterministicClock
 from weakincentives.runtime.watchdog import HealthServer, Heartbeat, Watchdog
 
 # =============================================================================
@@ -29,24 +29,29 @@ from weakincentives.runtime.watchdog import HealthServer, Heartbeat, Watchdog
 # =============================================================================
 
 
-def test_heartbeat_initial_elapsed_is_small() -> None:
+def test_heartbeat_initial_elapsed_is_small(monkeypatch: pytest.MonkeyPatch) -> None:
     """Heartbeat.elapsed() is near zero immediately after creation."""
+    _ = DeterministicClock(monkeypatch)
     hb = Heartbeat()
     assert hb.elapsed() < 0.1
 
 
-def test_heartbeat_elapsed_increases_over_time() -> None:
+def test_heartbeat_elapsed_increases_over_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Heartbeat.elapsed() increases as time passes."""
+    clock = DeterministicClock(monkeypatch)
     hb = Heartbeat()
-    time.sleep(0.1)
+    clock.advance(0.1)
     elapsed = hb.elapsed()
     assert 0.1 <= elapsed < 0.3
 
 
-def test_heartbeat_beat_resets_elapsed() -> None:
+def test_heartbeat_beat_resets_elapsed(monkeypatch: pytest.MonkeyPatch) -> None:
     """Heartbeat.beat() resets elapsed time to near zero."""
+    clock = DeterministicClock(monkeypatch)
     hb = Heartbeat()
-    time.sleep(0.1)
+    clock.advance(0.1)
     assert hb.elapsed() >= 0.1
 
     hb.beat()
@@ -80,8 +85,11 @@ def test_heartbeat_is_thread_safe() -> None:
 # =============================================================================
 
 
-def test_watchdog_check_heartbeats_empty_when_fresh() -> None:
+def test_watchdog_check_heartbeats_empty_when_fresh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Watchdog._check_heartbeats returns empty list when all heartbeats are fresh."""
+    _ = DeterministicClock(monkeypatch)
     hb = Heartbeat()
     watchdog = Watchdog([hb], stall_threshold=1.0, check_interval=0.1)
 
@@ -89,13 +97,16 @@ def test_watchdog_check_heartbeats_empty_when_fresh() -> None:
     assert stalled == []
 
 
-def test_watchdog_check_heartbeats_detects_stall() -> None:
+def test_watchdog_check_heartbeats_detects_stall(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Watchdog._check_heartbeats detects stalled heartbeats."""
+    clock = DeterministicClock(monkeypatch)
     hb = Heartbeat()
     watchdog = Watchdog([hb], stall_threshold=0.1, check_interval=0.05)
 
-    # Wait for stall
-    time.sleep(0.15)
+    # Advance clock past stall threshold
+    clock.advance(0.15)
 
     stalled = watchdog._check_heartbeats()
     assert len(stalled) == 1
@@ -103,12 +114,15 @@ def test_watchdog_check_heartbeats_detects_stall() -> None:
     assert stalled[0][1] > 0.1
 
 
-def test_watchdog_check_heartbeats_clears_after_beat() -> None:
+def test_watchdog_check_heartbeats_clears_after_beat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Watchdog._check_heartbeats clears stall after beat."""
+    clock = DeterministicClock(monkeypatch)
     hb = Heartbeat()
     watchdog = Watchdog([hb], stall_threshold=0.1, check_interval=0.05)
 
-    time.sleep(0.15)
+    clock.advance(0.15)
     stalled = watchdog._check_heartbeats()
     assert len(stalled) == 1
 
@@ -117,8 +131,9 @@ def test_watchdog_check_heartbeats_clears_after_beat() -> None:
     assert stalled == []
 
 
-def test_watchdog_custom_loop_names() -> None:
+def test_watchdog_custom_loop_names(monkeypatch: pytest.MonkeyPatch) -> None:
     """Watchdog uses custom loop names in stall reports."""
+    clock = DeterministicClock(monkeypatch)
     hb = Heartbeat()
     watchdog = Watchdog(
         [hb],
@@ -127,14 +142,15 @@ def test_watchdog_custom_loop_names() -> None:
         loop_names=["my-worker"],
     )
 
-    time.sleep(0.15)
+    clock.advance(0.15)
     stalled = watchdog._check_heartbeats()
     assert len(stalled) == 1
     assert stalled[0][0] == "my-worker"
 
 
-def test_watchdog_multiple_heartbeats() -> None:
+def test_watchdog_multiple_heartbeats(monkeypatch: pytest.MonkeyPatch) -> None:
     """Watchdog monitors multiple heartbeats independently."""
+    clock = DeterministicClock(monkeypatch)
     hb1 = Heartbeat()
     hb2 = Heartbeat()
     watchdog = Watchdog(
@@ -144,8 +160,8 @@ def test_watchdog_multiple_heartbeats() -> None:
         loop_names=["worker-1", "worker-2"],
     )
 
-    # Wait for both to stall
-    time.sleep(0.15)
+    # Advance clock past stall threshold
+    clock.advance(0.15)
 
     stalled = watchdog._check_heartbeats()
     assert len(stalled) == 2
@@ -360,28 +376,40 @@ def test_health_server_address_is_none_before_start() -> None:
 
 
 def test_watchdog_runs_check_loop() -> None:
-    """Watchdog periodically checks heartbeats."""
+    """Watchdog periodically checks heartbeats.
+
+    Note: This test uses real time because the watchdog runs in a background
+    thread with its own threading.Event.wait() loop that we can't easily
+    mock without changing the implementation significantly.
+    """
     hb = Heartbeat()
     check_count = 0
+    check_event = threading.Event()
 
     class CountingWatchdog(Watchdog):
         def _check_heartbeats(self) -> list[tuple[str, float]]:
             nonlocal check_count
             check_count += 1
+            if check_count >= 2:
+                check_event.set()
             return super()._check_heartbeats()
 
-    watchdog = CountingWatchdog([hb], stall_threshold=10.0, check_interval=0.05)
+    watchdog = CountingWatchdog([hb], stall_threshold=10.0, check_interval=0.01)
     watchdog.start()
 
-    time.sleep(0.2)
+    # Wait for at least 2 checks
+    check_event.wait(timeout=2.0)
     watchdog.stop()
 
     # Should have checked multiple times
     assert check_count >= 2
 
 
-def test_health_server_readiness_with_heartbeat() -> None:
+def test_health_server_readiness_with_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """HealthServer readiness check can incorporate heartbeat freshness."""
+    clock = DeterministicClock(monkeypatch)
     hb = Heartbeat()
     threshold = 0.1
 
@@ -399,8 +427,8 @@ def test_health_server_readiness_with_heartbeat() -> None:
         resp = urllib.request.urlopen(f"http://127.0.0.1:{port}/health/ready")
         assert resp.status == 200
 
-        # Wait for heartbeat to go stale
-        time.sleep(0.15)
+        # Advance clock past threshold
+        clock.advance(0.15)
 
         # Now not ready
         with pytest.raises(urllib.error.HTTPError) as exc_info:

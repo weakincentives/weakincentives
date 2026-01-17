@@ -45,7 +45,7 @@ class _InFlightMessage[T, R]:
     delivery_count: int
     receipt_handle: str
     reply_to: Mailbox[R, None] | None
-    expires_at: float  # time.monotonic() value
+    expires_at: float  # time.time.monotonic() value
 
 
 class InMemoryMailboxFactory[R]:

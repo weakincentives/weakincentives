@@ -75,7 +75,7 @@ class Heartbeat:
             ...
     """
 
-    _last_beat: float = field(default_factory=time.monotonic)
+    _last_beat: float = field(default_factory=lambda: time.monotonic())
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _callbacks: list[Callable[[], None]] = field(
         default_factory=lambda: list[Callable[[], None]]()

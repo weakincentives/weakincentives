@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import threading
-import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
@@ -27,6 +26,7 @@ from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.dlq import DeadLetter, DLQConsumer, DLQPolicy
+from weakincentives.runtime.lifecycle import wait_until
 from weakincentives.runtime.mailbox import (
     FakeMailbox,
     InMemoryMailbox,
@@ -774,8 +774,8 @@ def test_dlq_consumer_shutdown() -> None:
         )
         thread.start()
 
-        # Give it time to start
-        time.sleep(0.1)
+        # Wait for consumer to start running
+        wait_until(lambda: consumer.running, timeout=2.0)
         assert consumer.running
 
         # Shutdown

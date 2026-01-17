@@ -14,11 +14,11 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import MagicMock
 
 import pytest
 
+from tests.helpers.time import DeterministicClock
 from weakincentives.runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
 from weakincentives.runtime.mailbox import (
     InMemoryMailbox,
@@ -81,11 +81,12 @@ def test_heartbeat_callback_exception_logged_not_propagated() -> None:
     assert calls == ["before", "after"]
 
 
-def test_heartbeat_elapsed_updated_on_beat() -> None:
+def test_heartbeat_elapsed_updated_on_beat(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify elapsed() is updated when beat() is called."""
+    clock = DeterministicClock(monkeypatch)
     heartbeat = Heartbeat()
 
-    time.sleep(0.1)
+    clock.advance(0.1)
     elapsed_before = heartbeat.elapsed()
 
     heartbeat.beat()
@@ -160,8 +161,9 @@ def test_lease_extender_extends_on_beat() -> None:
     mock_extend.assert_called_with(300)  # Default extension
 
 
-def test_lease_extender_rate_limits() -> None:
+def test_lease_extender_rate_limits(monkeypatch: pytest.MonkeyPatch) -> None:
     """Verify extension is rate-limited by interval."""
+    clock = DeterministicClock(monkeypatch)
     msg, mock_extend = _create_test_message()
     heartbeat = Heartbeat()
     config = LeaseExtenderConfig(interval=0.2)  # 200ms limit
@@ -171,7 +173,7 @@ def test_lease_extender_rate_limits() -> None:
         heartbeat.beat()  # Extends
         heartbeat.beat()  # Skipped (interval not elapsed)
         heartbeat.beat()  # Skipped
-        time.sleep(0.25)
+        clock.advance(0.25)  # Advance clock past interval
         heartbeat.beat()  # Extends (interval elapsed)
 
     assert mock_extend.call_count == 2

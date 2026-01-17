@@ -18,13 +18,15 @@ from .filesystem import (
     ReadOnlyFilesystemValidationSuite,
     SnapshotableFilesystemValidationSuite,
 )
-from .time import FrozenUtcNow, frozen_utcnow
+from .time import DeterministicClock, FrozenUtcNow, deterministic_clock, frozen_utcnow
 
 __all__ = [
+    "DeterministicClock",
     "FilesystemValidationSuite",
     "FrozenUtcNow",
     "NullDispatcher",
     "ReadOnlyFilesystemValidationSuite",
     "SnapshotableFilesystemValidationSuite",
+    "deterministic_clock",
     "frozen_utcnow",
 ]

@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -281,10 +280,13 @@ def test_snapshot_listing_and_switch(tmp_path: Path) -> None:
     _write_snapshot(snapshot_one, ["a"])
     _write_snapshot(snapshot_two, ["b", "c"])
 
-    now = time.time()
-    time.sleep(0.01)
-    time_one = now
-    time_two = now + 1
+    # Use future timestamps to ensure they exceed st_ctime (set by OS on creation)
+    # list_snapshots uses max(st_ctime, st_mtime), so mtime must be > ctime
+    import time as _time
+
+    future_base = _time.time() + 1000.0  # Far in the future
+    time_one = future_base
+    time_two = future_base + 1.0  # One second later
     os.utime(snapshot_one, (time_one, time_one))
     os.utime(snapshot_two, (time_two, time_two))
 
