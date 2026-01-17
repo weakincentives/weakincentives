@@ -613,6 +613,7 @@ def test_main_loop_context_manager() -> None:
         requests.close()
 
 
+@pytest.mark.slow
 def test_main_loop_shutdown_timeout_returns_false() -> None:
     """MainLoop.shutdown() returns False when timeout expires."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (

@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules all clean
+.PHONY: format check test test-full lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules all clean
 
 # Format code with ruff
 format:
@@ -72,8 +72,12 @@ typecheck: ty pyright
 type-coverage:
 	@uv run --all-extras python build/run_type_coverage.py -q
 
-# Run tests with coverage (100% minimum)
+# Run tests with coverage (100% minimum), excluding slow tests
 test:
+	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= -m "not slow" tests
+
+# Run all tests including slow tests (for CI or thorough verification)
+test-full:
 	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= tests
 
 # Run OpenAI integration tests

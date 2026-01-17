@@ -27,7 +27,7 @@ import pytest
 if TYPE_CHECKING:
     from redis import Redis
 
-pytestmark = pytest.mark.redis_standalone
+pytestmark = [pytest.mark.redis_standalone, pytest.mark.slow]
 
 
 class TestTTLConstant:

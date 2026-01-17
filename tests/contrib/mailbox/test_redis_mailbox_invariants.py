@@ -40,7 +40,7 @@ try:
 except ImportError:
     HAS_HYPOTHESIS = False
 
-pytestmark = pytest.mark.redis_standalone
+pytestmark = [pytest.mark.redis_standalone, pytest.mark.slow]
 
 
 class TestReceiptHandleFreshness:

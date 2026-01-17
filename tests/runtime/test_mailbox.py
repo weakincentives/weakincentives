@@ -322,6 +322,7 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
+    @pytest.mark.slow
     def test_visibility_timeout_requeues_message(self) -> None:
         """Message is requeued after visibility timeout expires."""
         mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
@@ -860,6 +861,7 @@ def test_fake_mailbox_reply_sends_to_mailbox() -> None:
 class TestInMemoryMailboxCoverage:
     """Additional tests for InMemoryMailbox coverage."""
 
+    @pytest.mark.slow
     def test_extend_visibility_success(self) -> None:
         """extend_visibility() extends timeout for valid handle."""
         mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
