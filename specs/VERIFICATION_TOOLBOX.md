@@ -368,6 +368,82 @@ Checkers use configuration from `pyproject.toml` where applicable:
 The toolchain itself requires no configuration - it discovers and runs all
 registered checkers.
 
+## Agent Debugging Guide
+
+This section provides guidance for AI coding agents debugging failures.
+
+### Reading Failure Output
+
+When a check fails, the output provides everything needed to fix the issue:
+
+```
+✗ lint                 (2.3s)
+  src/foo.py:42:10: [E501] Line too long (120 > 88)
+```
+
+From this you know:
+
+1. **Which check**: `lint`
+1. **Which file**: `src/foo.py`
+1. **Which line**: `42`
+1. **What's wrong**: Line exceeds 88 characters
+
+**Action**: Read `src/foo.py:42` and fix the line length.
+
+### Test Failure Workflow
+
+```
+✗ test                 (45.2s)
+  tests/test_session.py:87: test_dispatch_event: AssertionError: assert 1 == 2
+```
+
+1. **Read the test**: `tests/test_session.py:87`
+1. **Understand the assertion**: What was expected vs actual?
+1. **Read the implementation**: What code is being tested?
+1. **Fix the bug** or **fix the test** depending on which is wrong
+
+### Type Error Workflow
+
+```
+✗ typecheck            (12.5s)
+  src/prompt/tool.py:145:23: Argument of type "str" cannot be assigned to "int"
+```
+
+1. **Read the location**: `src/prompt/tool.py:145`
+1. **Check the function signature**: What type is expected?
+1. **Trace the value**: Where does the wrong-typed value come from?
+1. **Fix the type mismatch**
+
+### Running Specific Checks
+
+When debugging, run only the relevant check to save time:
+
+```bash
+python check.py lint          # Just lint
+python check.py typecheck     # Just types
+python check.py test          # Just tests
+```
+
+### Verbose Mode for Context
+
+If the diagnostic isn't enough, use verbose mode:
+
+```bash
+python check.py test -v
+```
+
+This shows the full pytest output including stack traces.
+
+### JSON for Programmatic Access
+
+For structured parsing:
+
+```bash
+python check.py --json
+```
+
+Returns machine-readable results with all diagnostics.
+
 ## Design Principles
 
 1. **Failures are clickable** - Always include file:line locations
@@ -377,3 +453,26 @@ registered checkers.
 1. **No emojis by default** - Consistent with production standards
 1. **Simple protocol** - Easy to add new checkers
 1. **Not packaged** - Development tooling stays out of releases
+
+## Future Additions
+
+Potential enhancements for later:
+
+### Planned
+
+- **`--fail-fast`** - Stop at first failure (useful for quick iteration)
+- **`--errors-only`** - Filter to only show errors, not warnings
+- **Parallel execution** - Run independent checkers concurrently
+
+### Considered
+
+- **Suggested fixes** - Add `fix: str | None` field to Diagnostic
+- **Watch mode** - Re-run on file changes
+- **Caching** - Skip unchanged files (like ruff already does)
+- **Custom checker plugins** - Load checkers from user config
+
+### Not Planned
+
+- **IDE integration** - Use existing LSP tools instead
+- **Historical tracking** - Keep it simple, no database
+- **Notifications** - stdout only, external tools can wrap
