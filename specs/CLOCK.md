@@ -2,6 +2,22 @@
 
 Specification for controllable time dependencies in the WINK runtime.
 
+## Overview
+
+All time-dependent code in WINK uses explicit dependency injection via the
+`Clock` protocol and its implementations. This enables deterministic testing
+without real delays or fragile monkeypatching.
+
+**Key types:**
+
+- `Clock` - Unified protocol combining monotonic time, wall-clock time, and sleep
+- `MonotonicClock` - Protocol for elapsed time measurement (timeouts, rate limiting)
+- `WallClock` - Protocol for UTC timestamps (deadlines, event recording)
+- `Sleeper` - Protocol for delay operations
+- `SystemClock` - Production implementation using real system calls
+- `FakeClock` - Test implementation that advances time instantly
+- `SYSTEM_CLOCK` - Module-level singleton for production use
+
 ## Motivation
 
 Time-dependent code is notoriously difficult to test. Direct calls to
@@ -9,82 +25,32 @@ Time-dependent code is notoriously difficult to test. Direct calls to
 dependencies that force tests to either use real delays (slow, flaky) or
 resort to fragile monkeypatching (brittle, error-prone).
 
-WINK currently uses a mix of approaches:
+WINK standardizes time handling using explicit dependency injection.
 
-| Pattern | Example | Testability |
-|---------|---------|-------------|
-| Module-level function | `deadlines._utcnow()` | Monkeypatchable |
-| Constructor parameter | `InMemoryMailbox(clock=...)` | Excellent |
-| Direct global call | `time.monotonic()` in Heartbeat | Poor |
-| Direct sleep | `time.sleep()` in throttle | Poor |
+## Implementation Status
 
-This spec standardizes time handling across the codebase using explicit
-dependency injection.
+All core time-dependent components now support clock injection:
 
-## Current State Analysis
+| Component | Clock Type | Injection Point | Status |
+|-----------|-----------|-----------------|--------|
+| `Deadline` | WallClock | `clock` field | ✅ Implemented |
+| `Heartbeat` | MonotonicClock | `clock` field | ✅ Implemented |
+| `LeaseExtender` | MonotonicClock | `clock` field | ✅ Implemented |
+| `wait_until()` | Clock | `clock` parameter | ✅ Implemented |
+| `sleep_for()` | Sleeper | `sleeper` parameter | ✅ Implemented |
+| `InMemoryMailbox` | MonotonicClock | `clock` field | ✅ Implemented |
 
-### Wall-Clock Time (UTC datetime)
+Components that still use system time directly (acceptable for now):
 
-Used for timestamps, deadlines, and event recording:
-
-| Location | Usage | Current Mockability |
-|----------|-------|---------------------|
-| `deadlines._utcnow()` | Deadline validation | ✅ Monkeypatch |
-| `MainLoopResult.completed_at` | Completion timestamp | ❌ Global default |
-| `MainLoopRequest.created_at` | Request timestamp | ❌ Global default |
-| `DeadLetter.dead_lettered_at` | DLQ timestamp | ❌ Direct call |
-| `InMemoryMailbox._enqueued_at` | Message timestamp | ❌ Direct call |
-
-### Monotonic Clock (float seconds)
-
-Used for elapsed time, timeouts, and rate limiting:
-
-| Location | Usage | Current Mockability |
-|----------|-------|---------------------|
-| `InMemoryMailbox.clock` | Visibility timeout | ✅ Injectable |
-| `Heartbeat._last_beat` | Heartbeat tracking | ❌ Global call |
-| `Heartbeat.elapsed()` | Staleness check | ❌ Global call |
-| `LeaseExtender._on_beat()` | Rate limiting | ❌ Global call |
-| `lifecycle.wait_until()` | Polling timeout | ❌ Global call |
-| `HookContext.elapsed_ms` | Hook timing | ❌ Global call |
-| `EvalLoop._evaluate_sample()` | Latency measurement | ❌ Global call |
-
-### Sleep/Delay
-
-Used for throttling and polling:
-
-| Location | Usage | Current Mockability |
-|----------|-------|---------------------|
-| `throttle.sleep_for()` | Backoff delay | ❌ Real sleep |
-| `lifecycle.wait_until()` | Poll interval | ❌ Real sleep |
-| `Watchdog._run()` | Check interval | ❌ Event.wait() |
-| `InMemoryMailbox._reaper_loop()` | Reap interval | ❌ Event.wait() |
-
-### Existing Test Helpers
-
-Two helpers exist in `tests/helpers/time.py`:
-
-**FrozenUtcNow** - Controls wall-clock time for deadline tests:
-
-```python
-class FrozenUtcNow:
-    """Controller for deadlines._utcnow() during tests."""
-
-    def now(self) -> datetime: ...
-    def set(self, current: datetime) -> datetime: ...
-    def advance(self, delta: timedelta) -> datetime: ...
-```
-
-**ControllableClock** - Controls monotonic time:
-
-```python
-class ControllableClock:
-    """Controllable clock for testing without sleeping."""
-
-    def __call__(self) -> float: ...
-    def advance(self, seconds: float) -> float: ...
-    def set(self, value: float) -> float: ...
-```
+| Component | Usage | Notes |
+|-----------|-------|-------|
+| `MainLoopResult.completed_at` | Completion timestamp | Field default |
+| `MainLoopRequest.created_at` | Request timestamp | Field default |
+| `DeadLetter.dead_lettered_at` | DLQ timestamp | Explicit construction |
+| `Watchdog._run()` | Check interval | Uses Event.wait() |
+| `InMemoryMailbox._reaper_loop()` | Reap interval | Uses Event.wait() |
+| `HookContext.elapsed_ms` | Hook timing | Non-critical |
+| `EvalLoop._evaluate_sample()` | Latency measurement | Non-critical |
 
 ## Design Goals
 
@@ -224,7 +190,7 @@ import threading
 
 
 @dataclass
-class TestClock:
+class FakeClock:
     """Controllable clock for deterministic testing.
 
     Both monotonic and wall-clock time advance together when advance()
@@ -232,7 +198,7 @@ class TestClock:
 
     Example::
 
-        clock = TestClock()
+        clock = FakeClock()
 
         start = clock.monotonic()
         clock.sleep(10)  # Advances immediately, no real delay
@@ -289,377 +255,115 @@ class TestClock:
             self._wall = value
 ```
 
-## Refactoring Plan
+## Usage Examples
 
-### Phase 1: Core Clock Module
-
-Create the clock protocols and implementations:
-
-1. Create `src/weakincentives/clock.py` with protocols and `SystemClock`
-2. Enhance `tests/helpers/time.py` with unified `TestClock`
-3. Export from `src/weakincentives/__init__.py`
-
-### Phase 2: Deadline Module
-
-Refactor `deadlines.py` to accept a clock:
-
-**Before:**
-```python
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
-
-@FrozenDataclass()
-class Deadline:
-    expires_at: datetime
-
-    def __post_init__(self) -> None:
-        now = _utcnow()
-        if self.expires_at <= now:
-            raise ValueError("Deadline expires_at must be in the future.")
-```
-
-**After:**
-```python
-from weakincentives.clock import WallClock, SYSTEM_CLOCK
-
-@FrozenDataclass()
-class Deadline:
-    expires_at: datetime
-    _clock: WallClock = field(default=SYSTEM_CLOCK, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        now = self._clock.utcnow()
-        if self.expires_at <= now:
-            raise ValueError("Deadline expires_at must be in the future.")
-
-    def remaining(self, *, now: datetime | None = None) -> timedelta:
-        current = now if now is not None else self._clock.utcnow()
-        return self.expires_at - current
-```
-
-**Test usage:**
-```python
-def test_deadline_remaining(test_clock: TestClock) -> None:
-    test_clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
-
-    deadline = Deadline(
-        expires_at=datetime(2024, 6, 1, 13, 0, 0, tzinfo=UTC),
-        _clock=test_clock,
-    )
-
-    assert deadline.remaining() == timedelta(hours=1)
-
-    test_clock.advance(1800)  # 30 minutes
-    assert deadline.remaining() == timedelta(minutes=30)
-```
-
-### Phase 3: Heartbeat and Watchdog
-
-Inject clock into `Heartbeat` for testable elapsed time:
-
-**Before:**
-```python
-@dataclass(slots=True)
-class Heartbeat:
-    _last_beat: float = field(default_factory=time.monotonic)
-
-    def beat(self) -> None:
-        with self._lock:
-            self._last_beat = time.monotonic()
-
-    def elapsed(self) -> float:
-        with self._lock:
-            return time.monotonic() - self._last_beat
-```
-
-**After:**
-```python
-from weakincentives.clock import MonotonicClock, SYSTEM_CLOCK
-
-@dataclass(slots=True)
-class Heartbeat:
-    clock: MonotonicClock = field(default=SYSTEM_CLOCK, repr=False)
-    _last_beat: float = field(init=False)
-
-    def __post_init__(self) -> None:
-        self._last_beat = self.clock.monotonic()
-
-    def beat(self) -> None:
-        with self._lock:
-            self._last_beat = self.clock.monotonic()
-
-    def elapsed(self) -> float:
-        with self._lock:
-            return self.clock.monotonic() - self._last_beat
-```
-
-### Phase 4: LeaseExtender
-
-Inject clock for rate-limit testing:
-
-**Before:**
-```python
-def _on_beat(self) -> None:
-    with self._lock:
-        now = time.monotonic()
-        elapsed = now - self._last_extension
-        if elapsed < self.config.interval:
-            return
-```
-
-**After:**
-```python
-from weakincentives.clock import MonotonicClock, SYSTEM_CLOCK
-
-@dataclass(slots=True)
-class LeaseExtender:
-    config: LeaseExtenderConfig = field(default_factory=LeaseExtenderConfig)
-    clock: MonotonicClock = field(default=SYSTEM_CLOCK, repr=False)
-
-    def _on_beat(self) -> None:
-        with self._lock:
-            now = self.clock.monotonic()
-            elapsed = now - self._last_extension
-            if elapsed < self.config.interval:
-                return
-```
-
-### Phase 5: Lifecycle Utilities
-
-Refactor `wait_until()` to accept clock and sleeper:
-
-**Before:**
-```python
-def wait_until(
-    predicate: Callable[[], bool],
-    *,
-    timeout: float,
-    poll_interval: float = 0.1,
-) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(poll_interval)
-    return predicate()
-```
-
-**After:**
-```python
-from weakincentives.clock import Clock, SYSTEM_CLOCK
-
-def wait_until(
-    predicate: Callable[[], bool],
-    *,
-    timeout: float,
-    poll_interval: float = 0.1,
-    clock: Clock = SYSTEM_CLOCK,
-) -> bool:
-    deadline = clock.monotonic() + timeout
-    while clock.monotonic() < deadline:
-        if predicate():
-            return True
-        clock.sleep(poll_interval)
-    return predicate()
-```
-
-**Test usage:**
-```python
-def test_wait_until_timeout(test_clock: TestClock) -> None:
-    """Test wait_until returns False on timeout."""
-    calls = 0
-
-    def never_true() -> bool:
-        nonlocal calls
-        calls += 1
-        test_clock.advance(0.5)  # Each check advances time
-        return False
-
-    result = wait_until(
-        never_true,
-        timeout=2.0,
-        poll_interval=0.5,
-        clock=test_clock,
-    )
-
-    assert result is False
-    assert calls == 5  # 0.5s intervals over 2s timeout
-```
-
-### Phase 6: Throttle Module
-
-Inject sleeper for backoff testing:
-
-**Before:**
-```python
-def sleep_for(delay: timedelta) -> None:
-    time.sleep(delay.total_seconds())
-```
-
-**After:**
-```python
-from weakincentives.clock import Sleeper, SYSTEM_CLOCK
-
-def sleep_for(delay: timedelta, *, sleeper: Sleeper = SYSTEM_CLOCK) -> None:
-    sleeper.sleep(delay.total_seconds())
-```
-
-### Phase 7: Timestamp Fields
-
-For dataclass fields that capture timestamps, use a factory pattern:
-
-**Before:**
-```python
-@dataclass(frozen=True, slots=True)
-class MainLoopResult[OutputT]:
-    completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-```
-
-**After:**
-```python
-from weakincentives.clock import WallClock, SYSTEM_CLOCK
-
-def _default_timestamp(clock: WallClock = SYSTEM_CLOCK) -> datetime:
-    return clock.utcnow()
-
-@dataclass(frozen=True, slots=True)
-class MainLoopResult[OutputT]:
-    completed_at: datetime = field(default_factory=_default_timestamp)
-```
-
-For testing, use `replace()` or explicit construction:
+### Deadline with Clock Injection
 
 ```python
-def test_result_timestamp(test_clock: TestClock) -> None:
-    test_clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
+from datetime import UTC, datetime, timedelta
+from weakincentives import Deadline
+from weakincentives.clock import FakeClock
 
-    result = MainLoopResult(
-        request_id=uuid4(),
-        output="test",
-        completed_at=test_clock.utcnow(),
-    )
+# Production: uses system clock by default
+deadline = Deadline(datetime.now(UTC) + timedelta(hours=1))
 
-    assert result.completed_at.year == 2024
+# Testing: inject FakeClock for deterministic behavior
+clock = FakeClock()
+clock.set_wall(datetime(2024, 6, 1, 12, 0, tzinfo=UTC))
+
+deadline = Deadline(
+    expires_at=datetime(2024, 6, 1, 13, 0, tzinfo=UTC),
+    clock=clock,
+)
+
+assert deadline.remaining() == timedelta(hours=1)
+clock.advance(1800)  # 30 minutes
+assert deadline.remaining() == timedelta(minutes=30)
 ```
 
-### Phase 8: InMemoryMailbox Enhancement
-
-The mailbox already supports clock injection but uses different naming:
-
-**Current:**
-```python
-clock: Callable[[], float] = field(default=time.monotonic, repr=False)
-```
-
-**Recommended:**
-```python
-clock: MonotonicClock = field(default=SYSTEM_CLOCK, repr=False)
-
-# Update usage from clock() to clock.monotonic()
-expires_at = self.clock.monotonic() + visibility_timeout
-```
-
-### Phase 9: Background Thread Timing
-
-For threads that use `Event.wait(timeout=...)`:
-
-**Watchdog pattern:**
-```python
-class Watchdog:
-    def __init__(
-        self,
-        heartbeats: Sequence[Heartbeat],
-        *,
-        stall_threshold: float = 720.0,
-        check_interval: float = 60.0,
-        clock: MonotonicClock = SYSTEM_CLOCK,
-    ) -> None:
-        self._clock = clock
-        # ...
-
-    def _run(self) -> None:
-        # Event.wait() still uses real time for blocking
-        # But heartbeat.elapsed() uses the injected clock
-        while not self._stop_event.wait(timeout=self._check_interval):
-            stalled = self._check_heartbeats()
-            # ...
-```
-
-Note: Background thread loop timing (`Event.wait()`) cannot be easily mocked
-without restructuring. This is acceptable because:
-
-1. Watchdog tests focus on heartbeat staleness detection
-2. The clock injection in `Heartbeat.elapsed()` enables that testing
-3. Integration tests verify actual timeout behavior
-
-## Test Fixtures
-
-Add pytest fixtures for common test scenarios:
+### Heartbeat with Clock Injection
 
 ```python
-# tests/conftest.py
+from weakincentives.runtime.watchdog import Heartbeat
+from weakincentives.clock import FakeClock
 
-import pytest
-from tests.helpers.time import TestClock
+clock = FakeClock()
+hb = Heartbeat(clock=clock)
 
+hb.beat()
+assert hb.elapsed() == 0.0
 
-@pytest.fixture
-def test_clock() -> TestClock:
-    """Provide a fresh TestClock for each test."""
-    return TestClock()
-
-
-@pytest.fixture
-def frozen_time(test_clock: TestClock) -> TestClock:
-    """Provide a TestClock frozen at a known point."""
-    from datetime import datetime, UTC
-    test_clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
-    test_clock.set_monotonic(0.0)
-    return test_clock
+clock.advance(10)
+assert hb.elapsed() == 10.0
 ```
 
-## Migration Strategy
-
-### Backward Compatibility
-
-During migration, maintain backward compatibility:
-
-1. Clock parameters default to `SYSTEM_CLOCK`
-2. Existing tests continue to work
-3. New tests can inject `TestClock`
-
-### Deprecation of Monkeypatch Approach
-
-The existing `FrozenUtcNow` helper uses monkeypatching:
+### wait_until with Clock Injection
 
 ```python
-monkeypatch.setattr(deadlines, "_utcnow", self.now)
+from weakincentives.runtime.lifecycle import wait_until
+from weakincentives.clock import FakeClock
+
+clock = FakeClock()
+calls = []
+
+def eventually_true() -> bool:
+    calls.append(clock.monotonic())
+    clock.advance(0.5)
+    return len(calls) >= 3
+
+result = wait_until(
+    eventually_true,
+    timeout=2.0,
+    poll_interval=0.5,
+    clock=clock,
+)
+
+assert result is True
+assert len(calls) == 3
 ```
 
-After migration, this pattern should be replaced with clock injection.
-Keep `FrozenUtcNow` for backward compatibility but mark as deprecated.
+### sleep_for with Sleeper Injection
 
-### Testing Guidelines
+```python
+from datetime import timedelta
+from weakincentives.adapters.throttle import sleep_for
+from weakincentives.clock import FakeClock
 
-1. **Unit tests**: Always inject `TestClock`
-2. **Integration tests**: May use `SystemClock` for real timing
-3. **Property tests**: Use `TestClock` with hypothesis strategies
+clock = FakeClock()
+initial = clock.monotonic()
+
+sleep_for(timedelta(seconds=5), sleeper=clock)
+
+# FakeClock advances time instantly
+assert clock.monotonic() == initial + 5
+```
+
+## Testing Guidelines
+
+1. **Unit tests**: Always inject `FakeClock` for deterministic behavior
+2. **Integration tests**: May use `SystemClock` for real timing verification
+3. **Property tests**: Use `FakeClock` with hypothesis strategies
 
 ## Public API
 
-Export from main package:
+All clock types are exported from the main package:
 
 ```python
-# src/weakincentives/__init__.py
-
-from .clock import (
+from weakincentives import (
     Clock,
+    FakeClock,
     MonotonicClock,
-    WallClock,
+    SYSTEM_CLOCK,
     Sleeper,
     SystemClock,
-    SYSTEM_CLOCK,
+    WallClock,
 )
+```
+
+Or import directly from the clock module:
+
+```python
+from weakincentives.clock import FakeClock, SYSTEM_CLOCK
 ```
 
 ## Non-Goals
@@ -673,17 +377,7 @@ This spec does not address:
 
 ## Summary
 
-| Component | Clock Type | Injection Point |
-|-----------|-----------|-----------------|
-| Deadline | WallClock | Constructor field |
-| Heartbeat | MonotonicClock | Constructor field |
-| LeaseExtender | MonotonicClock | Constructor field |
-| wait_until | Clock | Function parameter |
-| sleep_for | Sleeper | Function parameter |
-| InMemoryMailbox | MonotonicClock | Constructor field |
-| Watchdog | MonotonicClock | Constructor (for Heartbeat) |
-| MainLoopResult | WallClock | Explicit construction |
-| DeadLetter | WallClock | Explicit construction |
-
-After refactoring, all time-dependent code will be deterministically testable
-without real delays or fragile monkeypatching.
+All core time-dependent code is now deterministically testable without real
+delays or fragile monkeypatching. Components accept a clock parameter that
+defaults to `SYSTEM_CLOCK` for production use, and tests can inject `FakeClock`
+for instant, controllable time advancement.

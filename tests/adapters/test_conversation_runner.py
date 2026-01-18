@@ -19,10 +19,7 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import (
-    FrozenUtcNow,
-    frozen_utcnow as _frozen_utcnow,  # noqa: F401
-)
+from weakincentives.clock import FakeClock
 from tests.helpers.adapters import DUMMY_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_BUDGET,
@@ -675,15 +672,14 @@ def test_inner_loop_raise_deadline_error() -> None:
     assert error.phase == PROMPT_EVALUATION_PHASE_REQUEST
 
 
-def test_inner_loop_ensure_deadline_remaining_expired(
-    frozen_utcnow: FrozenUtcNow,
-) -> None:
+def test_inner_loop_ensure_deadline_remaining_expired() -> None:
     """Test that InnerLoop raises when deadline is expired."""
     from datetime import timedelta
 
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
+    clock.set_wall(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
 
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
@@ -696,7 +692,7 @@ def test_inner_loop_ensure_deadline_remaining_expired(
     )
 
     # Advance time past the deadline
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.advance(10)
 
     with pytest.raises(PromptEvaluationError) as exc_info:
         loop._ensure_deadline_remaining("test", phase=PROMPT_EVALUATION_PHASE_REQUEST)

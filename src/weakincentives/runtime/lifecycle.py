@@ -48,11 +48,11 @@ from __future__ import annotations
 import contextlib
 import signal
 import threading
-import time
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Protocol, Self
 
+from ..clock import SYSTEM_CLOCK, Clock
 from .watchdog import HealthServer, Heartbeat, Watchdog
 
 if TYPE_CHECKING:
@@ -452,6 +452,7 @@ def wait_until(
     *,
     timeout: float,
     poll_interval: float = 0.1,
+    clock: Clock = SYSTEM_CLOCK,
 ) -> bool:
     """Wait until predicate returns True or timeout expires.
 
@@ -459,15 +460,39 @@ def wait_until(
         predicate: Zero-argument callable that returns True when done.
         timeout: Maximum seconds to wait.
         poll_interval: Seconds between predicate checks.
+        clock: Clock for time operations. Defaults to system clock.
+            Inject TestClock for deterministic testing.
 
     Returns:
         True if predicate returned True, False if timeout expired.
+
+    Example (testing)::
+
+        from weakincentives.clock import TestClock
+
+        clock = TestClock()
+        calls = []
+
+        def eventually_true() -> bool:
+            calls.append(clock.monotonic())
+            clock.advance(0.5)  # Each check advances time
+            return len(calls) >= 3
+
+        result = wait_until(
+            eventually_true,
+            timeout=2.0,
+            poll_interval=0.5,
+            clock=clock,
+        )
+
+        assert result is True
+        assert len(calls) == 3
     """
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    deadline = clock.monotonic() + timeout
+    while clock.monotonic() < deadline:
         if predicate():
             return True
-        time.sleep(poll_interval)
+        clock.sleep(poll_interval)
     return predicate()
 
 

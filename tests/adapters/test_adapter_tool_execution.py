@@ -21,8 +21,6 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
-
 try:
     from tests.adapters._test_stubs import (
         DummyChoice,
@@ -326,8 +324,10 @@ def test_adapter_tool_deadline_exceeded(
 
 
 def test_adapter_deadline_preflight_rejection(
-    adapter_harness: AdapterHarness, frozen_utcnow: FrozenUtcNow
+    adapter_harness: AdapterHarness,
 ) -> None:
+    from weakincentives.clock import FakeClock
+
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
         return ToolResult.ok(ToolPayload(answer="policies"), message="ok")
@@ -352,10 +352,11 @@ def test_adapter_deadline_preflight_rejection(
 
     dispatcher = InProcessDispatcher()
     session = Session(dispatcher=dispatcher)
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.set_wall(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+    clock.advance(10)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 

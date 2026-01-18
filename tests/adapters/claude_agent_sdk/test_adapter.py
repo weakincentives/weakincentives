@@ -23,7 +23,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.claude_agent_sdk import (
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
     ClaudeAgentSDKAdapter,
@@ -279,12 +278,14 @@ class TestClaudeAgentSDKAdapterEvaluate:
         self,
         session: Session,
         simple_prompt: Prompt[SimpleOutput],
-        frozen_utcnow: FrozenUtcNow,
     ) -> None:
+        from weakincentives.clock import FakeClock
+
+        clock = FakeClock()
         anchor = datetime.now(UTC)
-        frozen_utcnow.set(anchor)
-        deadline = Deadline(anchor + timedelta(seconds=5))
-        frozen_utcnow.advance(timedelta(seconds=10))
+        clock.set_wall(anchor)
+        deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        clock.advance(10)
 
         adapter = ClaudeAgentSDKAdapter()
 

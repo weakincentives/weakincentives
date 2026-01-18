@@ -20,7 +20,6 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     PostToolUseInput,
@@ -145,12 +144,13 @@ class TestHookContext:
         assert context.stop_reason is None
         assert context._tool_count == 0
 
-    def test_with_deadline_and_budget(
-        self, session: Session, frozen_utcnow: FrozenUtcNow
-    ) -> None:
+    def test_with_deadline_and_budget(self, session: Session) -> None:
+        from weakincentives.clock import FakeClock
+
+        clock = FakeClock()
         anchor = datetime.now(UTC)
-        frozen_utcnow.set(anchor)
-        deadline = Deadline(anchor + timedelta(minutes=5))
+        clock.set_wall(anchor)
+        deadline = Deadline(anchor + timedelta(minutes=5), clock=clock)
         budget = Budget(max_total_tokens=1000)
         tracker = BudgetTracker(budget)
 
@@ -175,13 +175,14 @@ class TestPreToolUseHook:
 
         assert result == {}
 
-    def test_denies_when_deadline_exceeded(
-        self, session: Session, frozen_utcnow: FrozenUtcNow
-    ) -> None:
+    def test_denies_when_deadline_exceeded(self, session: Session) -> None:
+        from weakincentives.clock import FakeClock
+
+        clock = FakeClock()
         anchor = datetime.now(UTC)
-        frozen_utcnow.set(anchor)
-        deadline = Deadline(anchor + timedelta(seconds=5))
-        frozen_utcnow.advance(timedelta(seconds=10))
+        clock.set_wall(anchor)
+        deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        clock.advance(10)
 
         context = HookContext(
             session=session,
@@ -1394,10 +1395,10 @@ class TestTaskCompletionStopHook:
         assert result == {}
         assert context.stop_reason == "end_turn"
 
-    def test_skips_check_when_deadline_exceeded(
-        self, session: Session, frozen_utcnow: FrozenUtcNow
-    ) -> None:
+    def test_skips_check_when_deadline_exceeded(self, session: Session) -> None:
         """Stop hook skips task completion check when deadline expired."""
+        from weakincentives.clock import FakeClock
+
         PlanningToolsSection._initialize_session(session)
         # Create incomplete plan
         session.dispatch(
@@ -1408,11 +1409,12 @@ class TestTaskCompletionStopHook:
             )
         )
 
-        # Create expired deadline using frozen time
+        # Create expired deadline using fake clock
+        clock = FakeClock()
         anchor = datetime.now(UTC)
-        frozen_utcnow.set(anchor)
-        expired_deadline = Deadline(anchor + timedelta(seconds=5))
-        frozen_utcnow.advance(timedelta(seconds=10))  # Now expired
+        clock.set_wall(anchor)
+        expired_deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        clock.advance(10)  # Now expired
 
         context = HookContext(
             session=session,

@@ -24,8 +24,8 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     from ._test_stubs import DummyToolCall, ToolParams, ToolPayload
 
-from tests.helpers import FrozenUtcNow
 from weakincentives import DeadlineExceededError
+from weakincentives.clock import FakeClock
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
@@ -151,18 +151,17 @@ def test_tool_execution_records_validation_failure() -> None:
         assert "Tool validation failed" in outcome.result.message
 
 
-def test_tool_execution_raises_on_expired_deadline(
-    frozen_utcnow: FrozenUtcNow,
-) -> None:
+def test_tool_execution_raises_on_expired_deadline() -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
         return ToolResult.ok(ToolPayload(answer="x"), message="should not run")
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
-    anchor = datetime.now(UTC)
-    frozen_utcnow.set(anchor)
-    expired_deadline = Deadline(anchor + timedelta(seconds=2))
-    frozen_utcnow.advance(timedelta(seconds=5))
+    clock = FakeClock()
+    anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    clock.set_wall(anchor)
+    expired_deadline = Deadline(anchor + timedelta(seconds=2), clock=clock)
+    clock.advance(5)  # Advance past deadline
     context = _base_context(tool, deadline=expired_deadline)
     tool_call = _tool_call({"query": "policies"})
 
