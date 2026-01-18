@@ -25,7 +25,7 @@ from weakincentives.metrics import (
 from weakincentives.runtime.events import TokenUsage
 
 
-class TestInMemoryMetricsCollector:  # noqa: PLR0904
+class TestInMemoryMetricsCollector:
     """Tests for InMemoryMetricsCollector."""
 
     def test_collector_empty_snapshot(self) -> None:
