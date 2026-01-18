@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # =============================================================================
 # Code Formatting
@@ -43,6 +43,10 @@ pip-audit:
 # Validate Markdown formatting
 markdown-check:
 	@uv run --all-extras python check.py -q markdown
+
+# Verify Python code examples in documentation
+verify-doc-examples:
+	@uv run --all-extras python check.py -q docs
 
 # =============================================================================
 # Type Checking
