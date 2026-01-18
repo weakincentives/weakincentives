@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules validate-clock all clean
 
 # Format code with ruff
 format:
@@ -36,6 +36,10 @@ check-core-imports:
 validate-modules:
 	@uv run python scripts/validate_module_boundaries.py
 
+# Validate that production code uses Clock abstraction
+validate-clock:
+	@uv run python scripts/validate_clock_usage.py
+
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
 	@uv run python build/run_pip_audit.py
@@ -72,9 +76,10 @@ typecheck: ty pyright
 type-coverage:
 	@uv run --all-extras python build/run_type_coverage.py -q
 
-# Run tests with coverage (100% minimum)
+# Run tests with coverage (100% minimum, 10s timeout per test)
+# Note: redis_standalone tests are excluded (run via 'make property-tests' and 'make stress-tests')
 test:
-	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= tests
+	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= --timeout=10 --timeout-method=thread -m "not redis_standalone" tests
 
 # Run OpenAI integration tests
 integration-tests:
@@ -214,11 +219,12 @@ demo-claude-agent:
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
-# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, check-core-imports, validate-modules, pip-audit, markdown, doc-examples, validate-integration-tests, test)
-# Note: validate-modules is commented out pending fixes for existing violations
-check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports pip-audit markdown-check validate-spec-refs verify-doc-examples validate-integration-tests test
+# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, check-core-imports, validate-clock, pip-audit, markdown, doc-examples, validate-integration-tests, test)
+# Note: validate-modules is disabled pending module boundary refactoring
+# Note: validate-clock is enabled and enforces Clock abstraction (zero violations)
+check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports validate-clock pip-audit markdown-check validate-spec-refs verify-doc-examples validate-integration-tests test
 # Uncomment after fixing module boundary violations:
-# check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports validate-modules pip-audit markdown-check verify-doc-examples validate-integration-tests test
+# check: ... validate-modules ...
 
 # Synchronize documentation files into package
 sync-docs:

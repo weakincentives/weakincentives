@@ -18,17 +18,19 @@ import pytest
 
 from weakincentives.contrib.tools import PlanningStrategy, PlanningToolsSection
 from weakincentives.prompt import PromptRenderError
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 
 def _make_section(
+    clock: FakeClock,
     *,
     strategy: PlanningStrategy | None = None,
     accepts_overrides: bool = False,
 ) -> PlanningToolsSection:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     if strategy is None:
         return PlanningToolsSection(
             session=session, accepts_overrides=accepts_overrides
@@ -40,8 +42,12 @@ def _make_section(
     )
 
 
-def _render_section(strategy: PlanningStrategy | None = None) -> str:
-    section = _make_section() if strategy is None else _make_section(strategy=strategy)
+def _render_section(clock: FakeClock, strategy: PlanningStrategy | None = None) -> str:
+    section = (
+        _make_section(clock)
+        if strategy is None
+        else _make_section(clock, strategy=strategy)
+    )
 
     params = section.default_params
     assert params is not None
@@ -49,14 +55,14 @@ def _render_section(strategy: PlanningStrategy | None = None) -> str:
     return section.render(params, depth=0, number="1")
 
 
-def test_planning_section_renders_instructions() -> None:
-    body = _render_section()
+def test_planning_section_renders_instructions(clock: FakeClock) -> None:
+    body = _render_section(clock)
 
     assert "planning_setup_plan" in body
     assert "planning_read_plan" in body
     assert "multi-step" in body
 
-    section = _make_section()
+    section = _make_section(clock)
     tool_names = tuple(tool.name for tool in section.tools())
     assert tool_names == (
         "planning_setup_plan",
@@ -66,40 +72,44 @@ def test_planning_section_renders_instructions() -> None:
     )
 
 
-def test_planning_section_default_strategy_matches_react() -> None:
-    default_body = _render_section()
-    react_body = _render_section(PlanningStrategy.REACT)
+def test_planning_section_default_strategy_matches_react(clock: FakeClock) -> None:
+    default_body = _render_section(clock)
+    react_body = _render_section(clock, PlanningStrategy.REACT)
 
     assert default_body == react_body
 
 
-def test_plan_act_reflect_strategy_injects_guidance() -> None:
-    body = _render_section(PlanningStrategy.PLAN_ACT_REFLECT)
+def test_plan_act_reflect_strategy_injects_guidance(clock: FakeClock) -> None:
+    body = _render_section(clock, PlanningStrategy.PLAN_ACT_REFLECT)
 
     assert "plan-act-reflect" in body
     assert "update the step status" in body
 
 
-def test_goal_decompose_route_synthesise_strategy_injects_guidance() -> None:
-    body = _render_section(PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE)
+def test_goal_decompose_route_synthesise_strategy_injects_guidance(
+    clock: FakeClock,
+) -> None:
+    body = _render_section(clock, PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE)
 
     assert "restating the goal" in body
     assert "Break the goal into concrete sub-problems" in body
     assert "synthesise the results" in body
 
 
-def test_planning_section_original_body_template_tracks_strategy() -> None:
-    par_section = _make_section(strategy=PlanningStrategy.PLAN_ACT_REFLECT)
+def test_planning_section_original_body_template_tracks_strategy(
+    clock: FakeClock,
+) -> None:
+    par_section = _make_section(clock, strategy=PlanningStrategy.PLAN_ACT_REFLECT)
     assert "plan-act-reflect" in par_section.original_body_template()
 
     goal_section = _make_section(
-        strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE,
+        clock, strategy=PlanningStrategy.GOAL_DECOMPOSE_ROUTE_SYNTHESISE
     )
     assert "restating the goal" in goal_section.original_body_template()
 
 
-def test_planning_section_rejects_missing_params() -> None:
-    section = _make_section()
+def test_planning_section_rejects_missing_params(clock: FakeClock) -> None:
+    section = _make_section(clock)
 
     with pytest.raises(PromptRenderError):
         section.render(None, depth=0, number="1")

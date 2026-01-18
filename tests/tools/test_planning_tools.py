@@ -36,6 +36,7 @@ from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
+from weakincentives.runtime.clock import FakeClock
 
 
 def _make_tool_event(name: str, value: SupportsDataclass) -> ToolInvoked:
@@ -77,24 +78,24 @@ def test_plan_command_renders() -> None:
     assert "snapshot" in read.render()
 
 
-def test_planning_tools_reject_mismatched_context_session() -> None:
+def test_planning_tools_reject_mismatched_context_session(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     tool = find_tool(section, "planning_setup_plan")
     handler = tool.handler
     assert handler is not None
     other_dispatcher = InProcessDispatcher()
-    mismatched_session = Session(dispatcher=other_dispatcher)
+    mismatched_session = Session(dispatcher=other_dispatcher, clock=clock)
     context = build_tool_context(mismatched_session)
 
     with pytest.raises(RuntimeError, match="session does not match"):
         handler(SetupPlan(objective="ship"), context=context)
 
 
-def test_setup_plan_normalizes_payloads() -> None:
+def test_setup_plan_normalizes_payloads(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
 
@@ -113,9 +114,9 @@ def test_setup_plan_normalizes_payloads() -> None:
     )
 
 
-def test_setup_plan_returns_plan() -> None:
+def test_setup_plan_returns_plan(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
 
@@ -133,9 +134,9 @@ def test_setup_plan_returns_plan() -> None:
     assert result.value.steps[1].title == "review"
 
 
-def test_setup_plan_rejects_invalid_objective() -> None:
+def test_setup_plan_rejects_invalid_objective(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
 
@@ -151,9 +152,9 @@ def test_setup_plan_rejects_invalid_objective() -> None:
         )
 
 
-def test_add_step_requires_existing_plan() -> None:
+def test_add_step_requires_existing_plan(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     add_tool = find_tool(section, "planning_add_step")
 
@@ -165,9 +166,9 @@ def test_add_step_requires_existing_plan() -> None:
         )
 
 
-def test_add_step_appends_new_steps() -> None:
+def test_add_step_appends_new_steps(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -189,9 +190,9 @@ def test_add_step_appends_new_steps() -> None:
     assert [step.title for step in plan.steps] == ["draft", "review", "release"]
 
 
-def test_add_step_returns_plan() -> None:
+def test_add_step_returns_plan(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -214,9 +215,9 @@ def test_add_step_returns_plan() -> None:
     assert result.value.steps[2].title == "release"
 
 
-def test_add_step_rejects_empty_payload() -> None:
+def test_add_step_rejects_empty_payload(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -231,9 +232,9 @@ def test_add_step_rejects_empty_payload() -> None:
         invoke_tool(add_tool, AddStep(steps=()), session=session)
 
 
-def test_add_step_rejects_when_plan_not_active() -> None:
+def test_add_step_rejects_when_plan_not_active(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -258,9 +259,9 @@ def test_add_step_rejects_when_plan_not_active() -> None:
         )
 
 
-def test_session_keeps_single_plan_snapshot() -> None:
+def test_session_keeps_single_plan_snapshot(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -280,9 +281,9 @@ def test_session_keeps_single_plan_snapshot() -> None:
     assert len(snapshots) == 1
 
 
-def test_update_step_rejects_empty_patch() -> None:
+def test_update_step_rejects_empty_patch(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -297,9 +298,9 @@ def test_update_step_rejects_empty_patch() -> None:
         invoke_tool(update_tool, UpdateStep(step_id=1), session=session)
 
 
-def test_update_step_updates_existing_step_title() -> None:
+def test_update_step_updates_existing_step_title(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -328,9 +329,9 @@ def test_update_step_updates_existing_step_title() -> None:
     assert plan.steps[1].step_id == 2
 
 
-def test_update_step_returns_plan() -> None:
+def test_update_step_returns_plan(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -356,9 +357,9 @@ def test_update_step_returns_plan() -> None:
     assert result.value.steps[1].status == "pending"
 
 
-def test_update_step_updates_status() -> None:
+def test_update_step_updates_status(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -380,9 +381,9 @@ def test_update_step_updates_status() -> None:
     assert plan.status == "active"  # Not all steps done yet
 
 
-def test_update_step_rejects_unknown_identifier() -> None:
+def test_update_step_rejects_unknown_identifier(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -401,9 +402,9 @@ def test_update_step_rejects_unknown_identifier() -> None:
         )
 
 
-def test_update_step_sets_plan_completed_when_all_done() -> None:
+def test_update_step_sets_plan_completed_when_all_done(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     add_tool = find_tool(section, "planning_add_step")
@@ -445,9 +446,9 @@ def test_update_step_sets_plan_completed_when_all_done() -> None:
     assert all(step.status == "done" for step in plan.steps)
 
 
-def test_update_step_rejects_completed_plan() -> None:
+def test_update_step_rejects_completed_plan(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -471,9 +472,9 @@ def test_update_step_rejects_completed_plan() -> None:
         )
 
 
-def test_read_plan_returns_snapshot() -> None:
+def test_read_plan_returns_snapshot(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     read_tool = find_tool(section, "planning_read_plan")
@@ -489,9 +490,9 @@ def test_read_plan_returns_snapshot() -> None:
     assert result.message == "Retrieved the current plan with 2 steps."
 
 
-def test_read_plan_requires_existing_plan() -> None:
+def test_read_plan_requires_existing_plan(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     read_tool = find_tool(section, "planning_read_plan")
 
@@ -499,9 +500,9 @@ def test_read_plan_requires_existing_plan() -> None:
         invoke_tool(read_tool, ReadPlan(), session=session)
 
 
-def test_read_plan_reports_empty_steps() -> None:
+def test_read_plan_reports_empty_steps(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     setup_tool = find_tool(section, "planning_setup_plan")
     read_tool = find_tool(section, "planning_read_plan")
@@ -516,18 +517,18 @@ def test_read_plan_reports_empty_steps() -> None:
     assert result.message == "Retrieved the current plan (no steps recorded)."
 
 
-def test_planning_tools_section_disables_tool_overrides_by_default() -> None:
+def test_planning_tools_section_disables_tool_overrides_by_default(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
 
     assert section.accepts_overrides is False
     assert all(tool.accepts_overrides is False for tool in section.tools())
 
 
-def test_planning_tools_section_allows_configuring_overrides() -> None:
+def test_planning_tools_section_allows_configuring_overrides(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(
         session=session,
         accepts_overrides=True,
@@ -548,12 +549,12 @@ def test_planning_tools_section_allows_configuring_overrides() -> None:
 # -----------------------------------------------------------------------------
 
 
-def test_planning_config_accepts_overrides() -> None:
+def test_planning_config_accepts_overrides(clock: FakeClock) -> None:
     """Test that config accepts_overrides is respected."""
     from weakincentives.contrib.tools import PlanningConfig
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     config = PlanningConfig(accepts_overrides=True)
     section = PlanningToolsSection(session=session, config=config)
 

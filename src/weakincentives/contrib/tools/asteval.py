@@ -997,7 +997,9 @@ class AstevalSection(MarkdownSection[_AstevalSectionParams]):
         self._session = session
         # Use provided filesystem or create a new one
         self._filesystem = (
-            filesystem if filesystem is not None else InMemoryFilesystem()
+            filesystem
+            if filesystem is not None
+            else InMemoryFilesystem(clock=session.clock)
         )
 
         # Store config for cloning

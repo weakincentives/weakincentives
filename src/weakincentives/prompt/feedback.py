@@ -68,8 +68,12 @@ if TYPE_CHECKING:
 
 
 def _utcnow() -> datetime:
-    """Return the current UTC timestamp."""
-    return datetime.now(UTC)
+    """Return sentinel UTC time for feedback timestamps.
+
+    This is a placeholder default that will be replaced with the actual
+    timestamp from session.clock in run_feedback_providers().
+    """
+    return datetime.min.replace(tzinfo=UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -395,7 +399,7 @@ def _should_trigger(trigger: FeedbackTrigger, context: FeedbackContext) -> bool:
     if trigger.every_n_seconds is not None:
         last = context.last_feedback
         if last is not None:
-            elapsed = (_utcnow() - last.timestamp).total_seconds()
+            elapsed = (context.session.clock.now() - last.timestamp).total_seconds()
             if elapsed >= trigger.every_n_seconds:
                 return True
         else:
@@ -434,11 +438,13 @@ def run_feedback_providers(
             context=context
         ):
             feedback = config.provider.provide(context=context)
-            # Update call_index and prompt_name for trigger state tracking
+            # Update call_index, prompt_name, and timestamp for trigger state tracking
+            # Use session clock for timestamp to ensure consistency with trigger evaluation
             feedback = replace(
                 feedback,
                 call_index=context.tool_call_count,
                 prompt_name=context.prompt_name,
+                timestamp=context.session.clock.now(),
             )
             # Store in session for history and trigger calculations
             _ = context.session.dispatch(feedback)

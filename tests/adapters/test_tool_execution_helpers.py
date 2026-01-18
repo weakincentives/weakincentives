@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any, cast
 
 import pytest
@@ -24,7 +24,6 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     from ._test_stubs import DummyToolCall, ToolParams, ToolPayload
 
-from tests.helpers import FrozenUtcNow
 from weakincentives import DeadlineExceededError
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_TOOL,
@@ -50,6 +49,7 @@ from weakincentives.prompt import (
     ToolHandler,
     ToolResult,
 )
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
@@ -80,7 +80,7 @@ def _base_context(
     dispatcher = InProcessDispatcher()
     prompt_template = _build_prompt(tool)
     prompt: Prompt[ToolPayload] = Prompt(prompt_template)
-    effective_session = session or Session(dispatcher=dispatcher)
+    effective_session = session or Session(dispatcher=dispatcher, clock=FakeClock())
     # Enter prompt context for resource access
     prompt.resources.__enter__()
     return ToolExecutionContext(
@@ -152,17 +152,16 @@ def test_tool_execution_records_validation_failure() -> None:
 
 
 def test_tool_execution_raises_on_expired_deadline(
-    frozen_utcnow: FrozenUtcNow,
+    clock: FakeClock,
 ) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
         return ToolResult.ok(ToolPayload(answer="x"), message="should not run")
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
-    anchor = datetime.now(UTC)
-    frozen_utcnow.set(anchor)
-    expired_deadline = Deadline(anchor + timedelta(seconds=2))
-    frozen_utcnow.advance(timedelta(seconds=5))
+    anchor = clock.now()
+    expired_deadline = Deadline(anchor + timedelta(seconds=2), clock=clock)
+    clock.advance(5)
     context = _base_context(tool, deadline=expired_deadline)
     tool_call = _tool_call({"query": "policies"})
 
@@ -179,13 +178,13 @@ def test_tool_execution_raises_on_expired_deadline(
     }
 
 
-def test_tool_execution_wraps_handler_deadline_exceptions() -> None:
+def test_tool_execution_wraps_handler_deadline_exceptions(clock: FakeClock) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
         raise DeadlineExceededError("deadline hit")
 
     tool = _build_tool(cast(ToolHandler[ToolParams, ToolPayload], handler))
-    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=10))
+    deadline = Deadline(clock.now() + timedelta(seconds=10), clock=clock)
     context = _base_context(tool, deadline=deadline)
     tool_call = _tool_call({"query": "policies"})
 

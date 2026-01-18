@@ -49,6 +49,7 @@ from weakincentives.prompt.overrides import (
     ToolOverride,
 )
 from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import Session, SessionProtocol
 from weakincentives.types import OPENAI_ADAPTER_NAME
@@ -200,7 +201,7 @@ class _RecordingAdapter(ProviderAdapter):
 
 
 def _build_prompt() -> PromptTemplate[_PromptOutput]:
-    session = Session()
+    session = Session(clock=FakeClock())
     workspace = VfsToolsSection(session=session)
     digest = WorkspaceDigestSection(session=session)
     return PromptTemplate[_PromptOutput](
@@ -217,7 +218,7 @@ def _create_optimizer(
     accepts_overrides: bool = True,
     optimization_session: Session | None = None,
 ) -> WorkspaceDigestOptimizer:
-    session = Session()
+    session = Session(clock=FakeClock())
     context = OptimizationContext(
         adapter=adapter,
         dispatcher=session.dispatcher,
@@ -229,11 +230,11 @@ def _create_optimizer(
     return WorkspaceDigestOptimizer(context, config=config, store_scope=store_scope)
 
 
-def test_optimize_persists_digest_from_output() -> None:
+def test_optimize_persists_digest_from_output(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     optimizer = _create_optimizer(adapter)
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
 
     result = optimizer.optimize(prompt, session=session)
 
@@ -244,8 +245,8 @@ def test_optimize_persists_digest_from_output() -> None:
     assert getattr(latest, "summary", None) == "dataclass-summary"
 
 
-def test_session_clear_slice_removes_entire_digest_slice() -> None:
-    session = Session()
+def test_session_clear_slice_removes_entire_digest_slice(clock: FakeClock) -> None:
+    session = Session(clock=clock)
     set_workspace_digest(session, "workspace-digest", "value")
 
     session[WorkspaceDigest].clear()
@@ -253,39 +254,39 @@ def test_session_clear_slice_removes_entire_digest_slice() -> None:
     assert latest_workspace_digest(session, "workspace-digest") is None
 
 
-def test_optimize_handles_string_output() -> None:
+def test_optimize_handles_string_output(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="string")
     optimizer = _create_optimizer(adapter)
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
 
     result = optimizer.optimize(prompt, session=session)
 
     assert result.digest == "string-digest"
 
 
-def test_optimize_falls_back_to_text() -> None:
+def test_optimize_falls_back_to_text(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="text")
     optimizer = _create_optimizer(adapter)
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
 
     result = optimizer.optimize(prompt, session=session)
 
     assert result.digest == "text-digest"
 
 
-def test_optimize_requires_digest_content() -> None:
+def test_optimize_requires_digest_content(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="none")
     optimizer = _create_optimizer(adapter)
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
 
     with pytest.raises(PromptEvaluationError):
         optimizer.optimize(prompt, session=session)
 
 
-def test_optimize_updates_global_overrides() -> None:
+def test_optimize_updates_global_overrides(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     overrides_store = _RecordingOverridesStore()
     optimizer = _create_optimizer(
@@ -295,7 +296,7 @@ def test_optimize_updates_global_overrides() -> None:
         overrides_tag="tag",
     )
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
 
     result = optimizer.optimize(prompt, session=session)
 
@@ -315,7 +316,7 @@ def test_optimize_updates_global_overrides() -> None:
     assert latest_workspace_digest(session, "workspace-digest") is None
 
 
-def test_optimize_global_scope_clears_existing_session_digest() -> None:
+def test_optimize_global_scope_clears_existing_session_digest(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     overrides_store = _RecordingOverridesStore()
     optimizer = _create_optimizer(
@@ -325,7 +326,7 @@ def test_optimize_global_scope_clears_existing_session_digest() -> None:
         overrides_tag="tag",
     )
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
     _ = set_workspace_digest(session, "workspace-digest", "stale")
 
     _ = optimizer.optimize(prompt, session=session)
@@ -333,7 +334,7 @@ def test_optimize_global_scope_clears_existing_session_digest() -> None:
     assert latest_workspace_digest(session, "workspace-digest") is None
 
 
-def test_optimize_requires_overrides_inputs_for_global_scope() -> None:
+def test_optimize_requires_overrides_inputs_for_global_scope(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     optimizer = _create_optimizer(
         adapter,
@@ -344,10 +345,12 @@ def test_optimize_requires_overrides_inputs_for_global_scope() -> None:
     prompt = Prompt(_build_prompt())
 
     with pytest.raises(PromptEvaluationError):
-        optimizer.optimize(prompt, session=Session())
+        optimizer.optimize(prompt, session=Session(clock=clock))
 
 
-def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
+def test_optimize_missing_overrides_inputs_preserves_session_digest(
+    clock: FakeClock,
+) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     optimizer = _create_optimizer(
         adapter,
@@ -356,7 +359,7 @@ def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
         overrides_tag="tag",
     )
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
     _ = set_workspace_digest(session, "workspace-digest", "existing")
 
     with pytest.raises(PromptEvaluationError):
@@ -367,28 +370,28 @@ def test_optimize_missing_overrides_inputs_preserves_session_digest() -> None:
     assert getattr(latest, "body", None) == "existing"
 
 
-def test_optimize_seeds_internal_prompt_overrides() -> None:
+def test_optimize_seeds_internal_prompt_overrides(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     overrides_store = _RecordingOverridesStore()
     optimizer = _create_optimizer(adapter, overrides_store=overrides_store)
     prompt = Prompt(_build_prompt())
 
-    _ = optimizer.optimize(prompt, session=Session())
+    _ = optimizer.optimize(prompt, session=Session(clock=clock))
 
     assert any(call[3] == "seed" for call in overrides_store.calls)
 
 
-def test_optimize_raises_when_internal_prompt_seeding_fails() -> None:
+def test_optimize_raises_when_internal_prompt_seeding_fails(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     overrides_store = _FailingSeedOverridesStore()
     optimizer = _create_optimizer(adapter, overrides_store=overrides_store)
     prompt = Prompt(_build_prompt())
 
     with pytest.raises(PromptEvaluationError):
-        optimizer.optimize(prompt, session=Session())
+        optimizer.optimize(prompt, session=Session(clock=clock))
 
 
-def test_optimize_skips_overrides_when_disabled() -> None:
+def test_optimize_skips_overrides_when_disabled(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     overrides_store = _RecordingOverridesStore()
     optimizer = _create_optimizer(
@@ -396,45 +399,45 @@ def test_optimize_skips_overrides_when_disabled() -> None:
     )
     prompt = Prompt(_build_prompt())
 
-    _ = optimizer.optimize(prompt, session=Session())
+    _ = optimizer.optimize(prompt, session=Session(clock=clock))
 
     assert not overrides_store.calls
 
 
-def test_optimize_requires_workspace_section() -> None:
+def test_optimize_requires_workspace_section(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     optimizer = _create_optimizer(adapter)
     digest_only_prompt = PromptTemplate[_PromptOutput](
         ns="tests",
         key="opt",
-        sections=(WorkspaceDigestSection(session=Session()),),
+        sections=(WorkspaceDigestSection(session=Session(clock=clock)),),
     )
 
     with pytest.raises(PromptEvaluationError):
-        optimizer.optimize(Prompt(digest_only_prompt), session=Session())
+        optimizer.optimize(Prompt(digest_only_prompt), session=Session(clock=clock))
 
 
-def test_optimize_requires_digest_section() -> None:
+def test_optimize_requires_digest_section(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     optimizer = _create_optimizer(adapter)
     workspace_only_prompt = PromptTemplate[_PromptOutput](
         ns="tests",
         key="opt",
-        sections=(VfsToolsSection(session=Session()),),
+        sections=(VfsToolsSection(session=Session(clock=clock)),),
     )
 
     with pytest.raises(PromptEvaluationError):
-        optimizer.optimize(Prompt(workspace_only_prompt), session=Session())
+        optimizer.optimize(Prompt(workspace_only_prompt), session=Session(clock=clock))
 
 
-def test_optimize_validates_digest_section_type() -> None:
+def test_optimize_validates_digest_section_type(clock: FakeClock) -> None:
     @dataclass(slots=True)
     class _Params:
         value: str = "v"
 
     adapter = _RecordingAdapter(mode="dataclass")
     optimizer = _create_optimizer(adapter)
-    workspace = VfsToolsSection(session=Session())
+    workspace = VfsToolsSection(session=Session(clock=clock))
     fake_digest = MarkdownSection[_Params](
         title="Digest",
         template="${value}",
@@ -446,7 +449,7 @@ def test_optimize_validates_digest_section_type() -> None:
     )
 
     with pytest.raises(PromptEvaluationError):
-        optimizer.optimize(Prompt(prompt), session=Session())
+        optimizer.optimize(Prompt(prompt), session=Session(clock=clock))
 
 
 def test_find_section_path_raises_for_missing_section() -> None:
@@ -458,11 +461,11 @@ def test_find_section_path_raises_for_missing_section() -> None:
         optimizer._find_section_path(prompt, "missing")
 
 
-def test_optimize_uses_isolated_session() -> None:
+def test_optimize_uses_isolated_session(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     optimizer = _create_optimizer(adapter)
     prompt = Prompt(_build_prompt())
-    outer_session = Session()
+    outer_session = Session(clock=clock)
 
     _ = optimizer.optimize(prompt, session=outer_session)
 
@@ -472,12 +475,12 @@ def test_optimize_uses_isolated_session() -> None:
     assert inner_session is not outer_session
 
 
-def test_optimize_accepts_provided_session() -> None:
+def test_optimize_accepts_provided_session(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
-    provided_session = Session()
+    provided_session = Session(clock=clock)
     optimizer = _create_optimizer(adapter, optimization_session=provided_session)
     prompt = Prompt(_build_prompt())
-    outer_session = Session()
+    outer_session = Session(clock=clock)
 
     _ = optimizer.optimize(prompt, session=outer_session)
 
@@ -485,11 +488,11 @@ def test_optimize_accepts_provided_session() -> None:
     assert adapter.sessions[0] is provided_session
 
 
-def test_workspace_digest_result_has_correct_scope() -> None:
+def test_workspace_digest_result_has_correct_scope(clock: FakeClock) -> None:
     adapter = _RecordingAdapter(mode="dataclass")
     optimizer = _create_optimizer(adapter, store_scope=PersistenceScope.SESSION)
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
 
     result = optimizer.optimize(prompt, session=session)
 
@@ -502,7 +505,7 @@ def test_optimizer_config_defaults() -> None:
     assert config.accepts_overrides is True
 
 
-def test_optimize_handles_non_string_digest_attribute() -> None:
+def test_optimize_handles_non_string_digest_attribute(clock: FakeClock) -> None:
     """Test that optimizer handles output with non-string digest attribute."""
 
     @dataclass(slots=True, frozen=True)
@@ -532,7 +535,7 @@ def test_optimize_handles_non_string_digest_attribute() -> None:
     adapter = _NonStringDigestAdapter()
     optimizer = _create_optimizer(adapter)
     prompt = Prompt(_build_prompt())
-    session = Session()
+    session = Session(clock=clock)
 
     result = optimizer.optimize(prompt, session=session)
 
@@ -540,9 +543,9 @@ def test_optimize_handles_non_string_digest_attribute() -> None:
     assert result.digest == "fallback-text"
 
 
-def test_latest_workspace_digest_handles_section_key_mismatch() -> None:
+def test_latest_workspace_digest_handles_section_key_mismatch(clock: FakeClock) -> None:
     """Test that latest_workspace_digest handles mismatched section_key."""
-    session = Session()
+    session = Session(clock=clock)
 
     # Create a digest with a different section_key
     _ = set_workspace_digest(session, "other-digest", "value1")

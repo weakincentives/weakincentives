@@ -14,10 +14,10 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Sequence
 from typing import TypeVar
 
+from ..runtime.clock import Clock, SystemClock
 from ..runtime.mailbox import Mailbox
 from ._experiment import Experiment
 from ._types import Dataset, EvalReport, EvalRequest, EvalResult
@@ -98,6 +98,7 @@ def collect_results(
     expected_count: int,
     *,
     timeout_seconds: float = 300,
+    clock: Clock | None = None,
 ) -> EvalReport:
     """Collect evaluation results into a report.
 
@@ -108,6 +109,7 @@ def collect_results(
         results: Mailbox to receive results from.
         expected_count: Number of results to collect.
         timeout_seconds: Maximum time to wait for all results.
+        clock: Clock for time measurements. Defaults to SystemClock().
 
     Returns:
         EvalReport with all collected results.
@@ -120,11 +122,13 @@ def collect_results(
         ... )
         >>> print(f"Pass rate: {report.pass_rate:.1%}")
     """
+    if clock is None:  # pragma: no cover - trivial default parameter
+        clock = SystemClock()
     collected: list[EvalResult] = []
-    deadline = time.time() + timeout_seconds
+    deadline = clock.monotonic() + timeout_seconds
 
-    while len(collected) < expected_count and time.time() < deadline:
-        remaining = deadline - time.time()
+    while len(collected) < expected_count and clock.monotonic() < deadline:
+        remaining = deadline - clock.monotonic()
         wait_time = min(20, max(1, int(remaining)))
 
         for msg in results.receive(wait_time_seconds=wait_time):

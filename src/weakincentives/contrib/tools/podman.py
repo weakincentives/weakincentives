@@ -22,7 +22,6 @@ import shutil
 import subprocess  # nosec: B404
 import tempfile
 import threading
-import time
 import weakref
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import suppress
@@ -32,6 +31,7 @@ from pathlib import Path
 from typing import Any, Final, Protocol, cast, override, runtime_checkable
 
 from weakincentives.filesystem import Filesystem, HostFilesystem
+from weakincentives.runtime.clock import Clock, SystemClock
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
@@ -183,7 +183,7 @@ class PodmanSandboxConfig:
     base_environment: Mapping[str, str] | None = None
     cache_dir: os.PathLike[str] | str | None = None
     client_factory: _ClientFactory | None = None
-    clock: Callable[[], datetime] | None = None
+    clock: Clock | None = None
     connection_name: str | None = None
     exec_runner: _ExecRunner | None = None
     accepts_overrides: bool = False
@@ -540,6 +540,8 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._resolved_mounts,
             self._mount_previews,
         ) = _resolve_podman_host_mounts(self._mounts, self._allowed_roots)
+        # Initialize clock before filesystem creation
+        self._clock: Clock = config.clock or SystemClock()
         # Create overlay directory eagerly so filesystem is available immediately
         # Use provided overlay path (for cloning) or create new one based on session_id
         if _overlay_path is not None and _filesystem is not None:
@@ -553,8 +555,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             self._overlay_path.mkdir(parents=True, exist_ok=True)
             for mount in self._resolved_mounts:
                 self._copy_mount_into_overlay(overlay=self._overlay_path, mount=mount)
-            self._filesystem = HostFilesystem(_root=str(self._overlay_path))
-        self._clock = config.clock or (lambda: datetime.now(UTC))
+            self._filesystem = HostFilesystem(_root=str(self._overlay_path), clock=self._clock)
         self._workspace_handle: _WorkspaceHandle | None = None
         self._lock = threading.RLock()
         self._connection_name = connection_name
@@ -584,7 +585,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         # Use /workspace as the mount point so paths like /workspace/file.txt
         # are correctly interpreted as file.txt in the overlay directory
         self._fs_handlers = FilesystemToolHandlers(
-            clock=self._clock, mount_point=_DEFAULT_WORKDIR
+            clock=self._clock.now, mount_point=_DEFAULT_WORKDIR
         )
         self._shell_suite = _PodmanShellSuite(section=self)
         self._eval_suite = PodmanEvalSuite(section=self)
@@ -845,6 +846,10 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
     def session(self) -> Session:
         return self._session
 
+    @property
+    def clock(self) -> Clock:
+        return self._clock
+
     @override
     def clone(self, **kwargs: object) -> PodmanSandboxSection:  # pragma: no cover
         session = kwargs.get("session")
@@ -941,7 +946,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
         )
         if exit_code != 0:
             raise ToolValidationError("Podman workspace failed readiness checks.")
-        now = self._clock().astimezone(UTC)
+        now = self._clock.now().astimezone(UTC)
         descriptor = PodmanWorkspace(
             container_id=container.id,
             container_name=name,
@@ -1038,7 +1043,7 @@ class PodmanSandboxSection(MarkdownSection[_PodmanSectionParams]):
             handle = self._workspace_handle
             if handle is None:
                 return
-            now = self._clock().astimezone(UTC)
+            now = self._clock.now().astimezone(UTC)
             updated_descriptor = replace(handle.descriptor, last_used_at=now)
             self._workspace_handle = _WorkspaceHandle(
                 descriptor=updated_descriptor,
@@ -1278,7 +1283,7 @@ class _PodmanShellSuite:
         timeout_seconds: float,
     ) -> ToolResult[PodmanShellResult]:
         exec_cmd = list(command)
-        start = time.perf_counter()
+        start = self._section.clock.monotonic()
         try:
             completed = self._section.run_cli_exec(
                 config=_ExecConfig(
@@ -1303,7 +1308,7 @@ class _PodmanShellSuite:
             raise ToolValidationError(
                 "Podman CLI is required to execute commands over SSH connections."
             ) from error
-        duration_ms = int((time.perf_counter() - start) * 1_000)
+        duration_ms = int((self._section.clock.monotonic() - start) * 1_000)
         self._section.touch_workspace()
         stdout_text_clean = str(stdout_text or "").rstrip()
         stderr_text_clean = str(stderr_text or "").rstrip()

@@ -54,7 +54,9 @@ class BasePromptOptimizer[InputT, OutputT](ABC):
         """Subclasses implement optimization logic here."""
         ...
 
-    def _create_optimization_session(self, prompt: Prompt[InputT]) -> Session:
+    def _create_optimization_session(
+        self, prompt: Prompt[InputT], *, session: SessionProtocol
+    ) -> Session:
         """Create an isolated session for optimization evaluation.
 
         Reuses the context's optimization_session if provided; otherwise
@@ -67,7 +69,8 @@ class BasePromptOptimizer[InputT, OutputT](ABC):
             tags={
                 "scope": f"{self._optimizer_scope}_optimization",
                 "prompt": prompt_name,
-            }
+            },
+            clock=session.clock,
         )
 
     @property

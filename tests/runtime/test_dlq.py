@@ -26,6 +26,7 @@ from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
+from weakincentives.runtime.clock import Clock, FakeClock
 from weakincentives.runtime.dlq import DeadLetter, DLQConsumer, DLQPolicy
 from weakincentives.runtime.mailbox import (
     FakeMailbox,
@@ -116,7 +117,20 @@ class _TestLoop(MainLoop[_Request, _Output]):
         config: MainLoopConfig | None = None,
         dlq: DLQPolicy[MainLoopRequest[_Request], MainLoopResult[_Output]]
         | None = None,
+        clock: Clock | None = None,
     ) -> None:
+        # Ensure clock is passed to MainLoop via config
+        resolved_clock = clock if clock is not None else FakeClock()
+        if config is None:
+            config = MainLoopConfig(clock=resolved_clock)
+        elif config.clock is None:
+            config = MainLoopConfig(
+                deadline=config.deadline,
+                budget=config.budget,
+                resources=config.resources,
+                lease_extender=config.lease_extender,
+                clock=resolved_clock,
+            )
         super().__init__(adapter=adapter, requests=requests, config=config, dlq=dlq)
         self._template = PromptTemplate[_Output](
             ns="test",
@@ -129,13 +143,14 @@ class _TestLoop(MainLoop[_Request, _Output]):
                 ),
             ],
         )
+        self._clock = resolved_clock
 
     def prepare(
         self, request: _Request, *, experiment: object = None
     ) -> tuple[Prompt[_Output], Session]:
         del experiment  # Unused in tests
         prompt = Prompt(self._template).bind(_Params(content=request.message))
-        session = Session(tags={"loop": "test"})
+        session = Session(tags={"loop": "test"}, clock=self._clock)
         return prompt, session
 
 
@@ -212,9 +227,11 @@ def test_dead_letter_is_frozen() -> None:
 # =============================================================================
 
 
-def test_dlq_policy_default_values() -> None:
+def test_dlq_policy_default_values(clock: FakeClock) -> None:
     """DLQPolicy has sensible defaults."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         policy: DLQPolicy[str, None] = DLQPolicy(mailbox=dlq_mailbox)
 
@@ -226,9 +243,11 @@ def test_dlq_policy_default_values() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_policy_should_dead_letter_by_count() -> None:
+def test_dlq_policy_should_dead_letter_by_count(clock: FakeClock) -> None:
     """DLQPolicy dead-letters when delivery count exceeds threshold."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         policy: DLQPolicy[str, None] = DLQPolicy(
             mailbox=dlq_mailbox,
@@ -271,9 +290,11 @@ def test_dlq_policy_should_dead_letter_by_count() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_policy_include_errors() -> None:
+def test_dlq_policy_include_errors(clock: FakeClock) -> None:
     """DLQPolicy immediately dead-letters included error types."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         policy: DLQPolicy[str, None] = DLQPolicy(
             mailbox=dlq_mailbox,
@@ -299,9 +320,11 @@ def test_dlq_policy_include_errors() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_policy_exclude_errors() -> None:
+def test_dlq_policy_exclude_errors(clock: FakeClock) -> None:
     """DLQPolicy never dead-letters excluded error types."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         policy: DLQPolicy[str, None] = DLQPolicy(
             mailbox=dlq_mailbox,
@@ -326,9 +349,11 @@ def test_dlq_policy_exclude_errors() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_policy_exclude_takes_precedence() -> None:
+def test_dlq_policy_exclude_takes_precedence(clock: FakeClock) -> None:
     """Exclude errors take precedence over include errors."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         # This is a weird config but should work
         policy: DLQPolicy[str, None] = DLQPolicy(
@@ -357,17 +382,17 @@ def test_dlq_policy_exclude_takes_precedence() -> None:
 # =============================================================================
 
 
-def test_mainloop_error_reply_without_dlq() -> None:
+def test_mainloop_error_reply_without_dlq(clock: FakeClock) -> None:
     """MainLoop sends error reply without DLQ configured (original behavior)."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
+        name="results", clock=clock
     )
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("failure"))
-        loop = _TestLoop(adapter=adapter, requests=requests)
+        loop = _TestLoop(adapter=adapter, requests=requests, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
@@ -388,21 +413,21 @@ def test_mainloop_error_reply_without_dlq() -> None:
         results.close()
 
 
-def test_mainloop_nacks_with_dlq_before_threshold() -> None:
+def test_mainloop_nacks_with_dlq_before_threshold(clock: FakeClock) -> None:
     """MainLoop nacks failed messages with DLQ before threshold is reached."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
+        name="results", clock=clock
     )
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
+        InMemoryMailbox(name="requests-dlq", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("failure"))
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=5)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
@@ -424,22 +449,22 @@ def test_mainloop_nacks_with_dlq_before_threshold() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_sends_to_dlq_after_threshold() -> None:
+def test_mainloop_sends_to_dlq_after_threshold(clock: FakeClock) -> None:
     """MainLoop sends to DLQ when delivery count equals threshold."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
+        name="results", clock=clock
     )
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
+        InMemoryMailbox(name="requests-dlq", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("persistent failure"))
         # Use max_delivery_count=1 to trigger DLQ on first failure
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
@@ -475,16 +500,16 @@ def test_mainloop_sends_to_dlq_after_threshold() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_immediate_dlq_for_included_error() -> None:
+def test_mainloop_immediate_dlq_for_included_error(clock: FakeClock) -> None:
     """MainLoop immediately dead-letters included error types."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
+        name="results", clock=clock
     )
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
+        InMemoryMailbox(name="requests-dlq", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=ValueError("validation error"))
@@ -493,7 +518,7 @@ def test_mainloop_immediate_dlq_for_included_error() -> None:
             max_delivery_count=5,
             include_errors=frozenset({ValueError}),
         )
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
@@ -515,16 +540,16 @@ def test_mainloop_immediate_dlq_for_included_error() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_never_dlq_for_excluded_error() -> None:
+def test_mainloop_never_dlq_for_excluded_error(clock: FakeClock) -> None:
     """MainLoop never dead-letters excluded error types."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
+        name="results", clock=clock
     )
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
+        InMemoryMailbox(name="requests-dlq", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=TimeoutError("transient timeout"))
@@ -533,7 +558,7 @@ def test_mainloop_never_dlq_for_excluded_error() -> None:
             max_delivery_count=2,
             exclude_errors=frozenset({TimeoutError}),
         )
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
@@ -551,21 +576,21 @@ def test_mainloop_never_dlq_for_excluded_error() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_dlq_preserves_request_id() -> None:
+def test_mainloop_dlq_preserves_request_id(clock: FakeClock) -> None:
     """MainLoop DLQ preserves request ID in dead letter."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
-        name="results"
+        name="results", clock=clock
     )
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
+        InMemoryMailbox(name="requests-dlq", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("failure"))
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
@@ -582,21 +607,21 @@ def test_mainloop_dlq_preserves_request_id() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_dlq_preserves_reply_to() -> None:
+def test_mainloop_dlq_preserves_reply_to(clock: FakeClock) -> None:
     """MainLoop DLQ preserves reply_to mailbox name in dead letter."""
     results: InMemoryMailbox[MainLoopResult[_Output], None] = InMemoryMailbox(
-        name="my-results-queue"
+        name="my-results-queue", clock=clock
     )
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
+        InMemoryMailbox(name="requests-dlq", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("failure"))
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
@@ -613,18 +638,18 @@ def test_mainloop_dlq_preserves_reply_to() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_dlq_without_reply_to() -> None:
+def test_mainloop_dlq_without_reply_to(clock: FakeClock) -> None:
     """MainLoop DLQ handles messages without reply_to."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
+        InMemoryMailbox(name="requests-dlq", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("failure"))
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         # Send without reply_to
@@ -645,21 +670,23 @@ def test_mainloop_dlq_without_reply_to() -> None:
         dlq_mailbox.close()
 
 
-def test_mainloop_dlq_handles_reply_error() -> None:
+def test_mainloop_dlq_handles_reply_error(clock: FakeClock) -> None:
     """MainLoop DLQ handles errors when sending reply."""
     from weakincentives.runtime.mailbox import MailboxConnectionError
 
-    results: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(name="results")
+    results: FakeMailbox[MainLoopResult[_Output], None] = FakeMailbox(
+        name="results", clock=clock
+    )
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[MainLoopRequest[_Request]], None] = (
-        InMemoryMailbox(name="requests-dlq")
+        InMemoryMailbox(name="requests-dlq", clock=clock)
     )
     try:
         adapter = _MockAdapter(error=RuntimeError("failure"))
         dlq = DLQPolicy(mailbox=dlq_mailbox, max_delivery_count=1)
-        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq)
+        loop = _TestLoop(adapter=adapter, requests=requests, dlq=dlq, clock=clock)
 
         request = MainLoopRequest(request=_Request(message="hello"))
         requests.send(request, reply_to=results)
@@ -682,9 +709,11 @@ def test_mainloop_dlq_handles_reply_error() -> None:
 # =============================================================================
 
 
-def test_dlq_consumer_processes_dead_letters() -> None:
+def test_dlq_consumer_processes_dead_letters(clock: FakeClock) -> None:
     """DLQConsumer processes dead letters with handler."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         processed: list[DeadLetter[str]] = []
 
@@ -718,9 +747,11 @@ def test_dlq_consumer_processes_dead_letters() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_consumer_nacks_on_handler_failure() -> None:
+def test_dlq_consumer_nacks_on_handler_failure(clock: FakeClock) -> None:
     """DLQConsumer nacks messages when handler fails."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
 
         def failing_handler(dl: DeadLetter[str]) -> None:
@@ -749,9 +780,11 @@ def test_dlq_consumer_nacks_on_handler_failure() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_consumer_has_heartbeat() -> None:
+def test_dlq_consumer_has_heartbeat(clock: FakeClock) -> None:
     """DLQConsumer has heartbeat for watchdog monitoring."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         consumer = DLQConsumer(mailbox=dlq_mailbox, handler=lambda _: None)
 
@@ -762,8 +795,10 @@ def test_dlq_consumer_has_heartbeat() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_consumer_shutdown() -> None:
+@pytest.mark.allow_system_clock
+def test_dlq_consumer_shutdown(clock: FakeClock) -> None:
     """DLQConsumer supports graceful shutdown."""
+    # Use SystemClock for this integration test since it uses real threading
     dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
     try:
         consumer = DLQConsumer(mailbox=dlq_mailbox, handler=lambda _: None)
@@ -789,9 +824,11 @@ def test_dlq_consumer_shutdown() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_consumer_context_manager() -> None:
+def test_dlq_consumer_context_manager(clock: FakeClock) -> None:
     """DLQConsumer supports context manager protocol."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         with DLQConsumer(mailbox=dlq_mailbox, handler=lambda _: None) as consumer:
             assert consumer is not None
@@ -801,9 +838,11 @@ def test_dlq_consumer_context_manager() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_consumer_running_property() -> None:
+def test_dlq_consumer_running_property(clock: FakeClock) -> None:
     """DLQConsumer running property reflects actual state."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         consumer = DLQConsumer(mailbox=dlq_mailbox, handler=lambda _: None)
 
@@ -825,9 +864,11 @@ def test_dlq_consumer_running_property() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_consumer_respects_max_iterations() -> None:
+def test_dlq_consumer_respects_max_iterations(clock: FakeClock) -> None:
     """DLQConsumer respects max_iterations limit."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         process_count = 0
 
@@ -863,9 +904,11 @@ def test_dlq_consumer_respects_max_iterations() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_consumer_beats_heartbeat() -> None:
+def test_dlq_consumer_beats_heartbeat(clock: FakeClock) -> None:
     """DLQConsumer beats heartbeat during processing."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         consumer = DLQConsumer(mailbox=dlq_mailbox, handler=lambda _: None)
 
@@ -894,9 +937,11 @@ def test_dlq_consumer_beats_heartbeat() -> None:
         dlq_mailbox.close()
 
 
-def test_dlq_consumer_exits_when_mailbox_closed() -> None:
+def test_dlq_consumer_exits_when_mailbox_closed(clock: FakeClock) -> None:
     """DLQConsumer exits when mailbox is closed."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         consumer = DLQConsumer(mailbox=dlq_mailbox, handler=lambda _: None)
 
@@ -912,9 +957,11 @@ def test_dlq_consumer_exits_when_mailbox_closed() -> None:
         pass  # Mailbox already closed
 
 
-def test_dlq_consumer_nacks_on_shutdown_during_messages() -> None:
+def test_dlq_consumer_nacks_on_shutdown_during_messages(clock: FakeClock) -> None:
     """DLQConsumer nacks unprocessed messages during shutdown."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         processed: list[str] = []
 
@@ -970,9 +1017,11 @@ class _ErrorBudgetPolicy(DLQPolicy[str, None]):
         return self.error_budget_exceeded
 
 
-def test_custom_dlq_policy() -> None:
+def test_custom_dlq_policy(clock: FakeClock) -> None:
     """Custom DLQPolicy can implement custom dead-letter logic."""
-    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(name="dlq")
+    dlq_mailbox: InMemoryMailbox[DeadLetter[str], None] = InMemoryMailbox(
+        name="dlq", clock=clock
+    )
     try:
         # Policy with error budget exceeded
         policy = _ErrorBudgetPolicy(

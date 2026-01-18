@@ -96,6 +96,7 @@ from weakincentives.prompt import (
     ToolResult,
 )
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.runtime.clock import Clock, FakeClock
 from weakincentives.runtime.events import (
     HandlerFailure,
     InProcessDispatcher,
@@ -165,11 +166,17 @@ def _evaluate_with_session(
     prompt: PromptTemplate[OutputT],
     *params: SupportsDataclass,
     session: SessionProtocol | None = None,
+    clock: Clock | None = None,
 ) -> PromptResponse[OutputT]:
+    from weakincentives.runtime.clock import FakeClock
+
+    resolved_clock = clock if clock is not None else FakeClock()
     target_session = (
         session
         if session is not None
-        else cast(SessionProtocol, Session(dispatcher=NullDispatcher()))
+        else cast(
+            SessionProtocol, Session(dispatcher=NullDispatcher(), clock=resolved_clock)
+        )
     )
     return _evaluate(adapter, prompt, *params, session=target_session)
 
@@ -347,7 +354,7 @@ def test_openai_adapter_returns_plain_text_response() -> None:
     assert "tools" not in request
 
 
-def test_openai_adapter_executes_tools_and_parses_output() -> None:
+def test_openai_adapter_executes_tools_and_parses_output(clock: FakeClock) -> None:
     module = cast(Any, _reload_module())
 
     calls: list[str] = []
@@ -394,7 +401,7 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     tool_events: list[ToolInvoked] = []
     dispatcher.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
@@ -436,6 +443,7 @@ def test_openai_adapter_executes_tools_and_parses_output() -> None:
 
 def test_openai_adapter_rolls_back_session_on_publish_failure(
     monkeypatch: pytest.MonkeyPatch,
+    clock: FakeClock,
 ) -> None:
     module = cast(Any, _reload_module())
 
@@ -473,7 +481,7 @@ def test_openai_adapter_rolls_back_session_on_publish_failure(
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     session[ToolPayload].register(ToolPayload, replace_latest)
     session[ToolPayload].seed((ToolPayload(answer="baseline"),))
 
@@ -541,7 +549,7 @@ def test_openai_format_dispatch_failures_handles_defaults() -> None:
     )
 
 
-def test_openai_adapter_surfaces_tool_validation_errors() -> None:
+def test_openai_adapter_surfaces_tool_validation_errors(clock: FakeClock) -> None:
     module = cast(Any, _reload_module())
 
     def handler(_: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
@@ -585,7 +593,7 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     tool_events: list[ToolInvoked] = []
 
     def record_tool_event(event: object) -> None:
@@ -625,7 +633,7 @@ def test_openai_adapter_surfaces_tool_validation_errors() -> None:
     assert rendered_text is None
 
 
-def test_openai_adapter_surfaces_tool_type_errors() -> None:
+def test_openai_adapter_surfaces_tool_type_errors(clock: FakeClock) -> None:
     module = cast(Any, _reload_module())
 
     invoked = False
@@ -673,7 +681,7 @@ def test_openai_adapter_surfaces_tool_type_errors() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     tool_events: list[ToolInvoked] = []
 
     def record_tool_event(event: object) -> None:
@@ -818,7 +826,7 @@ def test_openai_adapter_relaxes_forced_tool_choice_after_first_call() -> None:
     assert second_request.get("tool_choice") == "auto"
 
 
-def test_openai_adapter_emits_events_during_evaluation() -> None:
+def test_openai_adapter_emits_events_during_evaluation(clock: FakeClock) -> None:
     module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
@@ -855,7 +863,7 @@ def test_openai_adapter_emits_events_during_evaluation() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     tool_events: list[ToolInvoked] = []
     prompt_events: list[PromptExecuted] = []
 
@@ -935,7 +943,7 @@ def test_openai_adapter_raises_when_tool_handler_missing() -> None:
     assert err.value.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
-def test_openai_adapter_handles_tool_call_without_arguments() -> None:
+def test_openai_adapter_handles_tool_call_without_arguments(clock: FakeClock) -> None:
     module = cast(Any, _reload_module())
 
     def optional_handler(
@@ -981,7 +989,7 @@ def test_openai_adapter_handles_tool_call_without_arguments() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     tool_events: list[ToolInvoked] = []
     dispatcher.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
@@ -1306,7 +1314,7 @@ def test_openai_adapter_raises_for_unknown_tool() -> None:
     assert err.value.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
-def test_openai_adapter_handles_invalid_tool_params() -> None:
+def test_openai_adapter_handles_invalid_tool_params(clock: FakeClock) -> None:
     module = cast(Any, _reload_module())
 
     tool = Tool[ToolParams, ToolPayload](
@@ -1344,7 +1352,7 @@ def test_openai_adapter_handles_invalid_tool_params() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     tool_events: list[ToolInvoked] = []
     dispatcher.subscribe(
         ToolInvoked, lambda event: tool_events.append(cast(ToolInvoked, event))
@@ -1364,7 +1372,7 @@ def test_openai_adapter_handles_invalid_tool_params() -> None:
     assert "Missing required field" in invocation.result.message
 
 
-def test_openai_adapter_records_handler_failures() -> None:
+def test_openai_adapter_records_handler_failures(clock: FakeClock) -> None:
     module = cast(Any, _reload_module())
 
     def failing_handler(
@@ -1416,7 +1424,7 @@ def test_openai_adapter_records_handler_failures() -> None:
     adapter = module.OpenAIAdapter(model="gpt-test", client=client)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     tool_events: list[ToolInvoked] = []
 
     def record(event: object) -> None:
@@ -1929,7 +1937,9 @@ def test_openai_normalize_input_messages_splits_assistant_with_content_and_tools
     assert messages[1]["name"] == "search"
 
 
-def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
+def test_openai_adapter_creates_budget_tracker_when_budget_provided(
+    clock: FakeClock,
+) -> None:
     module = cast(Any, _reload_module())
 
     prompt = PromptTemplate(
@@ -1952,7 +1962,7 @@ def test_openai_adapter_creates_budget_tracker_when_budget_provided() -> None:
 
     budget = Budget(max_total_tokens=1000)
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     result = adapter.evaluate(
         Prompt(prompt).bind(GreetingParams(user="Test")),

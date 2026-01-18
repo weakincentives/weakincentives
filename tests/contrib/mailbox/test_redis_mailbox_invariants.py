@@ -40,7 +40,7 @@ try:
 except ImportError:
     HAS_HYPOTHESIS = False
 
-pytestmark = pytest.mark.redis_standalone
+pytestmark = [pytest.mark.redis_standalone, pytest.mark.allow_system_clock]
 
 
 class TestReceiptHandleFreshness:

@@ -20,7 +20,7 @@ import shutil
 import tempfile
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Final, override
 
@@ -53,10 +53,6 @@ class WorkspaceSecurityError(WinkError):
     """Raised when a workspace mount violates security constraints."""
 
     pass
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 @FrozenDataclass()
@@ -360,12 +356,14 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
             # Cloning path - reuse existing workspace state
             self._temp_dir = _temp_dir
             self._mount_previews = _mount_previews
-            self._created_at = _created_at or _utcnow()
+            self._created_at = _created_at or self._session.clock.now()
             # Use provided filesystem or create new one (for backward compatibility)
             self._filesystem: Filesystem = (
                 _filesystem
                 if _filesystem is not None
-                else HostFilesystem(_root=str(self._temp_dir))
+                else HostFilesystem(
+                    _root=str(self._temp_dir), clock=self._session.clock
+                )
             )
         elif mounts:
             # Create workspace from mounts
@@ -373,14 +371,18 @@ class ClaudeAgentWorkspaceSection(MarkdownSection[_ClaudeAgentWorkspaceSectionPa
                 mounts,
                 allowed_host_roots=self._allowed_host_roots,
             )
-            self._created_at = _utcnow()
-            self._filesystem = HostFilesystem(_root=str(self._temp_dir))
+            self._created_at = self._session.clock.now()
+            self._filesystem = HostFilesystem(
+                _root=str(self._temp_dir), clock=self._session.clock
+            )
         else:
             # Empty workspace
             self._temp_dir = Path(tempfile.mkdtemp(prefix="wink-sdk-"))
             self._mount_previews = ()
-            self._created_at = _utcnow()
-            self._filesystem = HostFilesystem(_root=str(self._temp_dir))
+            self._created_at = self._session.clock.now()
+            self._filesystem = HostFilesystem(
+                _root=str(self._temp_dir), clock=self._session.clock
+            )
 
         template = _render_workspace_template(self._mount_previews)
 

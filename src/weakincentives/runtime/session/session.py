@@ -28,6 +28,7 @@ from uuid import UUID, uuid4
 
 from ...dbc import invariant
 from ...types.dataclass import SupportsDataclass
+from ..clock import Clock, SystemClock
 from ..events import (
     DispatchResult,
     PromptExecuted,
@@ -192,11 +193,15 @@ class Session(SessionProtocol):
         created_at: datetime | None = None,
         tags: Mapping[object, object] | None = None,
         slice_config: SliceFactoryConfig | None = None,
+        clock: Clock | None = None,
     ) -> None:
         super().__init__()
+        # Resolve clock early for use in created_at
+        self._clock = clock if clock is not None else SystemClock()
+
         resolved_session_id = session_id if session_id is not None else uuid4()
         resolved_created_at = (
-            created_at if created_at is not None else datetime.now(UTC)
+            created_at if created_at is not None else self._clock.now()
         )
         if resolved_created_at.tzinfo is None:
             msg = "Session created_at must be timezone-aware."
@@ -234,6 +239,12 @@ class Session(SessionProtocol):
             parent._register_child(self)
         self._attach_to_dispatcher(self._dispatcher)
         self._register_builtin_reducers()
+
+    @property
+    @override
+    def clock(self) -> Clock:
+        """Return the clock instance for time-related operations."""
+        return self._clock
 
     @contextmanager
     def locked(self) -> Iterator[None]:
@@ -334,6 +345,7 @@ class Session(SessionProtocol):
         created_at: datetime | None = None,
         tags: Mapping[object, object] | None = None,
         slice_config: SliceFactoryConfig | None = None,
+        clock: Clock | None = None,
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
         reducer_snapshot, state_snapshot, policy_snapshot = (
@@ -348,6 +360,7 @@ class Session(SessionProtocol):
             slice_config=slice_config
             if slice_config is not None
             else self._slice_config,
+            clock=clock if clock is not None else self._clock,
         )
         self._copy_reducers_to_clone(clone, reducer_snapshot)
         self._apply_state_to_clone(clone, state_snapshot)
@@ -739,7 +752,7 @@ class Session(SessionProtocol):
             msg = "Unable to serialize session slices"
             raise SnapshotSerializationError(msg) from error
 
-        created_at = datetime.now(UTC)
+        created_at = self.clock.now()
         return Snapshot(
             created_at=created_at,
             parent_id=parent_id,
