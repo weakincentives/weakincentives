@@ -332,9 +332,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
             messages = mailbox.receive(max_messages=1, visibility_timeout=1)
             assert len(messages) == 1
 
-            # Advance clock past visibility timeout and let reaper run
+            # Advance clock past visibility timeout and trigger reap synchronously
             clock.advance(2)
-            time.sleep(0.15)  # Allow reaper thread to process
+            mailbox._reap_expired()
 
             # Message should be available again
             messages = mailbox.receive(max_messages=1)
@@ -875,9 +875,9 @@ class TestInMemoryMailboxCoverage:
             # Extend visibility
             messages[0].extend_visibility(60)
 
-            # Advance clock past original timeout and let reaper run
+            # Advance clock past original timeout and trigger reap synchronously
             clock.advance(2)
-            time.sleep(0.15)  # Allow reaper thread to process
+            mailbox._reap_expired()
 
             # Message should still be invisible (not requeued)
             assert mailbox.approximate_count() == 1

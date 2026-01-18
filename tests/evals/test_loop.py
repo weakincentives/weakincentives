@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import time
 from dataclasses import dataclass
 
 import pytest
@@ -1130,12 +1129,12 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run many times - should never dead-letter
-        # After each run, advance clock past backoff and let reaper requeue
+        # After each run, advance clock past backoff and trigger reap synchronously
         for _ in range(5):
             eval_loop.run(max_iterations=1, wait_time_seconds=0)
             # Advance clock past the backoff (min(60 * delivery_count, 900))
             clock.advance(1000)
-            time.sleep(0.15)  # Let reaper thread requeue the message
+            requests._reap_expired()  # Deterministic requeue
 
         # Message should still be in queue (nacked, not dead-lettered)
         assert requests.approximate_count() == 1
