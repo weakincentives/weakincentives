@@ -155,7 +155,7 @@ def sleep_for(delay: timedelta, *, sleeper: Sleeper = SYSTEM_CLOCK) -> None:
     Args:
         delay: Duration to sleep.
         sleeper: Sleep implementation. Defaults to system clock.
-            Inject TestClock for instant advancement in tests.
+            Inject FakeClock for instant advancement in tests.
     """
     sleeper.sleep(delay.total_seconds())
 

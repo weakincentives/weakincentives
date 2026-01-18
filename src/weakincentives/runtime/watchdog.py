@@ -77,9 +77,9 @@ class Heartbeat:
 
     For testing, inject a controllable clock::
 
-        from weakincentives.clock import TestClock
+        from weakincentives.clock import FakeClock
 
-        clock = TestClock()
+        clock = FakeClock()
         hb = Heartbeat(clock=clock)
 
         hb.beat()

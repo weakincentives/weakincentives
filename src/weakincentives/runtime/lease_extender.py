@@ -93,9 +93,9 @@ class LeaseExtender:
 
     For testing, inject a controllable clock::
 
-        from weakincentives.clock import TestClock
+        from weakincentives.clock import FakeClock
 
-        clock = TestClock()
+        clock = FakeClock()
         extender = LeaseExtender(
             config=LeaseExtenderConfig(interval=30),
             clock=clock,
