@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, NoReturn, cast
 from uuid import uuid4
 
@@ -407,7 +407,7 @@ class InnerLoop[OutputT]:
                 render_inputs=self.inputs.render_inputs,
                 rendered_prompt=self._rendered.text,
                 descriptor=self._rendered.descriptor,
-                created_at=datetime.now(UTC),
+                created_at=self.config.session.clock.now(),
                 run_context=self.config.run_context,
                 event_id=uuid4(),
             )
@@ -511,7 +511,7 @@ class InnerLoop[OutputT]:
                 adapter=self.inputs.adapter_name,
                 result=cast(PromptResponse[object], response_payload),
                 session_id=getattr(self.config.session, "session_id", None),
-                created_at=datetime.now(UTC),
+                created_at=self.config.session.clock.now(),
                 usage=usage,
                 run_context=self.config.run_context,
                 event_id=uuid4(),

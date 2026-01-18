@@ -26,6 +26,7 @@ from tests.helpers.session import (
     make_prompt_rendered,
     make_tool_event,
 )
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import (
     InProcessDispatcher,
     PromptExecuted,
@@ -215,10 +216,12 @@ def test_rollback_preserves_log_slices(session_factory: SessionFactory) -> None:
     assert session[ToolInvoked].all() == (first_event, second_event)
 
 
-def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> None:
+def test_snapshot_tracks_relationship_ids(
+    session_factory: SessionFactory, clock: FakeClock
+) -> None:
     parent, dispatcher = session_factory()
 
-    first_child = Session(dispatcher=dispatcher, parent=parent)
+    first_child = Session(dispatcher=dispatcher, parent=parent, clock=clock)
     parent_snapshot = parent.snapshot()
 
     assert parent_snapshot.parent_id is None
@@ -229,7 +232,7 @@ def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> No
     assert child_snapshot.parent_id == parent.session_id
     assert child_snapshot.children_ids == ()
 
-    second_child = Session(dispatcher=dispatcher, parent=parent)
+    second_child = Session(dispatcher=dispatcher, parent=parent, clock=clock)
 
     parent.restore(parent_snapshot)
 
@@ -237,7 +240,7 @@ def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> No
 
 
 def test_snapshot_rollback_requires_registered_slices(
-    session_factory: SessionFactory,
+    session_factory: SessionFactory, clock: FakeClock
 ) -> None:
     source, dispatcher = session_factory()
     result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="hello")))
@@ -245,7 +248,7 @@ def test_snapshot_rollback_requires_registered_slices(
     assert result.ok
     snapshot = source.snapshot()
 
-    target = Session(dispatcher=InProcessDispatcher())
+    target = Session(dispatcher=InProcessDispatcher(), clock=clock)
 
     with pytest.raises(SnapshotRestoreError):
         target.restore(snapshot)

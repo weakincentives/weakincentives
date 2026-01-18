@@ -23,6 +23,7 @@ from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.errors import RestoreFailedError
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt import Prompt, PromptTemplate
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot, SnapshotRestoreError
@@ -54,11 +55,11 @@ def _make_prompt() -> Prompt[object]:
 class TestCompositeSnapshotSerialization:
     """Tests for CompositeSnapshot.to_json() and from_json() methods."""
 
-    def test_to_json_basic(self) -> None:
+    def test_to_json_basic(self, clock: FakeClock) -> None:
         """Test serializing a composite snapshot to JSON."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "content")
         prompt = _make_prompt_with_fs(fs)
 
@@ -74,10 +75,10 @@ class TestCompositeSnapshotSerialization:
         assert "resources" in payload
         assert payload["metadata"]["tag"] == "test"
 
-    def test_to_json_without_resources(self) -> None:
+    def test_to_json_without_resources(self, clock: FakeClock) -> None:
         """Test serializing a snapshot without snapshotable resources."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt()
 
         snapshot = create_snapshot(
@@ -89,10 +90,10 @@ class TestCompositeSnapshotSerialization:
         assert payload["resources"] == []
         assert payload["metadata"]["tag"] == "no-resources"
 
-    def test_to_json_without_metadata(self) -> None:
+    def test_to_json_without_metadata(self, clock: FakeClock) -> None:
         """Test serializing a snapshot without metadata."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt()
 
         # Create snapshot without tag to have minimal metadata
@@ -102,11 +103,11 @@ class TestCompositeSnapshotSerialization:
         payload = json.loads(json_str)
         assert payload["metadata"] is not None  # Still has metadata with None tag
 
-    def test_from_json_basic(self) -> None:
+    def test_from_json_basic(self, clock: FakeClock) -> None:
         """Test deserializing a composite snapshot from JSON."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -122,25 +123,25 @@ class TestCompositeSnapshotSerialization:
         assert restored.metadata is not None
         assert restored.metadata.tag == "roundtrip"
 
-    def test_from_json_invalid_json(self) -> None:
+    def test_from_json_invalid_json(self, clock: FakeClock) -> None:
         """Test that invalid JSON raises SnapshotRestoreError."""
         with pytest.raises(
             SnapshotRestoreError, match="Invalid composite snapshot JSON"
         ):
             CompositeSnapshot.from_json("not valid json")
 
-    def test_from_json_not_object(self) -> None:
+    def test_from_json_not_object(self, clock: FakeClock) -> None:
         """Test that non-object JSON raises SnapshotRestoreError."""
         with pytest.raises(SnapshotRestoreError, match="must be an object"):
             CompositeSnapshot.from_json('"just a string"')
 
-    def test_from_json_wrong_version(self) -> None:
+    def test_from_json_wrong_version(self, clock: FakeClock) -> None:
         """Test that wrong schema version raises SnapshotRestoreError."""
         payload = {"version": "99", "snapshot_id": "123", "created_at": "2024-01-01"}
         with pytest.raises(SnapshotRestoreError, match="schema version mismatch"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_snapshot_id(self) -> None:
+    def test_from_json_invalid_snapshot_id(self, clock: FakeClock) -> None:
         """Test that invalid snapshot_id raises SnapshotRestoreError."""
         payload = {
             "version": "1",
@@ -150,7 +151,7 @@ class TestCompositeSnapshotSerialization:
         with pytest.raises(SnapshotRestoreError, match="Invalid snapshot_id"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_created_at(self) -> None:
+    def test_from_json_invalid_created_at(self, clock: FakeClock) -> None:
         """Test that invalid created_at raises SnapshotRestoreError."""
         payload = {
             "version": "1",
@@ -160,7 +161,7 @@ class TestCompositeSnapshotSerialization:
         with pytest.raises(SnapshotRestoreError, match="Invalid created_at"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_session(self) -> None:
+    def test_from_json_invalid_session(self, clock: FakeClock) -> None:
         """Test that invalid session raises SnapshotRestoreError."""
         payload = {
             "version": "1",
@@ -173,10 +174,10 @@ class TestCompositeSnapshotSerialization:
         ):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_resources_not_list(self) -> None:
+    def test_from_json_invalid_resources_not_list(self, clock: FakeClock) -> None:
         """Test that resources not being a list raises SnapshotRestoreError."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         session_snapshot = session.snapshot()
 
         payload = {
@@ -189,10 +190,10 @@ class TestCompositeSnapshotSerialization:
         with pytest.raises(SnapshotRestoreError, match="Resources must be a list"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_resource_entry(self) -> None:
+    def test_from_json_invalid_resource_entry(self, clock: FakeClock) -> None:
         """Test that invalid resource entry raises SnapshotRestoreError."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         session_snapshot = session.snapshot()
 
         payload = {
@@ -207,10 +208,10 @@ class TestCompositeSnapshotSerialization:
         ):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_metadata_not_object(self) -> None:
+    def test_from_json_invalid_metadata_not_object(self, clock: FakeClock) -> None:
         """Test that invalid metadata raises SnapshotRestoreError."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         session_snapshot = session.snapshot()
 
         payload = {
@@ -224,10 +225,10 @@ class TestCompositeSnapshotSerialization:
         with pytest.raises(SnapshotRestoreError, match="Metadata must be an object"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_from_json_invalid_metadata_phase(self) -> None:
+    def test_from_json_invalid_metadata_phase(self, clock: FakeClock) -> None:
         """Test that invalid metadata phase raises SnapshotRestoreError."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         session_snapshot = session.snapshot()
 
         payload = {
@@ -241,11 +242,11 @@ class TestCompositeSnapshotSerialization:
         with pytest.raises(SnapshotRestoreError, match="Metadata phase must be valid"):
             CompositeSnapshot.from_json(json.dumps(payload))
 
-    def test_roundtrip_with_filesystem_resource(self) -> None:
+    def test_roundtrip_with_filesystem_resource(self, clock: FakeClock) -> None:
         """Test full roundtrip serialization with filesystem resource."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -265,10 +266,10 @@ class TestCompositeSnapshotSerialization:
 class TestRestoreSnapshotErrors:
     """Tests for error handling in restore_snapshot()."""
 
-    def test_restore_handles_session_restore_failure(self) -> None:
+    def test_restore_handles_session_restore_failure(self, clock: FakeClock) -> None:
         """Test that session restore failure raises RestoreFailedError."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt()
 
         snapshot = create_snapshot(session, prompt.resources.context, tag="test")
@@ -285,11 +286,11 @@ class TestRestoreSnapshotErrors:
                 snapshot,
             )
 
-    def test_restore_skips_missing_resources(self) -> None:
+    def test_restore_skips_missing_resources(self, clock: FakeClock) -> None:
         """Test that restore skips resources not in current context."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt_with_fs = _make_prompt_with_fs(fs)
 
@@ -304,7 +305,7 @@ class TestRestoreSnapshotErrors:
         # Should not raise - silently skips missing resources
         restore_snapshot(session, prompt_without_fs.resources.context, snapshot)
 
-    def test_restore_handles_resource_restore_failure(self) -> None:
+    def test_restore_handles_resource_restore_failure(self, clock: FakeClock) -> None:
         """Test that resource restore failure raises RestoreFailedError."""
 
         class FailingFilesystem(Snapshotable):
@@ -317,7 +318,7 @@ class TestRestoreSnapshotErrors:
                 raise SnapshotRestoreError("Restore failed!")
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
 
         # Create prompt with failing filesystem
         prompt: Prompt[object] = Prompt(
@@ -335,11 +336,11 @@ class TestRestoreSnapshotErrors:
 class TestPendingToolTracker:
     """Tests for PendingToolTracker class."""
 
-    def test_abort_tool_execution_restores_state(self) -> None:
+    def test_abort_tool_execution_restores_state(self, clock: FakeClock) -> None:
         """Test that abort_tool_execution restores state."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -359,10 +360,12 @@ class TestPendingToolTracker:
         assert result is True
         assert fs.read("/test.txt").content == "original"
 
-    def test_abort_tool_execution_unknown_id_returns_false(self) -> None:
+    def test_abort_tool_execution_unknown_id_returns_false(
+        self, clock: FakeClock
+    ) -> None:
         """Test that aborting unknown tool returns False."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt()
 
         tracker = PendingToolTracker(
@@ -372,10 +375,10 @@ class TestPendingToolTracker:
         result = tracker.abort_tool_execution("unknown-id")
         assert result is False
 
-    def test_pending_tool_executions_property(self) -> None:
+    def test_pending_tool_executions_property(self, clock: FakeClock) -> None:
         """Test the pending_tool_executions property."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt()
 
         tracker = PendingToolTracker(
@@ -400,10 +403,12 @@ class TestPendingToolTracker:
         with pytest.raises(TypeError):
             pending["call-3"] = None  # type: ignore[index]
 
-    def test_end_tool_execution_returns_false_for_unknown(self) -> None:
+    def test_end_tool_execution_returns_false_for_unknown(
+        self, clock: FakeClock
+    ) -> None:
         """Test that ending unknown tool returns False."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt()
 
         tracker = PendingToolTracker(
@@ -413,11 +418,11 @@ class TestPendingToolTracker:
         result = tracker.end_tool_execution("unknown-id", success=True)
         assert result is False
 
-    def test_end_tool_execution_restores_on_failure(self) -> None:
+    def test_end_tool_execution_restores_on_failure(self, clock: FakeClock) -> None:
         """Test that end_tool_execution restores state on failure."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -436,11 +441,11 @@ class TestPendingToolTracker:
         assert result is True
         assert fs.read("/test.txt").content == "original"
 
-    def test_end_tool_execution_preserves_on_success(self) -> None:
+    def test_end_tool_execution_preserves_on_success(self, clock: FakeClock) -> None:
         """Test that end_tool_execution preserves state on success."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -463,11 +468,11 @@ class TestPendingToolTracker:
 class TestToolTransaction:
     """Tests for tool_transaction context manager."""
 
-    def test_restores_on_exception(self) -> None:
+    def test_restores_on_exception(self, clock: FakeClock) -> None:
         """Test that tool_transaction restores state on exception."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -478,11 +483,11 @@ class TestToolTransaction:
 
         assert fs.read("/test.txt").content == "original"
 
-    def test_preserves_on_success(self) -> None:
+    def test_preserves_on_success(self, clock: FakeClock) -> None:
         """Test that tool_transaction preserves state on success."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -491,11 +496,11 @@ class TestToolTransaction:
 
         assert fs.read("/test.txt").content == "modified"
 
-    def test_yields_snapshot_for_manual_restore(self) -> None:
+    def test_yields_snapshot_for_manual_restore(self, clock: FakeClock) -> None:
         """Test that tool_transaction yields snapshot for manual restore."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
-        fs = InMemoryFilesystem()
+        session = Session(dispatcher=dispatcher, clock=clock)
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
         prompt = _make_prompt_with_fs(fs)
 
@@ -513,10 +518,10 @@ class TestToolTransaction:
 class TestCompositeSnapshotErrors:
     """Tests for CompositeSnapshot error handling paths."""
 
-    def test_snapshot_with_metadata_roundtrip(self) -> None:
+    def test_snapshot_with_metadata_roundtrip(self, clock: FakeClock) -> None:
         """Test that snapshot with metadata serializes and deserializes."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt()
 
         snapshot = create_snapshot(
@@ -540,10 +545,10 @@ class TestCompositeSnapshotErrors:
 class TestRestoreSnapshotEdgeCases:
     """Tests for restore_snapshot edge cases."""
 
-    def test_restore_skips_non_snapshotable_resources(self) -> None:
+    def test_restore_skips_non_snapshotable_resources(self, clock: FakeClock) -> None:
         """Test that restore_snapshot skips resources without Snapshotable."""
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
 
         # Create a simple non-snapshotable resource
         class SimpleResource:

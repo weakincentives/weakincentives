@@ -34,6 +34,7 @@ from typing import Final, Literal
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
+from ...runtime.clock import Clock
 from .filesystem_memory import InMemoryFilesystem
 from .vfs_types import (
     HostMount,
@@ -151,7 +152,7 @@ def _load_mount_to_filesystem(
         mount_prefix=mount_prefix,
         include_patterns=include_patterns,
         exclude_patterns=exclude_patterns,
-        timestamp=get_current_time(),
+        timestamp=get_current_time(fs.clock),
         max_bytes=mount.max_bytes,
     )
 
@@ -331,9 +332,13 @@ def _iter_mount_files(root: Path, follow_symlinks: bool) -> Iterable[Path]:
             yield current / name
 
 
-def get_current_time() -> datetime:
+def get_current_time(clock: Clock | None = None) -> datetime:
     """Get current UTC time truncated to milliseconds."""
-    return _truncate_to_milliseconds(datetime.now(UTC))
+    from ...runtime.clock import SystemClock
+
+    if clock is None:  # pragma: no cover
+        clock = SystemClock()
+    return _truncate_to_milliseconds(clock.now())
 
 
 def _truncate_to_milliseconds(value: datetime) -> datetime:

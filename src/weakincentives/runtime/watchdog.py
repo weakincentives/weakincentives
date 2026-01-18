@@ -39,11 +39,12 @@ import logging
 import os
 import signal
 import threading
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
+
+from .clock import Clock, SystemClock
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -59,7 +60,8 @@ class Heartbeat:
 
     Example::
 
-        hb = Heartbeat()
+        clock = SystemClock()
+        hb = Heartbeat(clock=clock)
 
         # Register callbacks for beat observation
         hb.add_callback(lambda: print("beat!"))
@@ -75,11 +77,16 @@ class Heartbeat:
             ...
     """
 
-    _last_beat: float = field(default_factory=time.monotonic)
+    clock: Clock = field(default_factory=SystemClock)
+    _last_beat: float = field(init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _callbacks: list[Callable[[], None]] = field(
         default_factory=lambda: list[Callable[[], None]]()
     )
+
+    def __post_init__(self) -> None:
+        """Initialize last beat timestamp."""
+        self._last_beat = self.clock.monotonic()
 
     def beat(self) -> None:
         """Record a heartbeat and invoke all registered callbacks.
@@ -89,7 +96,7 @@ class Heartbeat:
         callbacks from running.
         """
         with self._lock:
-            self._last_beat = time.monotonic()
+            self._last_beat = self.clock.monotonic()
             callbacks = list(self._callbacks)  # Snapshot under lock
 
         # Invoke outside lock to avoid deadlock
@@ -102,7 +109,7 @@ class Heartbeat:
     def elapsed(self) -> float:
         """Seconds since last heartbeat."""
         with self._lock:
-            return time.monotonic() - self._last_beat
+            return self.clock.monotonic() - self._last_beat
 
     def add_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be invoked on each beat.
@@ -139,7 +146,8 @@ class Watchdog:
 
     Example::
 
-        heartbeats = [Heartbeat() for _ in loops]
+        clock = SystemClock()
+        heartbeats = [Heartbeat(clock=clock) for _ in loops]
         watchdog = Watchdog(heartbeats, stall_threshold=720.0)
         watchdog.start()
 

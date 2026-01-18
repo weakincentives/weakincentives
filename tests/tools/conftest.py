@@ -24,6 +24,7 @@ import pytest
 
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.clock import FakeClock
 
 
 def _compile_stub_segments(source: str) -> tuple[CodeType, CodeType | None]:
@@ -97,6 +98,6 @@ def _install_asteval_stub(
 
 
 @pytest.fixture()
-def session_and_dispatcher() -> tuple[Session, InProcessDispatcher]:
+def session_and_dispatcher(clock: FakeClock) -> tuple[Session, InProcessDispatcher]:
     dispatcher = InProcessDispatcher()
-    return Session(dispatcher=dispatcher), dispatcher
+    return Session(dispatcher=dispatcher, clock=clock), dispatcher

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.session import Replace, reducer
 
 if TYPE_CHECKING:
@@ -373,7 +374,7 @@ def test_reducer_qualname_set_correctly() -> None:
     assert "add_item" in qualname
 
 
-def test_install_state_slice_rejects_class_without_reducers() -> None:
+def test_install_state_slice_rejects_class_without_reducers(clock: FakeClock) -> None:
     """Verify install_state_slice raises ValueError for classes without @reducer."""
     from weakincentives.runtime.session import Session
     from weakincentives.runtime.session.state_slice import install_state_slice
@@ -382,7 +383,7 @@ def test_install_state_slice_rejects_class_without_reducers() -> None:
     class NoReducers:
         value: int
 
-    session = Session()
+    session = Session(clock=clock)
 
     with pytest.raises(ValueError, match="no @reducer decorated methods"):
         install_state_slice(session, NoReducers)

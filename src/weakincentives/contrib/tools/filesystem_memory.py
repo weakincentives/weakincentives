@@ -35,11 +35,12 @@ import re
 import types
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Literal
 from uuid import uuid4
 
 from weakincentives.errors import SnapshotRestoreError
+from weakincentives.runtime.clock import Clock, SystemClock
 from weakincentives.filesystem import (
     DEFAULT_READ_LIMIT,
     MAX_GREP_MATCHES,
@@ -117,6 +118,7 @@ class InMemoryFilesystem:
     Supports snapshot and restore operations via structural sharing.
     """
 
+    clock: Clock = field(default_factory=SystemClock)
     _files: dict[str, _InMemoryFile] = field(default_factory=_empty_files_dict)
     _directories: set[str] = field(default_factory=_empty_directories_set)
     _read_only: bool = False
@@ -461,7 +463,7 @@ class InMemoryFilesystem:
         # Encode text content to bytes for storage
         content_bytes = content.encode("utf-8")
 
-        timestamp = now()
+        timestamp = now(self.clock)
         final_content, created_at = self._resolve_write_bytes_content(
             normalized, content_bytes, mode, timestamp
         )
@@ -511,7 +513,7 @@ class InMemoryFilesystem:
         if mode == "create" and normalized in self._files:
             raise FileExistsError(f"File already exists: {path}")
 
-        timestamp = now()
+        timestamp = now(self.clock)
         final_content, created_at = self._resolve_write_bytes_content(
             normalized, content, mode, timestamp
         )
@@ -653,7 +655,7 @@ class InMemoryFilesystem:
 
         return FilesystemSnapshot(
             snapshot_id=uuid4(),
-            created_at=datetime.now(UTC),
+            created_at=self.clock.now(),
             commit_ref=commit_ref,
             root_path="/",
             tag=tag,

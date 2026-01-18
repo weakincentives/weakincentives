@@ -21,7 +21,6 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives import ToolValidationError
 from weakincentives.adapters.core import (
@@ -61,6 +60,7 @@ from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
 from weakincentives.resources.context import ScopedResourceContext
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import (
     Dispatcher,
     DispatchResult,
@@ -210,7 +210,7 @@ def testparse_tool_params_returns_none_for_empty_arguments() -> None:
     assert parsed is None
 
 
-def test_tool_executor_success() -> None:
+def test_tool_executor_success(clock: FakeClock) -> None:
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
         description="Echo",
@@ -224,7 +224,7 @@ def test_tool_executor_success() -> None:
         ),
     )
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     prompt = _make_prompt()
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -263,7 +263,7 @@ def test_tool_executor_success() -> None:
     assert len(executor.tool_message_records) == 1
 
 
-def test_tool_executor_succeeds_with_parameterless_tool() -> None:
+def test_tool_executor_succeeds_with_parameterless_tool(clock: FakeClock) -> None:
     """Verify that tools with no parameters execute successfully.
 
     This tests the fix for the bug where the validation check at line 478
@@ -290,7 +290,7 @@ def test_tool_executor_succeeds_with_parameterless_tool() -> None:
         ),
     )
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     prompt = _make_prompt()
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -342,7 +342,7 @@ def testdispatch_tool_invocation_attaches_usage() -> None:
     log = get_logger(__name__)
 
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
     prompt = _make_prompt()
     typed_tool = cast(Tool[SupportsDataclassOrNone, SupportsToolResult], tool)
     tool_registry: Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]] = {
@@ -461,7 +461,7 @@ def test_response_parser_structured_output_failure() -> None:
 
 
 def test_tool_executor_raises_when_deadline_expired(
-    frozen_utcnow: FrozenUtcNow,
+    clock: FakeClock,
 ) -> None:
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
@@ -476,7 +476,7 @@ def test_tool_executor_raises_when_deadline_expired(
         ),
     )
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     prompt = _make_prompt()  # noqa: F841 - needed for context manager side effect
     tool_registry = cast(
         Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -484,9 +484,9 @@ def test_tool_executor_raises_when_deadline_expired(
     )
 
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+    clock.advance(10)
 
     executor = ToolExecutor(
         adapter_name=TEST_ADAPTER_NAME,
@@ -666,9 +666,9 @@ class _ModifyParams:
 class TestToolExecutionFilesystemIntegration:
     """Tests for filesystem snapshot in tool_execution."""
 
-    def test_snapshot_created_before_tool_invocation(self) -> None:
+    def test_snapshot_created_before_tool_invocation(self, clock: FakeClock) -> None:
         """Verify filesystem snapshot is created when tool is executed."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
 
         tool = Tool[EchoParams, EchoPayload](
@@ -689,7 +689,7 @@ class TestToolExecutionFilesystemIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt()  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -720,9 +720,9 @@ class TestToolExecutionFilesystemIntegration:
         # We verify this indirectly by checking the outcome has fs_snapshot
         assert len(executor.tool_message_records) == 1
 
-    def test_filesystem_restored_on_tool_failure(self) -> None:
+    def test_filesystem_restored_on_tool_failure(self, clock: FakeClock) -> None:
         """Verify filesystem is restored when tool returns success=False."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
 
         def failing_handler(
@@ -753,7 +753,7 @@ class TestToolExecutionFilesystemIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -783,9 +783,9 @@ class TestToolExecutionFilesystemIntegration:
         # File should be restored to original content
         assert fs.read("/test.txt").content == "original"
 
-    def test_filesystem_restored_on_tool_exception(self) -> None:
+    def test_filesystem_restored_on_tool_exception(self, clock: FakeClock) -> None:
         """Verify filesystem is restored when tool raises exception."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
 
         def exception_handler(
@@ -814,7 +814,7 @@ class TestToolExecutionFilesystemIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -845,9 +845,9 @@ class TestToolExecutionFilesystemIntegration:
         # File should be restored to original content
         assert fs.read("/test.txt").content == "original"
 
-    def test_filesystem_not_restored_on_success(self) -> None:
+    def test_filesystem_not_restored_on_success(self, clock: FakeClock) -> None:
         """Verify filesystem is NOT restored when tool succeeds."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "original")
 
         def modify_handler(
@@ -875,7 +875,7 @@ class TestToolExecutionFilesystemIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -909,9 +909,9 @@ class TestToolExecutionFilesystemIntegration:
 class TestPublishInvocationFilesystemRestore:
     """Tests for filesystem restore in dispatch_tool_invocation."""
 
-    def test_filesystem_restored_on_publish_failure(self) -> None:
+    def test_filesystem_restored_on_publish_failure(self, clock: FakeClock) -> None:
         """Verify filesystem is restored when event publishing fails."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/test.txt", "before_tool")
 
         def dummy_handler(e: object) -> None:
@@ -935,7 +935,7 @@ class TestPublishInvocationFilesystemRestore:
                 )
 
         dispatcher = FailingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
 
         # Create prompt and take snapshot BEFORE tool modifications
         prompt = _make_prompt_with_fs(fs)
@@ -987,9 +987,11 @@ class TestPublishInvocationFilesystemRestore:
         # Filesystem should be restored because publish failed and tool succeeded
         assert fs.read("/test.txt").content == "before_tool"
 
-    def test_filesystem_not_restored_if_tool_already_failed(self) -> None:
+    def test_filesystem_not_restored_if_tool_already_failed(
+        self, clock: FakeClock
+    ) -> None:
         """Verify filesystem is NOT restored again if tool already failed."""
-        inner_fs = InMemoryFilesystem()
+        inner_fs = InMemoryFilesystem(clock=clock)
         inner_fs.write("/test.txt", "original")
         fs = _TrackingFilesystem(inner_fs)
 
@@ -1014,7 +1016,7 @@ class TestPublishInvocationFilesystemRestore:
                 )
 
         dispatcher = FailingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
 
         # Create prompt and take snapshot
         prompt = _make_prompt({Filesystem: fs})
@@ -1092,9 +1094,9 @@ class _InvalidParams:
 class TestFilesystemSnapshotIntegration:
     """Focused integration tests for filesystem snapshots with tool execution."""
 
-    def test_multiple_files_restored_on_failure(self) -> None:
+    def test_multiple_files_restored_on_failure(self, clock: FakeClock) -> None:
         """Test that all file modifications are restored when tool fails."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         # Create initial state with multiple files
         fs.write("/file1.txt", "original1")
         fs.write("/file2.txt", "original2")
@@ -1131,7 +1133,7 @@ class TestFilesystemSnapshotIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1168,9 +1170,9 @@ class TestFilesystemSnapshotIntegration:
         # New file should not exist
         assert not fs.exists("/newfile.txt")
 
-    def test_directory_operations_restored_on_exception(self) -> None:
+    def test_directory_operations_restored_on_exception(self, clock: FakeClock) -> None:
         """Test that directory modifications are restored on tool exception."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/existing/file.txt", "content")
 
         def dir_modify_handler(
@@ -1199,7 +1201,7 @@ class TestFilesystemSnapshotIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1232,14 +1234,16 @@ class TestFilesystemSnapshotIntegration:
         assert not fs.exists("/newdir/nested/file.txt")
         assert not fs.exists("/newdir")
 
-    def test_validation_error_does_not_restore_filesystem(self) -> None:
+    def test_validation_error_does_not_restore_filesystem(
+        self, clock: FakeClock
+    ) -> None:
         """Test that validation errors don't trigger filesystem restore.
 
         When a tool call fails validation (before the handler is invoked),
         the filesystem should not be modified or restored since the tool
         never ran.
         """
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/file.txt", "original")
 
         # Track if handler was called
@@ -1271,7 +1275,7 @@ class TestFilesystemSnapshotIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -1306,9 +1310,9 @@ class TestFilesystemSnapshotIntegration:
         # File should remain unchanged (no restore needed since no modification)
         assert fs.read("/file.txt").content == "original"
 
-    def test_successful_tool_preserves_all_changes(self) -> None:
+    def test_successful_tool_preserves_all_changes(self, clock: FakeClock) -> None:
         """Test that successful tool execution preserves all filesystem changes."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/file1.txt", "original1")
         fs.write("/file2.txt", "original2")
 
@@ -1339,7 +1343,7 @@ class TestFilesystemSnapshotIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt_with_fs(fs)  # noqa: F841 - context manager side effect
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -1373,9 +1377,9 @@ class TestFilesystemSnapshotIntegration:
         assert not fs.exists("/file2.txt")  # Was removed
         assert fs.read("/newfile.txt").content == "new content"
 
-    def test_file_deletion_restored_on_failure(self) -> None:
+    def test_file_deletion_restored_on_failure(self, clock: FakeClock) -> None:
         """Test that deleted files are restored when tool fails."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/important.txt", "critical data")
         fs.write("/keep.txt", "keep this")
 
@@ -1406,7 +1410,7 @@ class TestFilesystemSnapshotIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1439,9 +1443,9 @@ class TestFilesystemSnapshotIntegration:
         # Modified file should also be restored
         assert fs.read("/keep.txt").content == "keep this"
 
-    def test_partial_modifications_before_exception(self) -> None:
+    def test_partial_modifications_before_exception(self, clock: FakeClock) -> None:
         """Test that partial modifications are rolled back on exception."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/step1.txt", "original1")
         fs.write("/step2.txt", "original2")
         fs.write("/step3.txt", "original3")
@@ -1474,7 +1478,7 @@ class TestFilesystemSnapshotIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1512,9 +1516,11 @@ class TestFilesystemSnapshotIntegration:
 class TestHostFilesystemToolIntegration:
     """Integration tests for HostFilesystem with tool execution."""
 
-    def test_host_filesystem_restored_on_tool_failure(self, tmp_path: Path) -> None:
+    def test_host_filesystem_restored_on_tool_failure(
+        self, tmp_path: Path, clock: FakeClock
+    ) -> None:
         """Test HostFilesystem restore when tool fails."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
 
         # Create initial files
         fs.write("file1.txt", "original content 1")
@@ -1548,7 +1554,7 @@ class TestHostFilesystemToolIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},
@@ -1581,9 +1587,11 @@ class TestHostFilesystemToolIntegration:
         # New file should be gone
         assert not fs.exists("newfile.txt")
 
-    def test_host_filesystem_success_preserves_changes(self, tmp_path: Path) -> None:
+    def test_host_filesystem_success_preserves_changes(
+        self, tmp_path: Path, clock: FakeClock
+    ) -> None:
         """Test HostFilesystem preserves changes on success."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
 
         # Create initial file
         fs.write("file.txt", "original")
@@ -1612,7 +1620,7 @@ class TestHostFilesystemToolIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         prompt = _make_prompt_with_fs(fs)  # type: ignore[arg-type]  # noqa: F841
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
@@ -1644,9 +1652,11 @@ class TestHostFilesystemToolIntegration:
         # Changes should be preserved
         assert fs.read("file.txt").content == "modified by tool"
 
-    def test_host_filesystem_exception_restores_state(self, tmp_path: Path) -> None:
+    def test_host_filesystem_exception_restores_state(
+        self, tmp_path: Path, clock: FakeClock
+    ) -> None:
         """Test HostFilesystem restores state on tool exception."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
 
         # Create initial state
         fs.write("data.txt", "important data")
@@ -1676,7 +1686,7 @@ class TestHostFilesystemToolIntegration:
         )
 
         dispatcher = RecordingBus()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         tool_registry = cast(
             Mapping[str, Tool[SupportsDataclassOrNone, SupportsToolResult]],
             {tool.name: tool},

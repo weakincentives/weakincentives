@@ -23,6 +23,7 @@ from weakincentives.prompt._visibility import (
     _visibility_requires_positional_argument,
     normalize_visibility_selector,
 )
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
@@ -61,9 +62,9 @@ def test_visibility_requires_positional_argument_branches() -> None:
     )
 
 
-def test_normalize_visibility_selector_with_session_kwarg() -> None:
+def test_normalize_visibility_selector_with_session_kwarg(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     received_session: list[SessionProtocol | None] = []
 
@@ -80,9 +81,11 @@ def test_normalize_visibility_selector_with_session_kwarg() -> None:
     assert normalized(None, None) == SectionVisibility.SUMMARY
 
 
-def test_normalize_visibility_selector_with_params_and_session() -> None:
+def test_normalize_visibility_selector_with_params_and_session(
+    clock: FakeClock,
+) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     received: list[tuple[_VisibilityParams, SessionProtocol | None]] = []
 
@@ -102,14 +105,14 @@ def test_normalize_visibility_selector_with_params_and_session() -> None:
     assert normalized(params_false, session) == SectionVisibility.SUMMARY
 
 
-def test_normalize_visibility_selector_constant() -> None:
+def test_normalize_visibility_selector_constant(clock: FakeClock) -> None:
     """Constant visibility selectors should work with the new signature."""
     selector = normalize_visibility_selector(
         SectionVisibility.SUMMARY, params_type=None
     )
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     assert selector(None, None) == SectionVisibility.SUMMARY
     assert selector(None, session) == SectionVisibility.SUMMARY

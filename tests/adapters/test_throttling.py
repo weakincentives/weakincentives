@@ -12,7 +12,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import Any, cast
 
 import pytest
@@ -31,13 +31,16 @@ from weakincentives.adapters.throttle import (
 )
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.session import Session
 
 
-def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_retries_after_throttle(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
     rendered = RenderedPrompt(text="system")
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     response = DummyResponse([DummyChoice(DummyMessage(content="ok"))])
     delays: list[timedelta] = []
     calls = 0
@@ -86,10 +89,11 @@ def test_runner_retries_after_throttle(monkeypatch: pytest.MonkeyPatch) -> None:
 
 def test_runner_bubbles_throttle_when_budget_exhausted(
     monkeypatch: pytest.MonkeyPatch,
+    clock: FakeClock,
 ) -> None:
     rendered = RenderedPrompt(text="system")
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     monkeypatch.setattr(
         "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
@@ -154,10 +158,10 @@ def test_throttle_policy_validation() -> None:
         new_throttle_policy(max_total_delay=timedelta(0))
 
 
-def test_runner_raises_on_non_retryable_throttle() -> None:
+def test_runner_raises_on_non_retryable_throttle(clock: FakeClock) -> None:
     rendered = RenderedPrompt(text="system")
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     def provider(
         messages: list[dict[str, Any]],
@@ -184,10 +188,12 @@ def test_runner_raises_on_non_retryable_throttle() -> None:
         loop.run()
 
 
-def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_max_attempts_branch(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
     rendered = RenderedPrompt(text="system")
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     monkeypatch.setattr(
         "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
@@ -221,10 +227,12 @@ def test_runner_max_attempts_branch(monkeypatch: pytest.MonkeyPatch) -> None:
         loop.run()
 
 
-def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_runner_deadline_prevents_retry(
+    monkeypatch: pytest.MonkeyPatch, clock: FakeClock
+) -> None:
     rendered = RenderedPrompt(text="system")
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     monkeypatch.setattr(
         "weakincentives.adapters.inner_loop.sleep_for", lambda _delay: None
     )
@@ -256,7 +264,7 @@ def test_runner_deadline_prevents_retry(monkeypatch: pytest.MonkeyPatch) -> None
         throttle_policy=new_throttle_policy(
             max_attempts=3, base_delay=timedelta(seconds=1)
         ),
-        deadline=Deadline(expires_at=datetime.now(UTC) + timedelta(seconds=2)),
+        deadline=Deadline(expires_at=clock.now() + timedelta(seconds=2), clock=clock),
     )
 
     with pytest.raises(ThrottleError) as excinfo:
@@ -308,13 +316,16 @@ def testjittered_backoff_with_non_positive_base() -> None:
     assert jittered_backoff(policy=policy, attempt=1, retry_after=None) == timedelta(0)
 
 
-def test_sleep_for_invokes_time_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    observed: list[float] = []
-    monkeypatch.setattr("weakincentives.adapters.throttle.time.sleep", observed.append)
+def test_sleep_for_invokes_clock_sleep(clock: FakeClock) -> None:
+    from weakincentives.runtime import FakeClock
 
-    sleep_for(timedelta(milliseconds=150))
+    clock = FakeClock()
+    initial_time = clock.monotonic()
 
-    assert observed == [0.15]
+    sleep_for(timedelta(milliseconds=150), clock=clock)
+
+    # Verify time advanced by the correct amount
+    assert clock.monotonic() == initial_time + 0.15
 
 
 class _ThrottleLikeError(Exception):

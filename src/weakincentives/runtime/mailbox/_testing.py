@@ -16,8 +16,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
+
+from weakincentives.runtime.clock import Clock, SystemClock
 
 from ._types import (
     Mailbox,
@@ -200,6 +202,9 @@ class FakeMailbox[T, R]:
     name: str = "fake"
     """Queue name for identification."""
 
+    clock: Clock = field(default_factory=SystemClock)
+    """Clock for generating timestamps."""
+
     _pending: list[tuple[str, T, datetime, int, Mailbox[R, None] | None]] = field(
         init=False, repr=False
     )
@@ -240,7 +245,7 @@ class FakeMailbox[T, R]:
             raise self._connection_error
 
         msg_id = str(uuid4())
-        self._pending.append((msg_id, body, datetime.now(UTC), 0, reply_to))
+        self._pending.append((msg_id, body, self.clock.now(), 0, reply_to))
         return msg_id
 
     def receive(
@@ -377,9 +382,7 @@ class FakeMailbox[T, R]:
             The message ID.
         """
         msg_id = msg_id or str(uuid4())
-        self._pending.append(
-            (msg_id, body, datetime.now(UTC), delivery_count, reply_to)
-        )
+        self._pending.append((msg_id, body, self.clock.now(), delivery_count, reply_to))
         return msg_id
 
     def close(self) -> None:

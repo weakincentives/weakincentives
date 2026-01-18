@@ -23,7 +23,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.claude_agent_sdk import (
     CLAUDE_AGENT_SDK_ADAPTER_NAME,
     ClaudeAgentSDKAdapter,
@@ -39,6 +38,7 @@ from weakincentives.prompt import (
     SectionVisibility,
 )
 from weakincentives.prompt.errors import VisibilityExpansionRequired
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import (
     InProcessDispatcher,
     PromptExecuted,
@@ -153,9 +153,9 @@ class SimpleOutput:
 
 
 @pytest.fixture
-def session() -> Session:
+def session(clock: FakeClock) -> Session:
     dispatcher = InProcessDispatcher()
-    return Session(dispatcher=dispatcher)
+    return Session(dispatcher=dispatcher, clock=clock)
 
 
 @pytest.fixture
@@ -279,12 +279,12 @@ class TestClaudeAgentSDKAdapterEvaluate:
         self,
         session: Session,
         simple_prompt: Prompt[SimpleOutput],
-        frozen_utcnow: FrozenUtcNow,
+        clock: FakeClock,
     ) -> None:
         anchor = datetime.now(UTC)
-        frozen_utcnow.set(anchor)
-        deadline = Deadline(anchor + timedelta(seconds=5))
-        frozen_utcnow.advance(timedelta(seconds=10))
+        clock.set_now(anchor)
+        deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        clock.advance(10)
 
         adapter = ClaudeAgentSDKAdapter()
 
@@ -1338,8 +1338,8 @@ class TestVerifyTaskCompletion:
     """Tests for _verify_task_completion method."""
 
     @pytest.fixture
-    def session(self) -> Session:
-        return Session(dispatcher=InProcessDispatcher())
+    def session(self, clock: FakeClock) -> Session:
+        return Session(dispatcher=InProcessDispatcher(), clock=clock)
 
     @pytest.fixture
     def adapter(self) -> ClaudeAgentSDKAdapter:

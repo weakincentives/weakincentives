@@ -19,6 +19,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
 from weakincentives.runtime.mailbox import (
     InMemoryMailbox,
@@ -32,10 +33,10 @@ from weakincentives.runtime.watchdog import Heartbeat
 # =============================================================================
 
 
-def test_heartbeat_callback_invoked_on_beat() -> None:
+def test_heartbeat_callback_invoked_on_beat(clock: FakeClock) -> None:
     """Verify callbacks are invoked when beat() is called."""
     calls: list[str] = []
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     heartbeat.add_callback(lambda: calls.append("callback1"))
     heartbeat.add_callback(lambda: calls.append("callback2"))
 
@@ -44,10 +45,10 @@ def test_heartbeat_callback_invoked_on_beat() -> None:
     assert calls == ["callback1", "callback2"]
 
 
-def test_heartbeat_callback_removed() -> None:
+def test_heartbeat_callback_removed(clock: FakeClock) -> None:
     """Verify callbacks can be removed."""
     calls: list[str] = []
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     callback = lambda: calls.append("callback")  # noqa: E731
     heartbeat.add_callback(callback)
 
@@ -59,18 +60,18 @@ def test_heartbeat_callback_removed() -> None:
     assert calls == ["callback"]  # Not called again
 
 
-def test_heartbeat_remove_unregistered_callback_raises() -> None:
+def test_heartbeat_remove_unregistered_callback_raises(clock: FakeClock) -> None:
     """Verify removing an unregistered callback raises ValueError."""
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
 
     with pytest.raises(ValueError):
         heartbeat.remove_callback(lambda: None)
 
 
-def test_heartbeat_callback_exception_logged_not_propagated() -> None:
+def test_heartbeat_callback_exception_logged_not_propagated(clock: FakeClock) -> None:
     """Verify callback exceptions are logged but don't stop other callbacks."""
     calls: list[str] = []
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     heartbeat.add_callback(lambda: calls.append("before"))
     heartbeat.add_callback(lambda: (_ for _ in ()).throw(RuntimeError("test error")))
     heartbeat.add_callback(lambda: calls.append("after"))
@@ -81,6 +82,7 @@ def test_heartbeat_callback_exception_logged_not_propagated() -> None:
     assert calls == ["before", "after"]
 
 
+@pytest.mark.allow_system_clock
 def test_heartbeat_elapsed_updated_on_beat() -> None:
     """Verify elapsed() is updated when beat() is called."""
     heartbeat = Heartbeat()
@@ -123,14 +125,14 @@ def test_lease_extender_config_custom() -> None:
 # =============================================================================
 
 
-def _create_test_message() -> tuple[Message[str, str], MagicMock]:
+def _create_test_message(clock: FakeClock) -> tuple[Message[str, str], MagicMock]:
     """Create a test message with a mocked extend_visibility function."""
     extend_calls: list[int] = []
     extend_fn: MagicMock = MagicMock(
         side_effect=lambda timeout: extend_calls.append(timeout)
     )
 
-    mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
+    mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test", clock=clock)
     mailbox.send("test body")
     msgs = mailbox.receive(max_messages=1)
     original_msg = msgs[0]
@@ -144,12 +146,12 @@ def _create_test_message() -> tuple[Message[str, str], MagicMock]:
     return msg, extend_fn
 
 
-def test_lease_extender_extends_on_beat() -> None:
+def test_lease_extender_extends_on_beat(clock: FakeClock) -> None:
     """Verify extension happens when heartbeat fires."""
-    msg, mock_extend = _create_test_message()
-    heartbeat = Heartbeat()
+    msg, mock_extend = _create_test_message(clock)
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(interval=0.0)  # No rate limit
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     with extender.attach(msg, heartbeat):
         heartbeat.beat()
@@ -160,9 +162,10 @@ def test_lease_extender_extends_on_beat() -> None:
     mock_extend.assert_called_with(300)  # Default extension
 
 
+@pytest.mark.allow_system_clock
 def test_lease_extender_rate_limits() -> None:
     """Verify extension is rate-limited by interval."""
-    msg, mock_extend = _create_test_message()
+    msg, mock_extend = _create_test_message(FakeClock())
     heartbeat = Heartbeat()
     config = LeaseExtenderConfig(interval=0.2)  # 200ms limit
     extender = LeaseExtender(config=config)
@@ -177,12 +180,12 @@ def test_lease_extender_rate_limits() -> None:
     assert mock_extend.call_count == 2
 
 
-def test_lease_extender_disabled() -> None:
+def test_lease_extender_disabled(clock: FakeClock) -> None:
     """Verify no extension when disabled."""
-    msg, mock_extend = _create_test_message()
-    heartbeat = Heartbeat()
+    msg, mock_extend = _create_test_message(clock)
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(enabled=False)
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     with extender.attach(msg, heartbeat):
         heartbeat.beat()
@@ -190,12 +193,12 @@ def test_lease_extender_disabled() -> None:
     assert mock_extend.call_count == 0
 
 
-def test_lease_extender_custom_extension() -> None:
+def test_lease_extender_custom_extension(clock: FakeClock) -> None:
     """Verify custom extension value is used."""
-    msg, mock_extend = _create_test_message()
-    heartbeat = Heartbeat()
+    msg, mock_extend = _create_test_message(clock)
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(interval=0.0, extension=600)
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     with extender.attach(msg, heartbeat):
         heartbeat.beat()
@@ -203,12 +206,12 @@ def test_lease_extender_custom_extension() -> None:
     mock_extend.assert_called_once_with(600)
 
 
-def test_lease_extender_detaches_on_exit() -> None:
+def test_lease_extender_detaches_on_exit(clock: FakeClock) -> None:
     """Verify callback is removed when context exits."""
-    msg, mock_extend = _create_test_message()
-    heartbeat = Heartbeat()
+    msg, mock_extend = _create_test_message(clock)
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(interval=0.0)
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     with extender.attach(msg, heartbeat):
         heartbeat.beat()
@@ -219,13 +222,13 @@ def test_lease_extender_detaches_on_exit() -> None:
     assert mock_extend.call_count == 1
 
 
-def test_lease_extender_handles_receipt_expired_error() -> None:
+def test_lease_extender_handles_receipt_expired_error(clock: FakeClock) -> None:
     """Verify ReceiptHandleExpiredError is logged but doesn't raise."""
-    msg, mock_extend = _create_test_message()
+    msg, mock_extend = _create_test_message(clock)
     mock_extend.side_effect = ReceiptHandleExpiredError("test")
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(interval=0.0)
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     # Should not raise
     with extender.attach(msg, heartbeat):
@@ -234,13 +237,13 @@ def test_lease_extender_handles_receipt_expired_error() -> None:
     assert mock_extend.call_count == 1
 
 
-def test_lease_extender_handles_generic_exception() -> None:
+def test_lease_extender_handles_generic_exception(clock: FakeClock) -> None:
     """Verify generic exceptions are logged but don't raise."""
-    msg, mock_extend = _create_test_message()
+    msg, mock_extend = _create_test_message(clock)
     mock_extend.side_effect = RuntimeError("network error")
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(interval=0.0)
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     # Should not raise
     with extender.attach(msg, heartbeat):
@@ -249,13 +252,13 @@ def test_lease_extender_handles_generic_exception() -> None:
     assert mock_extend.call_count == 1
 
 
-def test_lease_extender_already_attached_raises() -> None:
+def test_lease_extender_already_attached_raises(clock: FakeClock) -> None:
     """Verify attaching when already attached raises RuntimeError."""
-    msg, _ = _create_test_message()
-    msg2, _ = _create_test_message()
-    heartbeat = Heartbeat()
+    msg, _ = _create_test_message(clock)
+    msg2, _ = _create_test_message(clock)
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(interval=0.0)
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     with extender.attach(msg, heartbeat):
         with pytest.raises(RuntimeError, match="already attached"):
@@ -263,12 +266,12 @@ def test_lease_extender_already_attached_raises() -> None:
                 pass
 
 
-def test_lease_extender_no_op_after_detach() -> None:
+def test_lease_extender_no_op_after_detach(clock: FakeClock) -> None:
     """Verify _on_beat is a no-op after detach."""
-    msg, mock_extend = _create_test_message()
-    heartbeat = Heartbeat()
+    msg, mock_extend = _create_test_message(clock)
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(interval=0.0)
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     with extender.attach(msg, heartbeat):
         heartbeat.beat()
@@ -280,12 +283,12 @@ def test_lease_extender_no_op_after_detach() -> None:
     assert mock_extend.call_count == 1
 
 
-def test_lease_extender_with_multiple_callbacks() -> None:
+def test_lease_extender_with_multiple_callbacks(clock: FakeClock) -> None:
     """Verify LeaseExtender coexists with other heartbeat callbacks."""
-    msg, mock_extend = _create_test_message()
-    heartbeat = Heartbeat()
+    msg, mock_extend = _create_test_message(clock)
+    heartbeat = Heartbeat(clock=clock)
     config = LeaseExtenderConfig(interval=0.0)
-    extender = LeaseExtender(config=config)
+    extender = LeaseExtender(clock=clock, config=config)
 
     other_calls: list[str] = []
     heartbeat.add_callback(lambda: other_calls.append("metrics"))
@@ -298,17 +301,17 @@ def test_lease_extender_with_multiple_callbacks() -> None:
     assert mock_extend.call_count == 1
 
 
-def test_lease_extender_default_config() -> None:
+def test_lease_extender_default_config(clock: FakeClock) -> None:
     """Verify LeaseExtender uses default config when None provided."""
-    extender = LeaseExtender()
+    extender = LeaseExtender(clock=clock)
     assert extender.config.interval == 60.0
     assert extender.config.extension == 300
     assert extender.config.enabled is True
 
 
-def test_lease_extender_detach_when_not_attached() -> None:
+def test_lease_extender_detach_when_not_attached(clock: FakeClock) -> None:
     """Verify _detach is safe when heartbeat is None (never attached)."""
-    extender = LeaseExtender()
+    extender = LeaseExtender(clock=clock)
 
     # Should not raise - covers the heartbeat is None branch in _detach
     extender._detach()
@@ -319,16 +322,16 @@ def test_lease_extender_detach_when_not_attached() -> None:
 # =============================================================================
 
 
-def test_tool_context_beat_with_heartbeat() -> None:
+def test_tool_context_beat_with_heartbeat(clock: FakeClock) -> None:
     """Verify ToolContext.beat() invokes heartbeat.beat() when set."""
     from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
     from weakincentives.runtime.session import Session
 
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     beat_count = [0]
     heartbeat.add_callback(lambda: beat_count.__setitem__(0, beat_count[0] + 1))
 
-    session = Session()
+    session = Session(clock=clock)
     template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
     prompt: Prompt[None] = Prompt(template)
     context = ToolContext(
@@ -344,17 +347,17 @@ def test_tool_context_beat_with_heartbeat() -> None:
     assert beat_count[0] == 1
 
 
-def test_tool_execution_context_beat_with_heartbeat() -> None:
+def test_tool_execution_context_beat_with_heartbeat(clock: FakeClock) -> None:
     """Verify ToolExecutionContext.beat() invokes heartbeat.beat() when set."""
     from weakincentives.adapters.tool_executor import ToolExecutionContext
     from weakincentives.prompt import Prompt, PromptTemplate
     from weakincentives.runtime.session import Session
 
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     beat_count = [0]
     heartbeat.add_callback(lambda: beat_count.__setitem__(0, beat_count[0] + 1))
 
-    session = Session()
+    session = Session(clock=clock)
     template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
     prompt: Prompt[None] = Prompt(template)
     context = ToolExecutionContext(
@@ -375,17 +378,17 @@ def test_tool_execution_context_beat_with_heartbeat() -> None:
     assert beat_count[0] == 1
 
 
-def test_hook_context_beat_with_heartbeat() -> None:
+def test_hook_context_beat_with_heartbeat(clock: FakeClock) -> None:
     """Verify HookContext.beat() invokes heartbeat.beat() when set."""
     from weakincentives.adapters.claude_agent_sdk._hooks import HookContext
     from weakincentives.prompt import Prompt, PromptTemplate
     from weakincentives.runtime.session import Session
 
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     beat_count = [0]
     heartbeat.add_callback(lambda: beat_count.__setitem__(0, beat_count[0] + 1))
 
-    session = Session()
+    session = Session(clock=clock)
     template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
     prompt: Prompt[None] = Prompt(template)
     context = HookContext(
@@ -400,18 +403,18 @@ def test_hook_context_beat_with_heartbeat() -> None:
     assert beat_count[0] == 1
 
 
-def test_inner_loop_beat_method_with_heartbeat() -> None:
+def test_inner_loop_beat_method_with_heartbeat(clock: FakeClock) -> None:
     """Verify InnerLoop._beat() invokes heartbeat.beat() when configured."""
     from weakincentives.adapters.inner_loop import InnerLoop, InnerLoopConfig
     from weakincentives.prompt import Prompt, PromptTemplate
     from weakincentives.prompt.prompt import RenderedPrompt
     from weakincentives.runtime.session import Session
 
-    heartbeat = Heartbeat()
+    heartbeat = Heartbeat(clock=clock)
     beat_count = [0]
     heartbeat.add_callback(lambda: beat_count.__setitem__(0, beat_count[0] + 1))
 
-    session = Session()
+    session = Session(clock=clock)
     template = PromptTemplate[None](ns="test", key="test", name="test")
     prompt = Prompt(template)
     rendered = RenderedPrompt[None](text="test prompt")
@@ -446,12 +449,12 @@ def test_inner_loop_beat_method_with_heartbeat() -> None:
     assert beat_count[0] == 1
 
 
-def test_tool_context_beat_without_heartbeat() -> None:
+def test_tool_context_beat_without_heartbeat(clock: FakeClock) -> None:
     """Verify ToolContext.beat() is safe when heartbeat is None."""
     from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
     from weakincentives.runtime.session import Session
 
-    session = Session()
+    session = Session(clock=clock)
     template: PromptTemplate[None] = PromptTemplate(ns="test", key="test", name="test")
     prompt: Prompt[None] = Prompt(template)
     context = ToolContext(

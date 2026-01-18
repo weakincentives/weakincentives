@@ -19,10 +19,6 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import (
-    FrozenUtcNow,
-    frozen_utcnow as _frozen_utcnow,  # noqa: F401
-)
 from tests.helpers.adapters import DUMMY_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_BUDGET,
@@ -47,6 +43,7 @@ from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.structured_output import StructuredOutputConfig
 from weakincentives.prompt.tool import Tool
 from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.runtime.clock import Clock, FakeClock
 from weakincentives.runtime.events import (
     Dispatcher,
     DispatchResult,
@@ -267,14 +264,21 @@ class StructuredOutput:
 
 
 class SessionStub(SessionProtocol):
-    def __init__(self, *, dispatcher: Dispatcher | None = None) -> None:
+    def __init__(
+        self, *, dispatcher: Dispatcher | None = None, clock: FakeClock
+    ) -> None:
         self.snapshots: list[SnapshotProtocol] = []
         self.restores: list[SnapshotProtocol] = []
         self._dispatcher = dispatcher or RecordingBus()
+        self._clock = clock
 
     @property
     def dispatcher(self) -> Dispatcher:
         return self._dispatcher
+
+    @property
+    def clock(self) -> Clock:
+        return self._clock
 
     def snapshot(
         self,
@@ -284,7 +288,7 @@ class SessionStub(SessionProtocol):
         include_all: bool = False,
     ) -> SnapshotProtocol:
         del tag, policies, include_all
-        snapshot = Snapshot(created_at=datetime.now(UTC))
+        snapshot = Snapshot(created_at=self._clock.now())
         self.snapshots.append(snapshot)
         return snapshot
 
@@ -301,13 +305,13 @@ class SessionStub(SessionProtocol):
 # Tests for the InnerLoop API
 
 
-def test_inner_loop_success() -> None:
+def test_inner_loop_success(clock: FakeClock) -> None:
     """Test that InnerLoop produces the expected result."""
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
@@ -318,7 +322,7 @@ def test_inner_loop_success() -> None:
     assert provider.calls[0]["messages"][0]["content"] == "system"
 
 
-def test_inner_loop_includes_usage_in_event() -> None:
+def test_inner_loop_includes_usage_in_event(clock: FakeClock) -> None:
     """Test that InnerLoop records token usage in events."""
     rendered = RenderedPrompt(text="system")
     responses = [
@@ -329,7 +333,7 @@ def test_inner_loop_includes_usage_in_event() -> None:
     ]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     _ = loop.run()
@@ -340,13 +344,13 @@ def test_inner_loop_includes_usage_in_event() -> None:
     )
 
 
-def test_inner_loop_publishes_prompt_rendered_event() -> None:
+def test_inner_loop_publishes_prompt_rendered_event(clock: FakeClock) -> None:
     """Test that InnerLoop publishes PromptRendered event with render inputs."""
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     params = EchoParams(value="hello")
 
     loop = build_inner_loop(
@@ -366,7 +370,7 @@ def test_inner_loop_publishes_prompt_rendered_event() -> None:
     assert event.prompt_key == "example"
 
 
-def test_inner_loop_parses_structured_output() -> None:
+def test_inner_loop_parses_structured_output(clock: FakeClock) -> None:
     """Test that InnerLoop correctly parses structured output."""
     rendered = RenderedPrompt(
         text="system",
@@ -390,7 +394,7 @@ def test_inner_loop_parses_structured_output() -> None:
     ]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(
         rendered=rendered,
@@ -403,7 +407,7 @@ def test_inner_loop_parses_structured_output() -> None:
     assert response.output == StructuredOutput(answer="42")
 
 
-def test_inner_loop_records_usage_to_budget_tracker() -> None:
+def test_inner_loop_records_usage_to_budget_tracker(clock: FakeClock) -> None:
     """Test that InnerLoop records token usage to budget tracker."""
     rendered = RenderedPrompt(text="system")
     responses = [
@@ -414,7 +418,7 @@ def test_inner_loop_records_usage_to_budget_tracker() -> None:
     ]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     budget = Budget(max_total_tokens=1000)
     tracker = BudgetTracker(budget=budget)
 
@@ -429,19 +433,19 @@ def test_inner_loop_records_usage_to_budget_tracker() -> None:
     assert consumed.cached_tokens == 10
 
 
-def test_run_inner_loop_function() -> None:
+def test_run_inner_loop_function(clock: FakeClock) -> None:
     """Test the run_inner_loop convenience function."""
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     template = PromptTemplate(ns="tests", key="example")
     prompt = Prompt(template)
     # Enter prompt context for resource lifecycle
     prompt.resources.__enter__()
-    session: SessionProtocol = Session(dispatcher=dispatcher)
+    session: SessionProtocol = Session(dispatcher=dispatcher, clock=clock)
 
     inputs = InnerLoopInputs[object](
         adapter_name=DUMMY_ADAPTER_NAME,
@@ -468,7 +472,7 @@ def test_run_inner_loop_function() -> None:
     assert isinstance(dispatcher.events[-1], PromptExecuted)
 
 
-def test_inner_loop_raises_on_budget_exceeded() -> None:
+def test_inner_loop_raises_on_budget_exceeded(clock: FakeClock) -> None:
     """Test that InnerLoop raises when budget is exceeded."""
     rendered = RenderedPrompt(text="system")
     responses = [
@@ -479,7 +483,7 @@ def test_inner_loop_raises_on_budget_exceeded() -> None:
     ]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     budget = Budget(max_total_tokens=500)
     tracker = BudgetTracker(budget=budget)
 
@@ -495,25 +499,25 @@ def test_inner_loop_raises_on_budget_exceeded() -> None:
     assert "Budget exceeded" in str(error)
 
 
-def test_inner_loop_requires_message_payload() -> None:
+def test_inner_loop_requires_message_payload(clock: FakeClock) -> None:
     """Test that InnerLoop raises when message is missing."""
     rendered = RenderedPrompt(text="system")
 
     class MissingMessageResponse(DummyResponse):
-        def __init__(self) -> None:
+        def __init__(self, clock: FakeClock) -> None:
             super().__init__(choices=[DummyChoice(DummyMessage(content=None))])
             self.choices[0].message = None
 
-    provider = ProviderStub([MissingMessageResponse()])
+    provider = ProviderStub([MissingMessageResponse(clock)])
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
 
     with pytest.raises(PromptEvaluationError):
         loop.run()
 
 
-def test_inner_loop_executes_tool_calls() -> None:
+def test_inner_loop_executes_tool_calls(clock: FakeClock) -> None:
     """Test that InnerLoop executes tool calls correctly."""
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
@@ -523,7 +527,7 @@ def test_inner_loop_executes_tool_calls() -> None:
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
@@ -535,13 +539,15 @@ def test_inner_loop_executes_tool_calls() -> None:
     assert tool_event.name == "echo"
 
 
-def test_inner_loop_continues_on_prompt_rendered_publish_failure() -> None:
+def test_inner_loop_continues_on_prompt_rendered_publish_failure(
+    clock: FakeClock,
+) -> None:
     """Test that InnerLoop continues when PromptRendered publish fails."""
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus(fail_rendered=True)
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     params = EchoParams(value="blocked")
 
     loop = build_inner_loop(
@@ -558,13 +564,13 @@ def test_inner_loop_continues_on_prompt_rendered_publish_failure() -> None:
     assert isinstance(dispatcher.events[-1], PromptExecuted)
 
 
-def test_inner_loop_raises_on_prompt_publish_failure() -> None:
+def test_inner_loop_raises_on_prompt_publish_failure(clock: FakeClock) -> None:
     """Test that InnerLoop raises when PromptExecuted publish fails."""
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus(fail_prompt=True)
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
 
@@ -576,7 +582,7 @@ def test_inner_loop_raises_on_prompt_publish_failure() -> None:
     assert provider.calls[0]["messages"][0]["content"] == "system"
 
 
-def test_inner_loop_formats_tool_dispatch_failures() -> None:
+def test_inner_loop_formats_tool_dispatch_failures(clock: FakeClock) -> None:
     """Test that InnerLoop formats dispatch failures for tools."""
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
@@ -586,7 +592,7 @@ def test_inner_loop_formats_tool_dispatch_failures() -> None:
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
     dispatcher = RecordingBus(fail_tool=True)
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     response = loop.run()
@@ -599,7 +605,7 @@ def test_inner_loop_formats_tool_dispatch_failures() -> None:
     assert "Reducer errors prevented applying tool result" in failure_message
 
 
-def test_inner_loop_rolls_back_on_tool_dispatch_failure() -> None:
+def test_inner_loop_rolls_back_on_tool_dispatch_failure(clock: FakeClock) -> None:
     """Test that InnerLoop rolls back session on tool dispatch failure."""
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
@@ -608,7 +614,7 @@ def test_inner_loop_rolls_back_on_tool_dispatch_failure() -> None:
     )
     rendered = tool_rendered_prompt(tool)
     provider = ProviderStub(build_tool_responses())
-    session = SessionStub(dispatcher=RecordingBus(fail_tool=True))
+    session = SessionStub(dispatcher=RecordingBus(fail_tool=True), clock=clock)
 
     loop = build_inner_loop(
         rendered=rendered,
@@ -622,14 +628,14 @@ def test_inner_loop_rolls_back_on_tool_dispatch_failure() -> None:
     assert session.restores == session.snapshots
 
 
-def test_inner_loop_includes_prompt_descriptor_in_event() -> None:
+def test_inner_loop_includes_prompt_descriptor_in_event(clock: FakeClock) -> None:
     """Test that InnerLoop includes descriptor in PromptRendered event."""
     descriptor = PromptDescriptor(ns="tests", key="example", sections=[], tools=[])
     rendered = RenderedPrompt(text="system", descriptor=descriptor)
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     loop.run()
@@ -640,29 +646,29 @@ def test_inner_loop_includes_prompt_descriptor_in_event() -> None:
     assert rendered_event.descriptor is descriptor
 
 
-def test_inner_loop_ensure_deadline_remaining_no_deadline() -> None:
+def test_inner_loop_ensure_deadline_remaining_no_deadline(clock: FakeClock) -> None:
     """Test that InnerLoop deadline check passes when no deadline is set."""
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(rendered=rendered, provider=provider, session=session)
     # This should not raise since there's no deadline
     loop._ensure_deadline_remaining("test", phase=PROMPT_EVALUATION_PHASE_REQUEST)
 
 
-def test_inner_loop_raise_deadline_error() -> None:
+def test_inner_loop_raise_deadline_error(clock: FakeClock) -> None:
     """Test that InnerLoop raises deadline error correctly."""
-    from datetime import UTC, timedelta
+    from datetime import timedelta
 
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
-    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+    session = Session(dispatcher=dispatcher, clock=clock)
+    deadline = Deadline(clock.now() + timedelta(seconds=5), clock=clock)
 
     loop = build_inner_loop(
         rendered=rendered, provider=provider, session=session, deadline=deadline
@@ -676,27 +682,27 @@ def test_inner_loop_raise_deadline_error() -> None:
 
 
 def test_inner_loop_ensure_deadline_remaining_expired(
-    frozen_utcnow: FrozenUtcNow,
+    clock: FakeClock,
 ) -> None:
     """Test that InnerLoop raises when deadline is expired."""
     from datetime import timedelta
 
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
 
     rendered = RenderedPrompt(text="system")
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     loop = build_inner_loop(
         rendered=rendered, provider=provider, session=session, deadline=deadline
     )
 
     # Advance time past the deadline
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.advance(10)
 
     with pytest.raises(PromptEvaluationError) as exc_info:
         loop._ensure_deadline_remaining("test", phase=PROMPT_EVALUATION_PHASE_REQUEST)
@@ -710,7 +716,9 @@ def test_inner_loop_ensure_deadline_remaining_expired(
 # =============================================================================
 
 
-def test_inner_loop_includes_run_context_in_prompt_rendered_event() -> None:
+def test_inner_loop_includes_run_context_in_prompt_rendered_event(
+    clock: FakeClock,
+) -> None:
     """InnerLoop includes run_context in PromptRendered events."""
     from uuid import UUID
 
@@ -718,7 +726,7 @@ def test_inner_loop_includes_run_context_in_prompt_rendered_event() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Hello"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     run_context = RunContext(
         run_id=UUID("00000000-0000-0000-0000-000000000001"),
@@ -747,7 +755,9 @@ def test_inner_loop_includes_run_context_in_prompt_rendered_event() -> None:
     assert event.run_context.span_id == "span-456"
 
 
-def test_inner_loop_includes_run_context_in_prompt_executed_event() -> None:
+def test_inner_loop_includes_run_context_in_prompt_executed_event(
+    clock: FakeClock,
+) -> None:
     """InnerLoop includes run_context in PromptExecuted events."""
     from uuid import UUID
 
@@ -755,7 +765,7 @@ def test_inner_loop_includes_run_context_in_prompt_executed_event() -> None:
     responses = [DummyResponse([DummyChoice(DummyMessage(content="Done"))])]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     run_context = RunContext(
         run_id=UUID("00000000-0000-0000-0000-000000000003"),
@@ -783,7 +793,9 @@ def test_inner_loop_includes_run_context_in_prompt_executed_event() -> None:
     assert event.run_context.trace_id == "trace-exec"
 
 
-def test_inner_loop_includes_run_context_in_tool_invoked_event() -> None:
+def test_inner_loop_includes_run_context_in_tool_invoked_event(
+    clock: FakeClock,
+) -> None:
     """InnerLoop includes run_context in ToolInvoked events."""
     from uuid import UUID
 
@@ -819,7 +831,7 @@ def test_inner_loop_includes_run_context_in_tool_invoked_event() -> None:
     ]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     run_context = RunContext(
         run_id=UUID("00000000-0000-0000-0000-000000000005"),
@@ -847,7 +859,7 @@ def test_inner_loop_includes_run_context_in_tool_invoked_event() -> None:
     assert event.run_context.trace_id == "trace-tool"
 
 
-def test_inner_loop_all_events_share_same_run_id() -> None:
+def test_inner_loop_all_events_share_same_run_id(clock: FakeClock) -> None:
     """All telemetry events from a single execution share the same run_id."""
     from uuid import UUID
 
@@ -883,7 +895,7 @@ def test_inner_loop_all_events_share_same_run_id() -> None:
     ]
     provider = ProviderStub(responses)
     dispatcher = RecordingBus()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     run_context = RunContext(
         run_id=UUID("00000000-0000-0000-0000-000000000007"),

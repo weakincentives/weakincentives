@@ -27,6 +27,7 @@ from uuid import UUID
 
 import pytest
 
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.serde import clone, dump, parse, schema
 from weakincentives.serde._utils import (
     _SLOTTED_EXTRAS,
@@ -328,7 +329,7 @@ class LiteralModel:
 # Use literal bools to exercise coercion and schema branches.
 @dataclass
 class LiteralBoolModel:
-    flag: Literal[True, False]  # noqa: RUF038 - keep literal bools for schema coverage
+    flag: Literal[True, False]  # noqa: RUF038
 
 
 @dataclass
@@ -1474,7 +1475,7 @@ def test_serialize_set_sorting_and_extra_policy_noop() -> None:
     assert parsed.name == "Ada"
 
 
-def test_schema_additional_types() -> None:
+def test_schema_additional_types(clock: FakeClock) -> None:
     @dataclass
     class PrimitiveSchema:
         flag: bool

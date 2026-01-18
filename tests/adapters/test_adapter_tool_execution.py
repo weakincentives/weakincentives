@@ -21,7 +21,7 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
+from weakincentives.runtime.clock import FakeClock
 
 try:
     from tests.adapters._test_stubs import (
@@ -190,7 +190,9 @@ def _tool_message_parts(
     return _split_tool_message_content(cast(str, raw))
 
 
-def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None:
+def test_adapter_tool_execution_success(
+    adapter_harness: AdapterHarness, clock: FakeClock
+) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del context
         return ToolResult.ok(ToolPayload(answer=params.query), message="completed")
@@ -215,7 +217,7 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
     adapter, requests = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
@@ -266,8 +268,9 @@ def test_adapter_tool_context_receives_deadline(
     adapter, _ = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
-    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+    clock = FakeClock()
+    session = Session(dispatcher=dispatcher, clock=clock)
+    deadline = Deadline(clock.now() + timedelta(seconds=5), clock=clock)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
@@ -306,8 +309,9 @@ def test_adapter_tool_deadline_exceeded(
     adapter, _ = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
-    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+    clock = FakeClock()
+    session = Session(dispatcher=dispatcher, clock=clock)
+    deadline = Deadline(clock.now() + timedelta(seconds=5), clock=clock)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
@@ -326,7 +330,7 @@ def test_adapter_tool_deadline_exceeded(
 
 
 def test_adapter_deadline_preflight_rejection(
-    adapter_harness: AdapterHarness, frozen_utcnow: FrozenUtcNow
+    adapter_harness: AdapterHarness, clock: FakeClock
 ) -> None:
     def handler(params: ToolParams, *, context: ToolContext) -> ToolResult[ToolPayload]:
         del params, context
@@ -351,11 +355,11 @@ def test_adapter_deadline_preflight_rejection(
     adapter, _ = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+    clock.advance(10)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
 
@@ -402,7 +406,7 @@ def test_adapter_tool_execution_validation_error(
     adapter, requests = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
     events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="invalid"))
@@ -457,7 +461,7 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     adapter, requests = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
     events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
@@ -513,7 +517,7 @@ def test_adapter_tool_execution_rejects_type_errors(
     adapter, requests = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
     events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
@@ -566,7 +570,7 @@ def test_adapter_tool_execution_unexpected_exception(
     adapter, requests = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
     events = _record_tool_events(dispatcher)
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="policies"))
@@ -619,7 +623,7 @@ def test_adapter_tool_execution_rolls_back_session(
     adapter, requests = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
     session[ToolPayload].register(ToolPayload, replace_latest)
     session[ToolPayload].seed((ToolPayload(answer="baseline"),))
 
@@ -703,7 +707,7 @@ def test_adapter_tool_visibility_expansion_propagates(
     adapter, _ = adapter_harness.build(responses)
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
 
     bound_prompt = Prompt(prompt_template).bind(ToolParams(query="docs"))
 
@@ -745,7 +749,7 @@ def test_tool_receives_filesystem_from_workspace_section(
     )
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
 
     # Create a workspace section with VFS filesystem
     workspace_section = VfsToolsSection(session=session)
@@ -811,7 +815,7 @@ def test_budget_tracker_passed_to_tool_context_via_resources(
     )
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
 
     prompt_template = PromptTemplate(
         ns=f"test/{adapter_harness.name}",

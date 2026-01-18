@@ -49,7 +49,7 @@ import threading
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
@@ -57,6 +57,7 @@ from ..budget import Budget, BudgetTracker
 from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
+from .clock import Clock, SystemClock
 from .dlq import DeadLetter, DLQPolicy
 from .lease_extender import LeaseExtender, LeaseExtenderConfig
 from .lifecycle import wait_until
@@ -75,6 +76,13 @@ if TYPE_CHECKING:
 _logger: StructuredLogger = get_logger(
     __name__, context={"component": "runtime.main_loop"}
 )
+
+
+def _default_completed_at() -> datetime:
+    """Generate default completed_at timestamp."""
+    from .clock import SystemClock
+
+    return SystemClock().now()
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,7 +108,7 @@ class MainLoopResult[OutputT]:
     run_context: RunContext | None = None
     """Execution context with correlation identifiers and metadata."""
 
-    completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    completed_at: datetime = field(default_factory=_default_completed_at)
     """Timestamp when processing completed."""
 
     @property
@@ -118,12 +126,23 @@ class MainLoopConfig:
     The ``lease_extender`` field controls automatic message visibility extension
     during processing. When enabled, heartbeats from tool execution extend the
     message lease, preventing timeout during long-running requests.
+
+    The ``clock`` field allows injecting a custom clock for testing. When None,
+    defaults to SystemClock().
     """
 
     deadline: Deadline | None = None
     budget: Budget | None = None
     resources: Mapping[type[object], object] | None = None
     lease_extender: LeaseExtenderConfig | None = None
+    clock: Clock | None = None
+
+
+def _default_created_at() -> datetime:
+    """Generate default created_at timestamp."""
+    from .clock import SystemClock
+
+    return SystemClock().now()
 
 
 @FrozenDataclass()
@@ -139,7 +158,7 @@ class MainLoopRequest[UserRequestT]:
     deadline: Deadline | None = None
     resources: Mapping[type[object], object] | None = None
     request_id: UUID = field(default_factory=uuid4)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime = field(default_factory=_default_created_at)
     run_context: RunContext | None = None
     """Optional execution context. If not provided, MainLoop creates one."""
     experiment: Experiment | None = None
@@ -226,14 +245,18 @@ class MainLoop[UserRequestT, OutputT](ABC):
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
-        self._heartbeat = Heartbeat()
+        # Use clock from config, or default to SystemClock
+        heartbeat_clock = (
+            self._config.clock if self._config.clock is not None else SystemClock()
+        )
+        self._heartbeat = Heartbeat(clock=heartbeat_clock)
         # Initialize lease extender with config or defaults
         lease_config = (
             self._config.lease_extender
             if self._config.lease_extender is not None
             else LeaseExtenderConfig()
         )
-        self._lease_extender = LeaseExtender(config=lease_config)
+        self._lease_extender = LeaseExtender(clock=heartbeat_clock, config=lease_config)
         # Auto-generate worker_id if not provided
         if worker_id:
             self._worker_id = worker_id
@@ -536,6 +559,10 @@ class MainLoop[UserRequestT, OutputT](ABC):
         # Create run-scoped logger for tracing
         log = bind_run_context(_logger, run_context)
 
+        # Use SystemClock for dead letter timestamp
+        from .clock import SystemClock
+
+        clock = SystemClock()
         dead_letter = DeadLetter(
             message_id=msg.id,
             body=msg.body,
@@ -543,7 +570,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
             delivery_count=msg.delivery_count,
             last_error=str(error),
             last_error_type=f"{type(error).__module__}.{type(error).__qualname__}",
-            dead_lettered_at=datetime.now(UTC),
+            dead_lettered_at=clock.now(),
             first_received_at=msg.enqueued_at,
             request_id=msg.body.request_id,
             reply_to=msg.reply_to.name if msg.reply_to else None,

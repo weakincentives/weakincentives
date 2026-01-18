@@ -36,12 +36,12 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from .clock import Clock, SystemClock
 from .mailbox import ReceiptHandleExpiredError
 
 if TYPE_CHECKING:
@@ -82,8 +82,9 @@ class LeaseExtender:
 
     Example::
 
-        extender = LeaseExtender(config=LeaseExtenderConfig(interval=30))
-        heartbeat = Heartbeat()
+        clock = SystemClock()
+        extender = LeaseExtender(clock=clock, config=LeaseExtenderConfig(interval=30))
+        heartbeat = Heartbeat(clock=clock)
 
         with extender.attach(msg, heartbeat):
             # Pass heartbeat through adapter to tools
@@ -92,6 +93,7 @@ class LeaseExtender:
             # Each beat potentially extends the message lease
     """
 
+    clock: Clock = field(default_factory=SystemClock)
     config: LeaseExtenderConfig = field(default_factory=LeaseExtenderConfig)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _msg: Message[Any, Any] | None = field(default=None, repr=False)
@@ -157,7 +159,7 @@ class LeaseExtender:
             if self._msg is None:
                 return
 
-            now = time.monotonic()
+            now = self.clock.monotonic()
             elapsed = now - self._last_extension
 
             if elapsed < self.config.interval:
@@ -170,7 +172,7 @@ class LeaseExtender:
         try:
             msg.extend_visibility(extension)
             with self._lock:
-                self._last_extension = time.monotonic()
+                self._last_extension = self.clock.monotonic()
             _logger.debug(
                 "Extended visibility for message %s by %d seconds",
                 msg.id,

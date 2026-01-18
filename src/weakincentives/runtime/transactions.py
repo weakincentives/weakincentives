@@ -40,7 +40,7 @@ import types
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Literal, cast
 from uuid import UUID, uuid4
 
@@ -374,7 +374,7 @@ def create_snapshot(
 
     return CompositeSnapshot(
         snapshot_id=uuid4(),
-        created_at=datetime.now(UTC),
+        created_at=session.clock.now(),
         session=session_snapshot,
         resources=types.MappingProxyType(resource_snapshots),
         metadata=SnapshotMetadata(tag=tag),
@@ -507,7 +507,7 @@ class PendingToolTracker:
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
                 snapshot=snapshot,
-                started_at=datetime.now(UTC),
+                started_at=self.session.clock.now(),
             )
 
     def end_tool_execution(

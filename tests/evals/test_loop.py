@@ -37,12 +37,17 @@ from weakincentives.evals import (
 )
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
+from weakincentives.runtime.clock import Clock, FakeClock
 from weakincentives.runtime.dlq import DeadLetter, DLQPolicy
 from weakincentives.runtime.mailbox import (
     Mailbox,
     ReceiptHandleExpiredError,
 )
-from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
+from weakincentives.runtime.main_loop import (
+    MainLoopConfig,
+    MainLoopRequest,
+    MainLoopResult,
+)
 from weakincentives.runtime.session import SessionProtocol
 
 # =============================================================================
@@ -107,8 +112,10 @@ class _TestLoop(MainLoop[str, _Output]):
         *,
         adapter: ProviderAdapter[_Output],
         requests: InMemoryMailbox[MainLoopRequest[str], MainLoopResult[_Output]],
+        config: MainLoopConfig | None = None,
     ) -> None:
-        super().__init__(adapter=adapter, requests=requests)
+        super().__init__(adapter=adapter, requests=requests, config=config)
+        self._config = config if config is not None else MainLoopConfig()
         self._template = PromptTemplate[_Output](
             ns="test",
             key="test-prompt",
@@ -129,7 +136,10 @@ class _TestLoop(MainLoop[str, _Output]):
     ) -> tuple[Prompt[_Output], Session]:
         _ = experiment
         prompt = Prompt(self._template).bind(_Params(content=request))
-        session = Session(tags={"loop": "test"})
+        test_clock = (
+            self._config.clock if self._config.clock is not None else FakeClock()
+        )
+        session = Session(tags={"loop": "test"}, clock=test_clock)
         return prompt, session
 
 
@@ -137,14 +147,19 @@ def _create_test_loop(
     *,
     result: str = "success",
     error: Exception | None = None,
+    clock: FakeClock | None = None,
 ) -> _TestLoop:
     """Create a test MainLoop with mock adapter."""
     adapter = _MockAdapter(result=result, error=error)
     # EvalLoop doesn't use MainLoop's mailboxes directly, but MainLoop requires one
+    test_clock = clock if clock is not None else FakeClock()
     requests: InMemoryMailbox[MainLoopRequest[str], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="dummy-requests")
+        InMemoryMailbox(name="dummy-requests", clock=test_clock)
     )
-    return _TestLoop(adapter=adapter, requests=requests)
+    from weakincentives.runtime.main_loop import MainLoopConfig
+
+    config = MainLoopConfig(clock=test_clock)
+    return _TestLoop(adapter=adapter, requests=requests, config=config)
 
 
 def _output_to_str(output: _Output, expected: str) -> Score:
@@ -157,19 +172,22 @@ def _output_to_str(output: _Output, expected: str) -> Score:
 # =============================================================================
 
 
-def test_eval_loop_processes_sample() -> None:
+def test_eval_loop_processes_sample(clock: FakeClock) -> None:
     """EvalLoop processes a sample and produces result."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        main_loop = _create_test_loop(result="correct", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         # Submit a sample with reply_to
@@ -177,7 +195,7 @@ def test_eval_loop_processes_sample() -> None:
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run single iteration
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Check result
         msgs = results.receive(max_messages=1)
@@ -194,25 +212,28 @@ def test_eval_loop_processes_sample() -> None:
         results.close()
 
 
-def test_eval_loop_handles_failure() -> None:
+def test_eval_loop_handles_failure(clock: FakeClock) -> None:
     """EvalLoop handles evaluation failure gracefully."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("test error"))
+        main_loop = _create_test_loop(error=RuntimeError("test error"), clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -226,19 +247,22 @@ def test_eval_loop_handles_failure() -> None:
         results.close()
 
 
-def test_eval_loop_respects_max_iterations() -> None:
+def test_eval_loop_respects_max_iterations(clock: FakeClock) -> None:
     """EvalLoop respects max_iterations limit."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop()
+        main_loop = _create_test_loop(clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         # Submit multiple samples
@@ -249,7 +273,7 @@ def test_eval_loop_respects_max_iterations() -> None:
             )
 
         # Run only 2 iterations
-        eval_loop.run(max_iterations=2)
+        eval_loop.run(max_iterations=2, wait_time_seconds=0)
 
         # Should have processed some samples
         assert results.approximate_count() >= 1
@@ -258,25 +282,28 @@ def test_eval_loop_respects_max_iterations() -> None:
         results.close()
 
 
-def test_eval_loop_failing_score() -> None:
+def test_eval_loop_failing_score(clock: FakeClock) -> None:
     """EvalLoop correctly reports failing evaluations."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop(result="wrong")
+        main_loop = _create_test_loop(result="wrong", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -295,10 +322,10 @@ def test_eval_loop_failing_score() -> None:
 # =============================================================================
 
 
-def test_submit_dataset() -> None:
+def test_submit_dataset(clock: FakeClock) -> None:
     """submit_dataset sends all samples to mailbox."""
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
@@ -324,10 +351,10 @@ def test_submit_dataset() -> None:
         requests.close()
 
 
-def test_submit_dataset_empty() -> None:
+def test_submit_dataset_empty(clock: FakeClock) -> None:
     """submit_dataset handles empty dataset."""
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
@@ -343,10 +370,10 @@ def test_submit_dataset_empty() -> None:
 # =============================================================================
 
 
-def test_submit_experiments() -> None:
+def test_submit_experiments(clock: FakeClock) -> None:
     """submit_experiments sends all samples under each experiment."""
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
@@ -379,9 +406,11 @@ def test_submit_experiments() -> None:
 # =============================================================================
 
 
-def test_collect_results() -> None:
+def test_collect_results(clock: FakeClock) -> None:
     """collect_results gathers results into report."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
 
     try:
         # Send some results
@@ -395,7 +424,9 @@ def test_collect_results() -> None:
                 )
             )
 
-        report = collect_results(results, expected_count=3, timeout_seconds=5)
+        report = collect_results(
+            results, expected_count=3, timeout_seconds=5, clock=clock
+        )
 
         assert report.total == 3
         assert report.pass_rate == pytest.approx(2 / 3)
@@ -403,9 +434,14 @@ def test_collect_results() -> None:
         results.close()
 
 
-def test_collect_results_timeout() -> None:
+@pytest.mark.allow_system_clock
+def test_collect_results_timeout(clock: Clock) -> None:
     """collect_results respects timeout."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    # Uses SystemClock because this test relies on real blocking behavior
+    # in InMemoryMailbox.receive() which waits on threading.Condition
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
 
     try:
         # Send only 1 result but expect 2
@@ -419,7 +455,9 @@ def test_collect_results_timeout() -> None:
         )
 
         # Short timeout - should return partial results
-        report = collect_results(results, expected_count=2, timeout_seconds=0.1)
+        report = collect_results(
+            results, expected_count=2, timeout_seconds=0.1, clock=clock
+        )
 
         # Should have collected what was available
         assert report.total == 1
@@ -427,12 +465,19 @@ def test_collect_results_timeout() -> None:
         results.close()
 
 
-def test_collect_results_empty() -> None:
+@pytest.mark.allow_system_clock
+def test_collect_results_empty(clock: Clock) -> None:
     """collect_results handles empty results."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    # Uses SystemClock because this test relies on real blocking behavior
+    # in InMemoryMailbox.receive() which waits on threading.Condition
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
 
     try:
-        report = collect_results(results, expected_count=0, timeout_seconds=0.1)
+        report = collect_results(
+            results, expected_count=0, timeout_seconds=0.1, clock=clock
+        )
         assert report.total == 0
         assert report.pass_rate == 0.0
     finally:
@@ -444,11 +489,13 @@ def test_collect_results_empty() -> None:
 # =============================================================================
 
 
-def test_end_to_end_evaluation() -> None:
+def test_end_to_end_evaluation(clock: FakeClock) -> None:
     """Full evaluation flow from dataset to report."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
@@ -461,11 +508,12 @@ def test_end_to_end_evaluation() -> None:
         dataset = Dataset(samples=samples)
 
         # Create loop
-        main_loop = _create_test_loop(result="success")
+        main_loop = _create_test_loop(result="success", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         # Submit with reply_to and evaluate
@@ -473,10 +521,12 @@ def test_end_to_end_evaluation() -> None:
             requests.send(
                 EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
             )
-        eval_loop.run(max_iterations=5)
+        eval_loop.run(max_iterations=5, wait_time_seconds=0)
 
         # Collect results
-        report = collect_results(results, expected_count=3, timeout_seconds=5)
+        report = collect_results(
+            results, expected_count=3, timeout_seconds=5, clock=clock
+        )
 
         # Verify
         assert report.total == 3
@@ -546,33 +596,39 @@ class _NoneOutputLoop(MainLoop[str, _Output]):
     ) -> tuple[Prompt[_Output], Session]:
         _ = experiment
         prompt = Prompt(self._template).bind(_Params(content=request))
-        session = Session(tags={"loop": "test"})
+        test_clock = (
+            self._config.clock if self._config.clock is not None else FakeClock()
+        )
+        session = Session(tags={"loop": "test"}, clock=test_clock)
         return prompt, session
 
 
-def test_eval_loop_none_output() -> None:
+def test_eval_loop_none_output(clock: FakeClock) -> None:
     """EvalLoop handles None output from adapter."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
         adapter = _NoneOutputAdapter()
         dummy_requests: InMemoryMailbox[
             MainLoopRequest[str], MainLoopResult[_Output]
-        ] = InMemoryMailbox(name="dummy-requests")
+        ] = InMemoryMailbox(name="dummy-requests", clock=clock)
         main_loop = _NoneOutputLoop(adapter=adapter, requests=dummy_requests)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         msgs = results.receive(max_messages=1)
         assert len(msgs) == 1
@@ -610,21 +666,22 @@ class _FailingMailbox(InMemoryMailbox[EvalResult, None]):
         return super().send(message)
 
 
-def test_eval_loop_nacks_on_send_failure() -> None:
+def test_eval_loop_nacks_on_send_failure(clock: FakeClock) -> None:
     """EvalLoop nacks message when result send fails (not acknowledges)."""
     failing_mailbox = _FailingMailbox(fail_on_send=True)
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
         # Create a successful loop - the key point is that evaluation succeeds
         # but send fails, so we should nack (not fabricate an error result)
-        main_loop = _create_test_loop(result="correct")
+        main_loop = _create_test_loop(result="correct", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
@@ -633,7 +690,7 @@ def test_eval_loop_nacks_on_send_failure() -> None:
         )
 
         # Run - evaluation succeeds, but send fails, should nack
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # The message should have been nacked (not acknowledged), so it should
         # still be in the queue after visibility timeout expires
@@ -645,20 +702,21 @@ def test_eval_loop_nacks_on_send_failure() -> None:
         failing_mailbox.close()
 
 
-def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
+def test_eval_loop_nacks_on_send_failure_after_eval_error(clock: FakeClock) -> None:
     """EvalLoop nacks message when send fails even after evaluation error."""
     failing_mailbox = _FailingMailbox(fail_on_send=True)
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
         # Create loop that will throw an exception during evaluation
-        main_loop = _create_test_loop(error=RuntimeError("eval error"))
+        main_loop = _create_test_loop(error=RuntimeError("eval error"), clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
@@ -667,7 +725,7 @@ def test_eval_loop_nacks_on_send_failure_after_eval_error() -> None:
         )
 
         # Run - evaluation fails, send also fails, should nack
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # The message should have been nacked (not acknowledged)
         assert requests.approximate_count() == 1
@@ -687,19 +745,20 @@ class _ExpiredHandleMailbox(InMemoryMailbox[EvalResult, None]):
         raise ReceiptHandleExpiredError("Handle expired")
 
 
-def test_eval_loop_handles_expired_receipt_on_send() -> None:
+def test_eval_loop_handles_expired_receipt_on_send(clock: FakeClock) -> None:
     """EvalLoop handles ReceiptHandleExpiredError on send gracefully."""
     expired_mailbox = _ExpiredHandleMailbox(name="expired-results")
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        main_loop = _create_test_loop(result="correct", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
@@ -708,7 +767,7 @@ def test_eval_loop_handles_expired_receipt_on_send() -> None:
         )
 
         # Run - should handle ReceiptHandleExpiredError gracefully (pass, not raise)
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message was processed (expired handle means message already requeued)
         # The mailbox should be empty since we don't ack or nack on expired handle
@@ -770,7 +829,7 @@ class _NackExpiresMessage:
         raise ReceiptHandleExpiredError("Handle expired on nack")
 
 
-def test_eval_loop_handles_expired_receipt_on_nack() -> None:
+def test_eval_loop_handles_expired_receipt_on_nack(clock: FakeClock) -> None:
     """EvalLoop handles ReceiptHandleExpiredError on nack gracefully."""
     failing_mailbox = _FailingMailbox(fail_on_send=True)
     requests: _NackExpiresRequestMailbox = _NackExpiresRequestMailbox(
@@ -778,11 +837,12 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        main_loop = _create_test_loop(result="correct", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,  # type: ignore[arg-type]
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
@@ -791,7 +851,7 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
         )
 
         # Run - send fails, nack raises ReceiptHandleExpiredError, should handle gracefully
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Should not raise, just pass
     finally:
@@ -799,21 +859,24 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
         failing_mailbox.close()
 
 
-def test_eval_loop_exits_when_mailbox_closed() -> None:
+def test_eval_loop_exits_when_mailbox_closed(clock: FakeClock) -> None:
     """EvalLoop exits cleanly when requests mailbox is closed."""
     import threading
 
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        main_loop = _create_test_loop(result="correct", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         # Close the mailbox before running
@@ -824,7 +887,7 @@ def test_eval_loop_exits_when_mailbox_closed() -> None:
         loop_completed = threading.Event()
 
         def run_loop() -> None:
-            eval_loop.run(max_iterations=None)
+            eval_loop.run(max_iterations=None, wait_time_seconds=0)
             loop_completed.set()
 
         thread = threading.Thread(target=run_loop)
@@ -840,18 +903,19 @@ def test_eval_loop_exits_when_mailbox_closed() -> None:
         results.close()
 
 
-def test_eval_loop_handles_no_reply_to() -> None:
+def test_eval_loop_handles_no_reply_to(clock: FakeClock) -> None:
     """EvalLoop logs warning and acks when message has no reply_to."""
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        main_loop = _create_test_loop(result="correct", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
@@ -859,7 +923,7 @@ def test_eval_loop_handles_no_reply_to() -> None:
         requests.send(EvalRequest(sample=sample, experiment=BASELINE))
 
         # Run - should handle missing reply_to gracefully (log warning, ack)
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should have been acknowledged
         assert requests.approximate_count() == 0
@@ -879,19 +943,22 @@ def _session_aware_evaluator(
     return Score(value=0.0, passed=False, reason="Type mismatch")
 
 
-def test_eval_loop_with_session_aware_evaluator() -> None:
+def test_eval_loop_with_session_aware_evaluator(clock: FakeClock) -> None:
     """EvalLoop correctly passes session to session-aware evaluators."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop(result="correct")
+        main_loop = _create_test_loop(result="correct", clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_session_aware_evaluator,
             requests=requests,
+            clock=clock,
         )
 
         # Submit a sample with reply_to
@@ -899,7 +966,7 @@ def test_eval_loop_with_session_aware_evaluator() -> None:
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run single iteration
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Check result
         msgs = results.receive(max_messages=1)
@@ -921,25 +988,28 @@ def test_eval_loop_with_session_aware_evaluator() -> None:
 # =============================================================================
 
 
-def test_eval_loop_error_reply_without_dlq() -> None:
+def test_eval_loop_error_reply_without_dlq(clock: FakeClock) -> None:
     """EvalLoop sends error reply without DLQ configured (original behavior)."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        main_loop = _create_test_loop(error=RuntimeError("failure"), clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=_output_to_str,
             requests=requests,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should be acknowledged (removed from queue)
         assert requests.approximate_count() == 0
@@ -955,18 +1025,20 @@ def test_eval_loop_error_reply_without_dlq() -> None:
         results.close()
 
 
-def test_eval_loop_nacks_with_dlq_before_threshold() -> None:
+def test_eval_loop_nacks_with_dlq_before_threshold(clock: FakeClock) -> None:
     """EvalLoop nacks failed messages with DLQ before threshold is reached."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
-        InMemoryMailbox(name="eval-requests-dlq")
+        InMemoryMailbox(name="eval-requests-dlq", clock=clock)
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        main_loop = _create_test_loop(error=RuntimeError("failure"), clock=clock)
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox, max_delivery_count=5
         )
@@ -975,13 +1047,14 @@ def test_eval_loop_nacks_with_dlq_before_threshold() -> None:
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run once - should nack for retry (below threshold)
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should be nacked (still in queue)
         assert requests.approximate_count() == 1
@@ -997,18 +1070,22 @@ def test_eval_loop_nacks_with_dlq_before_threshold() -> None:
         dlq_mailbox.close()
 
 
-def test_eval_loop_sends_to_dlq_after_threshold() -> None:
+def test_eval_loop_sends_to_dlq_after_threshold(clock: FakeClock) -> None:
     """EvalLoop sends to DLQ when delivery count equals threshold."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
-        InMemoryMailbox(name="eval-requests-dlq")
+        InMemoryMailbox(name="eval-requests-dlq", clock=clock)
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("persistent failure"))
+        main_loop = _create_test_loop(
+            error=RuntimeError("persistent failure"), clock=clock
+        )
         # Use max_delivery_count=1 to trigger DLQ on first failure
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox, max_delivery_count=1
@@ -1018,6 +1095,7 @@ def test_eval_loop_sends_to_dlq_after_threshold() -> None:
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
+            clock=clock,
         )
 
         sample = Sample(id="sample-1", input="test input", expected="correct")
@@ -1025,7 +1103,7 @@ def test_eval_loop_sends_to_dlq_after_threshold() -> None:
         requests.send(request, reply_to=results)
 
         # Run once - should dead-letter immediately (delivery_count=1 >= max=1)
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should be dead-lettered
         assert requests.approximate_count() == 0
@@ -1053,18 +1131,20 @@ def test_eval_loop_sends_to_dlq_after_threshold() -> None:
         dlq_mailbox.close()
 
 
-def test_eval_loop_immediate_dlq_for_included_error() -> None:
+def test_eval_loop_immediate_dlq_for_included_error(clock: FakeClock) -> None:
     """EvalLoop immediately dead-letters included error types."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
-        InMemoryMailbox(name="eval-requests-dlq")
+        InMemoryMailbox(name="eval-requests-dlq", clock=clock)
     )
 
     try:
-        main_loop = _create_test_loop(error=ValueError("validation error"))
+        main_loop = _create_test_loop(error=ValueError("validation error"), clock=clock)
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox,
             max_delivery_count=5,
@@ -1075,13 +1155,14 @@ def test_eval_loop_immediate_dlq_for_included_error() -> None:
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run once - should immediately dead-letter
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should be dead-lettered on first attempt
         assert requests.approximate_count() == 0
@@ -1097,18 +1178,22 @@ def test_eval_loop_immediate_dlq_for_included_error() -> None:
         dlq_mailbox.close()
 
 
-def test_eval_loop_never_dlq_for_excluded_error() -> None:
+def test_eval_loop_never_dlq_for_excluded_error(clock: FakeClock) -> None:
     """EvalLoop never dead-letters excluded error types."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
-        InMemoryMailbox(name="eval-requests-dlq")
+        InMemoryMailbox(name="eval-requests-dlq", clock=clock)
     )
 
     try:
-        main_loop = _create_test_loop(error=TimeoutError("transient timeout"))
+        main_loop = _create_test_loop(
+            error=TimeoutError("transient timeout"), clock=clock
+        )
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox,
             max_delivery_count=2,
@@ -1119,6 +1204,7 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
@@ -1126,7 +1212,7 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
 
         # Run many times - should never dead-letter
         for _ in range(5):
-            eval_loop.run(max_iterations=1)
+            eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should still be in queue (nacked, not dead-lettered)
         assert requests.approximate_count() == 1
@@ -1137,20 +1223,20 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
         dlq_mailbox.close()
 
 
-def test_eval_loop_dlq_handles_reply_error() -> None:
+def test_eval_loop_dlq_handles_reply_error(clock: FakeClock) -> None:
     """EvalLoop DLQ handles errors when sending reply."""
     from weakincentives.runtime.mailbox import FakeMailbox, MailboxConnectionError
 
     results: FakeMailbox[EvalResult, None] = FakeMailbox(name="eval-results")
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
-        InMemoryMailbox(name="eval-requests-dlq")
+        InMemoryMailbox(name="eval-requests-dlq", clock=clock)
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        main_loop = _create_test_loop(error=RuntimeError("failure"), clock=clock)
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox, max_delivery_count=1
         )
@@ -1159,6 +1245,7 @@ def test_eval_loop_dlq_handles_reply_error() -> None:
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
@@ -1167,7 +1254,7 @@ def test_eval_loop_dlq_handles_reply_error() -> None:
         # Make reply send fail
         results.set_connection_error(MailboxConnectionError("connection lost"))
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should still be dead-lettered despite reply failure
         assert requests.approximate_count() == 0
@@ -1177,17 +1264,17 @@ def test_eval_loop_dlq_handles_reply_error() -> None:
         dlq_mailbox.close()
 
 
-def test_eval_loop_dlq_without_reply_to() -> None:
+def test_eval_loop_dlq_without_reply_to(clock: FakeClock) -> None:
     """EvalLoop DLQ handles messages without reply_to."""
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
-        InMemoryMailbox(name="eval-requests-dlq")
+        InMemoryMailbox(name="eval-requests-dlq", clock=clock)
     )
 
     try:
-        main_loop = _create_test_loop(error=RuntimeError("failure"))
+        main_loop = _create_test_loop(error=RuntimeError("failure"), clock=clock)
         dlq: DLQPolicy[EvalRequest[str, str], EvalResult] = DLQPolicy(
             mailbox=dlq_mailbox, max_delivery_count=1
         )
@@ -1196,13 +1283,14 @@ def test_eval_loop_dlq_without_reply_to() -> None:
             evaluator=_output_to_str,
             requests=requests,
             dlq=dlq,
+            clock=clock,
         )
 
         sample = Sample(id="1", input="test input", expected="correct")
         # Send without reply_to
         requests.send(EvalRequest(sample=sample, experiment=BASELINE))
 
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Message should be dead-lettered
         assert requests.approximate_count() == 0

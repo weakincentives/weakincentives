@@ -22,12 +22,13 @@ import pytest
 
 from weakincentives.prompt.protocols import ToolSuiteSection, WorkspaceSection
 from weakincentives.runtime import InProcessDispatcher, Session
+from weakincentives.runtime.clock import FakeClock
 
 
 @pytest.fixture
-def session() -> Session:
+def session(clock: FakeClock) -> Session:
     """Create a session for testing."""
-    return Session(dispatcher=InProcessDispatcher())
+    return Session(dispatcher=InProcessDispatcher(), clock=clock)
 
 
 class TestToolSuiteSectionProtocol:
@@ -93,12 +94,14 @@ class TestToolSuiteSectionProtocol:
         # WorkspaceDigestSection does not expose session as a property
         assert not isinstance(section, ToolSuiteSection)
 
-    def test_clone_returns_new_instance(self, session: Session) -> None:
+    def test_clone_returns_new_instance(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Clone creates a new section with the new session."""
         from weakincentives.contrib.tools import PlanningToolsSection
 
         section = PlanningToolsSection(session=session)
-        new_session = Session(dispatcher=InProcessDispatcher())
+        new_session = Session(dispatcher=InProcessDispatcher(), clock=clock)
 
         cloned = section.clone(session=new_session)
 
@@ -115,13 +118,13 @@ class TestToolSuiteSectionProtocol:
         obj = NotAToolSuite()
         assert not isinstance(obj, ToolSuiteSection)
 
-    def test_partial_implementation_fails(self) -> None:
+    def test_partial_implementation_fails(self, clock: FakeClock) -> None:
         """Classes with only some attributes fail isinstance check."""
 
         class PartialImpl:
             @property
             def session(self) -> Session:
-                return Session(dispatcher=InProcessDispatcher())
+                return Session(dispatcher=InProcessDispatcher(), clock=clock)
 
             # Missing accepts_overrides and clone
 
@@ -194,12 +197,14 @@ class TestWorkspaceSectionProtocol:
         # WorkspaceSection attributes
         assert hasattr(section, "filesystem")
 
-    def test_clone_preserves_workspace_protocol(self, session: Session) -> None:
+    def test_clone_preserves_workspace_protocol(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Cloned workspace sections still implement WorkspaceSection."""
         from weakincentives.contrib.tools import VfsToolsSection
 
         section = VfsToolsSection(session=session)
-        new_session = Session(dispatcher=InProcessDispatcher())
+        new_session = Session(dispatcher=InProcessDispatcher(), clock=clock)
 
         cloned = section.clone(session=new_session)
 
@@ -242,15 +247,16 @@ class TestProtocolExports:
 class TestDuckTypingConformance:
     """Tests for duck-typing protocol conformance."""
 
-    def test_custom_implementation_passes_isinstance(self) -> None:
+    def test_custom_implementation_passes_isinstance(self, clock: FakeClock) -> None:
         """Custom class implementing protocol passes isinstance."""
         from weakincentives.contrib.tools import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
         class CustomWorkspaceSection:
-            def __init__(self, session: Session) -> None:
+            def __init__(self, session: Session, clock: FakeClock) -> None:
                 self._session = session
-                self._fs = InMemoryFilesystem()
+                self._clock = clock
+                self._fs = InMemoryFilesystem(clock=clock)
 
             @property
             def session(self) -> Session:
@@ -267,10 +273,10 @@ class TestDuckTypingConformance:
             def clone(self, **kwargs: object) -> CustomWorkspaceSection:
                 new_session = kwargs.get("session", self._session)
                 assert isinstance(new_session, Session)
-                return CustomWorkspaceSection(new_session)
+                return CustomWorkspaceSection(new_session, self._clock)
 
-        session = Session(dispatcher=InProcessDispatcher())
-        custom = CustomWorkspaceSection(session)
+        session = Session(dispatcher=InProcessDispatcher(), clock=clock)
+        custom = CustomWorkspaceSection(session, clock)
 
         # Should pass both protocol checks
         assert isinstance(custom, ToolSuiteSection)

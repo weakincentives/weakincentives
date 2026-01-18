@@ -14,17 +14,23 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from dataclasses import field
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING
 
 from .dataclasses import FrozenDataclass
+
+if TYPE_CHECKING:
+    from .runtime.clock import Clock
 
 __all__ = ["Deadline"]
 
 
-def _utcnow() -> datetime:
-    """Return the current UTC timestamp."""
+def _default_clock() -> Clock:
+    """Create default clock instance."""
+    from .runtime.clock import SystemClock
 
-    return datetime.now(UTC)
+    return SystemClock()
 
 
 @FrozenDataclass()
@@ -32,6 +38,7 @@ class Deadline:
     """Immutable value object describing a wall-clock expiration."""
 
     expires_at: datetime
+    clock: Clock = field(default_factory=_default_clock)
 
     def __post_init__(self) -> None:
         expires_at = self.expires_at
@@ -39,7 +46,7 @@ class Deadline:
             msg = "Deadline expires_at must be timezone-aware."
             raise ValueError(msg)
 
-        now = _utcnow()
+        now = self.clock.now()
         if expires_at <= now:
             msg = "Deadline expires_at must be in the future."
             raise ValueError(msg)
@@ -51,7 +58,7 @@ class Deadline:
     def remaining(self, *, now: datetime | None = None) -> timedelta:
         """Return the remaining duration before expiration."""
 
-        current = now or _utcnow()
+        current = now or self.clock.now()
         if current.tzinfo is None or current.utcoffset() is None:
             msg = "Deadline remaining now must be timezone-aware."
             raise ValueError(msg)

@@ -29,6 +29,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.rendering import PromptRenderer
 from weakincentives.prompt.tool import ToolContext, ToolExample, ToolResult
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session, SetVisibilityOverride
 from weakincentives.types import SupportsDataclass
@@ -337,7 +338,9 @@ class _SectionParams:
     title: str
 
 
-def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
+def test_summary_visibility_excludes_tools_from_rendered_prompt(
+    clock: FakeClock,
+) -> None:
     section = MarkdownSection[_SectionParams](
         title="Tools Section",
         template="Full content: ${title}",
@@ -372,7 +375,7 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
     # With SUMMARY visibility via session state, the section's own tools are excluded,
     # but the open_sections tool is injected for progressive disclosure
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     session.dispatch(
         SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.SUMMARY)
     )
@@ -382,7 +385,7 @@ def test_summary_visibility_excludes_tools_from_rendered_prompt() -> None:
     assert "Summary: Test" in rendered_summary.text
 
 
-def test_summary_visibility_skips_child_sections() -> None:
+def test_summary_visibility_skips_child_sections(clock: FakeClock) -> None:
     @dataclass
     class ChildParams:
         detail: str
@@ -423,7 +426,7 @@ def test_summary_visibility_skips_child_sections() -> None:
 
     # With SUMMARY visibility on parent via session state, child is skipped
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
@@ -433,7 +436,7 @@ def test_summary_visibility_skips_child_sections() -> None:
     assert "Child Detail" not in rendered_summary.text
 
 
-def test_summary_visibility_skips_child_tools() -> None:
+def test_summary_visibility_skips_child_tools(clock: FakeClock) -> None:
     @dataclass
     class ChildParams:
         query: str
@@ -482,7 +485,7 @@ def test_summary_visibility_skips_child_tools() -> None:
     # With SUMMARY visibility on parent via session state, child (and its tools) are skipped.
     # The open_sections tool is injected for progressive disclosure.
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )
@@ -491,7 +494,7 @@ def test_summary_visibility_skips_child_tools() -> None:
     assert rendered_summary.tools[0].name == "open_sections"
 
 
-def test_summary_visibility_default_excludes_tools() -> None:
+def test_summary_visibility_default_excludes_tools(clock: FakeClock) -> None:
     """Section configured with SUMMARY visibility by default excludes tools."""
     section = MarkdownSection[_SectionParams](
         title="Default Summary",
@@ -529,7 +532,7 @@ def test_summary_visibility_default_excludes_tools() -> None:
 
     # Override to FULL via session state includes tools
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     session.dispatch(
         SetVisibilityOverride(path=(section.key,), visibility=SectionVisibility.FULL)
     )
@@ -538,7 +541,7 @@ def test_summary_visibility_default_excludes_tools() -> None:
     assert "Full: Test" in rendered_full.text
 
 
-def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
+def test_summary_visibility_sibling_after_summary_is_rendered(clock: FakeClock) -> None:
     """Sibling sections after a SUMMARY section are rendered normally."""
 
     @dataclass
@@ -592,7 +595,7 @@ def test_summary_visibility_sibling_after_summary_is_rendered() -> None:
 
     # With SUMMARY visibility on parent via session state, child is skipped but sibling is rendered
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     session.dispatch(
         SetVisibilityOverride(path=("parent",), visibility=SectionVisibility.SUMMARY)
     )

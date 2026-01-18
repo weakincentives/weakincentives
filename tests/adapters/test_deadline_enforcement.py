@@ -22,7 +22,6 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives.adapters._provider_protocols import ProviderChoice, ProviderToolCall
 from weakincentives.adapters.core import (
@@ -54,6 +53,7 @@ from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
 from weakincentives.prompt.tool import Tool, ToolContext
 from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.protocols import SessionProtocol
@@ -123,12 +123,12 @@ def _tool_context(
     )
 
 
-def test_deadline_provider_payload_handles_none() -> None:
+def test_deadline_provider_payload_handles_none(clock: FakeClock) -> None:
     assert deadline_provider_payload(None) is None
 
 
-def test_raise_tool_deadline_error() -> None:
-    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+def test_raise_tool_deadline_error(clock: FakeClock) -> None:
+    deadline = Deadline(clock.now() + timedelta(seconds=5), clock=clock)
     with pytest.raises(PromptEvaluationError) as excinfo:
         raise_tool_deadline_error(
             prompt_name="test", tool_name="tool", deadline=deadline
@@ -141,13 +141,13 @@ def test_raise_tool_deadline_error() -> None:
     }
 
 
-def test_inner_loop_raise_deadline_error() -> None:
+def test_inner_loop_raise_deadline_error(clock: FakeClock) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
     dispatcher = InProcessDispatcher()
-    session: SessionProtocol = Session(dispatcher=dispatcher)
+    session: SessionProtocol = Session(dispatcher=dispatcher, clock=clock)
     prompt = _make_prompt()
-    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+    deadline = Deadline(clock.now() + timedelta(seconds=5), clock=clock)
 
     inputs = InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
@@ -174,16 +174,16 @@ def test_inner_loop_raise_deadline_error() -> None:
 
 
 def test_inner_loop_detects_expired_deadline(
-    frozen_utcnow: FrozenUtcNow,
+    clock: FakeClock,
 ) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
     dispatcher = InProcessDispatcher()
-    session: SessionProtocol = Session(dispatcher=dispatcher)
+    session: SessionProtocol = Session(dispatcher=dispatcher, clock=clock)
     prompt = _make_prompt()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
 
     inputs = InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
@@ -205,7 +205,7 @@ def test_inner_loop_detects_expired_deadline(
         deadline=deadline,
     )
     loop = InnerLoop[BodyResult](inputs=inputs, config=config)
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.advance(10)
     with pytest.raises(PromptEvaluationError):
         loop._ensure_deadline_remaining(
             "expired", phase=PROMPT_EVALUATION_PHASE_REQUEST
@@ -213,12 +213,12 @@ def test_inner_loop_detects_expired_deadline(
 
 
 def test_execute_tool_call_raises_when_deadline_expired(
-    frozen_utcnow: FrozenUtcNow,
+    clock: FakeClock,
 ) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
     dispatcher = InProcessDispatcher()
-    session: SessionProtocol = Session(dispatcher=dispatcher)
+    session: SessionProtocol = Session(dispatcher=dispatcher, clock=clock)
     prompt = _make_prompt()
 
     def handler(params: EchoParams, *, context: ToolContext) -> ToolResult[EchoResult]:
@@ -238,9 +238,9 @@ def test_execute_tool_call_raises_when_deadline_expired(
         id="call", function=SimpleNamespace(name="echo", arguments='{"content": "hi"}')
     )
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+    clock.advance(10)
     with pytest.raises(PromptEvaluationError) as excinfo:
         execute_tool_call(
             context=_tool_context(
@@ -258,11 +258,11 @@ def test_execute_tool_call_raises_when_deadline_expired(
     assert error.phase == PROMPT_EVALUATION_PHASE_TOOL
 
 
-def test_execute_tool_call_publishes_invocation() -> None:
+def test_execute_tool_call_publishes_invocation(clock: FakeClock) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
     dispatcher = InProcessDispatcher()
-    session: SessionProtocol = Session(dispatcher=dispatcher)
+    session: SessionProtocol = Session(dispatcher=dispatcher, clock=clock)
     prompt = _make_prompt()
 
     events: list[ToolInvoked] = []
@@ -308,13 +308,13 @@ def test_execute_tool_call_publishes_invocation() -> None:
     assert invocation.params.content == "hi"
 
 
-def test_run_inner_loop_replaces_rendered_deadline() -> None:
+def test_run_inner_loop_replaces_rendered_deadline(clock: FakeClock) -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     prompt = _make_prompt()
-    deadline = Deadline(datetime.now(UTC) + timedelta(seconds=5))
+    deadline = Deadline(clock.now() + timedelta(seconds=5), clock=clock)
 
     def call_provider(
         messages: list[dict[str, Any]],

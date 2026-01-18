@@ -21,33 +21,38 @@ from tests.tools.helpers import find_tool, invoke_tool
 from weakincentives.contrib.tools import PlanningStrategy, PlanningToolsSection
 from weakincentives.contrib.tools.planning import SetupPlan, UpdateStep
 from weakincentives.runtime import Session
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 
 # Tests for build_logged_session
 
 
-def test_build_logged_session_creates_session_with_event_dispatcher() -> None:
-    session = build_logged_session()
+def test_build_logged_session_creates_session_with_event_dispatcher(
+    clock: FakeClock,
+) -> None:
+    session = build_logged_session(clock=clock)
 
     assert session.dispatcher is not None
 
 
-def test_build_logged_session_applies_provided_tags() -> None:
-    session = build_logged_session(tags={"app": "test-app", "env": "test"})
+def test_build_logged_session_applies_provided_tags(clock: FakeClock) -> None:
+    session = build_logged_session(tags={"app": "test-app", "env": "test"}, clock=clock)
 
     # Tags are accessible on the session
     assert session.tags is not None
 
 
-def test_build_logged_session_accepts_parent_session() -> None:
-    parent = Session()
-    child = build_logged_session(parent=parent)
+def test_build_logged_session_accepts_parent_session(clock: FakeClock) -> None:
+    parent = Session(clock=clock)
+    child = build_logged_session(parent=parent, clock=clock)
 
     assert child.parent is parent
 
 
-def test_build_logged_session_empty_tags_creates_valid_session() -> None:
-    session = build_logged_session(tags={})
+def test_build_logged_session_empty_tags_creates_valid_session(
+    clock: FakeClock,
+) -> None:
+    session = build_logged_session(tags={}, clock=clock)
 
     assert session is not None
 
@@ -128,17 +133,21 @@ def test_resolve_override_tag_strips_env_var_value(
 # Tests for render_plan_snapshot
 
 
-def test_render_plan_snapshot_returns_no_plan_message_when_empty() -> None:
-    session = Session()
+def test_render_plan_snapshot_returns_no_plan_message_when_empty(
+    clock: FakeClock,
+) -> None:
+    session = Session(clock=clock)
 
     result = render_plan_snapshot(session)
 
     assert result == "No active plan."
 
 
-def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
+def test_render_plan_snapshot_renders_plan_with_objective_and_status(
+    clock: FakeClock,
+) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     invoke_tool(setup_tool, SetupPlan(objective="Test the app"), session=session)
@@ -148,9 +157,9 @@ def test_render_plan_snapshot_renders_plan_with_objective_and_status() -> None:
     assert "Objective: Test the app (status: active)" in result
 
 
-def test_render_plan_snapshot_renders_plan_steps() -> None:
+def test_render_plan_snapshot_renders_plan_steps(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -180,9 +189,9 @@ def test_render_plan_snapshot_renders_plan_steps() -> None:
     assert "- 3 [pending] Third step" in result
 
 
-def test_render_plan_snapshot_renders_completed_plan() -> None:
+def test_render_plan_snapshot_renders_completed_plan(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     update_tool = find_tool(section, "planning_update_step")
@@ -204,9 +213,9 @@ def test_render_plan_snapshot_renders_completed_plan() -> None:
     assert "- 1 [done] Complete this" in result
 
 
-def test_render_plan_snapshot_renders_plan_without_steps() -> None:
+def test_render_plan_snapshot_renders_plan_without_steps(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session, strategy=PlanningStrategy.REACT)
     setup_tool = find_tool(section, "planning_setup_plan")
     invoke_tool(
