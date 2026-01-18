@@ -8,266 +8,129 @@ All time-dependent code in WINK uses explicit dependency injection via the
 `Clock` protocol and its implementations. This enables deterministic testing
 without real delays or fragile monkeypatching.
 
-**Key types:**
+**Core types:**
 
-- `Clock` - Unified protocol combining monotonic time, wall-clock time, and sleep
-- `MonotonicClock` - Protocol for elapsed time measurement (timeouts, rate limiting)
+- `MonotonicClock` - Protocol for elapsed time measurement (timeouts, rate
+  limiting)
 - `WallClock` - Protocol for UTC timestamps (deadlines, event recording)
 - `Sleeper` - Protocol for delay operations
+- `Clock` - Unified protocol combining all three capabilities
 - `SystemClock` - Production implementation using real system calls
 - `FakeClock` - Test implementation that advances time instantly
 - `SYSTEM_CLOCK` - Module-level singleton for production use
 
-## Motivation
+## Time Domains
 
-Time-dependent code is notoriously difficult to test. Direct calls to
-`time.monotonic()`, `time.sleep()`, and `datetime.now(UTC)` create hidden
-dependencies that force tests to either use real delays (slow, flaky) or
-resort to fragile monkeypatching (brittle, error-prone).
+WINK distinguishes two distinct time domains:
 
-WINK standardizes time handling using explicit dependency injection.
+**Monotonic time** (float seconds): For measuring elapsed time, timeouts, and
+rate limiting. Guaranteed to never go backwards. The zero point is arbitrary and
+unrelated to wall-clock time.
 
-## Implementation Status
+**Wall-clock time** (UTC datetime): For timestamps, deadlines, and recording
+when events occurred. Can jump due to NTP adjustments but always timezone-aware
+(UTC).
 
-All core time-dependent components now support clock injection:
-
-| Component | Clock Type | Injection Point | Status |
-|-----------|-----------|-----------------|--------|
-| `Deadline` | WallClock | `clock` field | ✅ Implemented |
-| `Heartbeat` | MonotonicClock | `clock` field | ✅ Implemented |
-| `LeaseExtender` | MonotonicClock | `clock` field | ✅ Implemented |
-| `wait_until()` | Clock | `clock` parameter | ✅ Implemented |
-| `sleep_for()` | Sleeper | `sleeper` parameter | ✅ Implemented |
-| `InMemoryMailbox` | MonotonicClock | `clock` field | ✅ Implemented |
-
-Components that still use system time directly (acceptable for now):
-
-| Component | Usage | Notes |
-|-----------|-------|-------|
-| `MainLoopResult.completed_at` | Completion timestamp | Field default |
-| `MainLoopRequest.created_at` | Request timestamp | Field default |
-| `DeadLetter.dead_lettered_at` | DLQ timestamp | Explicit construction |
-| `Watchdog._run()` | Check interval | Uses Event.wait() |
-| `InMemoryMailbox._reaper_loop()` | Reap interval | Uses Event.wait() |
-| `HookContext.elapsed_ms` | Hook timing | Non-critical |
-| `EvalLoop._evaluate_sample()` | Latency measurement | Non-critical |
-
-## Design Goals
-
-1. **All time dependencies injectable** - No hidden calls to system clocks
-2. **Default to real clocks** - Production code unchanged
-3. **Test doubles advance without sleeping** - Fast, deterministic tests
-4. **Two clock types** - Monotonic for intervals, wall for timestamps
-5. **Minimal API surface** - Simple protocols, easy to implement
-6. **Thread-safe** - All clock operations must be safe for concurrent access
-
-## Proposed Architecture
-
-### Clock Protocols
-
-Define two separate protocols for the two distinct time domains:
+## Clock Protocols
 
 ```python
-# src/weakincentives/clock.py
+from weakincentives.clock import (
+    Clock,
+    MonotonicClock,
+    WallClock,
+    Sleeper,
+)
 
-from __future__ import annotations
-
-from datetime import UTC, datetime, timedelta
-from typing import Protocol, runtime_checkable
-
-
-@runtime_checkable
+# Narrow protocols for specific needs
 class MonotonicClock(Protocol):
-    """Protocol for monotonic time measurement.
+    def monotonic(self) -> float: ...
 
-    Monotonic clocks measure elapsed time and are guaranteed to never
-    go backwards. They are suitable for timeouts, rate limiting, and
-    measuring durations.
-
-    The zero point is arbitrary and not related to wall-clock time.
-    """
-
-    def monotonic(self) -> float:
-        """Return monotonic time in seconds."""
-        ...
-
-
-@runtime_checkable
 class WallClock(Protocol):
-    """Protocol for wall-clock time measurement.
+    def utcnow(self) -> datetime: ...
 
-    Wall clocks provide the current UTC datetime. They are suitable for
-    timestamps, deadlines, and recording when events occurred.
-
-    Unlike monotonic clocks, wall clocks can jump (NTP adjustments,
-    daylight saving, etc.) and should not be used for measuring durations.
-    """
-
-    def utcnow(self) -> datetime:
-        """Return current UTC datetime (timezone-aware)."""
-        ...
-
-
-@runtime_checkable
 class Sleeper(Protocol):
-    """Protocol for sleep/delay operations.
+    def sleep(self, seconds: float) -> None: ...
 
-    Separating sleep from clock allows tests to advance time without
-    actually sleeping, while production code uses real delays.
-    """
-
-    def sleep(self, seconds: float) -> None:
-        """Sleep for the specified duration in seconds."""
-        ...
-
-
+# Combined protocol for components needing multiple capabilities
 class Clock(MonotonicClock, WallClock, Sleeper, Protocol):
-    """Unified clock combining monotonic, wall-clock, and sleep.
-
-    Components that need multiple time capabilities should depend on
-    this combined protocol. Components that only need monotonic time
-    or wall-clock time should depend on the narrower protocol.
-    """
-
     pass
 ```
 
-### System Clock Implementation
+Components depend on the narrowest protocol that meets their needs:
 
-The default implementation uses real system calls:
+| Component | Protocol | Reason |
+| --- | --- | --- |
+| `Deadline` | `WallClock` | Compares against wall-clock time |
+| `Heartbeat` | `MonotonicClock` | Measures elapsed intervals |
+| `LeaseExtender` | `MonotonicClock` | Tracks extension intervals |
+| `wait_until()` | `Clock` | Needs sleep + monotonic |
+| `sleep_for()` | `Sleeper` | Only needs sleep |
+| `InMemoryMailbox` | `MonotonicClock` | Message visibility timing |
 
-```python
-# src/weakincentives/clock.py (continued)
+## SystemClock
 
-import time as _time
-from dataclasses import dataclass
-
-
-@dataclass(frozen=True, slots=True)
-class SystemClock:
-    """Production clock using system time functions.
-
-    This is the default clock used throughout WINK. It delegates to:
-    - time.monotonic() for monotonic time
-    - datetime.now(UTC) for wall-clock time
-    - time.sleep() for delays
-
-    Example::
-
-        clock = SystemClock()
-        start = clock.monotonic()
-        clock.sleep(1.0)
-        elapsed = clock.monotonic() - start  # ~1.0
-    """
-
-    def monotonic(self) -> float:
-        """Return monotonic time from time.monotonic()."""
-        return _time.monotonic()
-
-    def utcnow(self) -> datetime:
-        """Return current UTC datetime."""
-        return datetime.now(UTC)
-
-    def sleep(self, seconds: float) -> None:
-        """Sleep using time.sleep()."""
-        _time.sleep(seconds)
-
-
-# Module-level singleton for convenience
-SYSTEM_CLOCK: Clock = SystemClock()
-```
-
-### Test Clock Implementation
-
-A controllable clock for tests:
+The production implementation delegates to Python's standard library:
 
 ```python
-# tests/helpers/time.py (enhanced)
+from weakincentives.clock import SystemClock, SYSTEM_CLOCK
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
-import threading
+# Use the singleton
+start = SYSTEM_CLOCK.monotonic()
+SYSTEM_CLOCK.sleep(1.0)
+elapsed = SYSTEM_CLOCK.monotonic() - start  # ~1.0
 
-
-@dataclass
-class FakeClock:
-    """Controllable clock for deterministic testing.
-
-    Both monotonic and wall-clock time advance together when advance()
-    is called. Sleep operations advance time immediately without blocking.
-
-    Example::
-
-        clock = FakeClock()
-
-        start = clock.monotonic()
-        clock.sleep(10)  # Advances immediately, no real delay
-        assert clock.monotonic() - start == 10
-
-        # Or advance manually
-        clock.advance(60)
-        assert clock.monotonic() - start == 70
-
-    Thread-safety:
-        All operations are thread-safe. Multiple threads can read and
-        advance the clock concurrently.
-    """
-
-    _monotonic: float = 0.0
-    _wall: datetime = field(default_factory=lambda: datetime(2024, 1, 1, tzinfo=UTC))
-    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
-
-    def monotonic(self) -> float:
-        """Return current monotonic time."""
-        with self._lock:
-            return self._monotonic
-
-    def utcnow(self) -> datetime:
-        """Return current wall-clock time."""
-        with self._lock:
-            return self._wall
-
-    def sleep(self, seconds: float) -> None:
-        """Advance time immediately without blocking."""
-        self.advance(seconds)
-
-    def advance(self, seconds: float) -> None:
-        """Advance both clocks by the given duration.
-
-        Args:
-            seconds: Duration to advance in seconds.
-        """
-        with self._lock:
-            self._monotonic += seconds
-            self._wall += timedelta(seconds=seconds)
-
-    def set_monotonic(self, value: float) -> None:
-        """Set monotonic time to an absolute value."""
-        with self._lock:
-            self._monotonic = value
-
-    def set_wall(self, value: datetime) -> None:
-        """Set wall-clock time to an absolute value."""
-        if value.tzinfo is None:
-            msg = "Wall clock time must be timezone-aware"
-            raise ValueError(msg)
-        with self._lock:
-            self._wall = value
+# Or create an instance
+clock = SystemClock()
+now = clock.utcnow()  # datetime.now(UTC)
 ```
 
-## Usage Examples
+`SystemClock` is a frozen, slotted dataclass:
 
-### Deadline with Clock Injection
+- `monotonic()` → `time.monotonic()`
+- `utcnow()` → `datetime.now(UTC)`
+- `sleep()` → `time.sleep()`
+
+## FakeClock
+
+The test implementation advances time instantly without blocking:
+
+```python
+from weakincentives.clock import FakeClock
+
+clock = FakeClock()
+
+start = clock.monotonic()
+clock.sleep(10)  # Advances immediately, no real delay
+assert clock.monotonic() - start == 10
+
+# Manual advancement
+clock.advance(60)
+assert clock.monotonic() - start == 70
+```
+
+### FakeClock API
+
+| Method | Description |
+| --- | --- |
+| `monotonic()` | Return current monotonic time |
+| `utcnow()` | Return current wall-clock time |
+| `sleep(seconds)` | Advance time instantly (calls `advance()`) |
+| `advance(seconds)` | Advance both clocks by duration |
+| `set_monotonic(value)` | Set monotonic time to absolute value |
+| `set_wall(value)` | Set wall-clock time (must be timezone-aware) |
+
+Both `advance()` and `sleep()` advance monotonic and wall-clock time together.
+All operations are thread-safe.
+
+## Usage Patterns
+
+### Deadline Testing
 
 ```python
 from datetime import UTC, datetime, timedelta
 from weakincentives import Deadline
 from weakincentives.clock import FakeClock
 
-# Production: uses system clock by default
-deadline = Deadline(datetime.now(UTC) + timedelta(hours=1))
-
-# Testing: inject FakeClock for deterministic behavior
 clock = FakeClock()
 clock.set_wall(datetime(2024, 6, 1, 12, 0, tzinfo=UTC))
 
@@ -281,7 +144,7 @@ clock.advance(1800)  # 30 minutes
 assert deadline.remaining() == timedelta(minutes=30)
 ```
 
-### Heartbeat with Clock Injection
+### Heartbeat Testing
 
 ```python
 from weakincentives.runtime.watchdog import Heartbeat
@@ -297,7 +160,7 @@ clock.advance(10)
 assert hb.elapsed() == 10.0
 ```
 
-### wait_until with Clock Injection
+### wait_until Testing
 
 ```python
 from weakincentives.runtime.lifecycle import wait_until
@@ -322,7 +185,7 @@ assert result is True
 assert len(calls) == 3
 ```
 
-### sleep_for with Sleeper Injection
+### Throttle Testing
 
 ```python
 from datetime import timedelta
@@ -334,33 +197,67 @@ initial = clock.monotonic()
 
 sleep_for(timedelta(seconds=5), sleeper=clock)
 
-# FakeClock advances time instantly
 assert clock.monotonic() == initial + 5
 ```
 
-## Testing Guidelines
+## Component Integration
 
-1. **Unit tests**: Always inject `FakeClock` for deterministic behavior
-2. **Integration tests**: May use `SystemClock` for real timing verification
-3. **Property tests**: Use `FakeClock` with hypothesis strategies
+All clock-dependent components accept a clock parameter with a sensible default:
 
-## Public API
+```python
+# Deadline uses SYSTEM_CLOCK by default
+deadline = Deadline(expires_at=datetime(2024, 12, 31, tzinfo=UTC))
 
-All clock types are exported from the main package:
+# Inject FakeClock for testing
+clock = FakeClock()
+deadline = Deadline(expires_at=..., clock=clock)
+```
+
+The pattern is consistent across all components:
+
+| Component | Parameter | Type | Default |
+| --- | --- | --- | --- |
+| `Deadline` | `clock` | `WallClock` | `SYSTEM_CLOCK` |
+| `Heartbeat` | `clock` | `MonotonicClock` | `SYSTEM_CLOCK` |
+| `LeaseExtender` | `clock` | `MonotonicClock` | `SYSTEM_CLOCK` |
+| `wait_until()` | `clock` | `Clock` | `SYSTEM_CLOCK` |
+| `sleep_for()` | `sleeper` | `Sleeper` | `SYSTEM_CLOCK` |
+| `InMemoryMailbox` | `clock` | `MonotonicClock` | `SYSTEM_CLOCK` |
+
+## Test Helpers
+
+The `tests/helpers/time.py` module re-exports `FakeClock` and provides a pytest
+fixture:
+
+```python
+# In tests
+from tests.helpers.time import fake_clock  # pytest fixture
+
+def test_something(fake_clock: FakeClock) -> None:
+    fake_clock.set_wall(datetime(2024, 1, 1, tzinfo=UTC))
+    # ...
+```
+
+Legacy helpers (`ControllableClock`, `FrozenUtcNow`) are preserved for backward
+compatibility but deprecated in favor of `FakeClock`.
+
+## Public Exports
+
+From the main package:
 
 ```python
 from weakincentives import (
+    SYSTEM_CLOCK,
     Clock,
     FakeClock,
     MonotonicClock,
-    SYSTEM_CLOCK,
     Sleeper,
     SystemClock,
     WallClock,
 )
 ```
 
-Or import directly from the clock module:
+From the clock module:
 
 ```python
 from weakincentives.clock import FakeClock, SYSTEM_CLOCK
@@ -368,16 +265,16 @@ from weakincentives.clock import FakeClock, SYSTEM_CLOCK
 
 ## Non-Goals
 
-This spec does not address:
+This specification does not address:
 
-1. **Timezones** - WINK uses UTC exclusively
-2. **Calendar operations** - No date arithmetic needed
-3. **High-resolution timing** - Millisecond precision sufficient
-4. **Distributed clock sync** - Single-process focus
+- **Timezones**: WINK uses UTC exclusively
+- **Calendar operations**: No date arithmetic needed
+- **High-resolution timing**: Millisecond precision is sufficient
+- **Distributed clock sync**: Single-process focus
 
 ## Summary
 
-All core time-dependent code is now deterministically testable without real
-delays or fragile monkeypatching. Components accept a clock parameter that
-defaults to `SYSTEM_CLOCK` for production use, and tests can inject `FakeClock`
-for instant, controllable time advancement.
+All core time-dependent code in WINK accepts injectable clocks with sensible
+defaults. Production code uses `SYSTEM_CLOCK` unchanged, while tests inject
+`FakeClock` for instant, deterministic time advancement without real delays or
+monkeypatching.

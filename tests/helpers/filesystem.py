@@ -44,7 +44,7 @@ from weakincentives.filesystem import (
 )
 
 
-class FilesystemValidationSuite:  # noqa: PLR0904
+class FilesystemValidationSuite:
     """Abstract test suite for Filesystem protocol compliance.
 
     Subclasses must implement the ``fs`` fixture to provide a filesystem

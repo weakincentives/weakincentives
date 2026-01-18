@@ -192,4 +192,10 @@ def frozen_utcnow(monkeypatch: pytest.MonkeyPatch) -> FrozenUtcNow:
     return FrozenUtcNow(monkeypatch)
 
 
-__all__ = ["ControllableClock", "FakeClock", "FrozenUtcNow", "fake_clock", "frozen_utcnow"]
+__all__ = [
+    "ControllableClock",
+    "FakeClock",
+    "FrozenUtcNow",
+    "fake_clock",
+    "frozen_utcnow",
+]

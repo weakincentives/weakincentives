@@ -19,7 +19,6 @@ from typing import Any, cast
 
 import pytest
 
-from weakincentives.clock import FakeClock
 from tests.helpers.adapters import DUMMY_ADAPTER_NAME
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_BUDGET,
@@ -37,6 +36,7 @@ from weakincentives.adapters.inner_loop import (
 from weakincentives.adapters.throttle import ThrottlePolicy, new_throttle_policy
 from weakincentives.adapters.utilities import ToolChoice, token_usage_from_payload
 from weakincentives.budget import Budget, BudgetTracker
+from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate, ToolContext
 from weakincentives.prompt.overrides import PromptDescriptor

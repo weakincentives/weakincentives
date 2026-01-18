@@ -255,7 +255,7 @@ def create_pre_tool_use_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_tool_use_hook(  # noqa: RUF029 - SDK requires async signature
+    async def pre_tool_use_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -523,7 +523,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             }
         return None
 
-    async def post_tool_use_hook(  # noqa: RUF029, C901 - SDK requires async; observer dispatch
+    async def post_tool_use_hook(  # noqa: C901 - observer dispatch
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -714,7 +714,7 @@ def create_user_prompt_submit_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def user_prompt_submit_hook(  # noqa: RUF029 - SDK requires async signature
+    async def user_prompt_submit_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -776,7 +776,7 @@ def create_stop_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def stop_hook(  # noqa: RUF029 - SDK requires async signature
+    async def stop_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -854,7 +854,7 @@ def create_task_completion_stop_hook(
         except (LookupError, AttributeError):
             return None
 
-    async def task_completion_stop_hook(  # noqa: RUF029 - SDK requires async signature
+    async def task_completion_stop_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -953,7 +953,7 @@ def create_subagent_start_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def subagent_start_hook(  # noqa: RUF029 - SDK requires async signature
+    async def subagent_start_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -1001,7 +1001,7 @@ def create_subagent_stop_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def subagent_stop_hook(  # noqa: RUF029 - SDK requires async signature
+    async def subagent_stop_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -1054,7 +1054,7 @@ def create_pre_compact_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def pre_compact_hook(  # noqa: RUF029 - SDK requires async signature
+    async def pre_compact_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401
@@ -1112,7 +1112,7 @@ def create_notification_hook(
         An async hook callback function matching SDK signature.
     """
 
-    async def notification_hook(  # noqa: RUF029 - SDK requires async signature
+    async def notification_hook(
         input_data: Any,  # noqa: ANN401
         tool_use_id: str | None,
         sdk_context: Any,  # noqa: ANN401

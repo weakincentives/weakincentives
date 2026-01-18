@@ -181,7 +181,7 @@ def test_message_reply_success() -> None:
 # =============================================================================
 
 
-class TestInMemoryMailbox:  # noqa: PLR0904
+class TestInMemoryMailbox:
     """Tests for InMemoryMailbox implementation."""
 
     def test_send_returns_message_id(self) -> None:

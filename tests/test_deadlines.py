@@ -80,3 +80,10 @@ def test_deadline_remaining_rejects_naive_datetime() -> None:
 
     with pytest.raises(ValueError):
         deadline.remaining(now=datetime(2024, 1, 1, 12, 0))
+
+
+def test_fake_clock_set_wall_rejects_naive_datetime() -> None:
+    clock = FakeClock()
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        clock.set_wall(datetime(2024, 1, 1, 12, 0))  # naive datetime

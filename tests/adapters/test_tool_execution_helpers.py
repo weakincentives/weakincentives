@@ -25,7 +25,6 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for direct invocation
     from ._test_stubs import DummyToolCall, ToolParams, ToolPayload
 
 from weakincentives import DeadlineExceededError
-from weakincentives.clock import FakeClock
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_TOOL,
     PromptEvaluationError,
@@ -40,6 +39,7 @@ from weakincentives.adapters.utilities import (
     format_dispatch_failures,
     parse_tool_arguments,
 )
+from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import (
     MarkdownSection,

@@ -135,9 +135,7 @@ class MemorySlice[T: SupportsDataclass]:
 class MemorySliceFactory:
     """Factory that creates in-memory slices."""
 
-    def create[T: SupportsDataclass](  # noqa: PLR6301
-        self, slice_type: type[T]
-    ) -> MemorySlice[T]:
+    def create[T: SupportsDataclass](self, slice_type: type[T]) -> MemorySlice[T]:
         """Create a new empty in-memory slice.
 
         Args:

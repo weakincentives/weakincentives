@@ -170,7 +170,7 @@ class CompositeSnapshot:
             raise SnapshotSerializationError(msg) from error
 
     @classmethod
-    def from_json(cls, raw: str) -> CompositeSnapshot:  # noqa: C901, PLR0912, PLR0914, PLR0915
+    def from_json(cls, raw: str) -> CompositeSnapshot:  # noqa: C901, PLR0912, PLR0915
         """Deserialize a composite snapshot from its JSON representation.
 
         Args:

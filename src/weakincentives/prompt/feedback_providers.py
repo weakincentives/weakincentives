@@ -120,7 +120,7 @@ class DeadlineFeedback:
         return "Deadline"
 
     # PLR6301: Method doesn't use self, but must be instance method per Protocol
-    def should_run(self, *, context: FeedbackContext) -> bool:  # noqa: PLR6301
+    def should_run(self, *, context: FeedbackContext) -> bool:
         """Return True only if a deadline is configured."""
         return context.deadline is not None
 

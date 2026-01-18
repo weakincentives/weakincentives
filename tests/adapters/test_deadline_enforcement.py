@@ -23,7 +23,6 @@ from typing import Any, cast
 import pytest
 
 from tests.helpers.adapters import TEST_ADAPTER_NAME
-from weakincentives.clock import FakeClock
 from weakincentives.adapters._provider_protocols import ProviderChoice, ProviderToolCall
 from weakincentives.adapters.core import (
     PROMPT_EVALUATION_PHASE_REQUEST,
@@ -49,6 +48,7 @@ from weakincentives.adapters.utilities import (
     parse_tool_arguments,
     raise_tool_deadline_error,
 )
+from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
