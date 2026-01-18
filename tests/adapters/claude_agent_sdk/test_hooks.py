@@ -271,7 +271,8 @@ class TestPostToolUseHook:
         event = events[0]
         assert event.name == "Read"
         assert event.params == {"path": "/test.txt"}
-        assert event.result == {"stdout": "file contents"}
+        assert event.success is True
+        assert "file contents" in event.rendered_output
         assert event.call_id == "call-123"
         assert event.adapter == "test_adapter"
         assert event.prompt_name == "test_prompt"
@@ -803,13 +804,9 @@ class TestPostToolUseHookWithTypedParsing:
         assert len(events) == 1
         event = events[0]
         assert event.name == "Read"
-        # result should be the raw dict (SDK native tools)
-        assert event.result == {
-            "stdout": "file contents",
-            "stderr": "",
-            "interrupted": False,
-            "isImage": False,
-        }
+        # SDK native tools publish success=True and rendered_output contains response text
+        assert event.success is True
+        assert "file contents" in event.rendered_output
 
     def test_fallback_when_missing_tool_name(self, session: Session) -> None:
         """Test fallback to dict access when parsing fails (missing required field)."""

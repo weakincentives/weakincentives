@@ -130,7 +130,7 @@ def test_tool_execution_success_path() -> None:
 
     with tool_execution(context=context, tool_call=tool_call) as outcome:
         assert isinstance(outcome, ToolExecutionOutcome)
-        assert outcome.success is True
+        assert outcome.result.success is True
         assert outcome.result.value == ToolPayload(answer="policies")
         assert outcome.params == ToolParams(query="policies")
 
@@ -147,8 +147,8 @@ def test_tool_execution_records_validation_failure() -> None:
     with tool_execution(context=context, tool_call=tool_call) as outcome:
         assert isinstance(outcome.params, RejectedToolParams)
         assert outcome.params.raw_arguments == {"query": "policies", "extra": True}
-        assert outcome.success is False
-        assert "Tool validation failed" in outcome.message
+        assert outcome.result.success is False
+        assert "Tool validation failed" in outcome.result.message
 
 
 def test_tool_execution_raises_on_expired_deadline() -> None:
@@ -211,8 +211,8 @@ def test_tool_execution_converts_unexpected_exceptions() -> None:
     tool_call = _tool_call({"query": "policies"})
 
     with tool_execution(context=context, tool_call=tool_call) as outcome:
-        assert outcome.success is False
-        assert outcome.message == "Tool 'search_notes' execution failed: boom"
+        assert outcome.result.success is False
+        assert outcome.result.message == "Tool 'search_notes' execution failed: boom"
         assert outcome.params == ToolParams(query="policies")
 
 
@@ -232,6 +232,6 @@ def test_tool_execution_handles_type_error_as_possible_signature_mismatch() -> N
     tool_call = _tool_call({"query": "policies"})
 
     with tool_execution(context=context, tool_call=tool_call) as outcome:
-        assert outcome.success is False
-        assert "TypeError" in outcome.message
-        assert "search_notes" in outcome.message
+        assert outcome.result.success is False
+        assert "TypeError" in outcome.result.message
+        assert "search_notes" in outcome.result.message

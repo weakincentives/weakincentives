@@ -529,7 +529,9 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
         event: ReducerEvent,
     ) -> None:
         original_dispatch(data_type, event)
-        raise RuntimeError("Reducer crashed")
+        # Only fail for ToolPayload dispatches (not telemetry events)
+        if data_type is ToolPayload:
+            raise RuntimeError("Reducer crashed")
 
     monkeypatch.setattr(
         session,
@@ -537,18 +539,17 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
         MethodType(failing_dispatch, session),
     )
 
-    with pytest.raises(ExceptionGroup) as exc_info:
-        _evaluate_with_session(
-            adapter,
-            prompt,
-            ToolParams(query="policies"),
-            session=session,
-        )
-
-    assert "Reducer crashed" in str(exc_info.value)
+    # Evaluate should complete despite the reducer error (error is caught)
+    _evaluate_with_session(
+        adapter,
+        prompt,
+        ToolParams(query="policies"),
+        session=session,
+    )
 
     assert tool_events
-    tool_event = tool_events[0]
+    # Get the last tool event (may have correction after dispatch failure)
+    tool_event = [e for e in tool_events if e.name == "search_notes"][-1]
     assert tool_event.message.startswith(
         "Reducer errors prevented applying tool result:"
     )
@@ -557,9 +558,9 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
     latest_payload = session[ToolPayload].latest()
     assert latest_payload == ToolPayload(answer="baseline")
 
+    # PromptExecuted is telemetry only; it no longer carries the result
     assert prompt_events
-    prompt_result = prompt_events[0].result
-    assert prompt_result.output == StructuredAnswer(answer="Policy summary")
+    assert prompt_events[0].prompt_name == "search"
 
 
 def test_litellm_format_dispatch_failures_handles_defaults() -> None:
@@ -1041,7 +1042,8 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
     prompt_event = prompt_events[0]
     assert prompt_event.prompt_name == "search"
     assert prompt_event.adapter == "litellm"
-    assert prompt_event.result is result
+    # PromptExecuted is telemetry only; result is returned from evaluate()
+    assert result.output == StructuredAnswer(answer="Policy summary")
 
 
 def test_litellm_adapter_raises_when_tool_handler_missing() -> None:

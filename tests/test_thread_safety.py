@@ -78,7 +78,9 @@ class _DummyPrompt:
         return self._sections
 
 
-def _publish_tool_event(dispatcher: InProcessDispatcher, index: int) -> None:
+def _publish_tool_event(
+    dispatcher: InProcessDispatcher, session: Session, index: int
+) -> None:
     params = ExampleParams(value=index)
     result_payload = ExampleResult(value=index)
     result = ToolResult.ok(result_payload, message=f"ok-{index}")
@@ -95,7 +97,10 @@ def _publish_tool_event(dispatcher: InProcessDispatcher, index: int) -> None:
         created_at=datetime.now(UTC),
         rendered_output=rendered_output,
     )
+    # Dispatch telemetry event to dispatcher
     dispatcher.dispatch(event)
+    # Dispatch payload directly to session (payloads no longer extracted from events)
+    session.dispatch(result_payload)
 
 
 def test_session_attach_to_dispatcher_is_idempotent() -> None:
@@ -136,7 +141,7 @@ def test_session_collects_tool_data_across_threads(
     total_events = max(16, max_workers * 8)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(_publish_tool_event, dispatcher, index)
+            executor.submit(_publish_tool_event, dispatcher, session, index)
             for index in range(total_events)
         ]
         for future in futures:
@@ -165,7 +170,7 @@ def test_session_snapshots_restore_across_threads(
     snapshot_requests = max_workers * 4
 
     mutation_tasks = [
-        (lambda idx=index: _publish_tool_event(dispatcher, idx))
+        (lambda idx=index: _publish_tool_event(dispatcher, session, idx))
         for index in range(total_events)
     ]
     snapshot_tasks = [

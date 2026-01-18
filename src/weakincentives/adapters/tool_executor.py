@@ -654,30 +654,69 @@ def dispatch_tool_invocation(
     session_id = getattr(context.session, "session_id", None)
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
+    event_id = uuid4()
+    created_at = datetime.now(UTC)
 
+    # Dispatch payload directly to session reducers first to detect errors
+    payload = outcome.result.value
+    payload_dispatch_error: Exception | None = None
+    if is_dataclass_instance(payload):
+        try:
+            context.session.dispatch(payload)
+        except Exception as exc:
+            payload_dispatch_error = exc
+
+    # Determine the final message - may include error info
+    event_message = outcome.result.message
+    if payload_dispatch_error is not None:
+        event_message = (
+            f"Reducer errors prevented applying tool result: "
+            f"{payload_dispatch_error}"
+        )
+
+    # Create and dispatch telemetry event
     invocation = ToolInvoked(
         prompt_name=context.prompt_name,
         adapter=context.adapter_name,
         name=outcome.tool.name,
         params=outcome.params,
         success=outcome.result.success,
-        message=outcome.result.message,
+        message=event_message,
         session_id=session_id,
-        created_at=datetime.now(UTC),
+        created_at=created_at,
         usage=usage,
         rendered_output=rendered_output,
         call_id=outcome.call_id,
         run_context=context.run_context,
-        event_id=uuid4(),
+        event_id=event_id,
     )
     dispatch_result = context.session.dispatcher.dispatch(invocation)
 
-    # Dispatch payload directly to session reducers
-    payload = outcome.result.value
-    if is_dataclass_instance(payload):
-        context.session.dispatch(payload)
+    # Check if telemetry dispatch also failed
+    any_dispatch_failed = not dispatch_result.ok or payload_dispatch_error is not None
+    if not dispatch_result.ok and payload_dispatch_error is None:
+        # Telemetry dispatch failed - update message with dispatch errors
+        event_message = context.format_dispatch_failures(dispatch_result.errors)
+        # Create corrected event with error message
+        invocation = ToolInvoked(
+            prompt_name=context.prompt_name,
+            adapter=context.adapter_name,
+            name=outcome.tool.name,
+            params=outcome.params,
+            success=outcome.result.success,
+            message=event_message,
+            session_id=session_id,
+            created_at=created_at,
+            usage=usage,
+            rendered_output=rendered_output,
+            call_id=outcome.call_id,
+            run_context=context.run_context,
+            event_id=event_id,
+        )
+        # Re-dispatch with updated message so observers see correct state
+        context.session.dispatcher.dispatch(invocation)
 
-    if not dispatch_result.ok:
+    if any_dispatch_failed:
         # Restore to pre-tool state if tool succeeded (not already restored)
         if outcome.result.success:
             _restore_snapshot_if_needed(
@@ -691,17 +730,26 @@ def dispatch_tool_invocation(
             getattr(failure.handler, "__qualname__", repr(failure.handler))
             for failure in dispatch_result.errors
         ]
+        if payload_dispatch_error is not None:
+            failure_handlers.append(str(payload_dispatch_error))
         outcome.log.error(
             "Tool event dispatch failed.",
             event="tool_event_dispatch_failed",
             context={
-                "failure_count": len(dispatch_result.errors),
+                "failure_count": len(dispatch_result.errors)
+                + (1 if payload_dispatch_error else 0),
                 "failed_handlers": failure_handlers,
             },
         )
-        outcome.result.message = context.format_dispatch_failures(
-            dispatch_result.errors
-        )
+        if dispatch_result.errors:
+            outcome.result.message = context.format_dispatch_failures(
+                dispatch_result.errors
+            )
+        elif payload_dispatch_error is not None:
+            outcome.result.message = (
+                f"Reducer errors prevented applying tool result: "
+                f"{payload_dispatch_error}"
+            )
     else:
         outcome.log.debug(
             "Tool event dispatched.",
