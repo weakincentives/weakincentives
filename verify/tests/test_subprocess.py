@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weakincentives.verify._subprocess import (
+from subprocess_utils import (
     SubprocessResult,
     run_python_module,
     run_tool,

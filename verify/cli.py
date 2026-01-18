@@ -39,11 +39,11 @@ import asyncio
 import sys
 from pathlib import Path
 
-from weakincentives.verify._output import Output, OutputConfig
-from weakincentives.verify._paths import find_project_root
-from weakincentives.verify._registry import get_all_checkers, get_categories
-from weakincentives.verify._runner import run_checkers, run_checkers_async
-from weakincentives.verify._types import CheckContext, Checker, RunConfig
+from core_types import CheckContext, Checker, RunConfig
+from output import Output, OutputConfig
+from paths import find_project_root
+from registry import get_all_checkers, get_categories
+from runner import run_checkers, run_checkers_async
 
 
 def _create_parser() -> argparse.ArgumentParser:

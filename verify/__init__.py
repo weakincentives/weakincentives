@@ -17,7 +17,7 @@ consolidates all build-time checks into a single, composable system.
 
 Example usage::
 
-    from weakincentives.verify import run_checkers, get_all_checkers, CheckContext
+    from . import run_checkers, get_all_checkers, CheckContext
 
     ctx = CheckContext.from_project_root(Path.cwd())
     results = run_checkers(get_all_checkers(), ctx)
@@ -25,19 +25,19 @@ Example usage::
         print(f"{result.checker}: {'PASS' if result.passed else 'FAIL'}")
 """
 
-from weakincentives.verify._registry import (
-    get_all_checkers,
-    get_checker,
-    get_checkers_by_category,
-)
-from weakincentives.verify._runner import run_checkers, run_checkers_async
-from weakincentives.verify._types import (
+from core_types import (
     CheckContext,
     Checker,
     CheckResult,
     Finding,
     Severity,
 )
+from registry import (
+    get_all_checkers,
+    get_checker,
+    get_checkers_by_category,
+)
+from runner import run_checkers, run_checkers_async
 
 __all__ = [
     "CheckContext",

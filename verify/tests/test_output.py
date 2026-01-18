@@ -18,8 +18,8 @@ import json
 from io import StringIO
 from pathlib import Path
 
-from weakincentives.verify._output import Output, OutputConfig
-from weakincentives.verify._types import CheckResult, Finding, Severity
+from core_types import CheckResult, Finding, Severity
+from output import Output, OutputConfig
 
 
 class TestOutputConfig:

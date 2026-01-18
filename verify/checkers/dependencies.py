@@ -20,8 +20,8 @@ from __future__ import annotations
 
 import time
 
-from weakincentives.verify._subprocess import run_python_module
-from weakincentives.verify._types import CheckContext, CheckResult, Finding, Severity
+from core_types import CheckContext, CheckResult, Finding, Severity
+from subprocess_utils import run_python_module
 
 
 class DeptryChecker:

@@ -24,9 +24,9 @@ import sys
 import time
 from pathlib import Path
 
-from weakincentives.verify._ast import patch_ast_for_legacy_tools
-from weakincentives.verify._subprocess import run_python_module
-from weakincentives.verify._types import CheckContext, CheckResult, Finding, Severity
+from ast_utils import patch_ast_for_legacy_tools
+from core_types import CheckContext, CheckResult, Finding, Severity
+from subprocess_utils import run_python_module
 
 
 class BanditChecker:

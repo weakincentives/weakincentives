@@ -14,13 +14,13 @@
 
 from __future__ import annotations
 
-from weakincentives.verify._registry import (
+from core_types import Checker
+from registry import (
     get_all_checkers,
     get_categories,
     get_checker,
     get_checkers_by_category,
 )
-from weakincentives.verify._types import Checker
 
 
 class TestRegistry:

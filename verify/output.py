@@ -19,7 +19,7 @@ import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TextIO
 
-from weakincentives.verify._types import CheckResult, Finding, Severity
+from core_types import CheckResult, Finding, Severity
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

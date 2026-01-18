@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weakincentives.verify._types import (
+from core_types import (
     CheckContext,
     CheckResult,
     Finding,

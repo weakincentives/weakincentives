@@ -28,16 +28,16 @@ import time
 from pathlib import Path
 from typing import Any
 
-from weakincentives.verify._git import tracked_files
-from weakincentives.verify._markdown import (
+from core_types import CheckContext, CheckResult, Finding, Severity
+from git_utils import tracked_files
+from markdown_utils import (
     CodeBlock,
     extract_code_blocks,
     extract_file_path,
     extract_links,
     is_shell_output,
 )
-from weakincentives.verify._subprocess import run_tool
-from weakincentives.verify._types import CheckContext, CheckResult, Finding, Severity
+from subprocess_utils import run_tool
 
 # Patterns to match file references in specs
 FILE_REF_PATTERNS = [

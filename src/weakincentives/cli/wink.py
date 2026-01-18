@@ -23,7 +23,6 @@ from importlib.resources import files
 from pathlib import Path
 
 from ..runtime.logging import StructuredLogger, configure_logging, get_logger
-from ..verify import cli as verify_cli
 from . import debug_app
 from .docs_metadata import GUIDE_DESCRIPTIONS, SPEC_DESCRIPTIONS
 
@@ -416,9 +415,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "docs":
         return _handle_docs(args)
 
-    if args.command == "verify":
-        return _handle_verify(args)
-
     configure_logging(level=args.log_level, json_mode=args.json_logs)
     logger = get_logger(__name__)
 
@@ -426,45 +422,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _run_debug(args, logger)
 
     return 0
-
-
-def _handle_verify(args: argparse.Namespace) -> int:  # noqa: C901
-    """Handle the verify subcommand by delegating to the verify CLI."""
-    verify_argv: list[str] = []
-
-    # Mapping of arg attributes to CLI flags
-    flag_mappings: list[tuple[str, str]] = [
-        ("verify_quiet", "-q"),
-        ("verify_json", "--json"),
-        ("verify_no_color", "--no-color"),
-        ("verify_list", "--list"),
-        ("verify_fix", "--fix"),
-        ("verify_sync", "--sync"),
-    ]
-
-    # Positional args (checkers)
-    if hasattr(args, "verify_checkers") and args.verify_checkers:
-        verify_argv.extend(args.verify_checkers)
-
-    # Category flags with values
-    if hasattr(args, "verify_categories") and args.verify_categories:
-        for cat in args.verify_categories:
-            verify_argv.extend(["-c", cat])
-
-    # Numeric options with values
-    if hasattr(args, "verify_parallel") and args.verify_parallel:
-        verify_argv.extend(["-j", str(args.verify_parallel)])
-    if hasattr(args, "verify_maxfail") and args.verify_maxfail:
-        verify_argv.extend(["--maxfail", str(args.verify_maxfail)])
-    if hasattr(args, "verify_root") and args.verify_root:
-        verify_argv.extend(["--root", str(args.verify_root)])
-
-    # Boolean flags
-    for attr, flag in flag_mappings:
-        if getattr(args, attr, False):
-            verify_argv.append(flag)
-
-    return verify_cli.main(verify_argv)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -514,7 +471,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     _build_docs_parser(subcommands)
-    _build_verify_parser(subcommands)
 
     return parser
 
@@ -649,98 +605,3 @@ def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
             context={"error": repr(error)},
         )
         return 3
-
-
-def _build_verify_parser(
-    subcommands: argparse._SubParsersAction[argparse.ArgumentParser],  # pyright: ignore[reportPrivateUsage]
-) -> None:
-    """Build the verify subcommand parser."""
-    verify_parser = subcommands.add_parser(
-        "verify",
-        help="Run verification checks on the codebase",
-        description="Run verification checks (architecture, documentation, security, types, tests).",
-    )
-
-    _ = verify_parser.add_argument(
-        "verify_checkers",
-        nargs="*",
-        metavar="CHECKER",
-        help="Specific checker names to run (default: all)",
-    )
-
-    _ = verify_parser.add_argument(
-        "-c",
-        "--category",
-        action="append",
-        dest="verify_categories",
-        metavar="CATEGORY",
-        help="Run all checkers in category (can be repeated)",
-    )
-
-    _ = verify_parser.add_argument(
-        "-q",
-        "--quiet",
-        action="store_true",
-        dest="verify_quiet",
-        help="Suppress success output",
-    )
-
-    _ = verify_parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="verify_json",
-        help="Output results as JSON",
-    )
-
-    _ = verify_parser.add_argument(
-        "--no-color",
-        action="store_true",
-        dest="verify_no_color",
-        help="Disable colored output",
-    )
-
-    _ = verify_parser.add_argument(
-        "-j",
-        "--parallel",
-        type=int,
-        dest="verify_parallel",
-        metavar="N",
-        help="Max parallel checkers (default: CPU count)",
-    )
-
-    _ = verify_parser.add_argument(
-        "--maxfail",
-        type=int,
-        dest="verify_maxfail",
-        metavar="N",
-        help="Stop after N failures",
-    )
-
-    _ = verify_parser.add_argument(
-        "--list",
-        action="store_true",
-        dest="verify_list",
-        help="List available checkers and exit",
-    )
-
-    _ = verify_parser.add_argument(
-        "--root",
-        type=Path,
-        dest="verify_root",
-        metavar="PATH",
-        help="Project root directory (default: auto-detect)",
-    )
-
-    _ = verify_parser.add_argument(
-        "--fix",
-        action="store_true",
-        dest="verify_fix",
-        help="Apply auto-fixes where supported",
-    )
-
-    _ = verify_parser.add_argument(
-        "--sync",
-        action="store_true",
-        dest="verify_sync",
-        help="Run checkers synchronously (no parallelism)",
-    )

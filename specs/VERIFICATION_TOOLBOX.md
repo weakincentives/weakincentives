@@ -27,36 +27,42 @@ infrastructure:
 
 ## Goals
 
-1. **Unified CLI** - Single `wink verify` entrypoint with subcommands
+1. **Unified CLI** - Single `python verify.py` entrypoint
 1. **Shared infrastructure** - Common patterns for output, subprocess, paths
-1. **Production quality** - Same standards as `src/weakincentives/` (typed,
-   tested, DbC-decorated)
+1. **Production quality** - Typed and tested to the same standards
 1. **Composable checkers** - Mix and match verification passes
 1. **Parallel execution** - Independent checks run concurrently
 1. **Clear categories** - Checks grouped by what they verify
+1. **Not packaged** - Development tooling only, not shipped with the library
 
 ## Architecture
 
+The verification toolbox lives outside `src/weakincentives/` since it is
+project-specific development tooling, not part of the library release:
+
 ```
-src/weakincentives/
-├── verify/                    # New package
-│   ├── __init__.py           # Public API exports
-│   ├── _runner.py            # Orchestration, parallel execution
-│   ├── _output.py            # Unified output formatting
-│   ├── _subprocess.py        # Subprocess execution with retries
-│   ├── _paths.py             # Project path discovery
-│   ├── _git.py               # Git operations (tracked files, status)
-│   ├── _ast.py               # Shared AST analysis utilities
-│   ├── _markdown.py          # Shared markdown parsing
-│   ├── checkers/             # Individual verification passes
-│   │   ├── __init__.py
-│   │   ├── architecture.py   # Module boundaries, layers, core/contrib
-│   │   ├── documentation.py  # Spec refs, doc examples, md links, md format
-│   │   ├── security.py       # Bandit, pip-audit
-│   │   ├── dependencies.py   # Deptry
-│   │   ├── types.py          # Type coverage, integration test validation
-│   │   └── tests.py          # Pytest runner
-│   └── cli.py                # CLI entrypoint
+verify.py                      # Entry point script at repository root
+verify/                        # Verification package (not in src/)
+├── __init__.py               # Public API exports
+├── runner.py                 # Orchestration, parallel execution
+├── output.py                 # Unified output formatting
+├── subprocess_utils.py       # Subprocess execution with retries
+├── paths.py                  # Project path discovery
+├── git_utils.py              # Git operations (tracked files, status)
+├── ast_utils.py              # Shared AST analysis utilities
+├── markdown_utils.py         # Shared markdown parsing
+├── core_types.py             # Type definitions
+├── registry.py               # Checker registration
+├── cli.py                    # CLI implementation
+├── checkers/                 # Individual verification passes
+│   ├── __init__.py
+│   ├── architecture.py       # Module boundaries, layers, core/contrib
+│   ├── documentation.py      # Spec refs, doc examples, md links, md format
+│   ├── security.py           # Bandit, pip-audit
+│   ├── dependencies.py       # Deptry
+│   ├── types.py              # Type coverage, integration test validation
+│   └── tests.py              # Pytest runner
+└── tests/                    # Verification toolbox tests
 ```
 
 ## Checker Protocol
@@ -329,7 +335,7 @@ def is_git_repo(path: Path) -> bool:
 ## CLI Design
 
 ```
-wink verify [OPTIONS] [CHECKERS...]
+python verify.py [OPTIONS] [CHECKERS...]
 
 Options:
   --all, -a          Run all checkers (default if none specified)
@@ -349,10 +355,10 @@ Categories:
   tests              Test execution
 
 Examples:
-  wink verify                    # Run all checkers
-  wink verify -c architecture    # Run architecture checkers only
-  wink verify bandit vulns       # Run specific checkers
-  wink verify --list             # Show available checkers
+  python verify.py                    # Run all checkers
+  python verify.py -c architecture    # Run architecture checkers only
+  python verify.py bandit vulns       # Run specific checkers
+  python verify.py --list             # Show available checkers
 ```
 
 ## Execution Model
@@ -424,9 +430,9 @@ Port checkers one at a time, maintaining backward compatibility:
 
 ### Phase 3: CLI Integration
 
-1. Add `wink verify` CLI command
+1. Add `python verify.py` CLI command
 1. Deprecate direct script invocation
-1. Update Makefile to use `wink verify`
+1. Update Makefile to use `python verify.py`
 
 ### Phase 4: Cleanup
 
@@ -487,10 +493,10 @@ skip_files = ["CHANGELOG.md"]
 
 The migration is complete when:
 
-1. All current checks pass via `wink verify`
+1. All current checks pass via `python verify.py`
 1. `scripts/` and `build/` directories are removed
 1. Verification code has 100% test coverage
-1. `make check` uses `wink verify` internally
+1. `make check` uses `python verify.py` internally
 1. CI runs in same time or faster (parallel execution)
 1. All checkers have typed, documented APIs
 

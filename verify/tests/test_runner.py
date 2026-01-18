@@ -17,14 +17,14 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from weakincentives.verify._runner import run_checkers, run_checkers_async
-from weakincentives.verify._types import (
+from core_types import (
     CheckContext,
     CheckResult,
     Finding,
     RunConfig,
     Severity,
 )
+from runner import run_checkers, run_checkers_async
 
 
 class FakeChecker:

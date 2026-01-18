@@ -22,20 +22,20 @@ This package contains individual verification passes organized by category:
 - tests: Pytest execution
 """
 
-from weakincentives.verify.checkers.architecture import (
+from .architecture import (
     CoreContribSeparationChecker,
     LayerViolationsChecker,
 )
-from weakincentives.verify.checkers.dependencies import DeptryChecker
-from weakincentives.verify.checkers.documentation import (
+from .dependencies import DeptryChecker
+from .documentation import (
     DocExamplesChecker,
     MarkdownFormatChecker,
     MarkdownLinksChecker,
     SpecReferencesChecker,
 )
-from weakincentives.verify.checkers.security import BanditChecker, PipAuditChecker
-from weakincentives.verify.checkers.tests import PytestChecker
-from weakincentives.verify.checkers.types import (
+from .security import BanditChecker, PipAuditChecker
+from .tests import PytestChecker
+from .types import (
     IntegrationTypesChecker,
     TypeCoverageChecker,
 )

@@ -112,7 +112,7 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-extend-exclude = ["test-repositories"]
+extend-exclude = ["test-repositories", "verify"]
 
 [tool.ruff.lint]
 extend-select = [

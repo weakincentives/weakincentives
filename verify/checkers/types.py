@@ -24,8 +24,8 @@ import tempfile
 import time
 from pathlib import Path
 
-from weakincentives.verify._subprocess import run_tool
-from weakincentives.verify._types import CheckContext, CheckResult, Finding, Severity
+from core_types import CheckContext, CheckResult, Finding, Severity
+from subprocess_utils import run_tool
 
 PACKAGE_NAME = "weakincentives"
 DEFAULT_TYPE_COVERAGE_THRESHOLD = 100.0

@@ -19,7 +19,7 @@ import os
 import time
 from typing import TYPE_CHECKING
 
-from weakincentives.verify._types import CheckContext, Checker, CheckResult, RunConfig
+from core_types import CheckContext, Checker, CheckResult, RunConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence

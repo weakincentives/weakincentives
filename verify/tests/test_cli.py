@@ -17,8 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from weakincentives.verify.cli import main
+from cli import main
 
 
 class TestVerifyCLI:

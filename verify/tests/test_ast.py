@@ -17,8 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from weakincentives.verify._ast import (
+from ast_utils import (
     extract_imports,
     get_top_level_package,
     module_to_path,

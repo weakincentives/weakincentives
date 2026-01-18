@@ -22,12 +22,12 @@ from __future__ import annotations
 import time
 from typing import TYPE_CHECKING
 
-from weakincentives.verify._ast import (
+from ast_utils import (
     extract_imports,
     get_top_level_package,
     path_to_module,
 )
-from weakincentives.verify._types import CheckContext, CheckResult, Finding, Severity
+from core_types import CheckContext, CheckResult, Finding, Severity
 
 if TYPE_CHECKING:
     pass

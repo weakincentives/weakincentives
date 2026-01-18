@@ -17,26 +17,26 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from weakincentives.verify._types import Checker
+    from core_types import Checker
 
 
 def _load_all_checkers() -> tuple[Checker, ...]:
     """Lazily load all checker instances."""
     # Import here to avoid circular imports
-    from weakincentives.verify.checkers.architecture import (
+    from checkers.architecture import (
         CoreContribSeparationChecker,
         LayerViolationsChecker,
     )
-    from weakincentives.verify.checkers.dependencies import DeptryChecker
-    from weakincentives.verify.checkers.documentation import (
+    from checkers.dependencies import DeptryChecker
+    from checkers.documentation import (
         DocExamplesChecker,
         MarkdownFormatChecker,
         MarkdownLinksChecker,
         SpecReferencesChecker,
     )
-    from weakincentives.verify.checkers.security import BanditChecker, PipAuditChecker
-    from weakincentives.verify.checkers.tests import PytestChecker
-    from weakincentives.verify.checkers.types import (
+    from checkers.security import BanditChecker, PipAuditChecker
+    from checkers.tests import PytestChecker
+    from checkers.types import (
         IntegrationTypesChecker,
         TypeCoverageChecker,
     )

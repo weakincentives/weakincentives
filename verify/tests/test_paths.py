@@ -17,8 +17,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
-from weakincentives.verify._paths import (
+from paths import (
     find_project_root,
     get_guides_dir,
     get_package_dir,

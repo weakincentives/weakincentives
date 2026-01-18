@@ -21,12 +21,12 @@ lint-fix:
 	@uv run ruff check --fix -q .
 
 # =============================================================================
-# Security & Dependency Checks (via wink verify)
+# Security & Dependency Checks (via verify.py)
 # =============================================================================
 
 # Run Bandit security scanner
 bandit:
-	@uv run --all-extras wink verify -q bandit
+	@uv run --all-extras python verify.py -q bandit
 
 # Find unused code with vulture
 vulture:
@@ -34,39 +34,39 @@ vulture:
 
 # Check for unused or missing dependencies with deptry
 deptry:
-	@uv run --all-extras wink verify -q deptry
+	@uv run --all-extras python verify.py -q deptry
 
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
-	@uv run --all-extras wink verify -q pip_audit
+	@uv run --all-extras python verify.py -q pip_audit
 
 # =============================================================================
-# Architecture Checks (via wink verify)
+# Architecture Checks (via verify.py)
 # =============================================================================
 
 # Check that core modules don't import from contrib
 check-core-imports:
-	@uv run --all-extras wink verify -q core_contrib_separation
+	@uv run --all-extras python verify.py -q core_contrib_separation
 
 # Validate module boundaries and import patterns
 validate-modules:
-	@uv run --all-extras wink verify -q layer_violations
+	@uv run --all-extras python verify.py -q layer_violations
 
 # =============================================================================
-# Documentation Checks (via wink verify)
+# Documentation Checks (via verify.py)
 # =============================================================================
 
 # Validate Markdown formatting and local links
 markdown-check:
-	@uv run --all-extras wink verify -q markdown_format markdown_links
+	@uv run --all-extras python verify.py -q markdown_format markdown_links
 
 # Validate spec file references point to existing files
 validate-spec-refs:
-	@uv run --all-extras wink verify -q spec_references
+	@uv run --all-extras python verify.py -q spec_references
 
 # Verify Python code examples in documentation
 verify-doc-examples:
-	@uv run --all-extras wink verify -q doc_examples
+	@uv run --all-extras python verify.py -q doc_examples
 
 # =============================================================================
 # Type Checking
@@ -89,11 +89,11 @@ typecheck: ty pyright
 
 # Check type coverage (100% completeness required)
 type-coverage:
-	@uv run --all-extras wink verify -q type_coverage
+	@uv run --all-extras python verify.py -q type_coverage
 
 # Validate integration tests (typecheck without running)
 validate-integration-tests:
-	@uv run --all-extras wink verify -q integration_types
+	@uv run --all-extras python verify.py -q integration_types
 
 # =============================================================================
 # Testing
@@ -238,36 +238,36 @@ demo-claude-agent:
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
 # =============================================================================
-# Unified Verification Toolbox (wink verify)
+# Unified Verification Toolbox (verify.py)
 # =============================================================================
 
-# Run all verification checks via wink verify
+# Run all verification checks via verify.py
 verify:
-	@uv run --all-extras wink verify -q
+	@uv run --all-extras python verify.py -q
 
 # Run architecture verification only
 verify-arch:
-	@uv run --all-extras wink verify -q -c architecture
+	@uv run --all-extras python verify.py -q -c architecture
 
 # Run documentation verification only
 verify-docs:
-	@uv run --all-extras wink verify -q -c documentation
+	@uv run --all-extras python verify.py -q -c documentation
 
 # Run security verification only
 verify-security:
-	@uv run --all-extras wink verify -q -c security
+	@uv run --all-extras python verify.py -q -c security
 
 # Run dependency verification only
 verify-deps:
-	@uv run --all-extras wink verify -q -c dependencies
+	@uv run --all-extras python verify.py -q -c dependencies
 
 # Run type verification only
 verify-types:
-	@uv run --all-extras wink verify -q -c types
+	@uv run --all-extras python verify.py -q -c types
 
 # List all available checkers
 verify-list:
-	@uv run --all-extras wink verify --list
+	@uv run --all-extras python verify.py --list
 
 # =============================================================================
 # Main Check Target

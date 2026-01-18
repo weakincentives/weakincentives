@@ -16,11 +16,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weakincentives.verify._types import CheckContext
-from weakincentives.verify.checkers.architecture import (
+from checkers.architecture import (
     CoreContribSeparationChecker,
     LayerViolationsChecker,
 )
+from core_types import CheckContext
 
 
 class TestLayerViolationsChecker:

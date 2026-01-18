@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from weakincentives.verify._markdown import (
+from markdown_utils import (
     extract_code_blocks,
     extract_file_path,
     extract_links,
