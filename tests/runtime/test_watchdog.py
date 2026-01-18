@@ -164,11 +164,11 @@ def test_watchdog_start_stop() -> None:
     watchdog = Watchdog([hb], stall_threshold=10.0, check_interval=0.01)
 
     watchdog.start()
-    assert watchdog._thread is not None
-    assert watchdog._thread.is_alive()
+    assert watchdog._worker is not None
+    assert watchdog._worker.running
 
     watchdog.stop()
-    assert watchdog._thread is None
+    assert watchdog._worker is None
 
 
 def test_watchdog_start_is_idempotent() -> None:
@@ -177,12 +177,12 @@ def test_watchdog_start_is_idempotent() -> None:
     watchdog = Watchdog([hb], stall_threshold=10.0, check_interval=0.01)
 
     watchdog.start()
-    thread1 = watchdog._thread
+    worker1 = watchdog._worker
 
     watchdog.start()
-    thread2 = watchdog._thread
+    worker2 = watchdog._worker
 
-    assert thread1 is thread2
+    assert worker1 is worker2
 
     watchdog.stop()
 
@@ -194,7 +194,7 @@ def test_watchdog_stop_without_start() -> None:
 
     # Should not raise when stop is called without start
     watchdog.stop()
-    assert watchdog._thread is None
+    assert watchdog._worker is None
 
 
 def test_watchdog_stall_threshold_property() -> None:

@@ -25,6 +25,28 @@ from .clock import (
     SystemClock,
     WallClock,
 )
+from .threading import (
+    SYSTEM_EXECUTOR,
+    BackgroundWorker,
+    CallbackRegistry,
+    CancelledException,
+    Checkpoint,
+    Executor,
+    FakeCheckpoint,
+    FakeExecutor,
+    FakeGate,
+    FakeLatch,
+    FakeScheduler,
+    FifoScheduler,
+    Future,
+    Gate,
+    Latch,
+    Scheduler,
+    SimpleCancellationToken,
+    SystemCheckpoint,
+    SystemExecutor,
+    SystemGate,
+)
 from .dataclasses import FrozenDataclass
 from .deadlines import Deadline
 from .errors import DeadlineExceededError, ToolValidationError, WinkError
@@ -50,20 +72,54 @@ from .skills import (
 from .types import JSONValue, SupportsDataclass
 
 __all__ = [
+    # Clock
     "SYSTEM_CLOCK",
+    "Clock",
+    "FakeClock",
+    "MonotonicClock",
+    "Sleeper",
+    "SystemClock",
+    "WallClock",
+    # Threading
+    "SYSTEM_EXECUTOR",
+    "BackgroundWorker",
+    "CallbackRegistry",
+    "CancelledException",
+    "Checkpoint",
+    "Executor",
+    "FakeCheckpoint",
+    "FakeExecutor",
+    "FakeGate",
+    "FakeLatch",
+    "FakeScheduler",
+    "FifoScheduler",
+    "Future",
+    "Gate",
+    "Latch",
+    "Scheduler",
+    "SimpleCancellationToken",
+    "SystemCheckpoint",
+    "SystemExecutor",
+    "SystemGate",
+    # Budget
     "Budget",
     "BudgetExceededError",
     "BudgetTracker",
-    "Clock",
+    # Deadlines
     "Deadline",
     "DeadlineExceededError",
-    "FakeClock",
+    # Dataclasses
     "FrozenDataclass",
-    "JSONValue",
+    # Prompt
     "MarkdownSection",
-    "MonotonicClock",
     "Prompt",
     "PromptResponse",
+    "Tool",
+    "ToolContext",
+    "ToolHandler",
+    "ToolResult",
+    "parse_structured_output",
+    # Skills
     "Skill",
     "SkillConfig",
     "SkillError",
@@ -71,20 +127,16 @@ __all__ = [
     "SkillMountError",
     "SkillNotFoundError",
     "SkillValidationError",
-    "Sleeper",
+    # Logging
     "StructuredLogger",
-    "SupportsDataclass",
-    "SystemClock",
-    "Tool",
-    "ToolContext",
-    "ToolHandler",
-    "ToolResult",
-    "ToolValidationError",
-    "WallClock",
-    "WinkError",
     "configure_logging",
     "get_logger",
-    "parse_structured_output",
+    # Types
+    "JSONValue",
+    "SupportsDataclass",
+    # Errors
+    "ToolValidationError",
+    "WinkError",
 ]
 
 

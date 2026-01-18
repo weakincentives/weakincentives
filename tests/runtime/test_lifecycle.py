@@ -158,7 +158,7 @@ class _MockRunnable:
 
     def __init__(self, *, run_delay: float = 0.0) -> None:
         self._run_delay = run_delay
-        self._shutdown_event = threading.Event()
+        self._shutdown_signal = threading.Event()
         self._running = False
         self._lock = threading.Lock()
         self.run_called = False
@@ -177,7 +177,7 @@ class _MockRunnable:
         self.run_called = True
 
         # Simulate work until shutdown
-        while not self._shutdown_event.is_set():
+        while not self._shutdown_signal.is_set():
             time.sleep(0.01)
             if self._run_delay > 0:
                 time.sleep(self._run_delay)
@@ -188,7 +188,7 @@ class _MockRunnable:
 
     def shutdown(self, *, timeout: float = 30.0) -> bool:
         self.shutdown_called = True
-        self._shutdown_event.set()
+        self._shutdown_signal.set()
         return wait_until(lambda: not self.running, timeout=timeout)
 
     @property
@@ -704,7 +704,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
             )
             # Trigger shutdown after first message
             if self.call_count == 1:
-                self._loop._shutdown_event.set()
+                self._loop._shutdown_signal.set()
             return result
 
     class _MultiMessageMailbox(
@@ -786,7 +786,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
             )
             # Trigger shutdown after first message
             if self.call_count == 1:
-                self._loop._shutdown_event.set()
+                self._loop._shutdown_signal.set()
             return result
 
     class _ExpiredNackMailbox(
@@ -1167,7 +1167,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
             if eval_count == 1 and eval_loop_ref:
                 # Trigger shutdown after first evaluation - this will cause
                 # remaining messages in the batch to be nacked
-                eval_loop_ref[0]._shutdown_event.set()
+                eval_loop_ref[0]._shutdown_signal.set()
             return Score(value=1.0, passed=True)
 
         eval_loop: EvalLoop[_Request, _Output, str] = EvalLoop(
