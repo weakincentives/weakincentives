@@ -167,7 +167,7 @@ class ReviewResponse:
 
 ### 2. Compose the prompt
 
-```python
+```python nocheck
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection, WorkspaceDigestSection
 
@@ -189,7 +189,7 @@ prompt = Prompt(template).bind(ReviewTurnParams(request="Review main.py"))
 
 ### 3. Mount files safely
 
-```python
+```python nocheck
 from weakincentives.contrib.tools import HostMount, VfsPath, VfsToolsSection
 
 mounts = (
@@ -206,7 +206,7 @@ vfs_section = VfsToolsSection(session=session, mounts=mounts, allowed_host_roots
 
 ### 4. Run and get typed results
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from typing import Any
 from weakincentives.runtime import MainLoop, Session
@@ -223,8 +223,8 @@ class ReviewTurnParams:
 class ReviewResponse:
     summary: str
 
-def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:  # type: ignore[type-arg]
-    ...  # type: ignore[empty-body]
+def build_task_prompt(*, session: Session) -> PromptTemplate[ReviewResponse]:
+    ...
 
 class ReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     def __init__(self, adapter: Any, dispatcher: Any) -> None:
@@ -255,7 +255,7 @@ if plan:
 
 ### 6. Iterate prompts without code changes
 
-```python
+```python nocheck
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 
 prompt = Prompt(

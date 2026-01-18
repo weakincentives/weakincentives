@@ -13,7 +13,7 @@ Adapters bridge a prompt to a provider and enforce consistent semantics:
 
 All adapters implement the same interface:
 
-```python
+```python nocheck
 response = adapter.evaluate(
     prompt,
     session=session,
@@ -38,7 +38,7 @@ back typed results.
 
 **Install:** `pip install "weakincentives[openai]"`
 
-```python
+```python nocheck
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.adapters import OpenAIClientConfig, OpenAIModelConfig
 
@@ -66,7 +66,7 @@ results back to the model.
 LiteLLM provides a unified interface to many providers. Use this when you want
 to switch between providers without changing code.
 
-```python
+```python nocheck
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.adapters import LiteLLMClientConfig, LiteLLMModelConfig
 
@@ -86,7 +86,7 @@ applications. Instead of WINK executing tools itself, it delegates to Claude
 Code's native tool execution—giving you Claude's battle-tested tooling (Read,
 Write, Bash, Glob, Grep) with WINK's prompt composition and session management.
 
-```python
+```python nocheck
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKAdapter
 
 adapter = ClaudeAgentSDKAdapter()
@@ -124,7 +124,7 @@ and also publish `ToolInvoked` events.
 
 Adapters support throttle policies for retry handling on rate limits:
 
-```python
+```python nocheck
 from weakincentives.adapters import new_throttle_policy
 
 policy = new_throttle_policy(max_attempts=5)
@@ -133,7 +133,7 @@ adapter = OpenAIAdapter(model="gpt-4o", throttle_policy=policy)
 
 **Full throttle configuration:**
 
-```python
+```python nocheck
 from datetime import timedelta
 from weakincentives.adapters import ThrottlePolicy
 

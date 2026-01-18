@@ -22,7 +22,7 @@ A tool is defined by:
 
 **Skeleton:**
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from weakincentives.prompt import Tool, ToolContext, ToolResult
 
@@ -67,7 +67,7 @@ caught at construction time.
 **A key idea**: you can pass your own resources (HTTP clients, DB handles,
 tracers) without adding new fields to the core dataclass.
 
-```python
+```python nocheck
 from weakincentives.resources import Binding, ResourceRegistry
 
 registry = ResourceRegistry.of(
@@ -79,7 +79,7 @@ registry = ResourceRegistry.of(
 
 Resources are bound to `Prompt` via the `bind()` method:
 
-```python
+```python nocheck
 from weakincentives.resources import Binding, Scope
 from weakincentives.prompt import Prompt
 
@@ -112,7 +112,7 @@ Many contributed tool suites install one automatically (VFS, Podman).
 
 Tool handlers return `ToolResult`. Use the convenience constructors:
 
-```python
+```python nocheck
 # Success with typed value (most common)
 ToolResult.ok(MyResult(...), message="Done")
 
@@ -145,7 +145,7 @@ value is recorded in the session for debugging.
 Tools can provide `ToolExample` entries for better model performance and better
 debugging:
 
-```python
+```python nocheck
 from weakincentives.prompt import ToolExample
 
 tool = Tool[NowParams, NowResult](
@@ -237,7 +237,7 @@ plan rather than keeping it in their context.
 - `planning_update_step`: Update a step's status or details
 - `planning_read_plan`: Read the current plan state
 
-```python
+```python nocheck
 from weakincentives.contrib.tools import PlanningToolsSection, PlanningStrategy
 
 planning = PlanningToolsSection(
@@ -259,7 +259,7 @@ built-in strategies that shape the prompt instructions:
 The model reasons about what to do next, takes an action, observes the result,
 then repeats. Good for exploratory tasks where the path isn't clear upfront.
 
-```python
+```python nocheck
 planning = PlanningToolsSection(
     session=session,
     strategy=PlanningStrategy.REACT,
@@ -271,7 +271,7 @@ planning = PlanningToolsSection(
 The model creates a plan upfront, executes the steps, then reflects on results.
 Good for structured tasks where the steps are predictable.
 
-```python
+```python nocheck
 planning = PlanningToolsSection(
     session=session,
     strategy=PlanningStrategy.PLAN_ACT_REFLECT,
@@ -295,7 +295,7 @@ haven't read, or skipping required validation steps.
 
 **Built-in policies:**
 
-```python
+```python nocheck
 from weakincentives.prompt import (
     SequentialDependencyPolicy,
     ReadBeforeWritePolicy,
@@ -316,7 +316,7 @@ read_first = ReadBeforeWritePolicy()
 
 Policies are attached at the section level:
 
-```python
+```python nocheck
 from weakincentives.prompt import MarkdownSection, Tool
 
 section = MarkdownSection(
@@ -339,7 +339,7 @@ which policy was violated.
 
 You can implement custom policies by following the `ToolPolicy` protocol:
 
-```python
+```python nocheck
 from weakincentives.prompt import ToolPolicy, PolicyDecision, PolicyState
 
 class MyCustomPolicy(ToolPolicy):

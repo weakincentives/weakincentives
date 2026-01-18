@@ -12,7 +12,7 @@ EvalLoop.
 `LoopGroup` runs multiple loops in separate threads with coordinated shutdown
 and optional health endpoints:
 
-```python
+```python nocheck
 from weakincentives.runtime import LoopGroup
 
 # Run MainLoop and EvalLoop together
@@ -22,7 +22,7 @@ group.run()  # Blocks until SIGTERM/SIGINT
 
 For Kubernetes deployments, enable health endpoints and watchdog monitoring:
 
-```python
+```python nocheck
 group = LoopGroup(
     loops=[main_loop],
     health_port=8080,           # Exposes /health/live and /health/ready
@@ -44,7 +44,7 @@ group.run()
 
 For finer control, use `ShutdownCoordinator` directly:
 
-```python
+```python nocheck
 from weakincentives.runtime import ShutdownCoordinator
 
 coordinator = ShutdownCoordinator.install()
@@ -59,7 +59,7 @@ arrives, all registered callbacks are invoked in registration order.
 
 Both `MainLoop` and `EvalLoop` implement the `Runnable` protocol:
 
-```python
+```python nocheck
 from typing import Protocol
 from weakincentives.runtime import Heartbeat
 
@@ -85,7 +85,7 @@ Workers prove liveness by calling `heartbeat.beat()` at regular intervals. The
 watchdog tracks the last heartbeat time per loop and flags loops that exceed the
 stall threshold.
 
-```python
+```python nocheck
 from weakincentives.runtime import Heartbeat
 
 hb = Heartbeat()
@@ -110,7 +110,7 @@ The watchdog monitors heartbeats from loops and terminates the process if any
 loop stalls beyond the threshold. This prevents "stuck worker" scenarios where a
 loop hangs indefinitely.
 
-```python
+```python nocheck
 group = LoopGroup(
     loops=[main_loop, eval_loop],
     health_port=8080,           # Health endpoint port

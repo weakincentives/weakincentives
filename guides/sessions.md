@@ -28,7 +28,7 @@ straightforward.
 
 Use the slice accessor to read state:
 
-```python
+```python nocheck
 from dataclasses import dataclass
 
 @dataclass(slots=True, frozen=True)
@@ -62,7 +62,7 @@ exact sequence that led to any state.
 In WINK, reducers receive a `SliceView[S]` (read-only access to current values)
 and return a `SliceOp[S]` (describing the mutation to apply):
 
-```python
+```python nocheck
 from weakincentives.runtime.session import SliceView, Append
 
 def my_reducer(state: SliceView[Plan], event: AddStep) -> Append[Plan]:
@@ -85,7 +85,7 @@ WINK ships helper reducers:
 
 **Example**: keep only the latest plan:
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from weakincentives.runtime import replace_latest
 
@@ -104,7 +104,7 @@ assert session[Plan].all() == (Plan(steps=("step 2",)),)
 For complex slices, attach reducers as methods using `@reducer`. Methods must
 return `Replace[T]` wrapping the new value:
 
-```python
+```python nocheck
 from dataclasses import dataclass, replace
 from weakincentives.runtime.session import reducer, Replace
 
@@ -133,7 +133,7 @@ in `session.install()`.
 
 Sessions can be snapshotted and restored:
 
-```python
+```python nocheck
 snapshot = session.snapshot()
 # ... do work ...
 session.restore(snapshot)
@@ -162,7 +162,7 @@ By default, `session.snapshot()` captures only `STATE` slices.
 
 If you want everything (including logs), use:
 
-```python
+```python nocheck
 snapshot = session.snapshot(include_all=True)
 ```
 
@@ -173,7 +173,7 @@ event log even when rolling back working state.
 
 All mutations go through dispatch:
 
-```python
+```python nocheck
 from weakincentives.runtime.session import InitializeSlice, ClearSlice
 
 # Dispatch to reducers
@@ -200,7 +200,7 @@ subscribe to the dispatcher and log every event that flows through the system.
 A `Deadline` is a wall-clock time limit for agent execution. When the deadline
 expires, operations raise `DeadlineExceededError`.
 
-```python
+```python nocheck
 from datetime import timedelta
 from weakincentives import Deadline, DeadlineExceededError
 
@@ -231,7 +231,7 @@ indefinitely.
 A `Budget` limits token consumption. `BudgetTracker` accumulates usage across
 multiple evaluations.
 
-```python
+```python nocheck
 from weakincentives import Budget, BudgetTracker, BudgetExceededError
 
 # Budget with token limits
@@ -263,7 +263,7 @@ print(f"Output tokens: {tracker.output_tokens}")
 
 Budgets and deadlines work together. You can set both to limit time and cost:
 
-```python
+```python nocheck
 response, session = loop.execute(
     request,
     deadline=Deadline.from_timeout(timedelta(minutes=5)),
@@ -280,7 +280,7 @@ use different backends.
 
 **JsonlSlice**: Persists to a JSONL file. Each line is one item.
 
-```python
+```python nocheck
 from weakincentives.runtime.session import SliceFactoryConfig, JsonlSliceFactory
 
 # Configure session with JSONL storage for logs
@@ -293,7 +293,7 @@ session = Session(dispatcher=dispatcher, slice_config=config)
 
 **Common patterns:**
 
-```python
+```python nocheck
 # All state in memory, logs to JSONL (useful for debugging)
 config = SliceFactoryConfig(
     log_factory=JsonlSliceFactory(directory="./logs"),
@@ -312,7 +312,7 @@ config = SliceFactoryConfig(
 Sessions subscribe to an event dispatcher to capture telemetry. The dispatcher
 routes events to registered handlers.
 
-```python
+```python nocheck
 from weakincentives.runtime import InProcessDispatcher, Session, ToolInvoked
 
 dispatcher = InProcessDispatcher()

@@ -40,7 +40,7 @@ The adapter requires claude-agent-sdk version 0.1.15 or later.
 access to host files. It creates an isolated workspace directory with mounted
 content and enforces security boundaries.
 
-```python
+```python nocheck
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentWorkspaceSection,
     HostMount,
@@ -75,7 +75,7 @@ workspace = ClaudeAgentWorkspaceSection(
 The `allowed_host_roots` parameter is a critical security boundary. It
 restricts which host paths can be mounted:
 
-```python
+```python nocheck
 # Only allows mounting from /home/app/repos
 workspace = ClaudeAgentWorkspaceSection(
     session=session,
@@ -94,7 +94,7 @@ multi-tenant environments where mount paths might come from user input.
 
 The workspace section manages a temporary directory:
 
-```python
+```python nocheck
 with workspace:
     # workspace.temp_dir exists and contains mounted files
     adapter = ClaudeAgentSDKAdapter(
@@ -113,7 +113,7 @@ The section implements the context manager protocol. When used with
 
 Controls how the SDK subprocess operates:
 
-```python
+```python nocheck
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
@@ -147,7 +147,7 @@ adapter = ClaudeAgentSDKAdapter(client_config=config)
 
 Controls model selection and parameters:
 
-```python
+```python nocheck
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKModelConfig
 
 model_config = ClaudeAgentSDKModelConfig(
@@ -174,7 +174,7 @@ session state.
 
 ### IsolationConfig
 
-```python
+```python nocheck
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
@@ -208,7 +208,7 @@ adapter = ClaudeAgentSDKAdapter(
 Controls which network resources tools can access. This restricts tools only,
 not the API connection.
 
-```python
+```python nocheck
 # Block all tool network access (recommended for code review)
 policy = NetworkPolicy.no_network()
 
@@ -223,7 +223,7 @@ the model from exfiltrating code or fetching malicious payloads.
 
 Fine-grained control over the sandbox:
 
-```python
+```python nocheck
 sandbox = SandboxConfig(
     enabled=True,
     writable_paths=("/tmp/workspace",),
@@ -261,7 +261,7 @@ WINK tools attached to prompt sections are automatically exposed to Claude Code
 as MCP tools under the server key `"wink"`. This lets you keep side effects and
 validation in Python while Claude uses the tools natively.
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from weakincentives.prompt import MarkdownSection, Tool, ToolContext, ToolResult
 
@@ -312,7 +312,7 @@ When Claude Code calls the `search_index` tool, WINK:
 
 The `render()` method on your result dataclass controls what Claude sees:
 
-```python
+```python nocheck
 @dataclass(frozen=True)
 class FileAnalysis:
     issues: list[str]
@@ -332,7 +332,7 @@ class FileAnalysis:
 Skills are domain-specific instructions that enhance Claude Code's behavior.
 They follow the [Agent Skills specification](https://agentskills.io).
 
-```python
+```python nocheck
 from pathlib import Path
 from weakincentives.adapters.claude_agent_sdk import IsolationConfig
 from weakincentives.skills import SkillConfig, SkillMount
@@ -400,7 +400,7 @@ Native Claude Code tools (Read, Write, Bash) are tracked via SDK hooks and also
 publish `ToolInvoked` events. This gives you complete visibility into what the
 agent is doing.
 
-```python
+```python nocheck
 from weakincentives.runtime import InProcessDispatcher, ToolInvoked
 
 def log_tool_calls(event: ToolInvoked) -> None:
@@ -416,7 +416,7 @@ dispatcher.subscribe(ToolInvoked, log_tool_calls)
 
 The most common production pattern—reviewing code without network access:
 
-```python
+```python nocheck
 from weakincentives.adapters.claude_agent_sdk import (
     ClaudeAgentSDKAdapter,
     ClaudeAgentSDKClientConfig,
@@ -462,7 +462,7 @@ adapter = ClaudeAgentSDKAdapter(
 
 When the agent needs to fetch external documentation:
 
-```python
+```python nocheck
 adapter = ClaudeAgentSDKAdapter(
     client_config=ClaudeAgentSDKClientConfig(
         isolation=IsolationConfig(
@@ -481,7 +481,7 @@ adapter = ClaudeAgentSDKAdapter(
 
 Enable extended thinking for thorough code analysis:
 
-```python
+```python nocheck
 from weakincentives.adapters.claude_agent_sdk import ClaudeAgentSDKModelConfig
 
 adapter = ClaudeAgentSDKAdapter(
@@ -500,7 +500,7 @@ adapter = ClaudeAgentSDKAdapter(
 
 Always set limits in production to prevent runaway costs:
 
-```python
+```python nocheck
 config = ClaudeAgentSDKClientConfig(
     max_turns=25,           # Prevent infinite loops
     max_budget_usd=3.0,     # Hard cost cap

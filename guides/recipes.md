@@ -24,7 +24,7 @@ understand the individual pieces.
 
 **Pattern**:
 
-```python
+```python nocheck
 from weakincentives.contrib.tools import (
     VfsToolsSection,
     VfsConfig,
@@ -77,7 +77,7 @@ def build_qa_template(*, session):
 
 **Pattern**:
 
-```python
+```python nocheck
 @dataclass(slots=True, frozen=True)
 class PatchOutput:
     summary: str
@@ -123,7 +123,7 @@ def build_patch_template(*, session):
 
 **Pattern**:
 
-```python
+```python nocheck
 def build_research_template(*, session, sources: list[tuple[str, str, str]]):
     # sources is list of (key, title, content)
     source_sections = tuple(

@@ -38,7 +38,7 @@ essential concepts:
 - **Prompt template**: Deterministic prompt structure
 - **Session**: Recording of what happened
 
-```python
+```python nocheck
 from dataclasses import dataclass
 
 from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
@@ -110,7 +110,7 @@ Tools are registered by sections. Handlers receive immutable `ToolContext`
 Here's a toy tool that returns the current time. In a real agent this would be a
 filesystem read, an API call, or some other operation with side effects.
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -166,7 +166,7 @@ model sees both in the same context.
 Here's a minimal but complete agent you can run. It answers questions about a
 topic using a search tool.
 
-```python
+```python nocheck
 """Minimal WINK agent: a topic Q&A bot with a mock search tool."""
 import os
 from dataclasses import dataclass

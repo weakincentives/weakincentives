@@ -86,7 +86,7 @@ If you're moving from DSPy to WINK:
 
 **1. Convert signatures to dataclasses:**
 
-```python
+```python nocheck
 # DSPy
 class QA(dspy.Signature):
     question = dspy.InputField()
@@ -104,7 +104,7 @@ class Answer:
 
 **2. Convert modules to sections:**
 
-```python
+```python nocheck
 # DSPy
 qa = dspy.ChainOfThought(QA)
 
@@ -118,7 +118,7 @@ qa_section = MarkdownSection(
 
 **3. Convert programs to templates:**
 
-```python
+```python nocheck
 template = PromptTemplate[Answer](
     ns="qa",
     key="chain-of-thought",
@@ -128,7 +128,7 @@ template = PromptTemplate[Answer](
 
 **4. Replace optimizers with overrides:**
 
-```python
+```python nocheck
 # Instead of compiled prompts, use the override system
 prompt = Prompt(template, overrides_store=store, overrides_tag="v2")
 ```

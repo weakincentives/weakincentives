@@ -21,7 +21,7 @@ ID, title, details, and status.
 Use it when you want the model to externalize its plan without inventing its own
 format. Many models plan better when they have explicit tools for planning.
 
-```python
+```python nocheck
 from weakincentives.contrib.tools import PlanningToolsSection, PlanningStrategy
 
 planning = PlanningToolsSection(
@@ -62,7 +62,7 @@ backend (in-memory VFS, Podman containers, or host filesystem).
 
 **Accessing the filesystem from tool handlers:**
 
-```python
+```python nocheck
 def my_handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
     fs = context.filesystem
     if fs is None:
@@ -88,7 +88,7 @@ You can mount host directories into the VFS snapshot via `HostMount`. The VFS
 copies files into memory; writes go to the copy, not the host. This is the
 default "repo agent" workspace because it avoids accidental host writes.
 
-```python
+```python nocheck
 from weakincentives.contrib.tools import VfsToolsSection, VfsConfig, HostMount
 
 vfs = VfsToolsSection(
@@ -122,7 +122,7 @@ summary of the repository: file tree, key files, detected patterns.
 It works well with progressive disclosure: default to `SUMMARY`, expand on
 demand. The model gets an overview without the full file contents.
 
-```python
+```python nocheck
 from weakincentives.contrib.tools import WorkspaceDigestSection
 
 digest = WorkspaceDigestSection(session=session)
@@ -142,7 +142,7 @@ without granting shell access.
 
 **Install:** `pip install "weakincentives[asteval]"`
 
-```python
+```python nocheck
 from weakincentives.contrib.tools import AstevalSection
 
 asteval = AstevalSection(session=session, accepts_overrides=False)
@@ -158,7 +158,7 @@ host.
 
 **Install:** `pip install "weakincentives[podman]"`
 
-```python
+```python nocheck
 from weakincentives.contrib.tools import PodmanSandboxSection, PodmanSandboxConfig
 
 sandbox = PodmanSandboxSection(
@@ -174,7 +174,7 @@ sandbox = PodmanSandboxSection(
 
 A practical pattern (also used by `code_reviewer_example.py`):
 
-```python
+```python nocheck
 from typing import Any
 from weakincentives.contrib.tools import (
     PlanningToolsSection,
@@ -248,7 +248,7 @@ Filesystem backends that implement `SnapshotableFilesystem` support capturing
 and restoring workspace state. This enables rollback after failed tool
 invocations or exploratory changes.
 
-```python
+```python nocheck
 # Create a snapshot before risky operations
 snapshot = filesystem.snapshot(tag="before-refactor")
 
@@ -273,7 +273,7 @@ the same git blob objects, making snapshots space-efficient.
 
 **Session integration:**
 
-```python
+```python nocheck
 # Store snapshot in session
 session[FilesystemSnapshot].append(fs_snapshot)
 

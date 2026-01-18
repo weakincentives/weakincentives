@@ -9,7 +9,7 @@ Your template uses `${foo}` but no bound dataclass has a `foo` field.
 **Fix**: Check that your dataclass field names match placeholder names exactly.
 Placeholders are case-sensitive.
 
-```python
+```python nocheck
 # Wrong: placeholder is ${query}, field is question
 @dataclass
 class Params:
@@ -27,7 +27,7 @@ Tool handlers must return `ToolResult`, not `None`.
 
 **Fix**: Always return a `ToolResult`, even for failures:
 
-```python
+```python nocheck
 def handler(params, *, context):
     if something_wrong:
         return ToolResult.error("Failed")
@@ -42,7 +42,7 @@ The model's JSON response doesn't match your output dataclass.
 clear instructions in your prompt about the expected JSON structure. Use
 `allow_extra_keys=True` on the template if you want to ignore extra fields.
 
-```python
+```python nocheck
 # Be explicit in your prompt about the expected structure
 template = "Return JSON with these exact fields: summary (string), items (list of strings)"
 ```
@@ -59,7 +59,7 @@ The model sees tools but chooses not to use them.
 1. Check that the tool description accurately describes what it does
 1. Verify the tool is attached to an enabled section
 
-```python
+```python nocheck
 # Add explicit instruction
 template = (
     "You MUST use the search tool to find relevant information "
@@ -85,14 +85,14 @@ State changes aren't visible in subsequent queries.
 **Fix**: Make sure you're using the same session instance, and that you've
 registered reducers for your event types:
 
-```python
+```python nocheck
 session[Plan].register(AddStep, my_reducer)
 session.dispatch(AddStep(step="do thing"))
 ```
 
 Also verify you're querying the right slice:
 
-```python
+```python nocheck
 # This queries Plan slice
 plans = session[Plan].all()
 
@@ -113,7 +113,7 @@ Your override file exists but the prompt renders with the original text.
 **Fix**: Check the override file's `expected_hash` matches the current section
 hash. Re-seed the override if the code changed:
 
-```python
+```python nocheck
 store.seed(prompt, tag="v2")  # Generate new override with current hash
 ```
 
@@ -129,7 +129,7 @@ The model calls a tool, but nothing happens.
 
 Enable debug logging to see what's happening:
 
-```python
+```python nocheck
 from weakincentives.runtime import configure_logging
 configure_logging(level="DEBUG")
 ```
@@ -163,7 +163,7 @@ pip install "weakincentives[wink]"             # For debug CLI
 
 To see exactly what's being sent to the model:
 
-```python
+```python nocheck
 rendered = prompt.render(session=session)
 print(rendered.text)  # Full prompt markdown
 print([t.name for t in rendered.tools])  # Tool names

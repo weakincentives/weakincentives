@@ -33,7 +33,7 @@ aggregates results into a report.
 
 **Sample and Dataset:**
 
-```python
+```python nocheck
 from weakincentives.evals import Dataset, Sample
 
 # A sample pairs input with expected output
@@ -54,7 +54,7 @@ dataset = Dataset.load(Path("qa.jsonl"), str, str)
 
 Evaluators are pure functions—no side effects, no state:
 
-```python
+```python nocheck
 from weakincentives.evals import Score
 
 def my_evaluator(output: str, expected: str) -> Score:
@@ -111,7 +111,7 @@ on tool usage patterns, token budgets, and custom state invariants.
 
 **Built-in session evaluators:**
 
-```python
+```python nocheck
 from weakincentives.evals import (
     tool_called,
     tool_not_called,
@@ -138,7 +138,7 @@ evaluator = all_of(
 Standard evaluators (that only see output and expected) can be converted to
 session-aware evaluators using `adapt()`:
 
-```python
+```python nocheck
 from weakincentives.evals import adapt, exact_match, all_of, tool_called
 
 evaluator = all_of(
@@ -151,7 +151,7 @@ evaluator = all_of(
 
 **EvalLoop wraps your MainLoop:**
 
-```python
+```python nocheck
 from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, exact_match
 from weakincentives.runtime import InMemoryMailbox
 
@@ -168,7 +168,7 @@ eval_loop = EvalLoop(
 
 **Submit samples and collect results:**
 
-```python
+```python nocheck
 from weakincentives.evals import submit_dataset, collect_results, Experiment
 
 # Submit all samples to the evaluation mailbox
@@ -198,7 +198,7 @@ Run both `MainLoop` and `EvalLoop` workers from the same process. This ensures
 your evaluation suite runs against the exact same configuration as your
 production agent:
 
-```python
+```python nocheck
 from threading import Thread
 
 # Production worker
@@ -225,7 +225,7 @@ the new worker and verify the pass rate meets your threshold.
 When workers need to send results to dynamic destinations, use the `reply_to`
 pattern:
 
-```python
+```python nocheck
 # Client sends request with reply_to mailbox reference
 requests.send(
     body=AnalysisRequest(query="Find all bugs"),

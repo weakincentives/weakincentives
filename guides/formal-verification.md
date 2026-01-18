@@ -16,7 +16,7 @@ bugs that randomized testing might miss.
 
 ## Quick Example
 
-```python
+```python nocheck
 from weakincentives.formal import formal_spec, StateVar, Action, Invariant
 
 @formal_spec(
@@ -60,7 +60,7 @@ class Counter:
 
 ## Running Verification
 
-```python
+```python nocheck
 # formal-tests/test_counter.py
 from pathlib import Path
 from weakincentives.formal.testing import extract_and_verify
@@ -91,14 +91,14 @@ make verify-formal  # Runs TLC model checker
 
 **State variables** declare the TLA+ state space:
 
-```python
+```python nocheck
 StateVar("queue", "Seq(Message)", "Pending messages")
 StateVar("inFlight", "[1..NumConsumers -> Seq(Message)]", "In-flight per consumer")
 ```
 
 **Actions** define state transitions with preconditions and updates:
 
-```python
+```python nocheck
 Action(
     name="Receive",
     parameters=(ActionParameter("consumer", "1..NumConsumers"),),
@@ -112,7 +112,7 @@ Action(
 
 **Invariants** define safety properties that must always hold:
 
-```python
+```python nocheck
 Invariant("INV-1", "MessageExclusivity", "MessageInExactlyOnePlace(msg)")
 Invariant("INV-2", "NoLostMessages", "CountMessages() = InitialMessageCount")
 ```
@@ -145,7 +145,7 @@ carefully chosen bounds.
 
 ## Testing Utilities
 
-```python
+```python nocheck
 from weakincentives.formal.testing import (
     extract_spec,       # Extract FormalSpec from decorated class
     write_spec,         # Write .tla and .cfg files
