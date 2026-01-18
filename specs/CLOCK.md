@@ -115,12 +115,14 @@ assert clock.monotonic() - start == 70
 | `monotonic()` | Return current monotonic time |
 | `utcnow()` | Return current wall-clock time |
 | `sleep(seconds)` | Advance time instantly (calls `advance()`) |
-| `advance(seconds)` | Advance both clocks by duration |
+| `advance(seconds)` | Advance both clocks by duration (non-negative only) |
 | `set_monotonic(value)` | Set monotonic time to absolute value |
 | `set_wall(value)` | Set wall-clock time (must be timezone-aware) |
 
 Both `advance()` and `sleep()` advance monotonic and wall-clock time together.
-All operations are thread-safe.
+All operations are thread-safe. `advance()` raises `ValueError` if given
+negative seconds; use `set_monotonic()` and `set_wall()` for explicit clock
+positioning when needed.
 
 ## Usage Patterns
 
