@@ -72,9 +72,9 @@ typecheck: ty pyright
 type-coverage:
 	@uv run --all-extras python build/run_type_coverage.py -q
 
-# Run tests with coverage (100% minimum)
+# Run tests with coverage (100% minimum) and 10s per-test timeout
 test:
-	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 -q --no-header --cov-report= tests
+	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 --timeout=10 --timeout-method=thread -q --no-header --cov-report= tests
 
 # Run OpenAI integration tests
 integration-tests:
