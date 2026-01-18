@@ -21,6 +21,7 @@ from uuid import uuid4
 import pytest
 
 from tests.helpers.session import ExampleOutput, make_prompt_event
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import (
     Session,
@@ -33,16 +34,18 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.core
 
 
-def test_session_requires_timezone_aware_created_at() -> None:
+def test_session_requires_timezone_aware_created_at(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
     naive_timestamp = datetime.now()
 
     with pytest.raises(ValueError):
-        Session(dispatcher=dispatcher, created_at=naive_timestamp)
+        Session(dispatcher=dispatcher, created_at=naive_timestamp, clock=clock)
 
 
-def test_session_instantiates_default_dispatcher_when_none_provided() -> None:
-    session = Session()
+def test_session_instantiates_default_dispatcher_when_none_provided(
+    clock: FakeClock,
+) -> None:
+    session = Session(clock=clock)
     assert isinstance(session.dispatcher, InProcessDispatcher)
 
 

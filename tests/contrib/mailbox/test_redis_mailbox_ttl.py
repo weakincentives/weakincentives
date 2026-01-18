@@ -24,6 +24,8 @@ from uuid import uuid4
 
 import pytest
 
+from weakincentives.runtime.clock import FakeClock
+
 if TYPE_CHECKING:
     from redis import Redis
 
@@ -57,7 +59,9 @@ class TestTTLConfiguration:
         client.register_script.return_value = MagicMock()
         return client
 
-    def test_mailbox_uses_default_ttl(self, mock_redis_client: MagicMock) -> None:
+    def test_mailbox_uses_default_ttl(
+        self, mock_redis_client: MagicMock, clock: FakeClock
+    ) -> None:
         """RedisMailbox should use DEFAULT_TTL_SECONDS by default."""
         from weakincentives.contrib.mailbox import (
             DEFAULT_TTL_SECONDS,
@@ -67,13 +71,16 @@ class TestTTLConfiguration:
         mb: RedisMailbox[str, None] = RedisMailbox(
             name="test",
             client=mock_redis_client,
+            clock=clock,
             _send_only=True,
         )
 
         assert mb.default_ttl == DEFAULT_TTL_SECONDS
         mb.close()
 
-    def test_mailbox_custom_ttl(self, mock_redis_client: MagicMock) -> None:
+    def test_mailbox_custom_ttl(
+        self, mock_redis_client: MagicMock, clock: FakeClock
+    ) -> None:
         """RedisMailbox should accept custom TTL."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
@@ -82,13 +89,16 @@ class TestTTLConfiguration:
             name="test",
             client=mock_redis_client,
             default_ttl=custom_ttl,
+            clock=clock,
             _send_only=True,
         )
 
         assert mb.default_ttl == custom_ttl
         mb.close()
 
-    def test_mailbox_ttl_zero_disables(self, mock_redis_client: MagicMock) -> None:
+    def test_mailbox_ttl_zero_disables(
+        self, mock_redis_client: MagicMock, clock: FakeClock
+    ) -> None:
         """Setting TTL to 0 should disable expiration."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
@@ -96,13 +106,16 @@ class TestTTLConfiguration:
             name="test",
             client=mock_redis_client,
             default_ttl=0,
+            clock=clock,
             _send_only=True,
         )
 
         assert mb.default_ttl == 0
         mb.close()
 
-    def test_factory_uses_default_ttl(self, mock_redis_client: MagicMock) -> None:
+    def test_factory_uses_default_ttl(
+        self, mock_redis_client: MagicMock, clock: FakeClock
+    ) -> None:
         """RedisMailboxFactory should use DEFAULT_TTL_SECONDS by default."""
         from weakincentives.contrib.mailbox import (
             DEFAULT_TTL_SECONDS,
@@ -111,11 +124,14 @@ class TestTTLConfiguration:
 
         factory: RedisMailboxFactory[str] = RedisMailboxFactory(
             client=mock_redis_client,
+            clock=clock,
         )
 
         assert factory.default_ttl == DEFAULT_TTL_SECONDS
 
-    def test_factory_custom_ttl(self, mock_redis_client: MagicMock) -> None:
+    def test_factory_custom_ttl(
+        self, mock_redis_client: MagicMock, clock: FakeClock
+    ) -> None:
         """RedisMailboxFactory should accept custom TTL."""
         from weakincentives.contrib.mailbox import RedisMailboxFactory
 
@@ -123,12 +139,13 @@ class TestTTLConfiguration:
         factory: RedisMailboxFactory[str] = RedisMailboxFactory(
             client=mock_redis_client,
             default_ttl=custom_ttl,
+            clock=clock,
         )
 
         assert factory.default_ttl == custom_ttl
 
     def test_factory_propagates_ttl_to_mailbox(
-        self, mock_redis_client: MagicMock
+        self, mock_redis_client: MagicMock, clock: FakeClock
     ) -> None:
         """Factory.create() should propagate TTL to created mailbox."""
         from weakincentives.contrib.mailbox import RedisMailboxFactory
@@ -137,6 +154,7 @@ class TestTTLConfiguration:
         factory: RedisMailboxFactory[str] = RedisMailboxFactory(
             client=mock_redis_client,
             default_ttl=custom_ttl,
+            clock=clock,
         )
 
         mailbox = factory.create("reply-queue")
@@ -148,7 +166,9 @@ class TestTTLConfiguration:
 class TestTTLOnOperations:
     """Tests verifying TTL is passed to Lua scripts in each operation."""
 
-    def test_send_passes_ttl(self, redis_client: Redis[bytes]) -> None:
+    def test_send_passes_ttl(
+        self, redis_client: Redis[bytes], clock: FakeClock
+    ) -> None:
         """send() should pass TTL to the Lua script."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
@@ -157,6 +177,7 @@ class TestTTLOnOperations:
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
+            clock=clock,
         )
 
         try:
@@ -177,7 +198,9 @@ class TestTTLOnOperations:
             mb.close()
             mb.purge()
 
-    def test_receive_refreshes_ttl(self, redis_client: Redis[bytes]) -> None:
+    def test_receive_refreshes_ttl(
+        self, redis_client: Redis[bytes], clock: FakeClock
+    ) -> None:
         """receive() should refresh TTL on all keys."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
@@ -186,6 +209,7 @@ class TestTTLOnOperations:
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
+            clock=clock,
         )
 
         try:
@@ -207,7 +231,9 @@ class TestTTLOnOperations:
             mb.close()
             mb.purge()
 
-    def test_nack_refreshes_data_ttl(self, redis_client: Redis[bytes]) -> None:
+    def test_nack_refreshes_data_ttl(
+        self, redis_client: Redis[bytes], clock: FakeClock
+    ) -> None:
         """nack() should refresh TTL including the data key."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
@@ -216,6 +242,7 @@ class TestTTLOnOperations:
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
+            clock=clock,
         )
 
         try:
@@ -233,7 +260,9 @@ class TestTTLOnOperations:
             mb.close()
             mb.purge()
 
-    def test_extend_refreshes_data_ttl(self, redis_client: Redis[bytes]) -> None:
+    def test_extend_refreshes_data_ttl(
+        self, redis_client: Redis[bytes], clock: FakeClock
+    ) -> None:
         """extend() should refresh TTL including the data key."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
@@ -242,6 +271,7 @@ class TestTTLOnOperations:
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=custom_ttl,
+            clock=clock,
         )
 
         try:
@@ -250,7 +280,7 @@ class TestTTLOnOperations:
             assert len(msgs) == 1
 
             # Extend visibility
-            msgs[0].extend(60)
+            msgs[0].extend_visibility(60)
 
             # Verify TTL on data key
             ttl_data = redis_client.ttl(mb._keys.data)
@@ -261,7 +291,9 @@ class TestTTLOnOperations:
             mb.close()
             mb.purge()
 
-    def test_ttl_zero_no_expiration(self, redis_client: Redis[bytes]) -> None:
+    def test_ttl_zero_no_expiration(
+        self, redis_client: Redis[bytes], clock: FakeClock
+    ) -> None:
         """TTL=0 should not set any expiration on keys."""
         from weakincentives.contrib.mailbox import RedisMailbox
 
@@ -269,6 +301,7 @@ class TestTTLOnOperations:
             name=f"test-{uuid4().hex[:8]}",
             client=redis_client,
             default_ttl=0,  # Disable TTL
+            clock=clock,
         )
 
         try:
@@ -289,7 +322,7 @@ class TestReaperTTLRefresh:
     """Tests for TTL refresh by the background reaper."""
 
     def test_reaper_refreshes_ttl_with_no_expired_messages(
-        self, redis_client: Redis[bytes]
+        self, redis_client: Redis[bytes], clock: FakeClock
     ) -> None:
         """Reaper should refresh TTL even when no messages expire.
 
@@ -306,6 +339,7 @@ class TestReaperTTLRefresh:
             client=redis_client,
             default_ttl=custom_ttl,
             reaper_interval=0.1,  # Fast reaper for testing
+            clock=clock,
         )
 
         try:
@@ -335,7 +369,9 @@ class TestReaperTTLRefresh:
             mb.close()
             mb.purge()
 
-    def test_reaper_refreshes_all_keys(self, redis_client: Redis[bytes]) -> None:
+    def test_reaper_refreshes_all_keys(
+        self, redis_client: Redis[bytes], clock: FakeClock
+    ) -> None:
         """Reaper should refresh TTL on all four Redis keys."""
         import time
 
@@ -347,6 +383,7 @@ class TestReaperTTLRefresh:
             client=redis_client,
             default_ttl=custom_ttl,
             reaper_interval=0.1,
+            clock=clock,
         )
 
         try:

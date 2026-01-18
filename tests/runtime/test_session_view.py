@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import (
     ReadOnlySliceAccessor,
@@ -167,10 +168,10 @@ class TestSessionViewProperties:
 
         assert view.parent is None
 
-    def test_view_parent_returns_view_of_parent(self) -> None:
+    def test_view_parent_returns_view_of_parent(self, clock: FakeClock) -> None:
         dispatcher = InProcessDispatcher()
-        parent = Session(dispatcher=dispatcher)
-        child = Session(dispatcher=dispatcher, parent=parent)
+        parent = Session(dispatcher=dispatcher, clock=clock)
+        child = Session(dispatcher=dispatcher, parent=parent, clock=clock)
 
         view = SessionView(child)
         parent_view = view.parent
@@ -179,11 +180,11 @@ class TestSessionViewProperties:
         assert isinstance(parent_view, SessionView)
         assert parent_view.tags["session_id"] == str(parent.session_id)
 
-    def test_view_children_returns_views_of_children(self) -> None:
+    def test_view_children_returns_views_of_children(self, clock: FakeClock) -> None:
         dispatcher = InProcessDispatcher()
-        parent = Session(dispatcher=dispatcher)
-        child1 = Session(dispatcher=dispatcher, parent=parent)
-        child2 = Session(dispatcher=dispatcher, parent=parent)
+        parent = Session(dispatcher=dispatcher, clock=clock)
+        child1 = Session(dispatcher=dispatcher, parent=parent, clock=clock)
+        child2 = Session(dispatcher=dispatcher, parent=parent, clock=clock)
 
         view = SessionView(parent)
         children_views = view.children

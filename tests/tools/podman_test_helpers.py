@@ -29,6 +29,7 @@ from weakincentives.contrib.tools import (
     PodmanSandboxConfig,
     PodmanSandboxSection,
 )
+from weakincentives.runtime.clock import Clock
 from weakincentives.runtime.session import Session
 
 
@@ -202,9 +203,12 @@ def make_section(
     auto_connect: bool = False,
     mounts: Sequence[HostMount] = (),
     allowed_host_roots: Sequence[os.PathLike[str] | str] = (),
+    clock: Clock | None = None,
 ) -> PodmanSandboxSection:
     exec_runner = runner if runner is not None else FakeCliRunner()
     allowed_roots = tuple(allowed_host_roots)
+    # Use session's clock if no clock provided
+    effective_clock = clock if clock is not None else session.clock
     base_config = PodmanSandboxConfig(
         client_factory=lambda: client,
         cache_dir=cache_dir,
@@ -213,6 +217,7 @@ def make_section(
         exec_runner=exec_runner,
         mounts=mounts,
         allowed_host_roots=allowed_roots,
+        clock=effective_clock,
     )
     if auto_connect:
         return PodmanSandboxSection(session=session, config=base_config)

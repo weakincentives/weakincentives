@@ -91,6 +91,7 @@ from weakincentives.runtime import (
     Session,
     ShutdownCoordinator,
 )
+from weakincentives.runtime.clock import Clock
 from weakincentives.skills import SkillConfig, SkillMount
 from weakincentives.types import SupportsDataclass
 
@@ -247,6 +248,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
         ]
         | None = None,
+        clock: Clock | None = None,
     ) -> None:
         # Configure lease extender to extend message visibility during long tool execution.
         # Extends by 5 minutes every 60 seconds of active work (heartbeats from tools).
@@ -255,6 +257,7 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
                 interval=60.0,  # Rate-limit extensions to once per minute
                 extension=300,  # Extend by 5 minutes on each extension
             ),
+            clock=clock,
         )
         super().__init__(adapter=adapter, requests=requests, config=config, dlq=dlq)
         self._overrides_store = overrides_store or LocalPromptOverridesStore()

@@ -14,45 +14,28 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from typing import TYPE_CHECKING
 
 import pytest
 
-from weakincentives import deadlines
+from weakincentives.runtime.clock import Clock, FakeClock, SystemClock
 
-
-class FrozenUtcNow:
-    """Controller for :func:`weakincentives.deadlines._utcnow` during tests."""
-
-    def __init__(
-        self, monkeypatch: pytest.MonkeyPatch, *, anchor: datetime | None = None
-    ) -> None:
-        self._current = anchor if anchor is not None else datetime.now(UTC)
-        monkeypatch.setattr(deadlines, "_utcnow", self.now)
-
-    def now(self) -> datetime:
-        """Return the frozen current time."""
-
-        return self._current
-
-    def set(self, current: datetime) -> datetime:
-        """Reset the frozen clock to the provided datetime."""
-
-        self._current = current
-        return self._current
-
-    def advance(self, delta: timedelta) -> datetime:
-        """Move the frozen clock forward by ``delta``."""
-
-        self._current += delta
-        return self._current
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 
 @pytest.fixture
-def frozen_utcnow(monkeypatch: pytest.MonkeyPatch) -> FrozenUtcNow:
-    """Provide a controllable :func:`_utcnow` override for deadline tests."""
+def clock(request: pytest.FixtureRequest) -> Generator[Clock, None, None]:
+    """Provide a clock for tests.
 
-    return FrozenUtcNow(monkeypatch)
+    By default, returns a FakeClock for deterministic time control.
+    When the test is marked with @pytest.mark.allow_system_clock,
+    returns a SystemClock for tests that rely on real blocking behavior.
+    """
+    if request.node.get_closest_marker("allow_system_clock"):
+        yield SystemClock()
+    else:
+        yield FakeClock()
 
 
-__all__ = ["FrozenUtcNow", "frozen_utcnow"]
+__all__ = ["clock"]

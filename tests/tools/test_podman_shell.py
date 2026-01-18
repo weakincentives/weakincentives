@@ -47,6 +47,7 @@ from weakincentives.contrib.tools import (
 from weakincentives.prompt.tool import Tool
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.clock import FakeClock
 
 
 def test_section_registers_shell_tool(
@@ -249,11 +250,11 @@ def test_shell_execute_rejects_non_ascii_stdin(
         )
 
 
-def test_shell_execute_rejects_mismatched_session(tmp_path: Path) -> None:
+def test_shell_execute_rejects_mismatched_session(tmp_path: Path, clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     other_dispatcher = InProcessDispatcher()
-    other_session = Session(dispatcher=other_dispatcher)
+    other_session = Session(dispatcher=other_dispatcher, clock=clock)
     client = FakePodmanClient()
     section = make_section(
         session=session, client=client, cache_dir=tmp_path, runner=FakeCliRunner()

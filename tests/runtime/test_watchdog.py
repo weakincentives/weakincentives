@@ -22,6 +22,7 @@ from unittest.mock import patch
 
 import pytest
 
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.watchdog import HealthServer, Heartbeat, Watchdog
 
 # =============================================================================
@@ -29,13 +30,14 @@ from weakincentives.runtime.watchdog import HealthServer, Heartbeat, Watchdog
 # =============================================================================
 
 
-def test_heartbeat_initial_elapsed_is_small() -> None:
+def test_heartbeat_initial_elapsed_is_small(clock: FakeClock) -> None:
     """Heartbeat.elapsed() is near zero immediately after creation."""
-    hb = Heartbeat()
+    hb = Heartbeat(clock=clock)
     assert hb.elapsed() < 0.1
 
 
-def test_heartbeat_elapsed_increases_over_time() -> None:
+@pytest.mark.allow_system_clock
+def test_heartbeat_elapsed_increases_over_time(clock: FakeClock) -> None:
     """Heartbeat.elapsed() increases as time passes."""
     hb = Heartbeat()
     time.sleep(0.1)
@@ -43,7 +45,8 @@ def test_heartbeat_elapsed_increases_over_time() -> None:
     assert 0.1 <= elapsed < 0.3
 
 
-def test_heartbeat_beat_resets_elapsed() -> None:
+@pytest.mark.allow_system_clock
+def test_heartbeat_beat_resets_elapsed(clock: FakeClock) -> None:
     """Heartbeat.beat() resets elapsed time to near zero."""
     hb = Heartbeat()
     time.sleep(0.1)
@@ -53,9 +56,9 @@ def test_heartbeat_beat_resets_elapsed() -> None:
     assert hb.elapsed() < 0.05
 
 
-def test_heartbeat_is_thread_safe() -> None:
+def test_heartbeat_is_thread_safe(clock: FakeClock) -> None:
     """Heartbeat can be used from multiple threads safely."""
-    hb = Heartbeat()
+    hb = Heartbeat(clock=clock)
     errors: list[Exception] = []
 
     def beat_repeatedly() -> None:
@@ -80,16 +83,17 @@ def test_heartbeat_is_thread_safe() -> None:
 # =============================================================================
 
 
-def test_watchdog_check_heartbeats_empty_when_fresh() -> None:
+def test_watchdog_check_heartbeats_empty_when_fresh(clock: FakeClock) -> None:
     """Watchdog._check_heartbeats returns empty list when all heartbeats are fresh."""
-    hb = Heartbeat()
+    hb = Heartbeat(clock=clock)
     watchdog = Watchdog([hb], stall_threshold=1.0, check_interval=0.1)
 
     stalled = watchdog._check_heartbeats()
     assert stalled == []
 
 
-def test_watchdog_check_heartbeats_detects_stall() -> None:
+@pytest.mark.allow_system_clock
+def test_watchdog_check_heartbeats_detects_stall(clock: FakeClock) -> None:
     """Watchdog._check_heartbeats detects stalled heartbeats."""
     hb = Heartbeat()
     watchdog = Watchdog([hb], stall_threshold=0.1, check_interval=0.05)
@@ -103,7 +107,8 @@ def test_watchdog_check_heartbeats_detects_stall() -> None:
     assert stalled[0][1] > 0.1
 
 
-def test_watchdog_check_heartbeats_clears_after_beat() -> None:
+@pytest.mark.allow_system_clock
+def test_watchdog_check_heartbeats_clears_after_beat(clock: FakeClock) -> None:
     """Watchdog._check_heartbeats clears stall after beat."""
     hb = Heartbeat()
     watchdog = Watchdog([hb], stall_threshold=0.1, check_interval=0.05)
@@ -117,7 +122,8 @@ def test_watchdog_check_heartbeats_clears_after_beat() -> None:
     assert stalled == []
 
 
-def test_watchdog_custom_loop_names() -> None:
+@pytest.mark.allow_system_clock
+def test_watchdog_custom_loop_names(clock: FakeClock) -> None:
     """Watchdog uses custom loop names in stall reports."""
     hb = Heartbeat()
     watchdog = Watchdog(
@@ -133,6 +139,7 @@ def test_watchdog_custom_loop_names() -> None:
     assert stalled[0][0] == "my-worker"
 
 
+@pytest.mark.allow_system_clock
 def test_watchdog_multiple_heartbeats() -> None:
     """Watchdog monitors multiple heartbeats independently."""
     hb1 = Heartbeat()
@@ -158,9 +165,9 @@ def test_watchdog_multiple_heartbeats() -> None:
     assert stalled[0][0] == "worker-2"
 
 
-def test_watchdog_start_stop() -> None:
+def test_watchdog_start_stop(clock: FakeClock) -> None:
     """Watchdog can be started and stopped."""
-    hb = Heartbeat()
+    hb = Heartbeat(clock=clock)
     watchdog = Watchdog([hb], stall_threshold=10.0, check_interval=0.01)
 
     watchdog.start()
@@ -171,9 +178,9 @@ def test_watchdog_start_stop() -> None:
     assert watchdog._thread is None
 
 
-def test_watchdog_start_is_idempotent() -> None:
+def test_watchdog_start_is_idempotent(clock: FakeClock) -> None:
     """Multiple calls to Watchdog.start() have no effect."""
-    hb = Heartbeat()
+    hb = Heartbeat(clock=clock)
     watchdog = Watchdog([hb], stall_threshold=10.0, check_interval=0.01)
 
     watchdog.start()
@@ -187,9 +194,9 @@ def test_watchdog_start_is_idempotent() -> None:
     watchdog.stop()
 
 
-def test_watchdog_stop_without_start() -> None:
+def test_watchdog_stop_without_start(clock: FakeClock) -> None:
     """Watchdog.stop() is safe when never started."""
-    hb = Heartbeat()
+    hb = Heartbeat(clock=clock)
     watchdog = Watchdog([hb], stall_threshold=10.0, check_interval=0.01)
 
     # Should not raise when stop is called without start
@@ -197,13 +204,14 @@ def test_watchdog_stop_without_start() -> None:
     assert watchdog._thread is None
 
 
-def test_watchdog_stall_threshold_property() -> None:
+def test_watchdog_stall_threshold_property(clock: FakeClock) -> None:
     """Watchdog.stall_threshold property returns configured value."""
-    hb = Heartbeat()
+    hb = Heartbeat(clock=clock)
     watchdog = Watchdog([hb], stall_threshold=123.0)
     assert watchdog.stall_threshold == 123.0
 
 
+@pytest.mark.allow_system_clock
 def test_watchdog_terminate_calls_sigkill() -> None:
     """Watchdog._terminate calls os.kill with SIGKILL."""
     hb = Heartbeat()
@@ -219,9 +227,9 @@ def test_watchdog_terminate_calls_sigkill() -> None:
             assert call_args[1] == 9
 
 
-def test_watchdog_terminate_logs_diagnostics() -> None:
+def test_watchdog_terminate_logs_diagnostics(clock: FakeClock) -> None:
     """Watchdog._terminate logs critical diagnostics before termination."""
-    hb = Heartbeat()
+    hb = Heartbeat(clock=clock)
     watchdog = Watchdog([hb], stall_threshold=60.0)
 
     with patch("os.kill"):
@@ -284,7 +292,7 @@ def test_health_server_readiness_returns_503_when_not_ready() -> None:
         server.stop()
 
 
-def test_health_server_readiness_uses_callback() -> None:
+def test_health_server_readiness_uses_callback(clock: FakeClock) -> None:
     """HealthServer readiness check is called for each request."""
     call_count = 0
 
@@ -323,7 +331,7 @@ def test_health_server_404_for_unknown_path() -> None:
         server.stop()
 
 
-def test_health_server_start_is_idempotent() -> None:
+def test_health_server_start_is_idempotent(clock: FakeClock) -> None:
     """Multiple calls to HealthServer.start() have no effect."""
     server = HealthServer(port=0)
     server.start()
@@ -338,7 +346,7 @@ def test_health_server_start_is_idempotent() -> None:
         server.stop()
 
 
-def test_health_server_stop_clears_address() -> None:
+def test_health_server_stop_clears_address(clock: FakeClock) -> None:
     """HealthServer.stop() clears the address property."""
     server = HealthServer(port=0)
     server.start()
@@ -348,7 +356,7 @@ def test_health_server_stop_clears_address() -> None:
     assert server.address is None
 
 
-def test_health_server_address_is_none_before_start() -> None:
+def test_health_server_address_is_none_before_start(clock: FakeClock) -> None:
     """HealthServer.address is None before start."""
     server = HealthServer(port=0)
     assert server.address is None
@@ -359,7 +367,8 @@ def test_health_server_address_is_none_before_start() -> None:
 # =============================================================================
 
 
-def test_watchdog_runs_check_loop() -> None:
+@pytest.mark.allow_system_clock
+def test_watchdog_runs_check_loop(clock: FakeClock) -> None:
     """Watchdog periodically checks heartbeats."""
     hb = Heartbeat()
     check_count = 0
@@ -380,7 +389,8 @@ def test_watchdog_runs_check_loop() -> None:
     assert check_count >= 2
 
 
-def test_health_server_readiness_with_heartbeat() -> None:
+@pytest.mark.allow_system_clock
+def test_health_server_readiness_with_heartbeat(clock: FakeClock) -> None:
     """HealthServer readiness check can incorporate heartbeat freshness."""
     hb = Heartbeat()
     threshold = 0.1

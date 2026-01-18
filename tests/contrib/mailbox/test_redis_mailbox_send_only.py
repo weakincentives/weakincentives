@@ -24,6 +24,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from weakincentives.runtime.clock import FakeClock
+
 if TYPE_CHECKING:
     from redis import Redis
 
@@ -43,7 +45,7 @@ class TestSendOnlyMailbox:
         return client
 
     def test_send_only_mailbox_does_not_start_reaper_thread(
-        self, mock_redis_client: MagicMock
+        self, mock_redis_client: MagicMock, clock: FakeClock
     ) -> None:
         """Send-only mailboxes should not start a reaper thread."""
         from weakincentives.contrib.mailbox import RedisMailbox
@@ -51,6 +53,7 @@ class TestSendOnlyMailbox:
         mb: RedisMailbox[str, None] = RedisMailbox(
             name="test-send-only",
             client=mock_redis_client,
+            clock=clock,
             _send_only=True,
         )
 
@@ -61,7 +64,7 @@ class TestSendOnlyMailbox:
         mb.close()
 
     def test_send_only_mailbox_does_not_auto_create_resolver(
-        self, mock_redis_client: MagicMock
+        self, mock_redis_client: MagicMock, clock: FakeClock
     ) -> None:
         """Send-only mailboxes should not auto-create a reply resolver."""
         from weakincentives.contrib.mailbox import RedisMailbox
@@ -69,6 +72,7 @@ class TestSendOnlyMailbox:
         mb: RedisMailbox[str, None] = RedisMailbox(
             name="test-send-only",
             client=mock_redis_client,
+            clock=clock,
             _send_only=True,
         )
 
@@ -78,7 +82,7 @@ class TestSendOnlyMailbox:
         mb.close()
 
     def test_regular_mailbox_starts_reaper_thread(
-        self, mock_redis_client: MagicMock
+        self, mock_redis_client: MagicMock, clock: FakeClock
     ) -> None:
         """Regular mailboxes should start a reaper thread."""
         from weakincentives.contrib.mailbox import RedisMailbox
@@ -86,6 +90,7 @@ class TestSendOnlyMailbox:
         mb: RedisMailbox[str, None] = RedisMailbox(
             name="test-regular",
             client=mock_redis_client,
+            clock=clock,
             _send_only=False,
         )
 
@@ -97,7 +102,7 @@ class TestSendOnlyMailbox:
             mb.close()
 
     def test_regular_mailbox_auto_creates_resolver(
-        self, mock_redis_client: MagicMock
+        self, mock_redis_client: MagicMock, clock: FakeClock
     ) -> None:
         """Regular mailboxes should auto-create a reply resolver."""
         from weakincentives.contrib.mailbox import RedisMailbox
@@ -105,6 +110,7 @@ class TestSendOnlyMailbox:
         mb: RedisMailbox[str, None] = RedisMailbox(
             name="test-regular",
             client=mock_redis_client,
+            clock=clock,
             _send_only=False,
         )
 
@@ -126,13 +132,14 @@ class TestRedisMailboxFactory:
         return client
 
     def test_factory_creates_send_only_mailboxes(
-        self, mock_redis_client: MagicMock
+        self, mock_redis_client: MagicMock, clock: FakeClock
     ) -> None:
         """Factory.create() should produce send-only mailboxes."""
         from weakincentives.contrib.mailbox import RedisMailboxFactory
 
         factory: RedisMailboxFactory[str] = RedisMailboxFactory(
             client=mock_redis_client,
+            clock=clock,
         )
 
         mailbox = factory.create("reply-queue")
@@ -144,18 +151,22 @@ class TestRedisMailboxFactory:
 
         mailbox.close()
 
-    def test_factory_mailbox_can_send(self, redis_client: Redis[bytes]) -> None:
+    def test_factory_mailbox_can_send(
+        self, redis_client: Redis[bytes], clock: FakeClock
+    ) -> None:
         """Factory-created send-only mailboxes can still send messages."""
         from weakincentives.contrib.mailbox import RedisMailbox, RedisMailboxFactory
 
         factory: RedisMailboxFactory[str] = RedisMailboxFactory(
             client=redis_client,
+            clock=clock,
         )
 
         send_only = factory.create("reply-queue")
         receiver: RedisMailbox[str, None] = RedisMailbox(
             name="reply-queue",
             client=redis_client,
+            clock=clock,
         )
 
         try:

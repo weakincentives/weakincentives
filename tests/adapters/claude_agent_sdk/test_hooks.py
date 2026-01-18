@@ -20,7 +20,6 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.adapters.claude_agent_sdk._hooks import (
     HookContext,
     PostToolUseInput,
@@ -49,6 +48,7 @@ from weakincentives.prompt import (
     PromptTemplate,
 )
 from weakincentives.prompt.protocols import PromptProtocol
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.events.types import TokenUsage, ToolInvoked
 from weakincentives.runtime.session import Session
@@ -114,9 +114,9 @@ def _make_prompt_with_feedback_provider() -> Prompt[object]:
 
 
 @pytest.fixture
-def session() -> Session:
+def session(clock: FakeClock) -> Session:
     dispatcher = InProcessDispatcher()
-    return Session(dispatcher=dispatcher)
+    return Session(dispatcher=dispatcher, clock=clock)
 
 
 @pytest.fixture
@@ -130,7 +130,7 @@ def hook_context(session: Session) -> HookContext:
 
 
 class TestHookContext:
-    def test_basic_construction(self, session: Session) -> None:
+    def test_basic_construction(self, session: Session, clock: FakeClock) -> None:
         context = HookContext(
             session=session,
             prompt=cast("PromptProtocol[object]", _make_prompt()),
@@ -145,12 +145,10 @@ class TestHookContext:
         assert context.stop_reason is None
         assert context._tool_count == 0
 
-    def test_with_deadline_and_budget(
-        self, session: Session, frozen_utcnow: FrozenUtcNow
-    ) -> None:
+    def test_with_deadline_and_budget(self, session: Session, clock: FakeClock) -> None:
         anchor = datetime.now(UTC)
-        frozen_utcnow.set(anchor)
-        deadline = Deadline(anchor + timedelta(minutes=5))
+        clock.set_now(anchor)
+        deadline = Deadline(anchor + timedelta(minutes=5), clock=clock)
         budget = Budget(max_total_tokens=1000)
         tracker = BudgetTracker(budget)
 
@@ -167,7 +165,9 @@ class TestHookContext:
 
 
 class TestPreToolUseHook:
-    def test_allows_tool_by_default(self, hook_context: HookContext) -> None:
+    def test_allows_tool_by_default(
+        self, hook_context: HookContext, clock: FakeClock
+    ) -> None:
         hook = create_pre_tool_use_hook(hook_context)
         input_data = {"tool_name": "Read", "tool_input": {"path": "/test"}}
 
@@ -176,12 +176,12 @@ class TestPreToolUseHook:
         assert result == {}
 
     def test_denies_when_deadline_exceeded(
-        self, session: Session, frozen_utcnow: FrozenUtcNow
+        self, session: Session, clock: FakeClock
     ) -> None:
         anchor = datetime.now(UTC)
-        frozen_utcnow.set(anchor)
-        deadline = Deadline(anchor + timedelta(seconds=5))
-        frozen_utcnow.advance(timedelta(seconds=10))
+        clock.set_now(anchor)
+        deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        clock.advance(10)
 
         context = HookContext(
             session=session,
@@ -943,7 +943,7 @@ class TestPreToolUseHookTransactional:
 
     def test_takes_snapshot_with_session_and_prompt(self, session: Session) -> None:
         """Pre-tool hook takes snapshot when session and prompt are present."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=session.clock)
         fs.write("/test.txt", "initial")
         prompt = _make_prompt_with_fs(fs)
 
@@ -964,7 +964,7 @@ class TestPreToolUseHookTransactional:
 
     def test_skips_snapshot_for_mcp_wink_tools(self, session: Session) -> None:
         """Pre-tool hook skips snapshot for MCP WINK tools."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=session.clock)
         prompt = _make_prompt_with_fs(fs)
 
         context = HookContext(
@@ -989,7 +989,7 @@ class TestPostToolUseHookTransactional:
 
     def test_restores_state_on_tool_failure(self, session: Session) -> None:
         """Post-tool hook restores state when tool fails."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=session.clock)
         fs.write("/test.txt", "initial")
         prompt = _make_prompt_with_fs(fs)
 
@@ -1027,7 +1027,7 @@ class TestPostToolUseHookTransactional:
 
     def test_no_restore_on_success(self, session: Session) -> None:
         """Post-tool hook doesn't restore state on success."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=session.clock)
         fs.write("/test.txt", "initial")
         prompt = _make_prompt_with_fs(fs)
 
@@ -1162,7 +1162,9 @@ class TestIsToolErrorResponse:
 class TestTaskCompletionStopHook:
     """Tests for task completion stop hook functionality."""
 
-    def test_allows_stop_when_no_plan_slice(self, hook_context: HookContext) -> None:
+    def test_allows_stop_when_no_plan_slice(
+        self, hook_context: HookContext, clock: FakeClock
+    ) -> None:
         """Stop is allowed when Plan slice is not installed in session."""
         hook = create_task_completion_stop_hook(
             hook_context, checker=PlanBasedChecker(plan_type=Plan)
@@ -1174,7 +1176,9 @@ class TestTaskCompletionStopHook:
         assert result == {}
         assert hook_context.stop_reason == "end_turn"
 
-    def test_allows_stop_when_no_plan_initialized(self, session: Session) -> None:
+    def test_allows_stop_when_no_plan_initialized(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Stop is allowed when Plan slice exists but no plan is initialized."""
         # Install Plan slice but don't initialize a plan
         PlanningToolsSection._initialize_session(session)
@@ -1196,7 +1200,9 @@ class TestTaskCompletionStopHook:
         assert result == {}
         assert context.stop_reason == "end_turn"
 
-    def test_allows_stop_when_all_tasks_complete(self, session: Session) -> None:
+    def test_allows_stop_when_all_tasks_complete(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Stop is allowed when all plan tasks are marked as done."""
         PlanningToolsSection._initialize_session(session)
 
@@ -1228,7 +1234,9 @@ class TestTaskCompletionStopHook:
         assert result == {}
         assert context.stop_reason == "end_turn"
 
-    def test_signals_continue_when_tasks_incomplete(self, session: Session) -> None:
+    def test_signals_continue_when_tasks_incomplete(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Stop hook signals continuation when tasks are incomplete."""
         PlanningToolsSection._initialize_session(session)
 
@@ -1264,7 +1272,7 @@ class TestTaskCompletionStopHook:
         assert "Pending task" in result.get("reason", "")
         assert context.stop_reason == "end_turn"
 
-    def test_records_stop_reason(self, session: Session) -> None:
+    def test_records_stop_reason(self, session: Session, clock: FakeClock) -> None:
         """Stop hook records the stop reason regardless of task state."""
         PlanningToolsSection._initialize_session(session)
 
@@ -1284,7 +1292,9 @@ class TestTaskCompletionStopHook:
         asyncio.run(hook(input_data, None, None))
         assert context.stop_reason == "max_turns_reached"
 
-    def test_defaults_stop_reason_to_end_turn(self, session: Session) -> None:
+    def test_defaults_stop_reason_to_end_turn(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Stop hook defaults stopReason to end_turn when not provided."""
         PlanningToolsSection._initialize_session(session)
 
@@ -1303,7 +1313,7 @@ class TestTaskCompletionStopHook:
 
         assert context.stop_reason == "end_turn"
 
-    def test_handles_empty_steps(self, session: Session) -> None:
+    def test_handles_empty_steps(self, session: Session, clock: FakeClock) -> None:
         """Stop is allowed when plan has no steps."""
         PlanningToolsSection._initialize_session(session)
 
@@ -1331,7 +1341,9 @@ class TestTaskCompletionStopHook:
 
         assert result == {}
 
-    def test_reminder_message_truncates_long_task_list(self, session: Session) -> None:
+    def test_reminder_message_truncates_long_task_list(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Reminder message truncates task titles when there are many incomplete."""
         PlanningToolsSection._initialize_session(session)
 
@@ -1371,7 +1383,9 @@ class TestTaskCompletionStopHook:
         # Should not list all tasks
         assert "Task 9" not in reason
 
-    def test_checker_protocol_with_plan_based_checker(self, session: Session) -> None:
+    def test_checker_protocol_with_plan_based_checker(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Hook accepts any TaskCompletionChecker implementation."""
         PlanningToolsSection._initialize_session(session)
 
@@ -1395,7 +1409,7 @@ class TestTaskCompletionStopHook:
         assert context.stop_reason == "end_turn"
 
     def test_skips_check_when_deadline_exceeded(
-        self, session: Session, frozen_utcnow: FrozenUtcNow
+        self, session: Session, clock: FakeClock
     ) -> None:
         """Stop hook skips task completion check when deadline expired."""
         PlanningToolsSection._initialize_session(session)
@@ -1410,9 +1424,9 @@ class TestTaskCompletionStopHook:
 
         # Create expired deadline using frozen time
         anchor = datetime.now(UTC)
-        frozen_utcnow.set(anchor)
-        expired_deadline = Deadline(anchor + timedelta(seconds=5))
-        frozen_utcnow.advance(timedelta(seconds=10))  # Now expired
+        clock.set_now(anchor)
+        expired_deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+        clock.advance(10)  # Now expired
 
         context = HookContext(
             session=session,

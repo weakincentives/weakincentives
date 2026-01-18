@@ -20,6 +20,7 @@ from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Protocol, Self
 
 from ...types.dataclass import SupportsDataclass
+from ..clock import Clock
 from ..events.types import DispatchResult, TelemetryDispatcher
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .snapshots import Snapshot
@@ -67,6 +68,9 @@ class SessionProtocol(Protocol):
 
     @property
     def dispatcher(self) -> TelemetryDispatcher: ...
+
+    @property
+    def clock(self) -> Clock: ...
 
     def __getitem__[T: SupportsDataclass](
         self, slice_type: type[T]

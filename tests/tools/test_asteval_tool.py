@@ -44,6 +44,7 @@ from weakincentives.filesystem import READ_ENTIRE_FILE
 from weakincentives.prompt.tool import Tool, ToolResult
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.clock import FakeClock
 
 
 def _assert_success_message(result: ToolResult[EvalResult]) -> None:
@@ -78,7 +79,7 @@ def _setup_sections() -> tuple[
     Tool[EvalParams, EvalResult],
 ]:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=FakeClock())
     vfs_section = VfsToolsSection(session=session)
     section = AstevalSection(session=session, filesystem=vfs_section.filesystem)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
@@ -145,9 +146,9 @@ def test_missing_dependency_instructs_extra_install(
     assert "weakincentives[asteval]" in str(captured.value)
 
 
-def test_asteval_section_disables_tool_overrides_by_default() -> None:
+def test_asteval_section_disables_tool_overrides_by_default(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = AstevalSection(session=session)
     tool = cast(Tool[EvalParams, EvalResult], find_tool(section, "evaluate_python"))
 
@@ -155,9 +156,9 @@ def test_asteval_section_disables_tool_overrides_by_default() -> None:
     assert tool.accepts_overrides is False
 
 
-def test_asteval_section_override_flags_opt_in() -> None:
+def test_asteval_section_override_flags_opt_in(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = AstevalSection(
         session=session,
         accepts_overrides=True,
@@ -772,7 +773,7 @@ def test_message_summarizes_multiple_writes() -> None:
     assert paths == [("output", f"file{i}.txt") for i in range(4)]
 
 
-def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
+def test_read_text_uses_persisted_mount(tmp_path: Path, clock: FakeClock) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
     sunfish = root / "sunfish"
@@ -781,7 +782,7 @@ def test_read_text_uses_persisted_mount(tmp_path: Path) -> None:
     readme.write_text("hello mount", encoding="utf-8")
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     vfs_section = VfsToolsSection(
         session=session,
         mounts=(HostMount(host_path="sunfish", mount_path=VfsPath(("sunfish",))),),
@@ -1087,36 +1088,36 @@ def test_merge_globals_combines_mappings() -> None:
 # -----------------------------------------------------------------------------
 
 
-def test_asteval_config_accepts_overrides() -> None:
+def test_asteval_config_accepts_overrides(clock: FakeClock) -> None:
     """Test that config accepts_overrides is respected."""
     from weakincentives.contrib.tools import AstevalConfig
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     config = AstevalConfig(accepts_overrides=True)
     section = AstevalSection(session=session, config=config)
 
     assert section.accepts_overrides is True
 
 
-def test_asteval_filesystem_property_returns_filesystem() -> None:
+def test_asteval_filesystem_property_returns_filesystem(clock: FakeClock) -> None:
     """Test that the filesystem property returns the filesystem instance."""
     from weakincentives.filesystem import Filesystem
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = AstevalSection(session=session)
 
     fs = section.filesystem
     assert isinstance(fs, Filesystem)
 
 
-def test_asteval_clone_rejects_invalid_filesystem_type() -> None:
+def test_asteval_clone_rejects_invalid_filesystem_type(clock: FakeClock) -> None:
     """Test that clone raises TypeError for invalid filesystem argument."""
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = AstevalSection(session=session)
 
-    new_session = Session(dispatcher=dispatcher)
+    new_session = Session(dispatcher=dispatcher, clock=clock)
     with pytest.raises(TypeError, match="filesystem must be a Filesystem instance"):
         section.clone(session=new_session, filesystem="not a filesystem")

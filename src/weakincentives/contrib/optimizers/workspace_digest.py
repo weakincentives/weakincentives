@@ -98,7 +98,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         """
         prompt_name = prompt.name or prompt.key
         outer_session = session
-        inner_session = self._create_optimization_session(prompt)
+        inner_session = self._create_optimization_session(prompt, session=session)
 
         digest_section = self._require_workspace_digest_section(
             prompt, prompt_name=prompt_name

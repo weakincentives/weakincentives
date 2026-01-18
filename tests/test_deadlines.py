@@ -18,34 +18,34 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.deadlines import Deadline
+from weakincentives.runtime.clock import FakeClock
 
 
-def test_deadline_rejects_naive_datetime() -> None:
+def test_deadline_rejects_naive_datetime(clock: FakeClock) -> None:
     naive = datetime.now()
     with pytest.raises(ValueError):
-        Deadline(naive)
+        Deadline(naive, clock=clock)
 
 
-def test_deadline_rejects_past_datetime(frozen_utcnow: FrozenUtcNow) -> None:
+def test_deadline_rejects_past_datetime(clock: FakeClock) -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
+    clock.set_now(anchor)
     with pytest.raises(ValueError):
-        Deadline(anchor - timedelta(seconds=10))
+        Deadline(anchor - timedelta(seconds=10), clock=clock)
 
 
-def test_deadline_requires_future_second(frozen_utcnow: FrozenUtcNow) -> None:
+def test_deadline_requires_future_second(clock: FakeClock) -> None:
     anchor = datetime(2024, 1, 1, 12, 0, 0, 123456, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
+    clock.set_now(anchor)
     with pytest.raises(ValueError):
-        Deadline(anchor + timedelta(milliseconds=500))
+        Deadline(anchor + timedelta(milliseconds=500), clock=clock)
 
 
-def test_deadline_remaining_uses_override(frozen_utcnow: FrozenUtcNow) -> None:
+def test_deadline_remaining_uses_override(clock: FakeClock) -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
 
     remaining = deadline.remaining(now=anchor + timedelta(seconds=5))
 
@@ -53,11 +53,11 @@ def test_deadline_remaining_uses_override(frozen_utcnow: FrozenUtcNow) -> None:
 
 
 def test_deadline_remaining_rejects_naive_datetime(
-    frozen_utcnow: FrozenUtcNow,
+    clock: FakeClock,
 ) -> None:
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
 
     with pytest.raises(ValueError):
         deadline.remaining(now=datetime(2024, 1, 1, 12, 0))

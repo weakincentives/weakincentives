@@ -47,6 +47,7 @@ from weakincentives.adapters.utilities import (
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.session import Session
 
 
@@ -89,7 +90,7 @@ def test_mapping_to_str_dict_rejects_non_string_keys() -> None:
     assert mapping_to_str_dict({1: "value"}) is None
 
 
-def test_run_inner_loop_requires_message_payload() -> None:
+def test_run_inner_loop_requires_message_payload(clock: FakeClock) -> None:
     rendered = RenderedPrompt(text="system")
     dispatcher = NullDispatcher()
 
@@ -132,7 +133,7 @@ def test_run_inner_loop_requires_message_payload() -> None:
 
     adapter = DummyAdapter()
     prompt = Prompt(PromptTemplate(ns="tests", key="example"))
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     config = InnerLoopConfig(
         session=session,

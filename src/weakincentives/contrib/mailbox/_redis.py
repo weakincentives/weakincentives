@@ -34,10 +34,9 @@ import contextlib
 import json
 import logging
 import threading
-import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
@@ -48,6 +47,7 @@ from weakincentives.formal import (
     StateVar,
     formal_spec,
 )
+from weakincentives.runtime.clock import Clock, SystemClock
 from weakincentives.runtime.mailbox import (
     CompositeResolver,
     Mailbox,
@@ -289,7 +289,7 @@ class RedisMailboxFactory[R]:
             msg.acknowledge()
     """
 
-    __slots__ = ("body_type", "client", "default_ttl")
+    __slots__ = ("_clock", "body_type", "client", "default_ttl")
 
     client: Redis[bytes] | RedisCluster[bytes]
     """Redis client to use for all created mailboxes."""
@@ -300,12 +300,16 @@ class RedisMailboxFactory[R]:
     default_ttl: int
     """Default TTL in seconds for all Redis keys."""
 
+    _clock: Clock
+    """Clock instance for created mailboxes."""
+
     def __init__(
         self,
         client: Redis[bytes] | RedisCluster[bytes],
         *,
         body_type: type[R] | None = None,
         default_ttl: int = DEFAULT_TTL_SECONDS,
+        clock: Clock | None = None,
     ) -> None:
         """Initialize factory with shared Redis client.
 
@@ -313,11 +317,13 @@ class RedisMailboxFactory[R]:
             client: Redis client to use for all created mailboxes.
             body_type: Optional type hint for message body deserialization.
             default_ttl: Default TTL in seconds for Redis keys (default: 3 days).
+            clock: Clock instance for created mailboxes. Defaults to SystemClock().
         """
         super().__init__()
         self.client = client
         self.body_type = body_type
         self.default_ttl = default_ttl
+        self._clock = clock if clock is not None else SystemClock()
 
     def create(self, identifier: str) -> Mailbox[R, None]:
         """Create a RedisMailbox for the given identifier.
@@ -338,6 +344,7 @@ class RedisMailboxFactory[R]:
             client=self.client,
             body_type=self.body_type,
             default_ttl=self.default_ttl,
+            clock=self._clock,
             _send_only=True,  # Send-only: no reaper thread, no nested resolution
         )
 
@@ -721,6 +728,9 @@ class RedisMailbox[T, R]:
     Set to 0 to disable TTL. Keys are refreshed on each operation including
     the background reaper, so active queues stay alive indefinitely."""
 
+    clock: Clock = field(default_factory=SystemClock)
+    """Clock for time-dependent operations. Defaults to SystemClock for production."""
+
     _keys: _QueueKeys = field(init=False, repr=False)
     _scripts: dict[str, Any] = field(init=False, default_factory=dict, repr=False)
     _reaper_thread: threading.Thread | None = field(
@@ -753,7 +763,7 @@ class RedisMailbox[T, R]:
         # Set up default resolver if none provided
         if self.reply_resolver is None:
             factory: RedisMailboxFactory[R] = RedisMailboxFactory(
-                client=self.client, default_ttl=self.default_ttl
+                client=self.client, default_ttl=self.default_ttl, clock=self.clock
             )
             object.__setattr__(
                 self, "reply_resolver", CompositeResolver(registry={}, factory=factory)
@@ -854,7 +864,7 @@ class RedisMailbox[T, R]:
         """
         msg_id = str(uuid4())
         serialized = self._serialize(body)
-        enqueued_at = datetime.now(UTC).isoformat()
+        enqueued_at = self.clock.now().isoformat()
 
         try:
             keys = [
@@ -915,11 +925,11 @@ class RedisMailbox[T, R]:
 
         max_messages = min(max(1, max_messages), 10)
         messages: list[Message[T, R]] = []
-        deadline = time.time() + wait_time_seconds
+        deadline = self.clock.monotonic() + wait_time_seconds
 
         try:
             while len(messages) < max_messages and not self._closed:
-                remaining = deadline - time.time()
+                remaining = deadline - self.clock.monotonic()
                 msg = self._receive_one(visibility_timeout, remaining)
                 if msg is not None:
                     messages.append(msg)
@@ -958,7 +968,7 @@ class RedisMailbox[T, R]:
         lua_keys = [keys.pending, keys.invisible, keys.data, keys.meta]
         poll_interval = 0.3  # 300ms between poll attempts
 
-        deadline = time.time() + wait_seconds
+        deadline = self.clock.monotonic() + wait_seconds
 
         while True:
             receipt_suffix = str(uuid4())
@@ -984,12 +994,12 @@ class RedisMailbox[T, R]:
                 break
 
             # No message available
-            remaining = deadline - time.time()
+            remaining = deadline - self.clock.monotonic()
             if remaining <= 0:
                 return None
 
             # Poll again after interval (but don't overshoot deadline)
-            time.sleep(min(poll_interval, remaining))
+            self.clock.sleep(min(poll_interval, remaining))
 
         if data is None:
             # Message data was deleted (shouldn't happen, but handle gracefully)
@@ -1004,7 +1014,7 @@ class RedisMailbox[T, R]:
             )
             enqueued_at = datetime.fromisoformat(enqueued_str)
         else:
-            enqueued_at = datetime.now(UTC)
+            enqueued_at = self.clock.now()
 
         # Parse reply_to name and resolve to mailbox
         reply_to: Mailbox[R, None] | None = None

@@ -39,6 +39,7 @@ from weakincentives.contrib.tools import (
 )
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.clock import FakeClock
 
 
 def test_section_exposes_new_client(
@@ -206,9 +207,10 @@ def test_workspace_reuse_between_calls(
 
 def test_touch_workspace_handles_missing_handle(
     tmp_path: Path,
+    clock: FakeClock,
 ) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = make_section(
         session=session, client=FakePodmanClient(), cache_dir=tmp_path
     )
@@ -319,6 +321,7 @@ def test_section_auto_resolves_connection(
     monkeypatch: pytest.MonkeyPatch,
     session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
+    clock: FakeClock,
 ) -> None:
     session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
@@ -347,6 +350,7 @@ def test_section_auto_resolves_connection(
             client_factory=lambda: client,
             base_environment={"PATH": "/usr/bin"},
             exec_runner=cli_runner,
+            clock=clock,
         ),
     )
     handler = find_tool(section, "shell_execute").handler
@@ -615,6 +619,7 @@ def test_section_requires_connection_when_detection_fails(
     monkeypatch: pytest.MonkeyPatch,
     session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
+    clock: FakeClock,
 ) -> None:
     session, _dispatcher = session_and_dispatcher
     client = FakePodmanClient()
@@ -631,6 +636,7 @@ def test_section_requires_connection_when_detection_fails(
                 client_factory=lambda: client,
                 base_environment={"PATH": "/usr/bin"},
                 exec_runner=FakeCliRunner(),
+                clock=clock,
             ),
         )
 
@@ -638,6 +644,7 @@ def test_section_requires_connection_when_detection_fails(
 def test_section_init_with_overlay_path_and_filesystem(
     session_and_dispatcher: tuple[Session, InProcessDispatcher],
     tmp_path: Path,
+    clock: FakeClock,
 ) -> None:
     """Test that PodmanSandboxSection accepts _overlay_path and _filesystem for cloning."""
     session, _dispatcher = session_and_dispatcher
@@ -653,7 +660,7 @@ def test_section_init_with_overlay_path_and_filesystem(
 
     # Create new session for clone
     new_dispatcher = InProcessDispatcher()
-    new_session = Session(dispatcher=new_dispatcher)
+    new_session = Session(dispatcher=new_dispatcher, clock=clock)
 
     # Create a new section with the preserved overlay path and filesystem
     # Must provide base_url to avoid Podman connection resolution
@@ -664,6 +671,7 @@ def test_section_init_with_overlay_path_and_filesystem(
             client_factory=lambda: client,
             exec_runner=FakeCliRunner(),
             base_url="unix:///tmp/fake.sock",
+            clock=clock,
         ),
         _overlay_path=section1._overlay_path,
         _filesystem=section1._filesystem,

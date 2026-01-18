@@ -53,6 +53,7 @@ except ImportError:
 pytestmark = [
     pytest.mark.redis_standalone,
     pytest.mark.skipif(not HAS_HYPOTHESIS, reason="hypothesis not installed"),
+    pytest.mark.allow_system_clock,
 ]
 
 

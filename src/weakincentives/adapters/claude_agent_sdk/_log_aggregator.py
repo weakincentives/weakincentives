@@ -26,6 +26,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from ...runtime.clock import Clock, SystemClock
 from ...runtime.logging import StructuredLogger, get_logger
 
 __all__ = [
@@ -113,6 +114,9 @@ class ClaudeLogAggregator:
     poll_interval: float = _POLL_INTERVAL_SECONDS
     """Interval between file system polls in seconds."""
 
+    clock: Clock = field(default_factory=SystemClock)
+    """Clock for time operations."""
+
     _file_states: dict[Path, _FileState] = field(default_factory=dict)
     """Tracks read state for each discovered file."""
 
@@ -182,7 +186,7 @@ class ClaudeLogAggregator:
         """Background polling loop for file changes."""
         while self._running:  # pragma: no branch
             await self._poll_once()
-            await asyncio.sleep(self.poll_interval)
+            await self.clock.asleep(self.poll_interval)
 
     async def _poll_once(self) -> None:
         """Perform a single poll cycle: discover files and read new content."""

@@ -30,6 +30,7 @@ from weakincentives.evals import (
     llm_judge,
 )
 from weakincentives.prompt import Prompt
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.session import SessionProtocol
 
 # =============================================================================
@@ -188,10 +189,10 @@ class _MockJudgeAdapter(ProviderAdapter[JudgeOutput]):
         )
 
 
-def test_llm_judge_excellent() -> None:
+def test_llm_judge_excellent(clock: FakeClock) -> None:
     """llm_judge returns correct score for excellent rating."""
     adapter = _MockJudgeAdapter(rating="excellent", reason="Perfect")
-    evaluator = llm_judge(adapter, "accuracy")
+    evaluator = llm_judge(adapter, "accuracy", clock=clock)
 
     score = evaluator("correct answer", "expected")
 
@@ -201,10 +202,10 @@ def test_llm_judge_excellent() -> None:
     assert adapter.call_count == 1
 
 
-def test_llm_judge_good() -> None:
+def test_llm_judge_good(clock: FakeClock) -> None:
     """llm_judge returns correct score for good rating."""
     adapter = _MockJudgeAdapter(rating="good", reason="Minor issues")
-    evaluator = llm_judge(adapter, "accuracy")
+    evaluator = llm_judge(adapter, "accuracy", clock=clock)
 
     score = evaluator("mostly correct", "expected")
 
@@ -213,10 +214,10 @@ def test_llm_judge_good() -> None:
     assert score.reason == "Minor issues"
 
 
-def test_llm_judge_fair() -> None:
+def test_llm_judge_fair(clock: FakeClock) -> None:
     """llm_judge returns correct score for fair rating."""
     adapter = _MockJudgeAdapter(rating="fair", reason="Partially correct")
-    evaluator = llm_judge(adapter, "accuracy")
+    evaluator = llm_judge(adapter, "accuracy", clock=clock)
 
     score = evaluator("half right", "expected")
 
@@ -224,10 +225,10 @@ def test_llm_judge_fair() -> None:
     assert score.passed is False
 
 
-def test_llm_judge_poor() -> None:
+def test_llm_judge_poor(clock: FakeClock) -> None:
     """llm_judge returns correct score for poor rating."""
     adapter = _MockJudgeAdapter(rating="poor", reason="Mostly wrong")
-    evaluator = llm_judge(adapter, "accuracy")
+    evaluator = llm_judge(adapter, "accuracy", clock=clock)
 
     score = evaluator("bad answer", "expected")
 
@@ -235,10 +236,10 @@ def test_llm_judge_poor() -> None:
     assert score.passed is False
 
 
-def test_llm_judge_wrong() -> None:
+def test_llm_judge_wrong(clock: FakeClock) -> None:
     """llm_judge returns correct score for wrong rating."""
     adapter = _MockJudgeAdapter(rating="wrong", reason="Completely incorrect")
-    evaluator = llm_judge(adapter, "accuracy")
+    evaluator = llm_judge(adapter, "accuracy", clock=clock)
 
     score = evaluator("wrong answer", "expected")
 
@@ -246,10 +247,10 @@ def test_llm_judge_wrong() -> None:
     assert score.passed is False
 
 
-def test_llm_judge_handles_none_output() -> None:
+def test_llm_judge_handles_none_output(clock: FakeClock) -> None:
     """llm_judge handles None output gracefully."""
     adapter = _MockJudgeAdapter(return_none=True)
-    evaluator = llm_judge(adapter, "accuracy")
+    evaluator = llm_judge(adapter, "accuracy", clock=clock)
 
     score = evaluator("answer", "expected")
 
@@ -258,7 +259,7 @@ def test_llm_judge_handles_none_output() -> None:
     assert "no structured output" in score.reason
 
 
-def test_llm_judge_uses_criterion() -> None:
+def test_llm_judge_uses_criterion(clock: FakeClock) -> None:
     """llm_judge uses provided criterion in evaluation."""
 
     class _CaptureAdapter(ProviderAdapter[JudgeOutput]):
@@ -283,7 +284,7 @@ def test_llm_judge_uses_criterion() -> None:
             )
 
     adapter = _CaptureAdapter()
-    evaluator = llm_judge(adapter, "custom criterion here")
+    evaluator = llm_judge(adapter, "custom criterion here", clock=clock)
 
     _ = evaluator("output", "expected")
 

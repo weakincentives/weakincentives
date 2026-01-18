@@ -21,6 +21,7 @@ from datetime import UTC
 
 import pytest
 
+from weakincentives.runtime.clock import Clock, FakeClock
 from weakincentives.runtime.mailbox import (
     CollectingMailbox,
     CompositeResolver,
@@ -60,21 +61,21 @@ class _Result:
 # =============================================================================
 
 
-def test_message_is_mutable_for_finalized_state() -> None:
+def test_message_is_mutable_for_finalized_state(clock: FakeClock) -> None:
     """Message instances have mutable _finalized state but frozen public fields."""
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.now(),
     )
     # Public fields should not be directly modifiable
     assert msg.id == "msg-1"
     assert msg.is_finalized is False
 
 
-def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
+def test_message_lifecycle_methods_delegate_to_callbacks(clock: FakeClock) -> None:
     """Message lifecycle methods call bound callbacks."""
     ack_called = []
     nack_called = []
@@ -85,7 +86,7 @@ def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.now(),
         _acknowledge_fn=lambda: ack_called.append(True),
         _nack_fn=lambda t: nack_called.append(t),
         _extend_fn=lambda t: extend_called.append(t),
@@ -105,14 +106,14 @@ def test_message_lifecycle_methods_delegate_to_callbacks() -> None:
     assert extend_called == [60]
 
 
-def test_message_reply_without_reply_to_raises() -> None:
+def test_message_reply_without_reply_to_raises(clock: FakeClock) -> None:
     """Message.reply() raises ReplyNotAvailableError when no reply_to."""
     msg: Message[str, str] = Message(
         id="msg-1",
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.now(),
         reply_to=None,
     )
 
@@ -120,7 +121,7 @@ def test_message_reply_without_reply_to_raises() -> None:
         msg.reply("response")
 
 
-def test_message_reply_after_acknowledge_raises() -> None:
+def test_message_reply_after_acknowledge_raises(clock: FakeClock) -> None:
     """Message.reply() raises MessageFinalizedError after acknowledge."""
     responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
     msg: Message[str, str] = Message(
@@ -128,7 +129,7 @@ def test_message_reply_after_acknowledge_raises() -> None:
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.now(),
         reply_to=responses,
     )
 
@@ -138,7 +139,7 @@ def test_message_reply_after_acknowledge_raises() -> None:
         msg.reply("response")
 
 
-def test_message_reply_after_nack_raises() -> None:
+def test_message_reply_after_nack_raises(clock: FakeClock) -> None:
     """Message.reply() raises MessageFinalizedError after nack."""
     responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
     msg: Message[str, str] = Message(
@@ -146,7 +147,7 @@ def test_message_reply_after_nack_raises() -> None:
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.now(),
         reply_to=responses,
     )
 
@@ -156,7 +157,7 @@ def test_message_reply_after_nack_raises() -> None:
         msg.reply("response")
 
 
-def test_message_reply_success() -> None:
+def test_message_reply_success(clock: FakeClock) -> None:
     """Message.reply() sends to reply_to destination."""
     responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
 
@@ -165,7 +166,7 @@ def test_message_reply_success() -> None:
         body="hello",
         receipt_handle="handle-1",
         delivery_count=1,
-        enqueued_at=time.time(),  # type: ignore[arg-type]
+        enqueued_at=clock.now(),
         reply_to=responses,
     )
 
@@ -183,9 +184,9 @@ def test_message_reply_success() -> None:
 class TestInMemoryMailbox:  # noqa: PLR0904
     """Tests for InMemoryMailbox implementation."""
 
-    def test_send_returns_message_id(self) -> None:
+    def test_send_returns_message_id(self, clock: FakeClock) -> None:
         """send() returns a unique message ID."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             msg_id = mailbox.send("hello")
             assert isinstance(msg_id, str)
@@ -193,9 +194,11 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_send_and_receive_basic(self) -> None:
+    def test_send_and_receive_basic(self, clock: FakeClock) -> None:
         """Basic send and receive workflow."""
-        mailbox: InMemoryMailbox[_Event, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[_Event, None] = InMemoryMailbox(
+            name="test", clock=clock
+        )
         try:
             event = _Event(data="test-data")
             mailbox.send(event)
@@ -207,10 +210,12 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_send_with_reply_to(self) -> None:
+    def test_send_with_reply_to(self, clock: FakeClock) -> None:
         """send() accepts reply_to parameter."""
-        mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
-        responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
+        mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test", clock=clock)
+        responses: InMemoryMailbox[str, None] = InMemoryMailbox(
+            name="responses", clock=clock
+        )
         try:
             mailbox.send("hello", reply_to=responses)
             messages = mailbox.receive(max_messages=1)
@@ -220,18 +225,18 @@ class TestInMemoryMailbox:  # noqa: PLR0904
             mailbox.close()
             responses.close()
 
-    def test_receive_empty_queue(self) -> None:
+    def test_receive_empty_queue(self, clock: FakeClock) -> None:
         """receive() returns empty list when queue is empty."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             messages = mailbox.receive(max_messages=1)
             assert messages == []
         finally:
             mailbox.close()
 
-    def test_receive_max_messages(self) -> None:
+    def test_receive_max_messages(self, clock: FakeClock) -> None:
         """receive() respects max_messages limit."""
-        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             for i in range(5):
                 mailbox.send(i)
@@ -242,9 +247,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_receive_fifo_order(self) -> None:
+    def test_receive_fifo_order(self, clock: FakeClock) -> None:
         """Messages are received in FIFO order."""
-        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             for i in range(3):
                 mailbox.send(i)
@@ -254,9 +259,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_acknowledge_removes_message(self) -> None:
+    def test_acknowledge_removes_message(self, clock: FakeClock) -> None:
         """acknowledge() removes message from queue."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -267,9 +272,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_acknowledge_expired_handle_raises(self) -> None:
+    def test_acknowledge_expired_handle_raises(self, clock: FakeClock) -> None:
         """acknowledge() raises ReceiptHandleExpiredError for invalid handle."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -280,9 +285,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_nack_returns_message_to_queue(self) -> None:
+    def test_nack_returns_message_to_queue(self, clock: FakeClock) -> None:
         """nack() returns message to queue for redelivery."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -296,9 +301,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_nack_expired_handle_raises(self) -> None:
+    def test_nack_expired_handle_raises(self, clock: FakeClock) -> None:
         """nack() raises ReceiptHandleExpiredError for invalid handle."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -309,9 +314,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_extend_visibility_expired_handle_raises(self) -> None:
+    def test_extend_visibility_expired_handle_raises(self, clock: FakeClock) -> None:
         """extend_visibility() raises ReceiptHandleExpiredError for invalid handle."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -322,28 +327,30 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_visibility_timeout_requeues_message(self) -> None:
+    def test_visibility_timeout_requeues_message(self, clock: FakeClock) -> None:
         """Message is requeued after visibility timeout expires."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1, visibility_timeout=1)
             assert len(messages) == 1
 
-            # Wait for visibility timeout to expire
-            time.sleep(1.2)
+            # Advance time past visibility timeout
+            clock.advance(1.2)
+            # Trigger reaper check (reaper thread uses real time, not FakeClock)
+            mailbox._reap_expired()
 
             # Message should be available again
-            messages = mailbox.receive(max_messages=1)
+            messages = mailbox.receive(max_messages=1, wait_time_seconds=0)
             assert len(messages) == 1
             assert messages[0].body == "hello"
             assert messages[0].delivery_count == 2
         finally:
             mailbox.close()
 
-    def test_purge_removes_all_messages(self) -> None:
+    def test_purge_removes_all_messages(self, clock: FakeClock) -> None:
         """purge() removes all messages from queue."""
-        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             for i in range(5):
                 mailbox.send(i)
@@ -354,9 +361,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_approximate_count(self) -> None:
+    def test_approximate_count(self, clock: FakeClock) -> None:
         """approximate_count() returns correct message count."""
-        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             assert mailbox.approximate_count() == 0
 
@@ -369,9 +376,11 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_max_size_enforced(self) -> None:
+    def test_max_size_enforced(self, clock: FakeClock) -> None:
         """MailboxFullError raised when max_size exceeded."""
-        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test", max_size=2)
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(
+            name="test", max_size=2, clock=clock
+        )
         try:
             mailbox.send(1)
             mailbox.send(2)
@@ -381,9 +390,10 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_long_poll_wait_time(self) -> None:
+    @pytest.mark.allow_system_clock
+    def test_long_poll_wait_time(self, clock: FakeClock) -> None:
         """wait_time_seconds blocks until message arrives."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
 
             def sender() -> None:
@@ -405,9 +415,12 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_long_poll_timeout(self) -> None:
+    @pytest.mark.allow_system_clock
+    def test_long_poll_timeout(self, clock: Clock) -> None:
         """wait_time_seconds returns empty on timeout."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        # Uses SystemClock because this test relies on real blocking behavior
+        # in InMemoryMailbox.receive() which waits on threading.Condition
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             start = time.monotonic()
             messages = mailbox.receive(max_messages=1, wait_time_seconds=0.2)
@@ -418,9 +431,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_thread_safety(self) -> None:
+    def test_thread_safety(self, clock: FakeClock) -> None:
         """Mailbox is thread-safe for concurrent access."""
-        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[int, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             num_messages = 100
             num_threads = 4
@@ -467,9 +480,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_message_enqueued_at(self) -> None:
+    def test_message_enqueued_at(self, clock: FakeClock) -> None:
         """Message enqueued_at is set correctly."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1)
@@ -477,10 +490,14 @@ class TestInMemoryMailbox:  # noqa: PLR0904
         finally:
             mailbox.close()
 
-    def test_reply_with_mailbox_reference(self) -> None:
+    def test_reply_with_mailbox_reference(self, clock: FakeClock) -> None:
         """Message.reply() sends directly to reply_to mailbox."""
-        responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
-        requests: InMemoryMailbox[str, str] = InMemoryMailbox(name="requests")
+        responses: InMemoryMailbox[str, None] = InMemoryMailbox(
+            name="responses", clock=clock
+        )
+        requests: InMemoryMailbox[str, str] = InMemoryMailbox(
+            name="requests", clock=clock
+        )
         try:
             requests.send("hello", reply_to=responses)
             messages = requests.receive(max_messages=1)
@@ -499,10 +516,14 @@ class TestInMemoryMailbox:  # noqa: PLR0904
             requests.close()
             responses.close()
 
-    def test_reply_sends_directly_to_mailbox(self) -> None:
+    def test_reply_sends_directly_to_mailbox(self, clock: FakeClock) -> None:
         """Reply sends directly to the reply_to mailbox reference."""
-        requests: InMemoryMailbox[str, str] = InMemoryMailbox(name="requests")
-        responses: InMemoryMailbox[str, None] = InMemoryMailbox(name="responses")
+        requests: InMemoryMailbox[str, str] = InMemoryMailbox(
+            name="requests", clock=clock
+        )
+        responses: InMemoryMailbox[str, None] = InMemoryMailbox(
+            name="responses", clock=clock
+        )
         try:
             # Send with reply_to mailbox reference
             requests.send("hello", reply_to=responses)
@@ -521,9 +542,9 @@ class TestInMemoryMailbox:  # noqa: PLR0904
             requests.close()
             responses.close()
 
-    def test_reply_without_reply_to_raises(self) -> None:
+    def test_reply_without_reply_to_raises(self, clock: FakeClock) -> None:
         """Message.reply() raises when no reply_to specified."""
-        mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, str] = InMemoryMailbox(name="test", clock=clock)
         try:
             # Send without reply_to
             mailbox.send("hello")
@@ -543,27 +564,27 @@ class TestInMemoryMailbox:  # noqa: PLR0904
 class TestNullMailbox:
     """Tests for NullMailbox implementation."""
 
-    def test_send_returns_id(self) -> None:
+    def test_send_returns_id(self, clock: FakeClock) -> None:
         """send() returns a message ID even though message is dropped."""
         mailbox: NullMailbox[str, None] = NullMailbox()
         msg_id = mailbox.send("hello")
         assert isinstance(msg_id, str)
         assert len(msg_id) > 0
 
-    def test_receive_always_empty(self) -> None:
+    def test_receive_always_empty(self, clock: FakeClock) -> None:
         """receive() always returns empty list."""
         mailbox: NullMailbox[str, None] = NullMailbox()
         mailbox.send("hello")
         mailbox.send("world")
         assert mailbox.receive(max_messages=10) == []
 
-    def test_purge_returns_zero(self) -> None:
+    def test_purge_returns_zero(self, clock: FakeClock) -> None:
         """purge() returns zero (nothing to purge)."""
         mailbox: NullMailbox[str, None] = NullMailbox()
         mailbox.send("hello")
         assert mailbox.purge() == 0
 
-    def test_approximate_count_zero(self) -> None:
+    def test_approximate_count_zero(self, clock: FakeClock) -> None:
         """approximate_count() always returns zero."""
         mailbox: NullMailbox[str, None] = NullMailbox()
         mailbox.send("hello")
@@ -578,7 +599,7 @@ class TestNullMailbox:
 class TestCollectingMailbox:
     """Tests for CollectingMailbox implementation."""
 
-    def test_send_collects_messages(self) -> None:
+    def test_send_collects_messages(self, clock: FakeClock) -> None:
         """send() stores messages in sent list."""
         mailbox: CollectingMailbox[_Event, None] = CollectingMailbox()
         event1 = _Event(data="first")
@@ -590,13 +611,13 @@ class TestCollectingMailbox:
         assert mailbox.sent[0] == event1
         assert mailbox.sent[1] == event2
 
-    def test_receive_always_empty(self) -> None:
+    def test_receive_always_empty(self, clock: FakeClock) -> None:
         """receive() returns empty (collecting only)."""
         mailbox: CollectingMailbox[str, None] = CollectingMailbox()
         mailbox.send("hello")
         assert mailbox.receive(max_messages=10) == []
 
-    def test_purge_clears_collected(self) -> None:
+    def test_purge_clears_collected(self, clock: FakeClock) -> None:
         """purge() clears all collected messages."""
         mailbox: CollectingMailbox[str, None] = CollectingMailbox()
         mailbox.send("hello")
@@ -606,7 +627,7 @@ class TestCollectingMailbox:
         assert count == 2
         assert mailbox.sent == []
 
-    def test_approximate_count(self) -> None:
+    def test_approximate_count(self, clock: FakeClock) -> None:
         """approximate_count() returns number of collected messages."""
         mailbox: CollectingMailbox[str, None] = CollectingMailbox()
         assert mailbox.approximate_count() == 0
@@ -622,9 +643,9 @@ class TestCollectingMailbox:
 class TestFakeMailbox:
     """Tests for FakeMailbox implementation."""
 
-    def test_basic_send_receive(self) -> None:
+    def test_basic_send_receive(self, clock: FakeClock) -> None:
         """Basic send and receive workflow."""
-        mailbox: FakeMailbox[_Event, None] = FakeMailbox()
+        mailbox: FakeMailbox[_Event, None] = FakeMailbox(clock=clock)
         event = _Event(data="test")
         mailbox.send(event)
 
@@ -633,18 +654,18 @@ class TestFakeMailbox:
         assert messages[0].body == event
         assert messages[0].delivery_count == 1
 
-    def test_acknowledge(self) -> None:
+    def test_acknowledge(self, clock: FakeClock) -> None:
         """acknowledge() removes message."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].acknowledge()
 
         assert mailbox.approximate_count() == 0
 
-    def test_nack_requeues(self) -> None:
+    def test_nack_requeues(self, clock: FakeClock) -> None:
         """nack() returns message to queue."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].nack(visibility_timeout=0)
@@ -653,9 +674,9 @@ class TestFakeMailbox:
         assert len(messages) == 1
         assert messages[0].delivery_count == 2
 
-    def test_expire_handle(self) -> None:
+    def test_expire_handle(self, clock: FakeClock) -> None:
         """expire_handle() causes ReceiptHandleExpiredError on acknowledge."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
@@ -664,9 +685,9 @@ class TestFakeMailbox:
         with pytest.raises(ReceiptHandleExpiredError):
             messages[0].acknowledge()
 
-    def test_expire_handle_affects_nack(self) -> None:
+    def test_expire_handle_affects_nack(self, clock: FakeClock) -> None:
         """expire_handle() causes ReceiptHandleExpiredError on nack."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
@@ -675,9 +696,9 @@ class TestFakeMailbox:
         with pytest.raises(ReceiptHandleExpiredError):
             messages[0].nack()
 
-    def test_expire_handle_affects_extend(self) -> None:
+    def test_expire_handle_affects_extend(self, clock: FakeClock) -> None:
         """expire_handle() causes ReceiptHandleExpiredError on extend_visibility."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
@@ -686,43 +707,43 @@ class TestFakeMailbox:
         with pytest.raises(ReceiptHandleExpiredError):
             messages[0].extend_visibility(60)
 
-    def test_set_connection_error_affects_send(self) -> None:
+    def test_set_connection_error_affects_send(self, clock: FakeClock) -> None:
         """set_connection_error() causes error on send."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         error = MailboxConnectionError("Redis down")
         mailbox.set_connection_error(error)
 
         with pytest.raises(MailboxConnectionError, match="Redis down"):
             mailbox.send("hello")
 
-    def test_set_connection_error_affects_receive(self) -> None:
+    def test_set_connection_error_affects_receive(self, clock: FakeClock) -> None:
         """set_connection_error() causes error on receive."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         mailbox.set_connection_error(MailboxConnectionError("Redis down"))
 
         with pytest.raises(MailboxConnectionError):
             mailbox.receive(max_messages=1)
 
-    def test_set_connection_error_affects_purge(self) -> None:
+    def test_set_connection_error_affects_purge(self, clock: FakeClock) -> None:
         """set_connection_error() causes error on purge."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.set_connection_error(MailboxConnectionError("Redis down"))
 
         with pytest.raises(MailboxConnectionError):
             mailbox.purge()
 
-    def test_set_connection_error_affects_count(self) -> None:
+    def test_set_connection_error_affects_count(self, clock: FakeClock) -> None:
         """set_connection_error() causes error on approximate_count."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.set_connection_error(MailboxConnectionError("Redis down"))
 
         with pytest.raises(MailboxConnectionError):
             mailbox.approximate_count()
 
-    def test_clear_connection_error(self) -> None:
+    def test_clear_connection_error(self, clock: FakeClock) -> None:
         """clear_connection_error() removes pending error."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.set_connection_error(MailboxConnectionError("Redis down"))
         mailbox.clear_connection_error()
 
@@ -730,9 +751,9 @@ class TestFakeMailbox:
         mailbox.send("hello")
         assert mailbox.approximate_count() == 1
 
-    def test_inject_message(self) -> None:
+    def test_inject_message(self, clock: FakeClock) -> None:
         """inject_message() adds message directly to queue."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         msg_id = mailbox.inject_message("injected", delivery_count=3)
 
         messages = mailbox.receive(max_messages=1)
@@ -741,17 +762,17 @@ class TestFakeMailbox:
         assert messages[0].id == msg_id
         assert messages[0].delivery_count == 4  # 3 + 1 for this receive
 
-    def test_inject_message_with_custom_id(self) -> None:
+    def test_inject_message_with_custom_id(self, clock: FakeClock) -> None:
         """inject_message() respects custom message ID."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.inject_message("test", msg_id="custom-id")
 
         messages = mailbox.receive(max_messages=1)
         assert messages[0].id == "custom-id"
 
-    def test_acknowledge_unknown_handle_raises(self) -> None:
+    def test_acknowledge_unknown_handle_raises(self, clock: FakeClock) -> None:
         """acknowledge() raises for unknown (not expired) handle."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].acknowledge()  # First acknowledge succeeds
@@ -760,9 +781,9 @@ class TestFakeMailbox:
         with pytest.raises(ReceiptHandleExpiredError, match="not found"):
             messages[0].acknowledge()
 
-    def test_nack_unknown_handle_raises(self) -> None:
+    def test_nack_unknown_handle_raises(self, clock: FakeClock) -> None:
         """nack() raises for unknown (not expired) handle."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].acknowledge()  # Remove from invisible
@@ -770,9 +791,9 @@ class TestFakeMailbox:
         with pytest.raises(ReceiptHandleExpiredError, match="not found"):
             messages[0].nack()
 
-    def test_extend_unknown_handle_raises(self) -> None:
+    def test_extend_unknown_handle_raises(self, clock: FakeClock) -> None:
         """extend_visibility() raises for unknown (not expired) handle."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
         messages[0].acknowledge()  # Remove from invisible
@@ -780,9 +801,9 @@ class TestFakeMailbox:
         with pytest.raises(ReceiptHandleExpiredError, match="not found"):
             messages[0].extend_visibility(60)
 
-    def test_extend_visibility_success(self) -> None:
+    def test_extend_visibility_success(self, clock: FakeClock) -> None:
         """extend_visibility() succeeds for valid handle."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         messages = mailbox.receive(max_messages=1)
 
@@ -794,9 +815,9 @@ class TestFakeMailbox:
         messages[0].acknowledge()
         assert mailbox.approximate_count() == 0
 
-    def test_purge_without_connection_error(self) -> None:
+    def test_purge_without_connection_error(self, clock: FakeClock) -> None:
         """purge() works normally without connection error."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
         mailbox.send("world")
 
@@ -804,17 +825,17 @@ class TestFakeMailbox:
         assert count == 2
         assert mailbox.approximate_count() == 0
 
-    def test_send_with_reply_to(self) -> None:
+    def test_send_with_reply_to(self, clock: FakeClock) -> None:
         """send() accepts reply_to parameter."""
-        mailbox: FakeMailbox[str, str] = FakeMailbox()
+        mailbox: FakeMailbox[str, str] = FakeMailbox(clock=clock)
         responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
         mailbox.send("hello", reply_to=responses)
         messages = mailbox.receive(max_messages=1)
         assert messages[0].reply_to is responses
 
-    def test_inject_message_with_reply_to(self) -> None:
+    def test_inject_message_with_reply_to(self, clock: FakeClock) -> None:
         """inject_message() accepts reply_to parameter."""
-        mailbox: FakeMailbox[str, str] = FakeMailbox()
+        mailbox: FakeMailbox[str, str] = FakeMailbox(clock=clock)
         responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
         mailbox.inject_message("test", reply_to=responses)
         messages = mailbox.receive(max_messages=1)
@@ -826,9 +847,9 @@ class TestFakeMailbox:
 # =============================================================================
 
 
-def test_fake_mailbox_reply_without_reply_to_raises() -> None:
+def test_fake_mailbox_reply_without_reply_to_raises(clock: FakeClock) -> None:
     """FakeMailbox Message.reply() raises when no reply_to specified."""
-    mailbox: FakeMailbox[str, str] = FakeMailbox(name="test")
+    mailbox: FakeMailbox[str, str] = FakeMailbox(name="test", clock=clock)
     # Send without reply_to
     mailbox.send("hello")
     messages = mailbox.receive(max_messages=1)
@@ -837,9 +858,9 @@ def test_fake_mailbox_reply_without_reply_to_raises() -> None:
         messages[0].reply("response")
 
 
-def test_fake_mailbox_reply_sends_to_mailbox() -> None:
+def test_fake_mailbox_reply_sends_to_mailbox(clock: FakeClock) -> None:
     """FakeMailbox reply sends to the reply_to mailbox."""
-    mailbox: FakeMailbox[str, str] = FakeMailbox(name="test")
+    mailbox: FakeMailbox[str, str] = FakeMailbox(name="test", clock=clock)
     responses: CollectingMailbox[str, None] = CollectingMailbox(name="responses")
     mailbox.send("hello", reply_to=responses)
     messages = mailbox.receive(max_messages=1)
@@ -860,9 +881,9 @@ def test_fake_mailbox_reply_sends_to_mailbox() -> None:
 class TestInMemoryMailboxCoverage:
     """Additional tests for InMemoryMailbox coverage."""
 
-    def test_extend_visibility_success(self) -> None:
+    def test_extend_visibility_success(self, clock: FakeClock) -> None:
         """extend_visibility() extends timeout for valid handle."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(max_messages=1, visibility_timeout=1)
@@ -871,12 +892,14 @@ class TestInMemoryMailboxCoverage:
             # Extend visibility
             messages[0].extend_visibility(60)
 
-            # Wait for original timeout to pass
-            time.sleep(1.2)
+            # Advance time past original timeout
+            clock.advance(1.2)
+            # Trigger reaper check (reaper thread uses real time, not FakeClock)
+            mailbox._reap_expired()
 
             # Message should still be invisible (not requeued)
             assert mailbox.approximate_count() == 1
-            new_messages = mailbox.receive(max_messages=1)
+            new_messages = mailbox.receive(max_messages=1, wait_time_seconds=0)
             assert len(new_messages) == 0  # Still invisible
 
             # Acknowledge to clean up
@@ -890,30 +913,30 @@ class TestInMemoryMailboxCoverage:
 # =============================================================================
 
 
-def test_in_memory_mailbox_is_mailbox() -> None:
+def test_in_memory_mailbox_is_mailbox(clock: FakeClock) -> None:
     """InMemoryMailbox implements Mailbox protocol."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(clock=clock)
     try:
         assert isinstance(mailbox, Mailbox)
     finally:
         mailbox.close()
 
 
-def test_null_mailbox_is_mailbox() -> None:
+def test_null_mailbox_is_mailbox(clock: FakeClock) -> None:
     """NullMailbox implements Mailbox protocol."""
     mailbox: NullMailbox[str, None] = NullMailbox()
     assert isinstance(mailbox, Mailbox)
 
 
-def test_collecting_mailbox_is_mailbox() -> None:
+def test_collecting_mailbox_is_mailbox(clock: FakeClock) -> None:
     """CollectingMailbox implements Mailbox protocol."""
     mailbox: CollectingMailbox[str, None] = CollectingMailbox()
     assert isinstance(mailbox, Mailbox)
 
 
-def test_fake_mailbox_is_mailbox() -> None:
+def test_fake_mailbox_is_mailbox(clock: FakeClock) -> None:
     """FakeMailbox implements Mailbox protocol."""
-    mailbox: FakeMailbox[str, None] = FakeMailbox()
+    mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
     assert isinstance(mailbox, Mailbox)
 
 
@@ -922,25 +945,25 @@ def test_fake_mailbox_is_mailbox() -> None:
 # =============================================================================
 
 
-def test_in_memory_mailbox_closed_initially_false() -> None:
+def test_in_memory_mailbox_closed_initially_false(clock: FakeClock) -> None:
     """InMemoryMailbox.closed is False initially."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(clock=clock)
     try:
         assert mailbox.closed is False
     finally:
         mailbox.close()
 
 
-def test_in_memory_mailbox_closed_after_close() -> None:
+def test_in_memory_mailbox_closed_after_close(clock: FakeClock) -> None:
     """InMemoryMailbox.closed is True after close()."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(clock=clock)
     mailbox.close()
     assert mailbox.closed is True
 
 
-def test_in_memory_mailbox_receive_returns_empty_when_closed() -> None:
+def test_in_memory_mailbox_receive_returns_empty_when_closed(clock: FakeClock) -> None:
     """InMemoryMailbox.receive() returns empty when closed."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(clock=clock)
     mailbox.send("test")
     mailbox.close()
 
@@ -949,9 +972,10 @@ def test_in_memory_mailbox_receive_returns_empty_when_closed() -> None:
     assert len(messages) == 0
 
 
-def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
+@pytest.mark.allow_system_clock
+def test_in_memory_mailbox_close_wakes_blocked_receivers(clock: FakeClock) -> None:
     """InMemoryMailbox.close() wakes receivers blocked on wait."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox()
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(clock=clock)
     received: list[bool] = []
 
     def receiver() -> None:
@@ -974,41 +998,41 @@ def test_in_memory_mailbox_close_wakes_blocked_receivers() -> None:
     assert len(received) == 1
 
 
-def test_null_mailbox_closed_initially_false() -> None:
+def test_null_mailbox_closed_initially_false(clock: FakeClock) -> None:
     """NullMailbox.closed is False initially."""
     mailbox: NullMailbox[str, None] = NullMailbox()
     assert mailbox.closed is False
 
 
-def test_null_mailbox_closed_after_close() -> None:
+def test_null_mailbox_closed_after_close(clock: FakeClock) -> None:
     """NullMailbox.closed is True after close()."""
     mailbox: NullMailbox[str, None] = NullMailbox()
     mailbox.close()
     assert mailbox.closed is True
 
 
-def test_collecting_mailbox_closed_initially_false() -> None:
+def test_collecting_mailbox_closed_initially_false(clock: FakeClock) -> None:
     """CollectingMailbox.closed is False initially."""
     mailbox: CollectingMailbox[str, None] = CollectingMailbox()
     assert mailbox.closed is False
 
 
-def test_collecting_mailbox_closed_after_close() -> None:
+def test_collecting_mailbox_closed_after_close(clock: FakeClock) -> None:
     """CollectingMailbox.closed is True after close()."""
     mailbox: CollectingMailbox[str, None] = CollectingMailbox()
     mailbox.close()
     assert mailbox.closed is True
 
 
-def test_fake_mailbox_closed_initially_false() -> None:
+def test_fake_mailbox_closed_initially_false(clock: FakeClock) -> None:
     """FakeMailbox.closed is False initially."""
-    mailbox: FakeMailbox[str, None] = FakeMailbox()
+    mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
     assert mailbox.closed is False
 
 
-def test_fake_mailbox_closed_after_close() -> None:
+def test_fake_mailbox_closed_after_close(clock: FakeClock) -> None:
     """FakeMailbox.closed is True after close()."""
-    mailbox: FakeMailbox[str, None] = FakeMailbox()
+    mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
     mailbox.close()
     assert mailbox.closed is True
 
@@ -1018,9 +1042,9 @@ def test_fake_mailbox_closed_after_close() -> None:
 # =============================================================================
 
 
-def test_registry_resolver_resolve() -> None:
+def test_registry_resolver_resolve(clock: FakeClock) -> None:
     """RegistryResolver.resolve() returns registered mailbox."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
     try:
         resolver = RegistryResolver[str]({"test": mailbox})
         resolved = resolver.resolve("test")
@@ -1029,9 +1053,9 @@ def test_registry_resolver_resolve() -> None:
         mailbox.close()
 
 
-def test_registry_resolver_resolve_optional() -> None:
+def test_registry_resolver_resolve_optional(clock: FakeClock) -> None:
     """RegistryResolver.resolve_optional() returns None for unknown."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
     try:
         resolver = RegistryResolver[str]({"test": mailbox})
         assert resolver.resolve_optional("unknown") is None
@@ -1040,9 +1064,9 @@ def test_registry_resolver_resolve_optional() -> None:
         mailbox.close()
 
 
-def test_registry_resolver_resolve_raises_on_unknown() -> None:
+def test_registry_resolver_resolve_raises_on_unknown(clock: FakeClock) -> None:
     """RegistryResolver.resolve() raises MailboxResolutionError for unknown identifier."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
     try:
         resolver = RegistryResolver[str]({"test": mailbox})
         with pytest.raises(MailboxResolutionError) as exc_info:
@@ -1053,9 +1077,9 @@ def test_registry_resolver_resolve_raises_on_unknown() -> None:
         mailbox.close()
 
 
-def test_composite_resolver_resolve_from_registry() -> None:
+def test_composite_resolver_resolve_from_registry(clock: FakeClock) -> None:
     """CompositeResolver.resolve() returns mailbox from registry."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
     try:
         resolver = CompositeResolver[str](registry={"test": mailbox}, factory=None)
         resolved = resolver.resolve("test")
@@ -1064,9 +1088,9 @@ def test_composite_resolver_resolve_from_registry() -> None:
         mailbox.close()
 
 
-def test_composite_resolver_resolve_raises_without_factory() -> None:
+def test_composite_resolver_resolve_raises_without_factory(clock: FakeClock) -> None:
     """CompositeResolver.resolve() raises when identifier not in registry and no factory."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
     try:
         resolver = CompositeResolver[str](registry={"test": mailbox}, factory=None)
         with pytest.raises(MailboxResolutionError) as exc_info:
@@ -1076,9 +1100,11 @@ def test_composite_resolver_resolve_raises_without_factory() -> None:
         mailbox.close()
 
 
-def test_composite_resolver_resolve_uses_factory() -> None:
+def test_composite_resolver_resolve_uses_factory(clock: FakeClock) -> None:
     """CompositeResolver.resolve() uses factory for unknown identifiers."""
-    created_mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="created")
+    created_mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(
+        name="created", clock=clock
+    )
 
     class _TestFactory(MailboxFactory[str]):
         def create(self, identifier: str) -> Mailbox[str, None]:
@@ -1092,9 +1118,9 @@ def test_composite_resolver_resolve_uses_factory() -> None:
         created_mailbox.close()
 
 
-def test_composite_resolver_resolve_optional_from_registry() -> None:
+def test_composite_resolver_resolve_optional_from_registry(clock: FakeClock) -> None:
     """CompositeResolver.resolve_optional() returns mailbox from registry."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
     try:
         resolver = CompositeResolver[str](registry={"test": mailbox}, factory=None)
         resolved = resolver.resolve_optional("test")
@@ -1103,9 +1129,11 @@ def test_composite_resolver_resolve_optional_from_registry() -> None:
         mailbox.close()
 
 
-def test_composite_resolver_resolve_optional_none_without_factory() -> None:
+def test_composite_resolver_resolve_optional_none_without_factory(
+    clock: FakeClock,
+) -> None:
     """CompositeResolver.resolve_optional() returns None when no factory and not in registry."""
-    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+    mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
     try:
         resolver = CompositeResolver[str](registry={"test": mailbox}, factory=None)
         assert resolver.resolve_optional("unknown") is None
@@ -1113,9 +1141,11 @@ def test_composite_resolver_resolve_optional_none_without_factory() -> None:
         mailbox.close()
 
 
-def test_composite_resolver_resolve_optional_uses_factory() -> None:
+def test_composite_resolver_resolve_optional_uses_factory(clock: FakeClock) -> None:
     """CompositeResolver.resolve_optional() uses factory for unknown identifiers."""
-    created_mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="created")
+    created_mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(
+        name="created", clock=clock
+    )
 
     class _TestFactory(MailboxFactory[str]):
         def create(self, identifier: str) -> Mailbox[str, None]:
@@ -1129,7 +1159,9 @@ def test_composite_resolver_resolve_optional_uses_factory() -> None:
         created_mailbox.close()
 
 
-def test_composite_resolver_resolve_optional_catches_resolution_error() -> None:
+def test_composite_resolver_resolve_optional_catches_resolution_error(
+    clock: FakeClock,
+) -> None:
     """CompositeResolver.resolve_optional() returns None when factory raises MailboxResolutionError."""
 
     class _FailingFactory(MailboxFactory[str]):
@@ -1151,9 +1183,9 @@ from weakincentives.runtime.mailbox import InvalidParameterError  # noqa: E402
 class TestParameterValidation:
     """Tests for timeout parameter validation."""
 
-    def test_receive_negative_visibility_timeout_raises(self) -> None:
+    def test_receive_negative_visibility_timeout_raises(self, clock: FakeClock) -> None:
         """receive() raises InvalidParameterError for negative visibility_timeout."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             with pytest.raises(
                 InvalidParameterError, match="visibility_timeout must be non-negative"
@@ -1162,18 +1194,20 @@ class TestParameterValidation:
         finally:
             mailbox.close()
 
-    def test_receive_excessive_visibility_timeout_raises(self) -> None:
+    def test_receive_excessive_visibility_timeout_raises(
+        self, clock: FakeClock
+    ) -> None:
         """receive() raises InvalidParameterError for visibility_timeout > 43200."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             with pytest.raises(InvalidParameterError, match="must be at most 43200"):
                 mailbox.receive(visibility_timeout=43201)
         finally:
             mailbox.close()
 
-    def test_receive_negative_wait_time_raises(self) -> None:
+    def test_receive_negative_wait_time_raises(self, clock: FakeClock) -> None:
         """receive() raises InvalidParameterError for negative wait_time_seconds."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             with pytest.raises(
                 InvalidParameterError, match="wait_time_seconds must be non-negative"
@@ -1182,9 +1216,9 @@ class TestParameterValidation:
         finally:
             mailbox.close()
 
-    def test_receive_zero_visibility_timeout_allowed(self) -> None:
+    def test_receive_zero_visibility_timeout_allowed(self, clock: FakeClock) -> None:
         """receive() allows visibility_timeout=0."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(visibility_timeout=0)
@@ -1192,9 +1226,9 @@ class TestParameterValidation:
         finally:
             mailbox.close()
 
-    def test_receive_max_visibility_timeout_allowed(self) -> None:
+    def test_receive_max_visibility_timeout_allowed(self, clock: FakeClock) -> None:
         """receive() allows visibility_timeout=43200 (max value)."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive(visibility_timeout=43200)
@@ -1203,9 +1237,9 @@ class TestParameterValidation:
         finally:
             mailbox.close()
 
-    def test_nack_negative_visibility_timeout_raises(self) -> None:
+    def test_nack_negative_visibility_timeout_raises(self, clock: FakeClock) -> None:
         """nack() raises InvalidParameterError for negative visibility_timeout."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive()
@@ -1216,9 +1250,9 @@ class TestParameterValidation:
         finally:
             mailbox.close()
 
-    def test_nack_excessive_visibility_timeout_raises(self) -> None:
+    def test_nack_excessive_visibility_timeout_raises(self, clock: FakeClock) -> None:
         """nack() raises InvalidParameterError for visibility_timeout > 43200."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive()
@@ -1227,9 +1261,9 @@ class TestParameterValidation:
         finally:
             mailbox.close()
 
-    def test_extend_visibility_negative_timeout_raises(self) -> None:
+    def test_extend_visibility_negative_timeout_raises(self, clock: FakeClock) -> None:
         """extend_visibility() raises InvalidParameterError for negative timeout."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive()
@@ -1240,9 +1274,9 @@ class TestParameterValidation:
         finally:
             mailbox.close()
 
-    def test_extend_visibility_excessive_timeout_raises(self) -> None:
+    def test_extend_visibility_excessive_timeout_raises(self, clock: FakeClock) -> None:
         """extend_visibility() raises InvalidParameterError for timeout > 43200."""
-        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test")
+        mailbox: InMemoryMailbox[str, None] = InMemoryMailbox(name="test", clock=clock)
         try:
             mailbox.send("hello")
             messages = mailbox.receive()
@@ -1251,9 +1285,9 @@ class TestParameterValidation:
         finally:
             mailbox.close()
 
-    def test_fake_mailbox_receive_validates_parameters(self) -> None:
+    def test_fake_mailbox_receive_validates_parameters(self, clock: FakeClock) -> None:
         """FakeMailbox.receive() also validates parameters."""
-        mailbox: FakeMailbox[str, None] = FakeMailbox()
+        mailbox: FakeMailbox[str, None] = FakeMailbox(clock=clock)
         mailbox.send("hello")
 
         with pytest.raises(InvalidParameterError):
@@ -1271,9 +1305,9 @@ class TestParameterValidation:
 class TestInMemoryMailboxFactory:
     """Tests for InMemoryMailboxFactory."""
 
-    def test_factory_creates_mailbox(self) -> None:
+    def test_factory_creates_mailbox(self, clock: FakeClock) -> None:
         """Factory creates an InMemoryMailbox instance."""
-        factory: InMemoryMailboxFactory[str] = InMemoryMailboxFactory()
+        factory: InMemoryMailboxFactory[str] = InMemoryMailboxFactory(clock=clock)
         mailbox = factory.create("test-queue")
         try:
             assert mailbox.name == "test-queue"
@@ -1286,10 +1320,14 @@ class TestInMemoryMailboxFactory:
         finally:
             mailbox.close()
 
-    def test_factory_caches_mailbox_with_shared_registry(self) -> None:
+    def test_factory_caches_mailbox_with_shared_registry(
+        self, clock: FakeClock
+    ) -> None:
         """Factory caches mailbox when shared registry is provided."""
         registry: dict[str, Mailbox[str, None]] = {}
-        factory: InMemoryMailboxFactory[str] = InMemoryMailboxFactory(registry=registry)
+        factory: InMemoryMailboxFactory[str] = InMemoryMailboxFactory(
+            registry=registry, clock=clock
+        )
 
         mailbox1 = factory.create("test-queue")
         mailbox2 = factory.create("test-queue")

@@ -38,6 +38,7 @@ from weakincentives.runtime import (
     ShutdownCoordinator,
     wait_until,
 )
+from weakincentives.runtime.clock import Clock, FakeClock, SystemClock
 from weakincentives.runtime.session.protocols import SessionProtocol
 
 if TYPE_CHECKING:
@@ -136,7 +137,7 @@ class _TestLoop(MainLoop[_Request, _Output]):
     ) -> tuple[Prompt[_Output], Session]:
         _ = experiment
         prompt = Prompt(self._template).bind(_Params(content=request.message))
-        session = Session(tags={"loop": "test"})
+        session = Session(tags={"loop": "test"}, clock=FakeClock())
         return prompt, session
 
 
@@ -144,11 +145,12 @@ def _create_test_loop(
     *,
     delay: float = 0.0,
     error: Exception | None = None,
+    clock: FakeClock,
 ) -> _TestLoop:
     """Create a test MainLoop with mock adapter."""
     adapter = _MockAdapter(delay=delay, error=error)
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="dummy-requests")
+        InMemoryMailbox(name="dummy-requests", clock=clock)
     )
     return _TestLoop(adapter=adapter, requests=requests)
 
@@ -156,8 +158,9 @@ def _create_test_loop(
 class _MockRunnable:
     """Mock implementation of Runnable for testing LoopGroup."""
 
-    def __init__(self, *, run_delay: float = 0.0) -> None:
+    def __init__(self, *, run_delay: float = 0.0, clock: Clock | None = None) -> None:
         self._run_delay = run_delay
+        self._clock = clock
         self._shutdown_event = threading.Event()
         self._running = False
         self._lock = threading.Lock()
@@ -189,7 +192,7 @@ class _MockRunnable:
     def shutdown(self, *, timeout: float = 30.0) -> bool:
         self.shutdown_called = True
         self._shutdown_event.set()
-        return wait_until(lambda: not self.running, timeout=timeout)
+        return wait_until(lambda: not self.running, timeout=timeout, clock=self._clock)
 
     @property
     def running(self) -> bool:
@@ -213,7 +216,7 @@ class _MockRunnable:
 # =============================================================================
 
 
-def test_wait_until_returns_true_when_predicate_succeeds() -> None:
+def test_wait_until_returns_true_when_predicate_succeeds(clock: FakeClock) -> None:
     """wait_until returns True when predicate becomes True."""
     counter = {"value": 0}
 
@@ -226,13 +229,13 @@ def test_wait_until_returns_true_when_predicate_succeeds() -> None:
     assert counter["value"] >= 3
 
 
-def test_wait_until_returns_false_on_timeout() -> None:
+def test_wait_until_returns_false_on_timeout(clock: FakeClock) -> None:
     """wait_until returns False when timeout expires."""
     result = wait_until(lambda: False, timeout=0.1, poll_interval=0.01)
     assert result is False
 
 
-def test_wait_until_returns_immediately_if_predicate_true() -> None:
+def test_wait_until_returns_immediately_if_predicate_true(clock: FakeClock) -> None:
     """wait_until returns immediately if predicate is already True."""
     start = time.monotonic()
     result = wait_until(lambda: True, timeout=10.0, poll_interval=1.0)
@@ -383,10 +386,11 @@ def test_coordinator_signal_handler(reset_coordinator: None) -> None:
 # =============================================================================
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_runs_all_loops(reset_coordinator: None) -> None:
     """LoopGroup.run() starts all loops."""
     _ = reset_coordinator
-    loops = [_MockRunnable(run_delay=0.1) for _ in range(3)]
+    loops = [_MockRunnable(run_delay=0.1, clock=SystemClock()) for _ in range(3)]
     group = LoopGroup(loops=loops)
 
     # Run in background thread
@@ -439,6 +443,7 @@ def test_loop_group_context_manager(reset_coordinator: None) -> None:
     assert not thread.is_alive()
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_with_signals(reset_coordinator: None) -> None:
     """LoopGroup integrates with ShutdownCoordinator (main thread)."""
     _ = reset_coordinator
@@ -446,7 +451,7 @@ def test_loop_group_with_signals(reset_coordinator: None) -> None:
     # Pre-install coordinator to avoid signal handler issues
     coordinator = ShutdownCoordinator.install()
 
-    loops = [_MockRunnable(run_delay=0.05) for _ in range(2)]
+    loops = [_MockRunnable(run_delay=0.05, clock=SystemClock()) for _ in range(2)]
     group = LoopGroup(loops=loops)
 
     # Run in background thread with install_signals=True
@@ -468,8 +473,10 @@ def test_loop_group_with_signals(reset_coordinator: None) -> None:
 # =============================================================================
 
 
-def test_main_loop_shutdown_stops_loop() -> None:
+@pytest.mark.allow_system_clock
+def test_main_loop_shutdown_stops_loop(clock: FakeClock) -> None:
     """MainLoop.shutdown() stops the run loop."""
+    # Use SystemClock for this integration test since it uses real threading
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
@@ -496,10 +503,10 @@ def test_main_loop_shutdown_stops_loop() -> None:
         requests.close()
 
 
-def test_main_loop_shutdown_completes_in_flight() -> None:
+def test_main_loop_shutdown_completes_in_flight(clock: FakeClock) -> None:
     """MainLoop.shutdown() waits for in-flight message to complete."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
 
     try:
@@ -528,10 +535,10 @@ def test_main_loop_shutdown_completes_in_flight() -> None:
         requests.close()
 
 
-def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
+def test_main_loop_shutdown_nacks_unprocessed_messages(clock: FakeClock) -> None:
     """MainLoop.shutdown() nacks unprocessed messages from batch."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
 
     try:
@@ -561,10 +568,10 @@ def test_main_loop_shutdown_nacks_unprocessed_messages() -> None:
         requests.close()
 
 
-def test_main_loop_running_property() -> None:
+def test_main_loop_running_property(clock: FakeClock) -> None:
     """MainLoop.running property reflects loop state."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
 
     try:
@@ -589,8 +596,10 @@ def test_main_loop_running_property() -> None:
         requests.close()
 
 
-def test_main_loop_context_manager() -> None:
+@pytest.mark.allow_system_clock
+def test_main_loop_context_manager(clock: FakeClock) -> None:
     """MainLoop supports context manager protocol."""
+    # Use SystemClock for this integration test since it uses real threading
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
         InMemoryMailbox(name="requests")
     )
@@ -613,10 +622,10 @@ def test_main_loop_context_manager() -> None:
         requests.close()
 
 
-def test_main_loop_shutdown_timeout_returns_false() -> None:
+def test_main_loop_shutdown_timeout_returns_false(clock: FakeClock) -> None:
     """MainLoop.shutdown() returns False when timeout expires."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
 
     try:
@@ -645,10 +654,10 @@ def test_main_loop_shutdown_timeout_returns_false() -> None:
         pass
 
 
-def test_main_loop_can_restart_after_shutdown() -> None:
+def test_main_loop_can_restart_after_shutdown(clock: FakeClock) -> None:
     """MainLoop can run again after shutdown."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
 
     try:
@@ -669,7 +678,7 @@ def test_main_loop_can_restart_after_shutdown() -> None:
         requests.close()
 
 
-def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
+def test_main_loop_nacks_remaining_messages_on_shutdown(clock: FakeClock) -> None:
     """MainLoop nacks remaining messages in batch when shutdown is triggered mid-batch."""
     from collections.abc import Sequence
 
@@ -726,7 +735,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
                 wait_time_seconds=wait_time_seconds,
             )
 
-    requests = _MultiMessageMailbox(name="requests")
+    requests = _MultiMessageMailbox(name="requests", clock=clock)
 
     try:
         # Create a loop with a temporary adapter, then replace
@@ -753,7 +762,7 @@ def test_main_loop_nacks_remaining_messages_on_shutdown() -> None:
         requests.close()
 
 
-def test_main_loop_nacks_with_expired_receipt_handle() -> None:
+def test_main_loop_nacks_with_expired_receipt_handle(clock: FakeClock) -> None:
     """MainLoop handles expired receipt handle during shutdown nack."""
     from weakincentives.runtime.mailbox import Message, ReceiptHandleExpiredError
 
@@ -835,7 +844,7 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
         def nack(self, *, visibility_timeout: int = 0) -> None:
             raise ReceiptHandleExpiredError("Handle expired")
 
-    requests = _ExpiredNackMailbox(name="requests")
+    requests = _ExpiredNackMailbox(name="requests", clock=clock)
 
     try:
         temp_adapter = _MockAdapter()
@@ -866,10 +875,10 @@ def test_main_loop_nacks_with_expired_receipt_handle() -> None:
 # =============================================================================
 
 
-def test_main_loop_implements_runnable() -> None:
+def test_main_loop_implements_runnable(clock: FakeClock) -> None:
     """MainLoop conforms to Runnable protocol."""
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
 
     try:
@@ -887,12 +896,12 @@ def test_main_loop_implements_runnable() -> None:
         requests.close()
 
 
-def test_main_loop_has_heartbeat_property() -> None:
+def test_main_loop_has_heartbeat_property(clock: FakeClock) -> None:
     """MainLoop exposes heartbeat property for watchdog monitoring."""
     from weakincentives.runtime.watchdog import Heartbeat
 
     requests: InMemoryMailbox[MainLoopRequest[_Request], MainLoopResult[_Output]] = (
-        InMemoryMailbox(name="requests")
+        InMemoryMailbox(name="requests", clock=clock)
     )
 
     try:
@@ -927,10 +936,11 @@ def test_coordinator_handle_signal_triggers_shutdown(reset_coordinator: None) ->
     callback.assert_called_once()
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_trigger_shutdown_returns_result(reset_coordinator: None) -> None:
     """LoopGroup._trigger_shutdown returns shutdown result."""
     _ = reset_coordinator
-    loops = [_MockRunnable(run_delay=0.05) for _ in range(2)]
+    loops = [_MockRunnable(run_delay=0.05, clock=SystemClock()) for _ in range(2)]
     group = LoopGroup(loops=loops)
 
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
@@ -952,17 +962,19 @@ def test_loop_group_trigger_shutdown_returns_result(reset_coordinator: None) -> 
 # =============================================================================
 
 
-def test_eval_loop_shutdown_stops_loop() -> None:
+def test_eval_loop_shutdown_stops_loop(clock: FakeClock) -> None:
     """EvalLoop.shutdown() stops the run loop."""
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
         name="eval-requests"
     )
 
     try:
-        main_loop = _create_test_loop()
+        main_loop = _create_test_loop(clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=lambda o, e: Score(
@@ -991,7 +1003,7 @@ def test_eval_loop_shutdown_stops_loop() -> None:
         results.close()
 
 
-def test_eval_loop_shutdown_nacks_unprocessed() -> None:
+def test_eval_loop_shutdown_nacks_unprocessed(clock: FakeClock) -> None:
     """EvalLoop.shutdown() nacks unprocessed messages."""
     from weakincentives.evals import (
         BASELINE,
@@ -1002,7 +1014,9 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
         Score,
     )
 
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
         name="eval-requests"
     )
@@ -1012,7 +1026,7 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
         adapter = _MockAdapter(delay=0.1)
         main_requests: InMemoryMailbox[
             MainLoopRequest[str], MainLoopResult[_Output]
-        ] = InMemoryMailbox(name="main-requests")
+        ] = InMemoryMailbox(name="main-requests", clock=clock)
         main_loop = _TestLoop(
             adapter=adapter,
             requests=main_requests,
@@ -1052,17 +1066,19 @@ def test_eval_loop_shutdown_nacks_unprocessed() -> None:
         results.close()
 
 
-def test_eval_loop_context_manager() -> None:
+def test_eval_loop_context_manager(clock: FakeClock) -> None:
     """EvalLoop supports context manager protocol."""
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
         name="eval-requests"
     )
 
     try:
-        main_loop = _create_test_loop()
+        main_loop = _create_test_loop(clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=lambda o, e: Score(value=1.0, passed=True),
@@ -1085,17 +1101,19 @@ def test_eval_loop_context_manager() -> None:
         results.close()
 
 
-def test_eval_loop_running_property() -> None:
+def test_eval_loop_running_property(clock: FakeClock) -> None:
     """EvalLoop.running property reflects loop state."""
     from weakincentives.evals import EvalLoop, EvalRequest, EvalResult, Score
 
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
         name="eval-requests"
     )
 
     try:
-        main_loop = _create_test_loop()
+        main_loop = _create_test_loop(clock=clock)
         eval_loop: EvalLoop[str, _Output, str] = EvalLoop(
             loop=main_loop,
             evaluator=lambda o, e: Score(value=1.0, passed=True),
@@ -1118,7 +1136,7 @@ def test_eval_loop_running_property() -> None:
         results.close()
 
 
-def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
+def test_eval_loop_nacks_remaining_messages_on_shutdown(clock: FakeClock) -> None:
     """EvalLoop nacks remaining messages in batch when shutdown is triggered mid-batch."""
     from collections.abc import Sequence
 
@@ -1154,7 +1172,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
         adapter = _MockAdapter(delay=0)
         main_requests: InMemoryMailbox[
             MainLoopRequest[_Request], MainLoopResult[_Output]
-        ] = InMemoryMailbox(name="main-requests")
+        ] = InMemoryMailbox(name="main-requests", clock=clock)
         main_loop = _TestLoop(adapter=adapter, requests=main_requests)
 
         # Track number of evaluations and trigger shutdown after first
@@ -1200,7 +1218,7 @@ def test_eval_loop_nacks_remaining_messages_on_shutdown() -> None:
 # =============================================================================
 
 
-def test_health_server_liveness_endpoint() -> None:
+def test_health_server_liveness_endpoint(clock: FakeClock) -> None:
     """HealthServer returns 200 for /health/live."""
     import json
     import urllib.request
@@ -1220,7 +1238,7 @@ def test_health_server_liveness_endpoint() -> None:
         server.stop()
 
 
-def test_health_server_readiness_endpoint_healthy() -> None:
+def test_health_server_readiness_endpoint_healthy(clock: FakeClock) -> None:
     """HealthServer returns 200 for /health/ready when check passes."""
     import json
     import urllib.request
@@ -1240,7 +1258,7 @@ def test_health_server_readiness_endpoint_healthy() -> None:
         server.stop()
 
 
-def test_health_server_readiness_endpoint_unhealthy() -> None:
+def test_health_server_readiness_endpoint_unhealthy(clock: FakeClock) -> None:
     """HealthServer returns 503 for /health/ready when check fails."""
     import urllib.error
     import urllib.request
@@ -1284,7 +1302,7 @@ def test_health_server_404_for_unknown_path() -> None:
         server.stop()
 
 
-def test_health_server_address_none_when_not_started() -> None:
+def test_health_server_address_none_when_not_started(clock: FakeClock) -> None:
     """HealthServer.address is None before start."""
     from weakincentives.runtime import HealthServer
 
@@ -1292,7 +1310,7 @@ def test_health_server_address_none_when_not_started() -> None:
     assert server.address is None
 
 
-def test_health_server_start_idempotent() -> None:
+def test_health_server_start_idempotent(clock: FakeClock) -> None:
     """HealthServer.start() is idempotent."""
     from weakincentives.runtime import HealthServer
 
@@ -1308,7 +1326,7 @@ def test_health_server_start_idempotent() -> None:
         server.stop()
 
 
-def test_health_server_stop_idempotent() -> None:
+def test_health_server_stop_idempotent(clock: FakeClock) -> None:
     """HealthServer.stop() is idempotent."""
     from weakincentives.runtime import HealthServer
 
@@ -1319,7 +1337,7 @@ def test_health_server_stop_idempotent() -> None:
     assert server.address is None
 
 
-def test_health_server_dynamic_readiness_check() -> None:
+def test_health_server_dynamic_readiness_check(clock: FakeClock) -> None:
     """HealthServer readiness check is evaluated dynamically."""
     import json
     import urllib.error
@@ -1359,6 +1377,7 @@ def test_health_server_dynamic_readiness_check() -> None:
 # =============================================================================
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_starts_health_server(reset_coordinator: None) -> None:
     """LoopGroup starts health server when health_port is set."""
     import json
@@ -1367,7 +1386,7 @@ def test_loop_group_starts_health_server(reset_coordinator: None) -> None:
     from weakincentives.runtime import LoopGroup
 
     _ = reset_coordinator
-    loops = [_MockRunnable(run_delay=0.2)]
+    loops = [_MockRunnable(run_delay=0.2, clock=SystemClock())]
     group = LoopGroup(loops=loops, health_port=0, health_host="127.0.0.1")
 
     # Run in background thread
@@ -1392,7 +1411,10 @@ def test_loop_group_starts_health_server(reset_coordinator: None) -> None:
         thread.join(timeout=2.0)
 
 
-def test_loop_group_readiness_reflects_loop_state(reset_coordinator: None) -> None:
+@pytest.mark.allow_system_clock
+def test_loop_group_readiness_reflects_loop_state(
+    reset_coordinator: None,
+) -> None:
     """LoopGroup readiness endpoint reflects loop running state."""
     import json
     import urllib.request
@@ -1423,12 +1445,13 @@ def test_loop_group_readiness_reflects_loop_state(reset_coordinator: None) -> No
         thread.join(timeout=2.0)
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_no_health_server_without_port(reset_coordinator: None) -> None:
     """LoopGroup does not start health server when health_port is None."""
     from weakincentives.runtime import LoopGroup
 
     _ = reset_coordinator
-    loops = [_MockRunnable(run_delay=0.05)]
+    loops = [_MockRunnable(run_delay=0.05, clock=SystemClock())]
     group = LoopGroup(loops=loops)  # No health_port
 
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
@@ -1442,12 +1465,13 @@ def test_loop_group_no_health_server_without_port(reset_coordinator: None) -> No
         thread.join(timeout=2.0)
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_health_server_stops_on_shutdown(reset_coordinator: None) -> None:
     """LoopGroup stops health server on shutdown."""
     from weakincentives.runtime import LoopGroup
 
     _ = reset_coordinator
-    loops = [_MockRunnable()]
+    loops = [_MockRunnable(clock=SystemClock())]
     group = LoopGroup(loops=loops, health_port=0, health_host="127.0.0.1")
 
     thread = threading.Thread(target=group.run, kwargs={"install_signals": False})
@@ -1472,8 +1496,8 @@ def test_loop_group_health_server_stops_on_shutdown(reset_coordinator: None) -> 
 class _MockRunnableWithHeartbeat(_MockRunnable):
     """Mock implementation of Runnable with heartbeat for testing watchdog."""
 
-    def __init__(self, *, run_delay: float = 0.0) -> None:
-        super().__init__(run_delay=run_delay)
+    def __init__(self, *, run_delay: float = 0.0, clock: Clock | None = None) -> None:
+        super().__init__(run_delay=run_delay, clock=clock)
         from weakincentives.runtime.watchdog import Heartbeat as HeartbeatCls
 
         self._heartbeat: Heartbeat = HeartbeatCls()
@@ -1499,12 +1523,13 @@ class _MockRunnableWithHeartbeat(_MockRunnable):
         )
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_starts_watchdog_with_heartbeats(reset_coordinator: None) -> None:
     """LoopGroup starts watchdog when loops have heartbeat properties."""
     from weakincentives.runtime import LoopGroup
 
     _ = reset_coordinator
-    loops = [_MockRunnableWithHeartbeat(run_delay=0.05)]
+    loops = [_MockRunnableWithHeartbeat(run_delay=0.05, clock=SystemClock())]
     group = LoopGroup(
         loops=loops,
         watchdog_threshold=60.0,
@@ -1526,6 +1551,7 @@ def test_loop_group_starts_watchdog_with_heartbeats(reset_coordinator: None) -> 
     assert group._watchdog is None
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_watchdog_disabled_when_threshold_none(
     reset_coordinator: None,
 ) -> None:
@@ -1533,7 +1559,7 @@ def test_loop_group_watchdog_disabled_when_threshold_none(
     from weakincentives.runtime import LoopGroup
 
     _ = reset_coordinator
-    loops = [_MockRunnableWithHeartbeat(run_delay=0.05)]
+    loops = [_MockRunnableWithHeartbeat(run_delay=0.05, clock=SystemClock())]
     group = LoopGroup(
         loops=loops,
         watchdog_threshold=None,  # Disable watchdog
@@ -1551,6 +1577,7 @@ def test_loop_group_watchdog_disabled_when_threshold_none(
         thread.join(timeout=2.0)
 
 
+@pytest.mark.allow_system_clock
 def test_loop_group_build_readiness_check_with_heartbeats(
     reset_coordinator: None,
 ) -> None:

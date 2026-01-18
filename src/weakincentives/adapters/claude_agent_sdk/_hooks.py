@@ -14,10 +14,8 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
@@ -25,6 +23,7 @@ from ...deadlines import Deadline
 from ...filesystem import Filesystem
 from ...prompt.feedback import collect_feedback
 from ...prompt.protocols import PromptProtocol
+from ...runtime.clock import Clock
 from ...runtime.events.types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
@@ -169,6 +168,7 @@ class HookContext:
         budget_tracker: BudgetTracker | None = None,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
+        clock: Clock | None = None,
     ) -> None:
         self._session = session
         self._prompt = prompt
@@ -178,11 +178,12 @@ class HookContext:
         self.budget_tracker = budget_tracker
         self.heartbeat = heartbeat
         self.run_context = run_context
+        self.clock: Clock = clock if clock is not None else session.clock
         self.stop_reason: str | None = None
         self._tool_count = 0
         self._tool_tracker: PendingToolTracker | None = None
         self.stats: HookStats = HookStats()
-        self._start_time = time.monotonic()
+        self._start_time = self.clock.monotonic()
 
     def beat(self) -> None:
         """Record a heartbeat to prove processing is active.
@@ -233,11 +234,7 @@ class HookContext:
     @property
     def elapsed_ms(self) -> int:
         """Return elapsed time in milliseconds since context creation."""
-        return int((time.monotonic() - self._start_time) * 1000)
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
+        return int((self.clock.monotonic() - self._start_time) * 1000)
 
 
 def create_pre_tool_use_hook(
@@ -261,7 +258,10 @@ def create_pre_tool_use_hook(
         sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         _ = sdk_context
-        hook_start = time.monotonic()
+        hook_start = hook_context.clock.monotonic()
+
+        # Beat before tool execution to prove liveness
+        hook_context.beat()
 
         # Beat before tool execution to prove liveness
         hook_context.beat()
@@ -367,7 +367,7 @@ def create_pre_tool_use_hook(
                 tool_use_id=tool_use_id,
                 tool_name=tool_name,
             )
-            hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
+            hook_duration_ms = int((hook_context.clock.monotonic() - hook_start) * 1000)
             logger.debug(
                 "claude_agent_sdk.hook.snapshot_taken",
                 event="hook.snapshot_taken",
@@ -529,7 +529,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         sdk_context: Any,  # noqa: ANN401
     ) -> dict[str, Any]:
         _ = sdk_context
-        hook_start = time.monotonic()
+        hook_start = hook_context.clock.monotonic()
         data = _parse_tool_data(input_data)
 
         # Beat after tool execution to prove liveness
@@ -556,7 +556,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             params=data.tool_input,
             result=data.result_raw,
             session_id=None,
-            created_at=_utcnow(),
+            created_at=hook_context.clock.now(),
             usage=None,
             rendered_output=data.output_text[:1000] if data.output_text else "",
             call_id=tool_use_id,
@@ -592,7 +592,9 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
                 success=success,
             )
             if restored:
-                hook_duration_ms = int((time.monotonic() - hook_start) * 1000)
+                hook_duration_ms = int(
+                    (hook_context.clock.monotonic() - hook_start) * 1000
+                )
                 logger.info(
                     "claude_agent_sdk.hook.state_restored",
                     event="hook.state_restored",

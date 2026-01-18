@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any, Protocol, cast
 from uuid import uuid4
 
@@ -656,7 +656,7 @@ def dispatch_tool_invocation(
         params=outcome.params,
         result=cast(ToolResult[object], outcome.result),
         session_id=session_id,
-        created_at=datetime.now(UTC),
+        created_at=context.session.clock.now(),
         usage=usage,
         rendered_output=rendered_output,
         call_id=outcome.call_id,

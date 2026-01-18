@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING, Literal
 
 from ..prompt import MarkdownSection, Prompt, PromptTemplate
 from ..runtime import Session
+from ..runtime.clock import Clock
 from ._types import Score
 
 if TYPE_CHECKING:
@@ -109,6 +110,8 @@ Select one rating and explain your reasoning briefly.""",
 def llm_judge(
     adapter: ProviderAdapter[JudgeOutput],
     criterion: str,
+    *,
+    clock: Clock | None = None,
 ) -> Callable[[str, str], Score]:
     """Create evaluator that uses LLM to judge output.
 
@@ -118,6 +121,7 @@ def llm_judge(
     Args:
         adapter: Provider adapter configured for JudgeOutput structured output.
         criterion: What to evaluate (e.g., "factual accuracy", "clarity").
+        clock: Optional clock for deterministic time (defaults to SystemClock).
 
     Returns:
         Evaluator function that scores string outputs.
@@ -137,7 +141,7 @@ def llm_judge(
                 expected=expected,
             )
         )
-        session = Session()
+        session = Session(clock=clock)
         response = adapter.evaluate(prompt, session=session)
         if response.output is None:
             return Score(

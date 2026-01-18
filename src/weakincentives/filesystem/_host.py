@@ -36,13 +36,14 @@ import shutil
 import subprocess  # nosec: B404
 import tempfile
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 from weakincentives.errors import SnapshotError, SnapshotRestoreError
+from weakincentives.runtime.clock import Clock, SystemClock
 
 from ._types import (
     DEFAULT_READ_LIMIT,
@@ -90,6 +91,7 @@ class HostFilesystem:
     _read_only: bool = False
     _git_initialized: bool = False
     _git_dir: str | None = None
+    clock: Clock = field(default_factory=SystemClock)
 
     @property
     def root(self) -> str:
@@ -692,7 +694,7 @@ class HostFilesystem:
 
         # Commit (allow empty for idempotent snapshots)
         # Use --no-gpg-sign to avoid issues in environments with signing hooks
-        message = tag or f"snapshot-{datetime.now(UTC).isoformat()}"
+        message = tag or f"snapshot-{self.clock.now().isoformat()}"
         commit_result = self._run_git(
             ["commit", "-m", message, "--allow-empty", "--no-gpg-sign"],
             check=False,
@@ -729,7 +731,7 @@ class HostFilesystem:
 
         return FilesystemSnapshot(
             snapshot_id=uuid4(),
-            created_at=datetime.now(UTC),
+            created_at=self.clock.now(),
             commit_ref=commit_ref,
             root_path=self._root,
             git_dir=self._git_dir,

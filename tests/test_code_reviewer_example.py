@@ -52,6 +52,7 @@ from weakincentives.runtime import (
     MainLoopRequest,
     MainLoopResult,
 )
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher, PromptRendered
 from weakincentives.runtime.session import Session
 from weakincentives.types import SupportsDataclass
@@ -143,11 +144,12 @@ class _RecordingDeadlineAdapter:
 def test_prompt_render_reducer_prints_full_prompt(
     capsys: CaptureFixture[str],
     tmp_path: Path,
+    clock: FakeClock,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     dispatcher = InProcessDispatcher()
     attach_logging_subscribers(dispatcher)
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     event = PromptRendered(
         prompt_ns="example",
@@ -174,9 +176,9 @@ def test_prompt_render_reducer_prints_full_prompt(
     assert stored_events[-1].rendered_prompt == "<prompt body>"
 
 
-def test_workspace_digest_section_empty_by_default() -> None:
+def test_workspace_digest_section_empty_by_default(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     template = build_task_prompt(session=session)
 
     rendered = Prompt(template).bind(ReviewTurnParams(request="demo request")).render()
@@ -191,10 +193,11 @@ def test_workspace_digest_section_empty_by_default() -> None:
 
 def test_workspace_digest_override_applied_when_no_session_digest(
     tmp_path: Path,
+    clock: FakeClock,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     template = build_task_prompt(session=session)
 
     descriptor = descriptor_for_prompt(template)
@@ -222,9 +225,10 @@ def test_workspace_digest_override_applied_when_no_session_digest(
 
 def test_workspace_digest_prefers_session_snapshot_over_override(
     tmp_path: Path,
+    clock: FakeClock,
 ) -> None:
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
-    session = Session()
+    session = Session(clock=clock)
     template = build_task_prompt(session=session)
     descriptor = descriptor_for_prompt(template)
     digest_section = next(
@@ -260,22 +264,25 @@ def test_workspace_digest_prefers_session_snapshot_over_override(
     assert "Override digest" not in rendered.text
 
 
-def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
+def test_auto_optimization_runs_on_first_request(
+    tmp_path: Path, clock: FakeClock
+) -> None:
     """Auto-optimization runs when first request is processed (if enabled)."""
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = _RepositoryOptimizationAdapter("- Repo instructions from stub")
     responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
-        name="responses"
+        name="responses", clock=clock
     )
     requests: InMemoryMailbox[
         MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
-    ] = InMemoryMailbox(name="requests")
+    ] = InMemoryMailbox(name="requests", clock=clock)
     try:
         loop = CodeReviewLoop(
             adapter=cast(ProviderAdapter[ReviewResponse], adapter),
             requests=requests,
             overrides_store=overrides_store,
             enable_optimization=True,
+            clock=clock,
         )
 
         assert loop.override_tag == "latest"
@@ -301,18 +308,18 @@ def test_auto_optimization_runs_on_first_request(tmp_path: Path) -> None:
         responses.close()
 
 
-def test_deadline_passed_per_request(tmp_path: Path) -> None:
+def test_deadline_passed_per_request(tmp_path: Path, clock: FakeClock) -> None:
     """Each request gets a deadline from MainLoopRequest."""
     from datetime import timedelta
 
     overrides_store = LocalPromptOverridesStore(root_path=tmp_path)
     adapter = cast(ProviderAdapter[ReviewResponse], _RecordingDeadlineAdapter())
     responses: InMemoryMailbox[MainLoopResult[ReviewResponse], None] = InMemoryMailbox(
-        name="responses"
+        name="responses", clock=clock
     )
     requests: InMemoryMailbox[
         MainLoopRequest[ReviewTurnParams], MainLoopResult[ReviewResponse]
-    ] = InMemoryMailbox(name="requests")
+    ] = InMemoryMailbox(name="requests", clock=clock)
     try:
         loop = CodeReviewLoop(
             adapter=adapter,
@@ -323,8 +330,12 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
         set_workspace_digest(loop.session, "workspace-digest", "- existing digest")
 
         # Send requests with different deadlines
-        first_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=5))
-        second_deadline = Deadline(expires_at=datetime.now(UTC) + timedelta(minutes=10))
+        first_deadline = Deadline(
+            expires_at=clock.now() + timedelta(minutes=5), clock=clock
+        )
+        second_deadline = Deadline(
+            expires_at=clock.now() + timedelta(minutes=10), clock=clock
+        )
 
         requests.send(
             MainLoopRequest(
@@ -365,9 +376,10 @@ def _redirect_snapshots(
 def test_dump_session_logs_success(
     caplog: pytest.LogCaptureFixture,
     _redirect_snapshots: Path,
+    clock: FakeClock,
 ) -> None:
     caplog.set_level(logging.INFO, logger="weakincentives.debug")
-    session = Session()
+    session = Session(clock=clock)
     set_workspace_digest(session, "workspace-digest", "body")
 
     snapshot_path = dump_session(session, _redirect_snapshots)
@@ -390,10 +402,11 @@ def test_dump_session_logs_success(
 def test_dump_session_skips_empty_session(
     caplog: pytest.LogCaptureFixture,
     _redirect_snapshots: Path,
+    clock: FakeClock,
 ) -> None:
     """Sessions with no data (only empty slices) skip snapshot dump."""
     caplog.set_level(logging.INFO, logger="weakincentives.debug")
-    session = Session()
+    session = Session(clock=clock)
 
     # Sessions have builtin reducers registered but no data
     # Empty slices are excluded from snapshots, so this should be skipped

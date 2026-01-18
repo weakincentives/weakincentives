@@ -28,11 +28,12 @@ from weakincentives.contrib.tools import (
 from weakincentives.prompt.tool import Tool
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.clock import FakeClock
 
 
-def test_planning_end_to_end_flow() -> None:
+def test_planning_end_to_end_flow(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = PlanningToolsSection(session=session)
     tools = {tool.name: tool for tool in section.tools()}
 

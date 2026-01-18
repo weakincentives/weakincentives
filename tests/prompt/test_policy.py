@@ -35,6 +35,7 @@ from weakincentives.prompt import (
 from weakincentives.prompt.policy import _extract_path, _normalize_path
 from weakincentives.resources import Binding, ResourceRegistry
 from weakincentives.runtime import InProcessDispatcher, Session
+from weakincentives.runtime.clock import FakeClock
 
 if TYPE_CHECKING:
     from weakincentives.runtime.logging import StructuredLogger
@@ -200,28 +201,28 @@ class TestSequentialDependencyPolicy:
             name=name, description=f"Tool {name}", handler=_noop_handler
         )
 
-    def test_name_property(self) -> None:
+    def test_name_property(self, clock: FakeClock) -> None:
         policy = SequentialDependencyPolicy(dependencies={})
         assert policy.name == "sequential_dependency"
 
-    def test_allows_tool_without_dependencies(self) -> None:
+    def test_allows_tool_without_dependencies(self, clock: FakeClock) -> None:
         policy = SequentialDependencyPolicy(
             dependencies={"deploy": frozenset({"build"})}
         )
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = self._make_tool("unrelated_tool")
 
         decision = policy.check(tool, None, context=context)
         assert decision.allowed is True
 
-    def test_denies_tool_when_dependency_not_invoked(self) -> None:
+    def test_denies_tool_when_dependency_not_invoked(self, clock: FakeClock) -> None:
         policy = SequentialDependencyPolicy(
             dependencies={"deploy": frozenset({"build", "test"})}
         )
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = self._make_tool("deploy")
 
@@ -231,12 +232,12 @@ class TestSequentialDependencyPolicy:
         assert "deploy" in decision.reason
         assert "build" in decision.reason or "test" in decision.reason
 
-    def test_allows_tool_when_dependencies_satisfied(self) -> None:
+    def test_allows_tool_when_dependencies_satisfied(self, clock: FakeClock) -> None:
         policy = SequentialDependencyPolicy(
             dependencies={"deploy": frozenset({"build"})}
         )
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         # Seed state with build invoked
         session[PolicyState].seed(
             PolicyState(policy_name="test", invoked_tools=frozenset({"build"}))
@@ -247,10 +248,10 @@ class TestSequentialDependencyPolicy:
         decision = policy.check(tool, None, context=context)
         assert decision.allowed is True
 
-    def test_on_result_records_successful_invocation(self) -> None:
+    def test_on_result_records_successful_invocation(self, clock: FakeClock) -> None:
         policy = SequentialDependencyPolicy(dependencies={})
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = self._make_tool("build")
         result: ToolResult[None] = ToolResult.ok(None, message="success")
@@ -261,10 +262,12 @@ class TestSequentialDependencyPolicy:
         assert state is not None
         assert "build" in state.invoked_tools
 
-    def test_on_result_does_not_record_failed_invocation(self) -> None:
+    def test_on_result_does_not_record_failed_invocation(
+        self, clock: FakeClock
+    ) -> None:
         policy = SequentialDependencyPolicy(dependencies={})
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = self._make_tool("build")
         result: ToolResult[None] = ToolResult.error("failed")
@@ -274,10 +277,10 @@ class TestSequentialDependencyPolicy:
         state = session[PolicyState].latest()
         assert state is None
 
-    def test_on_result_preserves_existing_state(self) -> None:
+    def test_on_result_preserves_existing_state(self, clock: FakeClock) -> None:
         policy = SequentialDependencyPolicy(dependencies={})
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         session[PolicyState].seed(
             PolicyState(
                 policy_name="test",
@@ -342,24 +345,24 @@ class TestReadBeforeWritePolicy:
             name=name, description=f"Tool {name}", handler=_file_handler
         )
 
-    def test_name_property(self) -> None:
+    def test_name_property(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         assert policy.name == "read_before_write"
 
-    def test_allows_non_write_tool(self) -> None:
+    def test_allows_non_write_tool(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = self._make_tool("list_files")
 
         decision = policy.check(tool, FileParams(path="/x"), context=context)
         assert decision.allowed is True
 
-    def test_allows_write_when_no_path(self) -> None:
+    def test_allows_write_when_no_path(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = Tool[NoPathParams, None](
             name="write_file",
@@ -370,35 +373,35 @@ class TestReadBeforeWritePolicy:
         decision = policy.check(tool, NoPathParams(value="x"), context=context)
         assert decision.allowed is True
 
-    def test_allows_write_when_no_filesystem(self) -> None:
+    def test_allows_write_when_no_filesystem(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session, filesystem=None)
         tool = self._make_tool("write_file")
 
         decision = policy.check(tool, FileParams(path="/x"), context=context)
         assert decision.allowed is True
 
-    def test_allows_new_file_creation(self) -> None:
-        fs = InMemoryFilesystem()
+    def test_allows_new_file_creation(self, clock: FakeClock) -> None:
+        fs = InMemoryFilesystem(clock=clock)
         # File does not exist
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session, filesystem=fs)
         tool = self._make_tool("write_file")
 
         decision = policy.check(tool, FileParams(path="/new.txt"), context=context)
         assert decision.allowed is True
 
-    def test_denies_overwrite_without_read(self) -> None:
-        fs = InMemoryFilesystem()
+    def test_denies_overwrite_without_read(self, clock: FakeClock) -> None:
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/existing.txt", "content")
 
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session, filesystem=fs)
         tool = self._make_tool("write_file")
 
@@ -408,13 +411,13 @@ class TestReadBeforeWritePolicy:
         assert "/existing.txt" in decision.reason
         assert "read" in decision.reason.lower()
 
-    def test_allows_overwrite_after_read(self) -> None:
-        fs = InMemoryFilesystem()
+    def test_allows_overwrite_after_read(self, clock: FakeClock) -> None:
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("existing.txt", "content")
 
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         # Record that file was read (path stored in normalized form)
         session[PolicyState].seed(
             PolicyState(
@@ -428,10 +431,10 @@ class TestReadBeforeWritePolicy:
         decision = policy.check(tool, FileParams(path="/existing.txt"), context=context)
         assert decision.allowed is True
 
-    def test_on_result_records_read_operation(self) -> None:
+    def test_on_result_records_read_operation(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = self._make_tool("read_file")
         result: ToolResult[None] = ToolResult.ok(None)
@@ -443,10 +446,10 @@ class TestReadBeforeWritePolicy:
         # Path is normalized (leading slash stripped) when stored
         assert ("read_file", "test.txt") in state.invoked_keys
 
-    def test_on_result_does_not_record_failed_read(self) -> None:
+    def test_on_result_does_not_record_failed_read(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = self._make_tool("read_file")
         result: ToolResult[None] = ToolResult.error("failed")
@@ -456,10 +459,10 @@ class TestReadBeforeWritePolicy:
         state = session[PolicyState].latest()
         assert state is None
 
-    def test_on_result_does_not_record_non_read_tool(self) -> None:
+    def test_on_result_does_not_record_non_read_tool(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = self._make_tool("write_file")
         result: ToolResult[None] = ToolResult.ok(None)
@@ -469,10 +472,10 @@ class TestReadBeforeWritePolicy:
         state = session[PolicyState].latest()
         assert state is None
 
-    def test_on_result_does_not_record_when_no_path(self) -> None:
+    def test_on_result_does_not_record_when_no_path(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = Tool[NoPathParams, None](
             name="read_file",
@@ -486,10 +489,10 @@ class TestReadBeforeWritePolicy:
         state = session[PolicyState].latest()
         assert state is None
 
-    def test_on_result_preserves_existing_state(self) -> None:
+    def test_on_result_preserves_existing_state(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy()
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         # Use normalized paths (no leading slashes) as that's how policy stores them
         session[PolicyState].seed(
             PolicyState(
@@ -510,16 +513,16 @@ class TestReadBeforeWritePolicy:
         assert ("read_file", "x") in state.invoked_keys
         assert ("read_file", "y") in state.invoked_keys
 
-    def test_custom_read_write_tools(self) -> None:
+    def test_custom_read_write_tools(self, clock: FakeClock) -> None:
         policy = ReadBeforeWritePolicy(
             read_tools=frozenset({"fetch_file"}),
             write_tools=frozenset({"save_file"}),
         )
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("data.json", "{}")  # Use normalized path for filesystem
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session, filesystem=fs)
 
         # Standard write_file should be allowed (not in our write_tools)
@@ -542,7 +545,9 @@ class TestReadBeforeWritePolicy:
         decision3 = policy.check(tool2, FileParams(path="/data.json"), context=context)
         assert decision3.allowed is True
 
-    def test_mount_point_normalizes_paths_for_existence_check(self) -> None:
+    def test_mount_point_normalizes_paths_for_existence_check(
+        self, clock: FakeClock
+    ) -> None:
         """Policy should normalize paths before checking fs.exists().
 
         This tests the fix for the issue where /workspace/file.txt would
@@ -551,11 +556,11 @@ class TestReadBeforeWritePolicy:
         """
         # Policy with mount_point matching the tool's virtual mount
         policy = ReadBeforeWritePolicy(mount_point="/workspace")
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("config.yaml", "existing content")  # Relative path in fs
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session, filesystem=fs)
 
         # Tool passes /workspace/config.yaml (absolute with mount point)
@@ -568,14 +573,16 @@ class TestReadBeforeWritePolicy:
         assert decision.allowed is False
         assert "config.yaml" in (decision.reason or "")
 
-    def test_mount_point_normalizes_paths_when_recording_reads(self) -> None:
+    def test_mount_point_normalizes_paths_when_recording_reads(
+        self, clock: FakeClock
+    ) -> None:
         """on_result should normalize paths so check() can match them."""
         policy = ReadBeforeWritePolicy(mount_point="/workspace")
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("config.yaml", "content")
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session, filesystem=fs)
 
         # Record a read with mount-prefixed path
@@ -596,14 +603,16 @@ class TestReadBeforeWritePolicy:
         # Mount-prefixed path should NOT be in state
         assert ("read_file", "/workspace/config.yaml") not in state.invoked_keys
 
-    def test_mount_point_allows_write_after_normalized_read(self) -> None:
+    def test_mount_point_allows_write_after_normalized_read(
+        self, clock: FakeClock
+    ) -> None:
         """Full flow: read with mount path, then write with mount path."""
         policy = ReadBeforeWritePolicy(mount_point="/workspace")
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("config.yaml", "content")
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session, filesystem=fs)
 
         # First: write should be denied (file not read)
@@ -629,14 +638,14 @@ class TestReadBeforeWritePolicy:
         )
         assert decision2.allowed is True
 
-    def test_no_mount_point_strips_leading_slashes_only(self) -> None:
+    def test_no_mount_point_strips_leading_slashes_only(self, clock: FakeClock) -> None:
         """Without mount_point, only leading slashes are stripped."""
         policy = ReadBeforeWritePolicy()  # No mount_point
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("workspace/config.yaml", "content")
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session, filesystem=fs)
 
         # /workspace/config.yaml becomes workspace/config.yaml
@@ -679,11 +688,13 @@ class TestToolExecutorPolicyHelpers:
         logger.addHandler(logging.NullHandler())
         return StructuredLogger(logger)
 
-    def test_check_policies_returns_allow_for_empty_policies(self) -> None:
+    def test_check_policies_returns_allow_for_empty_policies(
+        self, clock: FakeClock
+    ) -> None:
         from weakincentives.adapters.tool_executor import _check_policies
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = Tool[FileParams, None](
             name="test_tool", description="Test", handler=None
@@ -699,11 +710,13 @@ class TestToolExecutorPolicyHelpers:
         )
         assert decision.allowed is True
 
-    def test_check_policies_returns_deny_from_first_denying_policy(self) -> None:
+    def test_check_policies_returns_deny_from_first_denying_policy(
+        self, clock: FakeClock
+    ) -> None:
         from weakincentives.adapters.tool_executor import _check_policies
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = Tool[FileParams, None](name="deploy", description="Deploy", handler=None)
         log = self._make_logger()
@@ -723,11 +736,13 @@ class TestToolExecutorPolicyHelpers:
         assert decision.allowed is False
         assert "build" in (decision.reason or "")
 
-    def test_check_policies_iterates_through_all_policies(self) -> None:
+    def test_check_policies_iterates_through_all_policies(
+        self, clock: FakeClock
+    ) -> None:
         from weakincentives.adapters.tool_executor import _check_policies
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = Tool[FileParams, None](
             name="unrelated", description="Unrelated tool", handler=None
@@ -752,11 +767,13 @@ class TestToolExecutorPolicyHelpers:
         # Both policies should allow since "unrelated" has no dependencies
         assert decision.allowed is True
 
-    def test_notify_policies_of_result_skips_failed_results(self) -> None:
+    def test_notify_policies_of_result_skips_failed_results(
+        self, clock: FakeClock
+    ) -> None:
         from weakincentives.adapters.tool_executor import _notify_policies_of_result
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = Tool[FileParams, None](
             name="read_file", description="Read", handler=None
@@ -776,11 +793,13 @@ class TestToolExecutorPolicyHelpers:
         state = session[PolicyState].latest()
         assert state is None
 
-    def test_notify_policies_of_result_calls_on_result_for_success(self) -> None:
+    def test_notify_policies_of_result_calls_on_result_for_success(
+        self, clock: FakeClock
+    ) -> None:
         from weakincentives.adapters.tool_executor import _notify_policies_of_result
 
         dispatcher = InProcessDispatcher()
-        session = Session(dispatcher=dispatcher)
+        session = Session(dispatcher=dispatcher, clock=clock)
         context = self._make_context(session)
         tool = Tool[FileParams, None](
             name="read_file", description="Read", handler=None

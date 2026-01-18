@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from ..runtime.session import SessionProtocol, SessionViewProtocol
     from ._experiment import Experiment
 
+from ..runtime.clock import Clock, SystemClock
 from ..serde import parse
 
 
@@ -432,8 +433,16 @@ class EvalRequest[InputT, ExpectedT]:
     request_id: UUID = field(default_factory=uuid4)
     """Unique request identifier."""
 
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    created_at: datetime | None = None
     """When the request was created."""
+
+    clock: Clock = field(default_factory=SystemClock)
+    """Clock for timestamp generation."""
+
+    def __post_init__(self) -> None:
+        """Initialize created_at from clock if not provided."""
+        if self.created_at is None:  # pragma: no branch
+            object.__setattr__(self, "created_at", self.clock.now())
 
 
 __all__ = [

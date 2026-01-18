@@ -15,11 +15,11 @@
 from __future__ import annotations
 
 import random
-import time
 from datetime import timedelta
 from typing import Any, Literal
 
 from ..dataclasses import FrozenDataclass
+from ..runtime.clock import Clock, SystemClock
 from .core import PromptEvaluationError, PromptEvaluationPhase
 
 ThrottleKind = Literal["rate_limit", "quota_exhausted", "timeout", "unknown"]
@@ -149,9 +149,16 @@ def details_from_error(
     )
 
 
-def sleep_for(delay: timedelta) -> None:
-    """Sleep for the specified duration."""
-    time.sleep(delay.total_seconds())
+def sleep_for(delay: timedelta, *, clock: Clock | None = None) -> None:
+    """Sleep for the specified duration.
+
+    Args:
+        delay: Duration to sleep.
+        clock: Clock instance. Defaults to SystemClock().
+    """
+    if clock is None:  # pragma: no cover - trivial default parameter
+        clock = SystemClock()
+    clock.sleep(delay.total_seconds())
 
 
 def jittered_backoff(

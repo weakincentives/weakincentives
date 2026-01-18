@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from . import (
+    clock,
     dlq,
     events,
     lease_extender,
@@ -23,6 +24,11 @@ from . import (
     main_loop,
     session,
     watchdog,
+)
+from .clock import (
+    Clock,
+    FakeClock,
+    SystemClock,
 )
 from .dlq import (
     DeadLetter,
@@ -108,6 +114,7 @@ from .watchdog import (
 
 __all__ = [
     "DEFAULT_SNAPSHOT_POLICIES",
+    "Clock",
     "CollectingMailbox",
     "CompositeSnapshot",
     "ControlDispatcher",
@@ -117,6 +124,7 @@ __all__ = [
     "DeadLetter",
     "DispatchResult",
     "Dispatcher",
+    "FakeClock",
     "FakeMailbox",
     "HandlerFailure",
     "HealthServer",
@@ -158,6 +166,7 @@ __all__ = [
     "SnapshotSerializationError",
     "Snapshotable",
     "StructuredLogger",
+    "SystemClock",
     "TelemetryDispatcher",
     "TokenUsage",
     "ToolInvoked",
@@ -165,6 +174,7 @@ __all__ = [
     "Watchdog",
     "append_all",
     "build_reducer_context",
+    "clock",
     "configure_logging",
     "create_snapshot",
     "dlq",

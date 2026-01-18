@@ -16,7 +16,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
 from ...budget import BudgetTracker
@@ -298,7 +297,7 @@ class BridgedTool:
             params=args,
             result=cast(ToolResult[object], result),
             session_id=None,
-            created_at=datetime.now(UTC),
+            created_at=self._session.clock.now(),
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
             call_id=None,

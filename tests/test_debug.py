@@ -22,6 +22,7 @@ from uuid import uuid4
 
 from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 from weakincentives.debug import archive_filesystem, dump_session
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.session import Session
 
 
@@ -30,9 +31,9 @@ class _Slice:
     value: str
 
 
-def test_dump_session_preserves_root_ordering(tmp_path: Path) -> None:
-    root = Session()
-    child = Session(parent=root)
+def test_dump_session_preserves_root_ordering(tmp_path: Path, clock: FakeClock) -> None:
+    root = Session(clock=clock)
+    child = Session(parent=root, clock=clock)
     root[_Slice].seed((_Slice("root"),))
     child[_Slice].seed((_Slice("child"),))
     target = tmp_path / f"{root.session_id}.jsonl"
@@ -46,8 +47,8 @@ def test_dump_session_preserves_root_ordering(tmp_path: Path) -> None:
     assert session_ids == [str(root.session_id), str(child.session_id)]
 
 
-def test_dump_session_normalizes_target(tmp_path: Path) -> None:
-    session = Session()
+def test_dump_session_normalizes_target(tmp_path: Path, clock: FakeClock) -> None:
+    session = Session(clock=clock)
     session[_Slice].seed((_Slice("value"),))
 
     explicit = tmp_path / "custom.json"
@@ -112,9 +113,9 @@ def test_archive_filesystem_creates_target_directory(tmp_path: Path) -> None:
     assert output_path.exists()
 
 
-def test_archive_filesystem_with_file_target(tmp_path: Path) -> None:
+def test_archive_filesystem_with_file_target(tmp_path: Path, clock: FakeClock) -> None:
     """When target is a file path, use its parent directory."""
-    fs = InMemoryFilesystem()
+    fs = InMemoryFilesystem(clock=clock)
     fs.write("file.txt", "content")
     file_target = tmp_path / "some_file.txt"
     file_target.touch()  # Create the file

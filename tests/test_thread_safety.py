@@ -30,6 +30,7 @@ import pytest
 from tests.helpers.adapters import UNIT_TEST_ADAPTER_NAME
 from weakincentives.prompt.overrides import LocalPromptOverridesStore, PromptOverride
 from weakincentives.prompt.tool_result import ToolResult
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher, ToolInvoked
 from weakincentives.runtime.session import Session
 from weakincentives.runtime.session.snapshots import Snapshot
@@ -97,9 +98,9 @@ def _publish_tool_event(dispatcher: InProcessDispatcher, index: int) -> None:
     dispatcher.dispatch(event)
 
 
-def test_session_attach_to_dispatcher_is_idempotent() -> None:
+def test_session_attach_to_dispatcher_is_idempotent(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     session._attach_to_dispatcher(dispatcher)
 
@@ -126,9 +127,10 @@ def test_session_attach_to_dispatcher_is_idempotent() -> None:
 @pytest.mark.threadstress(min_workers=2, max_workers=8)
 def test_session_collects_tool_data_across_threads(
     threadstress_workers: int,
+    clock: FakeClock,
 ) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     max_workers = threadstress_workers
     total_events = max(16, max_workers * 8)
@@ -154,9 +156,10 @@ def test_session_collects_tool_data_across_threads(
 @pytest.mark.threadstress(min_workers=2, max_workers=8)
 def test_session_snapshots_restore_across_threads(
     threadstress_workers: int,
+    clock: FakeClock,
 ) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     max_workers = threadstress_workers
     total_events = max(24, max_workers * 6)
@@ -191,7 +194,7 @@ def test_session_snapshots_restore_across_threads(
         expected_tool_events = snapshot.slices.get(ToolInvoked, ())
         expected_results = snapshot.slices.get(ExampleResult, ())
 
-        restored = Session(dispatcher=InProcessDispatcher())
+        restored = Session(dispatcher=InProcessDispatcher(), clock=clock)
         restored[ToolInvoked].seed(())
         restored[ExampleResult].seed(())
         restored.restore(snapshot, preserve_logs=False)
@@ -255,10 +258,10 @@ def test_local_prompt_overrides_store_seed_is_thread_safe(
         assert override.sections == first_sections
 
 
-def test_session_reset_clears_runtime_state() -> None:
+def test_session_reset_clears_runtime_state(clock: FakeClock) -> None:
     """Session reset clears all slices."""
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     seeded_value = ExampleResult(value=1)
     session[ExampleResult].seed((seeded_value,))
@@ -270,7 +273,7 @@ def test_session_reset_clears_runtime_state() -> None:
     assert session[ExampleResult].all() == ()
 
 
-def test_session_reducer_optimistic_concurrency_retry() -> None:
+def test_session_reducer_optimistic_concurrency_retry(clock: FakeClock) -> None:
     """Test branch 818->796: reducer retries when state is modified concurrently."""
     import threading
     import time
@@ -283,7 +286,7 @@ def test_session_reducer_optimistic_concurrency_retry() -> None:
         value: int
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     # Track how many times the reducer is called (retries will increase this)
     call_count = 0

@@ -15,13 +15,13 @@
 from __future__ import annotations
 
 import threading
-import time
 from collections import deque
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime
 from uuid import uuid4
 
+from ..clock import Clock, SystemClock
 from ..logging import StructuredLogger, get_logger
 from ._types import (
     Mailbox,
@@ -45,7 +45,7 @@ class _InFlightMessage[T, R]:
     delivery_count: int
     receipt_handle: str
     reply_to: Mailbox[R, None] | None
-    expires_at: float  # time.monotonic() value
+    expires_at: float  # self.clock.monotonic() value
 
 
 class InMemoryMailboxFactory[R]:
@@ -63,20 +63,28 @@ class InMemoryMailboxFactory[R]:
         requests = RedisMailbox(name="requests", client=redis_client, reply_resolver=resolver)
     """
 
-    __slots__ = ("_registry",)
+    __slots__ = ("_clock", "_registry")
 
     _registry: dict[str, Mailbox[R, None]]
     """Shared registry for caching created mailboxes."""
+    _clock: Clock
+    """Clock for created mailboxes."""
 
-    def __init__(self, registry: dict[str, Mailbox[R, None]] | None = None) -> None:
+    def __init__(
+        self,
+        registry: dict[str, Mailbox[R, None]] | None = None,
+        clock: Clock | None = None,
+    ) -> None:
         """Initialize factory with optional shared registry for caching.
 
         Args:
             registry: Shared registry dict. If provided, created mailboxes are
                 cached here to avoid creating duplicates.
+            clock: Clock instance for created mailboxes. Defaults to SystemClock().
         """
         super().__init__()
         self._registry = registry if registry is not None else {}
+        self._clock = clock if clock is not None else SystemClock()
 
     def create(self, identifier: str) -> Mailbox[R, None]:
         """Create or return cached InMemoryMailbox for the given identifier.
@@ -89,7 +97,7 @@ class InMemoryMailboxFactory[R]:
         """
         if identifier in self._registry:  # pragma: no cover - defensive
             return self._registry[identifier]
-        mailbox: Mailbox[R, None] = InMemoryMailbox(name=identifier)
+        mailbox: Mailbox[R, None] = InMemoryMailbox(name=identifier, clock=self._clock)
         self._registry[identifier] = mailbox
         return mailbox
 
@@ -138,6 +146,9 @@ class InMemoryMailbox[T, R]:
     max_size: int | None = None
     """Maximum queue capacity. None for unlimited."""
 
+    clock: Clock = field(default_factory=SystemClock, repr=False)
+    """Clock for time operations."""
+
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _condition: threading.Condition = field(init=False, repr=False)
     _pending: deque[_InFlightMessage[T, R]] = field(init=False, repr=False)
@@ -174,7 +185,7 @@ class InMemoryMailbox[T, R]:
 
     def _reap_expired(self) -> None:
         """Move expired messages from invisible back to pending."""
-        now = time.monotonic()
+        now = self.clock.monotonic()
         with self._lock:
             expired_handles = [
                 handle
@@ -212,7 +223,7 @@ class InMemoryMailbox[T, R]:
             in_flight = _InFlightMessage[T, R](
                 id=msg_id,
                 body=body,
-                enqueued_at=datetime.now(UTC),
+                enqueued_at=self.clock.now(),
                 delivery_count=0,
                 receipt_handle="",
                 reply_to=reply_to,
@@ -257,7 +268,7 @@ class InMemoryMailbox[T, R]:
         validate_visibility_timeout(visibility_timeout)
         validate_wait_time(wait_time_seconds)
         max_messages = min(max(1, max_messages), 10)
-        deadline = time.monotonic() + wait_time_seconds
+        deadline = self.clock.monotonic() + wait_time_seconds
 
         messages: list[Message[T, R]] = []
 
@@ -275,7 +286,7 @@ class InMemoryMailbox[T, R]:
                     receipt_handle = str(uuid4())
                     in_flight.receipt_handle = receipt_handle
                     in_flight.delivery_count += 1
-                    in_flight.expires_at = time.monotonic() + visibility_timeout
+                    in_flight.expires_at = self.clock.monotonic() + visibility_timeout
 
                     # Track delivery count
                     self._delivery_counts[in_flight.id] = in_flight.delivery_count
@@ -301,7 +312,7 @@ class InMemoryMailbox[T, R]:
                     if wait_time_seconds <= 0:
                         break
 
-                    remaining = deadline - time.monotonic()
+                    remaining = deadline - self.clock.monotonic()
                     if remaining <= 0:
                         break
 
@@ -357,7 +368,7 @@ class InMemoryMailbox[T, R]:
                 # Delay visibility
                 new_handle = str(uuid4())
                 msg.receipt_handle = new_handle
-                msg.expires_at = time.monotonic() + visibility_timeout
+                msg.expires_at = self.clock.monotonic() + visibility_timeout
                 self._invisible[new_handle] = msg
 
     def _extend(self, receipt_handle: str, timeout: int) -> None:
@@ -368,7 +379,7 @@ class InMemoryMailbox[T, R]:
                     f"Receipt handle '{receipt_handle}' not found or expired"
                 )
             msg = self._invisible[receipt_handle]
-            msg.expires_at = time.monotonic() + timeout
+            msg.expires_at = self.clock.monotonic() + timeout
 
     def purge(self) -> int:
         """Delete all messages from the queue.

@@ -24,6 +24,7 @@ from weakincentives.adapters.claude_agent_sdk._log_aggregator import (
     ClaudeLogAggregator,
     _FileState,
 )
+from weakincentives.runtime.clock import FakeClock
 
 
 class TestFileState:
@@ -379,7 +380,7 @@ class TestClaudeLogAggregatorReading:
 
         asyncio.run(_test())
 
-    def test_tracks_file_position(self, tmp_path: Path) -> None:
+    def test_tracks_file_position(self, tmp_path: Path, clock: FakeClock) -> None:
         async def _test() -> None:
             claude_dir = tmp_path / ".claude"
             claude_dir.mkdir()
@@ -390,6 +391,7 @@ class TestClaudeLogAggregatorReading:
             aggregator = ClaudeLogAggregator(
                 claude_dir=claude_dir,
                 prompt_name="test-prompt",
+                clock=clock,
             )
 
             await aggregator._discover_files()

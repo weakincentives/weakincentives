@@ -20,13 +20,13 @@ from typing import cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from weakincentives.budget import (
     Budget,
     BudgetExceededError,
     BudgetTracker,
 )
 from weakincentives.deadlines import Deadline
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import TokenUsage
 
 # Budget dataclass tests
@@ -38,11 +38,11 @@ def test_budget_requires_at_least_one_limit() -> None:
         Budget()
 
 
-def test_budget_accepts_deadline_only(frozen_utcnow: FrozenUtcNow) -> None:
+def test_budget_accepts_deadline_only(clock: FakeClock) -> None:
     """Budget can be constructed with only a deadline."""
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
 
     budget = Budget(deadline=deadline)
 
@@ -74,11 +74,11 @@ def test_budget_accepts_output_tokens_only() -> None:
     assert budget.max_output_tokens == 500
 
 
-def test_budget_accepts_combined_limits(frozen_utcnow: FrozenUtcNow) -> None:
+def test_budget_accepts_combined_limits(clock: FakeClock) -> None:
     """Budget can have both deadline and token limits."""
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
 
     budget = Budget(
         deadline=deadline,
@@ -239,17 +239,17 @@ def test_tracker_check_raises_when_output_exceeded() -> None:
 
 
 def test_tracker_check_raises_when_deadline_expired(
-    frozen_utcnow: FrozenUtcNow,
+    clock: FakeClock,
 ) -> None:
     """check() should raise BudgetExceededError when deadline passed."""
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
     budget = Budget(deadline=deadline)
     tracker = BudgetTracker(budget=budget)
 
     # Advance time past deadline
-    frozen_utcnow.set(anchor + timedelta(seconds=35))
+    clock.set_now(anchor + timedelta(seconds=35))
 
     with pytest.raises(BudgetExceededError) as exc_info:
         tracker.check()
@@ -383,11 +383,11 @@ def test_budget_tracker_reuse_across_conversations() -> None:
         tracker.check()
 
 
-def test_budget_with_all_limits(frozen_utcnow: FrozenUtcNow) -> None:
+def test_budget_with_all_limits(clock: FakeClock) -> None:
     """Test budget with all limits set."""
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(minutes=5))
+    clock.set_now(anchor)
+    deadline = Deadline(anchor + timedelta(minutes=5), clock=clock)
 
     budget = Budget(
         deadline=deadline,

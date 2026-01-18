@@ -21,11 +21,10 @@ from __future__ import annotations
 import contextlib
 import logging
 import threading
-import time
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Self
 
 from ..dataclasses import FrozenDataclass
+from ..runtime.clock import Clock, SystemClock
 from ..runtime.dlq import DeadLetter, DLQPolicy
 from ..runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
 from ..runtime.lifecycle import wait_until
@@ -98,8 +97,9 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
     _lock: threading.Lock
     _heartbeat: Heartbeat
     _lease_extender: LeaseExtender
+    _clock: Clock
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         *,
         loop: MainLoop[InputT, OutputT],
@@ -107,6 +107,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         requests: Mailbox[EvalRequest[InputT, ExpectedT], EvalResult],
         config: EvalLoopConfig | None = None,
         dlq: DLQPolicy[EvalRequest[InputT, ExpectedT], EvalResult] | None = None,
+        clock: Clock | None = None,
     ) -> None:
         """Initialize the EvalLoop.
 
@@ -121,6 +122,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             dlq: Optional dead letter queue policy. When configured, messages
                 that fail repeatedly are sent to the DLQ mailbox instead of
                 retrying indefinitely.
+            clock: Clock for time measurements. Defaults to SystemClock().
         """
         super().__init__()
         self._loop = loop
@@ -132,6 +134,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         self._running = False
         self._lock = threading.Lock()
         self._heartbeat = Heartbeat()
+        self._clock = clock if clock is not None else SystemClock()
         # Initialize lease extender with config or defaults
         lease_config = (
             self._config.lease_extender
@@ -282,7 +285,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
         """
         sample = request.sample
         experiment = request.experiment
-        start = time.monotonic()
+        start = self._clock.monotonic()
 
         # Pass our heartbeat and experiment to MainLoop
         response, session = self._loop.execute(
@@ -290,7 +293,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             heartbeat=self._heartbeat,
             experiment=experiment,
         )
-        latency_ms = int((time.monotonic() - start) * 1000)
+        latency_ms = int((self._clock.monotonic() - start) * 1000)
 
         # Beat after sample execution to prove progress
         self._heartbeat.beat()
@@ -372,7 +375,7 @@ class EvalLoop[InputT, OutputT, ExpectedT]:
             delivery_count=msg.delivery_count,
             last_error=str(error),
             last_error_type=f"{type(error).__module__}.{type(error).__qualname__}",
-            dead_lettered_at=datetime.now(UTC),
+            dead_lettered_at=self._clock.now(),
             first_received_at=msg.enqueued_at,
             request_id=msg.body.request_id,
             reply_to=msg.reply_to.name if msg.reply_to else None,

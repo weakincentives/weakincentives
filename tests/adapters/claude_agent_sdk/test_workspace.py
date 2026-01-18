@@ -30,6 +30,7 @@ from weakincentives.adapters.claude_agent_sdk.workspace import (
 from weakincentives.filesystem import Filesystem
 from weakincentives.prompt.protocols import WorkspaceSection
 from weakincentives.runtime import InProcessDispatcher, Session
+from weakincentives.runtime.clock import FakeClock
 
 
 class TestHostMount:
@@ -78,22 +79,26 @@ class TestHostMountPreview:
 
 
 @pytest.fixture
-def session() -> Session:
+def session(clock: FakeClock) -> Session:
     dispatcher = InProcessDispatcher()
-    return Session(dispatcher=dispatcher)
+    return Session(dispatcher=dispatcher, clock=clock)
 
 
 class TestClaudeAgentWorkspaceSectionCore:
     """Core functionality tests for ClaudeAgentWorkspaceSection."""
 
-    def test_implements_workspace_section_protocol(self, session: Session) -> None:
+    def test_implements_workspace_section_protocol(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         try:
             assert isinstance(section, WorkspaceSection)
         finally:
             section.cleanup()
 
-    def test_creates_empty_workspace_when_no_mounts(self, session: Session) -> None:
+    def test_creates_empty_workspace_when_no_mounts(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         try:
             assert section.temp_dir.exists()
@@ -101,7 +106,9 @@ class TestClaudeAgentWorkspaceSectionCore:
         finally:
             section.cleanup()
 
-    def test_creates_workspace_from_mounts(self, session: Session) -> None:
+    def test_creates_workspace_from_mounts(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
             host_path = Path(host_dir)
             (host_path / "test.py").write_text("print('hello')")
@@ -117,14 +124,16 @@ class TestClaudeAgentWorkspaceSectionCore:
             finally:
                 section.cleanup()
 
-    def test_session_property_returns_session(self, session: Session) -> None:
+    def test_session_property_returns_session(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         try:
             assert section.session is session
         finally:
             section.cleanup()
 
-    def test_temp_dir_property(self, session: Session) -> None:
+    def test_temp_dir_property(self, session: Session, clock: FakeClock) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         try:
             assert isinstance(section.temp_dir, Path)
@@ -132,7 +141,7 @@ class TestClaudeAgentWorkspaceSectionCore:
         finally:
             section.cleanup()
 
-    def test_mount_previews_property(self, session: Session) -> None:
+    def test_mount_previews_property(self, session: Session, clock: FakeClock) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
             host_path = Path(host_dir)
             (host_path / "test.txt").write_text("content")
@@ -149,7 +158,7 @@ class TestClaudeAgentWorkspaceSectionCore:
             finally:
                 section.cleanup()
 
-    def test_created_at_property(self, session: Session) -> None:
+    def test_created_at_property(self, session: Session, clock: FakeClock) -> None:
         from datetime import datetime
 
         section = ClaudeAgentWorkspaceSection(session=session)
@@ -158,7 +167,7 @@ class TestClaudeAgentWorkspaceSectionCore:
         finally:
             section.cleanup()
 
-    def test_filesystem_property(self, session: Session) -> None:
+    def test_filesystem_property(self, session: Session, clock: FakeClock) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         try:
             fs = section.filesystem
@@ -172,19 +181,25 @@ class TestClaudeAgentWorkspaceSectionCore:
 class TestClaudeAgentWorkspaceSectionCleanup:
     """Cleanup and clone tests for ClaudeAgentWorkspaceSection."""
 
-    def test_cleanup_removes_temp_directory(self, session: Session) -> None:
+    def test_cleanup_removes_temp_directory(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         temp_dir = section.temp_dir
         assert temp_dir.exists()
         section.cleanup()
         assert not temp_dir.exists()
 
-    def test_cleanup_handles_already_deleted(self, session: Session) -> None:
+    def test_cleanup_handles_already_deleted(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         shutil.rmtree(section.temp_dir)
         section.cleanup()  # Should not raise
 
-    def test_cleanup_removes_filesystem_git_directory(self, session: Session) -> None:
+    def test_cleanup_removes_filesystem_git_directory(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
         fs = section.filesystem
 
@@ -204,7 +219,9 @@ class TestClaudeAgentWorkspaceSectionCleanup:
         assert not temp_dir.exists()
         assert not Path(git_dir).exists()
 
-    def test_cleanup_handles_non_host_filesystem(self, session: Session) -> None:
+    def test_cleanup_handles_non_host_filesystem(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Test that cleanup works when filesystem is not a HostFilesystem."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
 
@@ -213,14 +230,14 @@ class TestClaudeAgentWorkspaceSectionCleanup:
         assert temp_dir.exists()
 
         # Replace the filesystem with InMemoryFilesystem (which has no cleanup)
-        section._filesystem = InMemoryFilesystem()
+        section._filesystem = InMemoryFilesystem(clock=clock)
 
         # Cleanup should still work (just skip filesystem cleanup)
         section.cleanup()
         assert not temp_dir.exists()
 
     def test_clone_creates_new_section_with_same_workspace(
-        self, session: Session
+        self, session: Session, clock: FakeClock
     ) -> None:
         with tempfile.TemporaryDirectory() as host_dir:
             (Path(host_dir) / "file.txt").write_text("content")
@@ -232,7 +249,7 @@ class TestClaudeAgentWorkspaceSectionCleanup:
 
             try:
                 new_dispatcher = InProcessDispatcher()
-                new_session = Session(dispatcher=new_dispatcher)
+                new_session = Session(dispatcher=new_dispatcher, clock=clock)
                 cloned = section.clone(session=new_session)
 
                 assert cloned is not section
@@ -242,7 +259,9 @@ class TestClaudeAgentWorkspaceSectionCleanup:
             finally:
                 section.cleanup()
 
-    def test_clone_preserves_filesystem_instance(self, session: Session) -> None:
+    def test_clone_preserves_filesystem_instance(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
 
         try:
@@ -252,7 +271,7 @@ class TestClaudeAgentWorkspaceSectionCleanup:
 
             # Clone to a new session
             new_dispatcher = InProcessDispatcher()
-            new_session = Session(dispatcher=new_dispatcher)
+            new_session = Session(dispatcher=new_dispatcher, clock=clock)
             cloned = section.clone(session=new_session)
 
             # Filesystem instance should be the same
@@ -264,7 +283,7 @@ class TestClaudeAgentWorkspaceSectionCleanup:
         finally:
             section.cleanup()
 
-    def test_clone_requires_session(self, session: Session) -> None:
+    def test_clone_requires_session(self, session: Session, clock: FakeClock) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
 
         try:
@@ -273,12 +292,14 @@ class TestClaudeAgentWorkspaceSectionCleanup:
         finally:
             section.cleanup()
 
-    def test_clone_rejects_mismatched_dispatcher(self, session: Session) -> None:
+    def test_clone_rejects_mismatched_dispatcher(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         section = ClaudeAgentWorkspaceSection(session=session)
 
         try:
             new_dispatcher = InProcessDispatcher()
-            new_session = Session(dispatcher=new_dispatcher)
+            new_session = Session(dispatcher=new_dispatcher, clock=clock)
             other_dispatcher = InProcessDispatcher()
 
             with pytest.raises(TypeError, match="dispatcher must match"):
@@ -555,12 +576,9 @@ class TestClaudeAgentWorkspaceSectionSecurity:
 class TestClaudeAgentWorkspaceSectionResources:
     """Tests for ClaudeAgentWorkspaceSection.resources() method."""
 
-    @pytest.fixture
-    def session(self) -> Session:
-        dispatcher = InProcessDispatcher()
-        return Session(dispatcher=dispatcher)
-
-    def test_resources_returns_filesystem(self, session: Session) -> None:
+    def test_resources_returns_filesystem(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """resources() returns a ResourceRegistry containing the filesystem."""
         from weakincentives.resources import ResourceRegistry
 

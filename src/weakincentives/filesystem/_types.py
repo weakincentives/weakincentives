@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from typing import Final, Literal
 from uuid import UUID
 
+from weakincentives.runtime.clock import Clock, SystemClock
+
 DEFAULT_READ_LIMIT: Final[int] = 2_000
 MAX_WRITE_LENGTH: Final[int] = 48_000
 MAX_WRITE_BYTES: Final[int] = 48_000
@@ -176,9 +178,11 @@ def validate_path(path: str) -> None:
             raise ValueError(msg)
 
 
-def now() -> datetime:
+def now(clock: Clock | None = None) -> datetime:
     """Return current UTC time truncated to milliseconds."""
-    value = datetime.now(UTC)
+    if clock is None:  # pragma: no cover
+        clock = SystemClock()
+    value = clock.now()
     microsecond = value.microsecond - value.microsecond % 1000
     return value.replace(microsecond=microsecond, tzinfo=UTC)
 

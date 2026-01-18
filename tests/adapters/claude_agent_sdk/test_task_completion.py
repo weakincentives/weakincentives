@@ -24,14 +24,15 @@ from weakincentives.adapters.claude_agent_sdk._task_completion import (
     TaskCompletionResult,
 )
 from weakincentives.contrib.tools.planning import Plan, PlanningToolsSection, PlanStep
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
 
 @pytest.fixture
-def session() -> Session:
+def session(clock: FakeClock) -> Session:
     dispatcher = InProcessDispatcher()
-    return Session(dispatcher=dispatcher)
+    return Session(dispatcher=dispatcher, clock=clock)
 
 
 class TestTaskCompletionResult:
@@ -88,7 +89,9 @@ class TestTaskCompletionContext:
 
 
 class TestPlanBasedChecker:
-    def test_complete_when_no_plan_type_configured(self, session: Session) -> None:
+    def test_complete_when_no_plan_type_configured(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Checker returns complete when plan_type is None (no-op mode)."""
         checker = PlanBasedChecker(plan_type=None)
         context = TaskCompletionContext(session=session)
@@ -99,11 +102,13 @@ class TestPlanBasedChecker:
         assert result.feedback is not None
         assert "No planning tools available" in result.feedback
 
-    def test_complete_when_no_plan_slice(self, session: Session) -> None:
+    def test_complete_when_no_plan_slice(
+        self, session: Session, clock: FakeClock
+    ) -> None:
         """Checker returns complete when Plan slice isn't registered or empty."""
         # Use a fresh session without Plan slice to test the no-plan case
         fresh_dispatcher = InProcessDispatcher()
-        fresh_session = Session(dispatcher=fresh_dispatcher)
+        fresh_session = Session(dispatcher=fresh_dispatcher, clock=clock)
 
         checker = PlanBasedChecker(plan_type=Plan)
         context = TaskCompletionContext(session=fresh_session)

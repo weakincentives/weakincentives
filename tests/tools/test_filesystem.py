@@ -42,6 +42,7 @@ from weakincentives.filesystem import (
     ReadResult,
     WriteResult,
 )
+from weakincentives.runtime.clock import FakeClock
 
 # =============================================================================
 # InMemoryFilesystem Tests using Validation Suites
@@ -52,56 +53,56 @@ class TestInMemoryFilesystemProtocol(FilesystemValidationSuite):
     """Test InMemoryFilesystem against the generic Filesystem protocol suite."""
 
     @pytest.fixture
-    def fs(self) -> InMemoryFilesystem:
+    def fs(self, clock: FakeClock) -> InMemoryFilesystem:
         """Provide a fresh InMemoryFilesystem instance."""
-        return InMemoryFilesystem()
+        return InMemoryFilesystem(clock=clock)
 
 
 class TestInMemoryFilesystemReadOnly(ReadOnlyFilesystemValidationSuite):
     """Test InMemoryFilesystem read-only behavior."""
 
     @pytest.fixture
-    def fs_readonly(self) -> InMemoryFilesystem:
+    def fs_readonly(self, clock: FakeClock) -> InMemoryFilesystem:
         """Provide a read-only InMemoryFilesystem instance."""
-        return InMemoryFilesystem(_read_only=True)
+        return InMemoryFilesystem(_read_only=True, clock=clock)
 
 
 class TestInMemoryFilesystemSnapshots(SnapshotableFilesystemValidationSuite):
     """Test InMemoryFilesystem snapshot behavior."""
 
     @pytest.fixture
-    def fs_snapshotable(self) -> InMemoryFilesystem:
+    def fs_snapshotable(self, clock: FakeClock) -> InMemoryFilesystem:
         """Provide a snapshotable InMemoryFilesystem instance."""
-        return InMemoryFilesystem()
+        return InMemoryFilesystem(clock=clock)
 
 
 class TestInMemoryFilesystemSpecific:
     """Implementation-specific tests for InMemoryFilesystem."""
 
-    def test_root_property_is_slash(self) -> None:
+    def test_root_property_is_slash(self, clock: FakeClock) -> None:
         """InMemoryFilesystem root should be '/'."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         assert fs.root == "/"
 
-    def test_snapshot_commit_ref_prefix(self) -> None:
+    def test_snapshot_commit_ref_prefix(self, clock: FakeClock) -> None:
         """InMemoryFilesystem snapshot commit_ref should start with 'mem-'."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("file.txt", "content")
         snapshot = fs.snapshot()
         assert snapshot.commit_ref.startswith("mem-")
 
-    def test_snapshot_root_path_is_slash(self) -> None:
+    def test_snapshot_root_path_is_slash(self, clock: FakeClock) -> None:
         """InMemoryFilesystem snapshot root_path should be '/'."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("file.txt", "content")
         snapshot = fs.snapshot()
         assert snapshot.root_path == "/"
 
-    def test_restore_unknown_snapshot_raises(self) -> None:
+    def test_restore_unknown_snapshot_raises(self, clock: FakeClock) -> None:
         """restore() should raise SnapshotRestoreError for unknown snapshot."""
         from datetime import UTC, datetime
 
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fake_snapshot = FilesystemSnapshot(
             snapshot_id=UUID("00000000-0000-0000-0000-000000000000"),
             created_at=datetime.now(UTC),
@@ -111,9 +112,9 @@ class TestInMemoryFilesystemSpecific:
         with pytest.raises(SnapshotRestoreError, match="Unknown snapshot"):
             fs.restore(fake_snapshot)
 
-    def test_list_with_implicit_subdirectories(self) -> None:
+    def test_list_with_implicit_subdirectories(self, clock: FakeClock) -> None:
         """Listing should show directories implicitly created by file writes."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("dir1/subdir/file1.txt", "content1")
         fs.write("dir1/subdir/file2.txt", "content2")
         fs.write("dir1/other/file3.txt", "content3")
@@ -123,25 +124,25 @@ class TestInMemoryFilesystemSpecific:
         assert "subdir" in dir_names
         assert "other" in dir_names
 
-    def test_delete_root_keeps_root_exists(self) -> None:
+    def test_delete_root_keeps_root_exists(self, clock: FakeClock) -> None:
         """Deleting root recursively should keep root existing but empty."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("/dir/file.txt", "content")
         fs.delete("/", recursive=True)
         assert fs.exists("/")
         assert not fs.exists("/dir")
 
-    def test_glob_with_recursive_pattern(self) -> None:
+    def test_glob_with_recursive_pattern(self, clock: FakeClock) -> None:
         """Glob with ** pattern should match files in subdirectories."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.write("dir/file.py", "code")
         fs.write("subdir/nested/deep.py", "more code")
         matches = fs.glob("**/*.py")
         assert len(matches) >= 1
 
-    def test_glob_in_root_includes_nested_files(self) -> None:
+    def test_glob_in_root_includes_nested_files(self, clock: FakeClock) -> None:
         """Glob in root with * should match files at root level."""
-        fs = InMemoryFilesystem()
+        fs = InMemoryFilesystem(clock=clock)
         fs.mkdir("mydir")
         fs.write("mydir/file.txt", "content")
         fs.write("root.txt", "root content")
@@ -159,57 +160,57 @@ class TestHostFilesystemProtocol(FilesystemValidationSuite):
     """Test HostFilesystem against the generic Filesystem protocol suite."""
 
     @pytest.fixture
-    def fs(self, tmp_path: Path) -> HostFilesystem:
+    def fs(self, tmp_path: Path, clock: FakeClock) -> HostFilesystem:
         """Provide a fresh HostFilesystem instance backed by a temp directory."""
-        return HostFilesystem(_root=str(tmp_path))
+        return HostFilesystem(_root=str(tmp_path), clock=clock)
 
 
 class TestHostFilesystemReadOnly(ReadOnlyFilesystemValidationSuite):
     """Test HostFilesystem read-only behavior."""
 
     @pytest.fixture
-    def fs_readonly(self, tmp_path: Path) -> HostFilesystem:
+    def fs_readonly(self, tmp_path: Path, clock: FakeClock) -> HostFilesystem:
         """Provide a read-only HostFilesystem instance."""
-        return HostFilesystem(_root=str(tmp_path), _read_only=True)
+        return HostFilesystem(_root=str(tmp_path), _read_only=True, clock=clock)
 
 
 class TestHostFilesystemSnapshots(SnapshotableFilesystemValidationSuite):
     """Test HostFilesystem snapshot behavior."""
 
     @pytest.fixture
-    def fs_snapshotable(self, tmp_path: Path) -> HostFilesystem:
+    def fs_snapshotable(self, tmp_path: Path, clock: FakeClock) -> HostFilesystem:
         """Provide a snapshotable HostFilesystem instance."""
-        return HostFilesystem(_root=str(tmp_path))
+        return HostFilesystem(_root=str(tmp_path), clock=clock)
 
 
 class TestHostFilesystemSpecific:
     """Implementation-specific tests for HostFilesystem."""
 
-    def test_root_property_matches_path(self, tmp_path: Path) -> None:
+    def test_root_property_matches_path(self, tmp_path: Path, clock: FakeClock) -> None:
         """HostFilesystem root should match the provided path."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         assert fs.root == str(tmp_path)
 
-    def test_snapshot_commit_ref_is_git_hash(self, tmp_path: Path) -> None:
+    def test_snapshot_commit_ref_is_git_hash(self, tmp_path: Path, clock: FakeClock) -> None:
         """HostFilesystem snapshot commit_ref should be a 40-char git hash."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         (tmp_path / "file.txt").write_text("content")
         snapshot = fs.snapshot()
         assert len(snapshot.commit_ref) == 40
         assert all(c in "0123456789abcdef" for c in snapshot.commit_ref)
 
-    def test_snapshot_root_path_matches(self, tmp_path: Path) -> None:
+    def test_snapshot_root_path_matches(self, tmp_path: Path, clock: FakeClock) -> None:
         """HostFilesystem snapshot root_path should match filesystem root."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         (tmp_path / "file.txt").write_text("content")
         snapshot = fs.snapshot()
         assert snapshot.root_path == str(tmp_path)
 
-    def test_restore_invalid_commit_raises(self, tmp_path: Path) -> None:
+    def test_restore_invalid_commit_raises(self, tmp_path: Path, clock: FakeClock) -> None:
         """restore() should raise SnapshotRestoreError for invalid commit."""
         from datetime import UTC, datetime
 
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         fs.write("file.txt", "content")
         _ = fs.snapshot()  # Initialize git
 
@@ -226,62 +227,62 @@ class TestHostFilesystemSpecific:
 class TestHostFilesystemPathSecurity:
     """Tests for HostFilesystem path security."""
 
-    def test_path_escape_prevented(self, tmp_path: Path) -> None:
+    def test_path_escape_prevented(self, tmp_path: Path, clock: FakeClock) -> None:
         """Attempting to escape the root should raise PermissionError."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         with pytest.raises(PermissionError, match="escapes root"):
             fs.read("../etc/passwd")
 
-    def test_exists_returns_false_for_escape_attempt(self, tmp_path: Path) -> None:
+    def test_exists_returns_false_for_escape_attempt(self, tmp_path: Path, clock: FakeClock) -> None:
         """exists() should return False for escape attempts rather than raise."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         assert fs.exists("../etc/passwd") is False
 
 
 class TestHostFilesystemEdgeCases:
     """Tests for HostFilesystem edge cases."""
 
-    def test_glob_skips_directories(self, tmp_path: Path) -> None:
+    def test_glob_skips_directories(self, tmp_path: Path, clock: FakeClock) -> None:
         """Glob should only return files, not directories."""
         (tmp_path / "subdir").mkdir()
         (tmp_path / "file.txt").write_text("content")
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         matches = fs.glob("*")
         assert len(matches) == 1
         assert matches[0].path == "file.txt"
 
-    def test_grep_skips_directories(self, tmp_path: Path) -> None:
+    def test_grep_skips_directories(self, tmp_path: Path, clock: FakeClock) -> None:
         """Grep should only search files, not directories."""
         (tmp_path / "subdir").mkdir()
         (tmp_path / "file.txt").write_text("hello")
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         matches = fs.grep("hello")
         assert len(matches) == 1
 
-    def test_grep_skips_binary_files(self, tmp_path: Path) -> None:
+    def test_grep_skips_binary_files(self, tmp_path: Path, clock: FakeClock) -> None:
         """Grep should skip files that fail to decode as UTF-8."""
         (tmp_path / "binary.bin").write_bytes(b"\xff\xfe\x00\x01")
         (tmp_path / "text.txt").write_text("hello")
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         matches = fs.grep(".*")
         assert len(matches) == 1
         assert matches[0].path == "text.txt"
 
-    def test_glob_nonexistent_path(self, tmp_path: Path) -> None:
+    def test_glob_nonexistent_path(self, tmp_path: Path, clock: FakeClock) -> None:
         """Glob on nonexistent path should return empty list."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         matches = fs.glob("*.py", path="missing")
         assert len(matches) == 0
 
-    def test_grep_nonexistent_path(self, tmp_path: Path) -> None:
+    def test_grep_nonexistent_path(self, tmp_path: Path, clock: FakeClock) -> None:
         """Grep on nonexistent path should return empty list."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         matches = fs.grep("pattern", path="missing")
         assert len(matches) == 0
 
-    def test_delete_root_fails(self, tmp_path: Path) -> None:
+    def test_delete_root_fails(self, tmp_path: Path, clock: FakeClock) -> None:
         """Deleting root directory should fail."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         with pytest.raises(PermissionError, match="Cannot delete root"):
             fs.delete(".")
 
@@ -289,9 +290,9 @@ class TestHostFilesystemEdgeCases:
 class TestHostFilesystemGitSnapshots:
     """Tests for HostFilesystem git-based snapshot features."""
 
-    def test_git_initialized_once(self, tmp_path: Path) -> None:
+    def test_git_initialized_once(self, tmp_path: Path, clock: FakeClock) -> None:
         """Git should only be initialized once."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         fs.write("file.txt", "content")
 
         _ = fs.snapshot()
@@ -304,9 +305,9 @@ class TestHostFilesystemGitSnapshots:
         _ = fs.snapshot()
         assert fs.git_dir == first_git_dir
 
-    def test_idempotent_empty_snapshot(self, tmp_path: Path) -> None:
+    def test_idempotent_empty_snapshot(self, tmp_path: Path, clock: FakeClock) -> None:
         """Creating snapshots without changes should work (allow-empty)."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         fs.write("file.txt", "content")
 
         snapshot1 = fs.snapshot()
@@ -316,9 +317,9 @@ class TestHostFilesystemGitSnapshots:
         assert len(snapshot1.commit_ref) == 40
         assert len(snapshot2.commit_ref) == 40
 
-    def test_restore_removes_gitignored_files(self, tmp_path: Path) -> None:
+    def test_restore_removes_gitignored_files(self, tmp_path: Path, clock: FakeClock) -> None:
         """restore() should remove gitignored files for strict rollback."""
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         fs.write("src/main.py", "print('hello')")
         fs.write(".gitignore", "*.pyc\n__pycache__/\n*.log\n")
         snapshot = fs.snapshot()
@@ -337,13 +338,13 @@ class TestHostFilesystemGitSnapshots:
         assert fs.exists(".gitignore")
 
     def test_snapshot_empty_repo_fallback(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Snapshot should handle edge case where commit fails on empty repo."""
         import subprocess
         from unittest.mock import MagicMock
 
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         original_run = subprocess.run
         commit_call_count = 0
 
@@ -378,13 +379,13 @@ class TestHostFilesystemGitSnapshots:
         assert len(snapshot.commit_ref) == 40
 
     def test_commit_fails_but_head_exists(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, tmp_path: Path, clock: FakeClock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Commit failure with existing HEAD should raise SnapshotError."""
         import subprocess
         from unittest.mock import MagicMock
 
-        fs = HostFilesystem(_root=str(tmp_path))
+        fs = HostFilesystem(_root=str(tmp_path), clock=clock)
         fs.write("file.txt", "initial")
         _ = fs.snapshot(tag="initial")
 
@@ -424,11 +425,11 @@ class TestHostFilesystemGitSnapshots:
 class TestHostFilesystemExternalGitDir:
     """Tests for HostFilesystem external git directory feature."""
 
-    def test_git_dir_outside_workspace_root(self, tmp_path: Path) -> None:
+    def test_git_dir_outside_workspace_root(self, tmp_path: Path, clock: FakeClock) -> None:
         """Git directory should be created outside workspace root."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        fs = HostFilesystem(_root=str(workspace))
+        fs = HostFilesystem(_root=str(workspace), clock=clock)
         fs.write("file.txt", "content")
 
         snapshot = fs.snapshot()
@@ -440,11 +441,11 @@ class TestHostFilesystemExternalGitDir:
         assert Path(fs.git_dir).name.startswith("wink-git-")
         assert snapshot.git_dir == fs.git_dir
 
-    def test_git_dir_not_accessible_in_workspace(self, tmp_path: Path) -> None:
+    def test_git_dir_not_accessible_in_workspace(self, tmp_path: Path, clock: FakeClock) -> None:
         """Workspace should not contain .git folder after snapshot."""
         workspace = tmp_path / "project"
         workspace.mkdir()
-        fs = HostFilesystem(_root=str(workspace))
+        fs = HostFilesystem(_root=str(workspace), clock=clock)
         fs.write("src/main.py", "print('hello')")
 
         _ = fs.snapshot()
@@ -452,13 +453,13 @@ class TestHostFilesystemExternalGitDir:
         assert not (workspace / ".git").exists()
         assert (workspace / "src" / "main.py").exists()
 
-    def test_custom_git_dir(self, tmp_path: Path) -> None:
+    def test_custom_git_dir(self, tmp_path: Path, clock: FakeClock) -> None:
         """Custom git directory can be specified."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         custom_git = tmp_path / "custom-git-storage"
 
-        fs = HostFilesystem(_root=str(workspace), _git_dir=str(custom_git))
+        fs = HostFilesystem(_root=str(workspace), clock=clock, _git_dir=str(custom_git))
         fs.write("file.txt", "content")
         snapshot = fs.snapshot()
 
@@ -466,11 +467,11 @@ class TestHostFilesystemExternalGitDir:
         assert custom_git.exists()
         assert snapshot.git_dir == str(custom_git)
 
-    def test_cleanup_removes_git_dir(self, tmp_path: Path) -> None:
+    def test_cleanup_removes_git_dir(self, tmp_path: Path, clock: FakeClock) -> None:
         """cleanup() should remove the external git directory."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        fs = HostFilesystem(_root=str(workspace))
+        fs = HostFilesystem(_root=str(workspace), clock=clock)
         fs.write("file.txt", "content")
 
         _ = fs.snapshot()
@@ -482,11 +483,11 @@ class TestHostFilesystemExternalGitDir:
         assert not git_dir_path.exists()
         assert fs._git_initialized is False
 
-    def test_cleanup_idempotent(self, tmp_path: Path) -> None:
+    def test_cleanup_idempotent(self, tmp_path: Path, clock: FakeClock) -> None:
         """cleanup() should be safe to call multiple times."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        fs = HostFilesystem(_root=str(workspace))
+        fs = HostFilesystem(_root=str(workspace), clock=clock)
         fs.write("file.txt", "content")
 
         _ = fs.snapshot()
@@ -494,18 +495,18 @@ class TestHostFilesystemExternalGitDir:
         fs.cleanup()
         fs.cleanup()
 
-    def test_cleanup_before_snapshot(self, tmp_path: Path) -> None:
+    def test_cleanup_before_snapshot(self, tmp_path: Path, clock: FakeClock) -> None:
         """cleanup() should be safe to call before any snapshot."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        fs = HostFilesystem(_root=str(workspace))
+        fs = HostFilesystem(_root=str(workspace), clock=clock)
         fs.cleanup()
 
-    def test_snapshot_contains_git_dir(self, tmp_path: Path) -> None:
+    def test_snapshot_contains_git_dir(self, tmp_path: Path, clock: FakeClock) -> None:
         """Snapshot should contain the git_dir path."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        fs = HostFilesystem(_root=str(workspace))
+        fs = HostFilesystem(_root=str(workspace), clock=clock)
         fs.write("file.txt", "content")
 
         snapshot = fs.snapshot()
@@ -513,30 +514,30 @@ class TestHostFilesystemExternalGitDir:
         assert snapshot.git_dir is not None
         assert snapshot.git_dir == fs.git_dir
 
-    def test_restore_with_snapshot_git_dir(self, tmp_path: Path) -> None:
+    def test_restore_with_snapshot_git_dir(self, tmp_path: Path, clock: FakeClock) -> None:
         """Restore should work when filesystem git_dir is not set but snapshot has it."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
         git_dir = tmp_path / "git-storage"
 
-        fs1 = HostFilesystem(_root=str(workspace), _git_dir=str(git_dir))
+        fs1 = HostFilesystem(_root=str(workspace), clock=clock, _git_dir=str(git_dir))
         fs1.write("file.txt", "original")
         snapshot = fs1.snapshot()
 
         fs1.write("file.txt", "modified")
         assert fs1.read("file.txt").content == "modified"
 
-        fs2 = HostFilesystem(_root=str(workspace))
+        fs2 = HostFilesystem(_root=str(workspace), clock=clock)
         fs2.restore(snapshot)
 
         assert fs2.git_dir == str(git_dir)
         assert fs2.read("file.txt").content == "original"
 
-    def test_git_dir_property(self, tmp_path: Path) -> None:
+    def test_git_dir_property(self, tmp_path: Path, clock: FakeClock) -> None:
         """git_dir property should return the external git directory path."""
         workspace = tmp_path / "workspace"
         workspace.mkdir()
-        fs = HostFilesystem(_root=str(workspace))
+        fs = HostFilesystem(_root=str(workspace), clock=clock)
 
         assert fs.git_dir is None
 
@@ -546,15 +547,15 @@ class TestHostFilesystemExternalGitDir:
         assert fs.git_dir is not None
         assert Path(fs.git_dir).exists()
 
-    def test_multiple_filesystems_independent_git_dirs(self, tmp_path: Path) -> None:
+    def test_multiple_filesystems_independent_git_dirs(self, tmp_path: Path, clock: FakeClock) -> None:
         """Multiple HostFilesystem instances should have independent git dirs."""
         ws1 = tmp_path / "workspace1"
         ws2 = tmp_path / "workspace2"
         ws1.mkdir()
         ws2.mkdir()
 
-        fs1 = HostFilesystem(_root=str(ws1))
-        fs2 = HostFilesystem(_root=str(ws2))
+        fs1 = HostFilesystem(_root=str(ws1), clock=clock)
+        fs2 = HostFilesystem(_root=str(ws2), clock=clock)
 
         fs1.write("file.txt", "content1")
         fs2.write("file.txt", "content2")

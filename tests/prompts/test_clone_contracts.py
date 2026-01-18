@@ -20,6 +20,7 @@ from weakincentives.contrib.tools.asteval import AstevalSection
 from weakincentives.contrib.tools.planning import PlanningStrategy, PlanningToolsSection
 from weakincentives.contrib.tools.vfs import VfsToolsSection
 from weakincentives.prompt import MarkdownSection
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.session import Session
 
 
@@ -47,15 +48,15 @@ def test_markdown_section_clone_deep_copies_children_and_defaults() -> None:
     assert clone.children and clone.children[0] is not child
 
 
-def test_tool_sections_clone_to_new_sessions() -> None:
-    original_session = Session()
+def test_tool_sections_clone_to_new_sessions(clock: FakeClock) -> None:
+    original_session = Session(clock=clock)
     vfs = VfsToolsSection(session=original_session)
     planning = PlanningToolsSection(
         session=original_session, strategy=PlanningStrategy.REACT
     )
     asteval = AstevalSection(session=original_session)
 
-    new_session = Session()
+    new_session = Session(clock=clock)
 
     vfs_clone = vfs.clone(session=new_session)
     planning_clone = planning.clone(session=new_session)
@@ -66,8 +67,8 @@ def test_tool_sections_clone_to_new_sessions() -> None:
     assert asteval_clone.session is new_session
 
 
-def test_tool_clones_validate_session_and_dispatcher() -> None:
-    base_session = Session()
+def test_tool_clones_validate_session_and_dispatcher(clock: FakeClock) -> None:
+    base_session = Session(clock=clock)
     vfs = VfsToolsSection(session=base_session)
     planning = PlanningToolsSection(
         session=base_session, strategy=PlanningStrategy.REACT
@@ -81,6 +82,6 @@ def test_tool_clones_validate_session_and_dispatcher() -> None:
     with pytest.raises(TypeError):
         _ = asteval.clone()
 
-    other_session = Session()
+    other_session = Session(clock=clock)
     with pytest.raises(TypeError):
         _ = vfs.clone(session=base_session, dispatcher=other_session.dispatcher)

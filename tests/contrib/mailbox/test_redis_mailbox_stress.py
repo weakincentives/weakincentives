@@ -31,7 +31,11 @@ from weakincentives.runtime.mailbox import ReceiptHandleExpiredError
 if TYPE_CHECKING:
     from redis import Redis
 
-pytestmark = [pytest.mark.redis_standalone, pytest.mark.slow]
+pytestmark = [
+    pytest.mark.redis_standalone,
+    pytest.mark.slow,
+    pytest.mark.allow_system_clock,
+]
 
 
 class TestConcurrentStress:

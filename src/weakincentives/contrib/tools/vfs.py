@@ -506,7 +506,7 @@ class VfsToolsSection(MarkdownSection[_VfsSectionParams]):
             mount_previews = _mount_previews
         else:
             # Fresh initialization
-            self._filesystem = InMemoryFilesystem()
+            self._filesystem = InMemoryFilesystem(clock=session.clock)
             mount_previews = materialize_host_mounts_to_filesystem(
                 self._filesystem, self._mounts, self._allowed_roots
             )

@@ -37,6 +37,7 @@ from weakincentives.prompt import (
 )
 from weakincentives.prompt.errors import VisibilityExpansionRequired
 from weakincentives.prompt.protocols import PromptProtocol
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
@@ -108,9 +109,9 @@ no_handler_tool = Tool[SearchParams, SearchResult](
 
 
 @pytest.fixture
-def session() -> Session:
+def session(clock: FakeClock) -> Session:
     dispatcher = InProcessDispatcher()
-    return Session(dispatcher=dispatcher)
+    return Session(dispatcher=dispatcher, clock=clock)
 
 
 @pytest.fixture
@@ -728,7 +729,7 @@ class TestVisibilityExpansionRequiredPropagation:
             asyncio.run(async_handler({"query": "test"}))
 
     def test_passes_filesystem_to_tool_context(
-        self, session: Session, mock_adapter: MagicMock
+        self, session: Session, mock_adapter: MagicMock, clock: FakeClock
     ) -> None:
         """Test that filesystem is accessed via prompt resources."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
@@ -750,7 +751,7 @@ class TestVisibilityExpansionRequiredPropagation:
             handler=capture_context_handler,
         )
 
-        test_filesystem = InMemoryFilesystem()
+        test_filesystem = InMemoryFilesystem(clock=clock)
         prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
 
         bridged = BridgedTool(
@@ -777,7 +778,7 @@ class TestVisibilityExpansionRequiredPropagation:
 
 class TestCreateBridgedToolsWithFilesystem:
     def test_passes_filesystem_to_bridged_tools(
-        self, session: Session, mock_adapter: MagicMock
+        self, session: Session, mock_adapter: MagicMock, clock: FakeClock
     ) -> None:
         """Test that create_bridged_tools passes filesystem via prompt resources."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
@@ -799,7 +800,7 @@ class TestCreateBridgedToolsWithFilesystem:
             handler=capture_context_handler,
         )
 
-        test_filesystem = InMemoryFilesystem()
+        test_filesystem = InMemoryFilesystem(clock=clock)
         prompt = _make_prompt_with_resources({Filesystem: test_filesystem})
 
         bridged_tools = create_bridged_tools(
@@ -928,7 +929,7 @@ class TestBridgedToolTransactionalExecution:
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
-        test_fs = InMemoryFilesystem()
+        test_fs = InMemoryFilesystem(clock=session.clock)
         test_fs.write("/test.txt", "initial content")
 
         prompt = _make_prompt_with_resources({Filesystem: test_fs})
@@ -1162,13 +1163,13 @@ class TestCreateBridgedToolsWithSession:
     """Tests for create_bridged_tools with session parameter."""
 
     def test_passes_session_to_bridged_tools(
-        self, session: Session, mock_adapter: MagicMock
+        self, session: Session, mock_adapter: MagicMock, clock: FakeClock
     ) -> None:
         """Test that create_bridged_tools passes session to BridgedTool."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
         from weakincentives.filesystem import Filesystem
 
-        test_fs = InMemoryFilesystem()
+        test_fs = InMemoryFilesystem(clock=clock)
         test_fs.write("/test.txt", "initial content")
 
         prompt = _make_prompt_with_resources({Filesystem: test_fs})

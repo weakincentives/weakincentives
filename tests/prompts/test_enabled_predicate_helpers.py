@@ -20,6 +20,7 @@ from weakincentives.prompt._enabled_predicate import (
     callable_requires_positional_argument,
     normalize_enabled_predicate,
 )
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
 
@@ -81,9 +82,9 @@ def test_callable_accepts_session_kwarg_detects_keyword_only() -> None:
     assert callable_accepts_session_kwarg(positional_session) is False
 
 
-def test_normalize_enabled_predicate_with_session_kwarg() -> None:
+def test_normalize_enabled_predicate_with_session_kwarg(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     received_session: list[SessionProtocol | None] = []
 
@@ -99,9 +100,9 @@ def test_normalize_enabled_predicate_with_session_kwarg() -> None:
     assert predicate(None, None) is False
 
 
-def test_normalize_enabled_predicate_with_params_and_session() -> None:
+def test_normalize_enabled_predicate_with_params_and_session(clock: FakeClock) -> None:
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
 
     received: list[tuple[ToggleParams, SessionProtocol | None]] = []
 

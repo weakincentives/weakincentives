@@ -30,6 +30,7 @@ from weakincentives.prompt.overrides import (
     SectionOverride,
 )
 from weakincentives.prompt.overrides.versioning import PromptDescriptor
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.session import Session
 
 
@@ -70,8 +71,8 @@ def test_store_section_override_requires_registered_path(tmp_path: Path) -> None
         store.store(descriptor, override)
 
 
-def test_workspace_digest_section_in_descriptor() -> None:
-    section = WorkspaceDigestSection(session=Session())
+def test_workspace_digest_section_in_descriptor(clock: FakeClock) -> None:
+    section = WorkspaceDigestSection(session=Session(clock=clock))
     descriptor = PromptDescriptor.from_prompt(
         PromptTemplate(ns="digest", key="prompt", sections=(section,))
     )
@@ -81,15 +82,17 @@ def test_workspace_digest_section_in_descriptor() -> None:
     assert WorkspaceDigest(section_key="a", summary="s", body="b").section_key == "a"
     with pytest.raises(TypeError):
         section.clone()
-    clone = section.clone(session=Session())
+    clone = section.clone(session=Session(clock=clock))
     assert isinstance(clone, WorkspaceDigestSection)
     heading = section.format_heading(depth=0, number="1.")
     assert heading.startswith("## 1. Workspace Digest")
 
 
-def test_workspace_digest_section_render_override_with_empty_body() -> None:
+def test_workspace_digest_section_render_override_with_empty_body(
+    clock: FakeClock,
+) -> None:
     """render_override returns heading only when body resolves to empty string."""
-    section = WorkspaceDigestSection(session=Session(), placeholder="")
+    section = WorkspaceDigestSection(session=Session(clock=clock), placeholder="")
 
     # With empty placeholder and no digest, render_override returns heading only
     rendered = section.render_override("   ", None, 0, "1.")
@@ -97,16 +100,18 @@ def test_workspace_digest_section_render_override_with_empty_body() -> None:
     assert rendered == "## 1. Workspace Digest"
 
 
-def test_workspace_digest_section_original_summary_template() -> None:
+def test_workspace_digest_section_original_summary_template(clock: FakeClock) -> None:
     """original_summary_template returns a static placeholder for hashing."""
-    section = WorkspaceDigestSection(session=Session())
+    section = WorkspaceDigestSection(session=Session(clock=clock))
 
     assert section.original_summary_template() == "Workspace digest summary."
 
 
-def test_workspace_digest_section_render_body_with_full_visibility() -> None:
+def test_workspace_digest_section_render_body_with_full_visibility(
+    clock: FakeClock,
+) -> None:
     """render_body returns full body content when visibility is FULL."""
-    session = Session()
+    session = Session(clock=clock)
     set_workspace_digest(
         session, "workspace-digest", "Full body content", summary="Short summary"
     )
@@ -118,9 +123,11 @@ def test_workspace_digest_section_render_body_with_full_visibility() -> None:
     assert body == "Full body content"
 
 
-def test_workspace_digest_section_render_body_with_summary_visibility() -> None:
+def test_workspace_digest_section_render_body_with_summary_visibility(
+    clock: FakeClock,
+) -> None:
     """render_body returns summary content when visibility is SUMMARY."""
-    session = Session()
+    session = Session(clock=clock)
     set_workspace_digest(
         session, "workspace-digest", "Full body content", summary="Short summary"
     )
@@ -132,9 +139,11 @@ def test_workspace_digest_section_render_body_with_summary_visibility() -> None:
     assert body == "Short summary"
 
 
-def test_workspace_digest_section_no_digest_renders_placeholder() -> None:
+def test_workspace_digest_section_no_digest_renders_placeholder(
+    clock: FakeClock,
+) -> None:
     """When no digest exists, render_body returns placeholder regardless of visibility."""
-    session = Session()
+    session = Session(clock=clock)
     section = WorkspaceDigestSection(session=session)
 
     # No digest exists - should return placeholder
@@ -143,9 +152,9 @@ def test_workspace_digest_section_no_digest_renders_placeholder() -> None:
     assert "Workspace digest unavailable" in body
 
 
-def test_workspace_digest_section_dynamic_visibility() -> None:
+def test_workspace_digest_section_dynamic_visibility(clock: FakeClock) -> None:
     """Visibility is FULL when no digest, SUMMARY when digest exists."""
-    session = Session()
+    session = Session(clock=clock)
     section = WorkspaceDigestSection(session=session)
 
     # No digest - visibility should be FULL, summary should be None
@@ -160,9 +169,11 @@ def test_workspace_digest_section_dynamic_visibility() -> None:
     assert section.summary == "summary"
 
 
-def test_workspace_digest_section_render_override_respects_visibility() -> None:
+def test_workspace_digest_section_render_override_respects_visibility(
+    clock: FakeClock,
+) -> None:
     """render_override respects visibility even when body override exists."""
-    session = Session()
+    session = Session(clock=clock)
     set_workspace_digest(
         session, "workspace-digest", "Full body content", summary="Short summary"
     )
@@ -178,14 +189,16 @@ def test_workspace_digest_section_render_override_respects_visibility() -> None:
     assert "ignored override body" not in rendered
 
 
-def test_workspace_digest_section_render_override_with_full_visibility() -> None:
+def test_workspace_digest_section_render_override_with_full_visibility(
+    clock: FakeClock,
+) -> None:
     """render_override returns full body when visibility is set to FULL."""
     from weakincentives.prompt._visibility import SectionVisibility
     from weakincentives.runtime.session.visibility_overrides import (
         SetVisibilityOverride,
     )
 
-    session = Session()
+    session = Session(clock=clock)
     set_workspace_digest(
         session, "workspace-digest", "Full body content", summary="Short summary"
     )

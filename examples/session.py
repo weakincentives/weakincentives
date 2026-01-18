@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from typing import cast
 
 from weakincentives.runtime import Session
+from weakincentives.runtime.clock import Clock
 
 from .logging import attach_logging_subscribers
 
@@ -32,12 +33,14 @@ def build_logged_session(
     *,
     parent: Session | None = None,
     tags: Mapping[str, str] | None = None,
+    clock: Clock | None = None,
 ) -> Session:
     """Create a session with logging subscribers attached.
 
     Args:
         parent: Optional parent session for hierarchical session trees.
         tags: Optional mapping of string tags to attach to the session.
+        clock: Optional clock for time-based operations. If None, uses SystemClock.
 
     Returns:
         A new Session instance with logging subscribers attached to its dispatcher.
@@ -46,7 +49,9 @@ def build_logged_session(
     if tags:
         session_tags.update(tags)
 
-    session = Session(parent=parent, tags=cast(Mapping[object, object], session_tags))
+    session = Session(
+        parent=parent, tags=cast(Mapping[object, object], session_tags), clock=clock
+    )
     attach_logging_subscribers(session.dispatcher)
     return session
 

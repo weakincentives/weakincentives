@@ -41,6 +41,7 @@ from weakincentives.prompt.progressive_disclosure import (
 from weakincentives.prompt.registry import PromptRegistry
 from weakincentives.prompt.section import Section
 from weakincentives.prompt.tool import ToolContext
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session, SetVisibilityOverride
 from weakincentives.types.dataclass import SupportsDataclass
@@ -149,7 +150,7 @@ def test_has_summarized_sections_with_summary_text() -> None:
     assert has_summarized_sections(snapshot) is True
 
 
-def test_has_summarized_sections_with_overrides() -> None:
+def test_has_summarized_sections_with_overrides(clock: FakeClock) -> None:
     """Visibility overrides via session state can expand summarized sections."""
     section = _make_section(
         key="sec",
@@ -164,7 +165,7 @@ def test_has_summarized_sections_with_overrides() -> None:
 
     # With override to FULL via session state, no summarized sections
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     session.dispatch(
         SetVisibilityOverride(path=("sec",), visibility=SectionVisibility.FULL)
     )
@@ -188,7 +189,7 @@ def test_compute_current_visibility_default() -> None:
     assert result["sec",] == SectionVisibility.SUMMARY
 
 
-def test_compute_current_visibility_with_overrides() -> None:
+def test_compute_current_visibility_with_overrides(clock: FakeClock) -> None:
     """Applies visibility overrides from session state."""
     section = _make_section(
         key="sec",
@@ -199,7 +200,7 @@ def test_compute_current_visibility_with_overrides() -> None:
     snapshot = registry.snapshot()
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     session.dispatch(
         SetVisibilityOverride(path=("sec",), visibility=SectionVisibility.FULL)
     )

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from weakincentives.runtime.clock import FakeClock
 from weakincentives.runtime.events import Dispatcher
 from weakincentives.runtime.session import (
     Append,
@@ -41,9 +42,9 @@ class _Context(ReducerContextProtocol):
     dispatcher: Dispatcher
 
 
-def test_replace_latest_by_replaces_matching_entry() -> None:
+def test_replace_latest_by_replaces_matching_entry(clock: FakeClock) -> None:
     reducer = replace_latest_by(lambda item: item.key)
-    session = Session()
+    session = Session(clock=clock)
     context = _Context(session=session, dispatcher=session.dispatcher)
     initial = MemorySlice((_Sample("a", "first"), _Sample("b", "second")))
 
@@ -61,9 +62,9 @@ def test_replace_latest_by_replaces_matching_entry() -> None:
     assert any(item.data == "second" for item in updated)
 
 
-def test_append_all_always_appends() -> None:
+def test_append_all_always_appends(clock: FakeClock) -> None:
     """append_all appends unconditionally (ledger semantics)."""
-    session = Session()
+    session = Session(clock=clock)
     context = _Context(session=session, dispatcher=session.dispatcher)
     initial = MemorySlice((_Sample("a", "first"),))
 
@@ -74,9 +75,9 @@ def test_append_all_always_appends() -> None:
     assert op.item == _Sample("a", "first")
 
 
-def test_append_all_appends_to_empty_slice() -> None:
+def test_append_all_appends_to_empty_slice(clock: FakeClock) -> None:
     """append_all works on empty slices."""
-    session = Session()
+    session = Session(clock=clock)
     context = _Context(session=session, dispatcher=session.dispatcher)
     initial = MemorySlice[_Sample]()
 
@@ -86,10 +87,12 @@ def test_append_all_appends_to_empty_slice() -> None:
     assert op.item == _Sample("a", "first")
 
 
-def test_upsert_by_replaces_first_duplicate_and_removes_others() -> None:
+def test_upsert_by_replaces_first_duplicate_and_removes_others(
+    clock: FakeClock,
+) -> None:
     """upsert_by replaces first matching key and discards subsequent duplicates."""
     reducer = upsert_by(lambda item: item.key)
-    session = Session()
+    session = Session(clock=clock)
     context = _Context(session=session, dispatcher=session.dispatcher)
     # Slice with duplicate keys - this covers the branch at line 61->64
     initial = MemorySlice(
@@ -114,10 +117,10 @@ def test_upsert_by_replaces_first_duplicate_and_removes_others() -> None:
     assert updated[1] == _Sample("a", "updated")
 
 
-def test_upsert_by_appends_when_key_not_found() -> None:
+def test_upsert_by_appends_when_key_not_found(clock: FakeClock) -> None:
     """upsert_by appends when key doesn't exist."""
     reducer = upsert_by(lambda item: item.key)
-    session = Session()
+    session = Session(clock=clock)
     context = _Context(session=session, dispatcher=session.dispatcher)
     initial = MemorySlice((_Sample("a", "first"),))
 

@@ -18,7 +18,6 @@ import contextlib
 import shutil
 import tempfile
 from collections.abc import Callable
-from datetime import UTC, datetime
 from typing import Any, cast, override
 
 from ...budget import Budget, BudgetTracker
@@ -67,10 +66,6 @@ logger: StructuredLogger = get_logger(
 
 CLAUDE_AGENT_SDK_ADAPTER_NAME: AdapterName = "claude_agent_sdk"
 """Canonical label for the Claude Agent SDK adapter."""
-
-
-def _utcnow() -> datetime:
-    return datetime.now(UTC)
 
 
 def _import_sdk() -> Any:  # pragma: no cover
@@ -406,7 +401,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 session_id=None,
                 render_inputs=(),
                 rendered_prompt=prompt_text,
-                created_at=_utcnow(),
+                created_at=session.clock.now(),
                 descriptor=None,
                 run_context=run_context,
             )
@@ -432,7 +427,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     event="evaluate.temp_workspace_created",
                     context={"temp_workspace_dir": temp_workspace_dir},
                 )
-            filesystem = HostFilesystem(_root=effective_cwd)
+            filesystem = HostFilesystem(_root=effective_cwd, clock=session.clock)
             prompt = prompt.bind(resources={Filesystem: filesystem})
             logger.debug(
                 "claude_agent_sdk.evaluate.filesystem_bound",
@@ -538,7 +533,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             },
         )
 
-        start_time = _utcnow()
+        start_time = session.clock.now()
 
         # Always create ephemeral home for hermetic isolation.
         # This prevents the SDK from reading the host's ~/.claude configuration,
@@ -622,7 +617,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             # Always clean up ephemeral home
             ephemeral_home.cleanup()
 
-        end_time = _utcnow()
+        end_time = session.clock.now()
         duration_ms = int((end_time - start_time).total_seconds() * 1000)
 
         result_text, output, usage = self._extract_result(
@@ -654,7 +649,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
                 result=response,
                 session_id=None,
-                created_at=_utcnow(),
+                created_at=session.clock.now(),
                 usage=usage,
                 run_context=run_context,
             )

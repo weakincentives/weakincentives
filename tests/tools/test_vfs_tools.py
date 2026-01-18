@@ -50,6 +50,7 @@ from weakincentives.filesystem import READ_ENTIRE_FILE
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import Session
+from weakincentives.runtime.clock import FakeClock
 
 
 def _make_section(
@@ -58,9 +59,13 @@ def _make_section(
     mounts: Sequence[HostMount] = (),
     allowed_host_roots: Sequence[Path | str] = (),
     accepts_overrides: bool = False,
+    clock: FakeClock | None = None,
 ) -> VfsToolsSection:
     if session is None:
-        session = Session(dispatcher=InProcessDispatcher())
+        session = Session(
+            dispatcher=InProcessDispatcher(),
+            clock=clock if clock is not None else FakeClock(),
+        )
     return VfsToolsSection(
         session=session,
         mounts=mounts,
@@ -70,12 +75,12 @@ def _make_section(
 
 
 @pytest.fixture()
-def session_and_dispatcher() -> tuple[Session, InProcessDispatcher]:
+def session_and_dispatcher(clock: FakeClock) -> tuple[Session, InProcessDispatcher]:
     dispatcher = InProcessDispatcher()
-    return Session(dispatcher=dispatcher), dispatcher
+    return Session(dispatcher=dispatcher, clock=clock), dispatcher
 
 
-def test_file_info_render_formats_metadata() -> None:
+def test_file_info_render_formats_metadata(clock: FakeClock) -> None:
     timestamp = datetime(2024, 1, 1, tzinfo=UTC)
     file_info = FileInfo(
         path=VfsPath(("src", "app.py")),
@@ -96,7 +101,7 @@ def test_file_info_render_formats_metadata() -> None:
     assert rendered_directory.endswith("/")
 
 
-def test_file_info_render_with_none_size_bytes() -> None:
+def test_file_info_render_with_none_size_bytes(clock: FakeClock) -> None:
     """Test FileInfo render when size_bytes is None."""
     file_info = FileInfo(
         path=VfsPath(("src", "app.py")),
@@ -112,7 +117,7 @@ def test_file_info_render_with_none_size_bytes() -> None:
     assert "src/app.py" in rendered
 
 
-def test_read_file_result_render_includes_window() -> None:
+def test_read_file_result_render_includes_window(clock: FakeClock) -> None:
     payload = ReadFileResult(
         path=VfsPath(("docs", "note.txt")),
         content="3 | value",
@@ -126,7 +131,7 @@ def test_read_file_result_render_includes_window() -> None:
     assert "value" in rendered
 
 
-def test_write_file_render_includes_preview() -> None:
+def test_write_file_render_includes_preview(clock: FakeClock) -> None:
     payload = WriteFile(
         path=VfsPath(("docs", "draft.md")),
         content="first line\nsecond line",
@@ -138,7 +143,7 @@ def test_write_file_render_includes_preview() -> None:
     assert "first line" in rendered
 
 
-def test_glob_and_grep_render_strings() -> None:
+def test_glob_and_grep_render_strings(clock: FakeClock) -> None:
     timestamp = datetime(2024, 2, 1, tzinfo=UTC)
     glob_match = GlobMatch(
         path=VfsPath(("docs", "readme.md")),
@@ -157,13 +162,13 @@ def test_glob_and_grep_render_strings() -> None:
     assert "docs/readme.md:12" in grep_match.render()
 
 
-def test_delete_entry_render_mentions_path() -> None:
+def test_delete_entry_render_mentions_path(clock: FakeClock) -> None:
     payload = DeleteEntry(path=VfsPath(("tmp", "cache")))
 
     assert "tmp/cache" in payload.render()
 
 
-def test_format_timestamp_helper_and_write_render() -> None:
+def test_format_timestamp_helper_and_write_render(clock: FakeClock) -> None:
     naive = datetime(2024, 1, 1, 12, 0, 0)
     aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
     assert format_timestamp(naive).endswith("+00:00")
@@ -197,7 +202,7 @@ def _get_filesystem(section: VfsToolsSection) -> InMemoryFilesystem:
     return fs
 
 
-def test_section_template_mentions_new_surface() -> None:
+def test_section_template_mentions_new_surface(clock: FakeClock) -> None:
     section = _make_section()
     template = section.template
     assert "ls" in template
@@ -557,14 +562,14 @@ def test_write_file_rejects_existing_target(
         invoke_tool(write_tool, params, session=session, filesystem=section.filesystem)
 
 
-def test_host_mounts_seed_snapshot(tmp_path: Path) -> None:
+def test_host_mounts_seed_snapshot(tmp_path: Path, clock: FakeClock) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()
     file_path = docs / "intro.md"
     file_path.write_text("hello", encoding="utf-8")
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = _make_section(
         session=session,
         mounts=(
@@ -935,9 +940,9 @@ def test_rm_requires_existing_path(
         invoke_tool(rm_tool, params, session=session, filesystem=section.filesystem)
 
 
-def test_inmemory_filesystem_supports_append() -> None:
+def test_inmemory_filesystem_supports_append(clock: FakeClock) -> None:
     """Test that InMemoryFilesystem supports append mode."""
-    fs = InMemoryFilesystem()
+    fs = InMemoryFilesystem(clock=clock)
     fs.write("log.txt", "line1", mode="create")
     fs.write("log.txt", "\nline2", mode="append")
     result = fs.read("log.txt")
@@ -945,42 +950,42 @@ def test_inmemory_filesystem_supports_append() -> None:
     assert "line1" in result.content
 
 
-def test_host_mount_requires_allowed_root(tmp_path: Path) -> None:
+def test_host_mount_requires_allowed_root(tmp_path: Path, clock: FakeClock) -> None:
     missing_root = tmp_path / "missing"
     with pytest.raises(ToolValidationError, match="Allowed host root does not exist"):
         VfsToolsSection(
-            session=Session(dispatcher=InProcessDispatcher()),
+            session=Session(dispatcher=InProcessDispatcher(), clock=clock),
             allowed_host_roots=(missing_root,),
         )
 
 
-def test_host_mount_rejects_empty_path(tmp_path: Path) -> None:
+def test_host_mount_rejects_empty_path(tmp_path: Path, clock: FakeClock) -> None:
     with pytest.raises(ToolValidationError, match="must not be empty"):
         VfsToolsSection(
-            session=Session(dispatcher=InProcessDispatcher()),
+            session=Session(dispatcher=InProcessDispatcher(), clock=clock),
             mounts=(HostMount(host_path=""),),
             allowed_host_roots=(tmp_path,),
         )
 
 
-def test_host_mount_enforces_max_bytes(tmp_path: Path) -> None:
+def test_host_mount_enforces_max_bytes(tmp_path: Path, clock: FakeClock) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()
     file_path = docs / "intro.md"
     file_path.write_text("hello", encoding="utf-8")
     with pytest.raises(ToolValidationError, match="byte budget"):
         VfsToolsSection(
-            session=Session(dispatcher=InProcessDispatcher()),
+            session=Session(dispatcher=InProcessDispatcher(), clock=clock),
             mounts=(HostMount(host_path="docs", max_bytes=1, include_glob=("*.md",)),),
             allowed_host_roots=(tmp_path,),
         )
 
 
-def test_host_mount_defaults_to_relative_destination(tmp_path: Path) -> None:
+def test_host_mount_defaults_to_relative_destination(tmp_path: Path, clock: FakeClock) -> None:
     file_path = tmp_path / "readme.md"
     file_path.write_text("hi", encoding="utf-8")
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = _make_section(
         session=session,
         mounts=(HostMount(host_path="readme.md"),),
@@ -996,13 +1001,13 @@ def test_host_mount_defaults_to_relative_destination(tmp_path: Path) -> None:
     assert entries[0].path.segments == ("readme.md",)
 
 
-def test_host_mount_glob_normalization(tmp_path: Path) -> None:
+def test_host_mount_glob_normalization(tmp_path: Path, clock: FakeClock) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "intro.md").write_text("hello", encoding="utf-8")
     (docs / "skip.tmp").write_text("ignore", encoding="utf-8")
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = _make_section(
         session=session,
         mounts=(
@@ -1024,13 +1029,13 @@ def test_host_mount_glob_normalization(tmp_path: Path) -> None:
     assert entries[0].path.segments == ("intro.md",)
 
 
-def test_host_mount_exclude_glob_filters_matches(tmp_path: Path) -> None:
+def test_host_mount_exclude_glob_filters_matches(tmp_path: Path, clock: FakeClock) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()
     (docs / "keep.txt").write_text("hello", encoding="utf-8")
     (docs / "skip.log").write_text("ignored", encoding="utf-8")
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = _make_section(
         session=session,
         mounts=(
@@ -1052,8 +1057,8 @@ def test_host_mount_exclude_glob_filters_matches(tmp_path: Path) -> None:
     assert [entry.path.segments for entry in entries] == [("keep.txt",)]
 
 
-def test_host_mount_double_star_glob_includes_root_files(tmp_path: Path) -> None:
-    """Test that **/*.ext patterns match files at the mount root (zero directories).
+def test_host_mount_double_star_glob_includes_root_files(tmp_path: Path, clock: FakeClock) -> None:
+    """Test that **/*.ext patterns match files at the mount root (zero directories, clock).
 
     This verifies the _match_glob fix: fnmatch doesn't treat ** as zero-or-more
     directories, so **/*.py should match both 'foo.py' (root) and 'sub/bar.py'.
@@ -1067,7 +1072,7 @@ def test_host_mount_double_star_glob_includes_root_files(tmp_path: Path) -> None
     (subdir / "nested.py").write_text("nested", encoding="utf-8")
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = _make_section(
         session=session,
         mounts=(
@@ -1086,7 +1091,7 @@ def test_host_mount_double_star_glob_includes_root_files(tmp_path: Path) -> None
     assert fs.exists("pkg/nested.py"), "Nested .py file should be included"
 
 
-def test_host_mount_double_star_glob_preserves_prefix(tmp_path: Path) -> None:
+def test_host_mount_double_star_glob_preserves_prefix(tmp_path: Path, clock: FakeClock) -> None:
     """Ensure ** patterns do not drop path prefixes when matching zero directories."""
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -1102,7 +1107,7 @@ def test_host_mount_double_star_glob_preserves_prefix(tmp_path: Path) -> None:
     (other / "test_other.py").write_text("other", encoding="utf-8")
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = _make_section(
         session=session,
         mounts=(
@@ -1121,29 +1126,29 @@ def test_host_mount_double_star_glob_preserves_prefix(tmp_path: Path) -> None:
     assert not fs.exists("other/test_other.py")
 
 
-def test_normalize_string_path_requires_value() -> None:
+def test_normalize_string_path_requires_value(clock: FakeClock) -> None:
     with pytest.raises(ToolValidationError, match="test is required"):
         vfs_types_module.normalize_string_path(None, allow_empty=False, field="test")
 
 
-def test_normalize_string_path_allows_empty() -> None:
+def test_normalize_string_path_allows_empty(clock: FakeClock) -> None:
     result = vfs_types_module.normalize_string_path("", allow_empty=True, field="path")
     assert result.segments == ()
 
 
-def test_normalize_string_path_rejects_missing_reference() -> None:
+def test_normalize_string_path_rejects_missing_reference(clock: FakeClock) -> None:
     with pytest.raises(ToolValidationError, match="must reference a file or directory"):
         vfs_types_module.normalize_string_path("/", allow_empty=False, field="path")
 
 
-def test_normalize_string_path_returns_segments() -> None:
+def test_normalize_string_path_returns_segments(clock: FakeClock) -> None:
     result = vfs_types_module.normalize_string_path(
         "docs/readme.md", allow_empty=False, field="file_path"
     )
     assert result.segments == ("docs", "readme.md")
 
 
-def test_normalize_string_path_strips_mount_point_prefix() -> None:
+def test_normalize_string_path_strips_mount_point_prefix(clock: FakeClock) -> None:
     """Paths like /workspace/sunfish should normalize to sunfish when mount_point is set."""
     result = vfs_types_module.normalize_string_path(
         "/workspace/sunfish/README.md",
@@ -1154,7 +1159,7 @@ def test_normalize_string_path_strips_mount_point_prefix() -> None:
     assert result.segments == ("sunfish", "README.md")
 
 
-def test_normalize_string_path_strips_mount_point_root() -> None:
+def test_normalize_string_path_strips_mount_point_root(clock: FakeClock) -> None:
     """Path /workspace should normalize to empty when mount_point is /workspace."""
     result = vfs_types_module.normalize_string_path(
         "/workspace", allow_empty=True, field="path", mount_point="/workspace"
@@ -1162,7 +1167,7 @@ def test_normalize_string_path_strips_mount_point_root() -> None:
     assert result.segments == ()
 
 
-def test_normalize_string_path_strips_mount_point_relative() -> None:
+def test_normalize_string_path_strips_mount_point_relative(clock: FakeClock) -> None:
     """Relative paths like workspace/file.txt should also be stripped."""
     result = vfs_types_module.normalize_string_path(
         "workspace/file.txt", allow_empty=False, field="path", mount_point="workspace"
@@ -1170,7 +1175,7 @@ def test_normalize_string_path_strips_mount_point_relative() -> None:
     assert result.segments == ("file.txt",)
 
 
-def test_normalize_string_path_ignores_mount_point_when_none() -> None:
+def test_normalize_string_path_ignores_mount_point_when_none(clock: FakeClock) -> None:
     """When mount_point is None, no prefix stripping occurs."""
     result = vfs_types_module.normalize_string_path(
         "workspace/file.txt", allow_empty=False, field="path", mount_point=None
@@ -1178,45 +1183,45 @@ def test_normalize_string_path_ignores_mount_point_when_none() -> None:
     assert result.segments == ("workspace", "file.txt")
 
 
-def test_normalize_segments_rejects_absolute() -> None:
+def test_normalize_segments_rejects_absolute(clock: FakeClock) -> None:
     with pytest.raises(ToolValidationError, match="Absolute paths are not allowed"):
         vfs_types_module.normalize_segments(("/bad",))
 
 
-def test_normalize_segments_skips_empty_parts() -> None:
+def test_normalize_segments_skips_empty_parts(clock: FakeClock) -> None:
     result = vfs_types_module.normalize_segments(("dir//sub",))
     assert result == ("dir", "sub")
 
 
-def test_normalize_optional_path_returns_value() -> None:
+def test_normalize_optional_path_returns_value(clock: FakeClock) -> None:
     result = vfs_types_module.normalize_optional_path(VfsPath(("docs",)))
     assert result.segments == ("docs",)
 
 
-def test_normalize_path_returns_segments() -> None:
+def test_normalize_path_returns_segments(clock: FakeClock) -> None:
     result = vfs_types_module.normalize_path(VfsPath(("docs", "file.txt")))
     assert result.segments == ("docs", "file.txt")
 
 
-def test_normalize_path_enforces_depth_limit() -> None:
+def test_normalize_path_enforces_depth_limit(clock: FakeClock) -> None:
     deep = tuple(str(index) for index in range(17))
     with pytest.raises(ToolValidationError, match="Path depth exceeds"):
         vfs_types_module.normalize_path(VfsPath(deep))
 
 
-def test_host_mount_outside_allowed_root(tmp_path: Path) -> None:
+def test_host_mount_outside_allowed_root(tmp_path: Path, clock: FakeClock) -> None:
     allowed = tmp_path / "allowed"
     allowed.mkdir()
     with pytest.raises(ToolValidationError, match="outside the allowed roots"):
         VfsToolsSection(
-            session=Session(dispatcher=InProcessDispatcher()),
+            session=Session(dispatcher=InProcessDispatcher(), clock=clock),
             mounts=(HostMount(host_path="../forbidden.txt"),),
             allowed_host_roots=(allowed,),
         )
 
 
 def test_host_mount_read_error_is_reported(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, clock: FakeClock
 ) -> None:
     docs = tmp_path / "docs"
     docs.mkdir()
@@ -1236,7 +1241,7 @@ def test_host_mount_read_error_is_reported(
 
     with pytest.raises(ToolValidationError, match="Failed to read mounted file"):
         VfsToolsSection(
-            session=Session(dispatcher=InProcessDispatcher()),
+            session=Session(dispatcher=InProcessDispatcher(), clock=clock),
             mounts=(HostMount(host_path="docs"),),
             allowed_host_roots=(tmp_path,),
         )
@@ -1252,15 +1257,15 @@ def test_resolve_mount_path_returns_candidate(tmp_path: Path) -> None:
     assert resolved == file_path
 
 
-def test_resolve_mount_path_requires_allowed_roots() -> None:
+def test_resolve_mount_path_requires_allowed_roots(clock: FakeClock) -> None:
     with pytest.raises(ToolValidationError, match="No allowed host roots"):
         vfs_mounts_module.resolve_mount_path("data.txt", ())
 
 
-def test_prompt_filesystem_returns_workspace_section_filesystem() -> None:
+def test_prompt_filesystem_returns_workspace_section_filesystem(clock: FakeClock) -> None:
     """Test that Prompt.filesystem() returns filesystem from workspace section."""
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = VfsToolsSection(session=session)
     template = PromptTemplate(
         ns="test",
@@ -1275,7 +1280,7 @@ def test_prompt_filesystem_returns_workspace_section_filesystem() -> None:
     assert fs is section.filesystem
 
 
-def test_prompt_filesystem_returns_none_when_no_workspace() -> None:
+def test_prompt_filesystem_returns_none_when_no_workspace(clock: FakeClock) -> None:
     """Test that Prompt.filesystem() returns None without workspace section."""
     section = MarkdownSection(
         title="Test",
@@ -1292,10 +1297,10 @@ def test_prompt_filesystem_returns_none_when_no_workspace() -> None:
     assert prompt.filesystem() is None
 
 
-def test_clone_preserves_filesystem_state() -> None:
+def test_clone_preserves_filesystem_state(clock: FakeClock) -> None:
     """Test that cloning VfsToolsSection preserves filesystem state."""
     dispatcher1 = InProcessDispatcher()
-    session1 = Session(dispatcher=dispatcher1)
+    session1 = Session(dispatcher=dispatcher1, clock=clock)
     section1 = VfsToolsSection(session=session1)
 
     # Write a file to the filesystem
@@ -1305,7 +1310,7 @@ def test_clone_preserves_filesystem_state() -> None:
 
     # Clone the section into a new session
     dispatcher2 = InProcessDispatcher()
-    session2 = Session(dispatcher=dispatcher2)
+    session2 = Session(dispatcher=dispatcher2, clock=clock)
     section2 = section1.clone(session=session2)
 
     # Verify the filesystem is preserved (same instance)
@@ -1316,31 +1321,31 @@ def test_clone_preserves_filesystem_state() -> None:
     assert result.content == "my content"
 
 
-def test_clone_requires_session() -> None:
+def test_clone_requires_session(clock: FakeClock) -> None:
     """Test that clone raises error when session is missing."""
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = VfsToolsSection(session=session)
 
     with pytest.raises(TypeError, match="session is required to clone"):
         section.clone()
 
 
-def test_clone_requires_matching_dispatcher() -> None:
+def test_clone_requires_matching_dispatcher(clock: FakeClock) -> None:
     """Test that clone raises error when dispatcher doesn't match session's dispatcher."""
     dispatcher1 = InProcessDispatcher()
-    session1 = Session(dispatcher=dispatcher1)
+    session1 = Session(dispatcher=dispatcher1, clock=clock)
     section = VfsToolsSection(session=session1)
 
     dispatcher2 = InProcessDispatcher()
-    session2 = Session(dispatcher=dispatcher2)
+    session2 = Session(dispatcher=dispatcher2, clock=clock)
     dispatcher3 = InProcessDispatcher()  # Different dispatcher than session2
 
     with pytest.raises(TypeError, match="Provided dispatcher must match"):
         section.clone(session=session2, dispatcher=dispatcher3)
 
 
-def test_list_directory_result_render_formats_output() -> None:
+def test_list_directory_result_render_formats_output(clock: FakeClock) -> None:
     """Test that ListDirectoryResult.render() formats output correctly."""
     path = VfsPath(("subdir",))
     result = ListDirectoryResult(
@@ -1358,7 +1363,7 @@ def test_list_directory_result_render_formats_output() -> None:
     assert "- file2.txt" in rendered
 
 
-def test_list_directory_result_render_empty_entries() -> None:
+def test_list_directory_result_render_empty_entries(clock: FakeClock) -> None:
     """Test that ListDirectoryResult.render() handles empty entries."""
     path = VfsPath(())
     result = ListDirectoryResult(
@@ -1373,10 +1378,10 @@ def test_list_directory_result_render_empty_entries() -> None:
     assert "Files: <none>" in rendered
 
 
-def test_edit_file_nonexistent_raises_error() -> None:
+def test_edit_file_nonexistent_raises_error(clock: FakeClock) -> None:
     """Test that edit_file raises error for non-existent file."""
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = VfsToolsSection(session=session)
     edit_tool = find_tool(section, "edit_file")
 
@@ -1393,10 +1398,10 @@ def test_edit_file_nonexistent_raises_error() -> None:
         )
 
 
-def test_edit_file_preserves_content_beyond_default_read_limit() -> None:
+def test_edit_file_preserves_content_beyond_default_read_limit(clock: FakeClock) -> None:
     """Test that edit_file doesn't truncate files with more than 2000 lines."""
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = VfsToolsSection(session=session)
     fs = section.filesystem
 
@@ -1425,17 +1430,17 @@ def test_edit_file_preserves_content_beyond_default_read_limit() -> None:
     assert result.total_lines == 2500
 
 
-def test_path_from_string_returns_empty_for_root() -> None:
+def test_path_from_string_returns_empty_for_root(clock: FakeClock) -> None:
     """Test that path_from_string returns empty VfsPath for root paths."""
     assert path_from_string("") == VfsPath(())
     assert path_from_string(".") == VfsPath(())
     assert path_from_string("/") == VfsPath(())
 
 
-def test_tool_handler_rejects_missing_filesystem() -> None:
+def test_tool_handler_rejects_missing_filesystem(clock: FakeClock) -> None:
     """Test that tool handlers raise error when filesystem is not in context."""
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = VfsToolsSection(session=session)
     tool = find_tool(section, "ls")
     handler = tool.handler
@@ -1453,19 +1458,19 @@ def test_tool_handler_rejects_missing_filesystem() -> None:
 # -----------------------------------------------------------------------------
 
 
-def test_config_accepts_overrides() -> None:
+def test_config_accepts_overrides(clock: FakeClock) -> None:
     """Test that config accepts_overrides is respected."""
     from weakincentives.contrib.tools import VfsConfig
 
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     config = VfsConfig(accepts_overrides=True)
     section = VfsToolsSection(session=session, config=config)
 
     assert section.accepts_overrides is True
 
 
-def test_file_info_render_with_size_bytes() -> None:
+def test_file_info_render_with_size_bytes(clock: FakeClock) -> None:
     """Test branch 172->174: FileInfo.render() when size_bytes is not None."""
     entry = FileInfo(
         path=VfsPath(("file.txt",)),
@@ -1482,6 +1487,7 @@ def test_file_info_render_with_size_bytes() -> None:
 
 def test_resolve_mount_path_continues_when_file_not_in_first_root(
     tmp_path: Path,
+    clock: FakeClock,
 ) -> None:
     """Test branch 1650->1644: continue when file doesn't exist in first root."""
     # Create two roots
@@ -1495,7 +1501,7 @@ def test_resolve_mount_path_continues_when_file_not_in_first_root(
 
     # Use VfsToolsSection which calls _resolve_mount_path internally
     dispatcher = InProcessDispatcher()
-    session = Session(dispatcher=dispatcher)
+    session = Session(dispatcher=dispatcher, clock=clock)
     section = _make_section(
         session=session,
         mounts=(HostMount(host_path="test.txt"),),
@@ -1506,7 +1512,7 @@ def test_resolve_mount_path_continues_when_file_not_in_first_root(
     assert section.filesystem.exists("test.txt")
 
 
-def test_match_glob_skips_already_seen_variant() -> None:
+def test_match_glob_skips_already_seen_variant(clock: FakeClock) -> None:
     """Test branch 1692->1697: skip variant that's already in seen set."""
     # Test pattern that creates duplicate variants due to multiple **/
     # For pattern "**/**/*.py", expanding **/ at index 0 gives "**/*.py"
