@@ -183,6 +183,7 @@ Consult these specs before modifying related code:
 | `specs/TASK_COMPLETION.md` | Task completion checking, PlanBasedChecker, composite verification |
 | `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
 | `specs/THREAD_SAFETY.md` | Concurrency or shared state |
+| `specs/THREADING_REVIEW.md` | Threading patterns analysis, Ticket primitive, message passing alternatives |
 | `specs/TOOLS.md` | Tool runtime, policies, sequential dependencies, planning tools |
 | `specs/FEEDBACK_PROVIDERS.md` | Ongoing progress feedback, stall/drift detection, context injection |
 | `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |

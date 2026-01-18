@@ -22,6 +22,7 @@ from . import (
     mailbox,
     main_loop,
     session,
+    ticket,
     watchdog,
 )
 from .dlq import (
@@ -91,6 +92,13 @@ from .session import (
     upsert_by,
 )
 from .snapshotable import Snapshotable
+from .ticket import (
+    Ticket,
+    TicketAlreadyCompletedError,
+    TicketError,
+    TicketNotReadyError,
+    TicketTimeoutError,
+)
 from .transactions import (
     CompositeSnapshot,
     PendingToolExecution,
@@ -159,6 +167,11 @@ __all__ = [
     "Snapshotable",
     "StructuredLogger",
     "TelemetryDispatcher",
+    "Ticket",
+    "TicketAlreadyCompletedError",
+    "TicketError",
+    "TicketNotReadyError",
+    "TicketTimeoutError",
     "TokenUsage",
     "ToolInvoked",
     "TypedReducer",
@@ -179,6 +192,7 @@ __all__ = [
     "replace_latest_by",
     "restore_snapshot",
     "session",
+    "ticket",
     "tool_transaction",
     "upsert_by",
     "wait_until",
