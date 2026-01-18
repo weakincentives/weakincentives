@@ -16,10 +16,15 @@ implementations provide deterministic control.
 - `Gate` - Protocol for signaling between threads (replaces `threading.Event`)
 - `Latch` - One-shot synchronization barrier for coordinating threads
 - `BackgroundWorker` - Abstraction for managed daemon threads
+- `Checkpoint` - Protocol for cooperative yield points
+- `CancellationToken` - Cooperative cancellation for long-running tasks
+- `Scheduler` - Protocol for cooperative task scheduling
 - `CallbackRegistry` - Thread-safe callback registration and invocation
 - `SystemExecutor` - Production implementation using `ThreadPoolExecutor`
 - `FakeExecutor` - Test implementation that runs tasks synchronously
 - `FakeGate` - Test implementation with manual control
+- `FakeCheckpoint` - Test implementation with yield/check counting
+- `FakeScheduler` - Test implementation with step-by-step execution
 - `SYSTEM_EXECUTOR` - Module-level singleton for production use
 
 ## Design Principles
@@ -383,6 +388,291 @@ assert len(calls) == 1
 assert worker.running is False
 ```
 
+## Cooperative Yielding
+
+For long-running tasks that need to yield control cooperatively, WINK provides
+checkpoint and cancellation primitives.
+
+### Checkpoint Protocol
+
+A `Checkpoint` is a yield point where tasks can:
+1. Check if they should be cancelled
+2. Yield control to other tasks
+3. Update progress
+
+```python
+from weakincentives.threading import Checkpoint, SystemCheckpoint, FakeCheckpoint
+
+class Checkpoint(Protocol):
+    """Protocol for cooperative yield points."""
+
+    def yield_(self) -> None:
+        """Yield control to other tasks.
+
+        In production, this is a no-op or calls time.sleep(0).
+        In tests, this can be intercepted to control execution order.
+        """
+        ...
+
+    def check(self) -> None:
+        """Check if task should continue.
+
+        Raises CancelledException if cancellation was requested.
+        """
+        ...
+
+    def is_cancelled(self) -> bool:
+        """Return True if cancellation was requested."""
+        ...
+
+    @property
+    def token(self) -> CancellationToken:
+        """The cancellation token for this checkpoint."""
+        ...
+```
+
+### CancellationToken
+
+Cooperative cancellation that tasks check at yield points:
+
+```python
+from weakincentives.threading import CancellationToken, CancelledException
+
+class CancellationToken:
+    """Token for cooperative cancellation."""
+
+    def __init__(self) -> None: ...
+
+    def cancel(self) -> None:
+        """Request cancellation."""
+        ...
+
+    def is_cancelled(self) -> bool:
+        """Return True if cancellation was requested."""
+        ...
+
+    def check(self) -> None:
+        """Raise CancelledException if cancelled."""
+        ...
+
+    def child(self) -> CancellationToken:
+        """Create a child token that cancels when parent cancels."""
+        ...
+```
+
+### Using Checkpoints in Long-Running Tasks
+
+Tasks should call `checkpoint.check()` or `checkpoint.yield_()` at regular
+intervals:
+
+```python
+from weakincentives.threading import Checkpoint, SystemCheckpoint
+
+def process_large_dataset(
+    items: list[Item],
+    checkpoint: Checkpoint | None = None,
+) -> list[Result]:
+    checkpoint = checkpoint or SystemCheckpoint()
+    results = []
+
+    for i, item in enumerate(items):
+        # Yield point - check cancellation and let other tasks run
+        checkpoint.check()
+
+        result = expensive_processing(item)
+        results.append(result)
+
+        # Yield every N items to prevent starvation
+        if i % 100 == 0:
+            checkpoint.yield_()
+
+    return results
+```
+
+### SystemCheckpoint
+
+Production implementation:
+
+```python
+from weakincentives.threading import SystemCheckpoint, CancellationToken
+
+# With explicit token
+token = CancellationToken()
+checkpoint = SystemCheckpoint(token=token)
+
+# Start long task...
+executor.submit(lambda: process_items(items, checkpoint=checkpoint))
+
+# Later, request cancellation
+token.cancel()  # Task will raise CancelledException at next check()
+```
+
+`SystemCheckpoint.yield_()` calls `time.sleep(0)` which releases the GIL and
+allows other Python threads to run.
+
+### FakeCheckpoint
+
+Test implementation with manual control:
+
+```python
+from weakincentives.threading import FakeCheckpoint
+
+checkpoint = FakeCheckpoint()
+
+# Track yield points
+results = []
+def task():
+    results.append("start")
+    checkpoint.yield_()
+    results.append("middle")
+    checkpoint.yield_()
+    results.append("end")
+
+task()
+
+# Verify yield points were hit
+assert checkpoint.yield_count == 2
+assert checkpoint.check_count == 0
+assert results == ["start", "middle", "end"]
+
+# Test cancellation
+checkpoint.token.cancel()
+with pytest.raises(CancelledException):
+    checkpoint.check()
+```
+
+### FakeCheckpoint API
+
+| Property/Method | Description |
+| --- | --- |
+| `yield_count` | Number of times `yield_()` was called |
+| `check_count` | Number of times `check()` was called |
+| `token` | The `CancellationToken` (can be cancelled for testing) |
+| `reset()` | Reset counters to zero |
+
+### Scheduler Protocol
+
+For advanced cooperative scheduling, the `Scheduler` protocol manages task
+execution order:
+
+```python
+from weakincentives.threading import Scheduler, FifoScheduler, FakeScheduler
+
+class Scheduler(Protocol):
+    """Protocol for cooperative task scheduling."""
+
+    def schedule(self, task: Callable[[], T]) -> Future[T]:
+        """Schedule a task for execution."""
+        ...
+
+    def yield_(self) -> None:
+        """Yield control to the scheduler."""
+        ...
+
+    def run_until_complete(self) -> None:
+        """Run scheduled tasks until all complete."""
+        ...
+
+    def run_one(self) -> bool:
+        """Run the next scheduled task. Returns False if queue empty."""
+        ...
+```
+
+### FifoScheduler
+
+Production cooperative scheduler using a thread pool:
+
+```python
+from weakincentives.threading import FifoScheduler
+
+scheduler = FifoScheduler(max_workers=4)
+
+# Schedule tasks
+f1 = scheduler.schedule(task1)
+f2 = scheduler.schedule(task2)
+
+# Tasks run concurrently, yielding at checkpoint.yield_() calls
+scheduler.run_until_complete()
+```
+
+### FakeScheduler
+
+Test implementation for deterministic execution:
+
+```python
+from weakincentives.threading import FakeScheduler
+
+scheduler = FakeScheduler()
+
+execution_order = []
+
+def task_a():
+    execution_order.append("a1")
+    scheduler.yield_()  # Yield control
+    execution_order.append("a2")
+
+def task_b():
+    execution_order.append("b1")
+    scheduler.yield_()
+    execution_order.append("b2")
+
+scheduler.schedule(task_a)
+scheduler.schedule(task_b)
+
+# Run tasks step by step
+scheduler.run_one()  # Runs task_a until first yield -> "a1"
+scheduler.run_one()  # Runs task_b until first yield -> "b1"
+scheduler.run_one()  # Resumes task_a -> "a2"
+scheduler.run_one()  # Resumes task_b -> "b2"
+
+assert execution_order == ["a1", "b1", "a2", "b2"]
+```
+
+### When to Use Each Primitive
+
+| Primitive | Use Case |
+| --- | --- |
+| `Checkpoint` | Long-running tasks that need cancellation + yield |
+| `CancellationToken` | Just need cancellation, no yielding |
+| `Scheduler` | Multiple cooperating tasks with controlled interleaving |
+| `Gate.wait(timeout)` | Implicit yield while waiting for signal |
+
+### Checkpoint Integration with Other Primitives
+
+Checkpoints integrate with other primitives:
+
+```python
+from weakincentives.threading import (
+    Checkpoint,
+    SystemCheckpoint,
+    Gate,
+    SystemGate,
+    CancellationToken,
+)
+
+class Worker:
+    def __init__(
+        self,
+        stop_signal: Gate | None = None,
+        checkpoint: Checkpoint | None = None,
+    ) -> None:
+        self._stop = stop_signal or SystemGate()
+        self._checkpoint = checkpoint or SystemCheckpoint()
+
+    def run(self) -> None:
+        while not self._stop.is_set():
+            # Check cancellation at each iteration
+            self._checkpoint.check()
+
+            self._process_batch()
+
+            # Yield after each batch
+            self._checkpoint.yield_()
+
+            # Wait for next poll interval (implicit yield)
+            self._stop.wait(timeout=1.0)
+```
+
 ## CallbackRegistry
 
 Thread-safe callback registration and invocation:
@@ -579,13 +869,19 @@ from weakincentives import (
     # Protocols
     Executor,
     Gate,
+    Checkpoint,
+    Scheduler,
 
     # Production implementations
     SystemExecutor,
     SystemGate,
+    SystemCheckpoint,
+    FifoScheduler,
     BackgroundWorker,
     CallbackRegistry,
     Latch,
+    CancellationToken,
+    CancelledException,
     SYSTEM_EXECUTOR,
 
     # Test implementations
@@ -593,6 +889,8 @@ from weakincentives import (
     FakeGate,
     FakeLatch,
     FakeBackgroundWorker,
+    FakeCheckpoint,
+    FakeScheduler,
 )
 ```
 
@@ -600,10 +898,26 @@ From the threading module:
 
 ```python
 from weakincentives.threading import (
+    # Protocols
     Executor,
-    FakeExecutor,
+    Gate,
+    Checkpoint,
+    Scheduler,
+
+    # Production
     SystemExecutor,
+    SystemGate,
+    SystemCheckpoint,
+    FifoScheduler,
+    CancellationToken,
+    CancelledException,
     SYSTEM_EXECUTOR,
+
+    # Test
+    FakeExecutor,
+    FakeGate,
+    FakeCheckpoint,
+    FakeScheduler,
 )
 ```
 
@@ -713,10 +1027,18 @@ This specification does not address:
 
 Threading primitives follow the same injectable dependency pattern as `Clock`:
 
-1. **Protocols** define the interface (`Executor`, `Gate`)
+1. **Protocols** define the interface (`Executor`, `Gate`, `Checkpoint`, `Scheduler`)
 2. **System implementations** provide production behavior
 3. **Fake implementations** enable deterministic testing
 4. **Module singletons** provide convenient defaults
 
+The primitives address three categories of threading needs:
+
+| Category | Primitives | Purpose |
+| --- | --- | --- |
+| **Execution** | `Executor`, `BackgroundWorker` | Submit and manage work |
+| **Coordination** | `Gate`, `Latch`, `CallbackRegistry` | Synchronize between threads |
+| **Cooperation** | `Checkpoint`, `CancellationToken`, `Scheduler` | Yield control voluntarily |
+
 This eliminates the primary sources of test flakiness in concurrent code:
-non-deterministic scheduling and real time delays.
+non-deterministic scheduling, real time delays, and uncontrolled interleaving.
