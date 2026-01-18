@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules verify verify-arch verify-docs verify-security verify-deps verify-types verify-list all clean
+.PHONY: format check test lint ty pyright typecheck bandit deptry pip-audit markdown-check integration-tests redis-tests redis-standalone-tests redis-cluster-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs all clean
 
 # =============================================================================
 # Code Formatting
@@ -10,63 +10,39 @@ format:
 
 # Check formatting without making changes
 format-check:
-	@uv run ruff format -q --check .
+	@uv run --all-extras python check.py -q format
 
 # Run ruff linter
 lint:
-	@uv run ruff check --preview -q .
+	@uv run --all-extras python check.py -q lint
 
 # Run ruff linter with fixes
 lint-fix:
 	@uv run ruff check --fix -q .
 
 # =============================================================================
-# Security & Dependency Checks (via verify.py)
+# Security & Dependency Checks
 # =============================================================================
 
 # Run Bandit security scanner
 bandit:
-	@uv run --all-extras python verify.py -q bandit
-
-# Find unused code with vulture
-vulture:
-	@uv run vulture
+	@uv run --all-extras python check.py -q bandit
 
 # Check for unused or missing dependencies with deptry
 deptry:
-	@uv run --all-extras python verify.py -q deptry
+	@uv run --all-extras python check.py -q deptry
 
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
-	@uv run --all-extras python verify.py -q pip_audit
+	@uv run --all-extras python check.py -q pip-audit
 
 # =============================================================================
-# Architecture Checks (via verify.py)
+# Documentation Checks
 # =============================================================================
 
-# Check that core modules don't import from contrib
-check-core-imports:
-	@uv run --all-extras python verify.py -q core_contrib_separation
-
-# Validate module boundaries and import patterns
-validate-modules:
-	@uv run --all-extras python verify.py -q layer_violations
-
-# =============================================================================
-# Documentation Checks (via verify.py)
-# =============================================================================
-
-# Validate Markdown formatting and local links
+# Validate Markdown formatting
 markdown-check:
-	@uv run --all-extras python verify.py -q markdown_format markdown_links
-
-# Validate spec file references point to existing files
-validate-spec-refs:
-	@uv run --all-extras python verify.py -q spec_references
-
-# Verify Python code examples in documentation
-verify-doc-examples:
-	@uv run --all-extras python verify.py -q doc_examples
+	@uv run --all-extras python check.py -q markdown
 
 # =============================================================================
 # Type Checking
@@ -85,15 +61,8 @@ pyright:
 		uv run --all-extras pyright --project pyproject.toml --verbose)
 
 # Run all type checkers
-typecheck: ty pyright
-
-# Check type coverage (100% completeness required)
-type-coverage:
-	@uv run --all-extras python verify.py -q type_coverage
-
-# Validate integration tests (typecheck without running)
-validate-integration-tests:
-	@uv run --all-extras python verify.py -q integration_types
+typecheck:
+	@uv run --all-extras python check.py -q typecheck
 
 # =============================================================================
 # Testing
@@ -101,7 +70,7 @@ validate-integration-tests:
 
 # Run tests with coverage (100% minimum) and 10s per-test timeout
 test:
-	@uv run --all-extras python verify.py -q pytest
+	@uv run --all-extras python check.py -q test
 
 # Run OpenAI integration tests
 integration-tests:
@@ -238,43 +207,12 @@ demo-claude-agent:
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
 
 # =============================================================================
-# Unified Verification Toolbox (verify.py)
-# =============================================================================
-
-# Run all verification checks via verify.py
-verify:
-	@uv run --all-extras python verify.py -q
-
-# Run architecture verification only
-verify-arch:
-	@uv run --all-extras python verify.py -q -c architecture
-
-# Run documentation verification only
-verify-docs:
-	@uv run --all-extras python verify.py -q -c documentation
-
-# Run security verification only
-verify-security:
-	@uv run --all-extras python verify.py -q -c security
-
-# Run dependency verification only
-verify-deps:
-	@uv run --all-extras python verify.py -q -c dependencies
-
-# Run type verification only
-verify-types:
-	@uv run --all-extras python verify.py -q -c types
-
-# List all available checkers
-verify-list:
-	@uv run --all-extras python verify.py --list
-
-# =============================================================================
 # Main Check Target
 # =============================================================================
 
 # Run all checks (format, lint, typecheck, security, dependencies, architecture, docs, tests)
-check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports pip-audit markdown-check validate-spec-refs verify-doc-examples validate-integration-tests test
+check: format-check lint typecheck bandit deptry pip-audit markdown-check test
+	@uv run --all-extras python check.py -q architecture docs
 
 # Synchronize documentation files into package
 sync-docs:

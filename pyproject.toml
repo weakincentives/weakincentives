@@ -112,7 +112,7 @@ dev = [
 [tool.ruff]
 line-length = 88
 target-version = "py312"
-extend-exclude = ["test-repositories", "verify"]
+extend-exclude = ["test-repositories", "toolchain"]
 
 [tool.ruff.lint]
 extend-select = [
@@ -237,6 +237,7 @@ exclude_lines = [
 
 [tool.deptry.per_rule_ignores]
 DEP002 = ["asteval", "claude-agent-sdk", "litellm", "mcp", "openai", "podman", "pyyaml", "redis"]
+DEP004 = ["weakincentives"]  # Package imports itself; declared as dev dep for testing
 
 [tool.pyright]
 typeCheckingMode = "strict"
