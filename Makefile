@@ -1,4 +1,4 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules verify verify-arch verify-docs verify-security verify-deps verify-types all clean
 
 # Format code with ruff
 format:
@@ -213,6 +213,44 @@ demo-claude-agent:
 		exit 1; \
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent
+
+# =============================================================================
+# Unified Verification Toolbox (wink verify)
+# =============================================================================
+# These targets use the new unified verification framework.
+# They can replace the individual check-*, validate-*, verify-* targets above.
+
+# Run all verification checks via wink verify
+verify:
+	@uv run --all-extras wink verify -q
+
+# Run architecture verification only
+verify-arch:
+	@uv run --all-extras wink verify -q -c architecture
+
+# Run documentation verification only
+verify-docs:
+	@uv run --all-extras wink verify -q -c documentation
+
+# Run security verification only
+verify-security:
+	@uv run --all-extras wink verify -q -c security
+
+# Run dependency verification only
+verify-deps:
+	@uv run --all-extras wink verify -q -c dependencies
+
+# Run type verification only
+verify-types:
+	@uv run --all-extras wink verify -q -c types
+
+# List all available checkers
+verify-list:
+	@uv run --all-extras wink verify --list
+
+# =============================================================================
+# Main Check Target
+# =============================================================================
 
 # Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, check-core-imports, validate-modules, pip-audit, markdown, doc-examples, validate-integration-tests, test)
 # Note: validate-modules is commented out pending fixes for existing violations
