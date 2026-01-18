@@ -55,4 +55,57 @@ def frozen_utcnow(monkeypatch: pytest.MonkeyPatch) -> FrozenUtcNow:
     return FrozenUtcNow(monkeypatch)
 
 
-__all__ = ["FrozenUtcNow", "frozen_utcnow"]
+class ControllableClock:
+    """A controllable clock for testing time-based behavior without sleeping.
+
+    Use as a replacement for time.monotonic() in tests. Advance the clock
+    manually to simulate time passage without actual delays.
+
+    Example::
+
+        clock = ControllableClock()
+        mailbox = InMemoryMailbox(name="test", clock=clock)
+
+        mailbox.send("hello")
+        messages = mailbox.receive(visibility_timeout=10)
+
+        # Advance past visibility timeout
+        clock.advance(11)
+
+        # Message should now be requeued
+        messages = mailbox.receive()
+    """
+
+    def __init__(self, start: float = 0.0) -> None:
+        self._current = start
+
+    def __call__(self) -> float:
+        """Return the current clock time."""
+        return self._current
+
+    def advance(self, seconds: float) -> float:
+        """Advance the clock by the given number of seconds.
+
+        Args:
+            seconds: Time to advance in seconds.
+
+        Returns:
+            The new current time.
+        """
+        self._current += seconds
+        return self._current
+
+    def set(self, value: float) -> float:
+        """Set the clock to an absolute value.
+
+        Args:
+            value: The new clock value.
+
+        Returns:
+            The new current time.
+        """
+        self._current = value
+        return self._current
+
+
+__all__ = ["ControllableClock", "FrozenUtcNow", "frozen_utcnow"]

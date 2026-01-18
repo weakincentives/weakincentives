@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import pytest
 
+from tests.helpers.time import ControllableClock
 from weakincentives.adapters.core import PromptResponse, ProviderAdapter
 from weakincentives.budget import Budget, BudgetTracker
 from weakincentives.deadlines import Deadline
@@ -473,7 +474,7 @@ def test_end_to_end_evaluation() -> None:
             requests.send(
                 EvalRequest(sample=sample, experiment=BASELINE), reply_to=results
             )
-        eval_loop.run(max_iterations=5)
+        eval_loop.run(max_iterations=5, wait_time_seconds=0)
 
         # Collect results
         report = collect_results(results, expected_count=3, timeout_seconds=5)
@@ -791,7 +792,7 @@ def test_eval_loop_handles_expired_receipt_on_nack() -> None:
         )
 
         # Run - send fails, nack raises ReceiptHandleExpiredError, should handle gracefully
-        eval_loop.run(max_iterations=1)
+        eval_loop.run(max_iterations=1, wait_time_seconds=0)
 
         # Should not raise, just pass
     finally:
@@ -1099,12 +1100,15 @@ def test_eval_loop_immediate_dlq_for_included_error() -> None:
 
 def test_eval_loop_never_dlq_for_excluded_error() -> None:
     """EvalLoop never dead-letters excluded error types."""
-    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
+    clock = ControllableClock()
+    results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(
+        name="eval-results", clock=clock
+    )
     requests: InMemoryMailbox[EvalRequest[str, str], EvalResult] = InMemoryMailbox(
-        name="eval-requests"
+        name="eval-requests", clock=clock
     )
     dlq_mailbox: InMemoryMailbox[DeadLetter[EvalRequest[str, str]], None] = (
-        InMemoryMailbox(name="eval-requests-dlq")
+        InMemoryMailbox(name="eval-requests-dlq", clock=clock)
     )
 
     try:
@@ -1125,8 +1129,12 @@ def test_eval_loop_never_dlq_for_excluded_error() -> None:
         requests.send(EvalRequest(sample=sample, experiment=BASELINE), reply_to=results)
 
         # Run many times - should never dead-letter
+        # After each run, advance clock past backoff and trigger reap synchronously
         for _ in range(5):
-            eval_loop.run(max_iterations=1)
+            eval_loop.run(max_iterations=1, wait_time_seconds=0)
+            # Advance clock past the backoff (min(60 * delivery_count, 900))
+            clock.advance(1000)
+            requests._reap_expired()  # Deterministic requeue
 
         # Message should still be in queue (nacked, not dead-lettered)
         assert requests.approximate_count() == 1
