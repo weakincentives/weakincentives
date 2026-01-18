@@ -1,3 +1,15 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 """Built-in verification checkers.
 
 This module provides factory functions to create all standard checkers
@@ -43,14 +55,14 @@ def create_lint_checker() -> SubprocessChecker:
 
 def create_typecheck_checker() -> SubprocessChecker:
     """Create the type checking checker (ty + pyright)."""
-    # ty checks src/, pyright uses pyproject.toml config (also src/).
+    # ty checks src/ with warnings as errors, pyright uses pyproject.toml config.
     return SubprocessChecker(
         name="typecheck",
         description="Check types with ty and pyright",
         command=[
             "bash",
             "-c",
-            "uv run ty check src && uv run pyright",
+            "uv run ty check --error-on-warning src && uv run pyright",
         ],
         parser=_parse_typecheck,
     )
