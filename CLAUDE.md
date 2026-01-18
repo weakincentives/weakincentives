@@ -65,9 +65,12 @@ src/weakincentives/
 ├── serde/           # Dataclass serialization (no Pydantic)
 └── types/           # JSON type aliases
 
-verify/              # Standalone verification toolbox (python verify.py)
+toolchain/           # Verification toolchain (python check.py)
 ├── checkers/        # Individual verification checkers
-└── tests/           # Verification toolbox tests
+├── result.py        # Location, Diagnostic, CheckResult, Report
+├── checker.py       # Checker protocol and SubprocessChecker
+├── runner.py        # Orchestrates checker execution
+└── output.py        # Console, JSON, Quiet formatters
 ```
 
 The library is organized as "core primitives" + "batteries for specific agent
@@ -183,7 +186,7 @@ Consult these specs before modifying related code:
 | `specs/TOOLS.md` | Tool runtime, policies, sequential dependencies, planning tools |
 | `specs/FEEDBACK_PROVIDERS.md` | Ongoing progress feedback, stall/drift detection, context injection |
 | `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |
-| `specs/VERIFICATION_TOOLBOX.md` | Unified verification framework, verify.py script, checker architecture |
+| `specs/VERIFICATION_TOOLBOX.md` | Verification toolchain (check.py), checker protocol, failure reporting |
 | `specs/WINK_DOCS.md` | CLI docs command, bundled documentation access |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 

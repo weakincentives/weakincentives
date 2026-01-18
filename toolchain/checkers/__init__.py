@@ -85,7 +85,6 @@ def create_test_checker() -> SubprocessChecker:
             "pytest",
             "--strict-config",
             "--strict-markers",
-            "--maxfail=1",
             "--cov-fail-under=100",
             "--timeout=10",
             "--timeout-method=thread",
