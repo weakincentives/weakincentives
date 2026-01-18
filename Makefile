@@ -1,4 +1,8 @@
-.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules verify verify-arch verify-docs verify-security verify-deps verify-types all clean
+.PHONY: format check test lint ty pyright typecheck type-coverage bandit vulture deptry pip-audit markdown-check validate-spec-refs verify-doc-examples integration-tests redis-tests redis-standalone-tests redis-cluster-tests validate-integration-tests property-tests stress-tests verify-mailbox verify-formal verify-formal-fast verify-formal-persist verify-all clean-extracted setup setup-tlaplus setup-redis demo demo-podman demo-claude-agent sync-docs check-core-imports validate-modules verify verify-arch verify-docs verify-security verify-deps verify-types verify-list all clean
+
+# =============================================================================
+# Code Formatting
+# =============================================================================
 
 # Format code with ruff
 format:
@@ -16,9 +20,13 @@ lint:
 lint-fix:
 	@uv run ruff check --fix -q .
 
+# =============================================================================
+# Security & Dependency Checks (via wink verify)
+# =============================================================================
+
 # Run Bandit security scanner
 bandit:
-	@uv run python build/run_bandit.py -q -r src/weakincentives
+	@uv run --all-extras wink verify -q bandit
 
 # Find unused code with vulture
 vulture:
@@ -26,32 +34,43 @@ vulture:
 
 # Check for unused or missing dependencies with deptry
 deptry:
-	@uv run python build/run_deptry.py
-
-# Check that core modules don't import from contrib
-check-core-imports:
-	@uv run python build/check_core_imports.py
-
-# Validate module boundaries and import patterns
-validate-modules:
-	@uv run python scripts/validate_module_boundaries.py
+	@uv run --all-extras wink verify -q deptry
 
 # Run pip-audit for dependency vulnerabilities
 pip-audit:
-	@uv run python build/run_pip_audit.py
+	@uv run --all-extras wink verify -q pip_audit
+
+# =============================================================================
+# Architecture Checks (via wink verify)
+# =============================================================================
+
+# Check that core modules don't import from contrib
+check-core-imports:
+	@uv run --all-extras wink verify -q core_contrib_separation
+
+# Validate module boundaries and import patterns
+validate-modules:
+	@uv run --all-extras wink verify -q layer_violations
+
+# =============================================================================
+# Documentation Checks (via wink verify)
+# =============================================================================
 
 # Validate Markdown formatting and local links
 markdown-check:
-	@uv run python build/run_mdformat.py
-	@uv run python build/check_md_links.py
+	@uv run --all-extras wink verify -q markdown_format markdown_links
 
 # Validate spec file references point to existing files
 validate-spec-refs:
-	@uv run python scripts/validate_spec_references.py
+	@uv run --all-extras wink verify -q spec_references
 
 # Verify Python code examples in documentation
 verify-doc-examples:
-	@uv run --all-extras python build/verify_doc_examples.py -q
+	@uv run --all-extras wink verify -q doc_examples
+
+# =============================================================================
+# Type Checking
+# =============================================================================
 
 # Run ty type checker (src only, consistent with pyright scope)
 ty:
@@ -70,11 +89,19 @@ typecheck: ty pyright
 
 # Check type coverage (100% completeness required)
 type-coverage:
-	@uv run --all-extras python build/run_type_coverage.py -q
+	@uv run --all-extras wink verify -q type_coverage
+
+# Validate integration tests (typecheck without running)
+validate-integration-tests:
+	@uv run --all-extras wink verify -q integration_types
+
+# =============================================================================
+# Testing
+# =============================================================================
 
 # Run tests with coverage (100% minimum) and 10s per-test timeout
 test:
-	@uv run --all-extras python build/run_pytest.py --strict-config --strict-markers --maxfail=1 --cov-fail-under=100 --timeout=10 --timeout-method=thread -q --no-header --cov-report= tests
+	@uv run --all-extras python verify.py -q pytest
 
 # Run OpenAI integration tests
 integration-tests:
@@ -95,10 +122,6 @@ redis-standalone-tests:
 # Run Redis cluster tests only
 redis-cluster-tests:
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv -m redis_cluster integration-tests
-
-# Validate integration tests (typecheck without running)
-validate-integration-tests:
-	@uv run --all-extras python build/validate_integration_tests.py -q
 
 # =============================================================================
 # Setup
@@ -121,7 +144,7 @@ setup-tlaplus:
 		echo '#!/bin/bash' | sudo tee /usr/local/bin/tlc > /dev/null; \
 		echo 'exec java -XX:+UseParallelGC -jar /usr/local/lib/tla2tools.jar "$$@"' | sudo tee -a /usr/local/bin/tlc > /dev/null; \
 		sudo chmod +x /usr/local/bin/tlc; \
-		echo "✓ TLA+ tools installed successfully"; \
+		echo "TLA+ tools installed successfully"; \
 	fi
 
 # Start Redis server for testing (if not running)
@@ -184,7 +207,7 @@ verify-formal-persist:
 
 # Run all formal verification (embedded specs + property tests)
 verify-all: verify-formal property-tests
-	@echo "✓ All formal verification passed:"
+	@echo "All formal verification passed:"
 	@echo "  - Embedded TLA+ specs with TLC model checking"
 	@echo "  - Property-based tests (Hypothesis)"
 
@@ -192,7 +215,7 @@ verify-all: verify-formal property-tests
 clean-extracted:
 	@echo "Cleaning extracted TLA+ specs..."
 	@rm -rf specs/tla/extracted/
-	@echo "✓ Cleaned specs/tla/extracted/"
+	@echo "Cleaned specs/tla/extracted/"
 
 # =============================================================================
 # Demos
@@ -217,8 +240,6 @@ demo-claude-agent:
 # =============================================================================
 # Unified Verification Toolbox (wink verify)
 # =============================================================================
-# These targets use the new unified verification framework.
-# They can replace the individual check-*, validate-*, verify-* targets above.
 
 # Run all verification checks via wink verify
 verify:
@@ -252,11 +273,8 @@ verify-list:
 # Main Check Target
 # =============================================================================
 
-# Run all checks (format check, lint, typecheck, type-coverage, bandit, vulture, deptry, check-core-imports, validate-modules, pip-audit, markdown, doc-examples, validate-integration-tests, test)
-# Note: validate-modules is commented out pending fixes for existing violations
+# Run all checks (format, lint, typecheck, security, dependencies, architecture, docs, tests)
 check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports pip-audit markdown-check validate-spec-refs verify-doc-examples validate-integration-tests test
-# Uncomment after fixing module boundary violations:
-# check: format-check lint typecheck type-coverage bandit vulture deptry check-core-imports validate-modules pip-audit markdown-check verify-doc-examples validate-integration-tests test
 
 # Synchronize documentation files into package
 sync-docs:

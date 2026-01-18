@@ -63,7 +63,8 @@ src/weakincentives/
 ├── resources/       # Dependency injection with scoped lifecycles
 ├── runtime/         # Session, events, lifecycle, mailbox, transactions
 ├── serde/           # Dataclass serialization (no Pydantic)
-└── types/           # JSON type aliases
+├── types/           # JSON type aliases
+└── verify/          # Unified verification toolbox (wink verify CLI)
 ```
 
 The library is organized as "core primitives" + "batteries for specific agent
@@ -179,6 +180,7 @@ Consult these specs before modifying related code:
 | `specs/TOOLS.md` | Tool runtime, policies, sequential dependencies, planning tools |
 | `specs/FEEDBACK_PROVIDERS.md` | Ongoing progress feedback, stall/drift detection, context injection |
 | `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |
+| `specs/VERIFICATION_TOOLBOX.md` | Unified verification framework, wink verify CLI, checker architecture |
 | `specs/WINK_DOCS.md` | CLI docs command, bundled documentation access |
 | `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
 
