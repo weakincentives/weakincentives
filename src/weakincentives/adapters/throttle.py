@@ -15,10 +15,10 @@
 from __future__ import annotations
 
 import random
-import time
 from datetime import timedelta
 from typing import Any, Literal
 
+from ..clock import SYSTEM_CLOCK, Sleeper
 from ..dataclasses import FrozenDataclass
 from .core import PromptEvaluationError, PromptEvaluationPhase
 
@@ -149,9 +149,15 @@ def details_from_error(
     )
 
 
-def sleep_for(delay: timedelta) -> None:
-    """Sleep for the specified duration."""
-    time.sleep(delay.total_seconds())
+def sleep_for(delay: timedelta, *, sleeper: Sleeper = SYSTEM_CLOCK) -> None:
+    """Sleep for the specified duration.
+
+    Args:
+        delay: Duration to sleep.
+        sleeper: Sleep implementation. Defaults to system clock.
+            Inject FakeClock for instant advancement in tests.
+    """
+    sleeper.sleep(delay.total_seconds())
 
 
 def jittered_backoff(

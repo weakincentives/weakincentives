@@ -39,11 +39,12 @@ import logging
 import os
 import signal
 import threading
-import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
+
+from ..clock import SYSTEM_CLOCK, MonotonicClock
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -73,13 +74,32 @@ class Heartbeat:
         if hb.elapsed() > threshold:
             # Worker is stuck
             ...
+
+    For testing, inject a controllable clock::
+
+        from weakincentives.clock import FakeClock
+
+        clock = FakeClock()
+        hb = Heartbeat(clock=clock)
+
+        hb.beat()
+        assert hb.elapsed() == 0.0
+
+        clock.advance(10)
+        assert hb.elapsed() == 10.0
     """
 
-    _last_beat: float = field(default_factory=time.monotonic)
-    _lock: threading.Lock = field(default_factory=threading.Lock)
+    clock: MonotonicClock = field(default=SYSTEM_CLOCK, repr=False)
+    """Clock for time operations. Defaults to system clock."""
+
+    _last_beat: float = field(init=False, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _callbacks: list[Callable[[], None]] = field(
-        default_factory=lambda: list[Callable[[], None]]()
+        default_factory=lambda: list[Callable[[], None]](), repr=False
     )
+
+    def __post_init__(self) -> None:
+        self._last_beat = self.clock.monotonic()
 
     def beat(self) -> None:
         """Record a heartbeat and invoke all registered callbacks.
@@ -89,7 +109,7 @@ class Heartbeat:
         callbacks from running.
         """
         with self._lock:
-            self._last_beat = time.monotonic()
+            self._last_beat = self.clock.monotonic()
             callbacks = list(self._callbacks)  # Snapshot under lock
 
         # Invoke outside lock to avoid deadlock
@@ -102,7 +122,7 @@ class Heartbeat:
     def elapsed(self) -> float:
         """Seconds since last heartbeat."""
         with self._lock:
-            return time.monotonic() - self._last_beat
+            return self.clock.monotonic() - self._last_beat
 
     def add_callback(self, callback: Callable[[], None]) -> None:
         """Add a callback to be invoked on each beat.
@@ -297,7 +317,7 @@ class HealthServer:
                 self.end_headers()
                 _ = self.wfile.write(data)
 
-            def log_message(  # pyright: ignore[reportImplicitOverride]  # noqa: PLR6301
+            def log_message(  # pyright: ignore[reportImplicitOverride]
                 self,
                 format: str,  # noqa: A002
                 *args: object,

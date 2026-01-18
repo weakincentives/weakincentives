@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
+from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 
 
@@ -28,36 +28,69 @@ def test_deadline_rejects_naive_datetime() -> None:
         Deadline(naive)
 
 
-def test_deadline_rejects_past_datetime(frozen_utcnow: FrozenUtcNow) -> None:
+def test_deadline_rejects_past_datetime() -> None:
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
+    clock.set_wall(anchor)
+
     with pytest.raises(ValueError):
-        Deadline(anchor - timedelta(seconds=10))
+        Deadline(anchor - timedelta(seconds=10), clock=clock)
 
 
-def test_deadline_requires_future_second(frozen_utcnow: FrozenUtcNow) -> None:
+def test_deadline_requires_future_second() -> None:
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, 0, 123456, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
+    clock.set_wall(anchor)
+
     with pytest.raises(ValueError):
-        Deadline(anchor + timedelta(milliseconds=500))
+        Deadline(anchor + timedelta(milliseconds=500), clock=clock)
 
 
-def test_deadline_remaining_uses_override(frozen_utcnow: FrozenUtcNow) -> None:
+def test_deadline_remaining_uses_override() -> None:
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30))
+    clock.set_wall(anchor)
+
+    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
 
     remaining = deadline.remaining(now=anchor + timedelta(seconds=5))
 
     assert remaining == timedelta(seconds=25)
 
 
-def test_deadline_remaining_rejects_naive_datetime(
-    frozen_utcnow: FrozenUtcNow,
-) -> None:
+def test_deadline_remaining_uses_clock() -> None:
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=30))
+    clock.set_wall(anchor)
+
+    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
+
+    assert deadline.remaining() == timedelta(seconds=30)
+
+    clock.advance(10)  # 10 seconds pass
+    assert deadline.remaining() == timedelta(seconds=20)
+
+
+def test_deadline_remaining_rejects_naive_datetime() -> None:
+    clock = FakeClock()
+    anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
+    clock.set_wall(anchor)
+
+    deadline = Deadline(anchor + timedelta(seconds=30), clock=clock)
 
     with pytest.raises(ValueError):
         deadline.remaining(now=datetime(2024, 1, 1, 12, 0))
+
+
+def test_fake_clock_set_wall_rejects_naive_datetime() -> None:
+    clock = FakeClock()
+
+    with pytest.raises(ValueError, match="timezone-aware"):
+        clock.set_wall(datetime(2024, 1, 1, 12, 0))  # naive datetime
+
+
+def test_fake_clock_advance_rejects_negative_seconds() -> None:
+    clock = FakeClock()
+
+    with pytest.raises(ValueError, match="negative"):
+        clock.advance(-5)

@@ -330,7 +330,7 @@ class LocalPromptOverridesStore(PromptOverridesStore):
             )
             return self._upsert_unlocked(descriptor, prompt_override, file_path)
 
-    def _resolve_unlocked(  # noqa: PLR6301
+    def _resolve_unlocked(
         self,
         descriptor: PromptDescriptor,
         tag: str,

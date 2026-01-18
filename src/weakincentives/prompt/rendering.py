@@ -160,7 +160,7 @@ class PromptRenderer[OutputT]:
             lookup[params_type] = value
         return lookup
 
-    def render(  # noqa: PLR0914, C901
+    def render(  # noqa: C901
         self,
         param_lookup: Mapping[type[SupportsDataclass], SupportsDataclass],
         overrides: Mapping[SectionPath, str] | None = None,

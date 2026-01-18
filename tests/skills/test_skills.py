@@ -199,7 +199,7 @@ class TestValidateSkillName:
             validate_skill_name("a" * 65)
 
 
-class TestValidateSkill:  # noqa: PLR0904
+class TestValidateSkill:
     """Tests for validate_skill function."""
 
     def test_valid_directory_skill(self, tmp_path: Path) -> None:

@@ -84,7 +84,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         return "workspace_digest"
 
     @override
-    def optimize(  # noqa: PLR0914 - keeping local clarity for optimization flow
+    def optimize(
         self,
         prompt: Prompt[object],
         *,
@@ -231,7 +231,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             section_key=digest_section.key,
         )
 
-    def _resolve_workspace_section(  # noqa: PLR6301
+    def _resolve_workspace_section(
         self, prompt: Prompt[object], prompt_name: str
     ) -> WorkspaceSection:
         """Find a section implementing the WorkspaceSection protocol."""
@@ -244,7 +244,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
         )
 
-    def _resolve_tool_sections(  # noqa: PLR6301
+    def _resolve_tool_sections(
         self, prompt: Prompt[object]
     ) -> tuple[Section[SupportsDataclass], ...]:
         sections: list[Section[SupportsDataclass]] = []
@@ -255,7 +255,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
                 continue
         return tuple(sections)
 
-    def _clone_section(  # noqa: PLR6301
+    def _clone_section(
         self,
         section: Section[SupportsDataclass],
         *,
@@ -270,7 +270,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             kwargs["filesystem"] = filesystem
         return section.clone(**kwargs)
 
-    def _require_workspace_digest_section(  # noqa: PLR6301
+    def _require_workspace_digest_section(
         self, prompt: Prompt[object], *, prompt_name: str
     ) -> WorkspaceDigestSection:
         try:
@@ -283,7 +283,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             ) from error
         return cast(WorkspaceDigestSection, section)
 
-    def _find_section_path(  # noqa: PLR6301
+    def _find_section_path(
         self, prompt: Prompt[object], section_key: str
     ) -> tuple[str, ...]:
         for node in prompt.sections:
@@ -296,7 +296,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
             phase=PROMPT_EVALUATION_PHASE_REQUEST,
         )
 
-    def _find_section_hash(  # noqa: PLR6301
+    def _find_section_hash(
         self, descriptor: PromptDescriptor, path: tuple[str, ...]
     ) -> HexDigest:
         for section in descriptor.sections:
@@ -305,7 +305,7 @@ class WorkspaceDigestOptimizer(BasePromptOptimizer[object, WorkspaceDigestResult
         msg = f"Section hash not found for path: {path}"
         raise PromptOverridesError(msg)
 
-    def _extract_summary_and_digest(  # noqa: PLR6301
+    def _extract_summary_and_digest(
         self, *, response: PromptResponse[Any], prompt_name: str
     ) -> tuple[str, str]:
         """Extract summary and digest from the optimization response.

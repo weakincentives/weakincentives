@@ -22,7 +22,6 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives.adapters._provider_protocols import ProviderChoice, ProviderToolCall
 from weakincentives.adapters.core import (
@@ -49,6 +48,7 @@ from weakincentives.adapters.utilities import (
     parse_tool_arguments,
     raise_tool_deadline_error,
 )
+from weakincentives.clock import FakeClock
 from weakincentives.deadlines import Deadline
 from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.prompt.prompt import RenderedPrompt
@@ -173,17 +173,16 @@ def test_inner_loop_raise_deadline_error() -> None:
         loop._raise_deadline_error("expired", phase=PROMPT_EVALUATION_PHASE_REQUEST)
 
 
-def test_inner_loop_detects_expired_deadline(
-    frozen_utcnow: FrozenUtcNow,
-) -> None:
+def test_inner_loop_detects_expired_deadline() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
     dispatcher = InProcessDispatcher()
     session: SessionProtocol = Session(dispatcher=dispatcher)
     prompt = _make_prompt()
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
+    clock.set_wall(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
 
     inputs = InnerLoopInputs[BodyResult](
         adapter_name=TEST_ADAPTER_NAME,
@@ -205,16 +204,14 @@ def test_inner_loop_detects_expired_deadline(
         deadline=deadline,
     )
     loop = InnerLoop[BodyResult](inputs=inputs, config=config)
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.advance(10)  # Advance past deadline
     with pytest.raises(PromptEvaluationError):
         loop._ensure_deadline_remaining(
             "expired", phase=PROMPT_EVALUATION_PHASE_REQUEST
         )
 
 
-def test_execute_tool_call_raises_when_deadline_expired(
-    frozen_utcnow: FrozenUtcNow,
-) -> None:
+def test_execute_tool_call_raises_when_deadline_expired() -> None:
     prompt = Prompt(_build_prompt()).bind(BodyParams(content="ready"))
     rendered = prompt.render()
     dispatcher = InProcessDispatcher()
@@ -237,10 +234,11 @@ def test_execute_tool_call_raises_when_deadline_expired(
     call = SimpleNamespace(
         id="call", function=SimpleNamespace(name="echo", arguments='{"content": "hi"}')
     )
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.set_wall(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+    clock.advance(10)  # Advance past deadline
     with pytest.raises(PromptEvaluationError) as excinfo:
         execute_tool_call(
             context=_tool_context(

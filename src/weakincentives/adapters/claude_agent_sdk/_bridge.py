@@ -392,7 +392,7 @@ def _make_async_handler(
     The async def is required by the SDK even though we don't await anything.
     """
 
-    async def handler(args: dict[str, Any]) -> dict[str, Any]:  # noqa: RUF029
+    async def handler(args: dict[str, Any]) -> dict[str, Any]:
         return bt(args)
 
     return handler

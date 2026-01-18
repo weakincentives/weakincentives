@@ -157,6 +157,7 @@ Consult these specs before modifying related code:
 | ------------------------------ | --------------------------------------------------------------------- |
 | `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
 | `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging, skill mounting |
+| `specs/CLOCK.md` | Controllable time abstractions, clock injection, testing patterns |
 | `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
 | `specs/DBC.md` | DbC decorators, exhaustiveness checking, `assert_never` patterns |
 | `specs/DEBUGGING.md` | Log collector, session slices, debug web UI, snapshot explorer |

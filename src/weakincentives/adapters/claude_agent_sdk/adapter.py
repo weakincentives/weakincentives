@@ -462,7 +462,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             if temp_workspace_dir:
                 shutil.rmtree(temp_workspace_dir, ignore_errors=True)
 
-    async def _run_with_prompt_context[OutputT](  # noqa: PLR0914 - locals needed for log aggregation
+    async def _run_with_prompt_context[OutputT](
         self,
         *,
         sdk: Any,
@@ -693,7 +693,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         return stderr_handler
 
-    async def _run_sdk_query(  # noqa: C901, PLR0912, PLR0914, PLR0915 - complexity needed for debug logging
+    async def _run_sdk_query(  # noqa: C901, PLR0912, PLR0915 - complexity needed for debug logging
         self,
         *,
         sdk: Any,
@@ -867,7 +867,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         # Use streaming mode (AsyncIterable) to enable hook support.
         # The SDK's query() function only initializes hooks when
         # is_streaming_mode=True, which requires an AsyncIterable prompt.
-        async def stream_prompt() -> Any:  # noqa: RUF029 - async generator
+        async def stream_prompt() -> Any:
             """Yield a single user message in streaming format."""
             yield {
                 "type": "user",

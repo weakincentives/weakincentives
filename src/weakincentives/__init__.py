@@ -16,6 +16,15 @@ from __future__ import annotations
 
 from .adapters import PromptResponse
 from .budget import Budget, BudgetExceededError, BudgetTracker
+from .clock import (
+    SYSTEM_CLOCK,
+    Clock,
+    FakeClock,
+    MonotonicClock,
+    Sleeper,
+    SystemClock,
+    WallClock,
+)
 from .dataclasses import FrozenDataclass
 from .deadlines import Deadline
 from .errors import DeadlineExceededError, ToolValidationError, WinkError
@@ -41,14 +50,18 @@ from .skills import (
 from .types import JSONValue, SupportsDataclass
 
 __all__ = [
+    "SYSTEM_CLOCK",
     "Budget",
     "BudgetExceededError",
     "BudgetTracker",
+    "Clock",
     "Deadline",
     "DeadlineExceededError",
+    "FakeClock",
     "FrozenDataclass",
     "JSONValue",
     "MarkdownSection",
+    "MonotonicClock",
     "Prompt",
     "PromptResponse",
     "Skill",
@@ -58,13 +71,16 @@ __all__ = [
     "SkillMountError",
     "SkillNotFoundError",
     "SkillValidationError",
+    "Sleeper",
     "StructuredLogger",
     "SupportsDataclass",
+    "SystemClock",
     "Tool",
     "ToolContext",
     "ToolHandler",
     "ToolResult",
     "ToolValidationError",
+    "WallClock",
     "WinkError",
     "configure_logging",
     "get_logger",

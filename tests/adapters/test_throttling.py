@@ -308,13 +308,16 @@ def testjittered_backoff_with_non_positive_base() -> None:
     assert jittered_backoff(policy=policy, attempt=1, retry_after=None) == timedelta(0)
 
 
-def test_sleep_for_invokes_time_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    observed: list[float] = []
-    monkeypatch.setattr("weakincentives.adapters.throttle.time.sleep", observed.append)
+def test_sleep_for_uses_sleeper() -> None:
+    from weakincentives.clock import FakeClock
 
-    sleep_for(timedelta(milliseconds=150))
+    clock = FakeClock()
+    initial = clock.monotonic()
 
-    assert observed == [0.15]
+    sleep_for(timedelta(milliseconds=150), sleeper=clock)
+
+    # FakeClock advances time on sleep instead of blocking
+    assert clock.monotonic() == initial + 0.15
 
 
 class _ThrottleLikeError(Exception):

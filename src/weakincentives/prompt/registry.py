@@ -736,7 +736,7 @@ def _validate_step_input_type(
         raise PromptValidationError(msg, section_path=path, placeholder="steps")
 
 
-def _validate_step_output_type(  # noqa: PLR0913, PLR0917
+def _validate_step_output_type(  # noqa: PLR0913
     example: object,
     step_idx: int,
     tool_name: str,

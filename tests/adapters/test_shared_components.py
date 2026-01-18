@@ -21,7 +21,6 @@ from typing import Any, cast
 
 import pytest
 
-from tests.helpers import FrozenUtcNow
 from tests.helpers.adapters import TEST_ADAPTER_NAME
 from weakincentives import ToolValidationError
 from weakincentives.adapters.core import (
@@ -460,9 +459,9 @@ def test_response_parser_structured_output_failure() -> None:
     assert error.phase == PROMPT_EVALUATION_PHASE_RESPONSE
 
 
-def test_tool_executor_raises_when_deadline_expired(
-    frozen_utcnow: FrozenUtcNow,
-) -> None:
+def test_tool_executor_raises_when_deadline_expired() -> None:
+    from weakincentives.clock import FakeClock
+
     tool = Tool[EchoParams, EchoPayload](
         name="echo",
         description="Echo",
@@ -483,10 +482,11 @@ def test_tool_executor_raises_when_deadline_expired(
         {tool.name: tool},
     )
 
+    clock = FakeClock()
     anchor = datetime(2024, 1, 1, 12, 0, tzinfo=UTC)
-    frozen_utcnow.set(anchor)
-    deadline = Deadline(anchor + timedelta(seconds=5))
-    frozen_utcnow.advance(timedelta(seconds=10))
+    clock.set_wall(anchor)
+    deadline = Deadline(anchor + timedelta(seconds=5), clock=clock)
+    clock.advance(10)
 
     executor = ToolExecutor(
         adapter_name=TEST_ADAPTER_NAME,

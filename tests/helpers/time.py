@@ -10,78 +10,81 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Clock control helpers for tests."""
+"""Clock control helpers for tests.
+
+The primary test clock is :class:`weakincentives.clock.FakeClock`, which provides
+controllable monotonic and wall-clock time. This module provides fixtures and
+backward-compatible helpers.
+
+Example::
+
+    from weakincentives.clock import FakeClock
+
+    def test_deadline_remaining() -> None:
+        clock = FakeClock()
+        clock.set_wall(datetime(2024, 6, 1, 12, 0, 0, tzinfo=UTC))
+
+        deadline = Deadline(
+            expires_at=datetime(2024, 6, 1, 13, 0, 0, tzinfo=UTC),
+            clock=clock,
+        )
+
+        assert deadline.remaining() == timedelta(hours=1)
+
+        clock.advance(1800)  # 30 minutes
+        assert deadline.remaining() == timedelta(minutes=30)
+"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
 import pytest
 
-from weakincentives import deadlines
-
-
-class FrozenUtcNow:
-    """Controller for :func:`weakincentives.deadlines._utcnow` during tests."""
-
-    def __init__(
-        self, monkeypatch: pytest.MonkeyPatch, *, anchor: datetime | None = None
-    ) -> None:
-        self._current = anchor if anchor is not None else datetime.now(UTC)
-        monkeypatch.setattr(deadlines, "_utcnow", self.now)
-
-    def now(self) -> datetime:
-        """Return the frozen current time."""
-
-        return self._current
-
-    def set(self, current: datetime) -> datetime:
-        """Reset the frozen clock to the provided datetime."""
-
-        self._current = current
-        return self._current
-
-    def advance(self, delta: timedelta) -> datetime:
-        """Move the frozen clock forward by ``delta``."""
-
-        self._current += delta
-        return self._current
-
-
-@pytest.fixture
-def frozen_utcnow(monkeypatch: pytest.MonkeyPatch) -> FrozenUtcNow:
-    """Provide a controllable :func:`_utcnow` override for deadline tests."""
-
-    return FrozenUtcNow(monkeypatch)
+# Re-export FakeClock from main module for convenience
+from weakincentives.clock import FakeClock
 
 
 class ControllableClock:
-    """A controllable clock for testing time-based behavior without sleeping.
+    """Backward-compatible wrapper around FakeClock for monotonic-only usage.
 
-    Use as a replacement for time.monotonic() in tests. Advance the clock
-    manually to simulate time passage without actual delays.
+    .. deprecated::
+        Use :class:`weakincentives.clock.FakeClock` directly instead.
+        This class remains for backward compatibility with tests that
+        use ``clock()`` instead of ``clock.monotonic()``.
 
-    Example::
+    Example (legacy)::
 
         clock = ControllableClock()
         mailbox = InMemoryMailbox(name="test", clock=clock)
 
-        mailbox.send("hello")
-        messages = mailbox.receive(visibility_timeout=10)
+    Example (preferred)::
 
-        # Advance past visibility timeout
-        clock.advance(11)
+        from weakincentives.clock import FakeClock
 
-        # Message should now be requeued
-        messages = mailbox.receive()
+        clock = FakeClock()
+        mailbox = InMemoryMailbox(name="test", clock=clock)
     """
 
     def __init__(self, start: float = 0.0) -> None:
-        self._current = start
+        self._clock = FakeClock()
+        self._clock.set_monotonic(start)
 
     def __call__(self) -> float:
-        """Return the current clock time."""
-        return self._current
+        """Return the current monotonic time (legacy callable interface)."""
+        return self._clock.monotonic()
+
+    def monotonic(self) -> float:
+        """Return the current monotonic time."""
+        return self._clock.monotonic()
+
+    def utcnow(self) -> datetime:
+        """Return the current wall-clock time."""
+        return self._clock.utcnow()
+
+    def sleep(self, seconds: float) -> None:
+        """Advance time immediately without blocking."""
+        self._clock.sleep(seconds)
 
     def advance(self, seconds: float) -> float:
         """Advance the clock by the given number of seconds.
@@ -90,22 +93,47 @@ class ControllableClock:
             seconds: Time to advance in seconds.
 
         Returns:
-            The new current time.
+            The new monotonic time.
         """
-        self._current += seconds
-        return self._current
+        self._clock.advance(seconds)
+        return self._clock.monotonic()
 
     def set(self, value: float) -> float:
-        """Set the clock to an absolute value.
+        """Set the monotonic clock to an absolute value.
 
         Args:
             value: The new clock value.
 
         Returns:
-            The new current time.
+            The new monotonic time.
         """
-        self._current = value
-        return self._current
+        self._clock.set_monotonic(value)
+        return self._clock.monotonic()
 
 
-__all__ = ["ControllableClock", "FrozenUtcNow", "frozen_utcnow"]
+@pytest.fixture
+def fake_clock() -> FakeClock:
+    """Provide a fresh FakeClock for deterministic time control.
+
+    This is the preferred fixture for testing time-dependent code.
+    Inject the clock into components that accept a clock parameter.
+
+    Example::
+
+        def test_heartbeat_elapsed(fake_clock: FakeClock) -> None:
+            hb = Heartbeat(clock=fake_clock)
+
+            hb.beat()
+            assert hb.elapsed() == 0.0
+
+            fake_clock.advance(10)
+            assert hb.elapsed() == 10.0
+    """
+    return FakeClock()
+
+
+__all__ = [
+    "ControllableClock",
+    "FakeClock",
+    "fake_clock",
+]
