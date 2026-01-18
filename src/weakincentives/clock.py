@@ -193,8 +193,14 @@ class FakeClock:
         """Advance both clocks by the given duration.
 
         Args:
-            seconds: Duration to advance in seconds.
+            seconds: Duration to advance in seconds (must be non-negative).
+
+        Raises:
+            ValueError: If seconds is negative.
         """
+        if seconds < 0:
+            msg = "Cannot advance time by negative seconds"
+            raise ValueError(msg)
         with self._lock:
             self._monotonic += seconds
             self._wall += timedelta(seconds=seconds)
