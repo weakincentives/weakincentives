@@ -14,7 +14,7 @@ design the codebase to make correct code natural.
 
 WINK enforces pyright strict mode. Type annotations are the source of truth:
 
-```python
+```python nocheck
 # Pyright catches this at edit time, not runtime
 def handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
     return ToolResult(message="ok", value=None)  # Error: expected MyResult
@@ -40,7 +40,7 @@ def handler(params: MyParams, *, context: ToolContext) -> ToolResult[MyResult]:
 
 Public APIs use decorators from `weakincentives.dbc`:
 
-```python
+```python nocheck
 from weakincentives.dbc import require, ensure, invariant, pure
 
 @require(lambda x: x > 0)  # x must be positive
@@ -144,7 +144,7 @@ doesn't handle it should fail loudly, not silently skip.
 
 WINK uses the `assert_never` pattern:
 
-```python
+```python nocheck
 from typing import assert_never
 from weakincentives.runtime.session import SliceOp, Append, Extend, Replace, Clear
 

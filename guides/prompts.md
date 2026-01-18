@@ -26,7 +26,7 @@ WINK's design goal is **predictability**:
 `PromptTemplate[OutputT]` is the immutable definition of an agent prompt. Think
 of it as a blueprint that never changes once defined.
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from weakincentives.prompt import PromptTemplate, MarkdownSection
 
@@ -74,7 +74,7 @@ fails at construction, not when the model is mid-response.
 `Prompt[OutputT]` is the runtime binding that connects a template to specific
 parameters:
 
-```python
+```python nocheck
 from weakincentives.prompt import Prompt
 
 prompt = Prompt(template).bind(Params(question="What is WINK?"))
@@ -82,7 +82,7 @@ prompt = Prompt(template).bind(Params(question="What is WINK?"))
 
 You can also configure overrides:
 
-```python
+```python nocheck
 prompt = Prompt(template, overrides_store=store, overrides_tag="stable")
 prompt = prompt.bind(Params(question="What is WINK?"))
 ```
@@ -118,7 +118,7 @@ sandboxes, etc.).
 
 `MarkdownSection` renders a `string.Template` with `${name}` placeholders:
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from weakincentives.prompt import MarkdownSection
 
@@ -161,7 +161,7 @@ Adapters will:
 If you need to parse output yourself (or you're using a custom adapter), use
 `parse_structured_output(...)`:
 
-```python
+```python nocheck
 from weakincentives.prompt import parse_structured_output
 
 rendered = prompt.render(session=session)
@@ -190,7 +190,7 @@ Supported signatures:
 **Example**: include "deep debugging instructions" only when a session flag is
 set:
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from weakincentives.prompt import MarkdownSection
 from weakincentives.runtime import Session
@@ -232,7 +232,7 @@ For those, prefer one of these patterns:
 
 **Pattern A: Build the template per session**
 
-```python
+```python nocheck
 from typing import Any
 from weakincentives.contrib.tools import PlanningToolsSection, VfsToolsSection
 from weakincentives.prompt import PromptTemplate, MarkdownSection

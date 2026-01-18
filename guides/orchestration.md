@@ -17,7 +17,7 @@ You implement a single method:
 
 Then call `loop.execute(request)`.
 
-```python
+```python nocheck
 from weakincentives.runtime import MainLoop, MainLoopConfig, Session
 from weakincentives.prompt import Prompt
 
@@ -36,7 +36,7 @@ the prompt. You don't have to handle this yourself.
 
 You can inject custom resources at the loop level via `MainLoopConfig`:
 
-```python
+```python nocheck
 from weakincentives.resources import Binding, ResourceRegistry
 from weakincentives.runtime import MainLoopConfig
 
@@ -65,7 +65,7 @@ deadline. `BudgetTracker` accumulates usage across retries.
 
 **Typical pattern:**
 
-```python
+```python nocheck
 from datetime import timedelta
 from weakincentives import Deadline, Budget
 

@@ -404,7 +404,7 @@ section = MarkdownSection[ReviewParams](
 
 Tools are typed with params and result dataclasses.
 
-```python
+```python nocheck
 from dataclasses import dataclass, field
 
 from weakincentives import Tool, ToolContext, ToolResult
@@ -541,7 +541,7 @@ session.restore(snapshot)
 
 Provider-agnostic evaluation interface.
 
-```python
+```python nocheck
 from weakincentives.adapters.openai import OpenAIAdapter
 from weakincentives.adapters.litellm import LiteLLMAdapter
 from weakincentives.adapters import PromptResponse

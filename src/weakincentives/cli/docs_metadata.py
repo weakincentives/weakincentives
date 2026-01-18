@@ -50,6 +50,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "THREAD_SAFETY": "Concurrency and shared state",
     "TOOLS": "Tool runtime, policies, sequential dependencies, planning tools",
     "VERIFICATION": "Redis mailbox detailed specification, invariants, property tests",
+    "VERIFICATION_TOOLBOX": "Verification toolchain (check.py), checker protocol, failure reporting",
     "WINK_DOCS": "CLI docs command, bundled documentation access",
     "WORKSPACE": "VFS, Podman, asteval, workspace digest",
 }

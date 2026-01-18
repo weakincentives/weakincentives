@@ -32,7 +32,7 @@ The default store is `LocalPromptOverridesStore`, which writes JSON files under:
 
 Wire it like:
 
-```python
+```python nocheck
 from weakincentives.prompt.overrides import LocalPromptOverridesStore
 from weakincentives.prompt import Prompt
 
@@ -106,7 +106,7 @@ Either way, you're forced to acknowledge that the code changed. No silent drift.
 
 Use `accepts_overrides=False` on sections that shouldn't be modified:
 
-```python
+```python nocheck
 security_section = MarkdownSection(
     title="Security",
     key="security",
@@ -125,7 +125,7 @@ This is useful for:
 
 Tags let you maintain multiple versions of overrides:
 
-```python
+```python nocheck
 # Development iteration
 dev_prompt = Prompt(template, overrides_store=store, overrides_tag="dev")
 

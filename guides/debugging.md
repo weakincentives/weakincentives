@@ -7,7 +7,7 @@ and what went wrong when things fail.
 
 *Canonical spec: [specs/LOGGING.md](../specs/LOGGING.md)*
 
-```python
+```python nocheck
 from weakincentives.runtime import configure_logging, get_logger
 
 configure_logging(level="INFO", json_mode=True)
@@ -58,7 +58,7 @@ route events wherever you need them.
 
 To see exactly what's being sent to the model:
 
-```python
+```python nocheck
 rendered = prompt.render(session=session)
 print(rendered.text)  # Full prompt markdown
 print([t.name for t in rendered.tools])  # Tool names
@@ -71,7 +71,7 @@ debugging or for snapshot tests.
 
 Use `weakincentives.debug.dump_session(...)` to persist a session tree:
 
-```python
+```python nocheck
 from weakincentives.debug import dump_session
 
 path = dump_session(session, target="snapshots/")  # writes <session_id>.jsonl

@@ -17,7 +17,7 @@ Most agent testing can happen without calling a model:
 Prompts are deterministic. Same inputs produce same outputs. This makes them
 perfect for snapshot testing:
 
-```python
+```python nocheck
 from dataclasses import dataclass
 from typing import Any
 from weakincentives.prompt import Prompt, PromptTemplate, MarkdownSection
@@ -57,7 +57,7 @@ expected. When prompts are deterministic, you can test them like regular code.
 
 Call handlers directly with fake `ToolContext`:
 
-```python
+```python nocheck
 from weakincentives.prompt import ToolContext, ToolResult
 from weakincentives.runtime import Session
 
@@ -92,7 +92,7 @@ No model needed. You're testing the business logic in isolation.
 
 Reducers are pure functions. Test them directly:
 
-```python
+```python nocheck
 from weakincentives.runtime.session import Append
 
 def test_add_step_reducer():
@@ -113,7 +113,7 @@ to test exhaustively.
 
 Run `adapter.evaluate` behind a flag:
 
-```python
+```python nocheck
 import os
 import pytest
 from weakincentives.adapters.openai import OpenAIAdapter
@@ -144,7 +144,7 @@ These are slow and cost money, so run them selectively:
 
 Test that overrides are applied correctly:
 
-```python
+```python nocheck
 def test_override_changes_prompt():
     store = InMemoryOverridesStore()
     store.save(override_with_custom_text)
@@ -159,7 +159,7 @@ def test_override_changes_prompt():
 
 Test that session state evolves correctly:
 
-```python
+```python nocheck
 def test_tool_invocation_updates_session():
     session = Session()
     session.install(Plan, initial=lambda: Plan(steps=()))

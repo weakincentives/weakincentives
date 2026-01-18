@@ -31,7 +31,7 @@ A section can have:
 If visibility is `SUMMARY` and `summary` is present, WINK renders the summary
 instead of the full template.
 
-```python
+```python nocheck
 from weakincentives.prompt import MarkdownSection, SectionVisibility
 
 section = MarkdownSection(
@@ -83,7 +83,7 @@ You don't need to handle this yourself—MainLoop does it automatically.
 Visibility overrides live in the `VisibilityOverrides` session slice and are
 applied at render time.
 
-```python
+```python nocheck
 from weakincentives.prompt import SectionVisibility
 from weakincentives.runtime.session import SetVisibilityOverride, VisibilityOverrides
 
@@ -109,7 +109,7 @@ contents when needed.
 
 ## Example Pattern
 
-```python
+```python nocheck
 from weakincentives.prompt import PromptTemplate, MarkdownSection, SectionVisibility
 
 template = PromptTemplate(

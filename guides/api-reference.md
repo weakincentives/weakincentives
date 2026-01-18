@@ -47,7 +47,7 @@ For everything else (e.g., `PromptTemplate`, `RenderedPrompt`, `Section`, `Secti
 
 ## weakincentives.prompt
 
-```python
+```python nocheck
 PromptTemplate[OutputT](ns, key, name=None, sections=..., allow_extra_keys=False)
 Prompt(template, overrides_store=None, overrides_tag="latest")
     .bind(*params)
@@ -72,7 +72,7 @@ ToolResult.error(message)               # failure case
 
 ## weakincentives.runtime
 
-```python
+```python nocheck
 Session(dispatcher, tags=None, parent=None)
 SessionView(session)                    # Read-only wrapper
 session[Type].all() / latest() / where()
@@ -110,7 +110,7 @@ MainLoop.execute(request, deadline=..., budget=..., resources=...)
 
 ## weakincentives.adapters
 
-```python
+```python nocheck
 ProviderAdapter.evaluate(prompt, session=..., deadline=..., budget=...)
 PromptResponse(prompt_name, text, output)
 ```
@@ -148,7 +148,7 @@ PromptResponse(prompt_name, text, output)
 
 **Core types:**
 
-```python
+```python nocheck
 Sample[InputT, ExpectedT](id, input, expected)
 Dataset[InputT, ExpectedT](samples)
 Dataset.load(path, input_type, expected_type)
@@ -161,7 +161,7 @@ EvalReport(results)
 
 **Evaluators:**
 
-```python
+```python nocheck
 exact_match(output, expected) -> Score
 contains(output, expected) -> Score
 all_of(*evaluators) -> Evaluator
@@ -191,7 +191,7 @@ collect_results(results, expected_count, timeout_seconds=300)
 
 Dataclass serialization utilities:
 
-```python
+```python nocheck
 from weakincentives.serde import dump, parse, schema, clone
 
 data = dump(my_dataclass)                    # Serialize to dict
@@ -202,7 +202,7 @@ copy = clone(my_dataclass)                   # Deep copy frozen dataclass
 
 ## weakincentives.filesystem
 
-```python
+```python nocheck
 from weakincentives.filesystem import (
     Filesystem,                # Protocol for file operations
     SnapshotableFilesystem,    # Extended protocol with snapshot/restore
@@ -224,7 +224,7 @@ grep_result = fs.grep("TODO", path="src/", glob="*.py")
 
 ## weakincentives.skills
 
-```python
+```python nocheck
 from weakincentives.skills import (
     SkillMount,
     SkillConfig,

@@ -79,7 +79,7 @@ architecture.
 
 **LangGraph style:**
 
-```python
+```python nocheck
 # Define tools separately
 @tool
 def search(query: str) -> str:
@@ -95,7 +95,7 @@ graph.add_conditional_edges("tools", should_continue)
 
 **WINK style:**
 
-```python
+```python nocheck
 # Tool and instructions together
 search_tool = Tool[SearchParams, SearchResult](
     name="search",

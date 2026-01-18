@@ -5,7 +5,7 @@
 Module organization and import patterns ensuring clear separation, predictable
 dependency flow, minimal coupling, and maintainable growth.
 
-**Validation:** `scripts/validate_module_boundaries.py`
+**Validation:** `wink verify layer_violations core_contrib_separation`
 
 ## Guiding Principles
 

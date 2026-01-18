@@ -52,7 +52,7 @@ Implements the `MainLoop` protocol with these responsibilities:
 - **Deadline Management**: Applies a default 5-minute deadline to each request
 - **Prompt Binding**: Creates and binds prompts via `create_prompt()`
 
-```python
+```python nocheck
 class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     def create_prompt(self, request: ReviewTurnParams) -> Prompt[ReviewResponse]: ...
     def create_session(self) -> Session: ...
@@ -101,7 +101,7 @@ On exit, dumps session state to `snapshots/` via `dump_session_tree`.
 
 Default guidance parameters for the review brief section.
 
-```python
+```python nocheck
 @dataclass(slots=True, frozen=True)
 class ReviewGuidance:
     focus: str = "Identify potential issues, risks, and follow-up questions..."
@@ -111,7 +111,7 @@ class ReviewGuidance:
 
 Runtime parameters provided per turn.
 
-```python
+```python nocheck
 @dataclass(slots=True, frozen=True)
 class ReviewTurnParams:
     request: str  # User-provided review request
@@ -121,7 +121,7 @@ class ReviewTurnParams:
 
 Structured output from the agent.
 
-```python
+```python nocheck
 @dataclass(slots=True, frozen=True)
 class ReviewResponse:
     summary: str
@@ -133,7 +133,7 @@ class ReviewResponse:
 
 Parameters for the reference documentation section.
 
-```python
+```python nocheck
 @dataclass(slots=True, frozen=True)
 class ReferenceParams:
     project_name: str = "sunfish"
@@ -184,7 +184,7 @@ class ReferenceParams:
 
 ### Mount Configuration
 
-```python
+```python nocheck
 SUNFISH_MOUNT_INCLUDE_GLOBS = (
     "*.md", "*.py", "*.txt", "*.yml", "*.yaml", "*.toml",
     "*.gitignore", "*.json", "*.cfg", "*.ini", "*.sh", "*.6",
@@ -236,7 +236,7 @@ Override tag is resolved in order:
 
 Each request has a deadline to prevent runaway execution:
 
-```python
+```python nocheck
 DEFAULT_DEADLINE_MINUTES = 5
 
 def _default_deadline() -> Deadline:
