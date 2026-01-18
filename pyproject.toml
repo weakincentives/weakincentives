@@ -196,7 +196,7 @@ quote-style = "double"
 indent-style = "space"
 
 [tool.pytest.ini_options]
-addopts = "--cov=src/weakincentives --cov-report=term-missing --cov-fail-under=100"
+addopts = "--cov=src/weakincentives --cov=toolchain --cov-report=term-missing --cov-fail-under=100"
 markers = [
     "core: marks fast, high-value tests that always run in CI.",
     "integration: marks tests that exercise live provider integrations.",
@@ -214,7 +214,7 @@ reruns_delay = 0.5
 
 [tool.coverage.run]
 branch = true
-source = ["src/weakincentives"]
+source = ["src/weakincentives", "toolchain"]
 omit = [
     # Redis mailbox requires integration tests with a real Redis server
     "src/weakincentives/contrib/mailbox/_redis.py",

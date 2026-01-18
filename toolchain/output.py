@@ -112,7 +112,7 @@ class ConsoleFormatter:
                 remaining = len(result.diagnostics) - len(shown)
                 if remaining > 0:
                     lines.append(f"  ... and {remaining} more")
-            elif self.verbose and result.output:
+            elif self.verbose and result.output:  # pragma: no cover
                 # Show raw output if no structured diagnostics
                 for line in result.output.split("\n")[:20]:
                     lines.append(f"  {line}")

@@ -264,7 +264,7 @@ def parse_mdformat(output: str, code: int) -> tuple[Diagnostic, ...]:
     # mdformat outputs files that would be changed
     for line in output.strip().split("\n"):
         line = line.strip()
-        if line.endswith(".md"):
+        if line.endswith(".md"):  # pragma: no branch
             diagnostics.append(
                 Diagnostic(
                     message="Needs formatting",

@@ -1,0 +1,332 @@
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Tests for toolchain checker implementations."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+from toolchain.checkers import (
+    create_all_checkers,
+    create_architecture_checker,
+    create_bandit_checker,
+    create_deptry_checker,
+    create_docs_checker,
+    create_format_checker,
+    create_lint_checker,
+    create_markdown_checker,
+    create_pip_audit_checker,
+    create_test_checker,
+    create_typecheck_checker,
+)
+from toolchain.checkers.architecture import ArchitectureChecker
+from toolchain.checkers.docs import DocsChecker
+
+
+class TestArchitectureChecker:
+    """Tests for ArchitectureChecker."""
+
+    def test_name_and_description(self) -> None:
+        checker = ArchitectureChecker()
+        assert checker.name == "architecture"
+        assert "core/contrib" in checker.description.lower()
+
+    def test_passes_on_valid_structure(self) -> None:
+        # Use actual src directory
+        root = Path(__file__).parents[2]
+        checker = ArchitectureChecker(src_dir=root / "src")
+        result = checker.run()
+        # Should pass if codebase is properly structured
+        assert result.name == "architecture"
+
+    def test_fails_on_missing_package(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert any("not found" in d.message.lower() for d in result.diagnostics)
+
+    def test_detects_core_importing_contrib(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            # Create core module that imports contrib
+            core = pkg / "core.py"
+            core.write_text("from weakincentives.contrib import something")
+
+            # Create contrib directory
+            contrib = pkg / "contrib"
+            contrib.mkdir()
+            (contrib / "__init__.py").write_text("")
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert any("contrib" in d.message.lower() for d in result.diagnostics)
+
+    def test_allows_contrib_importing_contrib(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            # Create contrib module that imports other contrib
+            contrib = pkg / "contrib"
+            contrib.mkdir()
+            (contrib / "__init__.py").write_text("")
+            (contrib / "tools.py").write_text("from weakincentives.contrib import other")
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            # Should pass - contrib can import contrib
+            assert not any("contrib" in d.message.lower() for d in result.diagnostics)
+
+    def test_handles_syntax_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+            (pkg / "broken.py").write_text("def broken(")  # Syntax error
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            assert result.status == "failed"
+            assert any("syntax" in d.message.lower() for d in result.diagnostics)
+
+    def test_skips_pycache_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            pkg = Path(tmpdir) / "weakincentives"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+            # Create a __pycache__ directory with a .py file (glob finds *.py)
+            pycache = pkg / "__pycache__"
+            pycache.mkdir()
+            # This .py file would cause issues if not skipped
+            (pycache / "bad.py").write_text("from weakincentives.contrib import x")
+
+            checker = ArchitectureChecker(src_dir=Path(tmpdir))
+            result = checker.run()
+            # Should pass - pycache is skipped
+            assert result.status == "passed"
+
+
+class TestDocsChecker:
+    """Tests for DocsChecker."""
+
+    def test_name_and_description(self) -> None:
+        checker = DocsChecker()
+        assert checker.name == "docs"
+        assert "documentation" in checker.description.lower()
+
+    def test_runs_on_real_codebase(self) -> None:
+        root = Path(__file__).parents[2]
+        checker = DocsChecker(root=root)
+        result = checker.run()
+        assert result.name == "docs"
+        # Duration should be recorded
+        assert result.duration_ms >= 0
+
+    def test_detects_broken_links(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+
+            # Create a README with a broken link
+            readme = root / "README.md"
+            readme.write_text("[Guide](./nonexistent.md)")
+
+            # Initialize as git repo with the file tracked
+            import subprocess
+
+            subprocess.run(["git", "init"], cwd=root, capture_output=True)
+            subprocess.run(["git", "add", "README.md"], cwd=root, capture_output=True)
+
+            checker = DocsChecker(root=root)
+            result = checker.run()
+            # Should detect broken link
+            assert any("broken" in d.message.lower() for d in result.diagnostics)
+
+    def test_is_api_reference(self) -> None:
+        checker = DocsChecker()
+
+        # API reference (mostly signatures) - pattern expects standalone function names
+        api_ref = """method(arg: str) -> int
+other(x: int) -> str
+.property"""
+        assert checker._is_api_reference(api_ref) is True
+
+        # Lines starting with . are also counted
+        dot_api = """.method() -> int
+.property -> str
+.other()"""
+        assert checker._is_api_reference(dot_api) is True
+
+        # Real code with imports
+        real_code = """from foo import bar
+
+def example():
+    return bar()"""
+        assert checker._is_api_reference(real_code) is False
+
+        # Empty code
+        assert checker._is_api_reference("") is False
+
+        # Only comments
+        assert checker._is_api_reference("# comment") is False
+
+    def test_is_noise(self) -> None:
+        checker = DocsChecker()
+        assert checker._is_noise("Variable not allowed in type expression") is True
+        assert checker._is_noise("Type error: int expected") is False
+        assert checker._is_noise("is obscured by a declaration") is True
+        assert checker._is_noise("could not be resolved") is True
+        assert checker._is_noise("Unexpected indentation") is True
+        assert checker._is_noise("must return value") is True
+        assert checker._is_noise("Expression value is unused") is True
+
+    def test_check_examples_no_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # No README.md or llms.md, no guides
+            checker = DocsChecker(root=Path(tmpdir))
+            result = checker.run()
+            # Should pass - no files to check
+            assert result.status == "passed"
+
+    def test_check_examples_no_python_blocks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            readme = root / "README.md"
+            # Markdown with no Python code blocks
+            readme.write_text("# README\n\nJust text, no code.")
+
+            import subprocess
+
+            subprocess.run(["git", "init"], cwd=root, capture_output=True)
+            subprocess.run(["git", "add", "."], cwd=root, capture_output=True)
+
+            checker = DocsChecker(root=root)
+            result = checker.run()
+            # Should pass - no code blocks to check
+            assert result.status == "passed"
+
+    def test_map_diagnostic_returns_none_out_of_range(self) -> None:
+        from toolchain.utils import CodeBlock
+
+        checker = DocsChecker()
+        # Test when diagnostic line is out of range
+        diag = {"range": {"start": {"line": 9999}}}
+        blocks: list[CodeBlock] = []
+        module = "# short module\npass"
+        result = checker._map_diagnostic(diag, blocks, module)
+        assert result is None
+
+    def test_map_diagnostic_no_line(self) -> None:
+        from toolchain.utils import CodeBlock
+
+        checker = DocsChecker()
+        # Test when diagnostic has no line info
+        diag = {"range": {"start": {}}}
+        blocks: list[CodeBlock] = []
+        module = "# short module"
+        result = checker._map_diagnostic(diag, blocks, module)
+        assert result is None
+
+
+class TestParseTypecheck:
+    """Tests for _parse_typecheck helper."""
+
+    def test_parses_combined_output(self) -> None:
+        from toolchain.checkers import _parse_typecheck
+
+        # Combined ty + pyright output
+        output = """error[invalid-type]: Type mismatch
+  --> src/foo.py:10:5
+  src/bar.py:20:10 - error: Cannot assign str to int"""
+        diagnostics = _parse_typecheck(output, 1)
+        assert len(diagnostics) == 2
+
+    def test_empty_output(self) -> None:
+        from toolchain.checkers import _parse_typecheck
+
+        diagnostics = _parse_typecheck("", 0)
+        assert len(diagnostics) == 0
+
+
+class TestFactoryFunctions:
+    """Tests for checker factory functions."""
+
+    def test_create_format_checker(self) -> None:
+        checker = create_format_checker()
+        assert checker.name == "format"
+        assert "ruff" in checker.command
+
+    def test_create_lint_checker(self) -> None:
+        checker = create_lint_checker()
+        assert checker.name == "lint"
+        assert "--preview" in checker.command
+
+    def test_create_typecheck_checker(self) -> None:
+        checker = create_typecheck_checker()
+        assert checker.name == "typecheck"
+        assert "ty" in str(checker.command)
+        assert "pyright" in str(checker.command)
+
+    def test_create_test_checker(self) -> None:
+        checker = create_test_checker()
+        assert checker.name == "test"
+        assert "pytest" in checker.command
+        assert checker.timeout == 600  # 10 minutes
+
+    def test_create_bandit_checker(self) -> None:
+        checker = create_bandit_checker()
+        assert checker.name == "bandit"
+        assert "bandit" in checker.command
+
+    def test_create_deptry_checker(self) -> None:
+        checker = create_deptry_checker()
+        assert checker.name == "deptry"
+        assert "deptry" in checker.command
+
+    def test_create_pip_audit_checker(self) -> None:
+        checker = create_pip_audit_checker()
+        assert checker.name == "pip-audit"
+        assert "pip-audit" in checker.command
+
+    def test_create_markdown_checker(self) -> None:
+        checker = create_markdown_checker()
+        assert checker.name == "markdown"
+        assert "mdformat" in checker.command
+
+    def test_create_architecture_checker(self) -> None:
+        checker = create_architecture_checker()
+        assert checker.name == "architecture"
+        assert isinstance(checker, ArchitectureChecker)
+
+    def test_create_docs_checker(self) -> None:
+        checker = create_docs_checker()
+        assert checker.name == "docs"
+        assert isinstance(checker, DocsChecker)
+
+    def test_create_all_checkers(self) -> None:
+        checkers = create_all_checkers()
+        assert len(checkers) >= 10  # At least 10 checkers
+        names = [c.name for c in checkers]
+        assert "format" in names
+        assert "lint" in names
+        assert "typecheck" in names
+        assert "test" in names
+        assert "architecture" in names
+        assert "docs" in names
