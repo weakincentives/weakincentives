@@ -26,6 +26,7 @@ import re
 import tempfile
 import time
 from pathlib import Path
+from typing import Any
 
 from weakincentives.verify._git import tracked_files
 from weakincentives.verify._markdown import (
@@ -33,7 +34,6 @@ from weakincentives.verify._markdown import (
     extract_code_blocks,
     extract_file_path,
     extract_links,
-    is_python_code_block,
     is_shell_output,
 )
 from weakincentives.verify._subprocess import run_tool
@@ -92,34 +92,38 @@ class SpecReferencesChecker:
             duration_ms=duration_ms,
         )
 
-    def _check_file(
-        self, spec_file: Path, root: Path, findings: list[Finding]
-    ) -> None:
+    @staticmethod
+    def _extract_paths(line: str) -> list[str]:
+        """Extract file paths from a line of text."""
+        paths: list[str] = []
+        for pattern in FILE_REF_PATTERNS:
+            for match in pattern.finditer(line):
+                for path in match.group(1).split(","):
+                    path = path.strip().strip("`")
+                    is_valid = "(" not in path and ")" not in path
+                    is_source = any(
+                        path.startswith(p) for p in ("src/", "tests/", "scripts/")
+                    )
+                    if is_valid and is_source:
+                        paths.append(path)
+        return paths
+
+    def _check_file(self, spec_file: Path, root: Path, findings: list[Finding]) -> None:
         content = spec_file.read_text(encoding="utf-8")
 
         for line_num, line in enumerate(content.splitlines(), start=1):
-            for pattern in FILE_REF_PATTERNS:
-                for match in pattern.finditer(line):
-                    path_str = match.group(1)
-                    for path in path_str.split(","):
-                        path = path.strip().strip("`")
-                        if "(" in path or ")" in path:
-                            continue
-                        if any(
-                            path.startswith(p)
-                            for p in ("src/", "tests/", "scripts/")
-                        ):
-                            full_path = root / path
-                            if not full_path.exists() and not full_path.is_dir():
-                                findings.append(
-                                    Finding(
-                                        checker=f"{self.category}.{self.name}",
-                                        severity=Severity.ERROR,
-                                        message=f"Referenced file not found: {path}",
-                                        file=spec_file,
-                                        line=line_num,
-                                    )
-                                )
+            for path in self._extract_paths(line):
+                full_path = root / path
+                if not full_path.exists() and not full_path.is_dir():
+                    findings.append(
+                        Finding(
+                            checker=f"{self.category}.{self.name}",
+                            severity=Severity.ERROR,
+                            message=f"Referenced file not found: {path}",
+                            file=spec_file,
+                            line=line_num,
+                        )
+                    )
 
 
 class MarkdownLinksChecker:
@@ -391,7 +395,7 @@ EventType = Any
     def description(self) -> str:
         return "Check that Python examples in docs type-check"
 
-    def check(self, ctx: CheckContext) -> CheckResult:
+    def check(self, ctx: CheckContext) -> CheckResult:  # noqa: C901, PLR0912, PLR0914
         start_time = time.monotonic()
         findings: list[Finding] = []
 
@@ -444,7 +448,7 @@ EventType = Any
             tmppath = Path(tmpdir)
 
             module_path = tmppath / "_doc_examples.py"
-            module_path.write_text(module_content, encoding="utf-8")
+            _ = module_path.write_text(module_content, encoding="utf-8")
 
             config = {
                 "typeCheckingMode": "basic",
@@ -460,10 +464,16 @@ EventType = Any
                 "reportIncompatibleMethodOverride": "none",
             }
             config_path = tmppath / "pyrightconfig.json"
-            config_path.write_text(json.dumps(config), encoding="utf-8")
+            _ = config_path.write_text(json.dumps(config), encoding="utf-8")
 
             result = run_tool(
-                ["pyright", "--project", str(config_path), "--outputjson", str(module_path)],
+                [
+                    "pyright",
+                    "--project",
+                    str(config_path),
+                    "--outputjson",
+                    str(module_path),
+                ],
                 timeout_seconds=60.0,
             )
 
@@ -471,15 +481,13 @@ EventType = Any
                 try:
                     output = json.loads(result.stdout)
                     for diag in output.get("generalDiagnostics", []):
-                        if diag.get("severity") not in ("error", "warning"):
+                        if diag.get("severity") not in {"error", "warning"}:
                             continue
                         msg = diag.get("message", "")
                         if self._is_doc_noise(msg):
                             continue
 
-                        source = self._map_to_source(
-                            diag, all_blocks, module_content
-                        )
+                        source = self._map_to_source(diag, all_blocks, module_content)
                         if source:
                             file, line = source
                             findings.append(
@@ -501,7 +509,8 @@ EventType = Any
             duration_ms=duration_ms,
         )
 
-    def _is_api_reference_block(self, code: str) -> bool:
+    @staticmethod
+    def _is_api_reference_block(code: str) -> bool:
         """Check if code is API reference documentation, not runnable code."""
         lines = [ln.strip() for ln in code.strip().split("\n") if ln.strip()]
         if not lines:
@@ -523,9 +532,8 @@ EventType = Any
         for line in lines:
             if line.startswith("#"):
                 continue
-            if api_return.match(line) or api_defaults.match(line):
-                strong_signatures += 1
-            elif line.startswith("."):
+            is_signature = api_return.match(line) or api_defaults.match(line)
+            if is_signature or line.startswith("."):
                 strong_signatures += 1
 
         non_comment = [ln for ln in lines if not ln.startswith("#")]
@@ -546,7 +554,8 @@ EventType = Any
 
         return "\n".join(parts)
 
-    def _preprocess_code(self, code: str) -> str:
+    @staticmethod
+    def _preprocess_code(code: str) -> str:
         """Preprocess code for type checking."""
         lines = code.split("\n")
         processed: list[str] = []
@@ -569,9 +578,9 @@ EventType = Any
             return True
         return "is not assignable to declared type" in msg and "_doc_examples" in msg
 
+    @staticmethod
     def _map_to_source(
-        self,
-        diag: dict,
+        diag: dict[str, Any],
         blocks: list[CodeBlock],
         module_content: str,
     ) -> tuple[Path, int] | None:

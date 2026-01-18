@@ -43,6 +43,7 @@ class PytestChecker:
             coverage_threshold: Minimum required coverage percentage.
             max_failures: Stop after this many test failures.
         """
+        super().__init__()
         self._coverage_threshold = coverage_threshold
         self._max_failures = max_failures
 
@@ -99,20 +100,18 @@ class PytestChecker:
 
             # Extract test failures
             failure_pattern = re.compile(r"^FAILED\s+(.+)$", re.MULTILINE)
-            for match in failure_pattern.finditer(output):
-                findings.append(
-                    Finding(
-                        checker=f"{self.category}.{self.name}",
-                        severity=Severity.ERROR,
-                        message=f"Test failed: {match.group(1)}",
-                    )
+            findings.extend(
+                Finding(
+                    checker=f"{self.category}.{self.name}",
+                    severity=Severity.ERROR,
+                    message=f"Test failed: {match.group(1)}",
                 )
+                for match in failure_pattern.finditer(output)
+            )
 
             # Check for coverage failures
             if "FAIL Required test coverage" in output:
-                coverage_match = re.search(
-                    r"coverage (?:of )?(\d+(?:\.\d+)?%)", output
-                )
+                coverage_match = re.search(r"coverage (?:of )?(\d+(?:\.\d+)?%)", output)
                 if coverage_match:
                     findings.append(
                         Finding(
@@ -142,14 +141,14 @@ class PytestChecker:
                     for line in output.splitlines()
                     if "error" in line.lower() or "Error" in line
                 ]
-                for line in error_lines[:5]:  # Limit to first 5
-                    findings.append(
-                        Finding(
-                            checker=f"{self.category}.{self.name}",
-                            severity=Severity.ERROR,
-                            message=line.strip(),
-                        )
+                findings.extend(
+                    Finding(
+                        checker=f"{self.category}.{self.name}",
+                        severity=Severity.ERROR,
+                        message=line.strip(),
                     )
+                    for line in error_lines[:5]  # Limit to first 5
+                )
 
             # If we couldn't parse specific failures, add a generic one
             if not findings:
@@ -179,7 +178,8 @@ class PytestChecker:
             duration_ms=duration_ms,
         )
 
-    def _extract_summary(self, output: str) -> str | None:
+    @staticmethod
+    def _extract_summary(output: str) -> str | None:
         """Extract the pytest summary line from output."""
         lines = output.splitlines()
         for line in reversed(lines):

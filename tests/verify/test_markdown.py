@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from weakincentives.verify._markdown import (
     extract_code_blocks,
     extract_file_path,

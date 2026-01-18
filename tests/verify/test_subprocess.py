@@ -16,8 +16,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from weakincentives.verify._subprocess import (
     SubprocessResult,
     run_python_module,
@@ -99,7 +97,9 @@ class TestRunTool:
 
     def test_run_with_env(self) -> None:
         """Run command with custom environment."""
-        result = run_tool(["sh", "-c", "echo $TEST_VAR"], env={"TEST_VAR": "test_value"})
+        result = run_tool(
+            ["sh", "-c", "echo $TEST_VAR"], env={"TEST_VAR": "test_value"}
+        )
         assert result.success is True
         assert "test_value" in result.stdout
 

@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 
 from weakincentives.verify._ast import patch_ast_for_legacy_tools
-from weakincentives.verify._subprocess import run_python_module, run_tool
+from weakincentives.verify._subprocess import run_python_module
 from weakincentives.verify._types import CheckContext, CheckResult, Finding, Severity
 
 
@@ -47,7 +47,7 @@ class BanditChecker:
     def description(self) -> str:
         return "Check for security anti-patterns"
 
-    def check(self, ctx: CheckContext) -> CheckResult:
+    def check(self, ctx: CheckContext) -> CheckResult:  # noqa: C901
         start_time = time.monotonic()
         findings: list[Finding] = []
 
@@ -141,7 +141,7 @@ class PipAuditChecker:
     def description(self) -> str:
         return "Check for known vulnerabilities in dependencies"
 
-    def check(self, ctx: CheckContext) -> CheckResult:
+    def check(self, ctx: CheckContext) -> CheckResult:  # noqa: C901
         start_time = time.monotonic()
         findings: list[Finding] = []
 

@@ -14,7 +14,7 @@
 
 from __future__ import annotations
 
-import subprocess
+import subprocess  # nosec B404 - subprocess use is intentional for git commands
 from pathlib import Path
 
 
@@ -27,7 +27,7 @@ def is_git_repo(path: Path) -> bool:
     Returns:
         True if inside a git repository, False otherwise.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603, B607 - hardcoded git command
         ["git", "rev-parse", "--is-inside-work-tree"],
         cwd=path,
         capture_output=True,
@@ -37,11 +37,14 @@ def is_git_repo(path: Path) -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
+_EMPTY_FROZENSET: frozenset[str] = frozenset()
+
+
 def tracked_files(
     root: Path,
     *,
     pattern: str = "*",
-    exclude_parts: frozenset[str] = frozenset(),
+    exclude_parts: frozenset[str] | None = None,
     exclude_prefixes: tuple[Path, ...] = (),
 ) -> tuple[Path, ...]:
     """Get git-tracked files matching a pattern.
@@ -58,7 +61,7 @@ def tracked_files(
     Raises:
         RuntimeError: If git ls-files fails.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603, B607 - hardcoded git command
         ["git", "ls-files", pattern],
         cwd=root,
         capture_output=True,
@@ -70,6 +73,7 @@ def tracked_files(
         message = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(f"git ls-files failed: {message}")
 
+    exclude_set = exclude_parts if exclude_parts is not None else _EMPTY_FROZENSET
     files: list[Path] = []
     for line in result.stdout.splitlines():
         if not line:
@@ -78,7 +82,7 @@ def tracked_files(
         path = Path(line)
 
         # Check exclusions by directory parts
-        if exclude_parts.intersection(path.parts):
+        if exclude_set.intersection(path.parts):
             continue
 
         # Check exclusions by prefix
@@ -102,7 +106,7 @@ def get_repo_root(path: Path) -> Path | None:
     Returns:
         The repository root, or None if not in a git repository.
     """
-    result = subprocess.run(
+    result = subprocess.run(  # nosec B603, B607 - hardcoded git command
         ["git", "rev-parse", "--show-toplevel"],
         cwd=path,
         capture_output=True,

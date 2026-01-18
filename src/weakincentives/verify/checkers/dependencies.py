@@ -55,32 +55,30 @@ class DeptryChecker:
 
         output = result.output.strip()
 
-        if not result.success or (output and "warning" in output.lower()):
-            if output:
-                for line in output.splitlines():
-                    line = line.strip()
-                    if not line:
-                        continue
-                    # Deptry outputs warnings/errors with specific codes
-                    if any(
-                        code in line
-                        for code in ("DEP001", "DEP002", "DEP003", "DEP004")
-                    ):
-                        findings.append(
-                            Finding(
-                                checker=f"{self.category}.{self.name}",
-                                severity=Severity.ERROR,
-                                message=line,
-                            )
+        if output and (not result.success or "warning" in output.lower()):
+            for line in output.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                # Deptry outputs warnings/errors with specific codes
+                if any(
+                    code in line for code in ("DEP001", "DEP002", "DEP003", "DEP004")
+                ):
+                    findings.append(
+                        Finding(
+                            checker=f"{self.category}.{self.name}",
+                            severity=Severity.ERROR,
+                            message=line,
                         )
-                    elif "warning" in line.lower() or "error" in line.lower():
-                        findings.append(
-                            Finding(
-                                checker=f"{self.category}.{self.name}",
-                                severity=Severity.WARNING,
-                                message=line,
-                            )
+                    )
+                elif "warning" in line.lower() or "error" in line.lower():
+                    findings.append(
+                        Finding(
+                            checker=f"{self.category}.{self.name}",
+                            severity=Severity.WARNING,
+                            message=line,
                         )
+                    )
 
         duration_ms = int((time.monotonic() - start_time) * 1000)
         return CheckResult(

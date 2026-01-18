@@ -43,6 +43,7 @@ class TypeCoverageChecker:
         Args:
             threshold: Minimum required type completeness percentage.
         """
+        super().__init__()
         self._threshold = threshold
 
     @property
@@ -107,15 +108,15 @@ class TypeCoverageChecker:
 
                     # Add details about symbols with unknown types
                     symbols = type_completeness.get("symbols", [])
-                    for symbol in symbols[:10]:  # Limit to first 10
-                        if symbol.get("category") == "unknown":
-                            findings.append(
-                                Finding(
-                                    checker=f"{self.category}.{self.name}",
-                                    severity=Severity.WARNING,
-                                    message=f"Unknown type: {symbol.get('name', 'unknown')}",
-                                )
-                            )
+                    findings.extend(
+                        Finding(
+                            checker=f"{self.category}.{self.name}",
+                            severity=Severity.WARNING,
+                            message=f"Unknown type: {symbol.get('name', 'unknown')}",
+                        )
+                        for symbol in symbols[:10]  # Limit to first 10
+                        if symbol.get("category") == "unknown"
+                    )
 
             except json.JSONDecodeError:
                 findings.append(

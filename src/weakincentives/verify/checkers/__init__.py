@@ -41,22 +41,16 @@ from weakincentives.verify.checkers.types import (
 )
 
 __all__ = [
-    # Architecture
-    "LayerViolationsChecker",
-    "CoreContribSeparationChecker",
-    # Documentation
-    "SpecReferencesChecker",
-    "DocExamplesChecker",
-    "MarkdownLinksChecker",
-    "MarkdownFormatChecker",
-    # Security
     "BanditChecker",
-    "PipAuditChecker",
-    # Dependencies
+    "CoreContribSeparationChecker",
     "DeptryChecker",
-    # Types
-    "TypeCoverageChecker",
+    "DocExamplesChecker",
     "IntegrationTypesChecker",
-    # Tests
+    "LayerViolationsChecker",
+    "MarkdownFormatChecker",
+    "MarkdownLinksChecker",
+    "PipAuditChecker",
     "PytestChecker",
+    "SpecReferencesChecker",
+    "TypeCoverageChecker",
 ]

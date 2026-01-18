@@ -14,8 +14,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from weakincentives.verify._registry import (
     get_all_checkers,
     get_categories,

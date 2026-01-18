@@ -16,9 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
-from weakincentives.verify._types import CheckContext, Severity
+from weakincentives.verify._types import CheckContext
 from weakincentives.verify.checkers.architecture import (
     CoreContribSeparationChecker,
     LayerViolationsChecker,
@@ -93,7 +91,10 @@ class TestLayerViolationsChecker:
         result = checker.check(ctx)
 
         assert not result.passed
-        assert any("LAYER" in f.message.upper() or "layer" in f.message for f in result.findings)
+        assert any(
+            "LAYER" in f.message.upper() or "layer" in f.message
+            for f in result.findings
+        )
 
 
 class TestCoreContribSeparationChecker:

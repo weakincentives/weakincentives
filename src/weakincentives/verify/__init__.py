@@ -25,6 +25,12 @@ Example usage::
         print(f"{result.checker}: {'PASS' if result.passed else 'FAIL'}")
 """
 
+from weakincentives.verify._registry import (
+    get_all_checkers,
+    get_checker,
+    get_checkers_by_category,
+)
+from weakincentives.verify._runner import run_checkers, run_checkers_async
 from weakincentives.verify._types import (
     CheckContext,
     Checker,
@@ -32,21 +38,16 @@ from weakincentives.verify._types import (
     Finding,
     Severity,
 )
-from weakincentives.verify._runner import run_checkers, run_checkers_async
-from weakincentives.verify._registry import get_all_checkers, get_checker, get_checkers_by_category
 
 __all__ = [
-    # Types
     "CheckContext",
-    "Checker",
     "CheckResult",
+    "Checker",
     "Finding",
     "Severity",
-    # Runner
-    "run_checkers",
-    "run_checkers_async",
-    # Registry
     "get_all_checkers",
     "get_checker",
     "get_checkers_by_category",
+    "run_checkers",
+    "run_checkers_async",
 ]

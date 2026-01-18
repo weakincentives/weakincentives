@@ -15,7 +15,7 @@
 from __future__ import annotations
 
 import os
-import subprocess
+import subprocess  # nosec B404 - subprocess use is intentional for verification tools
 import sys
 import time
 from dataclasses import dataclass
@@ -50,7 +50,7 @@ class SubprocessResult:
     @property
     def output(self) -> str:
         """Combined stdout and stderr."""
-        parts = []
+        parts: list[str] = []
         if self.stdout:
             parts.append(self.stdout)
         if self.stderr:
@@ -90,7 +90,7 @@ def run_tool(
     start_time = time.monotonic()
 
     try:
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 - cmd from trusted internal callers
             cmd,
             cwd=cwd,
             env=full_env,

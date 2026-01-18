@@ -13,27 +13,27 @@ infrastructure:
 
 1. **No shared patterns** - Each script re-implements path resolution, output
    formatting, subprocess execution, exit code handling, and error reporting
-2. **Unclear organization** - The split between `scripts/` and `build/` has no
+1. **Unclear organization** - The split between `scripts/` and `build/` has no
    principled basis (both contain validators invoked by Makefile)
-3. **Inconsistent UX** - Some scripts use emojis, others don't; some are quiet
+1. **Inconsistent UX** - Some scripts use emojis, others don't; some are quiet
    on success, others verbose; error formats vary
-4. **Duplicated AST analysis** - Three scripts parse Python ASTs independently
+1. **Duplicated AST analysis** - Three scripts parse Python ASTs independently
    (`validate_module_boundaries.py`, `check_core_imports.py`,
    `verify_doc_examples.py`)
-5. **Duplicated markdown processing** - Three scripts enumerate and parse
+1. **Duplicated markdown processing** - Three scripts enumerate and parse
    markdown files independently
-6. **Not testable** - Scripts lack unit tests despite enforcing 100% coverage
+1. **Not testable** - Scripts lack unit tests despite enforcing 100% coverage
    on production code
 
 ## Goals
 
 1. **Unified CLI** - Single `wink verify` entrypoint with subcommands
-2. **Shared infrastructure** - Common patterns for output, subprocess, paths
-3. **Production quality** - Same standards as `src/weakincentives/` (typed,
+1. **Shared infrastructure** - Common patterns for output, subprocess, paths
+1. **Production quality** - Same standards as `src/weakincentives/` (typed,
    tested, DbC-decorated)
-4. **Composable checkers** - Mix and match verification passes
-5. **Parallel execution** - Independent checks run concurrently
-6. **Clear categories** - Checks grouped by what they verify
+1. **Composable checkers** - Mix and match verification passes
+1. **Parallel execution** - Independent checks run concurrently
+1. **Clear categories** - Checks grouped by what they verify
 
 ## Architecture
 
@@ -209,9 +209,9 @@ class Output:
 **Principles:**
 
 1. **Quiet on success** - Default behavior shows nothing for passing checks
-2. **Verbose on failure** - Errors always shown with full context
-3. **No emojis** - Consistent with production code standards
-4. **Structured option** - `--json` for CI integration
+1. **Verbose on failure** - Errors always shown with full context
+1. **No emojis** - Consistent with production code standards
+1. **Structured option** - `--json` for CI integration
 
 ### Subprocess Execution (`_subprocess.py`)
 
@@ -276,7 +276,7 @@ def path_to_module(path: Path, src_dir: Path) -> str:
 
 Shared markdown processing:
 
-```python
+````python
 @dataclass(frozen=True, slots=True)
 class CodeBlock:
     """A fenced code block from markdown."""
@@ -307,7 +307,7 @@ def extract_code_blocks(
 def extract_links(file: Path) -> tuple[Link, ...]:
     """Extract all links from markdown."""
     ...
-```
+````
 
 ### Git Utilities (`_git.py`)
 
@@ -403,45 +403,45 @@ class RunConfig:
 ### Phase 1: Infrastructure
 
 1. Create `src/weakincentives/verify/` package
-2. Implement shared utilities (`_output.py`, `_subprocess.py`, etc.)
-3. Add tests for shared utilities (100% coverage)
+1. Implement shared utilities (`_output.py`, `_subprocess.py`, etc.)
+1. Add tests for shared utilities (100% coverage)
 
 ### Phase 2: Port Checkers
 
 Port checkers one at a time, maintaining backward compatibility:
 
 1. Port checker to new framework
-2. Add comprehensive tests
-3. Update Makefile target to use new implementation
-4. Remove old script
+1. Add comprehensive tests
+1. Update Makefile target to use new implementation
+1. Remove old script
 
 **Order:**
 
 1. Simple wrappers first: `bandit`, `deptry`, `pip-audit`, `mdformat`
-2. Markdown processors: `md_links`, `spec_references`
-3. AST analyzers: `core_imports`, `module_boundaries`
-4. Complex checkers: `doc_examples`, `type_coverage`, `pytest_runner`
+1. Markdown processors: `md_links`, `spec_references`
+1. AST analyzers: `core_imports`, `module_boundaries`
+1. Complex checkers: `doc_examples`, `type_coverage`, `pytest_runner`
 
 ### Phase 3: CLI Integration
 
 1. Add `wink verify` CLI command
-2. Deprecate direct script invocation
-3. Update Makefile to use `wink verify`
+1. Deprecate direct script invocation
+1. Update Makefile to use `wink verify`
 
 ### Phase 4: Cleanup
 
 1. Remove `scripts/` directory
-2. Remove `build/` directory (or repurpose for CI-only scripts)
-3. Update documentation
+1. Remove `build/` directory (or repurpose for CI-only scripts)
+1. Update documentation
 
 ## Testing Requirements
 
 The verification toolbox must meet the same standards as production code:
 
 1. **100% coverage** - All code paths tested
-2. **Property tests** - Hypothesis tests for parsers
-3. **Integration tests** - End-to-end verification of each checker
-4. **Mock external tools** - Tests don't require bandit/pyright installed
+1. **Property tests** - Hypothesis tests for parsers
+1. **Integration tests** - End-to-end verification of each checker
+1. **Mock external tools** - Tests don't require bandit/pyright installed
 
 ```python
 # Example test structure
@@ -488,11 +488,11 @@ skip_files = ["CHANGELOG.md"]
 The migration is complete when:
 
 1. All current checks pass via `wink verify`
-2. `scripts/` and `build/` directories are removed
-3. Verification code has 100% test coverage
-4. `make check` uses `wink verify` internally
-5. CI runs in same time or faster (parallel execution)
-6. All checkers have typed, documented APIs
+1. `scripts/` and `build/` directories are removed
+1. Verification code has 100% test coverage
+1. `make check` uses `wink verify` internally
+1. CI runs in same time or faster (parallel execution)
+1. All checkers have typed, documented APIs
 
 ## What This Spec Does NOT Include
 
@@ -532,8 +532,8 @@ Standard exit codes for CI:
 
 | Checker | Target | Current |
 |---------|--------|---------|
-| Architecture | <2s | ~1s |
-| Documentation | <5s | ~3s |
-| Security (bandit) | <10s | ~5s |
-| Type coverage | <15s | ~10s |
-| Full suite | <60s parallel | ~90s sequential |
+| Architecture | \<2s | ~1s |
+| Documentation | \<5s | ~3s |
+| Security (bandit) | \<10s | ~5s |
+| Type coverage | \<15s | ~10s |
+| Full suite | \<60s parallel | ~90s sequential |

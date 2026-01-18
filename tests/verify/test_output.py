@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import json
 from io import StringIO
-
-import pytest
+from pathlib import Path
 
 from weakincentives.verify._output import Output, OutputConfig
 from weakincentives.verify._types import CheckResult, Finding, Severity
@@ -88,7 +87,7 @@ class TestOutput:
         assert "test.checker" in out
         assert "Something went wrong" in out
 
-    def test_finding_with_location(self, tmp_path) -> None:
+    def test_finding_with_location(self, tmp_path: Path) -> None:
         """Finding output includes file location."""
         stderr = StringIO()
         output = Output(OutputConfig(color=False), stderr=stderr)

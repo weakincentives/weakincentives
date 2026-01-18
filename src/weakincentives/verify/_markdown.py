@@ -18,13 +18,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-
 # Pattern to match fenced code blocks
 # Captures: indent, language, meta (e.g., "nocheck"), and code content
 FENCE_PATTERN = re.compile(
-    r"^(?P<indent>[ \t]*)```(?P<lang>\w+)?(?P<meta>[^\n]*)\n"
-    r"(?P<code>.*?)"
-    r"\n(?P=indent)```[ \t]*$",
+    r"^(?P<indent>[ \t]*)```(?P<lang>\w+)?(?P<meta>[^\n]*)\n(?P<code>.*?)\n(?P=indent)```[ \t]*$",
     re.MULTILINE | re.DOTALL,
 )
 
@@ -75,11 +72,16 @@ class Link:
     is_local: bool
 
 
+_DEFAULT_SKIP_MARKERS: frozenset[str] = frozenset(
+    {"nocheck", "skip", "output", "result", "shell", "cli", "console"}
+)
+
+
 def extract_code_blocks(
     file: Path,
     *,
     languages: frozenset[str] | None = None,
-    skip_markers: frozenset[str] = frozenset({"nocheck", "skip", "output", "result", "shell", "cli", "console"}),
+    skip_markers: frozenset[str] | None = None,
 ) -> tuple[CodeBlock, ...]:
     """Extract fenced code blocks from a markdown file.
 
@@ -94,6 +96,9 @@ def extract_code_blocks(
     """
     content = file.read_text(encoding="utf-8")
     blocks: list[CodeBlock] = []
+    effective_skip_markers = (
+        skip_markers if skip_markers is not None else _DEFAULT_SKIP_MARKERS
+    )
 
     for match in FENCE_PATTERN.finditer(content):
         lang = match.group("lang") or ""
@@ -105,7 +110,7 @@ def extract_code_blocks(
             continue
 
         # Skip blocks with skip markers
-        if any(marker in meta for marker in skip_markers):
+        if any(marker in meta for marker in effective_skip_markers):
             continue
 
         # Calculate line numbers
@@ -197,9 +202,7 @@ def _is_local_link(target: str) -> bool:
     if target.startswith(("http://", "https://", "mailto:", "ftp://")):
         return False
     # Skip pure anchors
-    if target.startswith("#"):
-        return False
-    return True
+    return not target.startswith("#")
 
 
 def extract_file_path(target: str) -> str:

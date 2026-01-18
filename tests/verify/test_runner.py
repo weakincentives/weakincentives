@@ -17,10 +17,14 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-import pytest
-
 from weakincentives.verify._runner import run_checkers, run_checkers_async
-from weakincentives.verify._types import CheckContext, CheckResult, Finding, RunConfig, Severity
+from weakincentives.verify._types import (
+    CheckContext,
+    CheckResult,
+    Finding,
+    RunConfig,
+    Severity,
+)
 
 
 class FakeChecker:
@@ -181,10 +185,7 @@ class TestRunCheckersAsync:
     def test_run_async_multiple_checkers(self, tmp_path: Path) -> None:
         """Run multiple checkers asynchronously."""
         ctx = CheckContext.from_project_root(tmp_path)
-        checkers = [
-            FakeChecker(f"test{i}", passed=True)
-            for i in range(5)
-        ]
+        checkers = [FakeChecker(f"test{i}", passed=True) for i in range(5)]
 
         results = asyncio.run(run_checkers_async(checkers, ctx))
 

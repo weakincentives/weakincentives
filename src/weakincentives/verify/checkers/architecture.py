@@ -20,40 +20,47 @@ These checkers enforce architectural constraints:
 from __future__ import annotations
 
 import time
-from collections import defaultdict
-from pathlib import Path
 from typing import TYPE_CHECKING
 
-from weakincentives.verify._ast import extract_imports, get_top_level_package, path_to_module
+from weakincentives.verify._ast import (
+    extract_imports,
+    get_top_level_package,
+    path_to_module,
+)
 from weakincentives.verify._types import CheckContext, CheckResult, Finding, Severity
 
 if TYPE_CHECKING:
-    from weakincentives.verify._ast import ImportInfo
+    pass
 
 # Architecture layers (from low to high)
 LAYERS: dict[str, frozenset[str]] = {
-    "foundation": frozenset({"types", "errors", "dataclasses", "dbc", "deadlines", "budget"}),
-    "core": frozenset({
-        "runtime",
-        "prompt",
-        "resources",
-        "filesystem",
-        "serde",
-        "skills",
-        "formal",
-        "optimizers",
-        "debug",
-        "verify",
-    }),
+    "foundation": frozenset(
+        {"types", "errors", "dataclasses", "dbc", "deadlines", "budget"}
+    ),
+    "core": frozenset(
+        {
+            "runtime",
+            "prompt",
+            "resources",
+            "filesystem",
+            "serde",
+            "skills",
+            "formal",
+            "optimizers",
+            "debug",
+            "verify",
+        }
+    ),
     "adapters": frozenset({"adapters"}),
     "high_level": frozenset({"contrib", "evals", "cli"}),
 }
 
 # Map package to layer for quick lookup
-LAYER_MAP: dict[str, str] = {}
-for layer_name, packages in LAYERS.items():
-    for package in packages:
-        LAYER_MAP[package] = layer_name
+LAYER_MAP: dict[str, str] = {
+    package: layer_name
+    for layer_name, packages in LAYERS.items()
+    for package in packages
+}
 
 LAYER_ORDER = ("foundation", "core", "adapters", "high_level")
 
@@ -79,7 +86,7 @@ class LayerViolationsChecker:
     def description(self) -> str:
         return "Check that lower layers don't import from higher layers"
 
-    def check(self, ctx: CheckContext) -> CheckResult:
+    def check(self, ctx: CheckContext) -> CheckResult:  # noqa: C901
         start_time = time.monotonic()
         findings: list[Finding] = []
 
@@ -227,24 +234,22 @@ class CoreContribSeparationChecker:
             except SyntaxError:
                 continue  # Syntax errors handled by other checker
 
-            for imp in imports:
-                if "contrib" in imp.imported_from:
-                    findings.append(
-                        Finding(
-                            checker=f"{self.category}.{self.name}",
-                            severity=Severity.ERROR,
-                            message=(
-                                f"Core module imports from contrib: {imp.imported_from}"
-                            ),
-                            file=py_file,
-                            line=imp.lineno,
-                            suggestion=(
-                                "Core modules (weakincentives.*) must not import from "
-                                "contrib (weakincentives.contrib.*). Contrib builds on "
-                                "core, not vice versa."
-                            ),
-                        )
-                    )
+            findings.extend(
+                Finding(
+                    checker=f"{self.category}.{self.name}",
+                    severity=Severity.ERROR,
+                    message=f"Core module imports from contrib: {imp.imported_from}",
+                    file=py_file,
+                    line=imp.lineno,
+                    suggestion=(
+                        "Core modules (weakincentives.*) must not import from "
+                        "contrib (weakincentives.contrib.*). Contrib builds on "
+                        "core, not vice versa."
+                    ),
+                )
+                for imp in imports
+                if "contrib" in imp.imported_from
+            )
 
         duration_ms = int((time.monotonic() - start_time) * 1000)
         return CheckResult(

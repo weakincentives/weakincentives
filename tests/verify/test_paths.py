@@ -44,7 +44,7 @@ class TestFindProjectRoot:
         subdir = tmp_path / "some" / "deep" / "path"
         subdir.mkdir(parents=True)
 
-        with pytest.raises(FileNotFoundError, match="pyproject.toml"):
+        with pytest.raises(FileNotFoundError, match=r"pyproject\.toml"):
             find_project_root(subdir)
 
 

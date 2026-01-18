@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import json
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, TextIO
 
 from weakincentives.verify._types import CheckResult, Finding, Severity
@@ -65,6 +65,7 @@ class Output:
             stdout: Output stream for normal messages. Defaults to sys.stdout.
             stderr: Output stream for errors. Defaults to sys.stderr.
         """
+        super().__init__()
         self._config = config or OutputConfig()
         self._stdout = stdout or sys.stdout
         self._stderr = stderr or sys.stderr
@@ -75,7 +76,8 @@ class Output:
             return text
         return f"\033[{color_code}m{text}\033[0m"
 
-    def _severity_color(self, severity: Severity) -> str:
+    @staticmethod
+    def _severity_color(severity: Severity) -> str:
         """Get the ANSI color code for a severity level."""
         if severity == Severity.ERROR:
             return "31"  # Red
@@ -83,7 +85,7 @@ class Output:
             return "33"  # Yellow
         return "36"  # Cyan for INFO
 
-    def checker_start(self, checker_name: str) -> None:
+    def checker_start(self, _checker_name: str) -> None:
         """Report that a checker is starting."""
         if self._config.quiet or self._config.json_output:
             return
@@ -96,7 +98,9 @@ class Output:
         if self._config.quiet:
             return
         checkmark = self._colorize("PASS", "32")
-        print(f"{checkmark} {result.checker} ({result.duration_ms}ms)", file=self._stdout)
+        print(
+            f"{checkmark} {result.checker} ({result.duration_ms}ms)", file=self._stdout
+        )
 
     def checker_failure(self, result: CheckResult) -> None:
         """Report checker failure."""
@@ -159,12 +163,12 @@ class Output:
         else:
             status = self._colorize(f"{failed} check(s) failed", "31")
 
-        print(
-            f"{status}: {passed}/{total} passed, "
-            f"{total_errors} error(s), {total_warnings} warning(s) "
+        summary_parts = [
+            f"{status}: {passed}/{total} passed,",
+            f"{total_errors} error(s), {total_warnings} warning(s)",
             f"in {total_duration_ms}ms",
-            file=self._stdout,
-        )
+        ]
+        print(" ".join(summary_parts), file=self._stdout)
 
     def _json_summary(self, results: Sequence[CheckResult]) -> None:
         """Output results as JSON."""

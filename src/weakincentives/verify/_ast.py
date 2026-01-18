@@ -18,6 +18,9 @@ import ast
 from dataclasses import dataclass
 from pathlib import Path
 
+# Minimum parts needed for a valid subpackage (e.g., "package.subpackage")
+_MIN_SUBPACKAGE_PARTS = 2
+
 
 @dataclass(frozen=True, slots=True)
 class ImportInfo:
@@ -77,7 +80,9 @@ def extract_imports(source: str, module_name: str) -> tuple[ImportInfo, ...]:
             if node.level > 0:
                 base_parts = module_name.split(".")
                 # Go up node.level levels
-                base_parts = base_parts[: -node.level] if node.level <= len(base_parts) else []
+                base_parts = (
+                    base_parts[: -node.level] if node.level <= len(base_parts) else []
+                )
                 if node.module:
                     base_parts.append(node.module)
                 imported_from = ".".join(base_parts)
@@ -130,7 +135,9 @@ def path_to_module(path: Path, src_dir: Path) -> str:
     return ".".join(parts)
 
 
-def module_to_path(module: str, src_dir: Path, package_name: str = "weakincentives") -> Path | None:
+def module_to_path(
+    module: str, src_dir: Path, package_name: str = "weakincentives"
+) -> Path | None:
     """Convert a module name to a file path.
 
     Tries both __init__.py and module.py forms.
@@ -171,7 +178,9 @@ def module_to_path(module: str, src_dir: Path, package_name: str = "weakincentiv
     return None
 
 
-def get_top_level_package(module: str, root_package: str = "weakincentives") -> str | None:
+def get_top_level_package(
+    module: str, root_package: str = "weakincentives"
+) -> str | None:
     """Get the top-level package name within a root package.
 
     For "weakincentives.contrib.tools", returns "contrib".
@@ -189,7 +198,7 @@ def get_top_level_package(module: str, root_package: str = "weakincentives") -> 
     if not parts or parts[0] != root_package:
         return None
 
-    if len(parts) < 2:
+    if len(parts) < _MIN_SUBPACKAGE_PARTS:
         return None
 
     return parts[1]

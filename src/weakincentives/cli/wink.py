@@ -428,44 +428,41 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _handle_verify(args: argparse.Namespace) -> int:
+def _handle_verify(args: argparse.Namespace) -> int:  # noqa: C901
     """Handle the verify subcommand by delegating to the verify CLI."""
-    # Build argv for the verify CLI
     verify_argv: list[str] = []
 
+    # Mapping of arg attributes to CLI flags
+    flag_mappings: list[tuple[str, str]] = [
+        ("verify_quiet", "-q"),
+        ("verify_json", "--json"),
+        ("verify_no_color", "--no-color"),
+        ("verify_list", "--list"),
+        ("verify_fix", "--fix"),
+        ("verify_sync", "--sync"),
+    ]
+
+    # Positional args (checkers)
     if hasattr(args, "verify_checkers") and args.verify_checkers:
         verify_argv.extend(args.verify_checkers)
 
+    # Category flags with values
     if hasattr(args, "verify_categories") and args.verify_categories:
         for cat in args.verify_categories:
             verify_argv.extend(["-c", cat])
 
-    if hasattr(args, "verify_quiet") and args.verify_quiet:
-        verify_argv.append("-q")
-
-    if hasattr(args, "verify_json") and args.verify_json:
-        verify_argv.append("--json")
-
-    if hasattr(args, "verify_no_color") and args.verify_no_color:
-        verify_argv.append("--no-color")
-
+    # Numeric options with values
     if hasattr(args, "verify_parallel") and args.verify_parallel:
         verify_argv.extend(["-j", str(args.verify_parallel)])
-
     if hasattr(args, "verify_maxfail") and args.verify_maxfail:
         verify_argv.extend(["--maxfail", str(args.verify_maxfail)])
-
-    if hasattr(args, "verify_list") and args.verify_list:
-        verify_argv.append("--list")
-
     if hasattr(args, "verify_root") and args.verify_root:
         verify_argv.extend(["--root", str(args.verify_root)])
 
-    if hasattr(args, "verify_fix") and args.verify_fix:
-        verify_argv.append("--fix")
-
-    if hasattr(args, "verify_sync") and args.verify_sync:
-        verify_argv.append("--sync")
+    # Boolean flags
+    for attr, flag in flag_mappings:
+        if getattr(args, attr, False):
+            verify_argv.append(flag)
 
     return verify_cli.main(verify_argv)
 

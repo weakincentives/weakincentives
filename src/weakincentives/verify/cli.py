@@ -43,7 +43,7 @@ from weakincentives.verify._output import Output, OutputConfig
 from weakincentives.verify._paths import find_project_root
 from weakincentives.verify._registry import get_all_checkers, get_categories
 from weakincentives.verify._runner import run_checkers, run_checkers_async
-from weakincentives.verify._types import CheckContext, RunConfig
+from weakincentives.verify._types import CheckContext, Checker, RunConfig
 
 
 def _create_parser() -> argparse.ArgumentParser:
@@ -69,14 +69,14 @@ Examples:
 """,
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "checkers",
         nargs="*",
         metavar="CHECKER",
         help="Specific checker names to run (default: all)",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "-c",
         "--category",
         action="append",
@@ -85,27 +85,27 @@ Examples:
         help="Run all checkers in category (can be repeated)",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "-q",
         "--quiet",
         action="store_true",
         help="Suppress success output",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--json",
         action="store_true",
         dest="json_output",
         help="Output results as JSON",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--no-color",
         action="store_true",
         help="Disable colored output",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "-j",
         "--parallel",
         type=int,
@@ -113,34 +113,34 @@ Examples:
         help="Max parallel checkers (default: CPU count)",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--maxfail",
         type=int,
         metavar="N",
         help="Stop after N failures",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--list",
         action="store_true",
         dest="list_checkers",
         help="List available checkers and exit",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--root",
         type=Path,
         metavar="PATH",
         help="Project root directory (default: auto-detect)",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--fix",
         action="store_true",
         help="Apply auto-fixes where supported",
     )
 
-    parser.add_argument(
+    _ = parser.add_argument(
         "--sync",
         action="store_true",
         help="Run checkers synchronously (no parallelism)",
@@ -168,6 +168,50 @@ def _list_checkers(output: Output) -> int:
     return 0
 
 
+def _resolve_project_root(args: argparse.Namespace, output: Output) -> Path | None:
+    """Resolve the project root directory.
+
+    Returns None if the root cannot be found or is invalid.
+    """
+    try:
+        if args.root:
+            project_root = args.root.resolve()
+            if not (project_root / "pyproject.toml").exists():
+                output.error(f"No pyproject.toml found at {project_root}")
+                return None
+            return project_root
+        return find_project_root()
+    except FileNotFoundError as e:
+        output.error(str(e))
+        return None
+
+
+def _run_and_report(
+    args: argparse.Namespace,
+    checkers_to_run: list[Checker],
+    ctx: CheckContext,
+    run_config: RunConfig,
+    output: Output,
+) -> int:
+    """Run checkers and report results."""
+    if args.sync or args.parallel == 1:
+        results = run_checkers(checkers_to_run, ctx, config=run_config)
+    else:
+        results = asyncio.run(
+            run_checkers_async(checkers_to_run, ctx, config=run_config)
+        )
+
+    for result in results:
+        if result.passed:
+            output.checker_success(result)
+        else:
+            output.checker_failure(result)
+
+    output.summary(results)
+    failed = sum(1 for r in results if not r.passed)
+    return 1 if failed > 0 else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     """Main entry point for the CLI.
 
@@ -180,7 +224,6 @@ def main(argv: list[str] | None = None) -> int:
     parser = _create_parser()
     args = parser.parse_args(argv)
 
-    # Configure output
     output_config = OutputConfig(
         quiet=args.quiet,
         color=not args.no_color if args.no_color else None,
@@ -188,31 +231,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     output = Output(output_config)
 
-    # Handle --list
     if args.list_checkers:
         return _list_checkers(output)
 
-    # Find project root
-    try:
-        if args.root:
-            project_root = args.root.resolve()
-            if not (project_root / "pyproject.toml").exists():
-                output.error(f"No pyproject.toml found at {project_root}")
-                return 2
-        else:
-            project_root = find_project_root()
-    except FileNotFoundError as e:
-        output.error(str(e))
+    project_root = _resolve_project_root(args, output)
+    if project_root is None:
         return 2
 
-    # Create check context
-    ctx = CheckContext.from_project_root(
-        project_root,
-        quiet=args.quiet,
-        fix=args.fix,
-    )
-
-    # Create run config
+    ctx = CheckContext.from_project_root(project_root, quiet=args.quiet, fix=args.fix)
     run_config = RunConfig(
         max_failures=args.maxfail,
         max_parallel=args.parallel,
@@ -220,10 +246,7 @@ def main(argv: list[str] | None = None) -> int:
         checkers=frozenset(args.checkers) if args.checkers else None,
     )
 
-    # Get checkers
     all_checkers = get_all_checkers()
-
-    # Filter checkers based on config
     checkers_to_run = [c for c in all_checkers if run_config.should_run(c)]
 
     if not checkers_to_run:
@@ -233,26 +256,7 @@ def main(argv: list[str] | None = None) -> int:
             output.info("Use --list to see available checkers")
         return 2
 
-    # Run checkers
-    if args.sync or args.parallel == 1:
-        results = run_checkers(checkers_to_run, ctx, config=run_config)
-    else:
-        results = asyncio.run(
-            run_checkers_async(checkers_to_run, ctx, config=run_config)
-        )
-
-    # Report results
-    for result in results:
-        if result.passed:
-            output.checker_success(result)
-        else:
-            output.checker_failure(result)
-
-    output.summary(results)
-
-    # Return appropriate exit code
-    failed = sum(1 for r in results if not r.passed)
-    return 1 if failed > 0 else 0
+    return _run_and_report(args, checkers_to_run, ctx, run_config, output)
 
 
 if __name__ == "__main__":

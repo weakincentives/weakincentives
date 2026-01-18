@@ -14,13 +14,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    pass
 
 
 class Severity(Enum):
@@ -195,6 +195,4 @@ class RunConfig:
         """Check if a checker should be run given this config."""
         if self.categories is not None and checker.category not in self.categories:
             return False
-        if self.checkers is not None and checker.name not in self.checkers:
-            return False
-        return True
+        return not (self.checkers is not None and checker.name not in self.checkers)

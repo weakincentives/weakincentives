@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     from weakincentives.verify._types import Checker
 
 
-def _load_all_checkers() -> tuple["Checker", ...]:
+def _load_all_checkers() -> tuple[Checker, ...]:
     """Lazily load all checker instances."""
     # Import here to avoid circular imports
     from weakincentives.verify.checkers.architecture import (
@@ -63,23 +63,23 @@ def _load_all_checkers() -> tuple["Checker", ...]:
     )
 
 
-# Cached checker instances
-_CHECKERS: tuple["Checker", ...] | None = None
+# Cached checker instances (mutable cache, hence lowercase)
+_cached_checkers: tuple[Checker, ...] | None = None
 
 
-def get_all_checkers() -> tuple["Checker", ...]:
+def get_all_checkers() -> tuple[Checker, ...]:
     """Get all registered checkers.
 
     Returns:
         A tuple of all checker instances.
     """
-    global _CHECKERS
-    if _CHECKERS is None:
-        _CHECKERS = _load_all_checkers()
-    return _CHECKERS
+    global _cached_checkers
+    if _cached_checkers is None:
+        _cached_checkers = _load_all_checkers()
+    return _cached_checkers
 
 
-def get_checker(name: str) -> "Checker | None":
+def get_checker(name: str) -> Checker | None:
     """Get a checker by name.
 
     Args:
@@ -94,7 +94,7 @@ def get_checker(name: str) -> "Checker | None":
     return None
 
 
-def get_checkers_by_category(category: str) -> tuple["Checker", ...]:
+def get_checkers_by_category(category: str) -> tuple[Checker, ...]:
     """Get all checkers in a category.
 
     Args:

@@ -19,7 +19,7 @@ import os
 import time
 from typing import TYPE_CHECKING
 
-from weakincentives.verify._types import CheckContext, CheckResult, Checker, RunConfig
+from weakincentives.verify._types import CheckContext, Checker, CheckResult, RunConfig
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -110,7 +110,10 @@ async def run_checkers_async(
 
             if not result.passed:
                 failure_count += 1
-                if config.max_failures is not None and failure_count >= config.max_failures:
+                if (
+                    config.max_failures is not None
+                    and failure_count >= config.max_failures
+                ):
                     stop_flag.set()
 
             return result
