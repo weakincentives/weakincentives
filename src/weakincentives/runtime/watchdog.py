@@ -45,6 +45,8 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 
+from weakincentives.threads import checkpoint
+
 logger: logging.Logger = logging.getLogger(__name__)
 
 
@@ -88,16 +90,20 @@ class Heartbeat:
         Exceptions in callbacks are logged but do not prevent other
         callbacks from running.
         """
+        checkpoint("heartbeat.beat.start")
         with self._lock:
             self._last_beat = time.monotonic()
             callbacks = list(self._callbacks)  # Snapshot under lock
+        checkpoint("heartbeat.beat.snapshot")
 
         # Invoke outside lock to avoid deadlock
         for callback in callbacks:
+            checkpoint("heartbeat.beat.invoke")
             try:
                 callback()
             except Exception:
                 logger.exception("Heartbeat callback failed")
+        checkpoint("heartbeat.beat.end")
 
     def elapsed(self) -> float:
         """Seconds since last heartbeat."""
@@ -114,8 +120,10 @@ class Heartbeat:
         Args:
             callback: Callable with no arguments to invoke on beat.
         """
+        checkpoint("heartbeat.add_callback.start")
         with self._lock:
             self._callbacks.append(callback)
+        checkpoint("heartbeat.add_callback.end")
 
     def remove_callback(self, callback: Callable[[], None]) -> None:
         """Remove a previously added callback.
@@ -126,8 +134,10 @@ class Heartbeat:
         Raises:
             ValueError: If callback was not registered.
         """
+        checkpoint("heartbeat.remove_callback.start")
         with self._lock:
             self._callbacks.remove(callback)
+        checkpoint("heartbeat.remove_callback.end")
 
 
 class Watchdog:

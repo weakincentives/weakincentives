@@ -53,6 +53,8 @@ from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import TYPE_CHECKING, Protocol, Self
 
+from weakincentives.threads import checkpoint
+
 from .watchdog import HealthServer, Heartbeat, Watchdog
 
 if TYPE_CHECKING:
@@ -211,10 +213,13 @@ class ShutdownCoordinator:
         Args:
             callback: Zero-argument callable (typically loop.shutdown).
         """
+        checkpoint("shutdown_coordinator.register.start")
         with self._callbacks_lock:
             self._callbacks.append(callback)
             if self._triggered.is_set():
+                checkpoint("shutdown_coordinator.register.already_triggered")
                 _ = callback()
+        checkpoint("shutdown_coordinator.register.end")
 
     def unregister(self, callback: Callable[[], object]) -> None:
         """Remove a callback from the shutdown list.
@@ -222,16 +227,22 @@ class ShutdownCoordinator:
         Args:
             callback: Previously registered callback.
         """
+        checkpoint("shutdown_coordinator.unregister.start")
         with self._callbacks_lock, contextlib.suppress(ValueError):
             self._callbacks.remove(callback)
+        checkpoint("shutdown_coordinator.unregister.end")
 
     def trigger(self) -> None:
         """Manually trigger shutdown (for testing or programmatic control)."""
+        checkpoint("shutdown_coordinator.trigger.start")
         self._triggered.set()
         with self._callbacks_lock:
             callbacks = list(self._callbacks)
+        checkpoint("shutdown_coordinator.trigger.snapshot")
         for callback in callbacks:
+            checkpoint("shutdown_coordinator.trigger.invoke")
             _ = callback()
+        checkpoint("shutdown_coordinator.trigger.end")
 
     @property
     def triggered(self) -> bool:

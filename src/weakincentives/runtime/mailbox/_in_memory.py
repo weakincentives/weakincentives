@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from weakincentives.threads import checkpoint
+
 from ..logging import StructuredLogger, get_logger
 from ._types import (
     Mailbox,
@@ -174,6 +176,7 @@ class InMemoryMailbox[T, R]:
 
     def _reap_expired(self) -> None:
         """Move expired messages from invisible back to pending."""
+        checkpoint("mailbox.reap.start")
         now = time.monotonic()
         with self._lock:
             expired_handles = [
@@ -181,10 +184,14 @@ class InMemoryMailbox[T, R]:
                 for handle, msg in self._invisible.items()
                 if msg.expires_at <= now
             ]
+            checkpoint("mailbox.reap.found_expired")
             for handle in expired_handles:
                 msg = self._invisible.pop(handle)
+                checkpoint("mailbox.reap.popped")
                 self._pending.append(msg)
+                checkpoint("mailbox.reap.appended")
                 self._condition.notify_all()
+        checkpoint("mailbox.reap.end")
 
     def send(self, body: T, *, reply_to: Mailbox[R, None] | None = None) -> str:
         """Enqueue a message.
@@ -254,6 +261,7 @@ class InMemoryMailbox[T, R]:
         Raises:
             InvalidParameterError: visibility_timeout or wait_time_seconds out of range.
         """
+        checkpoint("mailbox.receive.start")
         validate_visibility_timeout(visibility_timeout)
         validate_wait_time(wait_time_seconds)
         max_messages = min(max(1, max_messages), 10)
@@ -268,8 +276,10 @@ class InMemoryMailbox[T, R]:
                     break
 
                 # Try to get a message
+                checkpoint("mailbox.receive.check_pending")
                 if self._pending:
                     in_flight = self._pending.popleft()
+                    checkpoint("mailbox.receive.popped")
 
                     # Generate new receipt handle and set expiry
                     receipt_handle = str(uuid4())
@@ -282,6 +292,7 @@ class InMemoryMailbox[T, R]:
 
                     # Move to invisible
                     self._invisible[receipt_handle] = in_flight
+                    checkpoint("mailbox.receive.moved_to_invisible")
 
                     # Create message with bound callbacks
                     message = Message[T, R](
@@ -298,6 +309,7 @@ class InMemoryMailbox[T, R]:
                     messages.append(message)
                 else:
                     # No messages available
+                    checkpoint("mailbox.receive.empty")
                     if wait_time_seconds <= 0:
                         break
 
@@ -308,6 +320,7 @@ class InMemoryMailbox[T, R]:
                     # Wait for messages, close signal, or timeout
                     _ = self._condition.wait(timeout=remaining)
 
+        checkpoint("mailbox.receive.end")
         if messages:
             logger.debug(
                 "mailbox.receive",
@@ -322,14 +335,18 @@ class InMemoryMailbox[T, R]:
 
     def _acknowledge(self, receipt_handle: str) -> None:
         """Delete message from queue."""
+        checkpoint("mailbox.acknowledge.start")
         with self._lock:
             if receipt_handle not in self._invisible:
+                checkpoint("mailbox.acknowledge.expired")
                 raise ReceiptHandleExpiredError(
                     f"Receipt handle '{receipt_handle}' not found or expired"
                 )
             msg = self._invisible.pop(receipt_handle)
+            checkpoint("mailbox.acknowledge.popped")
             # Clean up delivery count tracking
             _ = self._delivery_counts.pop(msg.id, None)
+        checkpoint("mailbox.acknowledge.end")
         logger.debug(
             "mailbox.acknowledge",
             event="mailbox.acknowledge",

@@ -12,613 +12,390 @@
 
 """Deterministic thread tests for concurrent library components.
 
-These tests use the weakincentives.threads framework to test race conditions
-in multi-threaded code with controlled interleaving.
+These tests verify thread safety properties of production components.
+The checkpoints in production code serve as documentation of yield points
+and can be used for controlled testing of lock-free code paths.
+
+For code with OS-level locks, we use regular concurrent testing since
+the deterministic scheduler cannot control OS lock acquisition order.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass, field
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from typing import Any
 
 import pytest
 
-from weakincentives.threads import (
-    checkpoint,
-    run_all_schedules,
-    run_with_schedule,
-)
+from weakincentives.runtime.lease_extender import LeaseExtender, LeaseExtenderConfig
+from weakincentives.runtime.lifecycle import ShutdownCoordinator
+from weakincentives.runtime.watchdog import Heartbeat
 
 # =============================================================================
-# Test Fixtures - Simplified versions of production components
+# Mock Message for LeaseExtender tests
 # =============================================================================
 
 
 @dataclass
 class MockMessage:
-    """Mock message for testing lease extension."""
+    """Mock message that tracks extend_visibility calls."""
 
     id: str = "msg-1"
-    extended: bool = False
+    body: str = "test"
+    receipt_handle: str = "handle-1"
+    delivery_count: int = 1
+    enqueued_at: datetime | None = None
+    reply_to: Any = None
     extend_count: int = 0
+    _lock: threading.Lock | None = None
+
+    def __post_init__(self) -> None:
+        if self.enqueued_at is None:
+            self.enqueued_at = datetime.now(UTC)
+        if self._lock is None:
+            self._lock = threading.Lock()
 
     def extend_visibility(self, timeout: int) -> None:
-        checkpoint("extend_visibility")
-        self.extended = True
-        self.extend_count += 1
+        """Track extension calls (thread-safe)."""
+        assert self._lock is not None
+        with self._lock:
+            self.extend_count += 1
 
+    def acknowledge(self) -> None:
+        """No-op for mock."""
 
-@dataclass
-class SimpleHeartbeat:
-    """Simplified heartbeat for testing callback races."""
-
-    _callbacks: list[Callable[[], None]] = field(default_factory=list)
-
-    def beat(self) -> None:
-        checkpoint("beat_start")
-        callbacks = list(self._callbacks)
-        checkpoint("beat_snapshot")
-        for cb in callbacks:
-            cb()
-        checkpoint("beat_end")
-
-    def add_callback(self, cb: Callable[[], None]) -> None:
-        checkpoint("add_callback")
-        self._callbacks.append(cb)
-
-    def remove_callback(self, cb: Callable[[], None]) -> None:
-        checkpoint("remove_callback")
-        self._callbacks.remove(cb)
-
-
-@dataclass
-class SimpleLeaseExtender:
-    """Simplified lease extender for testing attach/detach races."""
-
-    _msg: MockMessage | None = None
-    _heartbeat: SimpleHeartbeat | None = None
-    _attached: bool = False
-
-    def attach(self, msg: MockMessage, heartbeat: SimpleHeartbeat) -> None:
-        checkpoint("attach_start")
-        self._msg = msg
-        self._heartbeat = heartbeat
-        self._attached = True
-        checkpoint("attach_registered")
-        heartbeat.add_callback(self._on_beat)
-        checkpoint("attach_end")
-
-    def detach(self) -> None:
-        checkpoint("detach_start")
-        heartbeat = self._heartbeat
-        self._msg = None
-        self._heartbeat = None
-        self._attached = False
-        checkpoint("detach_cleared")
-        if heartbeat:
-            heartbeat.remove_callback(self._on_beat)
-        checkpoint("detach_end")
-
-    def _on_beat(self) -> None:
-        checkpoint("on_beat_start")
-        if self._msg is None:
-            checkpoint("on_beat_no_msg")
-            return
-        msg = self._msg
-        checkpoint("on_beat_got_msg")
-        msg.extend_visibility(300)
-        checkpoint("on_beat_end")
+    def nack(self, visibility_timeout: int = 0) -> None:
+        """No-op for mock."""
 
 
 # =============================================================================
-# Heartbeat Callback Tests
+# Heartbeat Tests - Real Component
 # =============================================================================
 
 
-class TestHeartbeatCallbackRaces:
-    """Test races in heartbeat callback management."""
+class TestHeartbeatConcurrency:
+    """Test thread safety of real Heartbeat component."""
 
-    def test_add_callback_during_beat_not_invoked(self) -> None:
-        """Callback added during beat iteration should not be invoked in that beat.
+    def test_concurrent_beats_no_crash(self) -> None:
+        """Multiple concurrent beat() calls don't crash."""
+        heartbeat = Heartbeat()
+        call_count = 0
+        count_lock = threading.Lock()
 
-        This tests the snapshot pattern: beat() takes a snapshot of callbacks
-        before iterating, so a callback added mid-iteration won't be called.
+        def callback() -> None:
+            nonlocal call_count
+            with count_lock:
+                call_count += 1
+
+        heartbeat.add_callback(callback)
+
+        def beat_many_times() -> None:
+            for _ in range(100):
+                heartbeat.beat()
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(beat_many_times) for _ in range(4)]
+            for f in futures:
+                f.result()
+
+        # All beats should have invoked the callback
+        assert call_count == 400
+
+    def test_concurrent_add_and_beat_no_crash(self) -> None:
+        """Concurrent add_callback and beat don't crash."""
+        heartbeat = Heartbeat()
+        invocations: list[int] = []
+        inv_lock = threading.Lock()
+
+        def beater() -> None:
+            for _ in range(50):
+                heartbeat.beat()
+
+        def adder() -> None:
+            for i in range(50):
+
+                def cb(n: int = i) -> None:
+                    with inv_lock:
+                        invocations.append(n)
+
+                heartbeat.add_callback(cb)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            f1 = executor.submit(beater)
+            f2 = executor.submit(adder)
+            f1.result()
+            f2.result()
+
+        # No assertion on count - just verifying no crash/deadlock
+
+    def test_snapshot_pattern_prevents_deadlock_on_self_modify(self) -> None:
+        """Callback that modifies callback list doesn't deadlock.
+
+        This verifies the snapshot pattern: beat() copies callbacks under lock,
+        then invokes outside lock, so callbacks can safely modify the list.
         """
-        heartbeat = SimpleHeartbeat()
+        heartbeat = Heartbeat()
         invocations: list[str] = []
+        removed = False
 
-        def callback_a() -> None:
-            checkpoint("callback_a")
-            invocations.append("a")
+        def self_removing_callback() -> None:
+            nonlocal removed
+            invocations.append("called")
+            if not removed:
+                removed = True
+                # This would deadlock if beat() held lock during callback
+                heartbeat.remove_callback(self_removing_callback)
 
-        def callback_b() -> None:
-            checkpoint("callback_b")
-            invocations.append("b")
+        heartbeat.add_callback(self_removing_callback)
 
-        heartbeat.add_callback(callback_a)
+        # First beat: runs callback, callback removes itself
+        heartbeat.beat()
+        assert invocations == ["called"]
 
-        def beat_thread() -> None:
-            heartbeat.beat()
-
-        def add_thread() -> None:
-            checkpoint("add_before")
-            heartbeat.add_callback(callback_b)
-            checkpoint("add_after")
-
-        # Schedule: beat takes snapshot, then add happens, then callbacks execute
-        result = run_with_schedule(
-            {"beat": beat_thread, "add": add_thread},
-            schedule=["beat", "beat", "add", "beat"],  # snapshot, then add
-        )
-
-        assert not result.deadlocked
-        # callback_b was added after snapshot, so only 'a' was invoked
-        assert invocations == ["a"]
-
-    def test_remove_callback_during_beat_still_invoked(self) -> None:
-        """Callback removed during beat iteration is still invoked (snapshot).
-
-        If beat() takes a snapshot and then the callback is removed,
-        the callback still runs because it was in the snapshot.
-        """
-        heartbeat = SimpleHeartbeat()
-        invocations: list[str] = []
-
-        def callback_a() -> None:
-            checkpoint("callback_a")
-            invocations.append("a")
-
-        heartbeat.add_callback(callback_a)
-
-        def beat_thread() -> None:
-            heartbeat.beat()
-
-        def remove_thread() -> None:
-            checkpoint("remove_before")
-            heartbeat.remove_callback(callback_a)
-            checkpoint("remove_after")
-
-        # Schedule: beat takes snapshot, remove happens, callback still executes
-        result = run_with_schedule(
-            {"beat": beat_thread, "remove": remove_thread},
-            schedule=["beat", "beat", "remove", "beat"],  # snapshot, remove, then exec
-        )
-
-        assert not result.deadlocked
-        # callback_a was in snapshot, so it was invoked despite being removed
-        assert invocations == ["a"]
-
-    def test_all_interleavings_of_add_and_beat(self) -> None:
-        """Exhaustively test all interleavings of add and beat."""
-        for result in run_all_schedules(
-            {
-                "beat": lambda: SimpleHeartbeat().beat(),
-                "add": lambda: None,  # Just checkpoints
-            }
-        ):
-            assert not result.deadlocked, f"Deadlock at {result.schedule}"
+        # Second beat: callback was removed
+        heartbeat.beat()
+        assert invocations == ["called"]  # No additional call
 
 
 # =============================================================================
-# LeaseExtender Tests
+# LeaseExtender Tests - Real Component
 # =============================================================================
 
 
-class TestLeaseExtenderRaces:
-    """Test races in lease extender attach/detach/beat interactions."""
+class TestLeaseExtenderConcurrency:
+    """Test thread safety of real LeaseExtender component."""
 
-    def test_beat_after_detach_does_not_extend(self) -> None:
-        """Beat callback invoked after detach should not extend message.
-
-        This is a critical safety property: once detached, no more extensions.
-        """
+    def test_attach_beat_detach_sequence(self) -> None:
+        """Basic attach-beat-detach sequence works correctly."""
         msg = MockMessage()
-        heartbeat = SimpleHeartbeat()
-        extender = SimpleLeaseExtender()
+        heartbeat = Heartbeat()
+        extender = LeaseExtender(config=LeaseExtenderConfig(interval=0.0))
 
-        def attach_detach_thread() -> None:
-            extender.attach(msg, heartbeat)
-            checkpoint("between_attach_detach")
-            extender.detach()
+        # Attach
+        extender._attach(msg, heartbeat)
 
-        def beat_thread() -> None:
-            checkpoint("beat_before")
-            heartbeat.beat()
-            checkpoint("beat_after")
-
-        # Schedule: attach, then beat starts but callback sees detached state
-        # This test may deadlock due to remove_callback ValueError
-        # That's expected - it shows the race condition exists
-        _ = run_with_schedule(
-            {"lifecycle": attach_detach_thread, "beat": beat_thread},
-            schedule=[
-                "lifecycle",  # attach_start
-                "lifecycle",  # attach_registered
-                "lifecycle",  # add_callback
-                "lifecycle",  # attach_end
-                "lifecycle",  # between_attach_detach
-                "lifecycle",  # detach_start
-                "lifecycle",  # detach_cleared
-                "beat",  # beat_before
-                "beat",  # beat_start
-                "beat",  # beat_snapshot (captures callback)
-                "lifecycle",  # remove_callback (fails - callback already snapshotted)
-            ],
-        )
-
-    def test_extension_happens_only_when_attached(self) -> None:
-        """Message extension only happens when extender is attached."""
-        msg = MockMessage()
-        heartbeat = SimpleHeartbeat()
-        extender = SimpleLeaseExtender()
-
-        # First attach and beat
-        extender.attach(msg, heartbeat)
-
-        def beat_while_attached() -> None:
-            heartbeat.beat()
-
-        result = run_with_schedule(
-            {"beat": beat_while_attached},
-            schedule=["beat"] * 6,  # All beat checkpoints
-        )
-
-        assert not result.deadlocked
+        # Beat triggers extension
+        heartbeat.beat()
         assert msg.extend_count == 1
 
-    def test_attach_detach_attach_sequence(self) -> None:
-        """Test attach-detach-attach sequence maintains consistency."""
-        msg1 = MockMessage(id="msg-1")
-        msg2 = MockMessage(id="msg-2")
-        heartbeat = SimpleHeartbeat()
-        extender = SimpleLeaseExtender()
+        # Detach
+        extender._detach()
 
-        def lifecycle() -> None:
-            extender.attach(msg1, heartbeat)
-            extender.detach()
-            checkpoint("between_attachments")
-            extender.attach(msg2, heartbeat)
+        # Beat after detach should NOT extend
+        heartbeat.beat()
+        assert msg.extend_count == 1
 
-        def beat() -> None:
-            heartbeat.beat()
+    def test_concurrent_beats_with_attached_extender(self) -> None:
+        """Concurrent beats with attached extender don't crash."""
+        msg = MockMessage()
+        heartbeat = Heartbeat()
+        # interval=0 means every beat can extend
+        extender = LeaseExtender(config=LeaseExtenderConfig(interval=0.0))
 
-        # Lifecycle has:
-        # attach: attach_start, attach_registered, add_callback, attach_end (4)
-        # detach: detach_start, detach_cleared, remove_callback, detach_end (4)
-        # between_attachments (1)
-        # attach: attach_start, attach_registered, add_callback, attach_end (4)
-        # Total: 13 checkpoints
-        #
-        # Beat has:
-        # beat_start, beat_snapshot, on_beat_start, on_beat_got_msg,
-        # extend_visibility, on_beat_end, beat_end (7)
-        result = run_with_schedule(
-            {"lifecycle": lifecycle, "beat": beat},
-            schedule=["lifecycle"] * 13 + ["beat"] * 7,
-        )
+        extender._attach(msg, heartbeat)
 
-        assert not result.deadlocked
-        # Only msg2 should be extended (msg1 was detached)
-        assert msg1.extend_count == 0
-        assert msg2.extend_count == 1
+        def beat_many() -> None:
+            for _ in range(100):
+                heartbeat.beat()
 
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(beat_many) for _ in range(4)]
+            for f in futures:
+                f.result()
 
-# =============================================================================
-# Shutdown Coordinator Tests
-# =============================================================================
+        extender._detach()
 
+        # All beats should extend (no rate limiting with interval=0)
+        assert msg.extend_count == 400
 
-@dataclass
-class SimpleShutdownCoordinator:
-    """Simplified shutdown coordinator for testing registration races."""
+    def test_rate_limiting_prevents_rapid_extensions(self) -> None:
+        """Rate limiting prevents multiple extensions within interval.
 
-    _triggered: bool = False
-    _callbacks: list[Callable[[], None]] = field(default_factory=list)
-
-    def register(self, callback: Callable[[], None]) -> None:
-        checkpoint("register_start")
-        self._callbacks.append(callback)
-        checkpoint("register_end")
-
-    def trigger(self) -> None:
-        checkpoint("trigger_start")
-        self._triggered = True
-        callbacks = list(self._callbacks)  # Snapshot
-        checkpoint("trigger_snapshot")
-        for cb in callbacks:
-            checkpoint("trigger_invoke")
-            cb()
-        checkpoint("trigger_end")
-
-
-class TestShutdownCoordinatorRaces:
-    """Test races in shutdown coordinator callback registration."""
-
-    def test_register_during_trigger_not_invoked(self) -> None:
-        """Callback registered during trigger should not be invoked.
-
-        The trigger() takes a snapshot before iterating, so callbacks
-        registered mid-trigger won't be called in that trigger.
+        With interval=0.0, every beat extends. With high interval,
+        only the first beat extends (since _last_extension starts at 0.0).
         """
-        coordinator = SimpleShutdownCoordinator()
-        invocations: list[str] = []
+        # Test 1: no rate limiting (interval=0)
+        msg_no_limit = MockMessage(id="no-limit")
+        heartbeat_no_limit = Heartbeat()
+        extender_no_limit = LeaseExtender(config=LeaseExtenderConfig(interval=0.0))
+        extender_no_limit._attach(msg_no_limit, heartbeat_no_limit)
+        for _ in range(5):
+            heartbeat_no_limit.beat()
+        extender_no_limit._detach()
 
-        def callback_a() -> None:
-            invocations.append("a")
+        # All 5 beats should extend
+        assert msg_no_limit.extend_count == 5
 
-        def callback_b() -> None:
-            invocations.append("b")
+        # Test 2: with rate limiting (high interval) - use fresh heartbeat
+        msg_limited = MockMessage(id="limited")
+        heartbeat_limited = Heartbeat()
+        extender_limited = LeaseExtender(config=LeaseExtenderConfig(interval=10000.0))
+        extender_limited._attach(msg_limited, heartbeat_limited)
+        for _ in range(5):
+            heartbeat_limited.beat()
+        extender_limited._detach()
 
-        coordinator.register(callback_a)
+        # Only first beat should extend (due to rate limiting)
+        assert msg_limited.extend_count == 1
 
-        def trigger_thread() -> None:
+
+# =============================================================================
+# ShutdownCoordinator Tests - Real Component
+# =============================================================================
+
+
+class TestShutdownCoordinatorConcurrency:
+    """Test thread safety of real ShutdownCoordinator component."""
+
+    def setup_method(self) -> None:
+        """Reset singleton before each test."""
+        ShutdownCoordinator.reset()
+
+    def teardown_method(self) -> None:
+        """Reset singleton after each test."""
+        ShutdownCoordinator.reset()
+
+    def test_concurrent_register_no_crash(self) -> None:
+        """Concurrent register calls don't crash."""
+        coordinator = ShutdownCoordinator()
+        call_count = 0
+        count_lock = threading.Lock()
+
+        def register_many() -> None:
+            for _ in range(50):
+
+                def cb() -> None:
+                    nonlocal call_count
+                    with count_lock:
+                        call_count += 1
+
+                coordinator.register(cb)
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(register_many) for _ in range(4)]
+            for f in futures:
+                f.result()
+
+        # Trigger and verify all callbacks run
+        coordinator.trigger()
+        assert call_count == 200
+
+    def test_concurrent_trigger_no_crash(self) -> None:
+        """Concurrent trigger calls don't crash."""
+        coordinator = ShutdownCoordinator()
+        call_count = 0
+        count_lock = threading.Lock()
+
+        def callback() -> None:
+            nonlocal call_count
+            with count_lock:
+                call_count += 1
+
+        coordinator.register(callback)
+
+        def trigger() -> None:
             coordinator.trigger()
 
-        def register_thread() -> None:
-            coordinator.register(callback_b)
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            futures = [executor.submit(trigger) for _ in range(4)]
+            for f in futures:
+                f.result()
 
-        # Trigger takes snapshot, then register happens
-        result = run_with_schedule(
-            {"trigger": trigger_thread, "register": register_thread},
-            schedule=[
-                "trigger",  # trigger_start
-                "trigger",  # trigger_snapshot
-                "register",  # register_start
-                "register",  # register_end
-                "trigger",  # trigger_invoke (only callback_a)
-                "trigger",  # trigger_end
-            ],
-        )
+        # Callback invoked once per trigger that runs its iteration
+        # (exact count depends on timing but shouldn't crash)
+        assert call_count >= 1
 
-        assert not result.deadlocked
-        assert invocations == ["a"]  # callback_b not invoked
+    def test_register_after_trigger_invokes_immediately(self) -> None:
+        """Callback registered after trigger is invoked immediately."""
+        coordinator = ShutdownCoordinator()
+        invocations: list[str] = []
 
-    def test_all_interleavings_preserve_existing_callbacks(self) -> None:
-        """All interleavings should invoke callbacks registered before trigger."""
-        for result in run_all_schedules(
-            {
-                "trigger": lambda: SimpleShutdownCoordinator().trigger(),
-                "register": lambda: None,
-            }
-        ):
-            assert not result.deadlocked
+        # Trigger first
+        coordinator.trigger()
+        assert coordinator.triggered
 
+        # Register after trigger
+        coordinator.register(lambda: invocations.append("late"))
 
-# =============================================================================
-# Concurrent Counter Tests (Classic Race Condition)
-# =============================================================================
+        # Should have been invoked immediately
+        assert invocations == ["late"]
 
+    def test_snapshot_pattern_prevents_deadlock(self) -> None:
+        """Callback that registers new callback doesn't deadlock."""
+        coordinator = ShutdownCoordinator()
+        invocations: list[str] = []
 
-class TestConcurrentCounter:
-    """Test classic counter race condition to validate framework."""
+        def callback_that_registers() -> None:
+            invocations.append("first")
+            # This would deadlock if trigger() held lock during callback
+            coordinator.register(lambda: invocations.append("second"))
 
-    def test_unsynchronized_counter_can_lose_updates(self) -> None:
-        """Demonstrate that unsynchronized increment can lose updates."""
+        coordinator.register(callback_that_registers)
+        coordinator.trigger()
 
-        @dataclass
-        class UnsafeCounter:
-            value: int = 0
-
-            def increment(self) -> None:
-                checkpoint("read")
-                v = self.value
-                checkpoint("compute")
-                self.value = v + 1
-                checkpoint("write")
-
-        # Test if any interleaving causes deadlocks
-        for _result in run_all_schedules(
-            {
-                "t1": lambda: (c := UnsafeCounter()) or c.increment(),
-                "t2": lambda: None,  # Placeholder
-            }
-        ):
-            pass  # Just checking no deadlocks
-
-        # With a shared counter between threads, we can show the race
-        counter = UnsafeCounter()
-
-        def inc1() -> None:
-            checkpoint("t1_read")
-            v = counter.value
-            checkpoint("t1_compute")
-            counter.value = v + 1
-            checkpoint("t1_write")
-
-        def inc2() -> None:
-            checkpoint("t2_read")
-            v = counter.value
-            checkpoint("t2_compute")
-            counter.value = v + 1
-            checkpoint("t2_write")
-
-        # Interleaving: t1 reads 0, t2 reads 0, both write 1 -> lost update
-        result = run_with_schedule(
-            {"t1": inc1, "t2": inc2},
-            schedule=["t1", "t2", "t1", "t2", "t1", "t2"],  # read, read, compute, ...
-        )
-
-        assert not result.deadlocked
-        # Both threads read 0, so final value is 1 instead of 2
-        assert counter.value == 1  # Lost update!
-
-    def test_synchronized_counter_preserves_all_updates(self) -> None:
-        """Synchronized counter should preserve all updates."""
-        import threading
-
-        @dataclass
-        class SafeCounter:
-            value: int = 0
-            _lock: threading.Lock = field(default_factory=threading.Lock)
-
-            def increment(self) -> None:
-                checkpoint("acquire")
-                with self._lock:
-                    checkpoint("read")
-                    v = self.value
-                    checkpoint("compute")
-                    self.value = v + 1
-                    checkpoint("write")
-                checkpoint("release")
-
-        counter = SafeCounter()
-
-        def inc1() -> None:
-            counter.increment()
-
-        def inc2() -> None:
-            counter.increment()
-
-        # With real locks, any interleaving should give correct result
-        # Note: This test shows the pattern but real locks don't work
-        # with the checkpoint scheduler (they block at OS level)
+        # "first" was invoked, "second" was invoked immediately on register
+        # (because triggered flag was already set)
+        assert "first" in invocations
+        assert "second" in invocations
 
 
 # =============================================================================
-# Message Queue Tests
+# Integration Tests
 # =============================================================================
 
 
-@dataclass
-class SimpleMessageQueue:
-    """Simplified message queue for testing reaper races."""
+class TestIntegration:
+    """Integration tests combining multiple components."""
 
-    pending: list[str] = field(default_factory=list)
-    invisible: dict[str, str] = field(default_factory=dict)
-
-    def send(self, msg: str) -> None:
-        checkpoint("send_start")
-        self.pending.append(msg)
-        checkpoint("send_end")
-
-    def receive(self) -> str | None:
-        checkpoint("receive_start")
-        if not self.pending:
-            checkpoint("receive_empty")
-            return None
-        msg = self.pending.pop(0)
-        checkpoint("receive_got")
-        handle = f"handle-{msg}"
-        self.invisible[handle] = msg
-        checkpoint("receive_invisible")
-        return msg
-
-    def acknowledge(self, handle: str) -> bool:
-        checkpoint("ack_start")
-        if handle not in self.invisible:
-            checkpoint("ack_expired")
-            return False
-        del self.invisible[handle]
-        checkpoint("ack_end")
-        return True
-
-    def reap_expired(self) -> None:
-        """Move expired messages back to pending."""
-        checkpoint("reap_start")
-        # Simulate: all invisible messages are expired
-        for handle in list(self.invisible.keys()):
-            checkpoint("reap_check")
-            msg = self.invisible.pop(handle)
-            checkpoint("reap_pop")
-            self.pending.append(msg)
-            checkpoint("reap_append")
-        checkpoint("reap_end")
-
-
-class TestMessageQueueRaces:
-    """Test races in message queue operations."""
-
-    def test_receive_and_reap_interleaving(self) -> None:
-        """Test that receive and reap don't lose or duplicate messages."""
-        queue = SimpleMessageQueue()
-        queue.send("msg1")
-
-        received: list[str | None] = []
-
-        def receiver() -> None:
-            msg = queue.receive()
-            received.append(msg)
-
-        def reaper() -> None:
-            queue.reap_expired()
-
-        # Test specific interleaving
-        result = run_with_schedule(
-            {"receive": receiver, "reap": reaper},
-            schedule=["receive", "receive", "reap", "receive", "reap", "receive"],
-        )
-
-        assert not result.deadlocked
-        # Message should be received exactly once
-        assert received == ["msg1"]
-
-    def test_ack_after_reap_fails(self) -> None:
-        """Ack should fail if message was reaped (returned to pending)."""
-        queue = SimpleMessageQueue()
-        queue.send("msg1")
-
-        # Receive the message
-        _ = queue.receive()
-        handle = "handle-msg1"
-
-        ack_results: list[bool] = []
-
-        def acker() -> None:
-            result = queue.acknowledge(handle)
-            ack_results.append(result)
-
-        def reaper() -> None:
-            queue.reap_expired()
-
-        # Reap first (moves message back), then ack fails
-        result = run_with_schedule(
-            {"ack": acker, "reap": reaper},
-            schedule=["reap"] * 5 + ["ack"] * 3,
-        )
-
-        assert not result.deadlocked
-        assert ack_results == [False]  # Ack failed because message was reaped
-
-
-# =============================================================================
-# Integration Test - Full Scenario
-# =============================================================================
-
-
-class TestIntegrationScenarios:
-    """Integration tests combining multiple concurrent components."""
-
-    def test_message_processing_with_heartbeat_and_lease(self) -> None:
-        """Test full message processing flow with heartbeat and lease extension."""
+    def test_heartbeat_lease_extender_integration(self) -> None:
+        """Heartbeat + LeaseExtender work together correctly."""
         msg = MockMessage()
-        heartbeat = SimpleHeartbeat()
-        extender = SimpleLeaseExtender()
+        heartbeat = Heartbeat()
+        extender = LeaseExtender(config=LeaseExtenderConfig(interval=0.0))
 
-        processing_complete = False
+        # Simulate message processing with heartbeats
+        extender._attach(msg, heartbeat)
 
-        def processor() -> None:
-            nonlocal processing_complete
-            checkpoint("process_start")
-            extender.attach(msg, heartbeat)
-            checkpoint("process_attached")
-            # Simulate processing with heartbeats
-            heartbeat.beat()
-            checkpoint("process_working")
-            heartbeat.beat()
-            checkpoint("process_done")
-            extender.detach()
-            processing_complete = True
-            checkpoint("process_detached")
+        # Worker beats periodically
+        heartbeat.beat()
+        assert msg.extend_count == 1
 
-        result = run_with_schedule(
-            {"processor": processor},
-            schedule=["processor"] * 30,  # Enough for all checkpoints
-        )
-
-        assert not result.deadlocked
-        assert processing_complete
-        # Should have extended twice (two beats while attached)
+        heartbeat.beat()
         assert msg.extend_count == 2
+
+        # Processing complete, detach
+        extender._detach()
+
+        # No more extensions after detach
+        heartbeat.beat()
+        assert msg.extend_count == 2
+
+    def test_multiple_extenders_same_heartbeat(self) -> None:
+        """Multiple extenders can share a heartbeat (one at a time)."""
+        msg1 = MockMessage(id="msg-1")
+        msg2 = MockMessage(id="msg-2")
+        heartbeat = Heartbeat()
+
+        extender1 = LeaseExtender(config=LeaseExtenderConfig(interval=0.0))
+        extender2 = LeaseExtender(config=LeaseExtenderConfig(interval=0.0))
+
+        # Process first message
+        extender1._attach(msg1, heartbeat)
+        heartbeat.beat()
+        assert msg1.extend_count == 1
+        extender1._detach()
+
+        # Process second message
+        extender2._attach(msg2, heartbeat)
+        heartbeat.beat()
+        assert msg2.extend_count == 1
+        extender2._detach()
+
+        # msg1 wasn't affected by second attach
+        assert msg1.extend_count == 1
 
 
 if __name__ == "__main__":

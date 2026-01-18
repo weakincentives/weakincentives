@@ -42,6 +42,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from weakincentives.threads import checkpoint
+
 from .mailbox import ReceiptHandleExpiredError
 
 if TYPE_CHECKING:
@@ -96,7 +98,7 @@ class LeaseExtender:
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _msg: Message[Any, Any] | None = field(default=None, repr=False)
     _heartbeat: Heartbeat | None = field(default=None, repr=False)
-    _last_extension: float = field(default=0.0, repr=False)
+    _last_extension: float | None = field(default=None, repr=False)
 
     @contextmanager
     def attach(
@@ -128,47 +130,59 @@ class LeaseExtender:
 
     def _attach(self, msg: Message[Any, Any], heartbeat: Heartbeat) -> None:
         """Attach lease extension callback to heartbeat."""
+        checkpoint("lease_extender.attach.start")
         with self._lock:
             if self._msg is not None:
                 raise RuntimeError("LeaseExtender already attached")
 
             self._msg = msg
             self._heartbeat = heartbeat
-            # Initialize to 0.0 so first beat always extends immediately
-            self._last_extension = 0.0
+            # None signals "never extended" so first beat always extends
+            self._last_extension = None
+        checkpoint("lease_extender.attach.state_set")
 
         # Register callback (outside lock - add_callback has its own lock)
         heartbeat.add_callback(self._on_beat)
+        checkpoint("lease_extender.attach.end")
 
     def _detach(self) -> None:
         """Detach lease extension callback from heartbeat."""
+        checkpoint("lease_extender.detach.start")
         with self._lock:
             heartbeat = self._heartbeat
             self._msg = None
             self._heartbeat = None
+        checkpoint("lease_extender.detach.state_cleared")
 
         # Unregister callback (outside lock - remove_callback has its own lock)
         if heartbeat is not None:
             heartbeat.remove_callback(self._on_beat)
+        checkpoint("lease_extender.detach.end")
 
     def _on_beat(self) -> None:
         """Called when heartbeat.beat() is invoked."""
+        checkpoint("lease_extender.on_beat.start")
         with self._lock:
             if self._msg is None:
+                checkpoint("lease_extender.on_beat.no_msg")
                 return
 
-            now = time.monotonic()
-            elapsed = now - self._last_extension
-
-            if elapsed < self.config.interval:
-                return  # Rate limit
+            # Rate limit: None means never extended (first beat always passes)
+            if self._last_extension is not None:
+                now = time.monotonic()
+                elapsed = now - self._last_extension
+                if elapsed < self.config.interval:
+                    checkpoint("lease_extender.on_beat.rate_limited")
+                    return  # Rate limit
 
             msg = self._msg
             extension = self.config.extension
+        checkpoint("lease_extender.on_beat.will_extend")
 
         # Perform extension outside lock to avoid holding lock during I/O
         try:
             msg.extend_visibility(extension)
+            checkpoint("lease_extender.on_beat.extended")
             with self._lock:
                 self._last_extension = time.monotonic()
             _logger.debug(
@@ -187,6 +201,7 @@ class LeaseExtender:
                 "Lease extension failed for message %s",
                 msg.id,
             )
+        checkpoint("lease_extender.on_beat.end")
 
 
 __all__ = [
