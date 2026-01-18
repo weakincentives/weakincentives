@@ -240,8 +240,8 @@ def test_something(fake_clock: FakeClock) -> None:
     # ...
 ```
 
-Legacy helpers (`ControllableClock`, `FrozenUtcNow`) are preserved for backward
-compatibility but deprecated in favor of `FakeClock`.
+`ControllableClock` is preserved for backward compatibility with tests that use
+the callable interface (`clock()` instead of `clock.monotonic()`).
 
 ## Public Exports
 

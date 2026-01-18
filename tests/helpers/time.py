@@ -37,7 +37,7 @@ Example::
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
 import pytest
 
@@ -111,56 +111,6 @@ class ControllableClock:
         return self._clock.monotonic()
 
 
-class FrozenUtcNow:
-    """Backward-compatible controller for wall-clock time in tests.
-
-    .. deprecated::
-        Use :class:`weakincentives.clock.FakeClock` with clock injection instead
-        of monkeypatching. This class remains for backward compatibility.
-
-    Example (legacy - monkeypatching)::
-
-        def test_deadline(frozen_utcnow: FrozenUtcNow) -> None:
-            frozen_utcnow.set(datetime(2024, 1, 1, tzinfo=UTC))
-            deadline = Deadline(expires_at=datetime(2024, 1, 1, 1, 0, tzinfo=UTC))
-            ...
-
-    Example (preferred - clock injection)::
-
-        def test_deadline() -> None:
-            clock = FakeClock()
-            clock.set_wall(datetime(2024, 1, 1, tzinfo=UTC))
-            deadline = Deadline(
-                expires_at=datetime(2024, 1, 1, 1, 0, tzinfo=UTC),
-                clock=clock,
-            )
-            ...
-    """
-
-    def __init__(
-        self, monkeypatch: pytest.MonkeyPatch, *, anchor: datetime | None = None
-    ) -> None:
-        self._current = anchor if anchor is not None else datetime.now(UTC)
-        # Note: This monkeypatching approach is deprecated.
-        # The _utcnow function no longer exists in the refactored deadlines module.
-        # This class is kept for reference but tests should use clock injection.
-        self._monkeypatch = monkeypatch
-
-    def now(self) -> datetime:
-        """Return the frozen current time."""
-        return self._current
-
-    def set(self, current: datetime) -> datetime:
-        """Reset the frozen clock to the provided datetime."""
-        self._current = current
-        return self._current
-
-    def advance(self, delta: timedelta) -> datetime:
-        """Move the frozen clock forward by ``delta``."""
-        self._current += delta
-        return self._current
-
-
 @pytest.fixture
 def fake_clock() -> FakeClock:
     """Provide a fresh FakeClock for deterministic time control.
@@ -182,20 +132,8 @@ def fake_clock() -> FakeClock:
     return FakeClock()
 
 
-@pytest.fixture
-def frozen_utcnow(monkeypatch: pytest.MonkeyPatch) -> FrozenUtcNow:
-    """Provide a controllable wall-clock for legacy deadline tests.
-
-    .. deprecated::
-        Use the ``fake_clock`` fixture with clock injection instead.
-    """
-    return FrozenUtcNow(monkeypatch)
-
-
 __all__ = [
     "ControllableClock",
     "FakeClock",
-    "FrozenUtcNow",
     "fake_clock",
-    "frozen_utcnow",
 ]
