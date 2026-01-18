@@ -225,9 +225,10 @@ def test_adapter_tool_execution_success(adapter_harness: AdapterHarness) -> None
 
     assert len(events) == 1
     invocation = events[0]
-    assert invocation.result.message == "completed"
-    assert invocation.result.success is True
-    assert invocation.result.value == ToolPayload(answer="policies")
+    assert invocation.message == "completed"
+    assert invocation.success is True
+    # Payload is dispatched to session, not stored on event
+    assert session[ToolPayload].latest() == ToolPayload(answer="policies")
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -415,9 +416,8 @@ def test_adapter_tool_execution_validation_error(
 
     assert len(events) == 1
     invocation = events[0]
-    assert invocation.result.message == "Tool validation failed: invalid query"
-    assert invocation.result.success is False
-    assert invocation.result.value is None
+    assert invocation.message == "Tool validation failed: invalid query"
+    assert invocation.success is False
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -471,9 +471,8 @@ def test_adapter_tool_execution_rejects_extra_arguments(
     assert invoked is False
     assert len(events) == 1
     invocation = events[0]
-    assert invocation.result.success is False
-    assert invocation.result.value is None
-    assert "Extra keys not permitted" in invocation.result.message
+    assert invocation.success is False
+    assert "Extra keys not permitted" in invocation.message
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -527,10 +526,9 @@ def test_adapter_tool_execution_rejects_type_errors(
     assert invoked is False
     assert len(events) == 1
     invocation = events[0]
-    assert invocation.result.success is False
-    assert invocation.result.value is None
+    assert invocation.success is False
     assert (
-        invocation.result.message
+        invocation.message
         == "Tool validation failed: query: value cannot be None"
     )
 
@@ -580,11 +578,10 @@ def test_adapter_tool_execution_unexpected_exception(
     assert len(events) == 1
     invocation = events[0]
     assert (
-        invocation.result.message
+        invocation.message
         == "Tool 'search_notes' execution failed: handler crash"
     )
-    assert invocation.result.success is False
-    assert invocation.result.value is None
+    assert invocation.success is False
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -654,18 +651,18 @@ def test_adapter_tool_execution_rolls_back_session(
 
     assert len(events) == 1
     invocation = events[0]
-    assert invocation.result.message.startswith(
+    assert invocation.message.startswith(
         "Reducer errors prevented applying tool result:"
     )
-    assert invocation.result.success is True
-    assert invocation.result.value == ToolPayload(answer="policies")
+    assert invocation.success is True
 
+    # Reducer failure prevented the new payload from being stored
     latest_payload = session[ToolPayload].latest()
     assert latest_payload == ToolPayload(answer="baseline")
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
-    assert message_text == invocation.result.message
+    assert message_text == invocation.message
     assert rendered_text is not None
     assert json.loads(rendered_text) == {"answer": "policies"}
 

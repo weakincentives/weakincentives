@@ -35,6 +35,7 @@ from ...runtime.session.protocols import SessionProtocol
 from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
 from ...types import AdapterName
+from ...types.dataclass import is_dataclass_instance
 from ..core import PromptEvaluationError, PromptResponse, ProviderAdapter
 from ._async_utils import run_async
 from ._bridge import create_bridged_tools, create_mcp_server
@@ -648,17 +649,25 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             output=output,
         )
 
+        # Dispatch telemetry event
         session.dispatcher.dispatch(
             PromptExecuted(
                 prompt_name=prompt_name,
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
-                result=response,
                 session_id=None,
                 created_at=_utcnow(),
                 usage=usage,
                 run_context=run_context,
             )
         )
+
+        # Dispatch output directly to session reducers
+        if is_dataclass_instance(output):
+            session.dispatch(output)
+        elif isinstance(output, (list, tuple)):
+            for item in output:
+                if is_dataclass_instance(item):
+                    session.dispatch(item)
 
         logger.info(
             "claude_agent_sdk.evaluate.complete",

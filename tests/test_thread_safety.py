@@ -88,7 +88,8 @@ def _publish_tool_event(dispatcher: InProcessDispatcher, index: int) -> None:
         adapter=UNIT_TEST_ADAPTER_NAME,
         name=f"example-{index}",
         params=params,
-        result=cast(ToolResult[object], result),
+        success=result.success,
+        message=result.message,
         call_id=str(index),
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -112,7 +113,8 @@ def test_session_attach_to_dispatcher_is_idempotent() -> None:
         adapter=UNIT_TEST_ADAPTER_NAME,
         name="example-idempotent",
         params=params,
-        result=cast(ToolResult[object], tool_result),
+        success=tool_result.success,
+        message=tool_result.message,
         call_id="999",
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -213,9 +215,10 @@ def test_session_snapshots_restore_across_threads(
         for value, count in result_value_counts.items():
             assert tool_value_counts[value] >= count
 
+        # Verify tool events have expected structure
         for tool_event in restored_tool_events:
-            assert isinstance(tool_event.result.value, ExampleResult)
-            assert tool_event.result.value.value == int(tool_event.call_id)
+            assert tool_event.success is True
+            assert tool_event.call_id is not None
 
 
 @pytest.mark.threadstress(min_workers=2, max_workers=6)

@@ -107,11 +107,14 @@ class InProcessDispatcher:
 
 @FrozenDataclass()
 class PromptExecuted:
-    """Event emitted after an adapter finishes evaluating a prompt."""
+    """Event emitted after an adapter finishes evaluating a prompt.
+
+    This is a telemetry event. The typed output (if any) is dispatched
+    separately via session.dispatch() at the call site.
+    """
 
     prompt_name: str
     adapter: AdapterName
-    result: Any
     session_id: UUID | None
     created_at: datetime
     usage: TokenUsage | None = None

@@ -74,10 +74,10 @@ def test_tool_invoked_appends_payload_every_time(
     assert isinstance(event.event_id, UUID)
 
 
-def test_tool_invoked_extracts_value_from_result(
+def test_tool_invoked_payload_dispatched_separately(
     session_factory: SessionFactory,
 ) -> None:
-    """Session extracts value from result.value for slice dispatch."""
+    """Payload is dispatched separately from ToolInvoked telemetry event."""
     session, dispatcher = session_factory()
 
     payload = ExamplePayload(value=7)
@@ -87,15 +87,19 @@ def test_tool_invoked_extracts_value_from_result(
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=7),
-        result=tool_result,
+        success=tool_result.success,
+        message=tool_result.message,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         rendered_output=tool_result.render(),
     )
 
+    # Dispatch telemetry event
     dispatcher.dispatch(event)
+    # Dispatch payload separately (as done at call site)
+    session.dispatch(payload)
 
-    # Session dispatches result.value to slice reducers
+    # Payload dispatched to slice reducers
     assert session[ExamplePayload].all() == (payload,)
 
 
@@ -218,29 +222,31 @@ def test_prompt_executed_extracts_value_from_result(
     assert session[ExampleOutput].all() == (output,)
 
 
-def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> None:
+def test_non_dataclass_payloads_are_not_dispatched(session_factory: SessionFactory) -> None:
     session, dispatcher = session_factory()
 
+    # First event with dataclass payload
     event = make_tool_event(1)
-    non_dataclass_result = cast(
-        ToolResult[object], ToolResult(message="ok", value="not a dataclass")
-    )
+    dispatcher.dispatch(event)
+    # Dispatch payload separately (as done at call site)
+    session.dispatch(ExamplePayload(value=1))
+
+    # Second event - non-dataclass payload would not be dispatched at call site
     non_dataclass_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=2),
-        result=non_dataclass_result,
+        success=True,
+        message="ok",
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        rendered_output=non_dataclass_result.render(),
+        rendered_output="not a dataclass",
     )
+    dispatcher.dispatch(non_dataclass_event)
+    # Non-dataclass payload "not a dataclass" is NOT dispatched
 
-    first_result = dispatcher.dispatch(event)
-    second_result = dispatcher.dispatch(non_dataclass_event)
-
-    assert first_result.ok
-    assert second_result.ok
+    # Only dataclass payloads are stored
     assert session[ExamplePayload].all() == (ExamplePayload(value=1),)
 
 
@@ -282,31 +288,32 @@ def test_replace_latest_keeps_only_newest_value(
 def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> None:
     session, dispatcher = session_factory()
 
+    # Dispatch success event
     dispatcher.dispatch(make_tool_event(1))
+    session.dispatch(ExamplePayload(value=1))  # Payload dispatched separately
 
-    failure = cast(
-        ToolResult[object],
-        ToolResult(message="failed", value=None, success=False),
-    )
+    # Dispatch failure event
     failure_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=2),
-        result=failure,
+        success=False,
+        message="failed",
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        rendered_output=failure.render(),
+        rendered_output="failed",
     )
     dispatcher.dispatch(failure_event)
+    # No payload dispatched for failure
 
     tool_events = session[ToolInvoked].all()
     assert len(tool_events) == 2
-    # First event has payload via result.value
-    assert tool_events[0].result.value == ExamplePayload(value=1)
-    # Failure event has no value
-    assert tool_events[1].result.value is None
-    assert tool_events[1].result.success is False
+    # First event succeeded
+    assert tool_events[0].success is True
+    # Failure event has success=False
+    assert tool_events[1].success is False
+    assert tool_events[1].message == "failed"
 
 
 def test_reducer_failure_leaves_previous_slice_unchanged(

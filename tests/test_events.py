@@ -237,14 +237,14 @@ class _Payload:
 
 def test_tool_invoked_event_fields() -> None:
     raw_result = ToolResult.ok(_Payload(value="data"), message="ok")
-    result = cast(ToolResult[object], raw_result)
     rendered_output = raw_result.render()
     event = ToolInvoked(
         prompt_name="demo",
         adapter=TEST_ADAPTER_NAME,
         name="tool",
         params=_Params(value=1),
-        result=result,
+        success=raw_result.success,
+        message=raw_result.message,
         call_id="abc123",
         session_id=uuid4(),
         created_at=datetime.now(UTC),
@@ -258,8 +258,8 @@ def test_tool_invoked_event_fields() -> None:
     assert event.params.value == 1
     assert isinstance(event.session_id, UUID)
     assert isinstance(event.created_at, datetime)
-    assert isinstance(event.result.value, _Payload)
-    assert event.result is result
+    assert event.success is True
+    assert event.message == "ok"
     assert event.call_id == "abc123"
     assert isinstance(event.event_id, UUID)
     assert event.rendered_output == rendered_output

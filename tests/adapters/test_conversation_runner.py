@@ -592,7 +592,7 @@ def test_inner_loop_formats_tool_dispatch_failures() -> None:
     tool_event = next(
         event for event in dispatcher.events if isinstance(event, ToolInvoked)
     )
-    failure_message = tool_event.result.message
+    failure_message = tool_event.message
     assert "Reducer errors prevented applying tool result" in failure_message
 
 

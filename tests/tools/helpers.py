@@ -33,6 +33,7 @@ from weakincentives.prompt.tool import Tool, ToolContext, ToolResult
 from weakincentives.runtime.events import ToolInvoked
 from weakincentives.runtime.session import SessionProtocol
 from weakincentives.types import SupportsDataclassOrNone, SupportsToolResult
+from weakincentives.types.dataclass import is_dataclass_instance
 
 ParamsT = TypeVar("ParamsT", bound=SupportsDataclassOrNone)
 ResultT = TypeVar("ResultT", bound=SupportsToolResult)
@@ -112,11 +113,17 @@ def invoke_tool(
         adapter=GENERIC_ADAPTER_NAME,
         name=tool.name,
         params=params,
-        result=cast(ToolResult[object], result),
+        success=result.success,
+        message=result.message,
         session_id=getattr(session, "session_id", None),
         created_at=datetime.now(UTC),
         rendered_output=rendered_output,
     )
     publish_result = session.dispatcher.dispatch(event)
     assert publish_result.ok
+
+    # Dispatch payload directly to session reducers
+    if is_dataclass_instance(result.value):
+        session.dispatch(result.value)
+
     return result

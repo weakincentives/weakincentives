@@ -70,7 +70,8 @@ def make_tool_invoked(name: str = "test_tool") -> ToolInvoked:
         adapter="test",
         name=name,
         params=None,
-        result=None,
+        success=True,
+        message="ok",
         session_id=None,
         created_at=datetime.now(UTC),
     )
@@ -400,7 +401,8 @@ class TestFeedbackContext:
                 adapter="test",
                 name="other_tool",
                 params=None,
-                result=None,
+                success=True,
+                message="ok",
                 session_id=None,
                 created_at=datetime.now(UTC),
             )
@@ -424,7 +426,8 @@ class TestFeedbackContext:
                 adapter="test",
                 name="other_tool",
                 params=None,
-                result=None,
+                success=True,
+                message="ok",
                 session_id=None,
                 created_at=datetime.now(UTC),
             )

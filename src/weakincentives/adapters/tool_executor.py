@@ -45,6 +45,7 @@ from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,
+    is_dataclass_instance,
 )
 from ._provider_protocols import ProviderToolCall
 from .core import (
@@ -644,7 +645,12 @@ def dispatch_tool_invocation(
     context: ToolExecutionContext,
     outcome: ToolExecutionOutcome,
 ) -> ToolInvoked:
-    """Send a tool invocation event to the session dispatcher."""
+    """Send a tool invocation event to the session dispatcher.
+
+    Dispatches two things:
+    1. ToolInvoked telemetry event (via dispatcher)
+    2. The typed payload directly to reducers (via session.dispatch)
+    """
     session_id = getattr(context.session, "session_id", None)
     rendered_output = outcome.result.render()
     usage = token_usage_from_payload(context.provider_payload)
@@ -654,7 +660,8 @@ def dispatch_tool_invocation(
         adapter=context.adapter_name,
         name=outcome.tool.name,
         params=outcome.params,
-        result=cast(ToolResult[object], outcome.result),
+        success=outcome.result.success,
+        message=outcome.result.message,
         session_id=session_id,
         created_at=datetime.now(UTC),
         usage=usage,
@@ -664,6 +671,12 @@ def dispatch_tool_invocation(
         event_id=uuid4(),
     )
     dispatch_result = context.session.dispatcher.dispatch(invocation)
+
+    # Dispatch payload directly to session reducers
+    payload = outcome.result.value
+    if is_dataclass_instance(payload):
+        context.session.dispatch(payload)
+
     if not dispatch_result.ok:
         # Restore to pre-tool state if tool succeeded (not already restored)
         if outcome.result.success:

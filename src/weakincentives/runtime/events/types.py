@@ -126,13 +126,18 @@ class TokenUsage:
 
 @FrozenDataclass()
 class ToolInvoked:
-    """Event emitted after an adapter executes a tool handler."""
+    """Event emitted after an adapter executes a tool handler.
+
+    This is a telemetry event. The typed payload (if any) is dispatched
+    separately via session.dispatch() at the call site.
+    """
 
     prompt_name: str
     adapter: AdapterName
     name: str
     params: Any
-    result: Any
+    success: bool
+    message: str
     session_id: UUID | None
     created_at: datetime
     usage: TokenUsage | None = None

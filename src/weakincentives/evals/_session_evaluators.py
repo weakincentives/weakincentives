@@ -135,8 +135,7 @@ def tool_call_count(
 def all_tools_succeeded() -> SessionEvaluator:
     """Assert all tool invocations succeeded.
 
-    Checks the 'success' field in each ToolInvoked.result dict.
-    Tools without a 'success' field are assumed to have succeeded.
+    Checks the 'success' field on each ToolInvoked event.
 
     Returns:
         SessionEvaluator that passes if no tool failures occurred.
@@ -156,11 +155,7 @@ def all_tools_succeeded() -> SessionEvaluator:
         if not calls:
             return Score(value=1.0, passed=True)
 
-        failures: list[str] = []
-        for call in calls:
-            result = call.result
-            if isinstance(result, dict) and result.get("success") is False:  # pyright: ignore[reportUnknownMemberType]
-                failures.append(call.name)
+        failures = [call.name for call in calls if not call.success]
 
         passed = len(failures) == 0
         return Score(

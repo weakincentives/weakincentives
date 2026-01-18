@@ -547,14 +547,21 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             feedback_response = _run_feedback_providers(data)
             return feedback_response if feedback_response else {}
 
+        # Determine success status
+        success = data.tool_error is None and not _is_tool_error_response(
+            data.result_raw
+        )
+
         # For native tools, dispatch ToolInvoked BEFORE running feedback providers
         # so that FeedbackContext.tool_call_count includes this tool call.
+        # Native tools have no typed payload - only telemetry event is dispatched.
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
             name=data.tool_name,
             params=data.tool_input,
-            result=data.result_raw,
+            success=success,
+            message=data.output_text or "",
             session_id=None,
             created_at=_utcnow(),
             usage=None,
@@ -563,11 +570,6 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             run_context=hook_context.run_context,
         )
         hook_context.session.dispatcher.dispatch(event)
-
-        # Determine success status
-        success = data.tool_error is None and not _is_tool_error_response(
-            data.result_raw
-        )
 
         logger.debug(
             "claude_agent_sdk.hook.tool_invoked",

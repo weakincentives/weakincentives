@@ -71,10 +71,10 @@ def test_query_where_returns_empty_tuple_when_no_values(
 
 
 def test_query_all_returns_all_values(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    session.dispatch(ExampleOutput(text="first"))
+    session.dispatch(ExampleOutput(text="second"))
 
     result = session[ExampleOutput].all()
 
@@ -86,8 +86,8 @@ def test_query_latest_returns_most_recent_value(
 ) -> None:
     session, dispatcher = session_factory()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    session.dispatch(ExampleOutput(text="first"))
+    session.dispatch(ExampleOutput(text="second"))
 
     result = session[ExampleOutput].latest()
 
@@ -97,9 +97,9 @@ def test_query_latest_returns_most_recent_value(
 def test_query_where_filters_values(session_factory: SessionFactory) -> None:
     session, dispatcher = session_factory()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apple")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="banana")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apricot")))
+    session.dispatch(ExampleOutput(text="apple"))
+    session.dispatch(ExampleOutput(text="banana"))
+    session.dispatch(ExampleOutput(text="apricot"))
 
     result = session[ExampleOutput].where(lambda x: x.text.startswith("a"))
 
@@ -109,8 +109,8 @@ def test_query_where_filters_values(session_factory: SessionFactory) -> None:
 def test_query_respects_dbc_purity(session_factory: SessionFactory) -> None:
     session, dispatcher = session_factory()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    session.dispatch(ExampleOutput(text="first"))
+    session.dispatch(ExampleOutput(text="second"))
 
     with dbc_enabled():
         assert session[ExampleOutput].all() == (
@@ -128,7 +128,7 @@ def test_query_where_logs_violate_purity_contract(
 ) -> None:
     session, dispatcher = session_factory()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    session.dispatch(ExampleOutput(text="first"))
 
     logger = logging.getLogger(__name__)
 
@@ -167,8 +167,8 @@ def test_mutate_seed_iterable_values(session_factory: SessionFactory) -> None:
 def test_mutate_clear_removes_all_values(session_factory: SessionFactory) -> None:
     session, dispatcher = session_factory()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    session.dispatch(ExampleOutput(text="first"))
+    session.dispatch(ExampleOutput(text="second"))
     assert session[ExampleOutput].all()
 
     session[ExampleOutput].clear()
@@ -179,9 +179,9 @@ def test_mutate_clear_removes_all_values(session_factory: SessionFactory) -> Non
 def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
     session, dispatcher = session_factory()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apple")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="banana")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apricot")))
+    session.dispatch(ExampleOutput(text="apple"))
+    session.dispatch(ExampleOutput(text="banana"))
+    session.dispatch(ExampleOutput(text="apricot"))
 
     session[ExampleOutput].clear(lambda x: x.text.startswith("a"))
 
@@ -222,8 +222,8 @@ def test_getitem_returns_slice_accessor(session_factory: SessionFactory) -> None
 def test_slice_accessor_query_methods_work(session_factory: SessionFactory) -> None:
     session, dispatcher = session_factory()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    session.dispatch(ExampleOutput(text="first"))
+    session.dispatch(ExampleOutput(text="second"))
 
     # Test all(), latest(), and where() work via SliceAccessor
     assert session[ExampleOutput].all() == (

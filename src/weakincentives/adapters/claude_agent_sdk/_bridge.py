@@ -33,6 +33,7 @@ from ...runtime.transactions import (
 )
 from ...runtime.watchdog import Heartbeat
 from ...serde import parse, schema
+from ...types.dataclass import is_dataclass_instance
 
 if TYPE_CHECKING:
     from ...prompt.protocols import PromptProtocol, RenderedPromptProtocol
@@ -287,16 +288,19 @@ class BridgedTool:
         result: ToolResult[Any],
         rendered_output: str,
     ) -> None:
-        """Dispatch a ToolInvoked event for session reducer dispatch.
+        """Dispatch telemetry event and payload to session.
 
-        The session extracts the value from result.value for slice routing.
+        Dispatches two things:
+        1. ToolInvoked telemetry event (via dispatcher)
+        2. The typed payload directly to reducers (via session.dispatch)
         """
         event = ToolInvoked(
             prompt_name=self._prompt_name,
             adapter=self._adapter_name,
             name=self.name,
             params=args,
-            result=cast(ToolResult[object], result),
+            success=result.success,
+            message=result.message,
             session_id=None,
             created_at=datetime.now(UTC),
             usage=None,
@@ -305,6 +309,10 @@ class BridgedTool:
             run_context=self._run_context,
         )
         self._session.dispatcher.dispatch(event)
+
+        # Dispatch payload directly to session reducers
+        if is_dataclass_instance(result.value):
+            self._session.dispatch(result.value)
 
 
 def create_bridged_tools(

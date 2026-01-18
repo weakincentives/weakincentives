@@ -40,6 +40,7 @@ from ..types.dataclass import (
     SupportsDataclass,
     SupportsDataclassOrNone,
     SupportsToolResult,
+    is_dataclass_instance,
 )
 from ._provider_protocols import ProviderChoice, ProviderMessage, ProviderToolCall
 from .core import (
@@ -501,15 +502,18 @@ class InnerLoop[OutputT]:
     def _dispatch_executed_event(
         self, response_payload: PromptResponse[OutputT]
     ) -> None:
-        """Dispatch the PromptExecuted event."""
+        """Dispatch telemetry event and output to session.
 
+        Dispatches two things:
+        1. PromptExecuted telemetry event (via dispatcher)
+        2. The typed output directly to reducers (via session.dispatch)
+        """
         usage = token_usage_from_payload(self._provider_payload)
 
         dispatch_result = self.config.session.dispatcher.dispatch(
             PromptExecuted(
                 prompt_name=self.inputs.prompt_name,
                 adapter=self.inputs.adapter_name,
-                result=cast(PromptResponse[object], response_payload),
                 session_id=getattr(self.config.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 usage=usage,
@@ -517,6 +521,17 @@ class InnerLoop[OutputT]:
                 event_id=uuid4(),
             )
         )
+
+        # Dispatch output directly to session reducers
+        output = response_payload.output
+        if is_dataclass_instance(output):
+            self.config.session.dispatch(output)
+        elif isinstance(output, (list, tuple)):
+            # Handle iterable outputs (dispatch each item)
+            for item in output:
+                if is_dataclass_instance(item):
+                    self.config.session.dispatch(item)
+
         if not dispatch_result.ok:
             failure_handlers = [
                 getattr(failure.handler, "__qualname__", repr(failure.handler))

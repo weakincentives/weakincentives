@@ -140,8 +140,9 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     tools_snapshot = cast(tuple[ToolInvoked, ...], snapshot.slices[ToolInvoked])
 
     assert rendered_snapshot == (rendered_event,)
-    assert executed_snapshot[0].result.output == ExampleOutput(text="complete")
-    assert tools_snapshot[0].result.value == ExamplePayload(value=4)
+    assert executed_snapshot[0].prompt_name == "example"
+    assert tools_snapshot[0].name == "tool"
+    assert tools_snapshot[0].success is True
 
     restored_rendered = cast(
         tuple[PromptRendered, ...], restored.slices[PromptRendered]
@@ -154,14 +155,14 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     assert restored_rendered[0].event_id == rendered_event.event_id
     restored_executed = restored_executed_slice[0]
     assert restored_executed.event_id == executed_event.event_id
-    assert restored_executed.result["prompt_name"] == "example"
-    assert restored_executed.result["output"] == {"text": "complete"}
+    assert restored_executed.prompt_name == "example"
 
     restored_tool = restored_tool_slice[0]
     assert restored_tool.event_id == tool_event.event_id
     assert restored_tool.name == "tool"
     assert restored_tool.params == {"value": 4}
-    assert restored_tool.result["value"] == {"value": 4}
+    assert restored_tool.success is True
+    assert restored_tool.message == "ok"
 
 
 def test_snapshot_filters_log_slices_by_default(
