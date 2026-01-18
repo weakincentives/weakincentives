@@ -226,27 +226,37 @@ the parsed diagnostics don't provide enough context.
 
 ## CLI Usage
 
+**Note**: Use `uv run` to ensure Python 3.12+ (required for PEP 695 syntax).
+
 ```bash
 # Run all checks
-python check.py
+uv run python check.py
 
 # Run specific checks
-python check.py lint test
+uv run python check.py lint test
 
 # List available checks
-python check.py --list
+uv run python check.py --list
 
 # Verbose output (full tool output on failure)
-python check.py -v
+uv run python check.py -v
 
 # Quiet mode (only show failures)
-python check.py -q
+uv run python check.py -q
 
 # JSON output for CI integration
-python check.py --json
+uv run python check.py --json
 
 # Disable colors
-python check.py --no-color
+uv run python check.py --no-color
+```
+
+Or use the Makefile which handles this automatically:
+
+```bash
+make check    # Run all checks
+make lint     # Just lint
+make test     # Just tests
 ```
 
 ## Adding a New Checker

@@ -14,11 +14,11 @@
 """Verification toolchain for the weakincentives project.
 
 Usage:
-    python check.py              # Run all checks
-    python check.py lint test    # Run specific checks
-    python check.py --list       # List available checks
-    python check.py -v           # Verbose output
-    python check.py --json       # JSON output
+    uv run python check.py           # Run all checks (recommended)
+    uv run python check.py lint test # Run specific checks
+    uv run python check.py --list    # List available checks
+
+Note: Use 'uv run' to ensure Python 3.12+ for PEP 695 syntax support.
 """
 
 from __future__ import annotations
