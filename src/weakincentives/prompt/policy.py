@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
 from ..dataclasses import FrozenDataclass
+from ..filesystem._path import strip_mount_point
 from ..types.dataclass import SupportsDataclass
 
 if TYPE_CHECKING:
@@ -189,19 +190,13 @@ def _normalize_path(path: str, mount_point: str | None) -> str:
 
     This mirrors the normalization done by FilesystemToolHandlers so that
     policy checks use the same path form that handlers will use.
+
+    Delegates to the shared :func:`strip_mount_point` implementation.
     """
     # Strip leading slashes (absolute → relative)
     normalized = path.lstrip("/")
-
-    # Strip mount point prefix if present
-    if mount_point is not None:
-        prefix = mount_point.lstrip("/")
-        if normalized.startswith(prefix + "/"):
-            normalized = normalized[len(prefix) + 1 :]
-        elif normalized == prefix:
-            normalized = ""
-
-    return normalized
+    # Strip mount point prefix using shared implementation
+    return strip_mount_point(normalized, mount_point)
 
 
 @dataclass(frozen=True)

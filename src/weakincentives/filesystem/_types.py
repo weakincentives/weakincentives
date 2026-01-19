@@ -24,11 +24,16 @@ from datetime import UTC, datetime
 from typing import Final, Literal
 from uuid import UUID
 
+from ._path import (
+    MAX_PATH_DEPTH,
+    MAX_SEGMENT_LENGTH,
+    normalize_path_string,
+    validate_path,
+)
+
 DEFAULT_READ_LIMIT: Final[int] = 2_000
 MAX_WRITE_LENGTH: Final[int] = 48_000
 MAX_WRITE_BYTES: Final[int] = 48_000
-MAX_PATH_DEPTH: Final[int] = 16
-MAX_SEGMENT_LENGTH: Final[int] = 80
 MAX_GREP_MATCHES: Final[int] = 1_000
 
 #: Pass as `limit` to `Filesystem.read()` to read the entire file without truncation.
@@ -146,34 +151,11 @@ class FilesystemSnapshot:
 
 
 def normalize_path(path: str) -> str:
-    """Normalize a path by removing leading/trailing slashes and cleaning segments."""
-    if not path or path in {".", "/"}:
-        return ""
-    stripped = path.strip().strip("/")
-    segments = [s for s in stripped.split("/") if s and s != "."]
-    # Process .. segments
-    result: list[str] = []
-    for segment in segments:
-        if segment == "..":
-            if result:
-                _ = result.pop()
-        else:
-            result.append(segment)
-    return "/".join(result)
+    """Normalize a path by removing leading/trailing slashes and cleaning segments.
 
-
-def validate_path(path: str) -> None:
-    """Validate path constraints."""
-    if not path:
-        return
-    segments = path.split("/")
-    if len(segments) > MAX_PATH_DEPTH:
-        msg = f"Path depth exceeds limit of {MAX_PATH_DEPTH} segments."
-        raise ValueError(msg)
-    for segment in segments:
-        if len(segment) > MAX_SEGMENT_LENGTH:
-            msg = f"Path segment exceeds limit of {MAX_SEGMENT_LENGTH} characters."
-            raise ValueError(msg)
+    Delegates to the shared implementation in :mod:`weakincentives.filesystem._path`.
+    """
+    return normalize_path_string(path)
 
 
 def now() -> datetime:
