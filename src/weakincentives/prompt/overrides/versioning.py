@@ -453,21 +453,20 @@ def _serialize_example_value(value: object) -> JSONValue:
     """Serialize an example input/output value to JSON-compatible form."""
     if value is None:
         return None
+    # Handle primitive types directly (no logging needed)
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    # Handle sequences (tuple, list) by recursively serializing elements
+    if isinstance(value, (tuple, list)):
+        seq = cast("tuple[object, ...] | list[object]", value)
+        return [_serialize_example_value(item) for item in seq]
     # Try to use serde.dump if it's a dataclass
     from ...serde import dump
 
     try:
         return dump(value, exclude_none=True)
     except TypeError:
-        # Non-dataclass values fall back to str() - expected for primitives
-        from ...runtime.logging import get_logger
-
-        logger = get_logger(__name__, context={"component": "prompt_overrides"})
-        logger.warning(
-            "Falling back to str() for non-dataclass example value.",
-            event="example_value_fallback",
-            context={"value_type": type(value).__name__},
-        )
+        # Unexpected non-dataclass type - use str() as last resort
         return str(value)
 
 
