@@ -1,392 +1,145 @@
 # CLAUDE.md
 
-Quick-reference guide for Claude and other AI assistants working in the
-`weakincentives` repository.
+Quick-reference for AI assistants working in the `weakincentives` repository.
 
-## Project Overview
+______________________________________________________________________
 
-WINK (Weak Incentives) is a Python library for building deterministic,
-side-effect-free background agents. It provides:
+## MANDATORY: Definition of Done
 
-- **Redux-style sessions** with immutable event ledgers and pure reducers
-- **Typed prompt composition** using dataclass-backed sections
-- **Provider-agnostic adapters** (OpenAI, LiteLLM, Claude Agent SDK)
-- **Design-by-contract enforcement** via decorators
-- **Sandboxed tooling** (VFS, asteval, Podman)
-- **Evaluation framework** with session-aware evaluators
-- **Formal verification support** via TLA+ spec embedding
+**No work is considered complete until `make check` passes with zero errors.**
 
-## Essential Commands
+This is non-negotiable. Do not claim a task is complete, do not move on to the
+next task, and do not commit until:
 
 ```bash
-# Setup
-uv sync && ./install-hooks.sh
-
-# Development workflow
-make format          # Format code (ruff, 88-char lines)
-make lint            # Lint with ruff --preview
-make typecheck       # ty check + pyright (strict mode)
-make test            # Pytest with 100% coverage requirement
-make check           # ALL checks - run before every commit
-
-# Additional checks
-make bandit          # Security scanning
-make deptry          # Dependency analysis
-make pip-audit       # Vulnerability scanning
-make markdown-check  # Markdown formatting
-# Integration tests (requires OPENAI_API_KEY)
-make integration-tests
+make check  # Must exit 0 with no errors
 ```
 
-**Critical**: Always run `make check` before committing. The pre-commit hooks
-enforce a clean run.
+If `make check` fails: fix errors, re-run, repeat until all checks pass.
+
+______________________________________________________________________
+
+## Commands
+
+```bash
+uv sync && ./install-hooks.sh   # Setup
+
+make format      # Ruff format (88-char lines)
+make lint        # Ruff lint --preview
+make typecheck   # ty + pyright (strict)
+make test        # Pytest, 100% coverage required
+make check       # ALL checks - MANDATORY before any commit
+```
 
 ## Architecture
 
 ```
 src/weakincentives/
-├── adapters/        # Provider integrations (OpenAI, LiteLLM, Claude Agent SDK)
-├── cli/             # wink CLI entrypoints
-├── contrib/         # Batteries for specific agent styles
-│   ├── tools/       # Planning, VFS, asteval, Podman, workspace digest
-│   ├── optimizers/  # Workspace digest optimizer
-│   └── mailbox/     # Redis mailbox implementation
-├── dataclasses/     # FrozenDataclass utilities
-├── dbc/             # Design-by-contract decorators
-├── debug/           # Debugging utilities (log collector, session inspection)
-├── evals/           # Evaluation framework (datasets, evaluators, EvalLoop)
-├── filesystem/      # Filesystem protocol and types (core abstraction)
-├── formal/          # TLA+ formal specification support
-├── optimizers/      # Optimizer framework and protocols
-├── skills/          # Skill types, validation (Agent Skills spec support)
-├── prompt/          # Section/Prompt composition, overrides, tools
-├── resources/       # Dependency injection with scoped lifecycles
-├── runtime/         # Session, events, lifecycle, mailbox, transactions
-├── serde/           # Dataclass serialization (no Pydantic)
-└── types/           # JSON type aliases
-
-toolchain/           # Verification toolchain (python check.py)
-├── checkers/        # Individual verification checkers
-├── result.py        # Location, Diagnostic, CheckResult, Report
-├── checker.py       # Checker protocol and SubprocessChecker
-├── runner.py        # Orchestrates checker execution
-└── output.py        # Console, JSON, Quiet formatters
+├── adapters/     # OpenAI, LiteLLM, Claude Agent SDK
+├── contrib/      # Tools (VFS, Podman, asteval), mailbox
+├── dbc/          # Design-by-contract decorators
+├── evals/        # Evaluation framework
+├── prompt/       # Section/Prompt composition
+├── resources/    # Dependency injection
+├── runtime/      # Session, events, lifecycle
+├── serde/        # Dataclass serialization
+└── ...
 ```
 
-The library is organized as "core primitives" + "batteries for specific agent
-styles":
+## Style Patterns
 
-- **Core** (`weakincentives.*`): Prompt composition, sessions, adapters, serde,
-  dbc, filesystem protocols, skills, resource registry
-- **Contrib** (`weakincentives.contrib.*`): Planning tools, VFS, Podman,
-  asteval, workspace optimizers, Redis mailbox
+### Types & Dataclasses
 
-## Code Conventions
-
-### Type Annotations
-
-- Strict pyright mode is enforced
-- Type annotations are the source of truth; avoid redundant runtime guards
-- Use `FrozenDataclass` for immutable data structures
+- Strict pyright; annotations are source of truth—no redundant runtime guards
+- Use `@dataclass(slots=True, frozen=True)` or `@FrozenDataclass()`
+- Use `assert_never()` with `# pragma: no cover` for union exhaustiveness
+- Use `TYPE_CHECKING` blocks to avoid circular imports
 
 ### Design-by-Contract
 
-Public APIs use DbC decorators from `weakincentives.dbc`:
-
-```python
-from weakincentives.dbc import require, ensure, invariant, pure
-
-@require(lambda x: x > 0, "x must be positive")
-@ensure(lambda result: result >= 0, "result must be non-negative")
-def compute(x: int) -> int:
-    ...
-```
-
-Always read `specs/DBC.md` before modifying DbC-decorated modules.
-
-### Dataclass Patterns
-
-```python
-from dataclasses import dataclass
-
-# Preferred: slots and frozen for immutability
-@dataclass(slots=True, frozen=True)
-class MyConfig:
-    name: str
-    count: int = 0
-```
-
-### Tool Handlers
-
-Tool handlers follow a consistent signature:
-
-```python
-def my_handler(params: ParamsType, *, context: ToolContext) -> ToolResult[ResultType]:
-    # Success case
-    return ToolResult.ok(ResultType(...), message="done")
-    # Or failure case
-    return ToolResult.error("Something went wrong")
-```
-
-### Imports
-
-- First-party imports use `weakincentives.*`
-- Keep `__init__.py` exports curated and minimal
-- Favor composition over inheritance
-
-## Testing Requirements
-
-- **100% coverage** required for `src/weakincentives/`
-- Pytest runs with `--strict-config --strict-markers`
-- Flaky tests retry twice automatically
-- Add fixtures to `tests/helpers/` when needed
-
-Run focused tests during development:
-
-```bash
-uv run pytest tests/path/to/test.py -v
-```
-
-Always finish with `make test` to verify coverage.
-
-## Spec Documents
-
-Consult these specs before modifying related code:
-
-| Spec | When to Read |
-| ------------------------------ | --------------------------------------------------------------------- |
-| `specs/ADAPTERS.md` | Provider adapters, structured output, throttling |
-| `specs/CLAUDE_AGENT_SDK.md` | Claude Agent SDK adapter, MCP tool bridging, skill mounting |
-| `specs/CLOCK.md` | Controllable time abstractions, clock injection, testing patterns |
-| `specs/DATACLASSES.md` | Serde utilities or frozen dataclass patterns |
-| `specs/DBC.md` | DbC decorators, exhaustiveness checking, `assert_never` patterns |
-| `specs/DEBUGGING.md` | Log collector, session slices, debug web UI, snapshot explorer |
-| `specs/DLQ.md` | Dead letter queues, poison message handling, MainLoop/EvalLoop DLQ config |
-| `specs/EVALS.md` | Evaluation framework, datasets, evaluators, session evaluators |
-| `specs/EXAMPLES.md` | Code review agent reference implementation |
-| `specs/EXPERIMENTS.md` | Experiment configuration for A/B testing, prompt overrides tags, feature flags |
-| `specs/FILESYSTEM.md` | Filesystem protocol, backend implementations, ToolContext integration |
-| `specs/FORMAL_VERIFICATION.md` | Embedding TLA+ in Python, `@formal_spec` decorator, TLC verification |
-| `specs/HEALTH.md` | Health endpoints, watchdog, stuck worker detection, process termination |
-| `specs/LIFECYCLE.md` | LoopGroup, ShutdownCoordinator, graceful shutdown patterns |
-| `specs/LEASE_EXTENDER.md` | Automatic message visibility extension during processing |
-| `specs/LOGGING.md` | Logging surfaces |
-| `specs/MAILBOX.md` | Message queue abstraction, SQS/Redis semantics, reply patterns, resolver |
-| `specs/MAIN_LOOP.md` | Main loop orchestration, visibility handling, event-driven execution |
-| `specs/METRICS.md` | Metrics primitives, in-memory collection, debug persistence |
-| `specs/POLICIES_OVER_WORKFLOWS.md` | Philosophy of declarative policies vs rigid workflows for unattended agents |
-| `specs/PROMPTS.md` | Prompt system, composition, overrides, structured output, resources |
-| `specs/RESOURCE_REGISTRY.md` | Dependency injection, resource scopes, transactional snapshots |
-| `specs/RUN_CONTEXT.md` | Execution metadata, request correlation, distributed tracing |
-| `specs/SESSIONS.md` | Session lifecycle, events, deadlines, budgets |
-| `specs/SKILLS.md` | Agent Skills specification and WINK skill mounting |
-| `specs/SLICES.md` | Slice storage backends, factory configuration, JSONL persistence |
-| `specs/TASK_COMPLETION.md` | Task completion checking, PlanBasedChecker, composite verification |
-| `specs/TESTING.md` | Test harnesses, fault injection, fuzzing, coverage standards |
-| `specs/THREAD_SAFETY.md` | Concurrency or shared state |
-| `specs/TOOLS.md` | Tool runtime, policies, sequential dependencies, planning tools |
-| `specs/FEEDBACK_PROVIDERS.md` | Ongoing progress feedback, stall/drift detection, context injection |
-| `specs/VERIFICATION.md` | Redis mailbox detailed specification, invariants, property tests |
-| `specs/VERIFICATION_TOOLBOX.md` | Verification toolchain (check.py), checker protocol, failure reporting |
-| `specs/WINK_DOCS.md` | CLI docs command, bundled documentation access |
-| `specs/WORKSPACE.md` | VFS, Podman, asteval, workspace digest |
-
-Full spec index in `AGENTS.md`.
-
-## Guides
-
-User-facing how-to material lives in `guides/`. See `guides/README.md` for the
-full table of contents.
-
-| Guide | Description |
-| ----------------------------------- | --------------------------------------------------- |
-| `guides/README.md` | Table of contents and overview |
-| `guides/philosophy.md` | The "weak incentives" approach and why WINK exists |
-| `guides/quickstart.md` | Get a working agent running quickly |
-| `guides/prompts.md` | Build typed, testable prompts |
-| `guides/tools.md` | Define tool contracts and handlers |
-| `guides/sessions.md` | Manage state with reducers |
-| `guides/adapters.md` | Connect to OpenAI, LiteLLM, Claude Agent SDK |
-| `guides/claude-agent-sdk.md` | Production integration with Claude Code |
-| `guides/orchestration.md` | Use MainLoop for request handling |
-| `guides/evaluation.md` | Test agents with datasets and evaluators |
-| `guides/lifecycle.md` | Manage shutdown, health checks, and watchdogs |
-| `guides/progressive-disclosure.md` | Control context size with summaries |
-| `guides/prompt-overrides.md` | Iterate on prompts without code changes |
-| `guides/workspace-tools.md` | Use VFS, Podman, planning, workspace digests |
-| `guides/debugging.md` | Inspect sessions and use the debug UI |
-| `guides/testing.md` | Test prompts, tools, and reducers |
-| `guides/code-quality.md` | Types, contracts, coverage, security |
-| `guides/recipes.md` | Common patterns for agents |
-| `guides/troubleshooting.md` | Debug common errors |
-| `guides/api-reference.md` | Quick lookup for key types |
-| `guides/migration-from-langgraph.md`| Coming from LangGraph/LangChain |
-| `guides/migration-from-dspy.md` | Coming from DSPy |
-| `guides/formal-verification.md` | TLA+ specs for critical code |
-| `guides/code-review-agent.md` | End-to-end walkthrough of the code reviewer |
-
-Guides cover quickstarts, patterns, recipes, and best practices. Design specs
-(what the system guarantees) remain in `specs/`.
-
-## Key Files
-
-- `README.md` - Public overview and tutorial
-- `AGENTS.md` - Canonical contributor handbook
-- `llms.md` - PyPI README with full public API reference
-- `GLOSSARY.md` - Terminology definitions
-- `CHANGELOG.md` - Track changes under "Unreleased"
-- `code_reviewer_example.py` - Complete working example
-
-## Common Patterns
-
-### Creating a Prompt
-
-```python
-from weakincentives import Prompt, MarkdownSection, Tool
-from weakincentives.prompt import PromptTemplate
-
-template = PromptTemplate[OutputType](
-    ns="my-namespace",
-    key="my-prompt",
-    name="my_prompt",
-    sections=[
-        MarkdownSection(
-            title="Instructions",
-            template="Do something with $param",
-            key="instructions",
-            tools=(my_tool,),
-        ),
-    ],
-)
-prompt = Prompt(template)  # Bind params with prompt.bind(MyParams(...))
-```
-
-### Session State
-
-```python
-from weakincentives.runtime import Session, InProcessDispatcher
-from weakincentives.runtime.session import InitializeSlice, ClearSlice
-from weakincentives.contrib.tools import Plan, AddStep
-
-dispatcher = InProcessDispatcher()
-session = Session(dispatcher=dispatcher)
-
-# Query state via indexing
-session[Plan].latest()                            # Most recent value
-session[Plan].all()                               # All values in slice
-session[Plan].where(lambda p: p.active)           # Filter by predicate
-
-# All mutations go through dispatch (unified, auditable)
-session.dispatch(AddStep(...))                    # Dispatch to reducers
-
-# Convenience methods (dispatch events internally)
-session[Plan].seed(initial_plan)                  # → InitializeSlice
-session[Plan].clear()                             # → ClearSlice
-session[Plan].register(AddStep, reducer)          # Register reducer
-
-# Direct system event dispatch (equivalent to methods above)
-session.dispatch(InitializeSlice(Plan, (initial_plan,)))
-session.dispatch(ClearSlice(Plan))
-
-# Global mutations
-session.reset()                                   # Clear all slices
-session.restore(snapshot)                         # Restore from snapshot
-```
-
-### Provider Adapter
-
-```python
-from weakincentives.adapters.openai import OpenAIAdapter
-
-adapter = OpenAIAdapter(model="gpt-4o")
-response = adapter.evaluate(prompt, session=session)
-output = response.output  # Typed result
-```
-
-### Prompt Resource Lifecycle
-
-Access resources through the prompt's resource context:
-
-```python
-# Resources bound to prompt require context manager
-with prompt.resources:
-    fs = prompt.resources.get(Filesystem)
-    # Resources available within context
-# Resources cleaned up automatically
-```
-
-### Reducers with SliceOp
-
-Reducers receive `SliceView[S]` and return `SliceOp[S]` operations:
-
-```python
-from dataclasses import dataclass, replace
-from weakincentives.runtime.session import SliceView, Append, Replace, reducer
-
-# Append a single item (Append takes one item)
-def add_step_reducer(state: SliceView[Plan], event: AddStep) -> Append[Plan]:
-    return Append(Plan(steps=(event.step,)))
-
-# Replace entire slice (Replace takes a tuple of items)
-def reset_plan_reducer(state: SliceView[Plan], event: ResetPlan) -> Replace[Plan]:
-    return Replace((Plan(steps=()),))
-
-# Declarative reducer on dataclass
-@dataclass(frozen=True)
-class AgentPlan:
-    steps: tuple[str, ...] = ()
-
-    @reducer(on=AddStep)
-    def add_step(self, event: AddStep) -> Replace["AgentPlan"]:
-        return Replace((replace(self, steps=(*self.steps, event.step)),))
-```
-
-### Resource Registry
-
-Dependency injection with scoped lifecycles:
-
-```python
-from weakincentives.resources import Binding, ResourceRegistry, Scope
-
-registry = ResourceRegistry.of(
-    Binding(Config, lambda r: Config.from_env()),
-    Binding(HTTPClient, lambda r: HTTPClient(r.get(Config).url)),
-    Binding(Tracer, lambda r: Tracer(), scope=Scope.TOOL_CALL),
-)
-
-with registry.open() as ctx:
-    http = ctx.get(HTTPClient)  # Lazily constructed singleton
-    with ctx.tool_scope() as resolver:
-        tracer = resolver.get(Tracer)  # Fresh per tool call
-```
-
-### LoopGroup for Production
-
-Coordinate multiple loops with graceful shutdown:
-
-```python
-from weakincentives.runtime import LoopGroup
-
-group = LoopGroup(
-    loops=[main_loop, eval_loop],
-    health_port=8080,        # Kubernetes probes at /health/live, /health/ready
-    watchdog_threshold=720.0,  # Terminate stuck workers
-)
-group.run()  # Blocks until SIGTERM/SIGINT
-```
-
-## Stability Notice
-
-This is **alpha software**. All APIs may change without backward
-compatibility. Do not add backward-compatibility shims or deprecation
-warnings—delete unused code completely.
-
-## Quick Checklist
-
-Before submitting changes:
-
-- [ ] `make check` passes
-- [ ] New public APIs have DbC decorators where appropriate
+- Public APIs: `@require`, `@ensure`, `@invariant`, `@pure` from `weakincentives.dbc`
+- Preconditions validate input; postconditions validate `result`
+- Messages: return `(bool, message)` tuple for custom diagnostics
+
+### Prompts & Sections
+
+- `PromptTemplate[OutputType]` with `ns`, `key`, `sections`
+- Section keys: `^[a-z0-9][a-z0-9._-]{0,63}$`
+- Tools declared on sections in `tools=(...)` tuple
+- Resources accessed via `with prompt.resources:` context
+
+### Sessions & Reducers
+
+- Pure reducers return `SliceOp[T]` (Append, Replace, Clear)—never mutate
+- All mutations via `session.dispatch(event)` by concrete dataclass type
+- Use `@reducer(on=EventType)` decorator on frozen dataclass methods
+- Access: `session[T].latest()`, `.all()`, `.where(predicate)`
+
+### Tools
+
+- Signature: `def handler(params: P, *, context: ToolContext) -> ToolResult[R]:`
+- Use `ToolResult.ok(value, message="...")` or `ToolResult.error("message")`
+- Tool names: `^[a-z0-9_-]{1,64}$`; descriptions 1-200 chars
+- Failed tools return errors (never abort); rollback is automatic
+
+### Resources
+
+- Scope: `SINGLETON`, `TOOL_CALL`, `PROTOTYPE` per `Binding`
+- Factory: `Binding(protocol, lambda resolver: Value(resolver.get(Dep)))`
+- Lifecycle: implement `Closeable`, `PostConstruct`, `Snapshotable` as needed
+
+### Serialization
+
+- Use `serde.parse(cls, data)` and `serde.dump(obj)`—no Pydantic
+- Constraints via `Annotated[type, {"ge": 0, "pattern": "..."}]`
+- `__type__` field for polymorphic union deserialization
+
+### Time
+
+- Depend on narrow protocols: `WallClock`, `MonotonicClock`, `Sleeper`
+- Inject `clock` parameter (default `SYSTEM_CLOCK`); use `FakeClock` in tests
+- Deadlines use `datetime(..., tzinfo=UTC)`
+
+### Module Layers
+
+- Foundation → Core → Adapters → High-level; no reverse imports
+- Private `_foo.py` modules never imported outside their package
+- Use protocols or `TYPE_CHECKING` to break circular dependencies
+
+### Avoid
+
+- Mutable defaults (`[]`, `{}`)
+- Global state—inject dependencies explicitly
+- Monkeypatching—use FakeClock/FakeFS instead
+- Cross-layer imports outside `TYPE_CHECKING`
+- Redundant type narrowing after type guards
+
+## Testing
+
+- 100% coverage required for `src/weakincentives/`
+- Run focused: `uv run pytest tests/path/to/test.py -v`
+- Always finish with `make check`
+
+## Documentation
+
+- **Specs**: `specs/` - design specs; see `AGENTS.md` for full index
+- **Guides**: `guides/` - how-to material; see `guides/README.md`
+- **Key files**: `README.md`, `AGENTS.md`, `llms.md`, `CHANGELOG.md`
+
+## Stability
+
+Alpha software. APIs may change. Delete unused code completely; no
+backward-compatibility shims.
+
+______________________________________________________________________
+
+## Final Checklist
+
+**Before ANY commit or claiming work is done:**
+
+- [ ] `make check` passes with zero errors (MANDATORY)
 - [ ] Tests cover new code paths (100% coverage)
-- [ ] Relevant spec documents consulted and updated if needed
+- [ ] Relevant specs consulted/updated
 - [ ] `CHANGELOG.md` updated for user-visible changes
+
+**If `make check` fails, the work is not done.**
