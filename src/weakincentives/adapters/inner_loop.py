@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any, NoReturn, cast
+from typing import TYPE_CHECKING, Any, NoReturn
 from uuid import uuid4
 
 from ..budget import BudgetExceededError, BudgetTracker
@@ -514,6 +514,7 @@ class InnerLoop[OutputT]:
             PromptExecuted(
                 prompt_name=self.inputs.prompt_name,
                 adapter=self.inputs.adapter_name,
+                result=response_payload,
                 session_id=getattr(self.config.session, "session_id", None),
                 created_at=datetime.now(UTC),
                 usage=usage,
@@ -525,12 +526,12 @@ class InnerLoop[OutputT]:
         # Dispatch output directly to session reducers
         output = response_payload.output
         if is_dataclass_instance(output):
-            self.config.session.dispatch(output)
+            _ = self.config.session.dispatch(output)  # ty: ignore[invalid-argument-type]
         elif isinstance(output, (list, tuple)):
             # Handle iterable outputs (dispatch each item)
-            for item in output:
-                if is_dataclass_instance(item):
-                    self.config.session.dispatch(item)
+            for item in output:  # pyright: ignore[reportUnknownVariableType]
+                if is_dataclass_instance(item):  # pyright: ignore[reportUnknownArgumentType]
+                    _ = self.config.session.dispatch(item)  # ty: ignore[invalid-argument-type]
 
         if not dispatch_result.ok:
             failure_handlers = [

@@ -25,6 +25,7 @@ from ...deadlines import Deadline
 from ...filesystem import Filesystem
 from ...prompt.feedback import collect_feedback
 from ...prompt.protocols import PromptProtocol
+from ...prompt.tool import ToolResult
 from ...runtime.events.types import ToolInvoked
 from ...runtime.logging import StructuredLogger, get_logger
 from ...runtime.run_context import RunContext
@@ -555,6 +556,9 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
         # For native tools, dispatch ToolInvoked BEFORE running feedback providers
         # so that FeedbackContext.tool_call_count includes this tool call.
         # Native tools have no typed payload - only telemetry event is dispatched.
+        tool_result: ToolResult[None] = ToolResult(
+            message=data.output_text or "", value=None, success=success
+        )
         event = ToolInvoked(
             prompt_name=hook_context.prompt_name,
             adapter=hook_context.adapter_name,
@@ -562,6 +566,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             params=data.tool_input,
             success=success,
             message=data.output_text or "",
+            result=tool_result,
             session_id=None,
             created_at=_utcnow(),
             usage=None,

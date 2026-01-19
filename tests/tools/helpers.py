@@ -115,6 +115,7 @@ def invoke_tool(
         params=params,
         success=result.success,
         message=result.message,
+        result=result,
         session_id=getattr(session, "session_id", None),
         created_at=datetime.now(UTC),
         rendered_output=rendered_output,

@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from random import shuffle
-from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -92,6 +91,7 @@ def _publish_tool_event(
         params=params,
         success=result.success,
         message=result.message,
+        result=result,
         call_id=str(index),
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -120,6 +120,7 @@ def test_session_attach_to_dispatcher_is_idempotent() -> None:
         params=params,
         success=tool_result.success,
         message=tool_result.message,
+        result=tool_result,
         call_id="999",
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),

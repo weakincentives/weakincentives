@@ -654,6 +654,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             PromptExecuted(
                 prompt_name=prompt_name,
                 adapter=CLAUDE_AGENT_SDK_ADAPTER_NAME,
+                result=response,
                 session_id=None,
                 created_at=_utcnow(),
                 usage=usage,
@@ -663,11 +664,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
 
         # Dispatch output directly to session reducers
         if is_dataclass_instance(output):
-            session.dispatch(output)
+            session.dispatch(output)  # ty: ignore[invalid-argument-type]
         elif isinstance(output, (list, tuple)):
             for item in output:
                 if is_dataclass_instance(item):
-                    session.dispatch(item)
+                    session.dispatch(item)  # ty: ignore[invalid-argument-type]
 
         logger.info(
             "claude_agent_sdk.evaluate.complete",

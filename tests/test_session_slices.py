@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from tests.helpers.session import ExampleOutput, make_prompt_event
+from tests.helpers.session import ExampleOutput
 from weakincentives.dbc import dbc_enabled
 from weakincentives.runtime.session import (
     SliceAccessor,
@@ -84,7 +84,7 @@ def test_query_all_returns_all_values(session_factory: SessionFactory) -> None:
 def test_query_latest_returns_most_recent_value(
     session_factory: SessionFactory,
 ) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session.dispatch(ExampleOutput(text="first"))
     session.dispatch(ExampleOutput(text="second"))
@@ -95,7 +95,7 @@ def test_query_latest_returns_most_recent_value(
 
 
 def test_query_where_filters_values(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session.dispatch(ExampleOutput(text="apple"))
     session.dispatch(ExampleOutput(text="banana"))
@@ -107,7 +107,7 @@ def test_query_where_filters_values(session_factory: SessionFactory) -> None:
 
 
 def test_query_respects_dbc_purity(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session.dispatch(ExampleOutput(text="first"))
     session.dispatch(ExampleOutput(text="second"))
@@ -126,7 +126,7 @@ def test_query_respects_dbc_purity(session_factory: SessionFactory) -> None:
 def test_query_where_logs_violate_purity_contract(
     session_factory: SessionFactory,
 ) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session.dispatch(ExampleOutput(text="first"))
 
@@ -165,7 +165,7 @@ def test_mutate_seed_iterable_values(session_factory: SessionFactory) -> None:
 
 
 def test_mutate_clear_removes_all_values(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session.dispatch(ExampleOutput(text="first"))
     session.dispatch(ExampleOutput(text="second"))
@@ -177,7 +177,7 @@ def test_mutate_clear_removes_all_values(session_factory: SessionFactory) -> Non
 
 
 def test_mutate_clear_with_predicate(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session.dispatch(ExampleOutput(text="apple"))
     session.dispatch(ExampleOutput(text="banana"))
@@ -220,7 +220,7 @@ def test_getitem_returns_slice_accessor(session_factory: SessionFactory) -> None
 
 
 def test_slice_accessor_query_methods_work(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session.dispatch(ExampleOutput(text="first"))
     session.dispatch(ExampleOutput(text="second"))

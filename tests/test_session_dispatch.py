@@ -30,6 +30,7 @@ from tests.helpers.session import (
     make_prompt_rendered,
     make_tool_event,
 )
+from weakincentives.adapters.core import PromptResponse
 from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import (
     PromptExecuted,
@@ -94,6 +95,7 @@ def test_tool_invoked_payload_dispatched_separately(
         params=ExampleParams(value=7),
         success=tool_result.success,
         message=tool_result.message,
+        result=tool_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         rendered_output=tool_result.render(),
@@ -152,7 +154,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     class SecondSlice:
         value: str
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     call_order: list[str] = []
 
@@ -205,9 +207,11 @@ def test_prompt_executed_payload_dispatched_separately(
     session, dispatcher = session_factory()
 
     output = ExampleOutput(text="filled")
+    response = PromptResponse(prompt_name="example", text="", output=output)
     event = PromptExecuted(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
+        result=response,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
     )
@@ -221,7 +225,9 @@ def test_prompt_executed_payload_dispatched_separately(
     assert session[ExampleOutput].all() == (output,)
 
 
-def test_non_dataclass_payloads_are_not_dispatched(session_factory: SessionFactory) -> None:
+def test_non_dataclass_payloads_are_not_dispatched(
+    session_factory: SessionFactory,
+) -> None:
     session, dispatcher = session_factory()
 
     # First event with dataclass payload
@@ -231,6 +237,9 @@ def test_non_dataclass_payloads_are_not_dispatched(session_factory: SessionFacto
     session.dispatch(ExamplePayload(value=1))
 
     # Second event - non-dataclass payload would not be dispatched at call site
+    non_dataclass_result: ToolResult[str] = ToolResult(
+        message="ok", value="not a dataclass", success=True
+    )
     non_dataclass_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
@@ -238,6 +247,7 @@ def test_non_dataclass_payloads_are_not_dispatched(session_factory: SessionFacto
         params=ExampleParams(value=2),
         success=True,
         message="ok",
+        result=non_dataclass_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         rendered_output="not a dataclass",
@@ -250,7 +260,7 @@ def test_non_dataclass_payloads_are_not_dispatched(session_factory: SessionFacto
 
 
 def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExamplePayload].register(
         ExamplePayload, upsert_by(lambda payload: payload.value)
@@ -288,6 +298,9 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
     session.dispatch(ExamplePayload(value=1))  # Payload dispatched separately
 
     # Dispatch failure event
+    failure_result: ToolResult[None] = ToolResult(
+        message="failed", value=None, success=False
+    )
     failure_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
@@ -295,6 +308,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
         params=ExampleParams(value=2),
         success=False,
         message="failed",
+        result=failure_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         rendered_output="failed",
@@ -314,7 +328,7 @@ def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> No
 def test_reducer_failure_leaves_previous_slice_unchanged(
     session_factory: SessionFactory,
 ) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
@@ -368,7 +382,7 @@ def test_dispatch_clear_slice(session_factory: SessionFactory) -> None:
     """Test that dispatching ClearSlice directly works."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     # Add some initial data (dispatch payloads directly)
     session.dispatch(ExampleOutput(text="first"))
@@ -385,7 +399,7 @@ def test_dispatch_clear_slice_with_predicate(session_factory: SessionFactory) ->
     """Test that dispatching ClearSlice with a predicate works."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     # Add some initial data (dispatch payloads directly)
     session.dispatch(ExampleOutput(text="apple"))
@@ -409,7 +423,7 @@ def test_clear_slice_with_no_matching_predicate(
     """Test that ClearSlice with a predicate that matches nothing leaves values unchanged."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     # Add some initial data (none starts with 'z') - dispatch payloads directly
     session.dispatch(ExampleOutput(text="apple"))
@@ -512,7 +526,7 @@ def test_prompt_executed_with_mixed_iterable_output(
     session_factory: SessionFactory,
 ) -> None:
     """Test that only dataclass items are dispatched to session slices."""
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
@@ -540,7 +554,7 @@ def test_prompt_executed_with_mixed_iterable_output(
 
 
 def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
     session.dispatch(ExampleOutput(text="first"))

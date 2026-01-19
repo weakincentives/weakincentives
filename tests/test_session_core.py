@@ -49,7 +49,7 @@ def test_session_instantiates_default_dispatcher_when_none_provided() -> None:
 def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None:
     from weakincentives.runtime.session import append_all
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
@@ -71,7 +71,7 @@ def test_clone_preserves_state_and_reducer_registration(
 ) -> None:
     provided_session_id = uuid4()
     provided_created_at = datetime.now(UTC)
-    session, dispatcher = session_factory(
+    session, _ = session_factory(
         session_id=provided_session_id, created_at=provided_created_at
     )
 
@@ -105,7 +105,7 @@ def test_clone_preserves_state_and_reducer_registration(
 def test_clone_attaches_to_new_dispatcher_when_provided(
     session_factory: SessionFactory,
 ) -> None:
-    session, source_dispatcher = session_factory()
+    session, _ = session_factory()
 
     # Dispatch payload directly (payloads no longer extracted from telemetry events)
     session.dispatch(ExampleOutput(text="first"))

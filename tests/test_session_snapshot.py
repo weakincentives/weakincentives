@@ -21,7 +21,6 @@ import pytest
 
 from tests.helpers.session import (
     ExampleOutput,
-    ExamplePayload,
     make_prompt_event,
     make_prompt_rendered,
     make_tool_event,
@@ -51,7 +50,7 @@ if TYPE_CHECKING:
 
 
 def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     # Dispatch payloads directly (payloads no longer extracted from telemetry events)
     session.dispatch(ExampleOutput(text="first"))
@@ -78,7 +77,7 @@ def test_snapshot_preserves_custom_reducer_behavior(
     class Summary:
         entries: tuple[str, ...]
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     def aggregate(
         view: SliceView[Summary],
@@ -238,7 +237,7 @@ def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> No
 def test_snapshot_rollback_requires_registered_slices(
     session_factory: SessionFactory,
 ) -> None:
-    source, dispatcher = session_factory()
+    source, _ = session_factory()
     # Dispatch payload directly (payloads no longer extracted from telemetry events)
     source.dispatch(ExampleOutput(text="hello"))
 
@@ -263,7 +262,7 @@ def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) 
 
 
 def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
     # Dispatch payload directly (payloads no longer extracted from telemetry events)

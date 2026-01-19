@@ -60,7 +60,7 @@ def test_null_event_dispatcher_is_noop() -> None:
         PromptExecuted(
             prompt_name="demo",
             adapter=TEST_ADAPTER_NAME,
-            
+            result=make_prompt_response("demo"),
             session_id=uuid4(),
             created_at=datetime.now(UTC),
         )
@@ -80,7 +80,7 @@ def test_publish_without_subscribers_returns_success_result() -> None:
     event = PromptExecuted(
         prompt_name="demo",
         adapter=TEST_ADAPTER_NAME,
-        
+        result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
@@ -134,7 +134,7 @@ def test_in_process_dispatcher_delivers_in_order() -> None:
     event = PromptExecuted(
         prompt_name="demo",
         adapter=TEST_ADAPTER_NAME,
-        
+        result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
@@ -168,7 +168,7 @@ def test_in_process_dispatcher_isolates_handler_exceptions(
     event = PromptExecuted(
         prompt_name="demo",
         adapter=TEST_ADAPTER_NAME,
-        
+        result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
@@ -207,7 +207,7 @@ def test_publish_result_raise_if_errors() -> None:
         PromptExecuted(
             prompt_name="demo",
             adapter=TEST_ADAPTER_NAME,
-            
+            result=make_prompt_response("demo"),
             session_id=uuid4(),
             created_at=datetime.now(UTC),
         )
@@ -245,6 +245,7 @@ def test_tool_invoked_event_fields() -> None:
         params=_Params(value=1),
         success=raw_result.success,
         message=raw_result.message,
+        result=raw_result,
         call_id="abc123",
         session_id=uuid4(),
         created_at=datetime.now(UTC),
@@ -289,7 +290,7 @@ def test_unsubscribe_removes_handler_and_returns_true() -> None:
     event = PromptExecuted(
         prompt_name="demo",
         adapter=TEST_ADAPTER_NAME,
-        
+        result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
@@ -348,7 +349,7 @@ def test_unsubscribe_does_not_affect_other_handlers() -> None:
     event = PromptExecuted(
         prompt_name="demo",
         adapter=TEST_ADAPTER_NAME,
-        
+        result=make_prompt_response("demo"),
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )

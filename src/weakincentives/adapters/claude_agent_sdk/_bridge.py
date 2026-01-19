@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Callable, Coroutine
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from ...budget import BudgetTracker
 from ...deadlines import Deadline
@@ -301,6 +301,7 @@ class BridgedTool:
             params=args,
             success=result.success,
             message=result.message,
+            result=result,
             session_id=None,
             created_at=datetime.now(UTC),
             usage=None,
@@ -312,7 +313,7 @@ class BridgedTool:
 
         # Dispatch payload directly to session reducers
         if is_dataclass_instance(result.value):
-            self._session.dispatch(result.value)
+            self._session.dispatch(result.value)  # ty: ignore[invalid-argument-type]
 
 
 def create_bridged_tools(

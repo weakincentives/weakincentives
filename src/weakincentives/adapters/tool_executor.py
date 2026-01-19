@@ -640,7 +640,7 @@ def tool_execution(
     context.beat()
 
 
-def dispatch_tool_invocation(
+def dispatch_tool_invocation(  # noqa: C901
     *,
     context: ToolExecutionContext,
     outcome: ToolExecutionOutcome,
@@ -662,7 +662,7 @@ def dispatch_tool_invocation(
     payload_dispatch_error: Exception | None = None
     if is_dataclass_instance(payload):
         try:
-            context.session.dispatch(payload)
+            _ = context.session.dispatch(payload)  # ty: ignore[invalid-argument-type]
         except Exception as exc:
             payload_dispatch_error = exc
 
@@ -670,8 +670,7 @@ def dispatch_tool_invocation(
     event_message = outcome.result.message
     if payload_dispatch_error is not None:
         event_message = (
-            f"Reducer errors prevented applying tool result: "
-            f"{payload_dispatch_error}"
+            f"Reducer errors prevented applying tool result: {payload_dispatch_error}"
         )
 
     # Create and dispatch telemetry event
@@ -682,6 +681,7 @@ def dispatch_tool_invocation(
         params=outcome.params,
         success=outcome.result.success,
         message=event_message,
+        result=outcome.result,
         session_id=session_id,
         created_at=created_at,
         usage=usage,
@@ -705,6 +705,7 @@ def dispatch_tool_invocation(
             params=outcome.params,
             success=outcome.result.success,
             message=event_message,
+            result=outcome.result,
             session_id=session_id,
             created_at=created_at,
             usage=usage,
@@ -714,7 +715,7 @@ def dispatch_tool_invocation(
             event_id=event_id,
         )
         # Re-dispatch with updated message so observers see correct state
-        context.session.dispatcher.dispatch(invocation)
+        _ = context.session.dispatcher.dispatch(invocation)
 
     if any_dispatch_failed:
         # Restore to pre-tool state if tool succeeded (not already restored)

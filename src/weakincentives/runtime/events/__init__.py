@@ -110,11 +110,13 @@ class PromptExecuted:
     """Event emitted after an adapter finishes evaluating a prompt.
 
     This is a telemetry event. The typed output (if any) is dispatched
-    separately via session.dispatch() at the call site.
+    separately via session.dispatch() at the call site. The ``result``
+    field contains the full PromptResponse for auditability.
     """
 
     prompt_name: str
     adapter: AdapterName
+    result: Any
     session_id: UUID | None
     created_at: datetime
     usage: TokenUsage | None = None

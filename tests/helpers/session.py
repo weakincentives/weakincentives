@@ -60,6 +60,7 @@ def make_tool_event(value: int) -> ToolInvoked:
         params=ExampleParams(value=value),
         success=tool_result.success,
         message=tool_result.message,
+        result=tool_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         rendered_output=rendered_output,
@@ -67,9 +68,15 @@ def make_tool_event(value: int) -> ToolInvoked:
 
 
 def make_prompt_event(output: object) -> PromptExecuted:
+    response = PromptResponse(
+        prompt_name="example",
+        text="",
+        output=output,
+    )
     return PromptExecuted(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
+        result=response,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
     )

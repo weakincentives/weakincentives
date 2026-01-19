@@ -527,10 +527,7 @@ def test_adapter_tool_execution_rejects_type_errors(
     assert len(events) == 1
     invocation = events[0]
     assert invocation.success is False
-    assert (
-        invocation.message
-        == "Tool validation failed: query: value cannot be None"
-    )
+    assert invocation.message == "Tool validation failed: query: value cannot be None"
 
     tool_message = _second_tool_message(requests)
     message_text, rendered_text = _tool_message_parts(tool_message)
@@ -577,10 +574,7 @@ def test_adapter_tool_execution_unexpected_exception(
 
     assert len(events) == 1
     invocation = events[0]
-    assert (
-        invocation.message
-        == "Tool 'search_notes' execution failed: handler crash"
-    )
+    assert invocation.message == "Tool 'search_notes' execution failed: handler crash"
     assert invocation.success is False
 
     tool_message = _second_tool_message(requests)

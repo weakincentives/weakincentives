@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
 
+from weakincentives.adapters.core import PromptResponse
 from weakincentives.evals import (
     adapt,
     all_of,
@@ -32,6 +33,7 @@ from weakincentives.evals import (
     tool_called,
     tool_not_called,
 )
+from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import PromptExecuted, TokenUsage, ToolInvoked
 from weakincentives.runtime.session import SessionViewProtocol
 
@@ -44,6 +46,9 @@ def make_tool_invoked(
     message: str = "ok",
 ) -> ToolInvoked:
     """Create a ToolInvoked event for testing."""
+    tool_result: ToolResult[None] = ToolResult(
+        message=message, value=None, success=success
+    )
     return ToolInvoked(
         prompt_name="test",
         adapter="openai",
@@ -51,6 +56,7 @@ def make_tool_invoked(
         params=params or {},
         success=success,
         message=message,
+        result=tool_result,
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
@@ -62,9 +68,11 @@ def make_prompt_executed(
     output_tokens: int = 50,
 ) -> PromptExecuted:
     """Create a PromptExecuted event for testing."""
+    response = PromptResponse(prompt_name="test", text="", output=None)
     return PromptExecuted(
         prompt_name="test",
         adapter="openai",
+        result=response,
         session_id=uuid4(),
         created_at=datetime.now(UTC),
         usage=TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens),
@@ -390,9 +398,11 @@ def test_token_usage_under_no_usage() -> None:
 def test_token_usage_under_with_none_usage() -> None:
     """token_usage_under handles executions with None usage."""
     # Create an execution with usage=None
+    response = PromptResponse(prompt_name="test", text="", output=None)
     execution_with_no_usage = PromptExecuted(
         prompt_name="test",
         adapter="openai",
+        result=response,
         session_id=uuid4(),
         created_at=datetime.now(UTC),
         usage=None,  # Explicitly None
