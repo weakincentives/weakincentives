@@ -20,7 +20,7 @@ from uuid import uuid4
 
 import pytest
 
-from tests.helpers.session import ExampleOutput, make_prompt_event
+from tests.helpers.session import ExampleOutput
 from weakincentives.runtime.events import InProcessDispatcher
 from weakincentives.runtime.session import (
     Session,
@@ -49,20 +49,20 @@ def test_session_instantiates_default_dispatcher_when_none_provided() -> None:
 def test_reset_clears_registered_slices(session_factory: SessionFactory) -> None:
     from weakincentives.runtime.session import append_all
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
-    first_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    assert first_result.ok
+    # Dispatch payload directly (payloads no longer extracted from telemetry events)
+    session.dispatch(ExampleOutput(text="first"))
     assert session[ExampleOutput].all()
 
     session.reset()
 
     assert session[ExampleOutput].all() == ()
 
-    second_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
-    assert second_result.ok
+    # Dispatch payload directly
+    session.dispatch(ExampleOutput(text="second"))
     assert session[ExampleOutput].all() == (ExampleOutput(text="second"),)
 
 
@@ -71,14 +71,14 @@ def test_clone_preserves_state_and_reducer_registration(
 ) -> None:
     provided_session_id = uuid4()
     provided_created_at = datetime.now(UTC)
-    session, dispatcher = session_factory(
+    session, _ = session_factory(
         session_id=provided_session_id, created_at=provided_created_at
     )
 
     session[ExampleOutput].register(ExampleOutput, replace_latest)
 
-    result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    assert result.ok
+    # Dispatch payload directly (payloads no longer extracted from telemetry events)
+    session.dispatch(ExampleOutput(text="first"))
 
     clone_dispatcher = InProcessDispatcher()
     clone = session.clone(dispatcher=clone_dispatcher)
@@ -89,12 +89,14 @@ def test_clone_preserves_state_and_reducer_registration(
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
     assert clone._reducers.keys() == session._reducers.keys()
 
-    clone_dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    # Dispatch to clone session
+    clone.dispatch(ExampleOutput(text="second"))
 
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="second")
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="third")))
+    # Dispatch to original session
+    session.dispatch(ExampleOutput(text="third"))
 
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="third")
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="second")
@@ -103,9 +105,10 @@ def test_clone_preserves_state_and_reducer_registration(
 def test_clone_attaches_to_new_dispatcher_when_provided(
     session_factory: SessionFactory,
 ) -> None:
-    session, source_dispatcher = session_factory()
+    session, _ = session_factory()
 
-    source_dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    # Dispatch payload directly (payloads no longer extracted from telemetry events)
+    session.dispatch(ExampleOutput(text="first"))
 
     target_dispatcher = InProcessDispatcher()
     clone_session_id = uuid4()
@@ -120,11 +123,13 @@ def test_clone_attaches_to_new_dispatcher_when_provided(
     assert clone.created_at == clone_created_at
     assert clone[ExampleOutput].all() == session[ExampleOutput].all()
 
-    target_dispatcher.dispatch(make_prompt_event(ExampleOutput(text="from clone")))
+    # Dispatch to clone session
+    clone.dispatch(ExampleOutput(text="from clone"))
 
     assert clone[ExampleOutput].all()[-1] == ExampleOutput(text="from clone")
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="first")
 
-    source_dispatcher.dispatch(make_prompt_event(ExampleOutput(text="original")))
+    # Dispatch to original session
+    session.dispatch(ExampleOutput(text="original"))
 
     assert session[ExampleOutput].all()[-1] == ExampleOutput(text="original")

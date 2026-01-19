@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import Mock
 from uuid import uuid4
 
+from weakincentives.adapters.core import PromptResponse
 from weakincentives.evals import (
     adapt,
     all_of,
@@ -32,6 +33,7 @@ from weakincentives.evals import (
     tool_called,
     tool_not_called,
 )
+from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime.events import PromptExecuted, TokenUsage, ToolInvoked
 from weakincentives.runtime.session import SessionViewProtocol
 
@@ -40,15 +42,21 @@ def make_tool_invoked(
     name: str,
     *,
     params: dict[str, Any] | None = None,
-    result: dict[str, Any] | None = None,
+    success: bool = True,
+    message: str = "ok",
 ) -> ToolInvoked:
     """Create a ToolInvoked event for testing."""
+    tool_result: ToolResult[None] = ToolResult(
+        message=message, value=None, success=success
+    )
     return ToolInvoked(
         prompt_name="test",
         adapter="openai",
         name=name,
         params=params or {},
-        result=result or {"success": True},
+        success=success,
+        message=message,
+        result=tool_result,
         session_id=uuid4(),
         created_at=datetime.now(UTC),
     )
@@ -60,10 +68,11 @@ def make_prompt_executed(
     output_tokens: int = 50,
 ) -> PromptExecuted:
     """Create a PromptExecuted event for testing."""
+    response = PromptResponse(prompt_name="test", text="", output=None)
     return PromptExecuted(
         prompt_name="test",
         adapter="openai",
-        result={"output": "test"},
+        result=response,
         session_id=uuid4(),
         created_at=datetime.now(UTC),
         usage=TokenUsage(input_tokens=input_tokens, output_tokens=output_tokens),
@@ -270,8 +279,8 @@ def test_all_tools_succeeded_pass() -> None:
     """all_tools_succeeded passes when all tools return success=True."""
     session = make_mock_session(
         tool_invocations=[
-            make_tool_invoked("search", result={"success": True}),
-            make_tool_invoked("fetch", result={"success": True}),
+            make_tool_invoked("search", success=True),
+            make_tool_invoked("fetch", success=True),
         ]
     )
     evaluator = all_tools_succeeded()
@@ -285,8 +294,8 @@ def test_all_tools_succeeded_fail() -> None:
     """all_tools_succeeded fails when any tool returns success=False."""
     session = make_mock_session(
         tool_invocations=[
-            make_tool_invoked("search", result={"success": True}),
-            make_tool_invoked("fetch", result={"success": False, "error": "not found"}),
+            make_tool_invoked("search", success=True),
+            make_tool_invoked("fetch", success=False),
         ]
     )
     evaluator = all_tools_succeeded()
@@ -297,10 +306,10 @@ def test_all_tools_succeeded_fail() -> None:
 
 
 def test_all_tools_succeeded_no_success_field() -> None:
-    """all_tools_succeeded treats missing success field as success."""
+    """all_tools_succeeded passes when success=True (default)."""
     session = make_mock_session(
         tool_invocations=[
-            make_tool_invoked("search", result={"data": "result"}),
+            make_tool_invoked("search"),  # success=True by default
         ]
     )
     evaluator = all_tools_succeeded()
@@ -320,8 +329,8 @@ def test_all_tools_succeeded_multiple_failures() -> None:
     """all_tools_succeeded reports all failed tools."""
     session = make_mock_session(
         tool_invocations=[
-            make_tool_invoked("search", result={"success": False}),
-            make_tool_invoked("fetch", result={"success": False}),
+            make_tool_invoked("search", success=False),
+            make_tool_invoked("fetch", success=False),
         ]
     )
     evaluator = all_tools_succeeded()
@@ -389,10 +398,11 @@ def test_token_usage_under_no_usage() -> None:
 def test_token_usage_under_with_none_usage() -> None:
     """token_usage_under handles executions with None usage."""
     # Create an execution with usage=None
+    response = PromptResponse(prompt_name="test", text="", output=None)
     execution_with_no_usage = PromptExecuted(
         prompt_name="test",
         adapter="openai",
-        result={"output": "test"},
+        result=response,
         session_id=uuid4(),
         created_at=datetime.now(UTC),
         usage=None,  # Explicitly None
@@ -552,7 +562,7 @@ def test_nested_session_evaluators() -> None:
     """Session evaluators can be nested in combinators."""
     session = make_mock_session(
         tool_invocations=[
-            make_tool_invoked("search", result={"success": True}),
+            make_tool_invoked("search", success=True),
         ],
         prompt_executions=[
             make_prompt_executed(input_tokens=100, output_tokens=50),

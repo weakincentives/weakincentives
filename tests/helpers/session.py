@@ -58,6 +58,8 @@ def make_tool_event(value: int) -> ToolInvoked:
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=value),
+        success=tool_result.success,
+        message=tool_result.message,
         result=tool_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -68,7 +70,7 @@ def make_tool_event(value: int) -> ToolInvoked:
 def make_prompt_event(output: object) -> PromptExecuted:
     response = PromptResponse(
         prompt_name="example",
-        text="done",
+        text="",
         output=output,
     )
     return PromptExecuted(

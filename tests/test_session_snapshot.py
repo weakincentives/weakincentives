@@ -21,7 +21,6 @@ import pytest
 
 from tests.helpers.session import (
     ExampleOutput,
-    ExamplePayload,
     make_prompt_event,
     make_prompt_rendered,
     make_tool_event,
@@ -51,22 +50,20 @@ if TYPE_CHECKING:
 
 
 def test_snapshot_round_trip_restores_state(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
-    first_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    second_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    # Dispatch payloads directly (payloads no longer extracted from telemetry events)
+    session.dispatch(ExampleOutput(text="first"))
+    session.dispatch(ExampleOutput(text="second"))
 
-    assert first_result.ok
-    assert second_result.ok
     original_state = session[ExampleOutput].all()
 
     snapshot = session.snapshot(include_all=True)
     raw = snapshot.to_json()
     restored = Snapshot.from_json(raw)
 
-    third_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="third")))
+    session.dispatch(ExampleOutput(text="third"))
     assert session[ExampleOutput].all() != original_state
-    assert third_result.ok
 
     session.restore(restored)
 
@@ -80,7 +77,7 @@ def test_snapshot_preserves_custom_reducer_behavior(
     class Summary:
         entries: tuple[str, ...]
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     def aggregate(
         view: SliceView[Summary],
@@ -96,22 +93,20 @@ def test_snapshot_preserves_custom_reducer_behavior(
 
     session[Summary].register(ExampleOutput, aggregate)
 
-    first_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="start")))
+    # Dispatch payloads directly (payloads no longer extracted from telemetry events)
+    session.dispatch(ExampleOutput(text="start"))
     snapshot = session.snapshot(include_all=True)
 
-    second_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="after")))
+    session.dispatch(ExampleOutput(text="after"))
     assert session[Summary].all()[0].entries == ("start", "after")
 
     session.restore(snapshot)
 
     assert session[Summary].all()[0].entries == ("start",)
 
-    third_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="again")))
+    session.dispatch(ExampleOutput(text="again"))
 
     assert session[Summary].all()[0].entries == ("start", "again")
-    assert first_result.ok
-    assert second_result.ok
-    assert third_result.ok
 
 
 def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None:
@@ -140,8 +135,9 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     tools_snapshot = cast(tuple[ToolInvoked, ...], snapshot.slices[ToolInvoked])
 
     assert rendered_snapshot == (rendered_event,)
-    assert executed_snapshot[0].result.output == ExampleOutput(text="complete")
-    assert tools_snapshot[0].result.value == ExamplePayload(value=4)
+    assert executed_snapshot[0].prompt_name == "example"
+    assert tools_snapshot[0].name == "tool"
+    assert tools_snapshot[0].success is True
 
     restored_rendered = cast(
         tuple[PromptRendered, ...], restored.slices[PromptRendered]
@@ -154,14 +150,14 @@ def test_snapshot_includes_event_slices(session_factory: SessionFactory) -> None
     assert restored_rendered[0].event_id == rendered_event.event_id
     restored_executed = restored_executed_slice[0]
     assert restored_executed.event_id == executed_event.event_id
-    assert restored_executed.result["prompt_name"] == "example"
-    assert restored_executed.result["output"] == {"text": "complete"}
+    assert restored_executed.prompt_name == "example"
 
     restored_tool = restored_tool_slice[0]
     assert restored_tool.event_id == tool_event.event_id
     assert restored_tool.name == "tool"
     assert restored_tool.params == {"value": 4}
-    assert restored_tool.result["value"] == {"value": 4}
+    assert restored_tool.success is True
+    assert restored_tool.message == "ok"
 
 
 def test_snapshot_filters_log_slices_by_default(
@@ -169,8 +165,10 @@ def test_snapshot_filters_log_slices_by_default(
 ) -> None:
     session, dispatcher = session_factory()
 
+    # Dispatch telemetry event (goes to log slice)
     dispatcher.dispatch(make_tool_event(1))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="state")))
+    # Dispatch payload directly (goes to state slice)
+    session.dispatch(ExampleOutput(text="state"))
 
     snapshot = session.snapshot()
 
@@ -239,10 +237,10 @@ def test_snapshot_tracks_relationship_ids(session_factory: SessionFactory) -> No
 def test_snapshot_rollback_requires_registered_slices(
     session_factory: SessionFactory,
 ) -> None:
-    source, dispatcher = session_factory()
-    result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="hello")))
+    source, _ = session_factory()
+    # Dispatch payload directly (payloads no longer extracted from telemetry events)
+    source.dispatch(ExampleOutput(text="hello"))
 
-    assert result.ok
     snapshot = source.snapshot()
 
     target = Session(dispatcher=InProcessDispatcher())
@@ -264,14 +262,15 @@ def test_snapshot_rejects_non_dataclass_values(session_factory: SessionFactory) 
 
 
 def test_mutate_rollback_restores_snapshot(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    # Dispatch payload directly (payloads no longer extracted from telemetry events)
+    session.dispatch(ExampleOutput(text="first"))
 
     snapshot = session.snapshot()
 
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    session.dispatch(ExampleOutput(text="second"))
     assert session[ExampleOutput].latest() == ExampleOutput(text="second")
 
     session.restore(snapshot)

@@ -589,10 +589,10 @@ def test_inner_loop_formats_tool_dispatch_failures() -> None:
     response = loop.run()
 
     assert response.text == "All done"
-    tool_event = next(
-        event for event in dispatcher.events if isinstance(event, ToolInvoked)
-    )
-    failure_message = tool_event.result.message
+    # Get the last ToolInvoked event (may have correction after dispatch failure)
+    tool_events = [e for e in dispatcher.events if isinstance(e, ToolInvoked)]
+    tool_event = tool_events[-1]
+    failure_message = tool_event.message
     assert "Reducer errors prevented applying tool result" in failure_message
 
 

@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -38,7 +38,6 @@ from ..events import (
 from ..logging import StructuredLogger, get_logger
 from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerEvent, TypedReducer
-from .dataclasses import is_dataclass_instance
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append_all
 from .slice_accessor import SliceAccessor
@@ -781,49 +780,20 @@ class Session(SessionProtocol):
         self._handle_prompt_rendered(start_event)
 
     def _handle_tool_invoked(self, event: ToolInvoked) -> None:
-        # Dispatch ToolInvoked to any reducers registered for ToolInvoked events
+        # Dispatch ToolInvoked to reducers registered for telemetry events.
+        # Typed payloads are dispatched directly at the call site via session.dispatch().
         self._dispatch_data_event(
             _TOOL_INVOKED_TYPE,
             cast(ReducerEvent, event),
         )
 
-        # Extract payload from ToolResult for slice dispatch
-        result = event.result
-        if hasattr(result, "value"):
-            # ToolResult dataclass
-            payload = result.value
-        elif isinstance(result, dict):
-            # Raw dict from SDK native tools - no typed value
-            payload = None
-        else:
-            payload = None
-
-        # Dispatch payload directly to slice reducers
-        if is_dataclass_instance(payload):
-            # Narrow for ty: payload is SupportsDataclass after TypeGuard
-            narrowed = cast(SupportsDataclass, payload)  # pyright: ignore[reportUnnecessaryCast]
-            self._dispatch_data_event(type(narrowed), narrowed)
-
     def _handle_prompt_executed(self, event: PromptExecuted) -> None:
-        # Dispatch PromptExecuted to any reducers registered for PromptExecuted events
+        # Dispatch PromptExecuted to reducers registered for telemetry events.
+        # Typed outputs are dispatched directly at the call site via session.dispatch().
         self._dispatch_data_event(
             _PROMPT_EXECUTED_TYPE,
             cast(ReducerEvent, event),
         )
-
-        # Dispatch output directly to slice reducers
-        output = event.result.output
-        if is_dataclass_instance(output):
-            self._dispatch_data_event(type(output), output)
-            return
-
-        # Handle iterable outputs (dispatch each item directly)
-        if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
-            for item in cast(Iterable[object], output):
-                if is_dataclass_instance(item):
-                    # Narrow for ty: item is SupportsDataclass after TypeGuard
-                    narrowed_item = cast(SupportsDataclass, item)  # pyright: ignore[reportUnnecessaryCast]
-                    self._dispatch_data_event(type(narrowed_item), narrowed_item)
 
     def _handle_prompt_rendered(self, event: PromptRendered) -> None:
         self._dispatch_data_event(

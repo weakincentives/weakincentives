@@ -22,7 +22,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from random import shuffle
-from typing import cast
 from uuid import uuid4
 
 import pytest
@@ -78,7 +77,9 @@ class _DummyPrompt:
         return self._sections
 
 
-def _publish_tool_event(dispatcher: InProcessDispatcher, index: int) -> None:
+def _publish_tool_event(
+    dispatcher: InProcessDispatcher, session: Session, index: int
+) -> None:
     params = ExampleParams(value=index)
     result_payload = ExampleResult(value=index)
     result = ToolResult.ok(result_payload, message=f"ok-{index}")
@@ -88,13 +89,18 @@ def _publish_tool_event(dispatcher: InProcessDispatcher, index: int) -> None:
         adapter=UNIT_TEST_ADAPTER_NAME,
         name=f"example-{index}",
         params=params,
-        result=cast(ToolResult[object], result),
+        success=result.success,
+        message=result.message,
+        result=result,
         call_id=str(index),
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
         rendered_output=rendered_output,
     )
+    # Dispatch telemetry event to dispatcher
     dispatcher.dispatch(event)
+    # Dispatch payload directly to session (payloads no longer extracted from events)
+    session.dispatch(result_payload)
 
 
 def test_session_attach_to_dispatcher_is_idempotent() -> None:
@@ -112,7 +118,9 @@ def test_session_attach_to_dispatcher_is_idempotent() -> None:
         adapter=UNIT_TEST_ADAPTER_NAME,
         name="example-idempotent",
         params=params,
-        result=cast(ToolResult[object], tool_result),
+        success=tool_result.success,
+        message=tool_result.message,
+        result=tool_result,
         call_id="999",
         session_id=THREAD_SESSION_ID,
         created_at=datetime.now(UTC),
@@ -134,7 +142,7 @@ def test_session_collects_tool_data_across_threads(
     total_events = max(16, max_workers * 8)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [
-            executor.submit(_publish_tool_event, dispatcher, index)
+            executor.submit(_publish_tool_event, dispatcher, session, index)
             for index in range(total_events)
         ]
         for future in futures:
@@ -163,7 +171,7 @@ def test_session_snapshots_restore_across_threads(
     snapshot_requests = max_workers * 4
 
     mutation_tasks = [
-        (lambda idx=index: _publish_tool_event(dispatcher, idx))
+        (lambda idx=index: _publish_tool_event(dispatcher, session, idx))
         for index in range(total_events)
     ]
     snapshot_tasks = [
@@ -213,9 +221,10 @@ def test_session_snapshots_restore_across_threads(
         for value, count in result_value_counts.items():
             assert tool_value_counts[value] >= count
 
+        # Verify tool events have expected structure
         for tool_event in restored_tool_events:
-            assert isinstance(tool_event.result.value, ExampleResult)
-            assert tool_event.result.value.value == int(tool_event.call_id)
+            assert tool_event.success is True
+            assert tool_event.call_id is not None
 
 
 @pytest.mark.threadstress(min_workers=2, max_workers=6)

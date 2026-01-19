@@ -529,7 +529,9 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
         event: ReducerEvent,
     ) -> None:
         original_dispatch(data_type, event)
-        raise RuntimeError("Reducer crashed")
+        # Only fail for ToolPayload dispatches (not telemetry events)
+        if data_type is ToolPayload:
+            raise RuntimeError("Reducer crashed")
 
     monkeypatch.setattr(
         session,
@@ -537,29 +539,28 @@ def test_litellm_adapter_rolls_back_session_on_publish_failure(
         MethodType(failing_dispatch, session),
     )
 
-    with pytest.raises(ExceptionGroup) as exc_info:
-        _evaluate_with_session(
-            adapter,
-            prompt,
-            ToolParams(query="policies"),
-            session=session,
-        )
-
-    assert "Reducer crashed" in str(exc_info.value)
+    # Evaluate should complete despite the reducer error (error is caught)
+    _evaluate_with_session(
+        adapter,
+        prompt,
+        ToolParams(query="policies"),
+        session=session,
+    )
 
     assert tool_events
-    tool_event = tool_events[0]
-    assert tool_event.result.message.startswith(
+    # Get the last tool event (may have correction after dispatch failure)
+    tool_event = [e for e in tool_events if e.name == "search_notes"][-1]
+    assert tool_event.message.startswith(
         "Reducer errors prevented applying tool result:"
     )
-    assert "Reducer crashed" in tool_event.result.message
+    assert "Reducer crashed" in tool_event.message
 
     latest_payload = session[ToolPayload].latest()
     assert latest_payload == ToolPayload(answer="baseline")
 
+    # PromptExecuted is telemetry only; it no longer carries the result
     assert prompt_events
-    prompt_result = prompt_events[0].result
-    assert prompt_result.output == StructuredAnswer(answer="Policy summary")
+    assert prompt_events[0].prompt_name == "search"
 
 
 def test_litellm_format_dispatch_failures_handles_defaults() -> None:
@@ -831,9 +832,8 @@ def test_litellm_adapter_surfaces_tool_validation_errors() -> None:
     assert result.output is None
     assert len(tool_events) == 1
     event = tool_events[0]
-    assert event.result.message == "Tool validation failed: invalid query"
-    assert event.result.success is False
-    assert event.result.value is None
+    assert event.message == "Tool validation failed: invalid query"
+    assert event.success is False
     assert event.call_id == "call_1"
 
     second_request = completion.requests[1]
@@ -918,9 +918,8 @@ def test_litellm_adapter_surfaces_tool_type_errors() -> None:
     assert invoked is False
     assert len(tool_events) == 1
     event = tool_events[0]
-    assert event.result.message == "Tool validation failed: query: value cannot be None"
-    assert event.result.success is False
-    assert event.result.value is None
+    assert event.message == "Tool validation failed: query: value cannot be None"
+    assert event.success is False
     assert event.call_id == "call_1"
 
     second_request = completion.requests[1]
@@ -1043,7 +1042,8 @@ def test_litellm_adapter_emits_events_during_evaluation() -> None:
     prompt_event = prompt_events[0]
     assert prompt_event.prompt_name == "search"
     assert prompt_event.adapter == "litellm"
-    assert prompt_event.result is result
+    # PromptExecuted is telemetry only; result is returned from evaluate()
+    assert result.output == StructuredAnswer(answer="Policy summary")
 
 
 def test_litellm_adapter_raises_when_tool_handler_missing() -> None:
@@ -1183,9 +1183,8 @@ def test_litellm_adapter_handles_invalid_tool_params() -> None:
     assert result.text == "Try again"
     assert len(tool_events) == 1
     invocation = tool_events[0]
-    assert invocation.result.success is False
-    assert invocation.result.value is None
-    assert "Missing required field" in invocation.result.message
+    assert invocation.success is False
+    assert "Missing required field" in invocation.message
 
 
 def test_litellm_adapter_records_handler_failures() -> None:
@@ -1260,9 +1259,8 @@ def test_litellm_adapter_records_handler_failures() -> None:
     assert result.output is None
     assert len(tool_events) == 1
     event = tool_events[0]
-    assert event.result.success is False
-    assert event.result.value is None
-    assert "execution failed: boom" in event.result.message
+    assert event.success is False
+    assert "execution failed: boom" in event.message
 
     second_request = completion.requests[1]
     second_messages = cast(list[dict[str, Any]], second_request["messages"])

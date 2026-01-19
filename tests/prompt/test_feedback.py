@@ -42,6 +42,7 @@ from weakincentives.prompt import (
     run_feedback_providers,
 )
 from weakincentives.prompt.feedback import _should_trigger
+from weakincentives.prompt.tool import ToolResult
 from weakincentives.runtime import InProcessDispatcher, Session
 from weakincentives.runtime.events import ToolInvoked
 
@@ -65,12 +66,15 @@ def make_prompt() -> Prompt[None]:
 
 def make_tool_invoked(name: str = "test_tool") -> ToolInvoked:
     """Create a ToolInvoked event for testing."""
+    result: ToolResult[None] = ToolResult.ok(None, message="ok")
     return ToolInvoked(
         prompt_name="test",
         adapter="test",
         name=name,
         params=None,
-        result=None,
+        success=True,
+        message="ok",
+        result=result,
         session_id=None,
         created_at=datetime.now(UTC),
     )
@@ -394,13 +398,16 @@ class TestFeedbackContext:
         # Add tool calls from different prompts
         session.dispatcher.dispatch(make_tool_invoked("tool_1"))  # prompt_name="test"
         session.dispatcher.dispatch(make_tool_invoked("tool_2"))  # prompt_name="test"
+        other_result: ToolResult[None] = ToolResult.ok(None, message="ok")
         session.dispatcher.dispatch(
             ToolInvoked(
                 prompt_name="other_prompt",  # Different prompt
                 adapter="test",
                 name="other_tool",
                 params=None,
-                result=None,
+                success=True,
+                message="ok",
+                result=other_result,
                 session_id=None,
                 created_at=datetime.now(UTC),
             )
@@ -418,13 +425,16 @@ class TestFeedbackContext:
         prompt = make_prompt()
 
         session.dispatcher.dispatch(make_tool_invoked("tool_1"))
+        other_result2: ToolResult[None] = ToolResult.ok(None, message="ok")
         session.dispatcher.dispatch(
             ToolInvoked(
                 prompt_name="other_prompt",
                 adapter="test",
                 name="other_tool",
                 params=None,
-                result=None,
+                success=True,
+                message="ok",
+                result=other_result2,
                 session_id=None,
                 created_at=datetime.now(UTC),
             )

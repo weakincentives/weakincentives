@@ -27,7 +27,6 @@ from tests.helpers.session import (
     ExampleOutput,
     ExampleParams,
     ExamplePayload,
-    make_prompt_event,
     make_prompt_rendered,
     make_tool_event,
 )
@@ -58,26 +57,33 @@ pytestmark = pytest.mark.core
 def test_tool_invoked_appends_payload_every_time(
     session_factory: SessionFactory,
 ) -> None:
+    """Payloads are dispatched directly; every dispatch appends."""
     session, dispatcher = session_factory()
 
+    # Dispatch telemetry events (these don't carry payloads)
     event = make_tool_event(1)
     first_result = dispatcher.dispatch(event)
     second_result = dispatcher.dispatch(event)
 
     assert first_result.ok
     assert second_result.ok
-    # append_all uses ledger semantics - every publish appends
+    assert isinstance(event.event_id, UUID)
+
+    # Dispatch payloads directly (as done at call sites)
+    # append_all uses ledger semantics - every dispatch appends
+    session.dispatch(ExamplePayload(value=1))
+    session.dispatch(ExamplePayload(value=1))
+
     assert session[ExamplePayload].all() == (
         ExamplePayload(value=1),
         ExamplePayload(value=1),
     )
-    assert isinstance(event.event_id, UUID)
 
 
-def test_tool_invoked_extracts_value_from_result(
+def test_tool_invoked_payload_dispatched_separately(
     session_factory: SessionFactory,
 ) -> None:
-    """Session extracts value from result.value for slice dispatch."""
+    """Payload is dispatched separately from ToolInvoked telemetry event."""
     session, dispatcher = session_factory()
 
     payload = ExamplePayload(value=7)
@@ -87,15 +93,20 @@ def test_tool_invoked_extracts_value_from_result(
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=7),
+        success=tool_result.success,
+        message=tool_result.message,
         result=tool_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
         rendered_output=tool_result.render(),
     )
 
+    # Dispatch telemetry event
     dispatcher.dispatch(event)
+    # Dispatch payload separately (as done at call site)
+    session.dispatch(payload)
 
-    # Session dispatches result.value to slice reducers
+    # Payload dispatched to slice reducers
     assert session[ExamplePayload].all() == (payload,)
 
 
@@ -120,16 +131,17 @@ def test_prompt_rendered_appends_start_event(
     assert isinstance(event.event_id, UUID)
 
 
-def test_prompt_executed_emits_multiple_dataclasses(
+def test_multiple_dataclasses_dispatched_to_slice(
     session_factory: SessionFactory,
 ) -> None:
     outputs = [ExampleOutput(text="first"), ExampleOutput(text="second")]
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
-    result = dispatcher.dispatch(make_prompt_event(outputs))
+    # Dispatch each payload directly (as done at call site for iterable outputs)
+    for output in outputs:
+        session.dispatch(output)
 
-    assert result.ok
     assert session[ExampleOutput].all() == tuple(outputs)
 
 
@@ -142,7 +154,7 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     class SecondSlice:
         value: str
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     call_order: list[str] = []
 
@@ -171,93 +183,94 @@ def test_reducers_run_in_registration_order(session_factory: SessionFactory) -> 
     session[FirstSlice].register(ExampleOutput, first)
     session[SecondSlice].register(ExampleOutput, second)
 
-    result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="hello")))
+    session.dispatch(ExampleOutput(text="hello"))
 
     assert call_order == ["first", "second"]
     assert session[FirstSlice].all() == (FirstSlice("hello"),)
     assert session[SecondSlice].all() == (SecondSlice("hello"),)
-    assert result.ok
 
 
 def test_default_append_used_when_no_custom_reducer(
     session_factory: SessionFactory,
 ) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
-    result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="hello")))
+    session.dispatch(ExampleOutput(text="hello"))
 
-    assert result.ok
     assert session[ExampleOutput].all() == (ExampleOutput(text="hello"),)
 
 
-def test_prompt_executed_extracts_value_from_result(
+def test_prompt_executed_payload_dispatched_separately(
     session_factory: SessionFactory,
 ) -> None:
-    """Session extracts output from result.output for slice dispatch."""
+    """Payload is dispatched separately from PromptExecuted telemetry event."""
     session, dispatcher = session_factory()
 
     output = ExampleOutput(text="filled")
+    response = PromptResponse(prompt_name="example", text="", output=output)
     event = PromptExecuted(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
-        result=cast(
-            PromptResponse[object],
-            PromptResponse(
-                prompt_name="example",
-                text="done",
-                output=output,
-            ),
-        ),
+        result=response,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
     )
 
+    # Dispatch telemetry event
     dispatcher.dispatch(event)
+    # Dispatch payload separately (as done at call site)
+    session.dispatch(output)
 
-    # Session dispatches result.output to slice reducers
+    # Payload dispatched to slice reducers
     assert session[ExampleOutput].all() == (output,)
 
 
-def test_non_dataclass_payloads_are_ignored(session_factory: SessionFactory) -> None:
+def test_non_dataclass_payloads_are_not_dispatched(
+    session_factory: SessionFactory,
+) -> None:
     session, dispatcher = session_factory()
 
+    # First event with dataclass payload
     event = make_tool_event(1)
-    non_dataclass_result = cast(
-        ToolResult[object], ToolResult(message="ok", value="not a dataclass")
+    dispatcher.dispatch(event)
+    # Dispatch payload separately (as done at call site)
+    session.dispatch(ExamplePayload(value=1))
+
+    # Second event - non-dataclass payload would not be dispatched at call site
+    non_dataclass_result: ToolResult[str] = ToolResult(
+        message="ok", value="not a dataclass", success=True
     )
     non_dataclass_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=2),
+        success=True,
+        message="ok",
         result=non_dataclass_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        rendered_output=non_dataclass_result.render(),
+        rendered_output="not a dataclass",
     )
+    dispatcher.dispatch(non_dataclass_event)
+    # Non-dataclass payload "not a dataclass" is NOT dispatched
 
-    first_result = dispatcher.dispatch(event)
-    second_result = dispatcher.dispatch(non_dataclass_event)
-
-    assert first_result.ok
-    assert second_result.ok
+    # Only dataclass payloads are stored
     assert session[ExamplePayload].all() == (ExamplePayload(value=1),)
 
 
 def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExamplePayload].register(
         ExamplePayload, upsert_by(lambda payload: payload.value)
     )
 
-    first_result = dispatcher.dispatch(make_tool_event(1))
-    second_result = dispatcher.dispatch(make_tool_event(1))
-    third_result = dispatcher.dispatch(make_tool_event(2))
+    # Dispatch payloads directly (upsert_by test)
+    session.dispatch(ExamplePayload(value=1))
+    session.dispatch(ExamplePayload(value=1))  # Should upsert
+    session.dispatch(ExamplePayload(value=2))
 
-    assert first_result.ok
-    assert second_result.ok
-    assert third_result.ok
     assert session[ExamplePayload].all() == (
         ExamplePayload(value=1),
         ExamplePayload(value=2),
@@ -267,52 +280,55 @@ def test_upsert_by_replaces_matching_keys(session_factory: SessionFactory) -> No
 def test_replace_latest_keeps_only_newest_value(
     session_factory: SessionFactory,
 ) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExamplePayload].register(ExamplePayload, replace_latest)
 
-    first_result = dispatcher.dispatch(make_tool_event(1))
-    second_result = dispatcher.dispatch(make_tool_event(2))
+    session.dispatch(ExamplePayload(value=1))
+    session.dispatch(ExamplePayload(value=2))
 
-    assert first_result.ok
-    assert second_result.ok
     assert session[ExamplePayload].all() == (ExamplePayload(value=2),)
 
 
 def test_tool_data_slice_records_failures(session_factory: SessionFactory) -> None:
     session, dispatcher = session_factory()
 
+    # Dispatch success event
     dispatcher.dispatch(make_tool_event(1))
+    session.dispatch(ExamplePayload(value=1))  # Payload dispatched separately
 
-    failure = cast(
-        ToolResult[object],
-        ToolResult(message="failed", value=None, success=False),
+    # Dispatch failure event
+    failure_result: ToolResult[None] = ToolResult(
+        message="failed", value=None, success=False
     )
     failure_event = ToolInvoked(
         prompt_name="example",
         adapter=GENERIC_ADAPTER_NAME,
         name="tool",
         params=ExampleParams(value=2),
-        result=failure,
+        success=False,
+        message="failed",
+        result=failure_result,
         session_id=DEFAULT_SESSION_ID,
         created_at=datetime.now(UTC),
-        rendered_output=failure.render(),
+        rendered_output="failed",
     )
     dispatcher.dispatch(failure_event)
+    # No payload dispatched for failure
 
     tool_events = session[ToolInvoked].all()
     assert len(tool_events) == 2
-    # First event has payload via result.value
-    assert tool_events[0].result.value == ExamplePayload(value=1)
-    # Failure event has no value
-    assert tool_events[1].result.value is None
-    assert tool_events[1].result.success is False
+    # First event succeeded
+    assert tool_events[0].success is True
+    # Failure event has success=False
+    assert tool_events[1].success is False
+    assert tool_events[1].message == "failed"
 
 
 def test_reducer_failure_leaves_previous_slice_unchanged(
     session_factory: SessionFactory,
 ) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
@@ -327,16 +343,15 @@ def test_reducer_failure_leaves_previous_slice_unchanged(
 
     session[ExampleOutput].register(ExampleOutput, faulty)
 
-    first_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    # Dispatch payload directly (payloads no longer extracted from telemetry events)
+    session.dispatch(ExampleOutput(text="first"))
 
     assert session[ExampleOutput].all() == (ExampleOutput(text="first"),)
-    assert first_result.handled_count == 1
 
-    # Second publish adds another entry (append_all doesn't dedupe)
+    # Second dispatch adds another entry (append_all doesn't dedupe)
     # The faulty reducer fails but append_all already ran successfully
-    second_result = dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    session.dispatch(ExampleOutput(text="second"))
 
-    assert second_result.handled_count == 1
     assert session[ExampleOutput].all() == (
         ExampleOutput(text="first"),
         ExampleOutput(text="second"),
@@ -367,11 +382,11 @@ def test_dispatch_clear_slice(session_factory: SessionFactory) -> None:
     """Test that dispatching ClearSlice directly works."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
-    # Add some initial data
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="second")))
+    # Add some initial data (dispatch payloads directly)
+    session.dispatch(ExampleOutput(text="first"))
+    session.dispatch(ExampleOutput(text="second"))
     assert len(session[ExampleOutput].all()) == 2
 
     # Dispatch ClearSlice directly
@@ -384,12 +399,12 @@ def test_dispatch_clear_slice_with_predicate(session_factory: SessionFactory) ->
     """Test that dispatching ClearSlice with a predicate works."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
-    # Add some initial data
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apple")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="banana")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apricot")))
+    # Add some initial data (dispatch payloads directly)
+    session.dispatch(ExampleOutput(text="apple"))
+    session.dispatch(ExampleOutput(text="banana"))
+    session.dispatch(ExampleOutput(text="apricot"))
 
     # Dispatch ClearSlice with predicate
     session.dispatch(
@@ -408,11 +423,11 @@ def test_clear_slice_with_no_matching_predicate(
     """Test that ClearSlice with a predicate that matches nothing leaves values unchanged."""
     from weakincentives.runtime.session import ClearSlice
 
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
-    # Add some initial data (none starts with 'z')
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="apple")))
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="banana")))
+    # Add some initial data (none starts with 'z') - dispatch payloads directly
+    session.dispatch(ExampleOutput(text="apple"))
+    session.dispatch(ExampleOutput(text="banana"))
 
     # Dispatch ClearSlice with predicate that matches nothing
     session.dispatch(
@@ -510,29 +525,26 @@ def test_broadcast_dispatches_to_all_reducers(session_factory: SessionFactory) -
 def test_prompt_executed_with_mixed_iterable_output(
     session_factory: SessionFactory,
 ) -> None:
-    """Test branch 759->758: non-dataclass items in iterable are skipped."""
-    session, dispatcher = session_factory()
+    """Test that only dataclass items are dispatched to session slices."""
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
 
-    # Create a PromptExecuted event with iterable output containing mixed types
+    # Mixed iterable containing dataclass and non-dataclass items
+    # At call sites, only dataclass items get dispatched via session.dispatch()
     mixed_output = [
         ExampleOutput(text="valid1"),  # Should be dispatched
-        "not-a-dataclass",  # Should be skipped (branch 759->758)
+        "not-a-dataclass",  # Should be skipped
         ExampleOutput(text="valid2"),  # Should be dispatched
-        42,  # Should be skipped (branch 759->758)
+        42,  # Should be skipped
     ]
 
-    event = PromptExecuted(
-        adapter=GENERIC_ADAPTER_NAME,
-        prompt_name="test",
-        result=PromptResponse(prompt_name="test", output=mixed_output, text=None),
-        session_id=DEFAULT_SESSION_ID,
-        created_at=datetime.now(UTC),
-    )
+    # Simulate call site behavior: dispatch only dataclass items
+    from dataclasses import is_dataclass
 
-    result = dispatcher.dispatch(event)
-    assert result.ok
+    for item in mixed_output:
+        if is_dataclass(item) and not isinstance(item, type):
+            session.dispatch(item)
 
     # Only dataclass instances should be in the session state
     assert session[ExampleOutput].all() == (
@@ -542,10 +554,10 @@ def test_prompt_executed_with_mixed_iterable_output(
 
 
 def test_mutate_reset_clears_all_slices(session_factory: SessionFactory) -> None:
-    session, dispatcher = session_factory()
+    session, _ = session_factory()
 
     session[ExampleOutput].register(ExampleOutput, append_all)
-    dispatcher.dispatch(make_prompt_event(ExampleOutput(text="first")))
+    session.dispatch(ExampleOutput(text="first"))
     assert session[ExampleOutput].all()
 
     session.reset()
