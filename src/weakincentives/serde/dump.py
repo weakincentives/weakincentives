@@ -55,7 +55,7 @@ def _serialize(
             exclude_none,
             alias_generator,
         )
-    if isinstance(value, set):
+    if isinstance(value, (set, frozenset)):
         return _serialize_set(
             cast(set[object], value),
             by_alias,

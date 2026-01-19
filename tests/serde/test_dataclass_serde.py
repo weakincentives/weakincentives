@@ -858,6 +858,16 @@ def test_dump_set_sort_fallback_on_bad_repr() -> None:
     assert BadReprStr.repr_calls > 0
 
 
+def test_dump_serializes_frozensets_sorted() -> None:
+    @dataclass
+    class FrozenSetHolder:
+        values: frozenset[int]
+
+    holder = FrozenSetHolder(values=frozenset({3, 1, 2}))
+    payload = dump(holder)
+    assert payload["values"] == [1, 2, 3]
+
+
 def test_dump_computed_none_excluded() -> None:
     @dataclass
     class ComputedNone:
