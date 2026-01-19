@@ -50,6 +50,7 @@ import signal
 import threading
 from collections.abc import Callable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol, Self
 
 from ..clock import SYSTEM_CLOCK, Clock
@@ -57,6 +58,69 @@ from .watchdog import HealthServer, Heartbeat, Watchdog
 
 if TYPE_CHECKING:
     from types import FrameType
+
+
+@dataclass(slots=True)
+class ShutdownRegistration:
+    """Manages the lifecycle of a shutdown callback registration.
+
+    Provides context manager support for automatic unregistration.
+    Thread-safe for concurrent access.
+
+    Example::
+
+        coordinator = ShutdownCoordinator.install()
+
+        # Context manager pattern (preferred)
+        with coordinator.scoped_register(loop.shutdown):
+            loop.run()
+        # Automatically unregistered on exit
+
+        # Manual management
+        reg = coordinator.scoped_register(loop.shutdown)
+        try:
+            loop.run()
+        finally:
+            reg.unregister()
+    """
+
+    _callback: Callable[[], object]
+    _unregister_fn: Callable[[Callable[[], object]], None]
+    _unregistered: bool = field(default=False, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+
+    @property
+    def active(self) -> bool:
+        """True if the registration is still active."""
+        with self._lock:
+            return not self._unregistered
+
+    def unregister(self) -> None:
+        """Unregister the callback.
+
+        Safe to call multiple times; subsequent calls are no-ops.
+        """
+        with self._lock:
+            if self._unregistered:
+                return
+            self._unregistered = True
+            callback = self._callback
+
+        self._unregister_fn(callback)
+
+    def __enter__(self) -> Self:
+        """Context manager entry."""
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object,
+    ) -> None:
+        """Context manager exit unregisters the callback."""
+        _ = (exc_type, exc_val, exc_tb)
+        self.unregister()
 
 
 class Runnable(Protocol):
@@ -202,8 +266,55 @@ class ShutdownCoordinator:
                     cls._instance._callbacks.clear()
             cls._instance = None
 
+    def scoped_register(
+        self,
+        callback: Callable[[], object],
+    ) -> ShutdownRegistration:
+        """Register a callback with lifecycle management.
+
+        Returns a ShutdownRegistration that can be used as a context manager
+        for automatic unregistration, or manually unregistered.
+
+        Callbacks are invoked in registration order. If shutdown has
+        already been triggered, the callback is invoked immediately.
+
+        Args:
+            callback: Zero-argument callable (typically loop.shutdown).
+
+        Returns:
+            A ShutdownRegistration for managing the callback lifecycle.
+
+        Example::
+
+            # Preferred: context manager for automatic cleanup
+            with coordinator.scoped_register(loop.shutdown):
+                loop.run()
+            # Callback automatically unregistered on exit
+
+            # Manual management
+            reg = coordinator.scoped_register(loop.shutdown)
+            # ... later ...
+            reg.unregister()
+        """
+        with self._callbacks_lock:
+            self._callbacks.append(callback)
+            if self._triggered.is_set():
+                _ = callback()
+        return ShutdownRegistration(
+            _callback=callback, _unregister_fn=self._unregister_internal
+        )
+
+    def _unregister_internal(self, callback: Callable[[], object]) -> None:
+        """Internal: unregister a callback (used by ShutdownRegistration)."""
+        with self._callbacks_lock, contextlib.suppress(ValueError):
+            self._callbacks.remove(callback)
+
     def register(self, callback: Callable[[], object]) -> None:
         """Register a callback to invoke on shutdown.
+
+        .. deprecated::
+            Use :meth:`scoped_register` instead, which returns a
+            ShutdownRegistration for lifecycle management.
 
         Callbacks are invoked in registration order. If shutdown has
         already been triggered, the callback is invoked immediately.
@@ -218,6 +329,11 @@ class ShutdownCoordinator:
 
     def unregister(self, callback: Callable[[], object]) -> None:
         """Remove a callback from the shutdown list.
+
+        .. deprecated::
+            Use :meth:`scoped_register` instead, which returns a
+            ShutdownRegistration that can be unregistered or used
+            as a context manager.
 
         Args:
             callback: Previously registered callback.
@@ -500,5 +616,6 @@ __all__ = [
     "LoopGroup",
     "Runnable",
     "ShutdownCoordinator",
+    "ShutdownRegistration",
     "wait_until",
 ]

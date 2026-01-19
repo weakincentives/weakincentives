@@ -379,6 +379,104 @@ def test_coordinator_signal_handler(reset_coordinator: None) -> None:
 
 
 # =============================================================================
+# ShutdownRegistration Tests
+# =============================================================================
+
+
+def test_scoped_register_returns_registration(reset_coordinator: None) -> None:
+    """scoped_register() returns a ShutdownRegistration object."""
+    from weakincentives.runtime.lifecycle import ShutdownRegistration
+
+    _ = reset_coordinator
+    coordinator = ShutdownCoordinator.install()
+    callback = MagicMock()
+
+    reg = coordinator.scoped_register(callback)
+
+    assert isinstance(reg, ShutdownRegistration)
+    assert reg.active
+
+
+def test_shutdown_registration_unregister_removes_callback(
+    reset_coordinator: None,
+) -> None:
+    """ShutdownRegistration.unregister() removes the callback."""
+    _ = reset_coordinator
+    coordinator = ShutdownCoordinator.install()
+    callback = MagicMock()
+
+    reg = coordinator.scoped_register(callback)
+    assert reg.active
+
+    reg.unregister()
+    assert not reg.active
+
+    coordinator.trigger()
+    callback.assert_not_called()
+
+
+def test_shutdown_registration_context_manager(reset_coordinator: None) -> None:
+    """ShutdownRegistration works as a context manager."""
+    _ = reset_coordinator
+    coordinator = ShutdownCoordinator.install()
+    callback = MagicMock()
+
+    with coordinator.scoped_register(callback) as reg:
+        assert reg.active
+
+    assert not reg.active
+    coordinator.trigger()
+    callback.assert_not_called()
+
+
+def test_shutdown_registration_unregister_idempotent(reset_coordinator: None) -> None:
+    """ShutdownRegistration.unregister() can be called multiple times safely."""
+    _ = reset_coordinator
+    coordinator = ShutdownCoordinator.install()
+    callback = MagicMock()
+
+    reg = coordinator.scoped_register(callback)
+    reg.unregister()
+    reg.unregister()  # Should not raise
+    reg.unregister()
+
+    assert not reg.active
+
+
+def test_scoped_register_late_triggers_immediately(reset_coordinator: None) -> None:
+    """Callback registered via scoped_register after trigger is invoked immediately."""
+    _ = reset_coordinator
+    coordinator = ShutdownCoordinator.install()
+    coordinator.trigger()
+
+    callback = MagicMock()
+    reg = coordinator.scoped_register(callback)
+
+    callback.assert_called_once()
+    assert reg.active  # Still active, can be unregistered
+
+
+def test_multiple_scoped_registrations(reset_coordinator: None) -> None:
+    """Multiple scoped registrations work independently."""
+    _ = reset_coordinator
+    coordinator = ShutdownCoordinator.install()
+    callback1 = MagicMock()
+    callback2 = MagicMock()
+
+    reg1 = coordinator.scoped_register(callback1)
+    reg2 = coordinator.scoped_register(callback2)
+
+    reg1.unregister()
+
+    coordinator.trigger()
+
+    callback1.assert_not_called()
+    callback2.assert_called_once()
+
+    reg2.unregister()
+
+
+# =============================================================================
 # LoopGroup Tests
 # =============================================================================
 
