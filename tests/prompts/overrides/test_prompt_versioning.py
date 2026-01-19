@@ -527,6 +527,57 @@ def test_tool_example_hash_handles_missing_input_attribute() -> None:
     assert result is None
 
 
+def test_serialize_example_value_handles_primitives() -> None:
+    """Test that primitive types are serialized directly without warnings."""
+    from weakincentives.prompt.overrides.versioning import _serialize_example_value
+
+    assert _serialize_example_value("hello") == "hello"
+    assert _serialize_example_value(42) == 42
+    assert _serialize_example_value(3.14) == 3.14
+    assert _serialize_example_value(True) is True
+    assert _serialize_example_value(False) is False
+
+
+def test_serialize_example_value_handles_sequences() -> None:
+    """Test that sequences of dataclasses are serialized correctly."""
+    from dataclasses import dataclass
+
+    from weakincentives.prompt.overrides.versioning import _serialize_example_value
+
+    @dataclass(frozen=True, slots=True)
+    class Item:
+        name: str
+        value: int
+
+    items = (Item("a", 1), Item("b", 2))
+    result = _serialize_example_value(items)
+
+    assert result == [{"name": "a", "value": 1}, {"name": "b", "value": 2}]
+
+
+def test_serialize_example_value_handles_nested_sequences() -> None:
+    """Test that nested sequences are serialized correctly."""
+    from weakincentives.prompt.overrides.versioning import _serialize_example_value
+
+    nested = [["a", "b"], ["c", "d"]]
+    result = _serialize_example_value(nested)
+
+    assert result == [["a", "b"], ["c", "d"]]
+
+
+def test_serialize_example_value_falls_back_to_str_for_unknown_types() -> None:
+    """Test that unknown types fall back to str() representation."""
+    from weakincentives.prompt.overrides.versioning import _serialize_example_value
+
+    # Use a non-dataclass, non-primitive, non-sequence type
+    class Custom:
+        def __str__(self) -> str:
+            return "custom-repr"
+
+    result = _serialize_example_value(Custom())
+    assert result == "custom-repr"
+
+
 # ---------------------------------------------------------------------------
 # DbC Precondition Tests
 # ---------------------------------------------------------------------------
