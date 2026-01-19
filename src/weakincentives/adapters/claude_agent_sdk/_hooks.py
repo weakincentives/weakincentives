@@ -555,7 +555,7 @@ def create_post_tool_use_hook(  # noqa: C901 - complexity needed for task comple
             name=data.tool_name,
             params=data.tool_input,
             result=data.result_raw,
-            session_id=None,
+            session_id=getattr(hook_context.session, "session_id", None),
             created_at=_utcnow(),
             usage=None,
             rendered_output=data.output_text[:1000] if data.output_text else "",

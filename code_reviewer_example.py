@@ -206,7 +206,8 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
         # Run in background thread
         thread = threading.Thread(target=lambda: loop.run(max_iterations=None))
         thread.start()
-        # Send request with reply_to mailbox instance
+        # Send request with reply_to mailbox instance.
+        # For distributed tracing, pass run_context with trace_id/span_id.
         params = ReviewTurnParams(request="Review the latest changes")
         requests.send(MainLoopRequest(request=params), reply_to=responses)
 
@@ -491,7 +492,9 @@ class CodeReviewApp:
                 if not user_prompt or user_prompt.lower() in {"exit", "quit"}:
                     break
 
-                # Send request to mailbox
+                # Send request to mailbox.
+                # Note: For distributed tracing integration, pass run_context with
+                # trace_id and span_id from the calling context (e.g., OpenTelemetry).
                 request = ReviewTurnParams(request=user_prompt)
                 request_event = MainLoopRequest(
                     request=request,
