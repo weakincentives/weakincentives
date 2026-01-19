@@ -203,9 +203,13 @@ demo-podman:
 	@uv run --all-extras python code_reviewer_example.py --podman
 
 # Launch the interactive code reviewer demo with Claude Agent SDK
+# Supports both Anthropic API (ANTHROPIC_API_KEY) and AWS Bedrock (CLAUDE_CODE_USE_BEDROCK=1 + AWS_REGION)
+# For Bedrock, credentials are resolved via AWS SDK credential chain (~/.aws/config, SSO cache, env vars)
 demo-claude-agent:
-	@if [ -z "$$ANTHROPIC_API_KEY" ]; then \
-		echo "ANTHROPIC_API_KEY is not set; export it to use Claude Agent SDK." >&2; \
+	@if [ -z "$$ANTHROPIC_API_KEY" ] && [ "$$CLAUDE_CODE_USE_BEDROCK" != "1" -o -z "$$AWS_REGION" ]; then \
+		echo "No authentication configured. Set either:" >&2; \
+		echo "  - ANTHROPIC_API_KEY for Anthropic API" >&2; \
+		echo "  - CLAUDE_CODE_USE_BEDROCK=1 and AWS_REGION for AWS Bedrock" >&2; \
 		exit 1; \
 	fi
 	@uv run --all-extras python code_reviewer_example.py --claude-agent

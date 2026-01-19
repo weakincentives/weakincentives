@@ -200,8 +200,49 @@ adapter = ClaudeAgentSDKAdapter(
 | `network_policy` | `NetworkPolicy \| None` | `None` | Tool network restrictions |
 | `sandbox` | `SandboxConfig \| None` | `None` | Sandbox configuration |
 | `env` | `Mapping[str, str] \| None` | `None` | Environment variables |
-| `api_key` | `str \| None` | `None` | API key override |
+| `api_key` | `str \| None` | `None` | Explicit API key (disables Bedrock) |
+| `aws_config_path` | `Path \| str \| None` | `None` | AWS config path for Docker |
 | `include_host_env` | `bool` | `False` | Copy non-sensitive vars |
+| `skills` | `SkillConfig \| None` | `None` | Skills to mount |
+
+**Authentication modes:**
+
+1. **Inherit host auth** (default): When `api_key` is `None`, inherits auth from
+   the host environment. Works with both Anthropic API (`ANTHROPIC_API_KEY`) and
+   AWS Bedrock (`CLAUDE_CODE_USE_BEDROCK=1` + AWS credentials).
+
+1. **Explicit API key**: When `api_key` is set, uses that key with Anthropic API
+   and disables Bedrock.
+
+**Factory methods** (recommended for fail-fast validation):
+
+```python
+# Inherit host auth - fails fast if no auth configured
+isolation = IsolationConfig.inherit_host_auth()
+
+# Explicit API key - fails fast if key is empty
+isolation = IsolationConfig.with_api_key("sk-ant-...")
+
+# Require Bedrock - fails fast if not configured
+isolation = IsolationConfig.for_bedrock(aws_config_path="/mnt/aws")
+```
+
+**Docker usage with Bedrock:**
+
+When running in Docker, mount your AWS config directory and specify the path:
+
+```bash
+# Run container with AWS config mounted
+docker run -v ~/.aws:/mnt/aws:ro \
+    -e CLAUDE_CODE_USE_BEDROCK=1 \
+    -e AWS_REGION=us-east-1 \
+    my-agent-image
+```
+
+```python
+# In your agent code
+isolation = IsolationConfig.for_bedrock(aws_config_path="/mnt/aws")
+```
 
 ### NetworkPolicy
 
@@ -249,11 +290,39 @@ When `isolation` is set:
 
 1. Creates ephemeral `HOME` directory with `$HOME/.claude/settings.json`
 1. Passes `env` and `setting_sources=["user"]` to SDK
-1. API key is injected into the isolated environment
+1. Copies `~/.aws` to ephemeral home for Bedrock credential access
 1. Host environment variables are excluded unless `include_host_env=True`
 
-Without an explicit `api_key`, `ANTHROPIC_API_KEY` from the process environment
-is forwarded automatically.
+**Auth inheritance** (when no explicit `api_key`):
+
+Auth vars are read from two sources (in priority order):
+
+1. Shell environment variables (highest priority)
+1. Host `~/.claude/settings.json` env section (fallback)
+
+This ensures that if `claude` works on the host, WINK agents will too.
+
+Vars passed through for Bedrock: `AWS_PROFILE`, `AWS_REGION`, `AWS_DEFAULT_REGION`,
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`, `AWS_ROLE_ARN`,
+`AWS_WEB_IDENTITY_TOKEN_FILE`, `CLAUDE_CODE_USE_BEDROCK`.
+
+### Model ID Helpers
+
+Model IDs differ between Anthropic API and Bedrock. Use these helpers for
+unified model selection:
+
+```python
+from weakincentives.adapters.claude_agent_sdk import (
+    get_default_model,      # Returns Opus 4.5 in correct format
+    to_bedrock_model_id,    # "claude-opus-4-5-20251101" -> "us.anthropic.claude-opus-4-5-20251101-v1:0"
+    to_anthropic_model_name, # Reverse conversion
+)
+
+# Automatic: returns correct format based on CLAUDE_CODE_USE_BEDROCK
+model = get_default_model()
+
+adapter = ClaudeAgentSDKAdapter(model=model)
+```
 
 ## Tool Bridging via MCP
 
