@@ -16,14 +16,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from functools import wraps
 from threading import RLock
 from types import MappingProxyType
-from typing import Any, Concatenate, Final, assert_never, cast, override
+from typing import Any, Concatenate, Final, cast, override
 from uuid import UUID, uuid4
 
 from ...dbc import invariant
@@ -38,20 +38,30 @@ from ..events import (
 from ..logging import StructuredLogger, get_logger
 from ._slice_types import SessionSlice, SessionSliceType
 from ._types import ReducerEvent, TypedReducer
-from .dataclasses import is_dataclass_instance
 from .protocols import SessionProtocol, SnapshotProtocol
 from .reducers import append_all
+from .session_cloning import (
+    apply_policies_to_clone,
+    apply_state_to_clone,
+    copy_reducers_to_clone,
+    resolve_clone_created,
+    resolve_clone_id,
+    resolve_clone_parent,
+    resolve_clone_tags,
+    snapshot_reducers_and_state,
+)
+from .session_dispatch import apply_slice_op
+from .session_telemetry import (
+    handle_prompt_executed,
+    handle_prompt_rendered,
+    handle_tool_invoked,
+)
 from .slice_accessor import SliceAccessor
 from .slice_mutations import ClearSlice, InitializeSlice
 from .slice_policy import DEFAULT_SNAPSHOT_POLICIES, SlicePolicy
 from .slices import (
-    Append,
-    Clear,
-    Extend,
-    Replace,
     Slice,
     SliceFactoryConfig,
-    SliceOp,
     default_slice_config,
 )
 from .snapshots import (
@@ -100,6 +110,7 @@ def _locked_method[SessionT: "Session", **P, R](
     return wrapper
 
 
+# Type casts for telemetry event types used in slice policy initialization
 _PROMPT_RENDERED_TYPE: type[SupportsDataclass] = cast(
     type[SupportsDataclass], PromptRendered
 )
@@ -240,24 +251,6 @@ class Session(SessionProtocol):
         with self._lock:
             yield
 
-    @staticmethod
-    def _copy_reducers_to_clone(
-        clone: Session,
-        reducer_snapshot: list[
-            tuple[SessionSliceType, tuple[_ReducerRegistration, ...]]
-        ],
-    ) -> None:
-        """Copy non-builtin reducers from snapshot to clone."""
-        for data_type, registrations in reducer_snapshot:
-            if data_type in clone._reducers:
-                continue
-            for registration in registrations:
-                clone._mutation_register_reducer(
-                    data_type,
-                    registration.reducer,
-                    slice_type=registration.slice_type,
-                )
-
     def _get_or_create_slice[T: SupportsDataclass](
         self, slice_type: type[T]
     ) -> Slice[T]:
@@ -267,63 +260,6 @@ class Session(SessionProtocol):
             factory = self._slice_config.factory_for_policy(policy)
             self._slices[slice_type] = factory.create(slice_type)
         return cast(Slice[T], self._slices[slice_type])
-
-    def _snapshot_reducers_and_state(
-        self,
-    ) -> tuple[
-        list[tuple[SessionSliceType, tuple[_ReducerRegistration, ...]]],
-        dict[SessionSliceType, SessionSlice],
-        dict[SessionSliceType, SlicePolicy],
-    ]:
-        """Create a snapshot of reducers and state while holding the lock."""
-        with self.locked():
-            reducer_snapshot = [
-                (data_type, tuple(registrations))
-                for data_type, registrations in self._reducers.items()
-            ]
-            # Convert slices to tuples for snapshot
-            state_snapshot = {
-                slice_type: slice_instance.snapshot()
-                for slice_type, slice_instance in self._slices.items()
-            }
-            policy_snapshot = dict(self._slice_policies)
-        return reducer_snapshot, state_snapshot, policy_snapshot
-
-    def _resolve_clone_parent(self, parent: Session | None) -> Session | None:
-        return self._parent if parent is None else parent
-
-    def _resolve_clone_id(self, session_id: UUID | None) -> UUID:
-        return session_id if session_id is not None else self.session_id
-
-    def _resolve_clone_created(self, created_at: datetime | None) -> datetime:
-        return created_at if created_at is not None else self.created_at
-
-    def _resolve_clone_tags(
-        self, tags: Mapping[object, object] | None
-    ) -> Mapping[object, object] | None:
-        if tags is None:
-            return cast(Mapping[object, object], self.tags)
-        return tags  # pragma: no cover - covered by test_clone_with_custom_tags
-
-    @staticmethod
-    def _apply_state_to_clone(
-        clone: Session,
-        state_snapshot: dict[SessionSliceType, SessionSlice],
-    ) -> None:
-        """Apply state snapshot to cloned session."""
-        with clone.locked():
-            for slice_type, items in state_snapshot.items():
-                slice_instance = clone._get_or_create_slice(slice_type)
-                slice_instance.replace(items)
-
-    @staticmethod
-    def _apply_policies_to_clone(
-        clone: Session,
-        policy_snapshot: dict[SessionSliceType, SlicePolicy],
-    ) -> None:
-        """Apply slice policy snapshot to cloned session."""
-        with clone.locked():
-            clone._slice_policies = dict(policy_snapshot)
 
     def clone(
         self,
@@ -336,22 +272,22 @@ class Session(SessionProtocol):
         slice_config: SliceFactoryConfig | None = None,
     ) -> Session:
         """Return a new session that mirrors the current state and reducers."""
-        reducer_snapshot, state_snapshot, policy_snapshot = (
-            self._snapshot_reducers_and_state()
+        reducer_snapshot, state_snapshot, policy_snapshot = snapshot_reducers_and_state(
+            self
         )
         clone = Session(
             dispatcher=dispatcher,
-            parent=self._resolve_clone_parent(parent),
-            session_id=self._resolve_clone_id(session_id),
-            created_at=self._resolve_clone_created(created_at),
-            tags=self._resolve_clone_tags(tags),
+            parent=resolve_clone_parent(self, parent),
+            session_id=resolve_clone_id(self, session_id),
+            created_at=resolve_clone_created(self, created_at),
+            tags=resolve_clone_tags(self, tags),
             slice_config=slice_config
             if slice_config is not None
             else self._slice_config,
         )
-        self._copy_reducers_to_clone(clone, reducer_snapshot)
-        self._apply_state_to_clone(clone, state_snapshot)
-        self._apply_policies_to_clone(clone, policy_snapshot)
+        copy_reducers_to_clone(clone, reducer_snapshot)
+        apply_state_to_clone(clone, state_snapshot)
+        apply_policies_to_clone(clone, policy_snapshot)
         return clone
 
     @_locked_method
@@ -609,56 +545,6 @@ class Session(SessionProtocol):
         """Dispatch an event to be processed by registered reducers."""
         self._dispatch_data_event(slice_type, event)
 
-    def _handle_system_mutation_event(self, event: ReducerEvent) -> bool:
-        """Handle system mutation events (InitializeSlice, ClearSlice).
-
-        These events bypass normal reducer dispatch and directly mutate state,
-        ensuring consistent behavior regardless of registered reducers.
-
-        Returns:
-            True if the event was a system mutation event and was handled,
-            False otherwise.
-        """
-        if isinstance(event, InitializeSlice):
-            # Use cast to work around generic type parameter inference
-            init_event = cast("InitializeSlice[Any]", event)
-            slice_type: SessionSliceType = init_event.slice_type
-            values: SessionSlice = init_event.values
-            logger.debug(
-                "session.initialize_slice",
-                event="session.initialize_slice",
-                context={
-                    "session_id": str(self.session_id),
-                    "slice_type": slice_type.__qualname__,
-                    "value_count": len(values),
-                },
-            )
-            with self.locked():
-                slice_instance = self._get_or_create_slice(slice_type)
-                slice_instance.replace(values)
-            return True
-
-        if isinstance(event, ClearSlice):
-            # Use cast to work around generic type parameter inference
-            clear_event = cast("ClearSlice[Any]", event)
-            slice_type = clear_event.slice_type
-            predicate: Callable[[Any], bool] | None = clear_event.predicate
-            logger.debug(
-                "session.clear_slice",
-                event="session.clear_slice",
-                context={
-                    "session_id": str(self.session_id),
-                    "slice_type": slice_type.__qualname__,
-                    "has_predicate": predicate is not None,
-                },
-            )
-            with self.locked():
-                slice_instance = self._get_or_create_slice(slice_type)
-                slice_instance.clear(predicate)
-            return True
-
-        return False
-
     # ──────────────────────────────────────────────────────────────────────
     # Properties
     # ──────────────────────────────────────────────────────────────────────
@@ -768,74 +654,62 @@ class Session(SessionProtocol):
                     return
             self._children.append(child)
 
-    def _on_tool_invoked(self, event: object) -> None:
-        tool_event = cast(ToolInvoked, event)
-        self._handle_tool_invoked(tool_event)
+    def _handle_system_mutation_event(self, event: ReducerEvent) -> bool:
+        """Handle system mutation events (InitializeSlice, ClearSlice).
 
-    def _on_prompt_executed(self, event: object) -> None:
-        prompt_event = cast(PromptExecuted, event)
-        self._handle_prompt_executed(prompt_event)
+        These events bypass normal reducer dispatch and directly mutate state,
+        ensuring consistent behavior regardless of registered reducers.
 
-    def _on_prompt_rendered(self, event: object) -> None:
-        start_event = cast(PromptRendered, event)
-        self._handle_prompt_rendered(start_event)
+        Returns:
+            True if the event was a system mutation event and was handled,
+            False otherwise.
+        """
+        if isinstance(event, InitializeSlice):
+            # Use cast to work around generic type parameter inference
+            init_event = cast("InitializeSlice[Any]", event)
+            slice_type: SessionSliceType = init_event.slice_type
+            values: SessionSlice = init_event.values
+            logger.debug(
+                "session.initialize_slice",
+                event="session.initialize_slice",
+                context={
+                    "session_id": str(self.session_id),
+                    "slice_type": slice_type.__qualname__,
+                    "value_count": len(values),
+                },
+            )
+            with self.locked():
+                slice_instance = self._get_or_create_slice(slice_type)
+                slice_instance.replace(values)
+            return True
 
-    def _handle_tool_invoked(self, event: ToolInvoked) -> None:
-        # Dispatch ToolInvoked to any reducers registered for ToolInvoked events
-        self._dispatch_data_event(
-            _TOOL_INVOKED_TYPE,
-            cast(ReducerEvent, event),
-        )
+        if isinstance(event, ClearSlice):
+            # Use cast to work around generic type parameter inference
+            clear_event = cast("ClearSlice[Any]", event)
+            slice_type = clear_event.slice_type
+            predicate: Callable[[Any], bool] | None = clear_event.predicate
+            logger.debug(
+                "session.clear_slice",
+                event="session.clear_slice",
+                context={
+                    "session_id": str(self.session_id),
+                    "slice_type": slice_type.__qualname__,
+                    "has_predicate": predicate is not None,
+                },
+            )
+            with self.locked():
+                slice_instance = self._get_or_create_slice(slice_type)
+                slice_instance.clear(predicate)
+            return True
 
-        # Extract payload from ToolResult for slice dispatch
-        result = event.result
-        if hasattr(result, "value"):
-            # ToolResult dataclass
-            payload = result.value
-        elif isinstance(result, dict):
-            # Raw dict from SDK native tools - no typed value
-            payload = None
-        else:
-            payload = None
-
-        # Dispatch payload directly to slice reducers
-        if is_dataclass_instance(payload):
-            # Narrow for ty: payload is SupportsDataclass after TypeGuard
-            narrowed = cast(SupportsDataclass, payload)  # pyright: ignore[reportUnnecessaryCast]
-            self._dispatch_data_event(type(narrowed), narrowed)
-
-    def _handle_prompt_executed(self, event: PromptExecuted) -> None:
-        # Dispatch PromptExecuted to any reducers registered for PromptExecuted events
-        self._dispatch_data_event(
-            _PROMPT_EXECUTED_TYPE,
-            cast(ReducerEvent, event),
-        )
-
-        # Dispatch output directly to slice reducers
-        output = event.result.output
-        if is_dataclass_instance(output):
-            self._dispatch_data_event(type(output), output)
-            return
-
-        # Handle iterable outputs (dispatch each item directly)
-        if isinstance(output, Iterable) and not isinstance(output, (str, bytes)):
-            for item in cast(Iterable[object], output):
-                if is_dataclass_instance(item):
-                    # Narrow for ty: item is SupportsDataclass after TypeGuard
-                    narrowed_item = cast(SupportsDataclass, item)  # pyright: ignore[reportUnnecessaryCast]
-                    self._dispatch_data_event(type(narrowed_item), narrowed_item)
-
-    def _handle_prompt_rendered(self, event: PromptRendered) -> None:
-        self._dispatch_data_event(
-            _PROMPT_RENDERED_TYPE,
-            cast(ReducerEvent, event),
-        )
+        return False
 
     def _dispatch_data_event(
         self,
         data_type: SessionSliceType,
         event: ReducerEvent,
     ) -> None:
+        """Dispatch a data event to registered reducers."""
         # Handle system mutation events specially
         if self._handle_system_mutation_event(event):
             return
@@ -875,9 +749,9 @@ class Session(SessionProtocol):
             )
             with self.locked():
                 slice_instance = self._get_or_create_slice(slice_type)
-                view = slice_instance.view()
+                slice_view = slice_instance.view()
             try:
-                op = registration.reducer(view, event, context=context)
+                op = registration.reducer(slice_view, event, context=context)
                 op_type = type(op).__name__
                 logger.debug(
                     "session.reducer_applied",
@@ -891,7 +765,7 @@ class Session(SessionProtocol):
                 )
                 # Apply the slice operation
                 with self.locked():
-                    self._apply_slice_op(op, slice_instance)
+                    apply_slice_op(op, slice_instance)
             except Exception:  # log and continue
                 logger.exception(
                     "Reducer application failed.",
@@ -904,23 +778,17 @@ class Session(SessionProtocol):
                 )
                 continue
 
-    @staticmethod
-    def _apply_slice_op[S: SupportsDataclass](
-        op: SliceOp[S],
-        slice_instance: Slice[S],
-    ) -> None:
-        """Apply slice operation using optimal method."""
-        match op:
-            case Append(item=item):
-                slice_instance.append(item)
-            case Extend(items=items):
-                slice_instance.extend(items)
-            case Replace(items=items):
-                slice_instance.replace(items)
-            case Clear(predicate=pred):
-                slice_instance.clear(pred)
-            case _ as unreachable:  # pragma: no cover - exhaustiveness sentinel
-                assert_never(unreachable)  # pyright: ignore[reportUnreachable]
+    def _on_tool_invoked(self, event: object) -> None:
+        tool_event = cast(ToolInvoked, event)
+        handle_tool_invoked(self, tool_event)
+
+    def _on_prompt_executed(self, event: object) -> None:
+        prompt_event = cast(PromptExecuted, event)
+        handle_prompt_executed(self, prompt_event)
+
+    def _on_prompt_rendered(self, event: object) -> None:
+        start_event = cast(PromptRendered, event)
+        handle_prompt_rendered(self, start_event)
 
     def _attach_to_dispatcher(self, dispatcher: TelemetryDispatcher) -> None:
         with self.locked():

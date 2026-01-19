@@ -21,6 +21,8 @@ from . import (
     lifecycle,
     mailbox,
     main_loop,
+    main_loop_types,
+    message_handlers,
     session,
     watchdog,
 )
@@ -175,6 +177,8 @@ __all__ = [
     "lifecycle",
     "mailbox",
     "main_loop",
+    "main_loop_types",
+    "message_handlers",
     "replace_latest",
     "replace_latest_by",
     "restore_snapshot",
