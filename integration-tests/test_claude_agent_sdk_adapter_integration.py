@@ -29,6 +29,7 @@ from weakincentives.adapters.claude_agent_sdk import (
     IsolationConfig,
     NetworkPolicy,
     SandboxConfig,
+    get_default_model,
 )
 from weakincentives.prompt import (
     MarkdownSection,
@@ -43,23 +44,37 @@ from weakincentives.runtime.session import Session
 
 pytest.importorskip("claude_agent_sdk")
 
+
+def _is_bedrock_mode() -> bool:
+    """Check if running in Bedrock mode based on environment."""
+    return os.getenv("CLAUDE_CODE_USE_BEDROCK") == "1" and "AWS_REGION" in os.environ
+
+
+def _has_credentials() -> bool:
+    """Check if Bedrock or Anthropic API credentials are available."""
+    return _is_bedrock_mode() or "ANTHROPIC_API_KEY" in os.environ
+
+
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        "ANTHROPIC_API_KEY" not in os.environ,
-        reason="ANTHROPIC_API_KEY not set; skipping Claude Agent SDK integration tests.",
+        not _has_credentials(),
+        reason="Neither CLAUDE_CODE_USE_BEDROCK+AWS_REGION nor ANTHROPIC_API_KEY set.",
     ),
     pytest.mark.timeout(60),  # SDK tests may take longer due to agentic execution
 ]
 
 _MODEL_ENV_VAR = "CLAUDE_AGENT_SDK_TEST_MODEL"
-_DEFAULT_MODEL = "claude-opus-4-5-20251101"
 _PROMPT_NS = "integration/claude-agent-sdk"
 
 
 def _get_model() -> str:
-    """Return the model name used for integration tests."""
-    return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
+    """Return the model name used for integration tests.
+
+    Uses get_default_model() which returns Opus 4.5 in the appropriate
+    format based on whether Bedrock is configured.
+    """
+    return os.environ.get(_MODEL_ENV_VAR, get_default_model())
 
 
 def _make_config(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig:
@@ -69,8 +84,8 @@ def _make_config(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig
     directory, preventing snapshot operations from creating commits in
     the actual repository.
 
-    Note: The adapter now defaults to hermetic isolation, so explicit
-    IsolationConfig is only needed for tests that need custom settings.
+    The IsolationConfig automatically inherits host authentication
+    (Bedrock or Anthropic API) when no explicit api_key is provided.
     """
     config_kwargs: dict[str, object] = {
         "permission_mode": "bypassPermissions",
