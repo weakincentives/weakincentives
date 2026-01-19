@@ -48,20 +48,20 @@ import socket
 import threading
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from dataclasses import replace
 from typing import TYPE_CHECKING, Self
 from uuid import UUID, uuid4
 
 from ..budget import Budget, BudgetTracker
-from ..dataclasses import FrozenDataclass
 from ..deadlines import Deadline
 from ..prompt.errors import VisibilityExpansionRequired
-from .dlq import DeadLetter, DLQPolicy
+from .dlq import DLQPolicy
 from .lease_extender import LeaseExtender, LeaseExtenderConfig
 from .lifecycle import wait_until
 from .logging import StructuredLogger, bind_run_context, get_logger
-from .mailbox import Mailbox, Message, ReceiptHandleExpiredError, ReplyNotAvailableError
+from .mailbox import Mailbox, Message, ReceiptHandleExpiredError
+from .main_loop_types import MainLoopConfig, MainLoopRequest, MainLoopResult
+from .message_handlers import handle_failure, reply_and_ack
 from .run_context import RunContext
 from .session import Session
 from .session.visibility_overrides import SetVisibilityOverride
@@ -75,75 +75,6 @@ if TYPE_CHECKING:
 _logger: StructuredLogger = get_logger(
     __name__, context={"component": "runtime.main_loop"}
 )
-
-
-@dataclass(frozen=True, slots=True)
-class MainLoopResult[OutputT]:
-    """Response from MainLoop execution.
-
-    Consolidates success and failure into a single type. Check ``success``
-    property to determine outcome.
-    """
-
-    request_id: UUID
-    """Correlates with MainLoopRequest.request_id."""
-
-    output: OutputT | None = None
-    """Present on success. The parsed output from the prompt response."""
-
-    error: str | None = None
-    """Error message on failure."""
-
-    session_id: UUID | None = None
-    """Session that processed the request (if available)."""
-
-    run_context: RunContext | None = None
-    """Execution context with correlation identifiers and metadata."""
-
-    completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    """Timestamp when processing completed."""
-
-    @property
-    def success(self) -> bool:
-        """Return True if this result represents successful completion."""
-        return self.error is None
-
-
-@FrozenDataclass()
-class MainLoopConfig:
-    """Configuration for MainLoop execution defaults.
-
-    Request-level ``budget``, ``deadline``, and ``resources`` override these defaults.
-
-    The ``lease_extender`` field controls automatic message visibility extension
-    during processing. When enabled, heartbeats from tool execution extend the
-    message lease, preventing timeout during long-running requests.
-    """
-
-    deadline: Deadline | None = None
-    budget: Budget | None = None
-    resources: Mapping[type[object], object] | None = None
-    lease_extender: LeaseExtenderConfig | None = None
-
-
-@FrozenDataclass()
-class MainLoopRequest[UserRequestT]:
-    """Request for MainLoop execution with optional constraints.
-
-    The ``budget``, ``deadline``, and ``resources`` fields override config defaults.
-    The ``experiment`` field specifies a configuration variant for A/B testing.
-    """
-
-    request: UserRequestT
-    budget: Budget | None = None
-    deadline: Deadline | None = None
-    resources: Mapping[type[object], object] | None = None
-    request_id: UUID = field(default_factory=uuid4)
-    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
-    run_context: RunContext | None = None
-    """Optional execution context. If not provided, MainLoop creates one."""
-    experiment: Experiment | None = None
-    """Optional experiment for A/B testing. When provided, prepare() receives it."""
 
 
 class MainLoop[UserRequestT, OutputT](ABC):
@@ -479,141 +410,30 @@ class MainLoop[UserRequestT, OutputT](ABC):
                 )
 
             except Exception as exc:
-                self._handle_failure(msg, exc, run_context=run_context)
+                handle_failure(
+                    msg,
+                    exc,
+                    run_context=run_context,
+                    dlq=self._dlq,
+                    requests_mailbox=self._requests,
+                    result_class=MainLoopResult,
+                )
                 return
 
-        self._reply_and_ack(msg, result)
-
-    def _handle_failure(
-        self,
-        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-        error: Exception,
-        *,
-        run_context: RunContext,
-    ) -> None:
-        """Handle message processing failure.
-
-        When DLQ is configured:
-        - Checks DLQ policy and either dead-letters or retries with backoff
-        - Only sends error replies on terminal outcomes (DLQ)
-
-        When DLQ is not configured:
-        - Sends error reply and acknowledges (original behavior)
-        """
-        if self._dlq is None:
-            # No DLQ configured - use original behavior: error reply + acknowledge
-            result = MainLoopResult[OutputT](
-                request_id=msg.body.request_id,
-                error=str(error),
-                run_context=run_context,
-            )
-            self._reply_and_ack(msg, result)
-            return
-
-        # DLQ is configured - check if we should dead-letter
-        if self._dlq.should_dead_letter(msg, error):
-            self._dead_letter(msg, error, run_context=run_context)
-            return
-
-        # Retry with backoff - do NOT send error reply here.
-        # The message will be redelivered and may succeed on retry.
-        # Only send error replies on terminal outcomes (DLQ or final failure).
-        backoff = min(60 * msg.delivery_count, 900)
-        with contextlib.suppress(ReceiptHandleExpiredError):
-            msg.nack(visibility_timeout=backoff)
-
-    def _dead_letter(
-        self,
-        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
-        error: Exception,
-        *,
-        run_context: RunContext,
-    ) -> None:
-        """Send message to dead letter queue."""
-        if self._dlq is None:  # pragma: no cover - defensive check
-            return
-
-        # Create run-scoped logger for tracing
-        log = bind_run_context(_logger, run_context)
-
-        dead_letter = DeadLetter(
-            message_id=msg.id,
-            body=msg.body,
-            source_mailbox=self._requests.name,
-            delivery_count=msg.delivery_count,
-            last_error=str(error),
-            last_error_type=f"{type(error).__module__}.{type(error).__qualname__}",
-            dead_lettered_at=datetime.now(UTC),
-            first_received_at=msg.enqueued_at,
-            request_id=msg.body.request_id,
-            reply_to=msg.reply_to.name if msg.reply_to else None,
-            trace_id=run_context.trace_id,
-        )
-
-        # Send error reply - this is a terminal outcome. Failures here
-        # should not prevent the dead letter from being sent.
-        try:
-            if msg.reply_to:
-                _ = msg.reply(
-                    MainLoopResult(
-                        request_id=msg.body.request_id,
-                        error=f"Dead-lettered after {msg.delivery_count} attempts: {error}",
-                        run_context=run_context,
-                    )
-                )
-        except Exception as reply_error:  # nosec B110 - intentional: reply failure should not block dead-lettering
-            log.debug(
-                "Failed to send error reply during dead-lettering.",
-                event="main_loop.dead_letter_reply_failed",
-                context={"message_id": msg.id, "error": str(reply_error)},
-            )
-
-        _ = self._dlq.mailbox.send(dead_letter)
-        log.warning(
-            "Message dead-lettered.",
-            event="main_loop.message_dead_lettered",
-            context={
-                "message_id": msg.id,
-                "delivery_count": msg.delivery_count,
-                "error_type": dead_letter.last_error_type,
-            },
-        )
-
-        # Acknowledge to remove from source queue
-        with contextlib.suppress(ReceiptHandleExpiredError):
-            msg.acknowledge()
+        reply_and_ack(msg, result)
 
     def _reply_and_ack(
         self,
         msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
         result: MainLoopResult[OutputT],
     ) -> None:
-        """Reply with result and acknowledge message, handling expired handles gracefully."""
-        _ = self  # Uses self implicitly via Message callbacks
-        # Create run-scoped logger if run_context available
-        log = bind_run_context(_logger, result.run_context)
-        try:
-            _ = msg.reply(result)
-            msg.acknowledge()
-        except ReplyNotAvailableError:
-            # No reply_to specified - log and acknowledge without reply
-            log.warning(
-                "No reply_to for message, acknowledging without reply.",
-                event="main_loop.no_reply_to",
-                context={"message_id": msg.id},
-            )
-            with contextlib.suppress(ReceiptHandleExpiredError):
-                msg.acknowledge()
-        except ReceiptHandleExpiredError:
-            # Handle expired during processing - message already requeued by reaper.
-            # This is expected for long-running requests. The duplicate response
-            # will be sent when the message is reprocessed.
-            pass
-        except Exception:
-            # Reply send failed - nack so message is retried
-            with contextlib.suppress(ReceiptHandleExpiredError):
-                backoff = min(60 * msg.delivery_count, 900)
-                msg.nack(visibility_timeout=backoff)
+        """Reply with result and acknowledge message.
+
+        Wrapper method for backwards compatibility with tests.
+        Delegates to the standalone reply_and_ack function.
+        """
+        _ = self  # Instance method for API compatibility
+        reply_and_ack(msg, result)
 
     def run(
         self,
