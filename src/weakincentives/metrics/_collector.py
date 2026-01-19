@@ -347,9 +347,13 @@ class InMemoryMetricsCollector:
             )
             metrics = metrics.with_delivery(delivery_count)
 
-            # Track retries (delivery_count > 1 means retry)
-            if delivery_count > 1:
-                metrics = replace(metrics, total_retries=metrics.total_retries.inc())
+            # Track retries (delivery_count > 1 means retry attempts occurred)
+            # Increment by delivery_count - 1 to count all retry attempts
+            retry_attempts = delivery_count - 1
+            if retry_attempts > 0:
+                metrics = replace(
+                    metrics, total_retries=metrics.total_retries.inc(retry_attempts)
+                )
 
             self._mailboxes[queue_name] = metrics
 

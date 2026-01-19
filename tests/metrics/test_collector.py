@@ -256,13 +256,14 @@ class TestInMemoryMetricsCollector:
         collector = InMemoryMetricsCollector()
         collector.record_message_received(
             "requests",
-            delivery_count=3,  # This is a retry
+            delivery_count=3,  # 2 retry attempts (deliveries 2 and 3)
             age_ms=1000,
         )
 
         snapshot = collector.snapshot()
         metrics = snapshot.mailboxes[0]
-        assert metrics.total_retries.value == 1
+        # delivery_count=3 means 2 retry attempts occurred
+        assert metrics.total_retries.value == 2
         assert metrics.delivery_count_dist[2] == 1
 
     def test_record_message_ack(self) -> None:
