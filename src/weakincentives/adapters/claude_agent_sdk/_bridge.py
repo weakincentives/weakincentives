@@ -297,7 +297,7 @@ class BridgedTool:
             name=self.name,
             params=args,
             result=cast(ToolResult[object], result),
-            session_id=None,
+            session_id=getattr(self._session, "session_id", None),
             created_at=datetime.now(UTC),
             usage=None,
             rendered_output=rendered_output[:1000] if rendered_output else "",
