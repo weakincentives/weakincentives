@@ -31,12 +31,15 @@ from typing import Final, Literal
 
 from ...dataclasses import FrozenDataclass
 from ...errors import ToolValidationError
+from ...filesystem._path import (
+    MAX_PATH_DEPTH as _MAX_PATH_DEPTH,
+    MAX_SEGMENT_LENGTH as _MAX_SEGMENT_LENGTH,
+    strip_mount_point,
+)
 
 _ASCII: Final[str] = "ascii"
 _DEFAULT_ENCODING: Final[Literal["utf-8"]] = "utf-8"
 _MAX_WRITE_LENGTH: Final[int] = 48_000
-_MAX_PATH_DEPTH: Final[int] = 16
-_MAX_SEGMENT_LENGTH: Final[int] = 80
 _MAX_READ_LIMIT: Final[int] = 2_000
 
 FileEncoding = Literal["utf-8"]
@@ -654,18 +657,6 @@ def normalize_limit(limit: int) -> int:
     return min(limit, _MAX_READ_LIMIT)
 
 
-def _strip_mount_point(path: str, mount_point: str | None) -> str:
-    """Strip mount point prefix from a path."""
-    if mount_point is None:
-        return path
-    prefix = mount_point.lstrip("/")
-    if path.startswith(prefix + "/"):
-        return path[len(prefix) + 1 :]
-    if path == prefix:
-        return ""
-    return path
-
-
 def normalize_string_path(
     raw: str | None,
     *,
@@ -696,7 +687,7 @@ def normalize_string_path(
     if stripped.startswith("/"):
         stripped = stripped.lstrip("/")
 
-    stripped = _strip_mount_point(stripped, mount_point)
+    stripped = strip_mount_point(stripped, mount_point)
 
     segments = normalize_segments(stripped.split("/"))
     if len(segments) > _MAX_PATH_DEPTH:
