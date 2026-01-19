@@ -223,7 +223,7 @@ class Watchdog:
         """Stop the watchdog thread gracefully."""
         self._stop_signal.set()
         if self._worker is not None:
-            self._worker.stop(timeout=self._check_interval * 2)
+            _ = self._worker.stop(timeout=self._check_interval * 2)
             self._worker = None
 
     def _run(self) -> None:

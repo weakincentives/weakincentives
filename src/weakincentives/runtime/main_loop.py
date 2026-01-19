@@ -230,7 +230,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         """
         _ = (self, prompt, session)
 
-    def execute(  # noqa: PLR0913
+    def execute(
         self,
         request: UserRequestT,
         *,

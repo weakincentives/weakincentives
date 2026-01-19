@@ -14,16 +14,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
-
-T = TypeVar("T")
 
 
 @dataclass
-class CallbackRegistry(Generic[T]):
+class CallbackRegistry[T]:
     """Thread-safe registry for callbacks.
 
     Callbacks are registered and unregistered under a lock, but invoked
@@ -52,7 +50,10 @@ class CallbackRegistry(Generic[T]):
         - One callback's exception doesn't affect others
     """
 
-    _callbacks: list[Callable[[T], None]] = field(default_factory=list, repr=False)
+    _callbacks: list[Callable[[T], None]] = field(  # pyright: ignore[reportUnknownVariableType]
+        default_factory=list,
+        repr=False,
+    )
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def register(self, callback: Callable[[T], None]) -> None:
@@ -72,11 +73,8 @@ class CallbackRegistry(Generic[T]):
         Args:
             callback: The callback to remove.
         """
-        with self._lock:
-            try:
-                self._callbacks.remove(callback)
-            except ValueError:
-                pass
+        with self._lock, contextlib.suppress(ValueError):
+            self._callbacks.remove(callback)
 
     def invoke(self, value: T) -> int:
         """Invoke all callbacks, stopping on first exception.
@@ -95,7 +93,7 @@ class CallbackRegistry(Generic[T]):
             callbacks = list(self._callbacks)
 
         # Invoke outside lock
-        for i, callback in enumerate(callbacks):
+        for callback in callbacks:
             callback(value)
         return len(callbacks)
 

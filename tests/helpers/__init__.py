@@ -33,19 +33,16 @@ from .threading import (
 )
 
 __all__ = [
-    # Filesystem
-    "FilesystemValidationSuite",
-    "ReadOnlyFilesystemValidationSuite",
-    "SnapshotableFilesystemValidationSuite",
-    # Events
-    "NullDispatcher",
-    # Threading
     "FakeBackgroundWorker",
     "FakeCheckpoint",
     "FakeExecutor",
     "FakeGate",
     "FakeLatch",
     "FakeScheduler",
+    "FilesystemValidationSuite",
+    "NullDispatcher",
+    "ReadOnlyFilesystemValidationSuite",
+    "SnapshotableFilesystemValidationSuite",
     "fake_checkpoint",
     "fake_executor",
     "fake_gate",

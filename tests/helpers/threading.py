@@ -150,17 +150,15 @@ def fake_latch_factory() -> Callable[[int], FakeLatch]:
 
 
 __all__ = [
-    # Fixtures
-    "fake_checkpoint",
-    "fake_executor",
-    "fake_gate",
-    "fake_latch_factory",
-    "fake_scheduler",
-    # Re-exports
     "FakeBackgroundWorker",
     "FakeCheckpoint",
     "FakeExecutor",
     "FakeGate",
     "FakeLatch",
     "FakeScheduler",
+    "fake_checkpoint",
+    "fake_executor",
+    "fake_gate",
+    "fake_latch_factory",
+    "fake_scheduler",
 ]

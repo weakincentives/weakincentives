@@ -18,7 +18,7 @@ from collections import deque
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from weakincentives.threading._executor import CompletedFuture
 from weakincentives.threading._types import Future
@@ -48,7 +48,10 @@ class FifoScheduler:
 
     max_workers: int = 4
     _executor: ThreadPoolExecutor | None = field(default=None, repr=False)
-    _futures: list[Future[object]] = field(default_factory=list, repr=False)
+    _futures: list[Future[Any]] = field(  # pyright: ignore[reportUnknownVariableType]
+        default_factory=list,
+        repr=False,
+    )
 
     def _ensure_executor(self) -> ThreadPoolExecutor:
         """Lazily create the thread pool."""
@@ -63,8 +66,8 @@ class FifoScheduler:
         """Schedule a task for execution."""
         executor = self._ensure_executor()
         future = executor.submit(task)
-        self._futures.append(future)  # type: ignore[arg-type]
-        return future  # type: ignore[return-value]
+        self._futures.append(future)
+        return future
 
     def yield_(self) -> None:
         """Yield control hint (releases GIL briefly)."""
@@ -75,7 +78,7 @@ class FifoScheduler:
     def run_until_complete(self) -> None:
         """Wait for all scheduled tasks to complete."""
         for future in self._futures:
-            future.result()
+            _ = future.result()
         self._futures.clear()
 
     def run_one(self) -> bool:
@@ -90,7 +93,7 @@ class FifoScheduler:
         # Wait for first incomplete future
         for future in self._futures:
             if not future.done():
-                future.result()
+                _ = future.result()
                 return True
 
         return False
@@ -141,18 +144,18 @@ class FakeScheduler:
     inject the scheduler or use a global for simplicity.
     """
 
-    _ready_queue: deque[_ScheduledTask[object]] = field(
+    _ready_queue: deque[_ScheduledTask[Any]] = field(  # pyright: ignore[reportUnknownVariableType]
         default_factory=deque,
         repr=False,
     )
-    _current_task: _ScheduledTask[object] | None = field(default=None, repr=False)
+    _current_task: _ScheduledTask[Any] | None = field(default=None, repr=False)
     _yield_requested: bool = field(default=False, repr=False)
 
     def schedule(self, task: Callable[[], T]) -> Future[T]:
         """Schedule a task for execution."""
         scheduled = _ScheduledTask(task)
-        self._ready_queue.append(scheduled)  # type: ignore[arg-type]
-        return scheduled.future  # type: ignore[return-value]
+        self._ready_queue.append(scheduled)
+        return scheduled.future
 
     def yield_(self) -> None:
         """Yield control to the scheduler.
@@ -182,7 +185,8 @@ class FakeScheduler:
             self._current_task = None
 
         # If task yielded (not completed), put back in queue
-        if not task.completed and self._yield_requested:
+        # Note: Current implementation always completes tasks, so this is defensive
+        if not task.completed and self._yield_requested:  # pragma: no cover
             self._ready_queue.append(task)
 
         return True
@@ -200,7 +204,7 @@ class FakeScheduler:
 
 
 @dataclass
-class _ScheduledTask:
+class _ScheduledTask[T]:
     """Internal wrapper for scheduled tasks."""
 
     task: Callable[[], T]
@@ -217,7 +221,7 @@ class _ScheduledTask:
         written as a generator or use async. For testing purposes,
         tasks should be structured to call yield_() at known points.
         """
-        if self.completed:
+        if self.completed:  # pragma: no cover
             return
 
         try:

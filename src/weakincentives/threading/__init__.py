@@ -82,34 +82,28 @@ Uses a thread pool that creates workers on demand.
 Tests can inject FakeExecutor instead for deterministic behavior.
 """
 
-# Alias for the concrete cancellation token
-CancellationToken = SimpleCancellationToken  # type: ignore[misc]
-
 __all__ = [
-    # Protocols
-    "Executor",
-    "Future",
-    "Gate",
-    "Checkpoint",
-    "Scheduler",
-    # Production implementations
     "SYSTEM_EXECUTOR",
-    "SystemExecutor",
-    "SystemGate",
-    "SystemCheckpoint",
-    "FifoScheduler",
     "BackgroundWorker",
     "CallbackRegistry",
-    "Latch",
-    "SimpleCancellationToken",
     "CancellationToken",
     "CancelledException",
+    "Checkpoint",
     "CompletedFuture",
-    # Test implementations
+    "Executor",
+    "FakeBackgroundWorker",
+    "FakeCheckpoint",
     "FakeExecutor",
     "FakeGate",
-    "FakeCheckpoint",
-    "FakeScheduler",
     "FakeLatch",
-    "FakeBackgroundWorker",
+    "FakeScheduler",
+    "FifoScheduler",
+    "Future",
+    "Gate",
+    "Latch",
+    "Scheduler",
+    "SimpleCancellationToken",
+    "SystemCheckpoint",
+    "SystemExecutor",
+    "SystemGate",
 ]

@@ -32,13 +32,13 @@ implementations provide deterministic control.
 1. **Injectable dependencies**: All threading primitives accept injectable
    implementations, defaulting to production behavior.
 
-2. **Testable without real threads**: `FakeExecutor` runs tasks synchronously in
+1. **Testable without real threads**: `FakeExecutor` runs tasks synchronously in
    the calling thread, eliminating race conditions and non-determinism in tests.
 
-3. **Explicit over implicit**: Background threads are managed explicitly via
+1. **Explicit over implicit**: Background threads are managed explicitly via
    `BackgroundWorker` rather than ad-hoc `threading.Thread` creation.
 
-4. **Consistent with Clock pattern**: Follow the same protocols + fake pattern
+1. **Consistent with Clock pattern**: Follow the same protocols + fake pattern
    established in `CLOCK.md` for familiarity.
 
 ## Executor Protocol
@@ -152,10 +152,10 @@ assert results == [1, 2]  # Always this order
 ### FakeExecutor Features
 
 1. **Synchronous execution**: Tasks complete before `submit()` returns.
-2. **No real threads**: All work happens in the calling thread.
-3. **Exception propagation**: Exceptions are captured and re-raised on
+1. **No real threads**: All work happens in the calling thread.
+1. **Exception propagation**: Exceptions are captured and re-raised on
    `result()`.
-4. **Deterministic**: Order of execution matches order of submission.
+1. **Deterministic**: Order of execution matches order of submission.
 
 ### FakeExecutor API
 
@@ -396,9 +396,10 @@ checkpoint and cancellation primitives.
 ### Checkpoint Protocol
 
 A `Checkpoint` is a yield point where tasks can:
+
 1. Check if they should be cancelled
-2. Yield control to other tasks
-3. Update progress
+1. Yield control to other tasks
+1. Update progress
 
 ```python
 from weakincentives.threading import Checkpoint, SystemCheckpoint, FakeCheckpoint
@@ -715,9 +716,9 @@ if errors:
 ### Thread Safety Guarantees
 
 1. **Registration under lock**: `register()` and `unregister()` are atomic.
-2. **Snapshot before invoke**: Callbacks are copied before invocation.
-3. **Invoke outside lock**: Callbacks execute without holding the lock.
-4. **Exception isolation**: One callback's exception doesn't affect others.
+1. **Snapshot before invoke**: Callbacks are copied before invocation.
+1. **Invoke outside lock**: Callbacks execute without holding the lock.
+1. **Exception isolation**: One callback's exception doesn't affect others.
 
 This pattern is used by `Heartbeat` for beat callbacks.
 
@@ -1028,9 +1029,9 @@ This specification does not address:
 Threading primitives follow the same injectable dependency pattern as `Clock`:
 
 1. **Protocols** define the interface (`Executor`, `Gate`, `Checkpoint`, `Scheduler`)
-2. **System implementations** provide production behavior
-3. **Fake implementations** enable deterministic testing
-4. **Module singletons** provide convenient defaults
+1. **System implementations** provide production behavior
+1. **Fake implementations** enable deterministic testing
+1. **Module singletons** provide convenient defaults
 
 The primitives address three categories of threading needs:
 

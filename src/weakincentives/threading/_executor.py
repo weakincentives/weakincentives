@@ -15,10 +15,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator
-from concurrent.futures import Future as CFuture
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Generic, TypeVar
+from typing import TypeVar
 
 from weakincentives.threading._types import Future
 
@@ -27,7 +26,7 @@ A = TypeVar("A")
 
 
 @dataclass
-class CompletedFuture(Generic[T]):
+class CompletedFuture[T]:
     """A future that is already complete with a value or exception."""
 
     _value: T | None = None
@@ -36,12 +35,12 @@ class CompletedFuture(Generic[T]):
     @classmethod
     def of(cls, value: T) -> CompletedFuture[T]:
         """Create a completed future with a value."""
-        return cls(_value=value)
+        return CompletedFuture[T](_value=value)
 
     @classmethod
     def failed(cls, exc: BaseException) -> CompletedFuture[T]:
         """Create a completed future with an exception."""
-        return cls(_exception=exc)
+        return CompletedFuture[T](_exception=exc)
 
     def result(self, timeout: float | None = None) -> T:
         """Return the result or raise the stored exception."""
@@ -93,7 +92,7 @@ class SystemExecutor:
     def submit(self, fn: Callable[[], T]) -> Future[T]:
         """Submit a callable for execution in the thread pool."""
         executor = self._ensure_executor()
-        return executor.submit(fn)  # type: ignore[return-value]
+        return executor.submit(fn)
 
     def map(
         self,
@@ -140,7 +139,9 @@ class FakeExecutor:
         assert len(executor.submitted) == 1
     """
 
-    submitted: list[Callable[[], object]] = field(default_factory=list)
+    submitted: list[Callable[[], object]] = field(  # pyright: ignore[reportUnknownVariableType]
+        default_factory=list,
+    )
     _shutdown: bool = field(default=False, repr=False)
 
     def submit(self, fn: Callable[[], T]) -> Future[T]:
@@ -189,22 +190,6 @@ class FakeExecutor:
         """Reset state for reuse in tests."""
         self.submitted.clear()
         self._shutdown = False
-
-
-class _WrappedFuture(Generic[T]):
-    """Wraps concurrent.futures.Future to match our Future protocol."""
-
-    def __init__(self, future: CFuture[T]) -> None:
-        self._future = future
-
-    def result(self, timeout: float | None = None) -> T:
-        return self._future.result(timeout=timeout)
-
-    def done(self) -> bool:
-        return self._future.done()
-
-    def cancel(self) -> bool:
-        return self._future.cancel()
 
 
 __all__ = [

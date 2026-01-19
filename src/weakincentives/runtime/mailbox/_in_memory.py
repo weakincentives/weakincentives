@@ -153,9 +153,7 @@ class InMemoryMailbox[T, R]:
         default=None, repr=False, init=False
     )
     _closed: bool = field(default=False, repr=False, init=False)
-    _stop_reaper: Gate = field(
-        default_factory=SystemGate, repr=False, init=False
-    )
+    _stop_reaper: Gate = field(default_factory=SystemGate, repr=False, init=False)
 
     def __post_init__(self) -> None:
         self._condition = threading.Condition(self._lock)
@@ -407,7 +405,7 @@ class InMemoryMailbox[T, R]:
         # Stop reaper worker
         self._stop_reaper.set()
         if self._reaper_worker is not None:  # pragma: no branch
-            self._reaper_worker.stop(timeout=1.0)
+            _ = self._reaper_worker.stop(timeout=1.0)
 
     @property
     def closed(self) -> bool:

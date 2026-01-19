@@ -22,7 +22,9 @@ from typing import TYPE_CHECKING
 from weakincentives.threading._types import CancelledException
 
 if TYPE_CHECKING:
-    from weakincentives.threading._types import CancellationToken as CancellationTokenProtocol
+    from weakincentives.threading._types import (
+        CancellationToken as CancellationTokenProtocol,
+    )
 
 
 @dataclass
@@ -97,6 +99,7 @@ class SystemCheckpoint:
 
     def __init__(self, token: CancellationTokenProtocol | None = None) -> None:
         """Initialize checkpoint with optional cancellation token."""
+        object.__init__(self)
         if token is None:
             self._token = SimpleCancellationToken()
         elif isinstance(token, SimpleCancellationToken):
@@ -195,6 +198,7 @@ class _WrappedToken:
     """Wraps an external CancellationToken protocol implementation."""
 
     def __init__(self, token: CancellationTokenProtocol) -> None:
+        super().__init__()
         self._token = token
 
     def cancel(self) -> None:

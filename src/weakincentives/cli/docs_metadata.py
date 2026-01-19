@@ -49,6 +49,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "TASK_COMPLETION": "Task completion checking, PlanBasedChecker, composite verification",
     "TESTING": "Test harnesses, fault injection, fuzzing, coverage standards",
     "THREAD_SAFETY": "Concurrency and shared state",
+    "THREADING_PRIMITIVES": "Injectable threading primitives, Executor/Gate protocols, testable concurrency",
     "TOOLS": "Tool runtime, policies, sequential dependencies, planning tools",
     "VERIFICATION": "Redis mailbox detailed specification, invariants, property tests",
     "VERIFICATION_TOOLBOX": "Verification toolchain (check.py), checker protocol, failure reporting",

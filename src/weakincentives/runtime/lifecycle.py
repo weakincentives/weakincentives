@@ -398,7 +398,9 @@ class LoopGroup:
                 self._watchdog.stop()
                 self._watchdog = None
             # Only shutdown if we created the executor
-            if self._owns_executor and self._executor is not None:
+            # Note: Currently unreachable as SYSTEM_EXECUTOR is used as fallback
+            # and not stored in self._executor. Kept for future extensibility.
+            if self._owns_executor and self._executor is not None:  # pragma: no cover
                 self._executor.shutdown(wait=True)
             self._futures.clear()
 
