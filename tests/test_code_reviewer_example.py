@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -40,7 +39,6 @@ from weakincentives.contrib.tools.digests import (
     set_workspace_digest,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.debug import dump_session
 from weakincentives.prompt import Prompt
 from weakincentives.prompt.overrides import (
     LocalPromptOverridesStore,
@@ -354,56 +352,11 @@ def test_deadline_passed_per_request(tmp_path: Path) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _redirect_snapshots(
+def _redirect_debug_bundles(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
 ) -> Path:
-    snapshot_dir = tmp_path_factory.mktemp("snapshots")
-    monkeypatch.setattr(reviewer_example, "SNAPSHOT_DIR", snapshot_dir, raising=False)
-    return snapshot_dir
-
-
-def test_dump_session_logs_success(
-    caplog: pytest.LogCaptureFixture,
-    _redirect_snapshots: Path,
-) -> None:
-    caplog.set_level(logging.INFO, logger="weakincentives.debug")
-    session = Session()
-    set_workspace_digest(session, "workspace-digest", "body")
-
-    snapshot_path = dump_session(session, _redirect_snapshots)
-
-    assert snapshot_path == _redirect_snapshots / f"{session.session_id}.jsonl"
-    assert snapshot_path is not None and snapshot_path.exists()
-    content = snapshot_path.read_text().splitlines()
-    assert len(content) == 1
-    record = next(
-        rec
-        for rec in caplog.records
-        if getattr(rec, "session_id", None) == str(session.session_id)
+    debug_bundles_dir = tmp_path_factory.mktemp("debug_bundles")
+    monkeypatch.setattr(
+        reviewer_example, "DEBUG_BUNDLES_DIR", debug_bundles_dir, raising=False
     )
-    assert record.levelno == logging.INFO
-    assert "Session snapshots persisted" in record.getMessage()
-    assert record.snapshot_path == str(snapshot_path)
-    assert record.snapshot_count == 1
-
-
-def test_dump_session_skips_empty_session(
-    caplog: pytest.LogCaptureFixture,
-    _redirect_snapshots: Path,
-) -> None:
-    """Sessions with no data (only empty slices) skip snapshot dump."""
-    caplog.set_level(logging.INFO, logger="weakincentives.debug")
-    session = Session()
-
-    # Sessions have builtin reducers registered but no data
-    # Empty slices are excluded from snapshots, so this should be skipped
-    snapshot_path = dump_session(session, _redirect_snapshots)
-
-    assert snapshot_path is None
-    assert not any(_redirect_snapshots.iterdir())
-    record = next(
-        rec
-        for rec in caplog.records
-        if getattr(rec, "session_id", None) == str(session.session_id)
-    )
-    assert "skipped; no slices" in record.getMessage()
+    return debug_bundles_dir

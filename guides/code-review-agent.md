@@ -93,7 +93,8 @@ Each turn:
 1. Renders response via `_render_response_payload`
 1. Prints plan snapshot via `render_plan_snapshot`
 
-On exit, dumps session state to `snapshots/` via `dump_session_tree`.
+Debug bundles are created automatically per-request in `debug_bundles/` via
+`MainLoopConfig.debug_bundle`.
 
 ## Data Types
 

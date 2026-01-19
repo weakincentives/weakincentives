@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +22,8 @@ import pytest
 
 from weakincentives import cli
 from weakincentives.cli import wink
-from weakincentives.dbc import dbc_enabled
-from weakincentives.runtime.session.snapshots import Snapshot
+from weakincentives.debug.bundle import BundleConfig, BundleWriter, CaptureMode
+from weakincentives.runtime.session import Session
 
 
 @dataclass(slots=True, frozen=True)
@@ -32,14 +31,20 @@ class _ExampleSlice:
     value: str
 
 
-def _write_snapshot(path: Path) -> None:
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={_ExampleSlice: (_ExampleSlice("a"),)},
-        tags={"suite": "wink", "session_id": path.stem},
-    )
-    with dbc_enabled(False):
-        path.write_text(snapshot.to_json() + "\n")
+def _create_test_bundle(target_dir: Path) -> Path:
+    """Create a test debug bundle with session data."""
+    session = Session()
+    session.dispatch(_ExampleSlice("a"))
+
+    with BundleWriter(
+        target_dir, config=BundleConfig(mode=CaptureMode.STANDARD)
+    ) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({"task": "test"})
+        writer.write_request_output({"status": "ok"})
+
+    assert writer.path is not None
+    return writer.path
 
 
 def test_cli_namespace_lists_wink_module() -> None:
@@ -49,8 +54,7 @@ def test_cli_namespace_lists_wink_module() -> None:
 def test_main_runs_debug_command(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path)
+    bundle_path = _create_test_bundle(tmp_path)
 
     calls: dict[str, Any] = {}
 
@@ -77,14 +81,8 @@ def test_main_runs_debug_command(
         calls["logger_name"] = name
         return fake_logger
 
-    real_loader = wink.debug_app.load_snapshot
-
-    def fake_load_snapshot(path: Path) -> object:
-        calls["loaded_path"] = path
-        return real_loader(path)
-
     def fake_build_app(*args: object, **kwargs: object) -> str:
-        calls["app_args"] = {"snapshot": args[0], **kwargs}
+        calls["app_args"] = {"store": args[0], **kwargs}
         return "app"
 
     def fake_run_server(
@@ -101,7 +99,6 @@ def test_main_runs_debug_command(
 
     monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-    monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
     monkeypatch.setattr(wink.debug_app, "build_debug_app", fake_build_app)
     monkeypatch.setattr(wink.debug_app, "run_debug_server", fake_run_server)
 
@@ -111,7 +108,7 @@ def test_main_runs_debug_command(
             "DEBUG",
             "--no-json-logs",
             "debug",
-            str(snapshot_path),
+            str(bundle_path),
             "--host",
             "0.0.0.0",
             "--port",
@@ -123,10 +120,9 @@ def test_main_runs_debug_command(
     assert exit_code == 0
     assert calls["configure"] == {"level": "DEBUG", "json_mode": False}
     assert calls["logger_name"] == "weakincentives.cli.wink"
-    assert calls["loaded_path"] == snapshot_path
-    snapshot_store = calls["app_args"]["snapshot"]
-    assert isinstance(snapshot_store, wink.debug_app.SnapshotStore)
-    assert snapshot_store.meta.path == str(snapshot_path)
+    bundle_store = calls["app_args"]["store"]
+    assert isinstance(bundle_store, wink.debug_app.BundleStore)
+    assert bundle_store.meta.path == str(bundle_path)
     assert calls["app_args"]["logger"] == fake_logger
     assert calls["run_args"] == {
         "app": "app",
@@ -137,10 +133,10 @@ def test_main_runs_debug_command(
     }
 
 
-def test_main_handles_invalid_snapshot(
+def test_main_handles_invalid_bundle(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    snapshot_path = tmp_path / "missing.jsonl"
+    bundle_path = tmp_path / "missing.zip"
 
     def fake_configure_logging(*, level: object, json_mode: object) -> None:
         return None
@@ -157,15 +153,10 @@ def test_main_handles_invalid_snapshot(
     def fake_get_logger(name: str) -> FakeLogger:
         return FakeLogger()
 
-    def fake_load_snapshot(path: Path) -> object:
-        msg = f"{path} missing"
-        raise wink.debug_app.SnapshotLoadError(msg)
-
     monkeypatch.setattr(wink, "configure_logging", fake_configure_logging)
     monkeypatch.setattr(wink, "get_logger", fake_get_logger)
-    monkeypatch.setattr(wink.debug_app, "load_snapshot", fake_load_snapshot)
 
-    exit_code = wink.main(["debug", str(snapshot_path)])
+    exit_code = wink.main(["debug", str(bundle_path)])
 
     assert exit_code == 2
 

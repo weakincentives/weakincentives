@@ -430,4 +430,4 @@ variant = [m for m in snapshot.adapters if m.experiment == "v2-concise"]
 - `specs/RESOURCE_REGISTRY.md` - Collector binding, singleton scope
 - `specs/RUN_CONTEXT.md` - Request correlation, distributed tracing
 - `specs/EXPERIMENTS.md` - A/B testing configuration
-- `specs/DEBUGGING.md` - Debug persistence utilities
+- `specs/DEBUG_BUNDLE.md` - Debug bundle specification

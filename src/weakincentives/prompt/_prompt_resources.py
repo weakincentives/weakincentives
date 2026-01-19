@@ -128,20 +128,48 @@ class PromptResources:
     def get[T](self, protocol: type[T]) -> T:
         """Resolve and return resource for protocol.
 
+        For pre-provided instances (created via ``Binding.instance()`` or
+        ``resources={Protocol: instance}``), returns the instance directly
+        without requiring the resource context.
+
+        For factory-constructed resources, requires being inside
+        ``with prompt.resources:``.
+
         Raises:
-            RuntimeError: If called outside resource context.
+            RuntimeError: If called outside resource context for non-provided resources.
             UnboundResourceError: No binding exists.
             CircularDependencyError: Dependency cycle detected.
             ProviderError: Provider raised an exception.
         """
+        # Check for pre-provided instance first (no context needed)
+        registry = self._prompt._collected_resources()  # pyright: ignore[reportPrivateUsage]
+        binding = registry.binding_for(protocol)
+        if binding is not None and binding.provided is not None:
+            return binding.provided
+        # Fall back to context-based resolution
         return self.context.get(protocol)
 
     def get_optional[T](self, protocol: type[T]) -> T | None:
         """Resolve if bound, return None otherwise.
 
+        For pre-provided instances (created via ``Binding.instance()`` or
+        ``resources={Protocol: instance}``), returns the instance directly
+        without requiring the resource context.
+
+        For factory-constructed resources, requires being inside
+        ``with prompt.resources:``.
+
         Raises:
-            RuntimeError: If called outside resource context.
+            RuntimeError: If called outside resource context for non-provided resources.
         """
+        # Check for pre-provided instance first (no context needed)
+        registry = self._prompt._collected_resources()  # pyright: ignore[reportPrivateUsage]
+        binding = registry.binding_for(protocol)
+        if binding is None:
+            return None  # No binding exists, return None without context
+        if binding.provided is not None:
+            return binding.provided
+        # Fall back to context-based resolution
         return self.context.get_optional(protocol)
 
     @contextmanager

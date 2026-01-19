@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
@@ -31,6 +32,7 @@ from .lease_extender import LeaseExtenderConfig
 from .run_context import RunContext
 
 if TYPE_CHECKING:
+    from ..debug.bundle import BundleConfig
     from ..evals._experiment import Experiment
 
 
@@ -60,6 +62,9 @@ class MainLoopResult[OutputT]:
     completed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     """Timestamp when processing completed."""
 
+    bundle_path: Path | None = None
+    """Path to debug bundle if bundling was enabled."""
+
     @property
     def success(self) -> bool:
         """Return True if this result represents successful completion."""
@@ -75,12 +80,17 @@ class MainLoopConfig:
     The ``lease_extender`` field controls automatic message visibility extension
     during processing. When enabled, heartbeats from tool execution extend the
     message lease, preventing timeout during long-running requests.
+
+    The ``debug_bundle`` field enables debug bundle creation for each execution.
+    When set, MainLoop automatically creates a bundle capturing request/response,
+    session state, logs, and other artifacts.
     """
 
     deadline: Deadline | None = None
     budget: Budget | None = None
     resources: Mapping[type[object], object] | None = None
     lease_extender: LeaseExtenderConfig | None = None
+    debug_bundle: BundleConfig | None = None
 
 
 @FrozenDataclass()

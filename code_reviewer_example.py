@@ -60,11 +60,7 @@ from weakincentives.contrib.tools import (
     WorkspaceDigestSection,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.debug import (
-    archive_filesystem,
-    collect_all_logs,
-    dump_session as dump_session_tree,
-)
+from weakincentives.debug import BundleConfig, CaptureMode
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
@@ -100,7 +96,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 DEMO_SKILLS_ROOT = PROJECT_ROOT / "demo-skills"
 
 TEST_REPOSITORIES_ROOT = (PROJECT_ROOT / "test-repositories").resolve()
-SNAPSHOT_DIR = PROJECT_ROOT / "snapshots"
+DEBUG_BUNDLES_DIR = PROJECT_ROOT / "debug_bundles"
 PROMPT_OVERRIDES_TAG_ENV = "CODE_REVIEW_PROMPT_TAG"
 SUNFISH_MOUNT_INCLUDE_GLOBS: tuple[str, ...] = (
     "*.md",
@@ -253,10 +249,15 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
     ) -> None:
         # Configure lease extender to extend message visibility during long tool execution.
         # Extends by 5 minutes every 60 seconds of active work (heartbeats from tools).
+        # Debug bundling captures logs, session state, and config for each request.
         config = MainLoopConfig(
             lease_extender=LeaseExtenderConfig(
                 interval=60.0,  # Rate-limit extensions to once per minute
                 extension=300,  # Extend by 5 minutes on each extension
+            ),
+            debug_bundle=BundleConfig(
+                target=DEBUG_BUNDLES_DIR,
+                mode=CaptureMode.STANDARD,
             ),
         )
         super().__init__(adapter=adapter, requests=requests, config=config, dlq=dlq)
@@ -409,11 +410,9 @@ class CodeReviewApp:
 
     def _run_worker(self) -> None:
         """Background worker that processes requests from the mailbox."""
-        # Collect all logs during prompt evaluations to a session-specific file
-        log_path = SNAPSHOT_DIR / f"{self._loop.session.session_id}.log"
-        with collect_all_logs(log_path):
-            # Run indefinitely until mailbox is closed
-            self._loop.run(max_iterations=None, wait_time_seconds=5)
+        # Run indefinitely until mailbox is closed
+        # Debug bundles are created automatically per-request via MainLoopConfig.debug_bundle
+        self._loop.run(max_iterations=None, wait_time_seconds=5)
         _LOGGER.debug("Worker thread exiting")
 
     def _render_result(self, result: MainLoopResult[ReviewResponse]) -> None:
@@ -426,6 +425,8 @@ class CodeReviewApp:
             print(f"Error: {result.error}")
         print("\n--- Plan Snapshot ---")
         print(render_plan_snapshot(self._loop.session))
+        if result.bundle_path is not None:
+            print(f"\nDebug bundle: {result.bundle_path}")
         print("-" * 23 + "\n")
 
     def _wait_for_response(
@@ -516,17 +517,10 @@ class CodeReviewApp:
             self._cleanup()
 
         print("Goodbye.")
-        session_id = self._loop.session.session_id
-        dump_session_tree(self._loop.session, SNAPSHOT_DIR)
-        print(f"Debug artifacts saved to {SNAPSHOT_DIR}/:")
-        print(f"  - {session_id}.jsonl (session snapshots)")
-        print(f"  - {session_id}.log (prompt evaluation logs)")
+        print(f"Debug bundles saved to {DEBUG_BUNDLES_DIR}/")
 
     def _cleanup(self) -> None:
         """Clean up resources."""
-        # Archive workspace before cleanup removes the temp directory
-        self._archive_workspace()
-
         # Gracefully shutdown the loop - completes in-flight work
         if self._loop.shutdown(timeout=5.0):
             _LOGGER.info("Worker loop stopped cleanly")
@@ -544,25 +538,6 @@ class CodeReviewApp:
         if self._workspace_section is not None:
             self._workspace_section.cleanup()
             _LOGGER.info("Cleaned up Claude Agent workspace.")
-
-    def _archive_workspace(self) -> None:
-        """Archive the workspace filesystem to a zip file.
-
-        Only archives for Claude Agent mode where workspace_section is stored.
-        VFS mode uses InMemoryFilesystem with host file copies that already
-        exist on disk, so archiving would be redundant.
-        """
-        if self._workspace_section is None:
-            return
-        archive_path = archive_filesystem(
-            self._workspace_section.filesystem,
-            SNAPSHOT_DIR,
-            archive_id=self._loop.session.session_id,
-        )
-        if archive_path is not None:
-            _LOGGER.info("Workspace archived to %s", archive_path)
-        else:
-            _LOGGER.debug("Workspace archive skipped (empty filesystem)")
 
 
 def parse_args() -> argparse.Namespace:

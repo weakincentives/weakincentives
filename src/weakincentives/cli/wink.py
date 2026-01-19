@@ -446,11 +446,11 @@ def _build_parser() -> argparse.ArgumentParser:
 
     debug_parser = subcommands.add_parser(
         "debug",
-        help="Start a debug server that renders a snapshot inspection UI.",
+        help="Start a debug server that renders a bundle inspection UI.",
     )
     _ = debug_parser.add_argument(
-        "snapshot_path",
-        help="Path to a session snapshot JSONL file or a directory containing snapshots.",
+        "bundle_path",
+        help="Path to a debug bundle .zip file or a directory containing bundles.",
     )
     _ = debug_parser.add_argument(
         "--host",
@@ -569,22 +569,18 @@ def _build_docs_parser(
 
 
 def _run_debug(args: argparse.Namespace, logger: StructuredLogger) -> int:
-    snapshot_path = Path(args.snapshot_path)
-
-    def _bootstrap_loader(path: Path) -> tuple[debug_app.LoadedSnapshot, ...]:
-        return debug_app.load_snapshot(path)
+    bundle_path = Path(args.bundle_path)
 
     try:
-        store = debug_app.SnapshotStore(
-            snapshot_path,
-            loader=_bootstrap_loader,
+        store = debug_app.BundleStore(
+            bundle_path,
             logger=logger,
         )
-    except debug_app.SnapshotLoadError as error:
+    except debug_app.BundleLoadError as error:
         logger.exception(
-            "Snapshot validation failed",
-            event="wink.debug.snapshot_error",
-            context={"path": str(snapshot_path), "error": str(error)},
+            "Bundle validation failed",
+            event="wink.debug.bundle_error",
+            context={"path": str(bundle_path), "error": str(error)},
         )
         return 2
 

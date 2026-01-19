@@ -59,6 +59,7 @@ class Binding[T]:
         provider: Factory function that constructs the instance.
         scope: Lifetime of constructed instances (default: SINGLETON).
         eager: If True, instantiate during context startup (SINGLETON only).
+        provided: Pre-constructed instance, accessible without context manager.
     """
 
     protocol: type[T]
@@ -73,6 +74,9 @@ class Binding[T]:
     eager: bool = False
     """If True, instantiate during context startup (SINGLETON only)."""
 
+    provided: T | None = None
+    """Pre-constructed instance, accessible without entering resource context."""
+
     @staticmethod
     def instance[U](protocol: type[U], value: U) -> Binding[U]:
         """Create a binding for a pre-constructed instance.
@@ -80,6 +84,10 @@ class Binding[T]:
         The instance is wrapped in a provider and marked as eager, so it's
         resolved immediately when the context starts. This ensures the
         instance is available in the singleton cache for introspection.
+
+        The ``provided`` field stores the instance directly, allowing access
+        without entering the resource context manager. Use this for externally-
+        managed instances that don't need lifecycle management.
 
         Example::
 
@@ -96,6 +104,10 @@ class Binding[T]:
                 Binding(Service, lambda r: Service(r.get(Config))),
             )
 
+            # Access provided instances without context
+            binding = registry.binding_for(Filesystem)
+            fs = binding.provided  # Direct access, no context needed
+
         Args:
             protocol: The protocol type this binding satisfies.
             value: The pre-constructed instance to return.
@@ -103,7 +115,9 @@ class Binding[T]:
         Returns:
             An eager SINGLETON binding that returns the instance.
         """
-        return Binding(protocol, lambda _: value, scope=Scope.SINGLETON, eager=True)
+        return Binding(
+            protocol, lambda _: value, scope=Scope.SINGLETON, eager=True, provided=value
+        )
 
 
 __all__ = ["Binding", "Provider"]

@@ -259,7 +259,8 @@ class MainLoop[UserRequestT, OutputT](ABC):
             resources=resources,
             experiment=experiment,
         )
-        return self._execute(request_event, heartbeat=heartbeat)
+        response, session, _ = self._execute(request_event, heartbeat=heartbeat)
+        return response, session
 
     def _execute(
         self,
@@ -267,7 +268,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
         *,
         heartbeat: Heartbeat | None = None,
         run_context: RunContext | None = None,
-    ) -> tuple[PromptResponse[OutputT], Session]:
+    ) -> tuple[PromptResponse[OutputT], Session, Prompt[OutputT]]:
         """Execute the main loop for a request event.
 
         Handles core execution logic including visibility expansion retries.
@@ -277,6 +278,9 @@ class MainLoop[UserRequestT, OutputT](ABC):
             heartbeat: Optional heartbeat override. If provided, uses this
                 instead of self._heartbeat for adapter evaluation.
             run_context: Optional execution context for distributed tracing.
+
+        Returns:
+            Tuple of (response, session, prompt) for access to execution artifacts.
         """
         prompt, session = self.prepare(
             request_event.request,
@@ -329,7 +333,7 @@ class MainLoop[UserRequestT, OutputT](ABC):
                     )
             else:
                 self.finalize(prompt, session)
-                return response, session
+                return response, session, prompt
 
     def _build_run_context(
         self,
@@ -392,33 +396,134 @@ class MainLoop[UserRequestT, OutputT](ABC):
             },
         )
 
+        # Check if debug bundling is enabled
+        bundle_config = self._config.debug_bundle
+
         # Attach lease extender to heartbeat for this message
         with self._lease_extender.attach(msg, self._heartbeat):
-            try:
-                response, session = self._execute(
-                    request_event, run_context=run_context
-                )
+            if bundle_config is not None and bundle_config.enabled:
+                self._handle_message_with_bundle(msg, request_event, run_context, log)
+            else:
+                self._handle_message_without_bundle(msg, request_event, run_context)
+
+        # Result is created and replied in the helper methods
+
+    def _handle_message_with_bundle(
+        self,
+        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
+        request_event: MainLoopRequest[UserRequestT],
+        run_context: RunContext,
+        log: StructuredLogger,
+    ) -> None:
+        """Process message with debug bundling enabled."""
+        from ..debug.bundle import BundleWriter
+        from ..filesystem import Filesystem
+
+        bundle_config = self._config.debug_bundle
+        if bundle_config is None or bundle_config.target is None:  # pragma: no cover
+            # Defensive guard: _handle_message only calls this when enabled=True
+            self._handle_message_without_bundle(msg, request_event, run_context)
+            return
+
+        writer: BundleWriter | None = None
+        try:
+            with BundleWriter(
+                bundle_config.target,
+                bundle_id=run_context.run_id,
+                config=bundle_config,
+                trigger="config",
+            ) as writer:
+                writer.write_request_input(request_event)
+                writer.write_run_context(run_context)
+
+                with writer.capture_logs():
+                    response, session, prompt = self._execute(
+                        request_event, run_context=run_context
+                    )
 
                 # Add session_id while preserving the same run_id
                 run_context = replace(run_context, session_id=session.session_id)
 
-                result = MainLoopResult[OutputT](
-                    request_id=request_event.request_id,
-                    output=response.output,
-                    session_id=session.session_id,
-                    run_context=run_context,
+                writer.write_session_after(session)
+                writer.write_request_output(response)
+                writer.write_config(self._config)
+
+                # Write filesystem snapshot if available from prompt resources
+                fs = prompt.resources.get_optional(Filesystem)
+                if fs is not None:
+                    writer.write_filesystem(fs)
+
+            # Bundle path is set after context manager exits (in __exit__ -> _finalize)
+            bundle_path = writer.path
+
+            result = MainLoopResult[OutputT](
+                request_id=request_event.request_id,
+                output=response.output,
+                session_id=session.session_id,
+                run_context=run_context,
+                bundle_path=bundle_path,
+            )
+            reply_and_ack(msg, result)
+
+        except Exception as exc:
+            # Check if bundle was created despite the error
+            bundle_path = writer.path if writer is not None else None
+
+            if bundle_path is not None:
+                # Bundle was created successfully, error was during execution
+                log.info(
+                    "Execution failed but debug bundle was created",
+                    event="main_loop.execution_failed_with_bundle",
+                    context={"error": str(exc), "bundle_path": str(bundle_path)},
+                )
+            else:
+                # True bundle creation failure
+                log.warning(
+                    "Debug bundle creation failed, falling back to unbundled execution",
+                    event="main_loop.bundle_failed",
+                    context={"error": str(exc)},
                 )
 
-            except Exception as exc:
-                handle_failure(
-                    msg,
-                    exc,
-                    run_context=run_context,
-                    dlq=self._dlq,
-                    requests_mailbox=self._requests,
-                    result_class=MainLoopResult,
-                )
-                return
+            handle_failure(
+                msg,
+                exc,
+                run_context=run_context,
+                dlq=self._dlq,
+                requests_mailbox=self._requests,
+                result_class=MainLoopResult,
+                bundle_path=bundle_path,
+            )
+
+    def _handle_message_without_bundle(
+        self,
+        msg: Message[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
+        request_event: MainLoopRequest[UserRequestT],
+        run_context: RunContext,
+    ) -> None:
+        """Process message without debug bundling."""
+        try:
+            response, session, _ = self._execute(request_event, run_context=run_context)
+
+            # Add session_id while preserving the same run_id
+            run_context = replace(run_context, session_id=session.session_id)
+
+            result = MainLoopResult[OutputT](
+                request_id=request_event.request_id,
+                output=response.output,
+                session_id=session.session_id,
+                run_context=run_context,
+            )
+
+        except Exception as exc:
+            handle_failure(
+                msg,
+                exc,
+                run_context=run_context,
+                dlq=self._dlq,
+                requests_mailbox=self._requests,
+                result_class=MainLoopResult,
+            )
+            return
 
         reply_and_ack(msg, result)
 

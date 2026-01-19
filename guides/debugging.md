@@ -67,24 +67,45 @@ print([t.name for t in rendered.tools])  # Tool names
 This is deterministic—same inputs produce the same output. You can use this for
 debugging or for snapshot tests.
 
-## Dumping Snapshots to JSONL
+## Debug Bundles
 
-Use `weakincentives.debug.dump_session(...)` to persist a session tree:
+*Canonical spec: [specs/DEBUG_BUNDLE.md](../specs/DEBUG_BUNDLE.md)*
+
+Debug bundles capture execution state in a self-contained zip archive:
 
 ```python nocheck
-from weakincentives.debug import dump_session
+from weakincentives.debug import BundleConfig, CaptureMode
+from weakincentives.runtime import MainLoopConfig
 
-path = dump_session(session, target="snapshots/")  # writes <session_id>.jsonl
+# Automatic bundling per-request via MainLoop
+config = MainLoopConfig(
+    debug_bundle=BundleConfig(
+        target="./debug_bundles/",
+        mode=CaptureMode.STANDARD,
+    ),
+)
 ```
-
-Each line is one serialized session snapshot (root → leaves). The JSONL format
-is stable and human-readable.
 
 **What's captured:**
 
-- All session slices (state and logs)
-- All events that flowed through the dispatcher
-- Timestamps for each snapshot
+- Session state before and after execution
+- Log records during evaluation
+- Request input and output
+- Configuration and run context
+- Filesystem snapshots (workspace state)
+
+For manual bundle creation:
+
+```python nocheck
+from weakincentives.debug import BundleWriter
+
+with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
+    writer.write_request_input(request)
+    with writer.capture_logs():
+        response = adapter.evaluate(prompt, session=session)
+    writer.write_request_output(response)
+    writer.write_session_after(session)
+```
 
 ## The Debug UI
 
@@ -93,7 +114,8 @@ is stable and human-readable.
 **Run:**
 
 ```bash
-wink debug snapshots/<session_id>.jsonl
+wink debug debug_bundles/  # Opens most recent bundle
+wink debug debug_bundles/<session_id>.jsonl  # Opens specific snapshot
 ```
 
 This starts a local server that renders the prompt/tool timeline for inspection.
@@ -106,6 +128,17 @@ You can see:
 
 The debug UI is your primary tool for understanding agent behavior after the
 fact.
+
+**Loading bundles programmatically:**
+
+```python nocheck
+from weakincentives.debug import DebugBundle
+
+bundle = DebugBundle.load("./debug_bundles/abc123.zip")
+print(bundle.manifest.request.status)
+print(bundle.request_input)
+print(bundle.logs)
+```
 
 ## Common Debugging Patterns
 

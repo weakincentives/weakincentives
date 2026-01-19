@@ -99,4 +99,4 @@ logger.info(
 
 ## Related Specifications
 
-- `specs/DEBUGGING.md` - Log collector
+- `specs/DEBUG_BUNDLE.md` - Debug bundle specification

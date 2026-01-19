@@ -28,6 +28,8 @@ from .mailbox import Message, ReceiptHandleExpiredError, ReplyNotAvailableError
 from .run_context import RunContext
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from .dlq import DLQPolicy
     from .mailbox import Mailbox
     from .main_loop_types import MainLoopRequest, MainLoopResult
@@ -45,6 +47,7 @@ def handle_failure[UserRequestT, OutputT](  # noqa: PLR0913
     dlq: DLQPolicy[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]] | None,
     requests_mailbox: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
     result_class: type[MainLoopResult[OutputT]],
+    bundle_path: Path | None = None,
 ) -> None:
     """Handle message processing failure.
 
@@ -62,6 +65,7 @@ def handle_failure[UserRequestT, OutputT](  # noqa: PLR0913
         dlq: Optional DLQ policy configuration.
         requests_mailbox: The source mailbox for dead letter metadata.
         result_class: The MainLoopResult class to use for error responses.
+        bundle_path: Optional path to debug bundle if one was created.
     """
     if dlq is None:
         # No DLQ configured - use original behavior: error reply + acknowledge
@@ -69,6 +73,7 @@ def handle_failure[UserRequestT, OutputT](  # noqa: PLR0913
             request_id=msg.body.request_id,
             error=str(error),
             run_context=run_context,
+            bundle_path=bundle_path,
         )
         reply_and_ack(msg, result)
         return
@@ -82,6 +87,7 @@ def handle_failure[UserRequestT, OutputT](  # noqa: PLR0913
             dlq=dlq,
             requests_mailbox=requests_mailbox,
             result_class=result_class,
+            bundle_path=bundle_path,
         )
         return
 
@@ -101,6 +107,7 @@ def dead_letter_message[UserRequestT, OutputT](  # noqa: PLR0913
     dlq: DLQPolicy[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
     requests_mailbox: Mailbox[MainLoopRequest[UserRequestT], MainLoopResult[OutputT]],
     result_class: type[MainLoopResult[OutputT]],
+    bundle_path: Path | None = None,
 ) -> None:
     """Send message to dead letter queue.
 
@@ -111,6 +118,7 @@ def dead_letter_message[UserRequestT, OutputT](  # noqa: PLR0913
         dlq: The DLQ policy with target mailbox.
         requests_mailbox: The source mailbox for metadata.
         result_class: The MainLoopResult class to use for error responses.
+        bundle_path: Optional path to debug bundle if one was created.
     """
     # Create run-scoped logger for tracing
     log = bind_run_context(_logger, run_context)
@@ -138,6 +146,7 @@ def dead_letter_message[UserRequestT, OutputT](  # noqa: PLR0913
                     request_id=msg.body.request_id,
                     error=f"Dead-lettered after {msg.delivery_count} attempts: {error}",
                     run_context=run_context,
+                    bundle_path=bundle_path,
                 )
             )
     except Exception as reply_error:  # nosec B110 - intentional: reply failure should not block dead-lettering

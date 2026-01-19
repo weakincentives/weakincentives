@@ -23,7 +23,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "CLOCK": "Controllable time abstractions, clock injection, testing patterns",
     "DATACLASSES": "Serde utilities, frozen dataclass patterns",
     "DBC": "DbC decorators, exhaustiveness checking, assert_never patterns",
-    "DEBUGGING": "Log collector, session slices, debug web UI, snapshot explorer",
+    "DEBUG_BUNDLE": "Debug bundles, log capture, session snapshots, debug web UI",
     "DLQ": "Dead letter queues, poison message handling, MainLoop/EvalLoop DLQ config",
     "EVALS": "Evaluation framework, datasets, evaluators, session evaluators",
     "EXAMPLES": "Code review agent reference implementation",
@@ -52,6 +52,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "TOOLS": "Tool runtime, policies, sequential dependencies, planning tools",
     "VERIFICATION": "Redis mailbox detailed specification, invariants, property tests",
     "VERIFICATION_TOOLBOX": "Verification toolchain (check.py), checker protocol, failure reporting",
+    "WINK_DEBUG": "Debug bundle viewer UI, proposed enhancements, timeline visualization",
     "WINK_DOCS": "CLI docs command, bundled documentation access",
     "WORKSPACE": "VFS, Podman, asteval, workspace digest",
 }
