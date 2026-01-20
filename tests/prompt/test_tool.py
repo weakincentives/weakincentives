@@ -505,3 +505,48 @@ def test_tool_wrap_handles_empty_toolresult_args(
         match=r"Tool handler return annotation must be ToolResult\[ResultT\].",
     ):
         Tool.wrap(handler)
+
+
+def test_tool_rejects_invalid_name_with_whitespace() -> None:
+    with pytest.raises(PromptValidationError, match="whitespace"):
+        Tool[ExampleParams, ExampleResult](
+            name="  my_tool  ",
+            description="Description.",
+            handler=None,
+        )
+
+
+def test_tool_rejects_invalid_name_pattern() -> None:
+    with pytest.raises(PromptValidationError, match="pattern"):
+        Tool[ExampleParams, ExampleResult](
+            name="INVALID_NAME",
+            description="Description.",
+            handler=None,
+        )
+
+
+def test_tool_rejects_empty_name() -> None:
+    with pytest.raises(PromptValidationError, match="1-64"):
+        Tool[ExampleParams, ExampleResult](
+            name="",
+            description="Description.",
+            handler=None,
+        )
+
+
+def test_tool_rejects_non_ascii_description() -> None:
+    with pytest.raises(PromptValidationError, match="ASCII"):
+        Tool[ExampleParams, ExampleResult](
+            name="my_tool",
+            description="Description with \u00e9",
+            handler=None,
+        )
+
+
+def test_tool_rejects_empty_description() -> None:
+    with pytest.raises(PromptValidationError, match="1-200"):
+        Tool[ExampleParams, ExampleResult](
+            name="my_tool",
+            description="",
+            handler=None,
+        )
