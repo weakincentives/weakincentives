@@ -74,14 +74,13 @@ debugging or for snapshot tests.
 Debug bundles capture execution state in a self-contained zip archive:
 
 ```python nocheck
-from weakincentives.debug import BundleConfig, CaptureMode
+from weakincentives.debug import BundleConfig
 from weakincentives.runtime import MainLoopConfig
 
 # Automatic bundling per-request via MainLoop
 config = MainLoopConfig(
     debug_bundle=BundleConfig(
         target="./debug_bundles/",
-        mode=CaptureMode.STANDARD,
     ),
 )
 ```

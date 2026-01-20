@@ -16,17 +16,15 @@ The primary API consists of:
 - ``BundleConfig``: Configure automatic bundle creation in MainLoop
 - ``BundleWriter``: Create debug bundles programmatically
 - ``DebugBundle``: Load and inspect existing bundles
-- ``CaptureMode``: Control verbosity (MINIMAL, STANDARD, FULL)
 
 Example - MainLoop integration::
 
-    from weakincentives.debug import BundleConfig, CaptureMode
+    from weakincentives.debug import BundleConfig
     from weakincentives.runtime import MainLoop, MainLoopConfig
 
     config = MainLoopConfig(
         debug_bundle=BundleConfig(
             target="./debug_bundles/",
-            mode=CaptureMode.STANDARD,
         ),
     )
     loop = MyLoop(adapter=adapter, requests=requests, config=config)
@@ -60,7 +58,6 @@ from .bundle import (
     BundleManifest,
     BundleValidationError,
     BundleWriter,
-    CaptureMode,
     DebugBundle,
 )
 
@@ -70,6 +67,5 @@ __all__ = [
     "BundleManifest",
     "BundleValidationError",
     "BundleWriter",
-    "CaptureMode",
     "DebugBundle",
 ]

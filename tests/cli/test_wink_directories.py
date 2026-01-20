@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 from weakincentives.cli import wink
-from weakincentives.debug.bundle import BundleConfig, BundleWriter, CaptureMode
+from weakincentives.debug.bundle import BundleConfig, BundleWriter
 from weakincentives.runtime.session import Session
 
 
@@ -37,9 +37,7 @@ def _create_test_bundle(target_dir: Path, name: str) -> Path:
     session = Session()
     session.dispatch(_ExampleSlice(name))
 
-    with BundleWriter(
-        target_dir, config=BundleConfig(mode=CaptureMode.STANDARD)
-    ) as writer:
+    with BundleWriter(target_dir, config=BundleConfig()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": name})
         writer.write_request_output({"status": "ok"})
