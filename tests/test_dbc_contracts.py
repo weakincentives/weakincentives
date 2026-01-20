@@ -30,6 +30,7 @@ from weakincentives.dbc import (
     dbc_active,
     dbc_enabled,
     ensure,
+    fresh_dbc_context,
     invariant,
     pure,
     require,
@@ -49,15 +50,12 @@ pytestmark = pytest.mark.core
 @pytest.fixture(autouse=True)
 def reset_dbc_state(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     """Ensure DbC toggles reset between tests."""
-
     import weakincentives.dbc as dbc_module
 
     monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
-    dbc_module._forced_state = None
-    dbc_module.enable_dbc()
-    yield
-    dbc_module._forced_state = None
-    monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
+    with fresh_dbc_context():
+        dbc_module.enable_dbc()
+        yield
 
 
 def test_require_allows_valid_inputs() -> None:
@@ -274,7 +272,7 @@ def test_dbc_activation_controls(monkeypatch: pytest.MonkeyPatch) -> None:
     import weakincentives.dbc as dbc_module
 
     dbc_module.disable_dbc()
-    dbc_module._forced_state = None
+    dbc_module._get_state().forced = None
     monkeypatch.delenv("WEAKINCENTIVES_DBC", raising=False)
     assert dbc_module.dbc_active() is False
 
@@ -287,7 +285,7 @@ def test_dbc_activation_controls(monkeypatch: pytest.MonkeyPatch) -> None:
         assert dbc_module.dbc_active() is True
     assert dbc_module.dbc_active() is False
 
-    dbc_module._forced_state = None
+    dbc_module._get_state().forced = None
     monkeypatch.setenv("WEAKINCENTIVES_DBC", "true")
     assert dbc_module.dbc_active() is True
     monkeypatch.setenv("WEAKINCENTIVES_DBC", "0")
@@ -470,3 +468,21 @@ def test_pure_handles_equal_keyword_arguments() -> None:
         return data["value"]
 
     assert read_dict(data={"value": 42}) == 42
+
+
+def test_fresh_dbc_context_isolates_state() -> None:
+    import weakincentives.dbc as dbc_module
+
+    # Set state in outer context
+    dbc_module.enable_dbc()
+    assert dbc_module.dbc_active() is True
+
+    # Inner context should start fresh
+    with fresh_dbc_context():
+        # State should be None initially (falls back to env)
+        assert dbc_module._get_state().forced is None
+        dbc_module.disable_dbc()
+        assert dbc_module.dbc_active() is False
+
+    # Outer context should be unchanged
+    assert dbc_module.dbc_active() is True

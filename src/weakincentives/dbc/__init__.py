@@ -20,7 +20,8 @@ import logging
 import os
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
+from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
 from threading import RLock
@@ -37,7 +38,32 @@ T = TypeVar("T", bound=object)
 ContractCallable = Callable[..., ContractResult | object]
 
 _ENV_FLAG = "WEAKINCENTIVES_DBC"
-_forced_state: bool | None = None
+
+
+@dataclass(slots=True)
+class DbcState:
+    """Mutable DBC state - only accessed via context."""
+
+    forced: bool | None = None
+
+
+# Sentinel to detect when context var hasn't been explicitly set
+_CONTEXT_UNSET: DbcState = DbcState()
+
+# Global fallback state for thread inheritance (threads don't inherit context vars)
+_global_state: DbcState = DbcState()
+
+# Context var for test isolation - defaults to sentinel to detect explicit sets
+_dbc_context: ContextVar[DbcState] = ContextVar("dbc_context", default=_CONTEXT_UNSET)
+
+
+def _get_state() -> DbcState:
+    """Get current DBC state from context, with global fallback for threads."""
+    state = _dbc_context.get()
+    # If context var is at default sentinel, use global state (thread inheritance)
+    if state is _CONTEXT_UNSET:
+        return _global_state
+    return state
 
 
 def _coerce_flag(value: str | None) -> bool:
@@ -49,9 +75,9 @@ def _coerce_flag(value: str | None) -> bool:
 
 def dbc_active() -> bool:
     """Return ``True`` when DbC checks should run."""
-
-    if _forced_state is not None:
-        return _forced_state
+    state = _get_state()
+    if state.forced is not None:
+        return state.forced
     return _coerce_flag(os.getenv(_ENV_FLAG))
 
 
@@ -61,29 +87,36 @@ def _qualname(target: object) -> str:
 
 def enable_dbc() -> None:
     """Force DbC enforcement on."""
-
-    global _forced_state
-    _forced_state = True
+    state = _get_state()
+    state.forced = True
 
 
 def disable_dbc() -> None:
     """Force DbC enforcement off."""
-
-    global _forced_state
-    _forced_state = False
+    state = _get_state()
+    state.forced = False
 
 
 @contextmanager
 def dbc_enabled(active: bool = True) -> Iterator[None]:
     """Temporarily set the DbC flag inside a ``with`` block."""
-
-    global _forced_state
-    previous = _forced_state
-    _forced_state = active
+    state = _get_state()
+    previous = state.forced
+    state.forced = active
     try:
         yield
     finally:
-        _forced_state = previous
+        state.forced = previous
+
+
+@contextmanager
+def fresh_dbc_context() -> Iterator[None]:
+    """Create isolated DBC context for testing."""
+    token: Token[DbcState] = _dbc_context.set(DbcState())
+    try:
+        yield
+    finally:
+        _dbc_context.reset(token)
 
 
 def _normalize_contract_result(
@@ -501,11 +534,13 @@ def pure(func: Callable[P, R]) -> Callable[P, R]:  # noqa: UP047
 
 
 __all__ = [
+    "DbcState",
     "dbc_active",
     "dbc_enabled",
     "disable_dbc",
     "enable_dbc",
     "ensure",
+    "fresh_dbc_context",
     "invariant",
     "pure",
     "require",
