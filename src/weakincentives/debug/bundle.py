@@ -249,6 +249,18 @@ class BuildInfo:
 
 
 @FrozenDataclass()
+class DocsInfo:
+    """Documentation metadata for manifest.
+
+    Lists recommended human-readable entrypoints within the bundle
+    for navigating documentation.
+    """
+
+    entrypoints: tuple[str, ...] = ()
+    description: str = "Human-readable documentation for bundle navigation"
+
+
+@FrozenDataclass()
 class BundleManifest:
     """Bundle manifest containing metadata and integrity checksums.
 
@@ -263,7 +275,8 @@ class BundleManifest:
           "prompt": { ... },
           "files": ["manifest.json", ...],
           "integrity": { ... },
-          "build": { ... }
+          "build": { ... },
+          "docs": { ... }
         }
     """
 
@@ -278,6 +291,7 @@ class BundleManifest:
     files: tuple[str, ...] = ()
     integrity: IntegrityInfo = field(default_factory=IntegrityInfo)
     build: BuildInfo = field(default_factory=BuildInfo)
+    docs: DocsInfo = field(default_factory=DocsInfo)
 
     def to_json(self) -> str:
         """Serialize manifest to JSON string."""
@@ -310,16 +324,24 @@ def _generate_readme(manifest: BundleManifest) -> str:
         "manifest.json       Bundle metadata and integrity checksums",
         "README.txt          This file",
         "",
+        "docs/",
+        "  README.md         How to navigate this bundle (START HERE)",
+        "  SCHEMAS.md        JSON schema documentation",
+        "  FILESYSTEM.md     Filesystem snapshot documentation",
+        "",
         "request/",
         "  input.json        MainLoop request",
         "  output.json       MainLoop response",
+        "  README.md         Request/response format documentation",
         "",
         "session/",
         "  before.jsonl      Session state before execution",
         "  after.jsonl       Session state after execution",
+        "  README.md         Slice storage format documentation",
         "",
         "logs/",
         "  app.jsonl         Log records during execution",
+        "  README.md         Log format and timeline documentation",
         "",
         "environment/        Reproducibility envelope",
         "  system.json       OS, kernel, arch, CPU, memory",
@@ -339,12 +361,603 @@ def _generate_readme(manifest: BundleManifest) -> str:
         "  prompt_overrides.json   Visibility overrides",
         "  error.json              Error details (if failed)",
         "  eval.json               Eval metadata (EvalLoop only)",
-        "  filesystem/             Workspace snapshot",
+        "  filesystem/             Workspace snapshot (see docs/FILESYSTEM.md)",
         "",
         "=" * 60,
         f"Format version: {manifest.format_version}",
     ]
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Bundle documentation generators
+# ---------------------------------------------------------------------------
+
+
+def _generate_docs_readme() -> str:
+    """Generate docs/README.md - bundle navigation and quickstart."""
+    return """\
+# Debug Bundle Documentation
+
+This bundle contains a complete snapshot of a MainLoop execution for debugging
+and reproduction purposes.
+
+## Quick Navigation
+
+| Path | Description |
+|------|-------------|
+| `manifest.json` | Bundle metadata, checksums, and structure |
+| `README.txt` | Quick overview of bundle contents |
+| `docs/` | Human-readable documentation (you are here) |
+| `request/` | MainLoop request input and response output |
+| `session/` | Session state snapshots (before/after execution) |
+| `logs/` | Structured log records from execution |
+| `filesystem/` | Workspace file snapshot (if captured) |
+
+## Recommended Reading Order
+
+1. **Start here**: `docs/README.md` (this file)
+2. **Understand the data**: `docs/SCHEMAS.md`
+3. **Explore artifacts**: Check each directory's `README.md`
+
+## Privacy Notes
+
+Debug bundles may contain sensitive information:
+
+- **Request/Response**: May include user prompts and model outputs
+- **Session State**: May contain accumulated context and tool results
+- **Logs**: May include debug-level details about execution
+- **Filesystem**: May include workspace file contents
+
+**Before sharing a bundle:**
+
+1. Review `request/input.json` for sensitive prompts
+2. Check `session/after.jsonl` for accumulated sensitive data
+3. Inspect `filesystem/` contents if present
+4. Consider using `MINIMAL` capture mode for less sensitive bundles
+
+## Reproduction Quickstart
+
+To reproduce the captured execution:
+
+```python
+from weakincentives.debug import DebugBundle
+
+# Load the bundle
+bundle = DebugBundle.load("path/to/bundle.zip")
+
+# Inspect the request
+print(bundle.request_input)
+
+# Check configuration
+print(bundle.config)
+
+# View session state
+print(bundle.session_before)
+print(bundle.session_after)
+
+# Verify integrity
+assert bundle.verify_integrity()
+```
+
+To replay with the same configuration:
+
+```python
+from weakincentives.runtime import MainLoop
+
+# Extract config from bundle
+config = bundle.config
+
+# Recreate the loop with same settings
+loop = MainLoop(...)
+
+# Re-run with the original request
+# (Note: Results may differ due to model non-determinism)
+```
+
+## Bundle Integrity
+
+Each bundle includes SHA-256 checksums in `manifest.json`. Verify integrity:
+
+```python
+bundle = DebugBundle.load("bundle.zip")
+if not bundle.verify_integrity():
+    print("WARNING: Bundle may have been modified")
+```
+"""
+
+
+def _generate_docs_schemas() -> str:
+    """Generate docs/SCHEMAS.md - schema documentation."""
+    return """\
+# Bundle Schemas
+
+This document describes the JSON schemas used in debug bundles.
+
+## manifest.json
+
+The manifest contains bundle metadata and integrity information.
+
+```json
+{
+  "format_version": "1.0.0",
+  "bundle_id": "uuid-string",
+  "created_at": "ISO-8601 timestamp",
+  "request": {
+    "request_id": "uuid-string",
+    "session_id": "uuid-string or null",
+    "status": "success | error",
+    "started_at": "ISO-8601 timestamp",
+    "ended_at": "ISO-8601 timestamp"
+  },
+  "capture": {
+    "mode": "minimal | standard | full",
+    "trigger": "config | env | request",
+    "limits_applied": {
+      "filesystem_truncated": false
+    }
+  },
+  "prompt": {
+    "ns": "prompt-namespace",
+    "key": "prompt-key",
+    "adapter": "adapter-name"
+  },
+  "files": ["list", "of", "files"],
+  "integrity": {
+    "algorithm": "sha256",
+    "checksums": {
+      "path/to/file": "hex-digest"
+    }
+  },
+  "build": {
+    "version": "semver",
+    "commit": "git-sha"
+  },
+  "docs": {
+    "entrypoints": ["docs/README.md", "docs/SCHEMAS.md"],
+    "description": "Human-readable documentation for bundle navigation"
+  }
+}
+```
+
+### Field Reference
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `format_version` | string | Bundle format version (semver) |
+| `bundle_id` | string | Unique identifier for this bundle |
+| `created_at` | string | ISO-8601 timestamp of bundle creation |
+| `request.status` | string | `"success"` or `"error"` |
+| `capture.mode` | string | Capture level used |
+| `capture.limits_applied` | object | Which limits were hit during capture |
+| `files` | array | List of all files in the bundle |
+| `integrity.checksums` | object | SHA-256 checksums for verification |
+
+## request/input.json
+
+The MainLoop request event that triggered execution.
+
+```json
+{
+  "messages": [
+    {
+      "role": "user | assistant | system",
+      "content": "message content"
+    }
+  ],
+  "tools": [...],
+  "context": {...}
+}
+```
+
+## request/output.json
+
+The MainLoop response after execution.
+
+```json
+{
+  "messages": [...],
+  "tool_calls": [...],
+  "finish_reason": "stop | tool_use | max_tokens",
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 50
+  }
+}
+```
+
+## config.json
+
+MainLoop and adapter configuration.
+
+```json
+{
+  "adapter": {
+    "model": "model-name",
+    "temperature": 0.7,
+    "max_tokens": 4096
+  },
+  "tools": {...},
+  "resources": {...}
+}
+```
+
+## run_context.json
+
+Execution context with tracing information.
+
+```json
+{
+  "request_id": "uuid",
+  "session_id": "uuid",
+  "trace_id": "string",
+  "span_id": "string"
+}
+```
+
+## metrics.json
+
+Timing, token usage, and budget state.
+
+```json
+{
+  "timing": {
+    "total_ms": 1234,
+    "model_ms": 1000,
+    "tool_ms": 200
+  },
+  "tokens": {
+    "input": 500,
+    "output": 200,
+    "total": 700
+  },
+  "budget": {
+    "remaining": 10000,
+    "used": 700
+  }
+}
+```
+
+## Validation
+
+To validate bundle contents programmatically:
+
+```python
+from weakincentives.debug import DebugBundle, BundleManifest
+from weakincentives.serde import parse
+
+# Load and validate manifest
+bundle = DebugBundle.load("bundle.zip")
+manifest = bundle.manifest
+
+# Verify all checksums
+assert bundle.verify_integrity()
+
+# Parse specific artifacts
+request_input = bundle.request_input
+config = bundle.config
+```
+"""
+
+
+def _generate_request_readme() -> str:
+    """Generate request/README.md - request/response format."""
+    return """\
+# Request Directory
+
+This directory contains the MainLoop request and response.
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `input.json` | The request event sent to MainLoop |
+| `output.json` | The response returned by MainLoop |
+
+## input.json
+
+Contains the serialized request event including:
+
+- `messages`: Conversation history sent to the model
+- `tools`: Available tool definitions (if any)
+- `context`: Additional context passed to the request
+
+## output.json
+
+Contains the serialized response including:
+
+- `messages`: New messages from the model
+- `tool_calls`: Tool invocations requested by the model
+- `finish_reason`: Why generation stopped
+- `usage`: Token consumption for this request
+
+## Usage
+
+```python
+from weakincentives.debug import DebugBundle
+
+bundle = DebugBundle.load("bundle.zip")
+
+# Access request data
+print(bundle.request_input)
+print(bundle.request_output)
+```
+"""
+
+
+def _generate_session_readme() -> str:
+    """Generate session/README.md - slice storage format."""
+    return """\
+# Session Directory
+
+This directory contains session state snapshots in JSONL format.
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `before.jsonl` | Session state before execution (if captured) |
+| `after.jsonl` | Session state after execution |
+
+## Slice Storage Format
+
+Session state is stored as JSON Lines (JSONL), where each line represents
+a session slice snapshot.
+
+### Structure
+
+```json
+{
+  "slices": {
+    "SliceTypeName": {
+      "items": [...],
+      "metadata": {...}
+    }
+  },
+  "session_id": "uuid",
+  "snapshot_at": "ISO-8601 timestamp"
+}
+```
+
+### Slice Types
+
+Each slice type stores domain-specific state:
+
+- **Messages**: Conversation history
+- **ToolResults**: Results from tool executions
+- **Context**: Accumulated context data
+- **Custom slices**: Application-defined state
+
+### Reading Slices
+
+```python
+from weakincentives.debug import DebugBundle
+import json
+
+bundle = DebugBundle.load("bundle.zip")
+
+# Get session after execution
+if bundle.session_after:
+    for line in bundle.session_after.strip().split("\\n"):
+        snapshot = json.loads(line)
+        print(f"Slices: {list(snapshot.get('slices', {}).keys())}")
+```
+
+## Comparing Before/After
+
+To understand what changed during execution:
+
+```python
+import json
+
+bundle = DebugBundle.load("bundle.zip")
+
+before = json.loads(bundle.session_before) if bundle.session_before else {}
+after = json.loads(bundle.session_after) if bundle.session_after else {}
+
+# Compare slice counts
+for slice_type in set(before.get("slices", {})) | set(after.get("slices", {})):
+    before_count = len(before.get("slices", {}).get(slice_type, {}).get("items", []))
+    after_count = len(after.get("slices", {}).get(slice_type, {}).get("items", []))
+    print(f"{slice_type}: {before_count} -> {after_count}")
+```
+"""
+
+
+def _generate_logs_readme() -> str:
+    """Generate logs/README.md - timeline and log format."""
+    return """\
+# Logs Directory
+
+This directory contains structured log records from execution.
+
+## Files
+
+| File | Description |
+|------|-------------|
+| `app.jsonl` | Application logs in JSON Lines format |
+
+## Log Record Format
+
+Each line in `app.jsonl` is a JSON object:
+
+```json
+{
+  "timestamp": "ISO-8601 timestamp",
+  "level": "DEBUG | INFO | WARNING | ERROR",
+  "logger": "logger.name",
+  "event": "event_name",
+  "message": "Human-readable message",
+  "context": {
+    "key": "value"
+  }
+}
+```
+
+### Field Reference
+
+| Field | Description |
+|-------|-------------|
+| `timestamp` | When the log was emitted (UTC) |
+| `level` | Log severity level |
+| `logger` | Python logger name (e.g., `weakincentives.runtime`) |
+| `event` | Structured event name for filtering |
+| `message` | Human-readable log message |
+| `context` | Additional structured data |
+
+## Timeline Analysis
+
+Logs form a timeline of execution. Common events:
+
+| Event | Description |
+|-------|-------------|
+| `request_started` | MainLoop began processing |
+| `model_call_started` | API call to model initiated |
+| `model_call_completed` | API call returned |
+| `tool_execution_started` | Tool handler invoked |
+| `tool_execution_completed` | Tool handler returned |
+| `request_completed` | MainLoop finished processing |
+
+## Querying Logs
+
+```python
+from weakincentives.debug import DebugBundle
+import json
+
+bundle = DebugBundle.load("bundle.zip")
+
+if bundle.logs:
+    for line in bundle.logs.strip().split("\\n"):
+        record = json.loads(line)
+
+        # Filter by level
+        if record["level"] == "ERROR":
+            print(f"ERROR: {record['message']}")
+
+        # Filter by event
+        if record.get("event") == "tool_execution_completed":
+            print(f"Tool: {record['context'].get('tool_name')}")
+```
+
+## Capture Modes
+
+Log verbosity depends on capture mode:
+
+| Mode | Log Level |
+|------|-----------|
+| `MINIMAL` | INFO and above |
+| `STANDARD` | DEBUG and above |
+| `FULL` | DEBUG and above |
+"""
+
+
+def _generate_filesystem_readme() -> str:
+    """Generate docs/FILESYSTEM.md - snapshot semantics."""
+    return """\
+# Filesystem Directory
+
+This directory contains a snapshot of the workspace filesystem.
+
+## Structure
+
+```
+filesystem/
+└── workspace/
+    ├── file1.txt
+    ├── subdir/
+    │   └── file2.py
+    └── ...
+```
+
+## Snapshot vs Diff
+
+The filesystem capture is a **point-in-time snapshot**, not a diff:
+
+- **Snapshot**: Complete copy of files at capture time
+- **No history**: Previous file states are not preserved
+- **No deletions tracked**: Deleted files simply don't appear
+
+To track changes, compare `session/before.jsonl` and `session/after.jsonl`
+which may contain filesystem-related events.
+
+## Truncation Semantics
+
+Files may be excluded or truncated based on configuration:
+
+| Limit | Default | Description |
+|-------|---------|-------------|
+| `max_file_size` | 10 MB | Skip files larger than this |
+| `max_total_size` | 50 MB | Stop capturing after this total |
+
+### Checking for Truncation
+
+```python
+bundle = DebugBundle.load("bundle.zip")
+manifest = bundle.manifest
+
+if manifest.capture.limits_applied.get("filesystem_truncated"):
+    print("WARNING: Filesystem capture was truncated")
+```
+
+## Capture Modes
+
+Filesystem capture depends on the capture mode:
+
+| Mode | Behavior |
+|------|----------|
+| `MINIMAL` | No filesystem capture |
+| `STANDARD` | Modified files only (if tracked) |
+| `FULL` | All files within limits |
+
+## Accessing Files
+
+```python
+from weakincentives.debug import DebugBundle
+
+bundle = DebugBundle.load("bundle.zip")
+
+# List all captured files
+for path in bundle.list_files():
+    if path.startswith("filesystem/"):
+        print(path)
+
+# Read a specific file
+content = bundle.read_file("filesystem/workspace/example.py")
+print(content.decode("utf-8"))
+```
+
+## Extracting Filesystem
+
+To extract the filesystem for local inspection:
+
+```python
+bundle = DebugBundle.load("bundle.zip")
+extracted = bundle.extract("/tmp/debug")
+
+# Files are now at /tmp/debug/debug_bundle/filesystem/workspace/
+```
+"""
+
+
+# List of all documentation files to generate
+_BUNDLE_DOCS: tuple[tuple[str, str], ...] = (
+    ("docs/README.md", _generate_docs_readme()),
+    ("docs/SCHEMAS.md", _generate_docs_schemas()),
+    ("docs/FILESYSTEM.md", _generate_filesystem_readme()),
+    ("request/README.md", _generate_request_readme()),
+    ("session/README.md", _generate_session_readme()),
+    ("logs/README.md", _generate_logs_readme()),
+)
+
+# Recommended entrypoints for the manifest
+_DOCS_ENTRYPOINTS: tuple[str, ...] = (
+    "docs/README.md",
+    "docs/SCHEMAS.md",
+    "docs/FILESYSTEM.md",
+    "request/README.md",
+    "session/README.md",
+    "logs/README.md",
+)
 
 
 def _compute_checksum(content: bytes) -> str:
@@ -468,6 +1081,7 @@ class BundleWriter:
         self._temp_dir = Path(tempfile.mkdtemp(prefix="debug_bundle_"))
         # Create directory structure
         (self._temp_dir / BUNDLE_ROOT_DIR).mkdir()
+        (self._temp_dir / BUNDLE_ROOT_DIR / "docs").mkdir()
         (self._temp_dir / BUNDLE_ROOT_DIR / "request").mkdir()
         (self._temp_dir / BUNDLE_ROOT_DIR / "session").mkdir()
         (self._temp_dir / BUNDLE_ROOT_DIR / "logs").mkdir()
@@ -824,7 +1438,7 @@ class BundleWriter:
         self._prompt_info = PromptInfo(ns=ns, key=key, adapter=adapter)
 
     def _finalize(self) -> None:
-        """Finalize bundle: generate README, compute manifest, create zip."""
+        """Finalize bundle: generate README, docs, compute manifest, create zip."""
         if self._finalized or self._temp_dir is None:
             return
 
@@ -837,6 +1451,10 @@ class BundleWriter:
                 content = self._log_collector_path.read_bytes()
                 self._files.append(rel_path)
                 self._checksums[rel_path] = _compute_checksum(content)
+
+        # Write documentation files
+        for doc_path, doc_content in _BUNDLE_DOCS:
+            self._write_artifact(doc_path, doc_content)
 
         # Build manifest
         manifest = BundleManifest(
@@ -862,6 +1480,7 @@ class BundleWriter:
                 checksums=self._checksums,
             ),
             build=BuildInfo(),
+            docs=DocsInfo(entrypoints=_DOCS_ENTRYPOINTS),
         )
 
         # Write README
@@ -1206,4 +1825,5 @@ __all__ = [
     "BundleValidationError",
     "BundleWriter",
     "DebugBundle",
+    "DocsInfo",
 ]

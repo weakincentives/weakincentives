@@ -1312,11 +1312,14 @@ def test_loop_with_debug_bundle_no_filesystem_in_resources(tmp_path: Path) -> No
         assert result.success is True
         assert result.bundle_path is not None
 
-        # Bundle should NOT contain filesystem files
+        # Bundle should NOT contain filesystem workspace files (only docs)
         bundle = DebugBundle.load(result.bundle_path)
         files = bundle.list_files()
-        filesystem_files = [f for f in files if f.startswith("filesystem/")]
-        assert len(filesystem_files) == 0
+        # Only filesystem/README.md should exist (documentation), no workspace files
+        filesystem_workspace = [
+            f for f in files if f.startswith("filesystem/workspace")
+        ]
+        assert len(filesystem_workspace) == 0
 
         msgs[0].acknowledge()
     finally:

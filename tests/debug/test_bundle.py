@@ -24,6 +24,8 @@ from uuid import uuid4
 import pytest
 
 from weakincentives.debug.bundle import (
+    _BUNDLE_DOCS,
+    _DOCS_ENTRYPOINTS,
     BUNDLE_FORMAT_VERSION,
     BundleConfig,
     BundleError,
@@ -31,8 +33,15 @@ from weakincentives.debug.bundle import (
     BundleValidationError,
     BundleWriter,
     DebugBundle,
+    DocsInfo,
     _compute_checksum,
+    _generate_docs_readme,
+    _generate_docs_schemas,
+    _generate_filesystem_readme,
+    _generate_logs_readme,
     _generate_readme,
+    _generate_request_readme,
+    _generate_session_readme,
     _get_compression_type,
 )
 from weakincentives.runtime.run_context import RunContext
@@ -1079,3 +1088,204 @@ class TestFinalizeEdgeCases:
 
         # Clean up manually since we bypassed normal __exit__
         writer.__exit__(None, None, None)
+
+
+class TestDocsInfo:
+    """Tests for DocsInfo dataclass."""
+
+    def test_default_docs_info(self) -> None:
+        """Test default DocsInfo values."""
+        docs = DocsInfo()
+        assert docs.entrypoints == ()
+        assert docs.description == "Human-readable documentation for bundle navigation"
+
+    def test_docs_info_with_entrypoints(self) -> None:
+        """Test DocsInfo with custom entrypoints."""
+        docs = DocsInfo(
+            entrypoints=("docs/README.md", "docs/SCHEMAS.md"),
+            description="Custom description",
+        )
+        assert docs.entrypoints == ("docs/README.md", "docs/SCHEMAS.md")
+        assert docs.description == "Custom description"
+
+
+class TestBundleDocumentation:
+    """Tests for bundle documentation generation."""
+
+    def test_bundle_docs_tuple_structure(self) -> None:
+        """Test _BUNDLE_DOCS has correct structure."""
+        assert len(_BUNDLE_DOCS) == 6
+        for path, content in _BUNDLE_DOCS:
+            assert isinstance(path, str)
+            assert isinstance(content, str)
+            assert path.endswith(".md")
+            assert len(content) > 0
+
+    def test_docs_entrypoints_tuple(self) -> None:
+        """Test _DOCS_ENTRYPOINTS contains expected paths."""
+        assert "docs/README.md" in _DOCS_ENTRYPOINTS
+        assert "docs/SCHEMAS.md" in _DOCS_ENTRYPOINTS
+        assert "request/README.md" in _DOCS_ENTRYPOINTS
+        assert "session/README.md" in _DOCS_ENTRYPOINTS
+        assert "logs/README.md" in _DOCS_ENTRYPOINTS
+        assert "docs/FILESYSTEM.md" in _DOCS_ENTRYPOINTS
+
+    def test_generate_docs_readme(self) -> None:
+        """Test docs/README.md generation."""
+        content = _generate_docs_readme()
+        assert "# Debug Bundle Documentation" in content
+        assert "Quick Navigation" in content
+        assert "Privacy Notes" in content
+        assert "Reproduction Quickstart" in content
+        assert "DebugBundle.load" in content
+
+    def test_generate_docs_schemas(self) -> None:
+        """Test docs/SCHEMAS.md generation."""
+        content = _generate_docs_schemas()
+        assert "# Bundle Schemas" in content
+        assert "manifest.json" in content
+        assert "format_version" in content
+        assert "request/input.json" in content
+        assert "config.json" in content
+        assert "Validation" in content
+
+    def test_generate_request_readme(self) -> None:
+        """Test request/README.md generation."""
+        content = _generate_request_readme()
+        assert "# Request Directory" in content
+        assert "input.json" in content
+        assert "output.json" in content
+        assert "MainLoop request" in content
+
+    def test_generate_session_readme(self) -> None:
+        """Test session/README.md generation."""
+        content = _generate_session_readme()
+        assert "# Session Directory" in content
+        assert "Slice Storage Format" in content
+        assert "before.jsonl" in content
+        assert "after.jsonl" in content
+        assert "JSONL" in content
+
+    def test_generate_logs_readme(self) -> None:
+        """Test logs/README.md generation."""
+        content = _generate_logs_readme()
+        assert "# Logs Directory" in content
+        assert "Log Record Format" in content
+        assert "Timeline Analysis" in content
+        assert "app.jsonl" in content
+
+    def test_generate_filesystem_readme(self) -> None:
+        """Test docs/FILESYSTEM.md generation."""
+        content = _generate_filesystem_readme()
+        assert "# Filesystem Directory" in content
+        assert "Snapshot vs Diff" in content
+        assert "Truncation Semantics" in content
+        assert "max_file_size" in content
+        assert "max_total_size" in content
+
+    def test_generate_readme_includes_docs_references(self) -> None:
+        """Test README.txt includes references to docs directory."""
+        manifest = BundleManifest(
+            bundle_id="test-123",
+            created_at="2024-01-15T10:30:00+00:00",
+        )
+        readme = _generate_readme(manifest)
+        assert "docs/" in readme
+        assert "README.md" in readme
+        assert "SCHEMAS.md" in readme
+        assert "(START HERE)" in readme
+
+    def test_bundle_includes_docs_files(self, tmp_path: Path) -> None:
+        """Test that created bundles include documentation files."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+        files = bundle.list_files()
+
+        # Check all expected docs files are present
+        assert "docs/README.md" in files
+        assert "docs/SCHEMAS.md" in files
+        assert "request/README.md" in files
+        assert "session/README.md" in files
+        assert "logs/README.md" in files
+        assert "docs/FILESYSTEM.md" in files
+
+    def test_bundle_manifest_includes_docs(self, tmp_path: Path) -> None:
+        """Test that bundle manifest includes docs entrypoints."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+
+        # Check manifest has docs info
+        assert bundle.manifest.docs is not None
+        assert bundle.manifest.docs.entrypoints == _DOCS_ENTRYPOINTS
+        assert "documentation" in bundle.manifest.docs.description.lower()
+
+    def test_docs_files_have_checksums(self, tmp_path: Path) -> None:
+        """Test that documentation files have integrity checksums."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+
+        # Check checksums exist for docs files
+        checksums = bundle.manifest.integrity.checksums
+        assert "docs/README.md" in checksums
+        assert "docs/SCHEMAS.md" in checksums
+        assert "request/README.md" in checksums
+
+    def test_docs_content_readable(self, tmp_path: Path) -> None:
+        """Test that documentation content is readable from bundle."""
+        with BundleWriter(tmp_path) as writer:
+            writer.write_request_input({"test": "input"})
+
+        assert writer.path is not None
+        bundle = DebugBundle.load(writer.path)
+
+        # Read docs/README.md content
+        content = bundle.read_file("docs/README.md").decode("utf-8")
+        assert "# Debug Bundle Documentation" in content
+        assert "Quick Navigation" in content
+
+    def test_manifest_docs_serialization(self) -> None:
+        """Test manifest with docs serializes correctly."""
+        manifest = BundleManifest(
+            bundle_id="test-123",
+            docs=DocsInfo(
+                entrypoints=("docs/README.md",),
+                description="Test docs",
+            ),
+        )
+        json_str = manifest.to_json()
+        data = json.loads(json_str)
+        assert "docs" in data
+        assert data["docs"]["entrypoints"] == ["docs/README.md"]
+        assert data["docs"]["description"] == "Test docs"
+
+    def test_manifest_from_json_with_docs(self) -> None:
+        """Test manifest deserialization includes docs."""
+        json_str = json.dumps(
+            {
+                "format_version": BUNDLE_FORMAT_VERSION,
+                "bundle_id": "test-456",
+                "created_at": "2024-01-15T10:30:00+00:00",
+                "request": {"request_id": "req-123"},
+                "capture": {"mode": "standard", "trigger": "config"},
+                "prompt": {"ns": "", "key": "", "adapter": ""},
+                "files": [],
+                "integrity": {"algorithm": "sha256", "checksums": {}},
+                "build": {"version": "", "commit": ""},
+                "docs": {
+                    "entrypoints": ["docs/README.md", "docs/SCHEMAS.md"],
+                    "description": "Test documentation",
+                },
+            }
+        )
+        manifest = BundleManifest.from_json(json_str)
+        assert manifest.docs.entrypoints == ("docs/README.md", "docs/SCHEMAS.md")
+        assert manifest.docs.description == "Test documentation"
