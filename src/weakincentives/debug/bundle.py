@@ -1152,7 +1152,7 @@ class DebugBundle:
                 if name.startswith(prefix) and not name.endswith("/")
             ]
 
-    def list_files_with_info(self) -> list[dict[str, str | int]]:
+    def _list_files_with_info(self) -> list[dict[str, str | int]]:
         """Return list of files with size and type info.
 
         Returns:

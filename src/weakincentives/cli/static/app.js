@@ -934,7 +934,11 @@ async function loadFileChunk(fullPath, reset = false) {
     renderFileContentWithLineNumbers(state.fileContent, state.fileHasMore);
   } catch (error) {
     if (reset) {
-      elements.filesystemViewer.innerHTML = `<p class="muted">Failed to load file: ${error.message}</p>`;
+      // Chunked loading failed on first attempt - fall back to full file load
+      // This handles binary files which can't be chunked as text
+      state.fileLoading = false;
+      await loadFullFile(fullPath);
+      return;
     } else {
       showToast(`Failed to load more: ${error.message}`, "error");
     }

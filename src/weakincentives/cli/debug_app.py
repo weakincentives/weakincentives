@@ -468,7 +468,7 @@ class _DebugAppHandlers:
 
     def list_files_with_info(self) -> list[dict[str, str | int]]:
         """List files in the bundle with size info."""
-        return self._store.bundle.list_files_with_info()
+        return self._store.bundle._list_files_with_info()  # pyright: ignore[reportPrivateUsage]
 
     def get_file(self, file_path: str) -> JSONResponse:
         """Get content of a specific file in the bundle."""
