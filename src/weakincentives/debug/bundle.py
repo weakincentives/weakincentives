@@ -1152,6 +1152,62 @@ class DebugBundle:
                 if name.startswith(prefix) and not name.endswith("/")
             ]
 
+    def list_files_with_info(self) -> list[dict[str, str | int]]:
+        """Return list of files with size and type info.
+
+        Returns:
+            List of dicts with path (str) and size (int) fields.
+        """
+        with zipfile.ZipFile(self._zip_path, "r") as zf:
+            prefix = f"{BUNDLE_ROOT_DIR}/"
+            result: list[dict[str, str | int]] = []
+            for info in zf.infolist():
+                if info.filename.startswith(prefix) and not info.is_dir():
+                    rel_path = info.filename[len(prefix) :]
+                    result.append(
+                        {
+                            "path": rel_path,
+                            "size": info.file_size,
+                        }
+                    )
+            return result
+
+    def _read_file_chunk(
+        self, rel_path: str, *, offset: int = 0, limit: int | None = None
+    ) -> tuple[str, int, bool]:
+        """Read a chunk of a text file as lines (internal).
+
+        Args:
+            rel_path: Relative path within the bundle.
+            offset: Line number to start from (0-indexed).
+            limit: Maximum number of lines to return.
+
+        Returns:
+            Tuple of (content, total_lines, has_more).
+
+        Raises:
+            BundleValidationError: If the file is not found or not text.
+        """
+        content_bytes = self.read_file(rel_path)
+        try:
+            full_content = content_bytes.decode("utf-8")
+        except UnicodeDecodeError as error:
+            raise BundleValidationError(
+                f"Cannot read binary file as text: {rel_path}"
+            ) from error
+
+        lines = full_content.splitlines(keepends=True)
+        total_lines = len(lines)
+
+        if offset >= total_lines:
+            return "", total_lines, False
+
+        end = total_lines if limit is None else min(offset + limit, total_lines)
+        chunk_lines = lines[offset:end]
+        has_more = end < total_lines
+
+        return "".join(chunk_lines), total_lines, has_more
+
     def extract(self, target: Path | str) -> Path:
         """Extract bundle to a directory.
 

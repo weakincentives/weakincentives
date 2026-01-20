@@ -466,6 +466,10 @@ class _DebugAppHandlers:
         """List files in the bundle."""
         return self._store.bundle.list_files()
 
+    def list_files_with_info(self) -> list[dict[str, str | int]]:
+        """List files in the bundle with size info."""
+        return self._store.bundle.list_files_with_info()
+
     def get_file(self, file_path: str) -> JSONResponse:
         """Get content of a specific file in the bundle."""
         try:
@@ -481,6 +485,30 @@ class _DebugAppHandlers:
                     return JSONResponse({"content": text, "type": "text"})
                 except UnicodeDecodeError:
                     return JSONResponse({"content": None, "type": "binary"})
+        except BundleValidationError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
+
+    def get_file_chunk(
+        self,
+        file_path: str,
+        *,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=1)] = None,
+    ) -> JSONResponse:
+        """Get a chunk of a text file by line numbers."""
+        try:
+            content, total_lines, has_more = self._store.bundle._read_file_chunk(  # pyright: ignore[reportPrivateUsage]
+                file_path, offset=offset, limit=limit
+            )
+            return JSONResponse(
+                {
+                    "content": content,
+                    "offset": offset,
+                    "total_lines": total_lines,
+                    "has_more": has_more,
+                    "type": "text",
+                }
+            )
         except BundleValidationError as error:
             raise HTTPException(status_code=404, detail=str(error)) from error
 
@@ -565,7 +593,9 @@ def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
     _ = app.get("/api/request/input")(handlers.get_request_input)
     _ = app.get("/api/request/output")(handlers.get_request_output)
     _ = app.get("/api/files")(handlers.list_files)
+    _ = app.get("/api/files-info")(handlers.list_files_with_info)
     _ = app.get("/api/files/{file_path:path}")(handlers.get_file)
+    _ = app.get("/api/files-chunk/{file_path:path}")(handlers.get_file_chunk)
     _ = app.post("/api/reload")(handlers.reload)
     _ = app.get("/api/bundles")(handlers.list_bundles)
     _ = app.post("/api/switch")(handlers.switch)

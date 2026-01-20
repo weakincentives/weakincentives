@@ -36,10 +36,18 @@ const state = {
   // Filesystem state
   allFiles: [],
   filesystemFiles: [],
+  filesystemTree: null,
+  expandedDirs: new Set(),
   selectedFile: null,
   fileContent: null,
   filesystemFilter: "",
   hasFilesystemSnapshot: false,
+  // Chunked file loading
+  fileChunkOffset: 0,
+  fileTotalLines: 0,
+  fileHasMore: false,
+  fileLoading: false,
+  fileChunkLimit: 500,
   // Shortcuts overlay
   shortcutsOpen: false,
 };
@@ -266,9 +274,14 @@ function resetViewState() {
   state.taskOutput = null;
   state.allFiles = [];
   state.filesystemFiles = [];
+  state.filesystemTree = null;
+  state.expandedDirs = new Set();
   state.selectedFile = null;
   state.fileContent = null;
   state.hasFilesystemSnapshot = false;
+  state.fileChunkOffset = 0;
+  state.fileTotalLines = 0;
+  state.fileHasMore = false;
 }
 
 async function reloadBundle() {
@@ -671,21 +684,160 @@ elements.taskCollapseAll.addEventListener("click", () => {
 
 const FILESYSTEM_PREFIX = "filesystem/";
 
+// Build a tree structure from flat file list with sizes
+function buildFileTree(files) {
+  const root = { name: "", children: new Map(), files: [], isDir: true };
+
+  files.forEach(({ path, size }) => {
+    const parts = path.split("/");
+    let current = root;
+
+    for (let i = 0; i < parts.length - 1; i++) {
+      const dirName = parts[i];
+      if (!current.children.has(dirName)) {
+        current.children.set(dirName, { name: dirName, children: new Map(), files: [], isDir: true });
+      }
+      current = current.children.get(dirName);
+    }
+
+    const fileName = parts[parts.length - 1];
+    current.files.push({ name: fileName, path, size, isDir: false });
+  });
+
+  return root;
+}
+
+// Format file size for display
+function formatFileSize(bytes) {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(1024));
+  const size = bytes / Math.pow(1024, i);
+  return `${size.toFixed(i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+// Get file extension icon class
+function getFileIcon(fileName) {
+  const ext = fileName.split(".").pop()?.toLowerCase() || "";
+  const iconMap = {
+    js: "icon-js", ts: "icon-ts", jsx: "icon-js", tsx: "icon-ts",
+    py: "icon-py", json: "icon-json", md: "icon-md",
+    html: "icon-html", css: "icon-css", yaml: "icon-yaml", yml: "icon-yaml",
+    toml: "icon-toml", txt: "icon-txt", sh: "icon-sh", bash: "icon-sh",
+  };
+  return iconMap[ext] || "icon-file";
+}
+
 async function loadFilesystem() {
   try {
-    const files = await fetchJSON("/api/files");
-    state.allFiles = files;
+    const filesInfo = await fetchJSON("/api/files-info");
+    state.allFiles = filesInfo;
 
     // Filter to only include filesystem snapshot files
-    state.filesystemFiles = files
-      .filter((f) => f.startsWith(FILESYSTEM_PREFIX))
-      .map((f) => f.slice(FILESYSTEM_PREFIX.length)); // Remove prefix for display
+    const fsFiles = filesInfo
+      .filter((f) => f.path.startsWith(FILESYSTEM_PREFIX))
+      .map((f) => ({
+        path: f.path.slice(FILESYSTEM_PREFIX.length),
+        size: f.size,
+      }));
 
-    state.hasFilesystemSnapshot = state.filesystemFiles.length > 0;
+    state.filesystemFiles = fsFiles;
+    state.hasFilesystemSnapshot = fsFiles.length > 0;
+    state.filesystemTree = buildFileTree(fsFiles);
+
+    // Auto-expand first level
+    if (state.filesystemTree) {
+      state.filesystemTree.children.forEach((_, key) => {
+        state.expandedDirs.add(key);
+      });
+    }
+
     renderFilesystemList();
   } catch (error) {
     elements.filesystemList.innerHTML = `<p class="muted">Failed to load files: ${error.message}</p>`;
   }
+}
+
+function toggleDir(dirPath) {
+  if (state.expandedDirs.has(dirPath)) {
+    state.expandedDirs.delete(dirPath);
+  } else {
+    state.expandedDirs.add(dirPath);
+  }
+  renderFilesystemList();
+}
+
+function renderTreeNode(node, parentPath, filter, depth = 0) {
+  const container = document.createDocumentFragment();
+  const currentPath = parentPath ? `${parentPath}/${node.name}` : node.name;
+  const isExpanded = state.expandedDirs.has(currentPath);
+
+  // Sort directories first, then files
+  const sortedDirs = Array.from(node.children.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+  const sortedFiles = [...node.files].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Filter items
+  const filterLower = filter.toLowerCase();
+  const filteredDirs = sortedDirs.filter(([_, dir]) => {
+    return hasMatchingDescendant(dir, filterLower);
+  });
+  const filteredFiles = sortedFiles.filter((f) => f.path.toLowerCase().includes(filterLower));
+
+  // Render directories
+  filteredDirs.forEach(([dirName, dir]) => {
+    const dirPath = parentPath ? `${parentPath}/${dirName}` : dirName;
+    const dirExpanded = state.expandedDirs.has(dirPath);
+
+    const dirItem = document.createElement("div");
+    dirItem.className = "tree-dir-item";
+    dirItem.style.paddingLeft = `${depth * 16 + 8}px`;
+
+    const chevron = dirExpanded ? "▼" : "▶";
+    dirItem.innerHTML = `
+      <span class="tree-chevron">${chevron}</span>
+      <span class="tree-dir-icon">📁</span>
+      <span class="tree-dir-name">${escapeHtml(dirName)}</span>
+    `;
+    dirItem.addEventListener("click", (e) => {
+      e.stopPropagation();
+      toggleDir(dirPath);
+    });
+    container.appendChild(dirItem);
+
+    if (dirExpanded) {
+      const childNodes = renderTreeNode(dir, dirPath, filter, depth + 1);
+      container.appendChild(childNodes);
+    }
+  });
+
+  // Render files
+  filteredFiles.forEach((file) => {
+    const fullPath = FILESYSTEM_PREFIX + file.path;
+    const fileItem = document.createElement("div");
+    fileItem.className = "tree-file-item" + (fullPath === state.selectedFile ? " active" : "");
+    fileItem.style.paddingLeft = `${depth * 16 + 8}px`;
+
+    const iconClass = getFileIcon(file.name);
+    fileItem.innerHTML = `
+      <span class="tree-file-icon ${iconClass}">📄</span>
+      <span class="tree-file-name">${escapeHtml(file.name)}</span>
+      <span class="tree-file-size">${formatFileSize(file.size)}</span>
+    `;
+    fileItem.addEventListener("click", () => selectFilesystemFile(fullPath, file.path, file.size));
+    container.appendChild(fileItem);
+  });
+
+  return container;
+}
+
+function hasMatchingDescendant(node, filter) {
+  // Check files in this directory
+  if (node.files.some((f) => f.path.toLowerCase().includes(filter))) return true;
+  // Check subdirectories
+  for (const child of node.children.values()) {
+    if (hasMatchingDescendant(child, filter)) return true;
+  }
+  return false;
 }
 
 function renderFilesystemList() {
@@ -700,24 +852,18 @@ function renderFilesystemList() {
 
   elements.filesystemNoSnapshot.classList.add("hidden");
 
-  const filter = state.filesystemFilter.toLowerCase();
-  const filtered = state.filesystemFiles.filter((f) => f.toLowerCase().includes(filter));
-
+  const filter = state.filesystemFilter;
   elements.filesystemList.innerHTML = "";
 
-  if (filtered.length === 0) {
+  if (!state.filesystemTree) return;
+
+  const treeContent = renderTreeNode(state.filesystemTree, "", filter);
+  if (treeContent.childNodes.length === 0) {
     elements.filesystemList.innerHTML = '<p class="muted">No files match filter</p>';
     return;
   }
 
-  filtered.forEach((displayPath) => {
-    const item = document.createElement("div");
-    const fullPath = FILESYSTEM_PREFIX + displayPath;
-    item.className = "file-item" + (fullPath === state.selectedFile ? " active" : "");
-    item.textContent = displayPath;
-    item.addEventListener("click", () => selectFilesystemFile(fullPath, displayPath));
-    elements.filesystemList.appendChild(item);
-  });
+  elements.filesystemList.appendChild(treeContent);
 }
 
 elements.filesystemFilter.addEventListener("input", () => {
@@ -725,17 +871,31 @@ elements.filesystemFilter.addEventListener("input", () => {
   renderFilesystemList();
 });
 
-async function selectFilesystemFile(fullPath, displayPath) {
+async function selectFilesystemFile(fullPath, displayPath, fileSize) {
   state.selectedFile = fullPath;
+  state.fileChunkOffset = 0;
+  state.fileContent = "";
+  state.fileTotalLines = 0;
+  state.fileHasMore = false;
   renderFilesystemList();
 
+  elements.filesystemEmptyState.classList.add("hidden");
+  elements.filesystemNoSnapshot.classList.add("hidden");
+  elements.filesystemContent.classList.remove("hidden");
+  elements.filesystemCurrentPath.textContent = displayPath;
+
+  // For large files (> 50KB), use chunked loading
+  const LARGE_FILE_THRESHOLD = 50 * 1024;
+  if (fileSize > LARGE_FILE_THRESHOLD) {
+    await loadFileChunk(fullPath, true);
+  } else {
+    await loadFullFile(fullPath);
+  }
+}
+
+async function loadFullFile(fullPath) {
   try {
     const result = await fetchJSON(`/api/files/${encodeURIComponent(fullPath)}`);
-
-    elements.filesystemEmptyState.classList.add("hidden");
-    elements.filesystemNoSnapshot.classList.add("hidden");
-    elements.filesystemContent.classList.remove("hidden");
-    elements.filesystemCurrentPath.textContent = displayPath;
 
     if (result.type === "binary") {
       elements.filesystemViewer.innerHTML = '<p class="muted">Binary file cannot be displayed</p>';
@@ -743,10 +903,91 @@ async function selectFilesystemFile(fullPath, displayPath) {
     } else {
       const content = result.type === "json" ? JSON.stringify(result.content, null, 2) : result.content;
       state.fileContent = content;
-      elements.filesystemViewer.innerHTML = `<pre class="file-content">${escapeHtml(content)}</pre>`;
+      renderFileContentWithLineNumbers(content, false);
     }
   } catch (error) {
     elements.filesystemViewer.innerHTML = `<p class="muted">Failed to load file: ${error.message}</p>`;
+  }
+}
+
+async function loadFileChunk(fullPath, reset = false) {
+  if (state.fileLoading) return;
+
+  try {
+    state.fileLoading = true;
+    const offset = reset ? 0 : state.fileChunkOffset;
+    const result = await fetchJSON(
+      `/api/files-chunk/${encodeURIComponent(fullPath)}?offset=${offset}&limit=${state.fileChunkLimit}`
+    );
+
+    if (reset) {
+      state.fileContent = result.content;
+      state.fileChunkOffset = state.fileChunkLimit;
+    } else {
+      state.fileContent += result.content;
+      state.fileChunkOffset += state.fileChunkLimit;
+    }
+
+    state.fileTotalLines = result.total_lines;
+    state.fileHasMore = result.has_more;
+
+    renderFileContentWithLineNumbers(state.fileContent, state.fileHasMore);
+  } catch (error) {
+    if (reset) {
+      elements.filesystemViewer.innerHTML = `<p class="muted">Failed to load file: ${error.message}</p>`;
+    } else {
+      showToast(`Failed to load more: ${error.message}`, "error");
+    }
+  } finally {
+    state.fileLoading = false;
+  }
+}
+
+function renderFileContentWithLineNumbers(content, hasMore) {
+  const lines = content.split("\n");
+  // Remove trailing empty line if content ends with newline
+  if (lines.length > 0 && lines[lines.length - 1] === "") {
+    lines.pop();
+  }
+
+  const lineNumbersHtml = lines.map((_, i) => `<span class="line-number">${i + 1}</span>`).join("\n");
+  const contentHtml = lines.map((line) => escapeHtml(line || " ")).join("\n");
+
+  let html = `
+    <div class="file-viewer-container">
+      <div class="file-line-numbers"><pre>${lineNumbersHtml}</pre></div>
+      <div class="file-content-area"><pre class="file-content">${contentHtml}</pre></div>
+    </div>
+  `;
+
+  if (hasMore) {
+    const remaining = state.fileTotalLines - state.fileChunkOffset;
+    html += `
+      <div class="file-load-more">
+        <button class="ghost file-load-more-btn" type="button">
+          Load more lines (${remaining} remaining of ${state.fileTotalLines} total)
+        </button>
+      </div>
+    `;
+  } else if (state.fileTotalLines > 0) {
+    html += `<div class="file-stats">${state.fileTotalLines} lines</div>`;
+  }
+
+  elements.filesystemViewer.innerHTML = html;
+
+  // Attach load more handler if present
+  const loadMoreBtn = elements.filesystemViewer.querySelector(".file-load-more-btn");
+  if (loadMoreBtn) {
+    loadMoreBtn.addEventListener("click", () => loadFileChunk(state.selectedFile, false));
+  }
+
+  // Sync scroll between line numbers and content
+  const lineNumbers = elements.filesystemViewer.querySelector(".file-line-numbers");
+  const contentArea = elements.filesystemViewer.querySelector(".file-content-area");
+  if (lineNumbers && contentArea) {
+    contentArea.addEventListener("scroll", () => {
+      lineNumbers.scrollTop = contentArea.scrollTop;
+    });
   }
 }
 

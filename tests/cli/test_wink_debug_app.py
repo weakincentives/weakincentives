@@ -936,3 +936,134 @@ def test_file_endpoint_binary_file(tmp_path: Path) -> None:
     content = file_response.json()
     assert content["type"] == "binary"
     assert content["content"] is None
+
+
+def test_files_info_endpoint(tmp_path: Path) -> None:
+    """Test files-info endpoint returns file sizes."""
+    bundle_path = _create_test_bundle(tmp_path, ["test"])
+    logger = debug_app.get_logger("test.files.info")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files-info")
+    assert response.status_code == 200
+    files = response.json()
+    assert isinstance(files, list)
+    assert len(files) > 0
+    # Each entry should have path and size
+    for entry in files:
+        assert "path" in entry
+        assert "size" in entry
+        assert isinstance(entry["size"], int)
+
+
+def test_file_chunk_endpoint(tmp_path: Path) -> None:
+    """Test chunked file reading endpoint."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Add a multi-line text file
+    import zipfile
+
+    test_content = "\n".join([f"Line {i}" for i in range(1, 101)])
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/multiline.txt", test_content)
+
+    logger = debug_app.get_logger("test.file.chunk")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    # Get first chunk
+    response = client.get(
+        "/api/files-chunk/multiline.txt", params={"offset": 0, "limit": 10}
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["type"] == "text"
+    assert result["offset"] == 0
+    assert result["total_lines"] == 100
+    assert result["has_more"] is True
+    assert "Line 1\n" in result["content"]
+    assert "Line 10\n" in result["content"]
+
+    # Get second chunk
+    response = client.get(
+        "/api/files-chunk/multiline.txt", params={"offset": 10, "limit": 10}
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["offset"] == 10
+    assert result["has_more"] is True
+    assert "Line 11\n" in result["content"]
+
+    # Get all remaining
+    response = client.get(
+        "/api/files-chunk/multiline.txt", params={"offset": 90, "limit": 20}
+    )
+    assert response.status_code == 200
+    result = response.json()
+    assert result["has_more"] is False
+
+    # Offset past end
+    response = client.get("/api/files-chunk/multiline.txt", params={"offset": 200})
+    assert response.status_code == 200
+    result = response.json()
+    assert result["content"] == ""
+    assert result["has_more"] is False
+
+
+def test_file_chunk_endpoint_binary_error(tmp_path: Path) -> None:
+    """Test that chunked reading of binary files returns 404."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    import zipfile
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/binary.dat", b"\x80\x81\x82\x83\xff\xfe")
+
+    logger = debug_app.get_logger("test.file.chunk.binary")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files-chunk/binary.dat")
+    assert response.status_code == 404
+
+
+def test_file_chunk_endpoint_missing_file(tmp_path: Path) -> None:
+    """Test that chunked reading of missing files returns 404."""
+    bundle_path = _create_test_bundle(tmp_path, ["test"])
+    logger = debug_app.get_logger("test.file.chunk.missing")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files-chunk/nonexistent.txt")
+    assert response.status_code == 404
+
+
+def test_files_info_excludes_root_files(tmp_path: Path) -> None:
+    """Test that files-info excludes files outside bundle root."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Add a file at root level (outside debug_bundle/ prefix)
+    import zipfile
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("root_file.txt", "should be excluded")
+        zf.writestr("debug_bundle/included.txt", "should be included")
+
+    logger = debug_app.get_logger("test.files.info.exclude")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    response = client.get("/api/files-info")
+    assert response.status_code == 200
+    files = response.json()
+    paths = [f["path"] for f in files]
+    # root_file.txt should not be included
+    assert "root_file.txt" not in paths
+    # included.txt should be there
+    assert "included.txt" in paths

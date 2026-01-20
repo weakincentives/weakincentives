@@ -2170,17 +2170,138 @@ select:focus-visible {
 
 .files-viewer {
   margin-top: 16px;
-  padding: 16px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  overflow-y: auto;
+  overflow: hidden;
   max-height: calc(100vh - 320px);
+}
+
+/* --- File Tree View --- */
+
+.tree-dir-item,
+.tree-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  border-radius: var(--radius-sm);
+  margin: 1px 4px;
+}
+
+.tree-dir-item:hover,
+.tree-file-item:hover {
+  background: var(--color-bg-subtle);
+}
+
+.tree-file-item.active {
+  background: var(--color-primary-subtle);
+  color: var(--color-primary-text);
+}
+
+.tree-chevron {
+  width: 12px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.tree-dir-icon,
+.tree-file-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.tree-dir-name {
+  font-weight: 500;
+  color: var(--color-text-main);
+}
+
+.tree-file-name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-main);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-file-size {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+/* --- File Viewer with Line Numbers --- */
+
+.file-viewer-container {
+  display: flex;
+  max-height: calc(100vh - 380px);
+  overflow: hidden;
+}
+
+.file-line-numbers {
+  flex-shrink: 0;
+  padding: 12px 0;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  overflow: hidden;
+  user-select: none;
+}
+
+.file-line-numbers pre {
+  margin: 0;
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.line-number {
+  display: block;
+  text-align: right;
+  color: var(--color-text-muted);
+  min-width: 3ch;
+}
+
+.file-content-area {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px;
+}
+
+.file-content-area pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+}
+
+.file-load-more {
+  padding: 12px 16px;
+  border-top: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.file-load-more-btn {
+  font-size: 13px;
+}
+
+.file-stats {
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  text-align: right;
 }
 
 .mono {
