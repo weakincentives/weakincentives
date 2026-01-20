@@ -49,7 +49,6 @@ class TestBundleConfig:
         """Test default configuration values."""
         config = BundleConfig()
         assert config.target is None
-        assert config.max_log_lines is None
         assert config.max_file_size == 10_000_000
         assert config.max_total_size == 52_428_800
         assert config.compression == "deflate"
