@@ -73,7 +73,9 @@ Example:
 
 from __future__ import annotations
 
+from ._hook_registry import HookRegistry, HookSet
 from ._hooks import create_task_completion_stop_hook
+from ._query_builder import SdkQueryBuilder, SdkQueryOptions
 from ._task_completion import (
     CompositeChecker,
     PlanBasedChecker,
@@ -124,6 +126,8 @@ __all__ = [
     "ClaudeAgentWorkspaceSection",
     "CompositeChecker",
     "EphemeralHome",
+    "HookRegistry",
+    "HookSet",
     "HostMount",
     "HostMountPreview",
     "IsolationAuthError",
@@ -132,6 +136,8 @@ __all__ = [
     "PermissionMode",
     "PlanBasedChecker",
     "SandboxConfig",
+    "SdkQueryBuilder",
+    "SdkQueryOptions",
     "TaskCompletionChecker",
     "TaskCompletionContext",
     "TaskCompletionResult",
