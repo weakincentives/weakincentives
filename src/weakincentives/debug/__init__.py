@@ -60,6 +60,15 @@ from .bundle import (
     BundleWriter,
     DebugBundle,
 )
+from .environment import (
+    CommandInfo,
+    ContainerInfo,
+    EnvironmentCapture,
+    GitInfo,
+    PythonInfo,
+    SystemInfo,
+    capture_environment,
+)
 
 __all__ = [
     "BundleConfig",
@@ -67,5 +76,12 @@ __all__ = [
     "BundleManifest",
     "BundleValidationError",
     "BundleWriter",
+    "CommandInfo",
+    "ContainerInfo",
     "DebugBundle",
+    "EnvironmentCapture",
+    "GitInfo",
+    "PythonInfo",
+    "SystemInfo",
+    "capture_environment",
 ]

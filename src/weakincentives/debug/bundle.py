@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from ..filesystem import Filesystem
     from ..runtime.run_context import RunContext
     from ..runtime.session import Session
+    from .environment import EnvironmentCapture
 
 _logger = logging.getLogger(__name__)
 
@@ -320,6 +321,16 @@ def _generate_readme(manifest: BundleManifest) -> str:
         "logs/",
         "  app.jsonl         Log records during execution",
         "",
+        "environment/        Reproducibility envelope",
+        "  system.json       OS, kernel, arch, CPU, memory",
+        "  python.json       Python version, executable, venv info",
+        "  packages.txt      Installed packages (pip freeze)",
+        "  env_vars.json     Environment variables (filtered/redacted)",
+        "  git.json          Repo root, commit, branch, remotes",
+        "  git.diff          Uncommitted changes (if any)",
+        "  command.txt       argv, working dir, entrypoint",
+        "  container.json    Container runtime info (if applicable)",
+        "",
         "config.json         MainLoop and adapter configuration",
         "run_context.json    Execution context (IDs, tracing)",
         "metrics.json        Token usage, timing, budget state",
@@ -460,6 +471,7 @@ class BundleWriter:
         (self._temp_dir / BUNDLE_ROOT_DIR / "request").mkdir()
         (self._temp_dir / BUNDLE_ROOT_DIR / "session").mkdir()
         (self._temp_dir / BUNDLE_ROOT_DIR / "logs").mkdir()
+        (self._temp_dir / BUNDLE_ROOT_DIR / "environment").mkdir()
         return self
 
     def __exit__(
@@ -650,6 +662,86 @@ class BundleWriter:
         except Exception:
             _logger.exception(
                 "Failed to write eval info",
+                extra={"bundle_id": str(self._bundle_id)},
+            )
+
+    def write_environment(
+        self,
+        env: EnvironmentCapture | None = None,
+        *,
+        include_packages: bool = True,
+        include_git_diff: bool = True,
+    ) -> None:
+        """Write reproducibility envelope (environment capture).
+
+        Captures system, Python, packages, env vars, git state, command info,
+        and container info into the environment/ directory.
+
+        Args:
+            env: Pre-captured environment, or None to capture now.
+            include_packages: Whether to capture installed packages (slower).
+            include_git_diff: Whether to capture git diff (may be large).
+        """
+        try:
+            from .environment import capture_environment
+
+            if env is None:
+                env = capture_environment(
+                    include_packages=include_packages,
+                    include_git_diff=include_git_diff,
+                )
+
+            # Write system.json
+            system_data = _serialize_object(env.system)
+            self._write_artifact(
+                "environment/system.json", json.dumps(system_data, indent=2)
+            )
+
+            # Write python.json
+            python_data = _serialize_object(env.python)
+            self._write_artifact(
+                "environment/python.json", json.dumps(python_data, indent=2)
+            )
+
+            # Write packages.txt
+            if env.packages:
+                self._write_artifact("environment/packages.txt", env.packages)
+
+            # Write env_vars.json
+            self._write_artifact(
+                "environment/env_vars.json", json.dumps(env.env_vars, indent=2)
+            )
+
+            # Write git.json (if in a git repo)
+            if env.git is not None:
+                git_data = _serialize_object(env.git)
+                self._write_artifact(
+                    "environment/git.json", json.dumps(git_data, indent=2)
+                )
+
+            # Write git.diff (if available and non-empty)
+            if env.git_diff:
+                self._write_artifact("environment/git.diff", env.git_diff)
+
+            # Write command.txt
+            command_lines = [
+                f"Working Directory: {env.command.working_dir}",
+                f"Executable: {env.command.executable}",
+                f"Entrypoint: {env.command.entrypoint}",
+                f"Arguments: {' '.join(env.command.argv)}",
+            ]
+            self._write_artifact("environment/command.txt", "\n".join(command_lines))
+
+            # Write container.json (if containerized)
+            if env.container is not None:
+                container_data = _serialize_object(env.container)
+                self._write_artifact(
+                    "environment/container.json", json.dumps(container_data, indent=2)
+                )
+
+        except Exception:
+            _logger.exception(
+                "Failed to write environment",
                 extra={"bundle_id": str(self._bundle_id)},
             )
 
@@ -1007,6 +1099,48 @@ class DebugBundle:
             return self._read_json("eval.json")
         except BundleValidationError:
             return None
+
+    @property
+    def environment(self) -> dict[str, JSONValue | str | None] | None:
+        """Return environment capture (reproducibility envelope), or None if not present.
+
+        Returns a dict with keys: system, python, packages, env_vars, git,
+        git_diff, command, container. Values are None if the specific artifact
+        was not captured.
+        """
+        # Check if any environment files exist
+        has_env = any(f.startswith("environment/") for f in self._manifest.files)
+        if not has_env:
+            return None
+
+        result: dict[str, JSONValue | str | None] = {}
+
+        # JSON files
+        for key, path in [
+            ("system", "environment/system.json"),
+            ("python", "environment/python.json"),
+            ("env_vars", "environment/env_vars.json"),
+            ("git", "environment/git.json"),
+            ("container", "environment/container.json"),
+        ]:
+            try:
+                result[key] = self._read_json(path)
+            except BundleValidationError:
+                result[key] = None
+
+        # Text files
+        for key, path in [
+            ("packages", "environment/packages.txt"),
+            ("git_diff", "environment/git.diff"),
+            ("command", "environment/command.txt"),
+        ]:
+            try:
+                content = self._read_artifact(path)
+                result[key] = content.decode("utf-8")
+            except BundleValidationError:
+                result[key] = None
+
+        return result
 
     def list_files(self) -> list[str]:
         """Return list of files in the bundle."""
