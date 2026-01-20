@@ -10,15 +10,66 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Debugging utilities for prompt evaluation and session inspection."""
+"""Debug bundle utilities for capturing and inspecting execution state.
+
+The primary API consists of:
+- ``BundleConfig``: Configure automatic bundle creation in MainLoop
+- ``BundleWriter``: Create debug bundles programmatically
+- ``DebugBundle``: Load and inspect existing bundles
+- ``CaptureMode``: Control verbosity (MINIMAL, STANDARD, FULL)
+
+Example - MainLoop integration::
+
+    from weakincentives.debug import BundleConfig, CaptureMode
+    from weakincentives.runtime import MainLoop, MainLoopConfig
+
+    config = MainLoopConfig(
+        debug_bundle=BundleConfig(
+            target="./debug_bundles/",
+            mode=CaptureMode.STANDARD,
+        ),
+    )
+    loop = MyLoop(adapter=adapter, requests=requests, config=config)
+
+Example - Manual bundle creation::
+
+    from weakincentives.debug import BundleWriter
+
+    with BundleWriter(target="./debug/", bundle_id=run_id) as writer:
+        writer.write_request_input(request)
+        with writer.capture_logs():
+            response = adapter.evaluate(prompt, session=session)
+        writer.write_request_output(response)
+        writer.write_session_after(session)
+
+Example - Inspect existing bundle::
+
+    from weakincentives.debug import DebugBundle
+
+    bundle = DebugBundle.load("./debug/abc123.zip")
+    print(bundle.manifest.request.status)
+    print(bundle.request_input)
+    print(bundle.logs)
+"""
 
 from __future__ import annotations
 
-from ._dump import archive_filesystem, dump_session
-from ._log_collector import collect_all_logs
+from .bundle import (
+    BundleConfig,
+    BundleError,
+    BundleManifest,
+    BundleValidationError,
+    BundleWriter,
+    CaptureMode,
+    DebugBundle,
+)
 
 __all__ = [
-    "archive_filesystem",
-    "collect_all_logs",
-    "dump_session",
+    "BundleConfig",
+    "BundleError",
+    "BundleManifest",
+    "BundleValidationError",
+    "BundleWriter",
+    "CaptureMode",
+    "DebugBundle",
 ]

@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>wink snapshot explorer</title>
+    <title>wink debug bundle explorer</title>
     <link rel="stylesheet" href="/static/style.css" />
   </head>
   <body>
@@ -14,58 +14,6 @@
 
     <!-- Toast container -->
     <div id="toast-container" class="toast-container"></div>
-
-    <!-- Command palette -->
-    <div id="command-palette" class="command-palette hidden" role="dialog" aria-modal="true" aria-label="Command palette">
-      <div class="command-palette-backdrop"></div>
-      <div class="command-palette-container">
-        <div class="command-palette-header">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"></circle>
-            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-          </svg>
-          <input
-            id="command-input"
-            type="text"
-            placeholder="Search slices, sessions, or actions..."
-            autocomplete="off"
-            aria-label="Command search"
-          />
-          <kbd>Esc</kbd>
-        </div>
-        <div id="command-results" class="command-results"></div>
-        <div class="command-footer">
-          <span><kbd>↑</kbd><kbd>↓</kbd> navigate</span>
-          <span><kbd>Enter</kbd> select</span>
-          <span><kbd>Esc</kbd> close</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Markdown pop-out modal -->
-    <div id="markdown-modal" class="markdown-modal hidden" role="dialog" aria-modal="true" aria-label="Markdown viewer">
-      <div class="markdown-modal-backdrop"></div>
-      <div class="markdown-modal-container">
-        <div class="markdown-modal-header">
-          <h2>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-            </svg>
-            <span id="markdown-modal-title">Markdown Content</span>
-          </h2>
-          <button id="markdown-modal-close" class="icon-button" type="button" aria-label="Close">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-        <div id="markdown-modal-body" class="markdown-modal-body"></div>
-      </div>
-    </div>
 
     <!-- Keyboard shortcuts help overlay -->
     <div id="shortcuts-overlay" class="shortcuts-overlay hidden" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
@@ -85,25 +33,21 @@
             <h3>Navigation</h3>
             <div class="shortcut-row"><kbd>J</kbd> / <kbd>↓</kbd><span>Next item</span></div>
             <div class="shortcut-row"><kbd>K</kbd> / <kbd>↑</kbd><span>Previous item</span></div>
-            <div class="shortcut-row"><kbd>H</kbd><span>Previous slice</span></div>
-            <div class="shortcut-row"><kbd>L</kbd><span>Next slice</span></div>
-            <div class="shortcut-row"><kbd>←</kbd><span>Previous snapshot</span></div>
-            <div class="shortcut-row"><kbd>→</kbd><span>Next snapshot</span></div>
+            <div class="shortcut-row"><kbd>←</kbd><span>Previous bundle</span></div>
+            <div class="shortcut-row"><kbd>→</kbd><span>Next bundle</span></div>
           </div>
           <div class="shortcuts-section">
             <h3>Actions</h3>
-            <div class="shortcut-row"><kbd>⌘</kbd><kbd>K</kbd> / <kbd>Ctrl</kbd><kbd>K</kbd><span>Open command palette</span></div>
-            <div class="shortcut-row"><kbd>/</kbd><span>Focus item search</span></div>
-            <div class="shortcut-row"><kbd>O</kbd><span>Focus object filter</span></div>
-            <div class="shortcut-row"><kbd>R</kbd><span>Reload snapshot</span></div>
-            <div class="shortcut-row"><kbd>E</kbd><span>Export JSON</span></div>
+            <div class="shortcut-row"><kbd>/</kbd><span>Focus search</span></div>
+            <div class="shortcut-row"><kbd>R</kbd><span>Reload bundle</span></div>
             <div class="shortcut-row"><kbd>D</kbd><span>Toggle dark mode</span></div>
           </div>
           <div class="shortcuts-section">
             <h3>View</h3>
+            <div class="shortcut-row"><kbd>1</kbd>-<kbd>4</kbd><span>Switch tabs</span></div>
             <div class="shortcut-row"><kbd>[</kbd><span>Toggle sidebar</span></div>
             <div class="shortcut-row"><kbd>?</kbd><span>Show this help</span></div>
-            <div class="shortcut-row"><kbd>Esc</kbd><span>Close dialogs / Clear search</span></div>
+            <div class="shortcut-row"><kbd>Esc</kbd><span>Close dialogs</span></div>
           </div>
         </div>
       </div>
@@ -112,11 +56,24 @@
     <header class="top-bar">
       <div class="heading">
         <p class="eyebrow">wink debug</p>
-        <h1>Snapshot Explorer</h1>
-        <p id="snapshot-path" class="muted"></p>
+        <h1>Bundle Explorer</h1>
+      </div>
+      <div class="bundle-meta">
+        <span class="meta-item">
+          <span class="meta-label">Status</span>
+          <span id="bundle-status" class="pill"></span>
+        </span>
+        <span class="meta-item">
+          <span class="meta-label">Bundle</span>
+          <span id="bundle-id" class="meta-value mono"></span>
+        </span>
+        <span class="meta-item">
+          <span class="meta-label">Request</span>
+          <span id="request-id" class="meta-value mono"></span>
+        </span>
       </div>
       <div class="actions">
-        <button id="theme-toggle" class="icon-button" type="button" title="Toggle dark mode" aria-label="Toggle dark mode">
+        <button id="theme-toggle" class="icon-button" type="button" title="Toggle dark mode (D)" aria-label="Toggle dark mode">
           <svg class="icon-sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <circle cx="12" cy="12" r="5"></circle>
             <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -132,40 +89,64 @@
             <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
           </svg>
         </button>
-        <button id="reload-button" class="icon-button" type="button" title="Reload snapshot (R)" aria-label="Reload snapshot">
+        <button id="reload-button" class="icon-button" type="button" title="Reload bundle (R)" aria-label="Reload bundle">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <polyline points="23 4 23 10 17 10"></polyline>
             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
           </svg>
         </button>
-        <label class="select-label">
-          <span>Bundles</span>
-          <select id="snapshot-select" aria-label="Select snapshot bundle"></select>
-        </label>
-        <div class="keyboard-hints" title="Press ? for all shortcuts">
-          <kbd>⌘K</kbd>
-          <button id="help-button" class="hint-button" type="button" aria-label="Show keyboard shortcuts">
-            <kbd>?</kbd>
-          </button>
-        </div>
+        <select id="bundle-select" class="bundle-select" aria-label="Select debug bundle"></select>
+        <button id="help-button" class="icon-button" type="button" title="Keyboard shortcuts (?)" aria-label="Show keyboard shortcuts">
+          <kbd>?</kbd>
+        </button>
       </div>
     </header>
-    <main class="layout">
+
+    <!-- Main navigation tabs -->
+    <nav class="main-tabs">
+      <button class="main-tab active" data-view="sessions">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+        </svg>
+        Sessions
+        <kbd>1</kbd>
+      </button>
+      <button class="main-tab" data-view="logs">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+          <polyline points="14 2 14 8 20 8"></polyline>
+          <line x1="16" y1="13" x2="8" y2="13"></line>
+          <line x1="16" y1="17" x2="8" y2="17"></line>
+        </svg>
+        Logs
+        <kbd>2</kbd>
+      </button>
+      <button class="main-tab" data-view="task">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        </svg>
+        Task
+        <kbd>3</kbd>
+      </button>
+      <button class="main-tab" data-view="filesystem">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+        </svg>
+        Filesystem
+        <kbd>4</kbd>
+      </button>
+    </nav>
+
+    <!-- ==================== SESSIONS VIEW ==================== -->
+    <main id="sessions-view" class="view-container">
       <aside class="sidebar">
-        <div class="panel session-panel">
-          <div class="panel-header">
-            <h2>Sessions</h2>
-            <p class="muted">File → session tree</p>
-          </div>
-          <div id="session-tree" class="session-tree"></div>
-        </div>
         <div class="panel">
           <div class="panel-header">
             <h2>Slices</h2>
             <input
               id="slice-filter"
               type="search"
-              placeholder="Filter slices"
+              placeholder="Filter slices..."
               autocomplete="off"
             />
           </div>
@@ -188,41 +169,14 @@
         </div>
       </aside>
       <section class="content">
-        <div id="meta-card" class="card">
-          <div class="meta-grid">
-            <div>
-              <p class="label">Created at</p>
-              <p id="meta-created"></p>
-            </div>
-            <div>
-              <p class="label">Schema version</p>
-              <p id="meta-version"></p>
-            </div>
-            <div>
-              <p class="label">Slice count</p>
-              <p id="meta-count"></p>
-            </div>
-          </div>
-          <div class="tag-section">
-            <p class="label">Tags</p>
-            <div class="pill-row" id="tag-row"></div>
-          </div>
-        </div>
         <div id="slice-card" class="card">
-          <!-- Empty state shown when no slice is selected -->
           <div id="slice-empty-state" class="empty-state">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-              <polyline points="10 9 9 9 8 9"></polyline>
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
             </svg>
             <h3>Select a slice to inspect</h3>
-            <p class="muted">Choose a state or event slice from the sidebar to view its contents</p>
+            <p class="muted">Choose a state or event slice from the sidebar</p>
           </div>
-
-          <!-- Content shown when a slice is selected -->
           <div id="slice-content" class="slice-content hidden">
             <div class="card-header">
               <div>
@@ -236,43 +190,16 @@
               <div class="viewer-toolbar">
                 <div class="viewer-controls">
                   <label class="inline-label">
-                    <span>Search items</span>
-                    <input
-                      id="item-search"
-                      type="search"
-                      placeholder="keyword"
-                      autocomplete="off"
-                      aria-label="Search items"
-                    />
+                    <span>Search</span>
+                    <input id="item-search" type="search" placeholder="keyword" autocomplete="off" />
                   </label>
                   <label class="inline-label">
-                    <span>Filter objects</span>
-                    <input
-                      id="object-filter"
-                      type="search"
-                      placeholder="property"
-                      autocomplete="off"
-                      aria-label="Filter object properties"
-                    />
-                  </label>
-                  <label class="inline-label">
-                    <span>Expand to depth</span>
-                    <input
-                      id="depth-input"
-                      type="number"
-                      min="1"
-                      max="10"
-                      value="2"
-                      aria-label="Expand tree to depth"
-                    />
+                    <span>Depth</span>
+                    <input id="depth-input" type="number" min="1" max="10" value="2" />
                   </label>
                   <div class="button-group">
-                    <button id="expand-all" class="ghost" type="button" aria-label="Expand all tree nodes">
-                      Expand all
-                    </button>
-                    <button id="collapse-all" class="ghost" type="button" aria-label="Collapse all tree nodes">
-                      Collapse all
-                    </button>
+                    <button id="expand-all" class="ghost" type="button">Expand all</button>
+                    <button id="collapse-all" class="ghost" type="button">Collapse all</button>
                   </div>
                 </div>
                 <button id="copy-button" class="ghost" aria-label="Copy JSON to clipboard">
@@ -283,12 +210,166 @@
                   Copy JSON
                 </button>
               </div>
-              <div id="json-viewer" class="items" aria-live="polite"></div>
+              <div id="json-viewer" class="items"></div>
             </div>
           </div>
         </div>
       </section>
     </main>
+
+    <!-- ==================== LOGS VIEW ==================== -->
+    <main id="logs-view" class="view-container hidden">
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Filters</h2>
+          </div>
+          <div class="logs-filters">
+            <div class="filter-group">
+              <label class="filter-label">Search</label>
+              <input
+                id="logs-search"
+                type="search"
+                placeholder="Search messages..."
+                autocomplete="off"
+              />
+            </div>
+            <div class="filter-group">
+              <label class="filter-label">Level</label>
+              <div class="level-filters">
+                <label class="level-checkbox">
+                  <input type="checkbox" value="DEBUG" checked /> DEBUG
+                </label>
+                <label class="level-checkbox">
+                  <input type="checkbox" value="INFO" checked /> INFO
+                </label>
+                <label class="level-checkbox">
+                  <input type="checkbox" value="WARNING" checked /> WARNING
+                </label>
+                <label class="level-checkbox">
+                  <input type="checkbox" value="ERROR" checked /> ERROR
+                </label>
+              </div>
+            </div>
+            <div class="filter-actions">
+              <button id="logs-clear-filters" class="ghost" type="button">Clear filters</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+      <section class="content logs-content">
+        <div class="logs-toolbar">
+          <div class="logs-toolbar-left">
+            <span id="logs-showing"></span>
+          </div>
+          <div class="logs-toolbar-right">
+            <button id="logs-copy" class="ghost" type="button">Copy filtered</button>
+            <button id="logs-scroll-bottom" class="ghost" type="button">Scroll to bottom</button>
+          </div>
+        </div>
+        <div id="logs-list" class="logs-list"></div>
+      </section>
+    </main>
+
+    <!-- ==================== TASK VIEW ==================== -->
+    <main id="task-view" class="view-container hidden">
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Task</h2>
+          </div>
+          <div class="request-nav">
+            <button class="request-nav-item active" data-request-panel="input">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="22" y1="2" x2="11" y2="13"></line>
+                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+              </svg>
+              Input
+            </button>
+            <button class="request-nav-item" data-request-panel="output">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 11 12 14 22 4"></polyline>
+                <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+              </svg>
+              Output
+            </button>
+          </div>
+        </div>
+      </aside>
+      <section class="content">
+        <div class="card request-card">
+          <div class="card-header">
+            <div>
+              <p class="label">Task</p>
+              <p id="task-panel-title">Input</p>
+            </div>
+          </div>
+          <div class="viewer-toolbar">
+            <div class="viewer-controls">
+              <label class="inline-label">
+                <span>Depth</span>
+                <input id="task-depth-input" type="number" min="1" max="10" value="2" />
+              </label>
+              <div class="button-group">
+                <button id="task-expand-all" class="ghost" type="button">Expand all</button>
+                <button id="task-collapse-all" class="ghost" type="button">Collapse all</button>
+              </div>
+            </div>
+            <button id="task-copy" class="ghost" type="button">Copy JSON</button>
+          </div>
+          <div id="task-content" class="request-json-container"></div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ==================== FILESYSTEM VIEW ==================== -->
+    <main id="filesystem-view" class="view-container hidden">
+      <aside class="sidebar">
+        <div class="panel">
+          <div class="panel-header">
+            <h2>Workspace Snapshot</h2>
+            <input
+              id="filesystem-filter"
+              type="search"
+              placeholder="Filter files..."
+              autocomplete="off"
+            />
+          </div>
+          <div id="filesystem-list" class="files-list"></div>
+        </div>
+      </aside>
+      <section class="content">
+        <div class="card">
+          <div id="filesystem-empty-state" class="empty-state">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <h3>Select a file to view</h3>
+            <p class="muted">Choose a file from the workspace snapshot</p>
+          </div>
+          <div id="filesystem-no-snapshot" class="empty-state hidden">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="12"></line>
+              <line x1="12" y1="16" x2="12.01" y2="16"></line>
+            </svg>
+            <h3>No filesystem snapshot</h3>
+            <p class="muted">This bundle does not include a workspace snapshot</p>
+          </div>
+          <div id="filesystem-content" class="files-content hidden">
+            <div class="card-header">
+              <div>
+                <p class="label">File</p>
+                <p id="filesystem-current-path" class="mono"></p>
+              </div>
+              <button id="filesystem-copy" class="ghost" type="button">Copy content</button>
+            </div>
+            <div id="filesystem-viewer" class="files-viewer"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
     <script src="/static/app.js"></script>
   </body>
 </html>

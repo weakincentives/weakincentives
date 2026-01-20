@@ -10,7 +10,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""FastAPI app for exploring session snapshot JSONL files."""
+"""FastAPI app for exploring debug bundle zip files."""
 
 from __future__ import annotations
 
@@ -22,9 +22,7 @@ from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from importlib.resources import files
 from pathlib import Path
-from types import MappingProxyType
 from typing import Annotated, cast
-from urllib.parse import unquote
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query
@@ -33,6 +31,7 @@ from fastapi.staticfiles import StaticFiles
 from markdown_it import MarkdownIt
 
 from ..dataclasses import FrozenDataclass
+from ..debug.bundle import BundleValidationError, DebugBundle
 from ..errors import WinkError
 from ..runtime.logging import StructuredLogger, get_logger
 from ..runtime.session.snapshots import (
@@ -62,8 +61,8 @@ _markdown = MarkdownIt("commonmark", {"linkify": True})
 # pyright: reportUnusedFunction=false
 
 
-class SnapshotLoadError(WinkError, RuntimeError):
-    """Raised when a snapshot cannot be loaded or validated."""
+class BundleLoadError(WinkError, RuntimeError):
+    """Raised when a bundle cannot be loaded or validated."""
 
 
 def _looks_like_markdown(text: str) -> bool:
@@ -114,191 +113,148 @@ class SliceSummary:
 
 
 @FrozenDataclass()
-class SnapshotMeta:
-    version: str
+class BundleMeta:
+    """Metadata about a loaded bundle for the debug UI."""
+
+    bundle_id: str
     created_at: str
     path: str
-    session_id: str
-    line_number: int
+    request_id: str
+    session_id: str | None
+    status: str
     slices: tuple[SliceSummary, ...]
-    tags: Mapping[str, str]
     validation_error: str | None = None
 
 
 @FrozenDataclass()
-class LoadedSnapshot:
-    meta: SnapshotMeta
-    slices: Mapping[str, SnapshotSlicePayload]
-    raw_payload: Mapping[str, JSONValue]
-    raw_text: str
+class LoadedBundle:
+    """A loaded debug bundle with parsed session data."""
+
+    meta: BundleMeta
+    bundle: DebugBundle
+    session_slices: Mapping[str, SnapshotSlicePayload]
     path: Path
 
 
-SnapshotLoader = Callable[[Path], tuple[LoadedSnapshot, ...]]
-
-
-def load_snapshot(snapshot_path: Path) -> tuple[LoadedSnapshot, ...]:
-    """Load and validate one or more snapshots from disk."""
-
-    if not snapshot_path.exists():
-        msg = f"Snapshot file not found: {snapshot_path}"
-        raise SnapshotLoadError(msg)
+def load_bundle(bundle_path: Path) -> LoadedBundle:
+    """Load and validate a debug bundle from disk."""
+    if not bundle_path.exists():
+        msg = f"Bundle file not found: {bundle_path}"
+        raise BundleLoadError(msg)
 
     try:
-        raw_text = snapshot_path.read_text()
-    except OSError as error:  # pragma: no cover - filesystem failures are unlikely
-        msg = f"Snapshot file cannot be read: {snapshot_path}"
-        raise SnapshotLoadError(msg) from error
+        bundle = DebugBundle.load(bundle_path)
+    except BundleValidationError as error:
+        msg = f"Invalid bundle: {error}"
+        raise BundleLoadError(msg) from error
 
-    entries: list[LoadedSnapshot] = []
-    for line_number, line in _extract_snapshot_lines(raw_text):
-        entries.append(_load_snapshot_line(line, line_number, snapshot_path))
-
-    if not entries:
-        msg = f"Snapshot file contained no entries: {snapshot_path}"
-        raise SnapshotLoadError(msg)
-
-    return tuple(entries)
-
-
-def _extract_snapshot_lines(raw_text: str) -> list[tuple[int, str]]:
-    lines: list[tuple[int, str]] = []
-    for index, line in enumerate(raw_text.splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        lines.append((index, stripped))
-    return lines
-
-
-def _slice_lookup(
-    slices: tuple[SnapshotSlicePayload, ...],
-) -> Mapping[str, SnapshotSlicePayload]:
-    return MappingProxyType({entry.slice_type: entry for entry in slices})
-
-
-def _summaries_from_slices(
-    slices: tuple[SnapshotSlicePayload, ...],
-) -> tuple[SliceSummary, ...]:
-    return tuple(
-        SliceSummary(
-            slice_type=entry.slice_type,
-            item_type=entry.item_type,
-            count=len(entry.items),
-        )
-        for entry in slices
-    )
-
-
-def _load_snapshot_line(
-    line: str,
-    line_number: int,
-    snapshot_path: Path,
-) -> LoadedSnapshot:
-    try:
-        payload = SnapshotPayload.from_json(line)
-    except SnapshotRestoreError as error:
-        msg = f"Invalid snapshot at line {line_number}: {error}"
-        raise SnapshotLoadError(msg) from error
-
+    # Parse session data to get slices
+    session_slices: dict[str, SnapshotSlicePayload] = {}
+    slice_summaries: list[SliceSummary] = []
     validation_error: str | None = None
-    try:
-        _ = Snapshot.from_json(line)
-    except SnapshotRestoreError as error:
-        validation_error = str(error)
-        logger.warning(
-            "Snapshot validation failed",
-            event="wink.debug.snapshot_error",
-            context={
-                "path": str(snapshot_path),
-                "line_number": line_number,
-                "error": validation_error,
-            },
-        )
 
-    raw_payload = MappingProxyType(
-        json.loads(line, object_pairs_hook=dict),
-    )
+    session_content = bundle.session_after
+    if session_content:
+        # Session is JSONL - parse the first line
+        lines = [line.strip() for line in session_content.splitlines() if line.strip()]
+        if lines:
+            try:
+                payload = SnapshotPayload.from_json(lines[0])
+                session_slices = {entry.slice_type: entry for entry in payload.slices}
+                slice_summaries = [
+                    SliceSummary(
+                        slice_type=entry.slice_type,
+                        item_type=entry.item_type,
+                        count=len(entry.items),
+                    )
+                    for entry in payload.slices
+                ]
 
-    slices = _slice_lookup(payload.slices)
-    summaries = _summaries_from_slices(payload.slices)
+                # Try full validation
+                try:
+                    _ = Snapshot.from_json(lines[0])
+                except SnapshotRestoreError as error:
+                    validation_error = str(error)
+                    logger.warning(
+                        "Session validation failed",
+                        event="wink.debug.session_error",
+                        context={
+                            "path": str(bundle_path),
+                            "error": validation_error,
+                        },
+                    )
+            except SnapshotRestoreError as error:
+                validation_error = str(error)
+                logger.warning(
+                    "Failed to parse session data",
+                    event="wink.debug.session_parse_error",
+                    context={
+                        "path": str(bundle_path),
+                        "error": validation_error,
+                    },
+                )
 
-    session_id = payload.tags.get("session_id")
-    if not isinstance(session_id, str) or not session_id:
-        msg = f"Snapshot is missing a session_id tag at line {line_number}"
-        raise SnapshotLoadError(msg)
-
-    meta = SnapshotMeta(
-        version=payload.version,
-        created_at=payload.created_at,
-        path=str(snapshot_path),
-        session_id=session_id,
-        line_number=line_number,
-        slices=tuple(summaries),
-        tags=payload.tags,
+    manifest = bundle.manifest
+    meta = BundleMeta(
+        bundle_id=manifest.bundle_id,
+        created_at=manifest.created_at,
+        path=str(bundle_path),
+        request_id=manifest.request.request_id,
+        session_id=manifest.request.session_id,
+        status=manifest.request.status,
+        slices=tuple(slice_summaries),
         validation_error=validation_error,
     )
 
-    return LoadedSnapshot(
+    return LoadedBundle(
         meta=meta,
-        slices=slices,
-        raw_payload=raw_payload,
-        raw_text=line,
-        path=snapshot_path,
+        bundle=bundle,
+        session_slices=session_slices,
+        path=bundle_path,
     )
 
 
-class SnapshotStore:
-    """In-memory store for the active snapshot and reload handling."""
+class BundleStore:
+    """In-memory store for the active bundle and reload handling."""
 
     def __init__(
         self,
         path: Path,
         *,
-        loader: SnapshotLoader,
         logger: StructuredLogger | None = None,
     ) -> None:
         super().__init__()
         resolved = path.resolve()
         self._root, self._path = self._normalize_path(resolved)
-        self._loader = loader
         self._logger = logger or get_logger(__name__)
-        self._entries: tuple[LoadedSnapshot, ...] = self._load_entries(self._path)
-        self._index = 0
+        self._bundle: LoadedBundle = load_bundle(self._path)
 
     @property
-    def meta(self) -> SnapshotMeta:
-        return self._current.meta
+    def meta(self) -> BundleMeta:
+        return self._bundle.meta
 
     @property
-    def raw_payload(self) -> Mapping[str, JSONValue]:
-        return self._current.raw_payload
-
-    @property
-    def raw_text(self) -> str:
-        return self._current.raw_text
+    def bundle(self) -> DebugBundle:
+        return self._bundle.bundle
 
     @property
     def path(self) -> Path:
         return self._path
 
-    @property
-    def entries(self) -> tuple[LoadedSnapshot, ...]:
-        return self._entries
-
-    def list_snapshots(self) -> list[Mapping[str, JSONValue]]:
-        snapshots: list[tuple[float, Path]] = []
-        for candidate in sorted(self._iter_snapshot_files(self._root)):
+    def list_bundles(self) -> list[Mapping[str, JSONValue]]:
+        """List all bundles in the root directory."""
+        bundles: list[tuple[float, Path]] = []
+        for candidate in sorted(self._iter_bundle_files(self._root)):
             try:
                 stats = candidate.stat()
                 created_at = max(stats.st_ctime, stats.st_mtime)
             except OSError:
                 continue
-            snapshots.append((created_at, candidate))
+            bundles.append((created_at, candidate))
 
         entries: list[Mapping[str, JSONValue]] = []
         for created_at, candidate in sorted(
-            snapshots, key=lambda entry: entry[0], reverse=True
+            bundles, key=lambda entry: entry[0], reverse=True
         ):
             created_iso = datetime.fromtimestamp(created_at, tz=UTC).isoformat()
             entries.append(
@@ -306,78 +262,40 @@ class SnapshotStore:
                     "path": str(candidate),
                     "name": candidate.name,
                     "created_at": created_iso,
-                }
-            )
-        return entries
-
-    def list_entries(self) -> list[Mapping[str, JSONValue]]:
-        entries: list[Mapping[str, JSONValue]] = []
-        for entry in self._entries:
-            meta = entry.meta
-            entries.append(
-                {
-                    "session_id": meta.session_id,
-                    "name": f"{meta.session_id} (line {meta.line_number})",
-                    "path": meta.path,
-                    "line_number": meta.line_number,
-                    "created_at": meta.created_at,
-                    "tags": dict(meta.tags),
-                    "selected": meta.session_id == self.meta.session_id,
+                    "selected": candidate == self._path,
                 }
             )
         return entries
 
     def slice_items(self, slice_type: str) -> SnapshotSlicePayload:
         try:
-            return self._current.slices[slice_type]
+            return self._bundle.session_slices[slice_type]
         except KeyError as error:
             raise KeyError(f"Unknown slice type: {slice_type}") from error
 
-    def reload(self) -> SnapshotMeta:
-        current_session_id = self.meta.session_id
-        self._entries = self._load_entries(self._path)
-        try:
-            self._index = self._select_index(session_id=current_session_id)
-        except SnapshotLoadError:
-            self._index = 0
+    def reload(self) -> BundleMeta:
+        """Reload the current bundle from disk."""
+        self._bundle = load_bundle(self._path)
         self._logger.info(
-            "Snapshot reloaded",
+            "Bundle reloaded",
             event="debug.server.reload",
             context={"path": str(self._path)},
         )
         return self.meta
 
-    def select(
-        self, *, session_id: str | None = None, line_number: int | None = None
-    ) -> SnapshotMeta:
-        self._index = self._select_index(
-            session_id=session_id,
-            line_number=line_number,
-        )
-        return self.meta
-
-    def switch(
-        self,
-        path: Path,
-        *,
-        session_id: str | None = None,
-        line_number: int | None = None,
-    ) -> SnapshotMeta:
+    def switch(self, path: Path) -> BundleMeta:
+        """Switch to a different bundle."""
         resolved = path.resolve()
         root, target = self._normalize_path(resolved)
         if root != self._root:
-            msg = f"Snapshot must live under {self._root}"
-            raise SnapshotLoadError(msg)
+            msg = f"Bundle must live under {self._root}"
+            raise BundleLoadError(msg)
 
         self._root = root
         self._path = target
-        self._entries = self._load_entries(target)
-        self._index = self._select_index(
-            session_id=session_id,
-            line_number=line_number,
-        )
+        self._bundle = load_bundle(target)
         self._logger.info(
-            "Snapshot switched",
+            "Bundle switched",
             event="debug.server.switch",
             context={"path": str(self._path)},
         )
@@ -387,65 +305,33 @@ class SnapshotStore:
         if path.is_dir():
             root = path
             candidates = sorted(
-                self._iter_snapshot_files(root),
+                self._iter_bundle_files(root),
                 key=lambda p: p.stat().st_mtime,
                 reverse=True,
             )
             if not candidates:
-                msg = f"No snapshots found under {root}"
-                raise SnapshotLoadError(msg)
+                msg = f"No bundles found under {root}"
+                raise BundleLoadError(msg)
             target = candidates[0]
         else:
             root = path.parent
             target = path
         return root, target
 
-    def _select_index(
-        self, *, session_id: str | None = None, line_number: int | None = None
-    ) -> int:
-        if session_id is not None:
-            for index, entry in enumerate(self._entries):
-                if entry.meta.session_id == session_id:
-                    return index
-            msg = f"Unknown session_id: {session_id}"
-            raise SnapshotLoadError(msg)
-
-        if line_number is not None:
-            for index, entry in enumerate(self._entries):
-                if entry.meta.line_number == line_number:
-                    return index
-            msg = f"Unknown line_number: {line_number}"
-            raise SnapshotLoadError(msg)
-
-        return 0
-
-    def _load_entries(self, path: Path) -> tuple[LoadedSnapshot, ...]:
-        entries = self._loader(path)
-        if not entries:
-            msg = f"No snapshots found under {path}"
-            raise SnapshotLoadError(msg)
-        return entries
-
     @staticmethod
-    def _iter_snapshot_files(root: Path) -> list[Path]:
-        candidates: list[Path] = []
-        for pattern in ("*.jsonl", "*.json"):
-            candidates.extend(p for p in root.glob(pattern) if p.is_file())
-        return candidates
-
-    @property
-    def _current(self) -> LoadedSnapshot:
-        return self._entries[self._index]
+    def _iter_bundle_files(root: Path) -> list[Path]:
+        """Find all bundle zip files in a directory."""
+        return [p for p in root.glob("*.zip") if p.is_file()]
 
 
-def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
+def _meta_response(meta: BundleMeta) -> Mapping[str, JSONValue]:
     return {
-        "version": meta.version,
+        "bundle_id": meta.bundle_id,
         "created_at": meta.created_at,
         "path": meta.path,
+        "request_id": meta.request_id,
         "session_id": meta.session_id,
-        "line_number": meta.line_number,
-        "tags": dict(meta.tags),
+        "status": meta.status,
         "validation_error": meta.validation_error,
         "slices": [
             {
@@ -462,7 +348,7 @@ def _meta_response(meta: SnapshotMeta) -> Mapping[str, JSONValue]:
 
 class _DebugAppHandlers:
     def __init__(
-        self, *, store: SnapshotStore, logger: StructuredLogger, static_dir: Path
+        self, *, store: BundleStore, logger: StructuredLogger, static_dir: Path
     ) -> None:
         super().__init__()
         self._store = store
@@ -476,8 +362,10 @@ class _DebugAppHandlers:
     def get_meta(self) -> Mapping[str, JSONValue]:
         return _meta_response(self._store.meta)
 
-    def list_entries(self) -> list[Mapping[str, JSONValue]]:
-        return self._store.list_entries()
+    def get_manifest(self) -> JSONResponse:
+        """Return the raw bundle manifest."""
+        manifest = self._store.bundle.manifest
+        return JSONResponse(json.loads(manifest.to_json()))
 
     def get_slice(
         self,
@@ -499,34 +387,117 @@ class _DebugAppHandlers:
             "items": rendered_items,
         }
 
-    def get_raw(self) -> JSONResponse:
-        return JSONResponse(json.loads(self._store.raw_text))
+    def get_logs(
+        self,
+        *,
+        offset: Annotated[int, Query(ge=0)] = 0,
+        limit: Annotated[int | None, Query(ge=0)] = None,
+        level: Annotated[str | None, Query()] = None,
+    ) -> Mapping[str, JSONValue]:
+        """Return log entries from the bundle."""
+        logs_content = self._store.bundle.logs
+        if logs_content is None:
+            return {"entries": [], "total": 0}
+
+        entries = self._parse_log_entries(logs_content, level)
+        total = len(entries)
+        entries = self._paginate_items(entries, offset=offset, limit=limit)
+        return {"entries": entries, "total": total}
+
+    @staticmethod
+    def _parse_log_entries(
+        logs_content: str, level_filter: str | None
+    ) -> list[Mapping[str, JSONValue]]:
+        """Parse JSONL log content, optionally filtering by level."""
+        entries: list[Mapping[str, JSONValue]] = []
+        for line in logs_content.splitlines():
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                parsed: JSONValue = json.loads(stripped)
+                if not isinstance(parsed, dict):
+                    continue
+                entry: Mapping[str, JSONValue] = cast(Mapping[str, JSONValue], parsed)
+                if level_filter:
+                    entry_level: JSONValue = entry.get("level", "")
+                    if (
+                        isinstance(entry_level, str)
+                        and entry_level.upper() != level_filter.upper()
+                    ):
+                        continue
+                    if not isinstance(entry_level, str):
+                        continue
+                entries.append(entry)
+            except json.JSONDecodeError:
+                continue
+        return entries
+
+    def get_config(self) -> JSONResponse:
+        """Return the bundle config."""
+        config = self._store.bundle.config
+        if config is None:
+            raise HTTPException(status_code=404, detail="Config not found in bundle")
+        return JSONResponse(config)
+
+    def get_metrics(self) -> JSONResponse:
+        """Return the bundle metrics."""
+        metrics = self._store.bundle.metrics
+        if metrics is None:
+            raise HTTPException(status_code=404, detail="Metrics not found in bundle")
+        return JSONResponse(metrics)
+
+    def get_error(self) -> JSONResponse:
+        """Return error details if present."""
+        error = self._store.bundle.error
+        if error is None:
+            raise HTTPException(status_code=404, detail="No error in bundle")
+        return JSONResponse(error)
+
+    def get_request_input(self) -> JSONResponse:
+        """Return the request input."""
+        return JSONResponse(self._store.bundle.request_input)
+
+    def get_request_output(self) -> JSONResponse:
+        """Return the request output."""
+        return JSONResponse(self._store.bundle.request_output)
+
+    def list_files(self) -> list[str]:
+        """List files in the bundle."""
+        return self._store.bundle.list_files()
+
+    def get_file(self, file_path: str) -> JSONResponse:
+        """Get content of a specific file in the bundle."""
+        try:
+            content = self._store.bundle.read_file(file_path)
+            # Try to parse as JSON
+            try:
+                parsed = json.loads(content.decode("utf-8"))
+                return JSONResponse({"content": parsed, "type": "json"})
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                # Return as text or indicate binary
+                try:
+                    text = content.decode("utf-8")
+                    return JSONResponse({"content": text, "type": "text"})
+                except UnicodeDecodeError:
+                    return JSONResponse({"content": None, "type": "binary"})
+        except BundleValidationError as error:
+            raise HTTPException(status_code=404, detail=str(error)) from error
 
     def reload(self) -> Mapping[str, JSONValue]:
         return _meta_response(self._execute_reload())
 
-    def list_snapshots(self) -> list[Mapping[str, JSONValue]]:
-        return self._store.list_snapshots()
-
-    def select(self, payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
-        session_id, line_number = self._parse_select_payload(payload)
-        meta = self._execute_snapshot_command(
-            lambda: self._store.select(session_id=session_id, line_number=line_number)
-        )
-        return _meta_response(meta)
+    def list_bundles(self) -> list[Mapping[str, JSONValue]]:
+        return self._store.list_bundles()
 
     def switch(self, payload: dict[str, JSONValue]) -> Mapping[str, JSONValue]:
-        path, session_id, line_number = self._parse_switch_payload(payload)
-        meta = self._execute_snapshot_command(
-            lambda: self._store.switch(
-                path,
-                session_id=session_id,
-                line_number=line_number,
-            )
-        )
+        path = self._parse_switch_payload(payload)
+        meta = self._execute_bundle_command(lambda: self._store.switch(path))
         return _meta_response(meta)
 
     def _slice_items(self, encoded_slice_type: str) -> SnapshotSlicePayload:
+        from urllib.parse import unquote
+
         slice_type = unquote(encoded_slice_type)
         try:
             return self._store.slice_items(slice_type)
@@ -543,96 +514,60 @@ class _DebugAppHandlers:
             items = items[:limit]
         return items
 
-    def _execute_reload(self) -> SnapshotMeta:
+    def _execute_reload(self) -> BundleMeta:
         try:
             return self._store.reload()
-        except SnapshotLoadError as error:
+        except BundleLoadError as error:
             self._logger.warning(
-                "Snapshot reload failed",
+                "Bundle reload failed",
                 event="debug.server.reload_failed",
                 context={"path": self._store.meta.path, "error": str(error)},
             )
-            raise self._translate_snapshot_error(error) from error
+            raise self._translate_bundle_error(error) from error
 
     @staticmethod
-    def _translate_snapshot_error(error: SnapshotLoadError) -> HTTPException:
+    def _translate_bundle_error(error: BundleLoadError) -> HTTPException:
         return HTTPException(status_code=400, detail=str(error))
 
-    def _execute_snapshot_command(
-        self, command: Callable[[], SnapshotMeta]
-    ) -> SnapshotMeta:
+    def _execute_bundle_command(self, command: Callable[[], BundleMeta]) -> BundleMeta:
         try:
             return command()
-        except SnapshotLoadError as error:
-            raise self._translate_snapshot_error(error) from error
+        except BundleLoadError as error:
+            raise self._translate_bundle_error(error) from error
 
     @staticmethod
-    def _parse_select_payload(
-        payload: Mapping[str, JSONValue],
-    ) -> tuple[str | None, int | None]:
-        session_value = payload.get("session_id")
-        line_value = payload.get("line_number")
-
-        if session_value is None and line_value is None:
-            raise HTTPException(
-                status_code=400,
-                detail="session_id or line_number is required",
-            )
-
-        _validate_optional_session_id(session_value)
-        _validate_optional_line_number(line_value)
-        return cast(str | None, session_value), cast(int | None, line_value)
-
-    @staticmethod
-    def _parse_switch_payload(
-        payload: Mapping[str, JSONValue],
-    ) -> tuple[Path, str | None, int | None]:
+    def _parse_switch_payload(payload: Mapping[str, JSONValue]) -> Path:
         path_value = payload.get("path")
         if not isinstance(path_value, str):
             raise HTTPException(status_code=400, detail="path is required")
-
-        session_value = payload.get("session_id")
-        _validate_optional_session_id(session_value)
-
-        line_value = payload.get("line_number")
-        _validate_optional_line_number(line_value)
-
-        return (
-            Path(path_value),
-            cast(str | None, session_value),
-            cast(int | None, line_value),
-        )
+        return Path(path_value)
 
 
-def _validate_optional_session_id(value: JSONValue | None) -> None:
-    if value is not None and not isinstance(value, str):
-        raise HTTPException(status_code=400, detail="session_id must be a string")
-
-
-def _validate_optional_line_number(value: JSONValue | None) -> None:
-    if value is not None and not isinstance(value, int):
-        raise HTTPException(status_code=400, detail="line_number must be an integer")
-
-
-def build_debug_app(store: SnapshotStore, logger: StructuredLogger) -> FastAPI:
-    """Construct the FastAPI application for inspecting snapshots."""
+def build_debug_app(store: BundleStore, logger: StructuredLogger) -> FastAPI:
+    """Construct the FastAPI application for inspecting debug bundles."""
 
     static_dir = Path(str(files(__package__).joinpath("static")))
     handlers = _DebugAppHandlers(store=store, logger=logger, static_dir=static_dir)
 
-    app = FastAPI(title="wink snapshot debug server")
-    app.state.snapshot_store = store
+    app = FastAPI(title="wink debug bundle server")
+    app.state.bundle_store = store
     app.state.logger = logger
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     _ = app.get("/", response_class=HTMLResponse)(handlers.index)
     _ = app.get("/api/meta")(handlers.get_meta)
-    _ = app.get("/api/entries")(handlers.list_entries)
+    _ = app.get("/api/manifest")(handlers.get_manifest)
     _ = app.get("/api/slices/{encoded_slice_type}")(handlers.get_slice)
-    _ = app.get("/api/raw")(handlers.get_raw)
+    _ = app.get("/api/logs")(handlers.get_logs)
+    _ = app.get("/api/config")(handlers.get_config)
+    _ = app.get("/api/metrics")(handlers.get_metrics)
+    _ = app.get("/api/error")(handlers.get_error)
+    _ = app.get("/api/request/input")(handlers.get_request_input)
+    _ = app.get("/api/request/output")(handlers.get_request_output)
+    _ = app.get("/api/files")(handlers.list_files)
+    _ = app.get("/api/files/{file_path:path}")(handlers.get_file)
     _ = app.post("/api/reload")(handlers.reload)
-    _ = app.get("/api/snapshots")(handlers.list_snapshots)
-    _ = app.post("/api/select")(handlers.select)
+    _ = app.get("/api/bundles")(handlers.list_bundles)
     _ = app.post("/api/switch")(handlers.switch)
 
     return app
@@ -686,3 +621,9 @@ def _open_browser(url: str, logger: StructuredLogger) -> None:
             event="debug.server.browser",
             context={"url": url, "error": repr(error)},
         )
+
+
+# Backwards compatibility aliases (deprecated)
+SnapshotLoadError = BundleLoadError
+SnapshotStore = BundleStore
+load_snapshot = load_bundle

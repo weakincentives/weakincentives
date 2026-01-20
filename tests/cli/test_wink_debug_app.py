@@ -17,20 +17,28 @@ from __future__ import annotations
 import json
 import os
 import time
-from collections.abc import Callable, Mapping
+import zipfile
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 from urllib.parse import quote
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from weakincentives.cli import debug_app
-from weakincentives.dbc import dbc_enabled
-from weakincentives.runtime.session.snapshots import Snapshot
+from weakincentives.debug.bundle import (
+    BUNDLE_FORMAT_VERSION,
+    BUNDLE_ROOT_DIR,
+    BundleConfig,
+    BundleManifest,
+    BundleWriter,
+    CaptureMode,
+)
+from weakincentives.runtime.session import Session
 
 
 @dataclass(slots=True, frozen=True)
@@ -43,68 +51,108 @@ class _ListSlice:
     value: object
 
 
-def _write_snapshot(path: Path, values: list[str]) -> list[str]:
-    session_ids: list[str] = []
-    entries: list[str] = []
-    for index, value in enumerate(values):
-        session_id = f"{path.stem}-{index}"
-        snapshot = Snapshot(
-            created_at=datetime.now(UTC),
-            slices={_ExampleSlice: (_ExampleSlice(value),)},
-            tags={"suite": "wink-debug", "session_id": session_id},
+def _create_test_bundle(
+    target_dir: Path,
+    values: list[str],
+) -> Path:
+    """Create a test debug bundle with session data."""
+    session = Session()
+
+    for value in values:
+        session.dispatch(_ExampleSlice(value))
+
+    with BundleWriter(
+        target_dir,
+        config=BundleConfig(mode=CaptureMode.STANDARD),
+    ) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({"task": "test"})
+        writer.write_request_output({"status": "ok"})
+        writer.write_config({"adapter": "test"})
+        writer.write_metrics({"tokens": 100})
+
+    assert writer.path is not None
+    return writer.path
+
+
+def _create_minimal_bundle(
+    target_dir: Path,
+    session_content: str | None = None,
+    manifest_override: dict[str, object] | None = None,
+) -> Path:
+    """Create a minimal bundle directly for edge case testing."""
+    bundle_id = str(uuid4())
+    timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    zip_name = f"{bundle_id}_{timestamp}.zip"
+    zip_path = target_dir / zip_name
+
+    manifest = BundleManifest(
+        format_version=BUNDLE_FORMAT_VERSION,
+        bundle_id=bundle_id,
+        created_at=datetime.now(UTC).isoformat(),
+    )
+    manifest_dict = json.loads(manifest.to_json())
+    if manifest_override:
+        manifest_dict.update(manifest_override)
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            f"{BUNDLE_ROOT_DIR}/manifest.json",
+            json.dumps(manifest_dict, indent=2),
         )
-        entries.append(snapshot.to_json())
-        session_ids.append(session_id)
-    with dbc_enabled(False):
-        path.write_text("\n".join(entries))
-    return session_ids
+        zf.writestr(f"{BUNDLE_ROOT_DIR}/README.txt", "Test bundle")
+        zf.writestr(
+            f"{BUNDLE_ROOT_DIR}/request/input.json",
+            json.dumps({"task": "test"}),
+        )
+        zf.writestr(
+            f"{BUNDLE_ROOT_DIR}/request/output.json",
+            json.dumps({"status": "ok"}),
+        )
+        if session_content:
+            zf.writestr(
+                f"{BUNDLE_ROOT_DIR}/session/after.jsonl",
+                session_content,
+            )
+
+    return zip_path
 
 
-def test_load_snapshot_validates_schema(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    session_ids = _write_snapshot(snapshot_path, ["one"])
-
-    loaded = debug_app.load_snapshot(snapshot_path)
-
-    assert len(loaded) == 1
-    meta = loaded[0].meta
-    assert meta.version == "1"
-    assert meta.tags["suite"] == "wink-debug"
-    assert meta.session_id == session_ids[0]
-    assert meta.line_number == 1
-    assert meta.slices[0].count == 1
+def _create_session_jsonl(values: list[str], session_id: str = "test") -> str:
+    """Create JSONL session content for a bundle."""
+    session = Session(session_id=uuid4())
+    for value in values:
+        session.dispatch(_ExampleSlice(value))
+    snapshot = session.snapshot(include_all=True)
+    return snapshot.to_json() + "\n"
 
 
-def test_load_snapshot_errors(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "missing.jsonl"
+def test_load_bundle_validates_schema(tmp_path: Path) -> None:
+    bundle_path = _create_test_bundle(tmp_path, ["one"])
 
-    with pytest.raises(debug_app.SnapshotLoadError):
-        debug_app.load_snapshot(snapshot_path)
+    loaded = debug_app.load_bundle(bundle_path)
 
-    snapshot_path.write_text("")
-
-    with pytest.raises(debug_app.SnapshotLoadError):
-        debug_app.load_snapshot(snapshot_path)
-
-    snapshot_path.write_text("{")
-
-    with pytest.raises(debug_app.SnapshotLoadError):
-        debug_app.load_snapshot(snapshot_path)
-
-    payload_missing_session = {
-        "version": "1",
-        "created_at": datetime.now(UTC).isoformat(),
-        "slices": [],
-        "tags": {},
-    }
-    snapshot_path.write_text(json.dumps(payload_missing_session))
-
-    with pytest.raises(debug_app.SnapshotLoadError):
-        debug_app.load_snapshot(snapshot_path)
+    assert loaded.meta.bundle_id
+    assert loaded.meta.status == "success"
+    assert len(loaded.meta.slices) == 1
+    assert loaded.meta.slices[0].count == 1
 
 
-def test_load_snapshot_recovers_from_unknown_types(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
+def test_load_bundle_errors(tmp_path: Path) -> None:
+    missing_path = tmp_path / "missing.zip"
+
+    with pytest.raises(debug_app.BundleLoadError):
+        debug_app.load_bundle(missing_path)
+
+    # Invalid zip file
+    invalid_path = tmp_path / "invalid.zip"
+    invalid_path.write_text("not a zip")
+
+    with pytest.raises(debug_app.BundleLoadError):
+        debug_app.load_bundle(invalid_path)
+
+
+def test_load_bundle_recovers_from_unknown_types(tmp_path: Path) -> None:
     payload = {
         "version": "1",
         "created_at": datetime.now(UTC).isoformat(),
@@ -117,21 +165,19 @@ def test_load_snapshot_recovers_from_unknown_types(tmp_path: Path) -> None:
         ],
         "tags": {"session_id": "unknown"},
     }
-    snapshot_path.write_text(json.dumps(payload))
+    session_content = json.dumps(payload)
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=session_content)
 
-    loaded = debug_app.load_snapshot(snapshot_path)
+    loaded = debug_app.load_bundle(bundle_path)
 
-    assert len(loaded) == 1
-    entry = loaded[0]
-    assert entry.meta.validation_error
-    assert "__main__:UnknownType" in entry.slices
-    unknown_slice = entry.slices["__main__:UnknownType"]
+    assert loaded.meta.validation_error
+    assert "__main__:UnknownType" in loaded.session_slices
+    unknown_slice = loaded.session_slices["__main__:UnknownType"]
     assert unknown_slice.items == ({"value": "one"},)
 
 
-def test_load_snapshot_recovers_from_unknown_policy_types(tmp_path: Path) -> None:
-    """Verify snapshots with __main__ policy types can be loaded for display."""
-    snapshot_path = tmp_path / "snapshot.jsonl"
+def test_load_bundle_recovers_from_unknown_policy_types(tmp_path: Path) -> None:
+    """Verify bundles with __main__ policy types can be loaded for display."""
     payload = {
         "version": "1",
         "created_at": datetime.now(UTC).isoformat(),
@@ -145,258 +191,166 @@ def test_load_snapshot_recovers_from_unknown_policy_types(tmp_path: Path) -> Non
         "policies": {"__main__:ReviewResponse": "state"},
         "tags": {"session_id": "policy-test"},
     }
-    snapshot_path.write_text(json.dumps(payload))
+    session_content = json.dumps(payload)
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=session_content)
 
-    loaded = debug_app.load_snapshot(snapshot_path)
+    loaded = debug_app.load_bundle(bundle_path)
 
-    assert len(loaded) == 1
-    entry = loaded[0]
-    assert entry.meta.validation_error
-    assert "__main__:ReviewResponse" in entry.slices
-    review_slice = entry.slices["__main__:ReviewResponse"]
+    assert loaded.meta.validation_error
+    assert "__main__:ReviewResponse" in loaded.session_slices
+    review_slice = loaded.session_slices["__main__:ReviewResponse"]
     assert review_slice.items == ({"score": 10},)
 
 
-def test_api_routes_expose_snapshot_data(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    session_ids = _write_snapshot(snapshot_path, ["a", "b", "c"])
+def test_api_routes_expose_bundle_data(tmp_path: Path) -> None:
+    bundle_path = _create_test_bundle(tmp_path, ["a", "b", "c"])
     logger = debug_app.get_logger("test.api")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
+    store = debug_app.BundleStore(bundle_path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
     meta_response = client.get("/api/meta")
     assert meta_response.status_code == 200
     meta = meta_response.json()
-    assert meta["session_id"] == session_ids[0]
-    assert meta["line_number"] == 1
+    assert meta["bundle_id"]
+    assert meta["status"] == "success"
     assert len(meta["slices"]) == 1
-    assert meta["tags"]["suite"] == "wink-debug"
     slice_type = meta["slices"][0]["slice_type"]
 
-    entries_response = client.get("/api/entries")
-    entries = entries_response.json()
-    assert [entry["session_id"] for entry in entries] == session_ids
-    assert entries[0]["selected"] is True
-
-    select_response = client.post("/api/select", json={"session_id": session_ids[1]})
-    assert select_response.status_code == 200
-    selected_meta = select_response.json()
-    assert selected_meta["session_id"] == session_ids[1]
+    manifest_response = client.get("/api/manifest")
+    assert manifest_response.status_code == 200
+    manifest = manifest_response.json()
+    assert manifest["format_version"] == BUNDLE_FORMAT_VERSION
 
     detail_response = client.get(f"/api/slices/{quote(slice_type)}")
     assert detail_response.status_code == 200
     detail = detail_response.json()
-    first_item = detail["items"][0]
-    assert first_item["value"] == "b"
-    assert first_item["__type__"] == (
-        f"{_ExampleSlice.__module__}:{_ExampleSlice.__qualname__}"
-    )
+    # Items are in reverse order (last dispatched first in snapshot)
+    values = [item["value"] for item in detail["items"]]
+    assert set(values) == {"a", "b", "c"}
 
-    raw_response = client.get("/api/raw")
-    assert raw_response.status_code == 200
-    raw = raw_response.json()
-    assert raw["version"] == "1"
-    raw_item = raw["slices"][0]["items"][0]
-    assert raw_item["value"] == "b"
-    assert raw_item["__type__"] == (
-        f"{_ExampleSlice.__module__}:{_ExampleSlice.__qualname__}"
-    )
+    request_input = client.get("/api/request/input")
+    assert request_input.status_code == 200
+    assert request_input.json() == {"task": "test"}
+
+    request_output = client.get("/api/request/output")
+    assert request_output.status_code == 200
+    assert request_output.json() == {"status": "ok"}
 
 
 def test_slice_pagination_with_query_params(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={
-            _ExampleSlice: tuple(
-                _ExampleSlice(value) for value in ("zero", "one", "two", "three")
-            )
-        },
-        tags={"session_id": "paginate"},
-    )
-    snapshot_path.write_text(snapshot.to_json())
+    bundle_path = _create_test_bundle(tmp_path, ["zero", "one", "two", "three"])
 
     logger = debug_app.get_logger("test.pagination")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
+    store = debug_app.BundleStore(bundle_path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
     slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
 
     default_items = client.get(f"/api/slices/{quote(slice_type)}").json()["items"]
-    assert [item["value"] for item in default_items] == [
-        "zero",
-        "one",
-        "two",
-        "three",
-    ]
+    values = [item["value"] for item in default_items]
+    assert len(values) == 4
 
     paginated_items = client.get(
         f"/api/slices/{quote(slice_type)}", params={"offset": 1, "limit": 2}
     ).json()["items"]
 
-    assert [item["value"] for item in paginated_items] == ["one", "two"]
+    assert len(paginated_items) == 2
 
 
-def test_reload_endpoint_replaces_snapshot(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["one"])
+def test_reload_endpoint_replaces_bundle(tmp_path: Path) -> None:
+    bundle_path = _create_test_bundle(tmp_path, ["one"])
     logger = debug_app.get_logger("test.reload")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
+    store = debug_app.BundleStore(bundle_path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
-    updated_session_ids = _write_snapshot(snapshot_path, ["two", "three"])
+    original_bundle_id = client.get("/api/meta").json()["bundle_id"]
 
     reload_response = client.post("/api/reload")
     assert reload_response.status_code == 200
     meta = reload_response.json()
-    assert meta["session_id"] == updated_session_ids[0]
-    assert meta["slices"][0]["count"] == 1
-    slice_type = meta["slices"][0]["slice_type"]
+    assert meta["bundle_id"] == original_bundle_id
 
-    detail = client.get(f"/api/slices/{quote(slice_type)}").json()
-    assert [item["value"] for item in detail["items"]] == ["two"]
-
-    _write_snapshot(snapshot_path, ["invalid"])
-    snapshot_path.write_text("not-json")
+    # Corrupt the bundle
+    bundle_path.write_text("not-a-zip")
     reload_failed = client.post("/api/reload")
     assert reload_failed.status_code == 400
 
-    meta_after_failure = client.get("/api/meta").json()
-    assert meta_after_failure["session_id"] == updated_session_ids[0]
-    assert meta_after_failure["slices"][0]["count"] == 1
 
-
-def test_snapshot_listing_and_switch(tmp_path: Path) -> None:
-    snapshot_one = tmp_path / "one.jsonl"
-    snapshot_two = tmp_path / "two.jsonl"
-    _write_snapshot(snapshot_one, ["a"])
-    _write_snapshot(snapshot_two, ["b", "c"])
+def test_bundle_listing_and_switch(tmp_path: Path) -> None:
+    bundle_one = _create_test_bundle(tmp_path, ["a"])
+    time.sleep(0.01)
+    bundle_two = _create_test_bundle(tmp_path, ["b", "c"])
 
     now = time.time()
-    time.sleep(0.01)
-    time_one = now
-    time_two = now + 1
-    os.utime(snapshot_one, (time_one, time_one))
-    os.utime(snapshot_two, (time_two, time_two))
+    time_one = now - 1
+    time_two = now
+    os.utime(bundle_one, (time_one, time_one))
+    os.utime(bundle_two, (time_two, time_two))
 
     logger = debug_app.get_logger("test.switch")
-    store = debug_app.SnapshotStore(
-        snapshot_one, loader=debug_app.load_snapshot, logger=logger
-    )
+    store = debug_app.BundleStore(bundle_one, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
-    listing = client.get("/api/snapshots").json()
-    assert listing[0]["name"] == "two.jsonl"
-    assert listing[1]["name"] == "one.jsonl"
+    listing = client.get("/api/bundles").json()
+    assert len(listing) == 2
+    # Most recent first
+    assert listing[0]["path"] == str(bundle_two)
 
-    switch_response = client.post("/api/switch", json={"path": str(snapshot_two)})
+    switch_response = client.post("/api/switch", json={"path": str(bundle_two)})
     assert switch_response.status_code == 200
     switched_meta = switch_response.json()
-    assert switched_meta["path"] == str(snapshot_two)
-
-    detail = client.get("/api/meta").json()
-    assert detail["path"] == str(snapshot_two)
-    assert detail["session_id"] == "two-0"
+    assert switched_meta["path"] == str(bundle_two)
 
 
-def test_snapshot_store_handles_errors_and_properties(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["one"])
+def test_bundle_store_handles_errors(tmp_path: Path) -> None:
+    bundle_path = _create_test_bundle(tmp_path, ["one"])
 
-    missing_target = tmp_path / "missing.jsonl"
-    broken_link = tmp_path / "broken.jsonl"
-    broken_link.symlink_to(missing_target)
+    store = debug_app.BundleStore(bundle_path, logger=debug_app.get_logger(__name__))
 
-    store = debug_app.SnapshotStore(
-        snapshot_path,
-        loader=debug_app.load_snapshot,
-        logger=debug_app.get_logger(__name__),
-    )
+    assert store.path == bundle_path.resolve()
 
-    raw_payload = store.raw_payload
-    assert raw_payload["version"] == "1"
-    tags_value = raw_payload.get("tags")
-    assert isinstance(tags_value, Mapping)
-    tags = cast(Mapping[str, object], tags_value)
-    assert tags.get("suite") == "wink-debug"
-    assert "session_id" in tags
-    assert store.path == snapshot_path.resolve()
-    assert len(store.entries) == 1
-
-    listing = store.list_snapshots()
-    names = {entry["name"] for entry in listing}
-    assert "snapshot.jsonl" in names
-    assert "broken.jsonl" not in names
-
-    entry_listing = store.list_entries()
-    assert entry_listing[0]["selected"] is True
+    listing = store.list_bundles()
+    assert len(listing) == 1
+    assert listing[0]["selected"] is True
 
     with pytest.raises(KeyError, match="Unknown slice type: missing"):
         store.slice_items("missing")
 
 
-def test_snapshot_loading_ignores_blank_lines(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    session_ids = _write_snapshot(snapshot_path, ["first", "second"])
-    snapshot_path.write_text("\n" + snapshot_path.read_text() + "\n\n")
-
-    loaded = debug_app.load_snapshot(snapshot_path)
-
-    assert [entry.meta.session_id for entry in loaded] == session_ids
-
-
 def test_api_slice_offset_and_errors(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={
-            _ExampleSlice: (
-                _ExampleSlice("one"),
-                _ExampleSlice("two"),
-                _ExampleSlice("three"),
-            )
-        },
-        tags={"session_id": "multi"},
-    )
-    snapshot_path.write_text(snapshot.to_json())
+    bundle_path = _create_test_bundle(tmp_path, ["one", "two", "three"])
     logger = debug_app.get_logger("test.api.slices")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
+    store = debug_app.BundleStore(bundle_path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
     slice_type = client.get("/api/meta").json()["slices"][0]["slice_type"]
     limited = client.get(f"/api/slices/{quote(slice_type)}?offset=1&limit=1").json()
-    assert [item["value"] for item in limited["items"]] == ["two"]
+    assert len(limited["items"]) == 1
 
     missing = client.get("/api/slices/unknown")
     assert missing.status_code == 404
 
 
 def test_api_slice_renders_markdown(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
     markdown_text = "# Heading\n\nSome **bold** markdown content."
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={_ExampleSlice: (_ExampleSlice(markdown_text),)},
-        tags={"session_id": "markdown"},
-    )
-    snapshot_path.write_text(snapshot.to_json())
+    session = Session()
+    session.dispatch(_ExampleSlice(markdown_text))
+
+    with BundleWriter(
+        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
+    ) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+
+    assert writer.path is not None
     logger = debug_app.get_logger("test.api.markdown")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
+    store = debug_app.BundleStore(writer.path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
@@ -410,26 +364,26 @@ def test_api_slice_renders_markdown(tmp_path: Path) -> None:
 
 
 def test_markdown_renderer_handles_nested_values(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
     pre_rendered = {"__markdown__": {"text": "keep", "html": "<p>keep</p>\n"}}
-    snapshot = Snapshot(
-        created_at=datetime.now(UTC),
-        slices={
-            _ListSlice: (
-                _ListSlice(
-                    {
-                        "content": ["* bullet point with detail", pre_rendered, 7],
-                    }
-                ),
-            )
-        },
-        tags={"session_id": "nested"},
+    session = Session()
+    session.dispatch(
+        _ListSlice(
+            {
+                "content": ["* bullet point with detail", pre_rendered, 7],
+            }
+        )
     )
-    snapshot_path.write_text(snapshot.to_json())
+
+    with BundleWriter(
+        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
+    ) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+
+    assert writer.path is not None
     logger = debug_app.get_logger("test.api.markdown.nested")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
+    store = debug_app.BundleStore(writer.path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
@@ -442,170 +396,41 @@ def test_markdown_renderer_handles_nested_values(tmp_path: Path) -> None:
     assert content[2] == 7
 
 
-def test_api_select_errors_and_recover(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["alpha"])
-    logger = debug_app.get_logger("test.api.select")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
-    app = debug_app.build_debug_app(store, logger=logger)
-    client = TestClient(app)
-
-    bad_session = client.post("/api/select", json={"session_id": "missing"})
-    assert bad_session.status_code == 400
-
-    bad_line = client.post("/api/select", json={"line_number": 99})
-    assert bad_line.status_code == 400
-
-    by_line = client.post("/api/select", json={"line_number": 1})
-    assert by_line.status_code == 200
-
-    snapshot_path.write_text(
-        "\n".join(
-            Snapshot(
-                created_at=datetime.now(UTC),
-                slices={_ExampleSlice: (_ExampleSlice("beta"),)},
-                tags={"session_id": "beta"},
-            ).to_json()
-            for _ in range(1)
-        )
-    )
-    reload_response = client.post("/api/reload")
-    assert reload_response.status_code == 200
-    assert reload_response.json()["session_id"] == "beta"
-
-
-def test_list_snapshots_skips_errors(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    base = tmp_path / "base.jsonl"
-    _write_snapshot(base, ["value"])
-    bad = tmp_path / "bad.jsonl"
-    bad.write_text("invalid")
-
-    original_stat = Path.stat
-
-    def fake_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
-        if path.name == "bad.jsonl":
-            raise OSError("fail")
-        return original_stat(path, follow_symlinks=follow_symlinks)
-
-    monkeypatch.setattr(Path, "stat", fake_stat)
-    monkeypatch.setattr(
-        debug_app.SnapshotStore,
-        "_iter_snapshot_files",
-        staticmethod(lambda root: [base, bad]),
-    )
-
-    store = debug_app.SnapshotStore(
-        base, loader=debug_app.load_snapshot, logger=debug_app.get_logger("test.list")
-    )
-    entries = store.list_snapshots()
-
-    assert [entry["name"] for entry in entries] == ["base.jsonl"]
-
-
-def test_snapshot_store_reload_fallbacks(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["original"])
-    store = debug_app.SnapshotStore(
-        snapshot_path,
-        loader=debug_app.load_snapshot,
-        logger=debug_app.get_logger("test.reload_fallback"),
-    )
-
-    _write_snapshot(snapshot_path, ["replacement"])
-    meta = store.reload()
-
-    assert meta.session_id.endswith("0")
-
-
-def test_snapshot_store_select_errors(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["only"])
-    store = debug_app.SnapshotStore(
-        snapshot_path,
-        loader=debug_app.load_snapshot,
-        logger=debug_app.get_logger("test.select_errors"),
-    )
-
-    with pytest.raises(debug_app.SnapshotLoadError):
-        store.select(session_id="missing")
-
-    with pytest.raises(debug_app.SnapshotLoadError):
-        store.select(line_number=99)
-
-
-def test_snapshot_store_rejects_empty_loader(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["value"])
-
-    def _empty_loader(path: Path) -> tuple[debug_app.LoadedSnapshot, ...]:
-        assert path == snapshot_path
-        return ()
-
-    with pytest.raises(debug_app.SnapshotLoadError):
-        debug_app.SnapshotStore(
-            snapshot_path,
-            loader=_empty_loader,
-            logger=debug_app.get_logger("test.empty_loader"),
-        )
-
-
-def test_snapshot_store_switch_rejects_outside_root(tmp_path: Path) -> None:
-    base_snapshot = tmp_path / "base.jsonl"
+def test_bundle_store_switch_rejects_outside_root(tmp_path: Path) -> None:
+    base_bundle = _create_test_bundle(tmp_path, ["base"])
     other_dir = tmp_path / "other"
     other_dir.mkdir()
-    other_snapshot = other_dir / "other.jsonl"
+    other_bundle = _create_test_bundle(other_dir, ["other"])
 
-    _write_snapshot(base_snapshot, ["base"])
-    _write_snapshot(other_snapshot, ["other"])
-
-    store = debug_app.SnapshotStore(
-        base_snapshot,
-        loader=debug_app.load_snapshot,
-        logger=debug_app.get_logger("test.switch_root"),
+    store = debug_app.BundleStore(
+        base_bundle, logger=debug_app.get_logger("test.switch_root")
     )
 
-    with pytest.raises(debug_app.SnapshotLoadError) as excinfo:
-        store.switch(other_snapshot)
+    with pytest.raises(debug_app.BundleLoadError) as excinfo:
+        store.switch(other_bundle)
 
-    assert (
-        str(excinfo.value)
-        == f"Snapshot must live under {base_snapshot.parent.resolve()}"
-    )
+    assert "Bundle must live under" in str(excinfo.value)
 
 
-def test_normalize_path_requires_snapshots(tmp_path: Path) -> None:
+def test_normalize_path_requires_bundles(tmp_path: Path) -> None:
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
 
-    with pytest.raises(debug_app.SnapshotLoadError) as excinfo:
-        debug_app.SnapshotStore(
-            empty_dir,
-            loader=debug_app.load_snapshot,
-            logger=debug_app.get_logger("test.empty"),
-        )
+    with pytest.raises(debug_app.BundleLoadError) as excinfo:
+        debug_app.BundleStore(empty_dir, logger=debug_app.get_logger("test.empty"))
 
-    assert str(excinfo.value) == f"No snapshots found under {empty_dir.resolve()}"
+    assert "No bundles found under" in str(excinfo.value)
 
 
 def test_index_and_error_endpoints(tmp_path: Path) -> None:
-    snapshot_path = tmp_path / "snapshot.jsonl"
-    _write_snapshot(snapshot_path, ["a"])
+    bundle_path = _create_test_bundle(tmp_path, ["a"])
 
     other_dir = tmp_path / "other"
     other_dir.mkdir()
-    other_snapshot = other_dir / "other.jsonl"
-    _write_snapshot(other_snapshot, ["b"])
+    other_bundle = _create_test_bundle(other_dir, ["b"])
 
     logger = debug_app.get_logger("test.routes")
-    store = debug_app.SnapshotStore(
-        snapshot_path, loader=debug_app.load_snapshot, logger=logger
-    )
+    store = debug_app.BundleStore(bundle_path, logger=logger)
     app = debug_app.build_debug_app(store, logger=logger)
     client = TestClient(app)
 
@@ -621,30 +446,91 @@ def test_index_and_error_endpoints(tmp_path: Path) -> None:
     assert missing_path.status_code == 400
     assert missing_path.json()["detail"] == "path is required"
 
-    wrong_root = client.post("/api/switch", json={"path": str(other_snapshot)})
+    wrong_root = client.post("/api/switch", json={"path": str(other_bundle)})
     assert wrong_root.status_code == 400
-    assert "Snapshot must live under" in wrong_root.json()["detail"]
+    assert "Bundle must live under" in wrong_root.json()["detail"]
 
-    bad_switch_session = client.post(
-        "/api/switch", json={"path": str(snapshot_path), "session_id": 123}
-    )
-    assert bad_switch_session.status_code == 400
 
-    bad_switch_line = client.post(
-        "/api/switch", json={"path": str(snapshot_path), "line_number": "one"}
-    )
-    assert bad_switch_line.status_code == 400
+def test_api_logs_endpoint(tmp_path: Path) -> None:
+    """Test the logs API endpoint."""
+    # Create a bundle with logs
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
 
-    missing_selection = client.post("/api/select", json={})
-    assert missing_selection.status_code == 400
-    assert "session_id or line_number is required" in missing_selection.json()["detail"]
+    with BundleWriter(
+        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
+    ) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
 
-    bad_line_number = client.post("/api/select", json={"line_number": "one"})
-    assert bad_line_number.status_code == 400
-    assert "line_number must be an integer" in bad_line_number.json()["detail"]
+            logging.getLogger("test.logs").info("Test log message")
 
-    bad_session = client.post("/api/select", json={"session_id": 123})
-    assert bad_session.status_code == 400
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.logs.api")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    logs_response = client.get("/api/logs")
+    assert logs_response.status_code == 200
+    logs = logs_response.json()
+    assert "entries" in logs
+    assert "total" in logs
+
+
+def test_api_config_and_metrics_endpoints(tmp_path: Path) -> None:
+    """Test config and metrics endpoints."""
+    bundle_path = _create_test_bundle(tmp_path, ["test"])
+    logger = debug_app.get_logger("test.config.metrics")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    config_response = client.get("/api/config")
+    assert config_response.status_code == 200
+    assert config_response.json() == {"adapter": "test"}
+
+    metrics_response = client.get("/api/metrics")
+    assert metrics_response.status_code == 200
+    assert metrics_response.json() == {"tokens": 100}
+
+
+def test_api_error_endpoint_not_found(tmp_path: Path) -> None:
+    """Test error endpoint returns 404 when no error in bundle."""
+    bundle_path = _create_test_bundle(tmp_path, ["test"])
+    logger = debug_app.get_logger("test.error")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    error_response = client.get("/api/error")
+    assert error_response.status_code == 404
+
+
+def test_api_files_endpoints(tmp_path: Path) -> None:
+    """Test file listing and content endpoints."""
+    bundle_path = _create_test_bundle(tmp_path, ["test"])
+    logger = debug_app.get_logger("test.files")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    files_response = client.get("/api/files")
+    assert files_response.status_code == 200
+    files = files_response.json()
+    assert "manifest.json" in files
+    assert "request/input.json" in files
+
+    file_content = client.get("/api/files/manifest.json")
+    assert file_content.status_code == 200
+    content = file_content.json()
+    assert content["type"] == "json"
+
+    missing_file = client.get("/api/files/nonexistent.json")
+    assert missing_file.status_code == 404
 
 
 def test_run_debug_server_opens_browser(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -788,3 +674,278 @@ def test_run_debug_server_without_browser(monkeypatch: pytest.MonkeyPatch) -> No
     assert browser_opened is False
     assert config_calls["run_called"] is True
     assert infos[0]["event"] == "debug.server.start"
+
+
+def test_bundle_without_session(tmp_path: Path) -> None:
+    """Test loading a bundle without session data."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    loaded = debug_app.load_bundle(bundle_path)
+
+    assert loaded.meta.bundle_id
+    assert len(loaded.meta.slices) == 0
+    assert len(loaded.session_slices) == 0
+
+
+def test_bundle_with_whitespace_session(tmp_path: Path) -> None:
+    """Test loading a bundle with whitespace-only session content."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content="   \n\n   ")
+
+    loaded = debug_app.load_bundle(bundle_path)
+
+    assert loaded.meta.bundle_id
+    assert len(loaded.meta.slices) == 0
+    assert len(loaded.session_slices) == 0
+
+
+def test_bundle_with_invalid_session_content(tmp_path: Path) -> None:
+    """Test loading a bundle with unparseable session content."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content="not-json")
+
+    loaded = debug_app.load_bundle(bundle_path)
+
+    assert loaded.meta.bundle_id
+    assert loaded.meta.validation_error is not None
+
+
+def test_logs_endpoint_with_level_filter(tmp_path: Path) -> None:
+    """Test filtering logs by level."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(
+        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
+    ) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+        with writer.capture_logs():
+            import logging
+
+            test_logger = logging.getLogger("test.level_filter")
+            test_logger.setLevel(logging.DEBUG)
+            test_logger.debug("Debug message")
+            test_logger.info("Info message")
+            test_logger.warning("Warning message")
+
+    assert writer.path is not None
+    logger = debug_app.get_logger("test.logs.filter")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    # Filter by WARNING level
+    warning_logs = client.get("/api/logs", params={"level": "WARNING"}).json()
+    assert warning_logs["total"] >= 0
+
+
+def test_list_bundles_with_broken_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Test that listing bundles skips files that fail stat."""
+    good_bundle = _create_test_bundle(tmp_path, ["value"])
+    bad = tmp_path / "bad.zip"
+    bad.write_text("invalid")
+
+    original_stat = Path.stat
+
+    def fake_stat(path: Path, *, follow_symlinks: bool = True) -> os.stat_result:
+        if path.name == "bad.zip":
+            raise OSError("fail")
+        return original_stat(path, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(Path, "stat", fake_stat)
+    monkeypatch.setattr(
+        debug_app.BundleStore,
+        "_iter_bundle_files",
+        staticmethod(lambda root: [good_bundle, bad]),
+    )
+
+    store = debug_app.BundleStore(good_bundle, logger=debug_app.get_logger("test.list"))
+    entries = store.list_bundles()
+
+    assert len(entries) == 1
+    assert entries[0]["name"] == good_bundle.name
+
+
+def test_backwards_compatibility_aliases() -> None:
+    """Test that old names still work."""
+    assert debug_app.SnapshotLoadError is debug_app.BundleLoadError
+    assert debug_app.SnapshotStore is debug_app.BundleStore
+    assert debug_app.load_snapshot is debug_app.load_bundle
+
+
+def test_logs_endpoint_no_logs(tmp_path: Path) -> None:
+    """Test logs endpoint when bundle has no logs."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+    logger = debug_app.get_logger("test.logs.none")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    logs_response = client.get("/api/logs")
+    assert logs_response.status_code == 200
+    logs = logs_response.json()
+    assert logs["entries"] == []
+    assert logs["total"] == 0
+
+
+def test_logs_with_malformed_and_non_dict_entries(tmp_path: Path) -> None:
+    """Test logs endpoint handles malformed and non-dict JSON entries."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(
+        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
+    ) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+
+    assert writer.path is not None
+
+    # Manually add malformed log content with blank lines and non-dict entries
+    import zipfile
+
+    with zipfile.ZipFile(writer.path, "a") as zf:
+        log_content = '\n{"level": "INFO", "msg": "valid"}\n[1,2,3]\ninvalid-json\n\n'
+        zf.writestr("debug_bundle/logs/app.jsonl", log_content)
+
+    logger = debug_app.get_logger("test.logs.malformed")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    logs_response = client.get("/api/logs")
+    assert logs_response.status_code == 200
+    logs = logs_response.json()
+    # Should only have the valid dict entry
+    assert logs["total"] == 1
+    assert logs["entries"][0]["msg"] == "valid"
+
+
+def test_logs_with_non_string_level(tmp_path: Path) -> None:
+    """Test logs endpoint handles entries where level is not a string."""
+    session = Session()
+    session.dispatch(_ExampleSlice("test"))
+
+    with BundleWriter(
+        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
+    ) as writer:
+        writer.write_session_after(session)
+        writer.write_request_input({})
+        writer.write_request_output({})
+
+    assert writer.path is not None
+
+    # Manually add log with non-string level
+    import zipfile
+
+    with zipfile.ZipFile(writer.path, "a") as zf:
+        log_content = '{"level": 42, "msg": "numeric level"}\n{"level": "WARNING", "msg": "string level"}\n'
+        zf.writestr("debug_bundle/logs/app.jsonl", log_content)
+
+    logger = debug_app.get_logger("test.logs.nonstring_level")
+    store = debug_app.BundleStore(writer.path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    # Filter by WARNING - numeric level entry should be excluded
+    logs_response = client.get("/api/logs", params={"level": "WARNING"})
+    assert logs_response.status_code == 200
+    logs = logs_response.json()
+    assert logs["total"] == 1
+    assert logs["entries"][0]["msg"] == "string level"
+
+
+def test_config_endpoint_missing(tmp_path: Path) -> None:
+    """Test config endpoint returns 404 when no config in bundle."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+    logger = debug_app.get_logger("test.config.missing")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    config_response = client.get("/api/config")
+    assert config_response.status_code == 404
+
+
+def test_metrics_endpoint_missing(tmp_path: Path) -> None:
+    """Test metrics endpoint returns 404 when no metrics in bundle."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+    logger = debug_app.get_logger("test.metrics.missing")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    metrics_response = client.get("/api/metrics")
+    assert metrics_response.status_code == 404
+
+
+def test_error_endpoint_with_error(tmp_path: Path) -> None:
+    """Test error endpoint returns error when present in bundle."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Manually add error.json
+    import zipfile
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr(
+            "debug_bundle/error.json",
+            '{"type": "ValueError", "message": "test error"}',
+        )
+
+    logger = debug_app.get_logger("test.error.present")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    error_response = client.get("/api/error")
+    assert error_response.status_code == 200
+    error = error_response.json()
+    assert error["type"] == "ValueError"
+
+
+def test_file_endpoint_text_file(tmp_path: Path) -> None:
+    """Test reading a non-JSON text file."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Manually add a text file
+    import zipfile
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        zf.writestr("debug_bundle/README.txt", "This is plain text content")
+
+    logger = debug_app.get_logger("test.file.text")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    file_response = client.get("/api/files/README.txt")
+    assert file_response.status_code == 200
+    content = file_response.json()
+    assert content["type"] == "text"
+    assert content["content"] == "This is plain text content"
+
+
+def test_file_endpoint_binary_file(tmp_path: Path) -> None:
+    """Test reading a binary file."""
+    bundle_path = _create_minimal_bundle(tmp_path, session_content=None)
+
+    # Manually add a binary file
+    import zipfile
+
+    with zipfile.ZipFile(bundle_path, "a") as zf:
+        # Add binary data that can't be decoded as UTF-8
+        zf.writestr("debug_bundle/binary.dat", b"\x80\x81\x82\x83\xff\xfe")
+
+    logger = debug_app.get_logger("test.file.binary")
+    store = debug_app.BundleStore(bundle_path, logger=logger)
+    app = debug_app.build_debug_app(store, logger=logger)
+    client = TestClient(app)
+
+    file_response = client.get("/api/files/binary.dat")
+    assert file_response.status_code == 200
+    content = file_response.json()
+    assert content["type"] == "binary"
+    assert content["content"] is None

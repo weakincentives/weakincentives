@@ -432,3 +432,22 @@ class TestPromptResourceLifecycle:
             with prompt.resources.tool_scope() as resolver:
                 # Should be able to resolve resources within tool scope
                 assert resolver.get(ToolScopedResource) is instance
+
+    def test_get_optional_factory_binding_within_context(self) -> None:
+        """get_optional() resolves factory-constructed resources within context."""
+        from weakincentives.resources import Binding
+
+        class FactoryResource:
+            pass
+
+        created_instance = FactoryResource()
+        # Factory binding (not pre-provided) - passed via dict
+        binding = Binding(FactoryResource, provider=lambda _: created_instance)
+
+        template = PromptTemplate(ns="tests", key="factory-test")
+        prompt = Prompt(template).bind(resources={FactoryResource: binding})
+
+        with prompt.resources:
+            # get_optional should resolve via context for factory bindings
+            resolved = prompt.resources.get_optional(FactoryResource)
+            assert resolved is created_instance

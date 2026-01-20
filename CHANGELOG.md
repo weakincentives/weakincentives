@@ -229,31 +229,26 @@ except OpenAIError as e:
 All exceptions inherit from `PromptEvaluationError` and include `message`,
 `status_code` (if applicable), and `original_error`.
 
-### Debug Utilities
+### Debug Bundles
 
-**Log collector** (`collect_all_logs`): Captures all log records during prompt
-evaluation to a JSONL file. Also aggregates logs from Claude Agent SDK's
-`.claude` directory.
-
-```python
-from weakincentives.debug import collect_all_logs
-
-with collect_all_logs("./logs/session.log") as collector:
-    response = adapter.evaluate(prompt, session=session)
-```
-
-**Filesystem archive** (`archive_filesystem`): Creates zip archives of virtual
-filesystem contents for post-mortem analysis.
+**Note:** The standalone functions `collect_all_logs`, `archive_filesystem`, and
+`dump_session` have been replaced by the unified `BundleWriter` API. Use
+`BundleConfig` with `MainLoopConfig` for automatic bundle creation per-request.
 
 ```python
-from weakincentives.debug import archive_filesystem
+from weakincentives.debug import BundleConfig, CaptureMode
+from weakincentives.runtime import MainLoopConfig
 
-archive_path = archive_filesystem(
-    workspace.filesystem,
-    "snapshots/",
-    archive_id=session.session_id,
+config = MainLoopConfig(
+    debug_bundle=BundleConfig(
+        target="./debug_bundles/",
+        mode=CaptureMode.STANDARD,
+    ),
 )
 ```
+
+For manual bundle creation, use `BundleWriter` directly. See
+`specs/DEBUG_BUNDLE.md` for the full specification.
 
 ### RedisMailbox: Default TTL for Redis Keys
 
