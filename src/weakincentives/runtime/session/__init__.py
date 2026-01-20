@@ -17,7 +17,14 @@ from ._types import (
     ReducerEvent,
     TypedReducer,
 )
-from .protocols import SessionProtocol, SessionViewProtocol, SnapshotProtocol
+from .protocols import (
+    ReadOnlySliceAccessorProtocol,
+    SessionProtocol,
+    SessionViewProtocol,
+    SliceAccessorProtocol,
+    SnapshotProtocol,
+    TypedReducerProtocol,
+)
 from .reducer_context import ReducerContext, build_reducer_context
 from .reducers import (
     append_all,
@@ -84,6 +91,7 @@ __all__ = [  # noqa: RUF022
     "MemorySliceFactory",
     "MemorySliceView",
     "ReadOnlySliceAccessor",
+    "ReadOnlySliceAccessorProtocol",
     "ReducerContext",
     "ReducerContextProtocol",
     "ReducerEvent",
@@ -96,6 +104,7 @@ __all__ = [  # noqa: RUF022
     "SetVisibilityOverride",
     "Slice",
     "SliceAccessor",
+    "SliceAccessorProtocol",
     "SliceFactory",
     "SliceFactoryConfig",
     "SliceOp",
@@ -106,6 +115,7 @@ __all__ = [  # noqa: RUF022
     "SnapshotRestoreError",
     "SnapshotSerializationError",
     "TypedReducer",
+    "TypedReducerProtocol",
     "VisibilityOverrides",
     "append_all",
     "as_view",

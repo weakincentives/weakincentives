@@ -10,44 +10,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# pyright: reportImportCycles=false
+"""Shared typing helpers for session reducers.
 
-"""Shared typing helpers for session reducers."""
-
-from __future__ import annotations
-
-from typing import TYPE_CHECKING, Protocol
+This module re-exports protocol types from _protocols for backward compatibility.
+For new code, prefer importing directly from _protocols.
+"""
 
 from ...types.dataclass import SupportsDataclass
-from .slices import SliceOp, SliceView
+from ._protocols import ReducerContextProtocol, TypedReducerProtocol
 
-if TYPE_CHECKING:
-    from .protocols import SessionViewProtocol
-
-
+# Type alias for reducer events (any dataclass)
 ReducerEvent = SupportsDataclass
 
-
-class ReducerContextProtocol(Protocol):
-    """Protocol implemented by reducer context objects."""
-
-    session: SessionViewProtocol
-
-
-class TypedReducer[S: SupportsDataclass](Protocol):
-    """Protocol for reducer callables maintained by :class:`Session`.
-
-    Reducers receive a lazy SliceView and return a SliceOp describing
-    the mutation to apply.
-    """
-
-    def __call__(
-        self,
-        view: SliceView[S],
-        event: ReducerEvent,
-        *,
-        context: ReducerContextProtocol,
-    ) -> SliceOp[S]: ...
+# Re-export with original name for backward compatibility
+TypedReducer = TypedReducerProtocol
 
 
 __all__ = [

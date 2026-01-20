@@ -48,7 +48,7 @@ from ..dataclasses import FrozenDataclass
 from ..errors import RestoreFailedError
 from ..serde import TYPE_REF_KEY, dump, parse, resolve_type_identifier, type_identifier
 from ..types import JSONValue
-from .session.protocols import SessionProtocol
+from .session.protocols import SessionProtocol, SnapshotProtocol
 from .session.snapshots import (
     Snapshot,
     SnapshotRestoreError,
@@ -102,7 +102,7 @@ class CompositeSnapshot:
 
     snapshot_id: UUID
     created_at: datetime
-    session: Snapshot
+    session: SnapshotProtocol
     resources: Mapping[type[object], object] = field(
         default_factory=lambda: types.MappingProxyType({})
     )

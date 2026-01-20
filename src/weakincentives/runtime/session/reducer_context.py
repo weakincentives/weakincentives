@@ -15,8 +15,7 @@
 from __future__ import annotations
 
 from ...dataclasses import FrozenDataclass
-from ._types import ReducerContextProtocol
-from .protocols import SessionViewProtocol
+from ._protocols import ReducerContextProtocol, SessionViewProtocol
 
 
 @FrozenDataclass()

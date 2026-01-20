@@ -10,7 +10,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# pyright: reportImportCycles=false
 # pyright: reportPrivateUsage=false
 
 """Fluent slice accessor combining query, dispatch, and mutation operations."""
@@ -18,15 +17,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Protocol, cast
 
 from ...dbc import pure
 from ...types.dataclass import SupportsDataclass
+from ._protocols import TypedReducerProtocol
 from .slice_mutations import ClearSlice, InitializeSlice
 from .slice_policy import SlicePolicy
-
-if TYPE_CHECKING:
-    from ._types import TypedReducer
 
 
 class _ReadOnlySliceAccessorProvider(Protocol):
@@ -47,7 +44,7 @@ class _SliceAccessorProvider(Protocol):
     def _mutation_register_reducer[S: SupportsDataclass](
         self,
         data_type: type[SupportsDataclass],
-        reducer: TypedReducer[S],
+        reducer: TypedReducerProtocol[S],
         *,
         slice_type: type[S] | None = None,
         policy: SlicePolicy | None = None,
@@ -186,7 +183,7 @@ class SliceAccessor[T: SupportsDataclass]:
     def register(
         self,
         event_type: type[SupportsDataclass],
-        reducer: Any,  # TypedReducer[T] - avoiding import cycle  # noqa: ANN401
+        reducer: TypedReducerProtocol[T],
         *,
         policy: SlicePolicy | None = None,
     ) -> None:
