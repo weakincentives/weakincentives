@@ -91,6 +91,7 @@ def parse_pytest(output: str, code: int) -> tuple[Diagnostic, ...]:
     - Test file and function name
     - Line number where assertion failed
     - The actual assertion error message
+    - Traceback context for better debugging
     """
     if code == 0:
         return ()
@@ -106,15 +107,20 @@ def parse_pytest(output: str, code: int) -> tuple[Diagnostic, ...]:
 
     for match in failed_pattern.finditer(output):
         file, test, reason = match.groups()
-        if reason:
+
+        # Try to find line number and full context from traceback
+        line_num, traceback_msg = _find_test_failure_line(output, file, test)
+
+        # Build comprehensive error message
+        if traceback_msg:
+            # We have traceback context
+            msg = f"{test}\n{traceback_msg}"
+        elif reason:
             # Clean up the reason - take first line if multiline
             reason = reason.split("\n")[0].strip()
             msg = f"{test}: {reason}"
         else:
             msg = f"{test}"
-
-        # Try to find line number from traceback
-        line_num = _find_test_failure_line(output, file, test)
 
         diagnostics.append(
             Diagnostic(
@@ -170,24 +176,61 @@ def parse_pytest(output: str, code: int) -> tuple[Diagnostic, ...]:
     return tuple(diagnostics)
 
 
-def _find_test_failure_line(output: str, file: str, test: str) -> int | None:
-    """Extract line number from pytest traceback for a specific test."""
-    # Look for the traceback section for this test
-    # Pattern: file.py:123: in test_name
+def _find_test_failure_line(output: str, file: str, test: str) -> tuple[int | None, str | None]:
+    """Extract line number and traceback context from pytest output for a specific test.
+
+    Returns:
+        Tuple of (line_number, traceback_message) where traceback_message includes
+        the assertion details and context.
+    """
+    # Look for the test failure section in output
+    # pytest --tb=short format includes:
+    # file.py:123: in test_name
+    #     assert x == y
+    # E   AssertionError: message
+    # or
+    # >   assert x == y
+    # E   assert False
+
+    # Try to find the section for this specific test
+    test_section_pattern = rf"_+ {re.escape(test)} _+.*?(?=_+ \w+ _+|$)"
+    test_section_match = re.search(test_section_pattern, output, re.DOTALL)
+
+    if test_section_match:
+        section = test_section_match.group(0)
+
+        # Extract line number and assertion context
+        line_pattern = re.compile(rf"{re.escape(file)}:(\d+)")
+        line_match = line_pattern.search(section)
+        line_num = int(line_match.group(1)) if line_match else None
+
+        # Extract assertion details (lines starting with 'E   ')
+        error_lines = []
+        for line in section.split("\n"):
+            if line.startswith("E   "):
+                error_lines.append(line[4:])  # Remove 'E   ' prefix
+            elif line.strip().startswith(">") and "assert" in line:
+                error_lines.append(line.strip()[1:].strip())  # Add assertion line
+
+        if error_lines:
+            traceback_msg = "\n".join(error_lines[:5])  # Limit to first 5 lines
+            return line_num, traceback_msg
+
+        return line_num, None
+
+    # Fallback: look for assertion line in general traceback
     pattern = re.compile(rf"{re.escape(file)}:(\d+).*?{re.escape(test)}")
     match = pattern.search(output)
     if match:
-        return int(match.group(1))
+        return int(match.group(1)), None
 
-    # Alternative: look for assertion line in traceback
-    # >       assert x == y
-    # file.py:42: AssertionError
+    # Alternative fallback
     assertion_pattern = re.compile(rf"{re.escape(file)}:(\d+): (?:AssertionError|assert)")
     match = assertion_pattern.search(output)
     if match:
-        return int(match.group(1))
+        return int(match.group(1)), None
 
-    return None
+    return None, None
 
 
 def parse_bandit(output: str, code: int) -> tuple[Diagnostic, ...]:

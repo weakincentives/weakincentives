@@ -165,6 +165,21 @@ SyntaxError: invalid syntax"""
         assert len(diagnostics) == 1
         assert "No tests ran" in diagnostics[0].message
 
+    def test_parses_with_traceback_context(self) -> None:
+        """Test that traceback context is included in the diagnostic message."""
+        output = """FAILED tests/test_foo.py::test_something
+_ test_something _
+tests/test_foo.py:42: in test_something
+>   assert x == y
+E   AssertionError: Values differ
+E   assert 1 == 2
+_ test_other _"""
+        diagnostics = parse_pytest(output, 1)
+        assert len(diagnostics) == 1
+        assert "test_something" in diagnostics[0].message
+        # Should include traceback details
+        assert ("assert" in diagnostics[0].message or "AssertionError" in diagnostics[0].message)
+
 
 class TestFindTestFailureLine:
     """Tests for _find_test_failure_line helper."""
@@ -172,18 +187,40 @@ class TestFindTestFailureLine:
     def test_finds_line_in_traceback(self) -> None:
         output = """tests/test_foo.py:42: in test_something
 >       assert x == y"""
-        line = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
+        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
         assert line == 42
 
     def test_finds_assertion_line(self) -> None:
         output = """tests/test_foo.py:42: AssertionError"""
-        line = _find_test_failure_line(output, "tests/test_foo.py", "test_other")
+        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_other")
         assert line == 42
 
     def test_returns_none_when_not_found(self) -> None:
         output = "no traceback here"
-        line = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
+        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
         assert line is None
+
+    def test_extracts_traceback_message(self) -> None:
+        """Test that we extract assertion details from traceback."""
+        output = """_ test_something _
+tests/test_foo.py:42: in test_something
+>   assert x == y
+E   AssertionError: x != y
+_ test_other _"""
+        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
+        assert line == 42
+        assert msg is not None
+        assert "assert x == y" in msg or "AssertionError" in msg
+
+    def test_test_section_without_error_lines(self) -> None:
+        """Test section found but no error lines extracted."""
+        output = """_ test_something _
+tests/test_foo.py:42: in test_something
+Some other output
+_ test_other _"""
+        line, msg = _find_test_failure_line(output, "tests/test_foo.py", "test_something")
+        assert line == 42
+        assert msg is None
 
 
 class TestParseBandit:

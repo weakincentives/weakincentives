@@ -100,7 +100,7 @@ def create_test_checker() -> SubprocessChecker:
             "--cov-fail-under=100",
             "--timeout=10",
             "--timeout-method=thread",
-            "-q",
+            "--tb=short",  # Short traceback format - shows enough context without being verbose
             "--no-header",
             "--cov-report=",
             "tests",
