@@ -27,20 +27,17 @@ schemas, making complex investigations expressible as declarative queries.
 ## Quick Start
 
 ```bash
-# Open interactive SQL shell
-wink query ./bundle.zip
+# Get full schema information (start here)
+wink query ./bundle.zip --schema
 
-# Run single query
+# Run a query
 wink query ./bundle.zip "SELECT * FROM logs WHERE level = 'ERROR'"
 
 # Query multiple bundles
 wink query ./debug/ "SELECT bundle_id, status FROM manifest"
 
-# Discover schema
-wink query ./bundle.zip ".schema"
-
-# Export results
-wink query ./bundle.zip "SELECT * FROM tool_calls" --format csv > tools.csv
+# Export results as JSON
+wink query ./bundle.zip "SELECT * FROM tool_calls" --format json
 ```
 
 ## SQL Interface
@@ -344,7 +341,8 @@ GROUP BY bundle_id
 ### Synopsis
 
 ```
-wink query [OPTIONS] <BUNDLE_PATH> [QUERY]
+wink query [OPTIONS] <BUNDLE_PATH> <QUERY>
+wink query [OPTIONS] <BUNDLE_PATH> --schema
 ```
 
 ### Arguments
@@ -352,23 +350,21 @@ wink query [OPTIONS] <BUNDLE_PATH> [QUERY]
 | Argument | Description |
 |----------|-------------|
 | `BUNDLE_PATH` | Path to `.zip` bundle or directory containing bundles |
-| `QUERY` | Optional SQL query; if omitted, opens interactive shell |
+| `QUERY` | SQL query to execute (required unless `--schema` is used) |
 
 ### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
+| `--schema` | - | Output full schema information as JSON and exit |
 | `--format`, `-f` | `table` | Output format: `table`, `json`, `jsonl`, `csv`, `markdown` |
 | `--limit`, `-n` | `1000` | Maximum rows to return (0 for unlimited) |
 | `--no-headers` | false | Omit column headers (csv/table) |
-| `--schema` | false | Print schema and exit |
-| `--tables` | false | List available tables and exit |
-| `--describe TABLE` | - | Show detailed schema for TABLE |
-| `--load-file FILE` | - | Execute SQL from file |
+| `--load-file FILE` | - | Execute SQL from file instead of QUERY argument |
 | `--output`, `-o` | stdout | Write results to file |
 | `--quiet`, `-q` | false | Suppress informational messages |
 | `--timing` | false | Show query execution time |
-| `--explain` | false | Show query plan |
+| `--explain` | false | Show query plan instead of results |
 
 ### Output Formats
 
@@ -427,156 +423,214 @@ GitHub-flavored markdown table:
 | write     | 15    | 45.7            |
 ```
 
-## Interactive Shell
+## Schema Discovery
 
-When no query is provided, an interactive SQL shell opens:
+The `--schema` flag outputs comprehensive schema information as JSON, providing
+everything an AI agent needs to construct valid queries.
 
-```
-wink query ./bundle.zip
-Bundle: debug_abc123_2024-01-15.zip
-Tables: 12 (run .tables to list)
-Type .help for commands, .quit to exit
-
-sql> SELECT COUNT(*) FROM logs;
-┌──────────┐
-│ COUNT(*) │
-├──────────┤
-│ 1523     │
-└──────────┘
-
-sql> .schema logs
-CREATE TABLE logs (
-  _rowid INTEGER PRIMARY KEY,
-  timestamp TEXT,
-  timestamp_ms INTEGER,
-  level TEXT,
-  ...
-);
-
-sql>
+```bash
+wink query ./bundle.zip --schema
 ```
 
-### Shell Commands
+### Schema Output Format
 
-| Command | Description |
-|---------|-------------|
-| `.help` | Show available commands |
-| `.quit`, `.exit` | Exit shell |
-| `.tables` | List all tables |
-| `.schema [TABLE]` | Show schema (all or specific table) |
-| `.describe TABLE` | Detailed table description with stats |
-| `.indexes [TABLE]` | Show indexes |
-| `.sample TABLE [N]` | Show N sample rows (default 5) |
-| `.count TABLE` | Show row count |
-| `.explain QUERY` | Show query execution plan |
-| `.timer on|off` | Toggle query timing |
-| `.format FORMAT` | Set output format |
-| `.output FILE` | Redirect output to file |
-| `.output` | Reset output to stdout |
-| `.load FILE` | Execute SQL from file |
-| `.dump [TABLE]` | Dump table as SQL INSERT statements |
-| `.bundle` | Show current bundle info |
-| `.bundles` | List all loaded bundles (multi-bundle mode) |
-| `.switch BUNDLE_ID` | Switch active bundle (multi-bundle mode) |
-
-## Self-Documentation Features
-
-The query interface is designed to be self-explanatory for AI agents.
-
-### Schema Discovery
-
-```sql
-sql> .tables
-manifest        logs            session_slices  tool_calls
-files           config          errors          timeline
-token_usage     state_changes   slice_agentplan slice_toolresult
-error           eval            metrics
+```json
+{
+  "bundle": {
+    "bundle_id": "debug_abc123_2024-01-15",
+    "format_version": "1.0",
+    "status": "error",
+    "created_at": "2024-01-15T10:30:00Z"
+  },
+  "tables": [
+    {
+      "name": "manifest",
+      "description": "Bundle metadata from manifest.json",
+      "row_count": 1,
+      "category": "core",
+      "columns": [
+        {
+          "name": "bundle_id",
+          "type": "TEXT",
+          "description": "Unique bundle identifier",
+          "indexed": false
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "description": "Execution status: 'success' or 'error'",
+          "indexed": false
+        }
+      ],
+      "indexes": [],
+      "sample_queries": [
+        "SELECT status, duration_ms FROM manifest"
+      ]
+    },
+    {
+      "name": "logs",
+      "description": "Log entries from logs/app.jsonl",
+      "row_count": 1523,
+      "category": "core",
+      "columns": [
+        {
+          "name": "_rowid",
+          "type": "INTEGER",
+          "description": "Entry sequence number",
+          "indexed": false
+        },
+        {
+          "name": "timestamp",
+          "type": "TEXT",
+          "description": "ISO-8601 timestamp",
+          "indexed": false
+        },
+        {
+          "name": "timestamp_ms",
+          "type": "INTEGER",
+          "description": "Unix timestamp in milliseconds",
+          "indexed": true
+        },
+        {
+          "name": "level",
+          "type": "TEXT",
+          "description": "Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL",
+          "indexed": true
+        },
+        {
+          "name": "event",
+          "type": "TEXT",
+          "description": "Structured event name (e.g., 'tool.execution.complete')",
+          "indexed": true
+        },
+        {
+          "name": "logger",
+          "type": "TEXT",
+          "description": "Logger name",
+          "indexed": true
+        },
+        {
+          "name": "message",
+          "type": "TEXT",
+          "description": "Log message text",
+          "indexed": false
+        },
+        {
+          "name": "context",
+          "type": "TEXT",
+          "description": "JSON-encoded context object; use json_extract() to access fields",
+          "indexed": false
+        }
+      ],
+      "indexes": [
+        {"name": "idx_logs_timestamp_ms", "columns": ["timestamp_ms"]},
+        {"name": "idx_logs_level", "columns": ["level"]},
+        {"name": "idx_logs_event", "columns": ["event"]},
+        {"name": "idx_logs_logger", "columns": ["logger"]}
+      ],
+      "sample_queries": [
+        "SELECT timestamp, level, message FROM logs WHERE level = 'ERROR'",
+        "SELECT json_extract(context, '$.tool_name') FROM logs WHERE event = 'tool.execution.complete'"
+      ]
+    },
+    {
+      "name": "errors",
+      "description": "Aggregated errors from all sources (logs, error.json, tool failures)",
+      "row_count": 1,
+      "category": "derived",
+      "columns": [
+        {"name": "_rowid", "type": "INTEGER", "description": "Error sequence", "indexed": false},
+        {"name": "source", "type": "TEXT", "description": "Error source: 'log', 'error.json', 'tool_call'", "indexed": false},
+        {"name": "timestamp", "type": "TEXT", "description": "When error occurred", "indexed": false},
+        {"name": "error_type", "type": "TEXT", "description": "Exception or error type name", "indexed": false},
+        {"name": "message", "type": "TEXT", "description": "Error message", "indexed": false},
+        {"name": "phase", "type": "TEXT", "description": "Execution phase: 'render', 'call', 'parse', 'tool'", "indexed": false},
+        {"name": "traceback", "type": "TEXT", "description": "Stack trace if available", "indexed": false},
+        {"name": "context", "type": "TEXT", "description": "JSON-encoded error context", "indexed": false}
+      ],
+      "indexes": [],
+      "sample_queries": [
+        "SELECT error_type, message, phase FROM errors",
+        "SELECT * FROM errors ORDER BY timestamp"
+      ]
+    },
+    {
+      "name": "slice_agentplan",
+      "description": "Session state: AgentPlan instances from myapp.state:AgentPlan",
+      "row_count": 3,
+      "category": "slice",
+      "source_type": "myapp.state:AgentPlan",
+      "columns": [
+        {"name": "_rowid", "type": "INTEGER", "description": "Item sequence", "indexed": false},
+        {"name": "goal", "type": "TEXT", "description": "Field: str", "indexed": false},
+        {"name": "steps", "type": "TEXT", "description": "Field: tuple[str, ...] (JSON-encoded)", "indexed": false},
+        {"name": "status", "type": "TEXT", "description": "Field: Literal['pending', 'active', 'complete']", "indexed": false},
+        {"name": "_raw", "type": "TEXT", "description": "Full JSON representation", "indexed": false}
+      ],
+      "indexes": [],
+      "sample_queries": [
+        "SELECT goal, status FROM slice_agentplan",
+        "SELECT json_extract(steps, '$[0]') as first_step FROM slice_agentplan"
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "name": "file_content",
+      "signature": "file_content(path TEXT) -> TEXT",
+      "description": "Read file content from filesystem snapshot; returns NULL if binary or missing"
+    },
+    {
+      "name": "json_extract",
+      "signature": "json_extract(json TEXT, path TEXT) -> ANY",
+      "description": "SQLite built-in: extract value from JSON using path like '$.field'"
+    },
+    {
+      "name": "json_pretty",
+      "signature": "json_pretty(json TEXT) -> TEXT",
+      "description": "Pretty-print JSON string with indentation"
+    },
+    {
+      "name": "duration_fmt",
+      "signature": "duration_fmt(ms INTEGER) -> TEXT",
+      "description": "Format milliseconds as human-readable (e.g., '1.5s', '2m 30s')"
+    },
+    {
+      "name": "truncate",
+      "signature": "truncate(text TEXT, max_len INTEGER) -> TEXT",
+      "description": "Truncate text with ellipsis if exceeds max_len"
+    }
+  ],
+  "suggested_queries": {
+    "error_investigation": [
+      "SELECT error_type, message, phase FROM errors",
+      "SELECT * FROM timeline WHERE timestamp_ms BETWEEN (SELECT timestamp_ms - 10000 FROM errors LIMIT 1) AND (SELECT timestamp_ms + 2000 FROM errors LIMIT 1) ORDER BY timestamp_ms"
+    ],
+    "tool_analysis": [
+      "SELECT tool_name, COUNT(*) as calls, AVG(duration_ms) as avg_ms, SUM(CASE WHEN success=0 THEN 1 ELSE 0 END) as failures FROM tool_calls GROUP BY tool_name ORDER BY calls DESC",
+      "SELECT tool_name, error_code, params FROM tool_calls WHERE success = 0"
+    ],
+    "token_usage": [
+      "SELECT phase, tokens FROM token_usage"
+    ],
+    "state_analysis": [
+      "SELECT slice_type, COUNT(*) as items FROM session_slices GROUP BY slice_type"
+    ]
+  }
+}
 ```
 
-```sql
-sql> .describe logs
-Table: logs
-Description: Log entries from execution (logs/app.jsonl)
-Rows: 1523
-Source: logs/app.jsonl
+### Schema Categories
 
-Columns:
-  _rowid       INTEGER  Entry sequence number
-  timestamp    TEXT     ISO-8601 timestamp
-  timestamp_ms INTEGER  Unix timestamp in milliseconds (indexed)
-  level        TEXT     Log level (indexed)
-  event        TEXT     Event name (indexed)
-  logger       TEXT     Logger name (indexed)
-  message      TEXT     Log message
-  context      TEXT     JSON-encoded context object
+| Category | Description |
+|----------|-------------|
+| `core` | Always present: manifest, logs, session_slices, tool_calls, files, config |
+| `derived` | Computed on load: errors, timeline, token_usage, state_changes |
+| `slice` | Dynamic per slice type: slice\_{typename} |
+| `optional` | Present when artifact exists: error, eval, metrics |
 
-Indexes:
-  idx_logs_timestamp_ms ON (timestamp_ms)
-  idx_logs_level ON (level)
-  idx_logs_event ON (event)
-  idx_logs_logger ON (logger)
-
-Sample:
-  timestamp              level  event                     message
-  2024-01-15T10:30:00Z  DEBUG  session.dispatch          Dispatching event
-  2024-01-15T10:30:01Z  INFO   tool.execution.complete   Tool completed
-```
-
-### Contextual Help
-
-```sql
-sql> .help timeline
-Table: timeline
-Unified chronological event stream combining logs, tool calls, state changes,
-and errors into a single time-ordered view.
-
-Use this table to understand the sequence of events during execution:
-
-  -- What happened in the first 10 seconds?
-  SELECT event_type, event_name, summary
-  FROM timeline
-  WHERE timestamp_ms < (SELECT MIN(timestamp_ms) + 10000 FROM timeline)
-  ORDER BY timestamp_ms;
-
-  -- Find events around an error
-  SELECT *
-  FROM timeline
-  WHERE timestamp_ms BETWEEN
-    (SELECT timestamp_ms - 5000 FROM errors WHERE _rowid = 1)
-    AND
-    (SELECT timestamp_ms + 1000 FROM errors WHERE _rowid = 1)
-  ORDER BY timestamp_ms;
-```
-
-### Query Suggestions
-
-The shell provides contextual suggestions based on table content:
-
-```sql
-sql> .suggest
-Based on this bundle's contents:
-
-1. Error Investigation (1 error found):
-   SELECT * FROM error;
-   SELECT * FROM timeline
-   WHERE timestamp_ms BETWEEN
-     (SELECT timestamp_ms - 5000 FROM errors LIMIT 1)
-     AND (SELECT timestamp_ms + 1000 FROM errors LIMIT 1);
-
-2. Tool Performance (47 tool calls):
-   SELECT tool_name, COUNT(*) as calls,
-          AVG(duration_ms) as avg_ms,
-          SUM(CASE WHEN success=0 THEN 1 ELSE 0 END) as failures
-   FROM tool_calls
-   GROUP BY tool_name
-   ORDER BY calls DESC;
-
-3. Token Usage:
-   SELECT phase, tokens FROM token_usage;
-
-4. State Evolution (3 slice types):
-   SELECT slice_type, COUNT(*) FROM session_slices GROUP BY slice_type;
-```
+The schema output includes row counts and sample queries for each table,
+enabling agents to understand both structure and content at a glance.
 
 ## Common Query Patterns
 
@@ -785,12 +839,10 @@ wink query "$BUNDLE" "SELECT * FROM token_usage" --format json
 Recommended investigation sequence for AI agents:
 
 ```bash
-# 1. Get overview
-wink query ./bundle.zip ".describe manifest"
-wink query ./bundle.zip "SELECT status, duration_ms FROM manifest"
+# 1. Get schema (includes bundle status, row counts, and suggested queries)
+wink query ./bundle.zip --schema
 
 # 2. Check for errors
-wink query ./bundle.zip "SELECT COUNT(*) FROM errors"
 wink query ./bundle.zip "SELECT * FROM errors" --format json
 
 # 3. If errors found, get timeline context
