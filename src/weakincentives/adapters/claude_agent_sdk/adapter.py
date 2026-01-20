@@ -53,6 +53,7 @@ from ._hooks import (
 )
 from ._log_aggregator import ClaudeLogAggregator
 from ._task_completion import TaskCompletionContext
+from ._visibility_signal import VisibilityExpansionSignal
 from .config import ClaudeAgentSDKClientConfig, ClaudeAgentSDKModelConfig
 from .isolation import EphemeralHome, IsolationConfig
 
@@ -501,6 +502,11 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             run_context=run_context,
         )
 
+        # Create visibility signal for progressive disclosure support.
+        # When a tool raises VisibilityExpansionRequired, the bridge stores
+        # the exception in this signal. We check it after SDK query completes.
+        visibility_signal = VisibilityExpansionSignal()
+
         bridged_tools = create_bridged_tools(
             rendered.tools,
             session=session,
@@ -513,6 +519,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
             prompt_name=prompt_name,
             heartbeat=heartbeat,
             run_context=run_context,
+            visibility_signal=visibility_signal,
         )
 
         logger.debug(
@@ -590,6 +597,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                     bridged_tools=bridged_tools,
                     ephemeral_home=ephemeral_home,
                     effective_cwd=effective_cwd,
+                    visibility_signal=visibility_signal,
                 )
         except VisibilityExpansionRequired:
             # Progressive disclosure: let this propagate to the caller
@@ -703,6 +711,7 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
         bridged_tools: tuple[Any, ...],
         ephemeral_home: EphemeralHome,
         effective_cwd: str | None = None,
+        visibility_signal: VisibilityExpansionSignal,
     ) -> list[Any]:
         """Execute the SDK query and return message list."""
         # Import the SDK's types
@@ -923,6 +932,21 @@ class ClaudeAgentSDKAdapter[OutputT](ProviderAdapter[OutputT]):
                 "stats_hook_errors": hook_context.stats.hook_errors,
             },
         )
+
+        # Check for visibility expansion signal from progressive disclosure.
+        # If a tool raised VisibilityExpansionRequired, the bridge stored it
+        # in the signal. We re-raise it here so the caller can handle it.
+        stored_exc = visibility_signal.get_and_clear()
+        if stored_exc is not None:
+            logger.debug(
+                "claude_agent_sdk.sdk_query.visibility_expansion_detected",
+                event="sdk_query.visibility_expansion_detected",
+                context={
+                    "section_keys": stored_exc.section_keys,
+                    "reason": stored_exc.reason,
+                },
+            )
+            raise stored_exc
 
         return messages
 

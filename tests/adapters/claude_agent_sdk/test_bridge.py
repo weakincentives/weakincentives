@@ -27,6 +27,9 @@ from weakincentives.adapters.claude_agent_sdk._bridge import (
     create_bridged_tools,
     create_mcp_server,
 )
+from weakincentives.adapters.claude_agent_sdk._visibility_signal import (
+    VisibilityExpansionSignal,
+)
 from weakincentives.prompt import (
     Prompt,
     PromptTemplate,
@@ -626,15 +629,15 @@ class TestCreateMcpServer:
 
 
 class TestVisibilityExpansionRequiredPropagation:
-    """Tests for VisibilityExpansionRequired exception propagation."""
+    """Tests for VisibilityExpansionRequired exception handling via signal."""
 
-    def test_bridged_tool_propagates_visibility_expansion_required(
+    def test_bridged_tool_stores_visibility_expansion_in_signal(
         self,
         session: Session,
         prompt: Prompt[object],
         mock_adapter: MagicMock,
     ) -> None:
-        """Test that BridgedTool re-raises VisibilityExpansionRequired."""
+        """Test that BridgedTool stores VisibilityExpansionRequired in signal."""
 
         def expanding_handler(
             params: SearchParams, *, context: ToolContext
@@ -653,6 +656,8 @@ class TestVisibilityExpansionRequiredPropagation:
             handler=expanding_handler,
         )
 
+        visibility_signal = VisibilityExpansionSignal()
+
         bridged = BridgedTool(
             name="expanding",
             description="Tool that requests expansion",
@@ -667,26 +672,35 @@ class TestVisibilityExpansionRequiredPropagation:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            visibility_signal=visibility_signal,
         )
 
-        # The exception should propagate, not be caught
-        with pytest.raises(VisibilityExpansionRequired) as exc_info:
-            bridged({"query": "test"})
+        # Should return success response (not error - the tool worked correctly)
+        result = bridged({"query": "test"})
 
-        # Verify the exception has the expected attributes
-        exc = exc_info.value
-        assert isinstance(exc, VisibilityExpansionRequired)
-        assert exc.requested_overrides == {("section", "key"): SectionVisibility.FULL}
-        assert exc.section_keys == ("section.key",)
-        assert exc.reason == "Need more details"
+        # Verify success response format
+        assert result["isError"] is False
+        assert "content" in result
+        assert result["content"][0]["type"] == "text"
+        assert "section.key" in result["content"][0]["text"]
 
-    def test_async_handler_propagates_visibility_expansion_required(
+        # Verify the exception was stored in signal
+        stored_exc = visibility_signal.get_and_clear()
+        assert stored_exc is not None
+        assert isinstance(stored_exc, VisibilityExpansionRequired)
+        assert stored_exc.requested_overrides == {
+            ("section", "key"): SectionVisibility.FULL
+        }
+        assert stored_exc.section_keys == ("section.key",)
+        assert stored_exc.reason == "Need more details"
+
+    def test_bridged_tool_without_signal_returns_success_response(
         self,
         session: Session,
         prompt: Prompt[object],
         mock_adapter: MagicMock,
     ) -> None:
-        """Test that async handler wrapper propagates VisibilityExpansionRequired."""
+        """Test that BridgedTool without signal still returns success response."""
 
         def expanding_handler(
             params: SearchParams, *, context: ToolContext
@@ -705,6 +719,7 @@ class TestVisibilityExpansionRequiredPropagation:
             handler=expanding_handler,
         )
 
+        # No visibility_signal provided
         bridged = BridgedTool(
             name="expanding",
             description="Tool that requests expansion",
@@ -721,11 +736,65 @@ class TestVisibilityExpansionRequiredPropagation:
             budget_tracker=None,
         )
 
+        # Should return success response (tool worked correctly)
+        result = bridged({"query": "test"})
+        assert result["isError"] is False
+        assert "a.b" in result["content"][0]["text"]
+
+    def test_async_handler_stores_visibility_expansion_in_signal(
+        self,
+        session: Session,
+        prompt: Prompt[object],
+        mock_adapter: MagicMock,
+    ) -> None:
+        """Test that async handler wrapper uses signal for VisibilityExpansionRequired."""
+
+        def expanding_handler(
+            params: SearchParams, *, context: ToolContext
+        ) -> ToolResult[SearchResult]:
+            del context
+            raise VisibilityExpansionRequired(
+                "Expansion required",
+                requested_overrides={("a", "b"): SectionVisibility.FULL},
+                reason="Test reason",
+                section_keys=("a.b",),
+            )
+
+        expanding_tool = Tool[SearchParams, SearchResult](
+            name="expanding",
+            description="Tool that requests expansion",
+            handler=expanding_handler,
+        )
+
+        visibility_signal = VisibilityExpansionSignal()
+
+        bridged = BridgedTool(
+            name="expanding",
+            description="Tool that requests expansion",
+            input_schema={
+                "type": "object",
+                "properties": {"query": {"type": "string"}},
+            },
+            tool=expanding_tool,
+            session=session,
+            adapter=mock_adapter,
+            prompt=cast("PromptProtocol[object]", prompt),
+            rendered_prompt=None,
+            deadline=None,
+            budget_tracker=None,
+            visibility_signal=visibility_signal,
+        )
+
         async_handler = _make_async_handler(bridged)
 
-        # The async wrapper should also propagate the exception
-        with pytest.raises(VisibilityExpansionRequired):
-            asyncio.run(async_handler({"query": "test"}))
+        # The async wrapper should return success response
+        result = asyncio.run(async_handler({"query": "test"}))
+        assert result["isError"] is False
+
+        # And the exception should be in the signal
+        stored_exc = visibility_signal.get_and_clear()
+        assert stored_exc is not None
+        assert stored_exc.section_keys == ("a.b",)
 
     def test_passes_filesystem_to_tool_context(
         self, session: Session, mock_adapter: MagicMock
@@ -1089,6 +1158,8 @@ class TestBridgedToolTransactionalExecution:
             handler=visibility_handler,
         )
 
+        visibility_signal = VisibilityExpansionSignal()
+
         bridged = BridgedTool(
             name="visibility_tool",
             description="Tool that requests visibility expansion",
@@ -1103,13 +1174,19 @@ class TestBridgedToolTransactionalExecution:
             rendered_prompt=None,
             deadline=None,
             budget_tracker=None,
+            visibility_signal=visibility_signal,
         )
 
-        with pytest.raises(VisibilityExpansionRequired):
-            bridged({"query": "test"})
+        # Should return success response (tool worked correctly)
+        result = bridged({"query": "test"})
+        assert result["isError"] is False
 
         # Filesystem should be restored to initial content
         assert test_fs.read("/test.txt").content == "initial content"
+
+        # Exception should be stored in signal
+        stored_exc = visibility_signal.get_and_clear()
+        assert stored_exc is not None
 
     def test_no_filesystem_when_not_in_resources(
         self,
@@ -1206,3 +1283,76 @@ class TestCreateBridgedToolsWithSession:
         assert result["isError"] is True
         # Filesystem should be restored to initial content
         assert test_fs.read("/test.txt").content == "initial content"
+
+
+class TestVisibilityExpansionSignal:
+    """Tests for VisibilityExpansionSignal thread-safe container."""
+
+    def test_signal_stores_exception(self) -> None:
+        """Test that signal stores exception correctly."""
+        signal = VisibilityExpansionSignal()
+
+        exc = VisibilityExpansionRequired(
+            "Test",
+            requested_overrides={("a",): SectionVisibility.FULL},
+            reason="Test reason",
+            section_keys=("a",),
+        )
+
+        signal.set(exc)
+        assert signal.is_set()
+
+        stored = signal.get_and_clear()
+        assert stored is exc
+        assert not signal.is_set()
+
+    def test_signal_first_one_wins(self) -> None:
+        """Test that only the first exception is stored."""
+        signal = VisibilityExpansionSignal()
+
+        exc1 = VisibilityExpansionRequired(
+            "First",
+            requested_overrides={("first",): SectionVisibility.FULL},
+            reason="First reason",
+            section_keys=("first",),
+        )
+        exc2 = VisibilityExpansionRequired(
+            "Second",
+            requested_overrides={("second",): SectionVisibility.FULL},
+            reason="Second reason",
+            section_keys=("second",),
+        )
+
+        signal.set(exc1)
+        signal.set(exc2)  # Should be ignored
+
+        stored = signal.get_and_clear()
+        assert stored is exc1
+        assert stored.section_keys == ("first",)
+
+    def test_signal_get_and_clear_clears(self) -> None:
+        """Test that get_and_clear clears the signal."""
+        signal = VisibilityExpansionSignal()
+
+        exc = VisibilityExpansionRequired(
+            "Test",
+            requested_overrides={("a",): SectionVisibility.FULL},
+            reason="Test",
+            section_keys=("a",),
+        )
+
+        signal.set(exc)
+        assert signal.is_set()
+
+        _ = signal.get_and_clear()
+        assert not signal.is_set()
+
+        # Second call should return None
+        assert signal.get_and_clear() is None
+
+    def test_signal_empty_returns_none(self) -> None:
+        """Test that empty signal returns None."""
+        signal = VisibilityExpansionSignal()
+
+        assert not signal.is_set()
+        assert signal.get_and_clear() is None

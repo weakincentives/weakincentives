@@ -20,11 +20,16 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import override
 
 import pytest
 
-from weakincentives.adapters.openai import OpenAIAdapter
+from weakincentives.adapters.claude_agent_sdk import (
+    ClaudeAgentSDKAdapter,
+    ClaudeAgentSDKClientConfig,
+    get_default_model,
+)
 from weakincentives.contrib.tools import AstevalSection
 from weakincentives.evals import (
     BASELINE,
@@ -40,19 +45,29 @@ from weakincentives.prompt import MarkdownSection, Prompt, PromptTemplate
 from weakincentives.runtime import InMemoryMailbox, MainLoop, Session
 from weakincentives.runtime.main_loop import MainLoopRequest, MainLoopResult
 
-pytest.importorskip("openai")
+pytest.importorskip("claude_agent_sdk")
+
+
+def _is_bedrock_mode() -> bool:
+    """Check if running in Bedrock mode based on environment."""
+    return os.getenv("CLAUDE_CODE_USE_BEDROCK") == "1" and "AWS_REGION" in os.environ
+
+
+def _has_credentials() -> bool:
+    """Check if Bedrock or Anthropic API credentials are available."""
+    return _is_bedrock_mode() or "ANTHROPIC_API_KEY" in os.environ
+
 
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        "OPENAI_API_KEY" not in os.environ,
-        reason="OPENAI_API_KEY not set; skipping OpenAI integration tests.",
+        not _has_credentials(),
+        reason="Neither CLAUDE_CODE_USE_BEDROCK+AWS_REGION nor ANTHROPIC_API_KEY set.",
     ),
     pytest.mark.timeout(300),  # Math evals may take time (10 samples x ~30s each)
 ]
 
-_MODEL_ENV_VAR = "OPENAI_TEST_MODEL"
-_DEFAULT_MODEL = "gpt-4.1-mini"
+_MODEL_ENV_VAR = "CLAUDE_AGENT_SDK_TEST_MODEL"
 _PROMPT_NS = "integration/evals-math"
 
 # Evaluation constants
@@ -101,7 +116,7 @@ class MathSolverLoop(MainLoop[MathProblem, MathAnswer]):
     def __init__(
         self,
         *,
-        adapter: OpenAIAdapter[MathAnswer],
+        adapter: ClaudeAgentSDKAdapter[MathAnswer],
         requests: InMemoryMailbox[
             MainLoopRequest[MathProblem], MainLoopResult[MathAnswer]
         ],
@@ -262,19 +277,34 @@ def _math_evaluator(output: object, expected: object) -> Score:
 # =============================================================================
 
 
-@pytest.fixture(scope="module")
-def openai_model() -> str:
-    """Return the model name used for integration tests."""
-    return os.environ.get(_MODEL_ENV_VAR, _DEFAULT_MODEL)
+def _get_model() -> str:
+    """Return the model name used for integration tests.
+
+    Uses get_default_model() which returns Sonnet 4.5 in the appropriate
+    format based on whether Bedrock is configured.
+    """
+    return os.environ.get(_MODEL_ENV_VAR, get_default_model())
 
 
-@pytest.fixture(scope="module")
-def adapter(openai_model: str) -> OpenAIAdapter[MathAnswer]:
-    """Create an OpenAI adapter for math solving."""
-    return OpenAIAdapter(model=openai_model)
+def _make_config(tmp_path: Path, **kwargs: object) -> ClaudeAgentSDKClientConfig:
+    """Build a ClaudeAgentSDKClientConfig with explicit cwd."""
+    config_kwargs: dict[str, object] = {
+        "permission_mode": "bypassPermissions",
+        "cwd": str(tmp_path),
+    }
+    config_kwargs.update(kwargs)
+    return ClaudeAgentSDKClientConfig(**config_kwargs)
 
 
-def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
+def _make_adapter(tmp_path: Path) -> ClaudeAgentSDKAdapter[MathAnswer]:
+    """Create a Claude Agent SDK adapter for math solving."""
+    return ClaudeAgentSDKAdapter(
+        model=_get_model(),
+        client_config=_make_config(tmp_path),
+    )
+
+
+def test_math_eval_single_sample(tmp_path: Path) -> None:
     """Test a single math problem evaluation."""
     # Setup mailboxes
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -286,6 +316,7 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
     ] = InMemoryMailbox(name="dummy-requests")
 
     try:
+        adapter = _make_adapter(tmp_path)
         main_loop = MathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,
@@ -323,7 +354,7 @@ def test_math_eval_single_sample(adapter: OpenAIAdapter[MathAnswer]) -> None:
         dummy_requests.close()
 
 
-def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
+def test_math_eval_full_dataset(tmp_path: Path) -> None:
     """Test the full math dataset evaluation."""
     # Setup mailboxes
     results: InMemoryMailbox[EvalResult, None] = InMemoryMailbox(name="eval-results")
@@ -335,6 +366,7 @@ def test_math_eval_full_dataset(adapter: OpenAIAdapter[MathAnswer]) -> None:
     ] = InMemoryMailbox(name="dummy-requests")
 
     try:
+        adapter = _make_adapter(tmp_path)
         main_loop = MathSolverLoop(
             adapter=adapter,
             requests=dummy_requests,

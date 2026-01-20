@@ -253,9 +253,9 @@ class TestModelIdFunctions:
     """Tests for model ID conversion and default model functions."""
 
     def test_default_model_constants(self) -> None:
-        """Default model constants should be Opus 4.5."""
-        assert "opus" in DEFAULT_MODEL.lower()
-        assert "opus" in DEFAULT_BEDROCK_MODEL.lower()
+        """Default model constants should be Sonnet 4.5."""
+        assert "sonnet" in DEFAULT_MODEL.lower()
+        assert "sonnet" in DEFAULT_BEDROCK_MODEL.lower()
 
     def test_get_default_model_anthropic(self) -> None:
         """get_default_model returns Anthropic format when not using Bedrock."""
