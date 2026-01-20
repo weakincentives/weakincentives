@@ -54,6 +54,7 @@ SPEC_DESCRIPTIONS: dict[str, str] = {
     "VERIFICATION_TOOLBOX": "Verification toolchain (check.py), checker protocol, failure reporting",
     "WINK_DEBUG": "Debug bundle viewer UI, proposed enhancements, timeline visualization",
     "WINK_DOCS": "CLI docs command, bundled documentation access",
+    "WINK_QUERY": "SQL-based debug bundle exploration with DuckDB for AI agents",
     "WORKSPACE": "VFS, Podman, asteval, workspace digest",
 }
 
