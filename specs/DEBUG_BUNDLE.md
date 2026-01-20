@@ -106,21 +106,12 @@ Configuration for bundle creation:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `target` | `Path \| None` | `None` | Output directory |
-| `mode` | `CaptureMode` | `"standard"` | Capture level |
-| `include_session_before` | `bool` | `True` | Capture pre-execution state |
-| `include_filesystem` | `bool` | `True` | Archive workspace files |
-| `include_logs` | `bool` | `True` | Capture log records |
 | `max_file_size` | `int` | `10_000_000` | Skip files > 10MB |
 | `max_total_size` | `int` | `52_428_800` | Max filesystem capture (50MB) |
 | `compression` | `str` | `"deflate"` | Zip compression method |
 
-### Capture Modes
-
-| Mode | Description |
-|------|-------------|
-| `minimal` | Request I/O, session after, INFO+ logs, no filesystem |
-| `standard` | Full DEBUG logs, session before+after, modified files |
-| `full` | Standard plus all filesystem contents within limits |
+Bundles always capture full debug information: DEBUG logs, session before+after,
+and all filesystem contents within size limits.
 
 ### BundleWriter
 

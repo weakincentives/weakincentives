@@ -60,7 +60,7 @@ from weakincentives.contrib.tools import (
     WorkspaceDigestSection,
 )
 from weakincentives.deadlines import Deadline
-from weakincentives.debug import BundleConfig, CaptureMode
+from weakincentives.debug import BundleConfig
 from weakincentives.optimizers import (
     OptimizationContext,
     PersistenceScope,
@@ -257,7 +257,6 @@ class CodeReviewLoop(MainLoop[ReviewTurnParams, ReviewResponse]):
             ),
             debug_bundle=BundleConfig(
                 target=DEBUG_BUNDLES_DIR,
-                mode=CaptureMode.STANDARD,
             ),
         )
         super().__init__(adapter=adapter, requests=requests, config=config, dlq=dlq)

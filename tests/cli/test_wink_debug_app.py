@@ -36,7 +36,6 @@ from weakincentives.debug.bundle import (
     BundleConfig,
     BundleManifest,
     BundleWriter,
-    CaptureMode,
 )
 from weakincentives.runtime.session import Session
 
@@ -63,7 +62,7 @@ def _create_test_bundle(
 
     with BundleWriter(
         target_dir,
-        config=BundleConfig(mode=CaptureMode.STANDARD),
+        config=BundleConfig(),
     ) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})
@@ -341,9 +340,7 @@ def test_api_slice_renders_markdown(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice(markdown_text))
 
-    with BundleWriter(
-        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
-    ) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -374,9 +371,7 @@ def test_markdown_renderer_handles_nested_values(tmp_path: Path) -> None:
         )
     )
 
-    with BundleWriter(
-        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
-    ) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -457,9 +452,7 @@ def test_api_logs_endpoint(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(
-        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
-    ) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -713,9 +706,7 @@ def test_logs_endpoint_with_level_filter(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(
-        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
-    ) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -795,9 +786,7 @@ def test_logs_with_malformed_and_non_dict_entries(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(
-        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
-    ) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})
@@ -829,9 +818,7 @@ def test_logs_with_non_string_level(tmp_path: Path) -> None:
     session = Session()
     session.dispatch(_ExampleSlice("test"))
 
-    with BundleWriter(
-        tmp_path, config=BundleConfig(mode=CaptureMode.STANDARD)
-    ) as writer:
+    with BundleWriter(tmp_path, config=BundleConfig()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({})
         writer.write_request_output({})

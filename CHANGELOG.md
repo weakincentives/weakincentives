@@ -236,13 +236,12 @@ All exceptions inherit from `PromptEvaluationError` and include `message`,
 `BundleConfig` with `MainLoopConfig` for automatic bundle creation per-request.
 
 ```python
-from weakincentives.debug import BundleConfig, CaptureMode
+from weakincentives.debug import BundleConfig
 from weakincentives.runtime import MainLoopConfig
 
 config = MainLoopConfig(
     debug_bundle=BundleConfig(
         target="./debug_bundles/",
-        mode=CaptureMode.STANDARD,
     ),
 )
 ```

@@ -45,7 +45,6 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import field
 from datetime import UTC, datetime
-from enum import Enum
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any, Self, override
 from uuid import UUID, uuid4
@@ -153,20 +152,6 @@ BUNDLE_FORMAT_VERSION = "1.0.0"
 BUNDLE_ROOT_DIR = "debug_bundle"
 
 
-class CaptureMode(Enum):
-    """Capture mode for debug bundles.
-
-    Attributes:
-        MINIMAL: Request I/O, session after, INFO+ logs, no filesystem.
-        STANDARD: Full DEBUG logs, session before+after, modified files.
-        FULL: Standard plus all filesystem contents within limits.
-    """
-
-    MINIMAL = "minimal"
-    STANDARD = "standard"
-    FULL = "full"
-
-
 class BundleError(WinkError, RuntimeError):
     """Base error for bundle operations."""
 
@@ -181,46 +166,29 @@ class BundleConfig:
 
     Attributes:
         target: Output directory for bundles. None disables bundling.
-        mode: Capture level (minimal, standard, full).
-        include_session_before: Capture pre-execution session state.
-        include_filesystem: Archive workspace files.
-        include_logs: Capture log records during execution.
         max_file_size: Skip files larger than this (bytes). Default 10MB.
         max_total_size: Maximum filesystem capture size (bytes). Default 50MB.
         compression: Zip compression method.
     """
 
     target: Path | None = None
-    mode: CaptureMode = CaptureMode.STANDARD
-    include_session_before: bool = True
-    include_filesystem: bool = True
-    include_logs: bool = True
     max_file_size: int = 10_000_000  # 10MB
     max_total_size: int = 52_428_800  # 50MB
     compression: str = "deflate"
 
     @classmethod
-    def __pre_init__(  # noqa: PLR0913
+    def __pre_init__(
         cls,
         *,
         target: Path | str | None = None,
-        mode: CaptureMode | str = CaptureMode.STANDARD,
-        include_session_before: bool = True,
-        include_filesystem: bool = True,
-        include_logs: bool = True,
         max_file_size: int = 10_000_000,
         max_total_size: int = 52_428_800,
         compression: str = "deflate",
     ) -> Mapping[str, object]:
         """Normalize inputs before construction."""
         normalized_target = Path(target) if isinstance(target, str) else target
-        normalized_mode = CaptureMode(mode) if isinstance(mode, str) else mode
         return {
             "target": normalized_target,
-            "mode": normalized_mode,
-            "include_session_before": include_session_before,
-            "include_filesystem": include_filesystem,
-            "include_logs": include_logs,
             "max_file_size": max_file_size,
             "max_total_size": max_total_size,
             "compression": compression,
@@ -303,7 +271,7 @@ class BundleManifest:
     created_at: str = ""
     request: RequestInfo = field(default_factory=lambda: RequestInfo(request_id=""))
     capture: CaptureInfo = field(
-        default_factory=lambda: CaptureInfo(mode="standard", trigger="config")
+        default_factory=lambda: CaptureInfo(mode="full", trigger="config")
     )
     prompt: PromptInfo = field(default_factory=PromptInfo)
     files: tuple[str, ...] = ()
@@ -559,11 +527,6 @@ class BundleWriter:
 
     def write_session_before(self, session: Session) -> None:
         """Write session state before execution."""
-        if not self._config.include_session_before:
-            return
-        if self._config.mode == CaptureMode.MINIMAL:
-            return
-
         try:
             self._session_id = session.session_id
             snapshot = session.snapshot(include_all=True)
@@ -593,23 +556,15 @@ class BundleWriter:
     @contextmanager
     def capture_logs(self) -> Iterator[None]:
         """Context manager to capture logs during execution."""
-        if not self._config.include_logs:
-            yield
-            return
-
         if self._temp_dir is None:
             yield
             return
-
-        log_level = (
-            logging.INFO if self._config.mode == CaptureMode.MINIMAL else logging.DEBUG
-        )
 
         log_path = self._temp_dir / BUNDLE_ROOT_DIR / "logs" / "app.jsonl"
         self._log_collector_path = log_path
 
         try:
-            with collect_all_logs(log_path, level=log_level):
+            with collect_all_logs(log_path, level=logging.DEBUG):
                 yield
         except Exception:
             _logger.exception(
@@ -705,11 +660,6 @@ class BundleWriter:
         root_path: str = ".",
     ) -> None:
         """Write workspace filesystem snapshot."""
-        if not self._config.include_filesystem:
-            return
-        if self._config.mode == CaptureMode.MINIMAL:
-            return
-
         try:
             self._archive_filesystem(fs, root_path)
         except Exception:
@@ -809,7 +759,7 @@ class BundleWriter:
                 ended_at=self._ended_at.isoformat() if self._ended_at else "",
             ),
             capture=CaptureInfo(
-                mode=self._config.mode.value,
+                mode="full",
                 trigger=self._trigger,
                 limits_applied=self._limits_applied,
             ),
@@ -1121,6 +1071,5 @@ __all__ = [
     "BundleManifest",
     "BundleValidationError",
     "BundleWriter",
-    "CaptureMode",
     "DebugBundle",
 ]

@@ -30,7 +30,6 @@ from weakincentives.debug.bundle import (
     BundleManifest,
     BundleValidationError,
     BundleWriter,
-    CaptureMode,
     DebugBundle,
     _compute_checksum,
     _generate_readme,
@@ -43,22 +42,6 @@ if TYPE_CHECKING:
     pass
 
 
-class TestCaptureMode:
-    """Tests for CaptureMode enum."""
-
-    def test_capture_mode_values(self) -> None:
-        """Verify capture mode values."""
-        assert CaptureMode.MINIMAL.value == "minimal"
-        assert CaptureMode.STANDARD.value == "standard"
-        assert CaptureMode.FULL.value == "full"
-
-    def test_capture_mode_from_string(self) -> None:
-        """Test creating capture mode from string."""
-        assert CaptureMode("minimal") == CaptureMode.MINIMAL
-        assert CaptureMode("standard") == CaptureMode.STANDARD
-        assert CaptureMode("full") == CaptureMode.FULL
-
-
 class TestBundleConfig:
     """Tests for BundleConfig dataclass."""
 
@@ -66,10 +49,6 @@ class TestBundleConfig:
         """Test default configuration values."""
         config = BundleConfig()
         assert config.target is None
-        assert config.mode == CaptureMode.STANDARD
-        assert config.include_session_before is True
-        assert config.include_filesystem is True
-        assert config.include_logs is True
         assert config.max_file_size == 10_000_000
         assert config.max_total_size == 52_428_800
         assert config.compression == "deflate"
@@ -78,11 +57,6 @@ class TestBundleConfig:
         """Test config normalizes string target to Path."""
         config = BundleConfig(target=str(tmp_path))
         assert config.target == tmp_path
-
-    def test_config_with_string_mode(self) -> None:
-        """Test config normalizes string mode to CaptureMode."""
-        config = BundleConfig(mode="minimal")
-        assert config.mode == CaptureMode.MINIMAL
 
     def test_enabled_property(self, tmp_path: Path) -> None:
         """Test enabled property."""
@@ -122,7 +96,7 @@ class TestBundleManifest:
                 "bundle_id": "test-456",
                 "created_at": "2024-01-15T10:30:00+00:00",
                 "request": {"request_id": "req-123"},
-                "capture": {"mode": "standard", "trigger": "config"},
+                "capture": {"mode": "full", "trigger": "config"},
                 "prompt": {"ns": "", "key": "", "adapter": ""},
                 "files": [],
                 "integrity": {"algorithm": "sha256", "checksums": {}},
@@ -301,18 +275,6 @@ class TestBundleWriter:
         bundle = DebugBundle.load(writer.path)
         assert bundle.session_after is not None
 
-    def test_writer_minimal_mode_skips_session_before(self, tmp_path: Path) -> None:
-        """Test minimal mode skips session before."""
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.MINIMAL)
-
-        session = Session()
-        with BundleWriter(tmp_path, config=config) as writer:
-            writer.write_session_before(session)
-
-        assert writer.path is not None
-        bundle = DebugBundle.load(writer.path)
-        assert bundle.session_before is None
-
     def test_writer_with_custom_compression(self, tmp_path: Path) -> None:
         """Test writer with different compression methods."""
         config = BundleConfig(target=tmp_path, compression="stored")
@@ -481,29 +443,6 @@ class TestBundleErrors:
 class TestFilesystemArchiving:
     """Tests for filesystem archiving functionality."""
 
-    def test_writer_skips_filesystem_when_disabled(self, tmp_path: Path) -> None:
-        """Test filesystem not captured when include_filesystem is False."""
-        config = BundleConfig(target=tmp_path, include_filesystem=False)
-
-        with BundleWriter(tmp_path, config=config) as writer:
-            # Create a simple mock that would fail if called
-            writer.write_filesystem(None)  # type: ignore[arg-type]
-
-        assert writer.path is not None
-        bundle = DebugBundle.load(writer.path)
-        files = bundle.list_files()
-        assert not any("filesystem" in f for f in files)
-
-    def test_writer_skips_filesystem_in_minimal_mode(self, tmp_path: Path) -> None:
-        """Test filesystem not captured in minimal mode."""
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.MINIMAL)
-
-        with BundleWriter(tmp_path, config=config) as writer:
-            # Create a simple mock that would fail if called
-            writer.write_filesystem(None)  # type: ignore[arg-type]
-
-        assert writer.path is not None
-
     def test_writer_archives_filesystem(self, tmp_path: Path) -> None:
         """Test filesystem archiving with InMemoryFilesystem."""
         from weakincentives.contrib.tools.filesystem_memory import InMemoryFilesystem
@@ -531,7 +470,7 @@ class TestFilesystemArchiving:
             def list(self, _path: str) -> list:
                 raise OSError("Simulated error")
 
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.FULL)
+        config = BundleConfig(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(FailingFilesystem())  # type: ignore[arg-type]
@@ -614,17 +553,6 @@ class TestBundleAccessors:
         assert bundle.session_after is not None
         assert "TestSlice" in bundle.session_after
 
-    def test_logs_returns_none_when_missing(self, tmp_path: Path) -> None:
-        """Test logs returns None when not present."""
-        config = BundleConfig(target=tmp_path, include_logs=False)
-
-        with BundleWriter(tmp_path, config=config) as writer:
-            pass  # Logs not captured
-
-        assert writer.path is not None
-        bundle = DebugBundle.load(writer.path)
-        assert bundle.logs is None
-
     def test_run_context_returns_none_when_missing(self, tmp_path: Path) -> None:
         """Test run_context returns None when not present."""
         with BundleWriter(tmp_path) as writer:
@@ -678,7 +606,7 @@ class TestWriteExceptionHandling:
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test write_session_before handles errors gracefully."""
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.FULL)
+        config = BundleConfig(target=tmp_path)
 
         class BrokenSession:
             """Session that raises on snapshot."""
@@ -824,34 +752,12 @@ class TestWriteExceptionHandling:
         assert writer.path is not None
         assert "Error during log capture" in caplog.text
 
-    def test_include_session_before_false(self, tmp_path: Path) -> None:
-        """Test session_before is skipped when include_session_before is False."""
-        config = BundleConfig(
-            target=tmp_path,
-            mode=CaptureMode.FULL,
-            include_session_before=False,
-        )
-
-        session = Session()
-        with BundleWriter(tmp_path, config=config) as writer:
-            writer.write_session_before(session)
-
-        assert writer.path is not None
-        bundle = DebugBundle.load(writer.path)
-        assert bundle.session_before is None
-
     def test_write_session_before_empty_session(self, tmp_path: Path) -> None:
         """Test session_before skips write when session has no slices."""
-        config = BundleConfig(
-            target=tmp_path,
-            mode=CaptureMode.FULL,
-            include_session_before=True,
-        )
-
         # Empty session with no dispatched events
         session = Session()
 
-        with BundleWriter(tmp_path, config=config) as writer:
+        with BundleWriter(tmp_path) as writer:
             writer.write_session_before(session)
 
         assert writer.path is not None
@@ -865,19 +771,6 @@ class TestWriteExceptionHandling:
         # Don't enter context, so temp_dir is None
         with writer.capture_logs():
             pass  # Should just yield and return
-
-    def test_capture_logs_with_include_logs_false(self, tmp_path: Path) -> None:
-        """Test capture_logs yields without capturing when include_logs is False."""
-        config = BundleConfig(target=tmp_path, include_logs=False)
-
-        with BundleWriter(tmp_path, config=config) as writer:
-            # capture_logs should immediately yield without capturing
-            with writer.capture_logs():
-                pass
-
-        assert writer.path is not None
-        bundle = DebugBundle.load(writer.path)
-        assert bundle.logs is None
 
 
 class TestBundleIntegrity:
@@ -950,13 +843,7 @@ class TestSessionContentReturns:
         session = Session()
         _ = session.dispatch(BeforeSlice(value="before"))
 
-        config = BundleConfig(
-            target=tmp_path,
-            mode=CaptureMode.FULL,
-            include_session_before=True,
-        )
-
-        with BundleWriter(tmp_path, config=config) as writer:
+        with BundleWriter(tmp_path) as writer:
             writer.write_session_before(session)
 
         assert writer.path is not None
@@ -992,7 +879,7 @@ class TestFilesystemEdgeCases:
         fs = PermissionErrorFilesystem()
         _ = fs.write("/test.txt", "content")
 
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.FULL)
+        config = BundleConfig(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -1018,7 +905,7 @@ class TestFilesystemEdgeCases:
         fs = DisappearingFilesystem()
         _ = fs.write("/test.txt", "content")
 
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.FULL)
+        config = BundleConfig(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -1038,7 +925,7 @@ class TestFilesystemEdgeCases:
         fs = DirectoryAsFileFilesystem()
         _ = fs.write("/test.txt", "content")
 
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.FULL)
+        config = BundleConfig(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -1057,7 +944,7 @@ class TestFilesystemEdgeCases:
 
         fs = ListFailsFilesystem()
 
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.FULL)
+        config = BundleConfig(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -1076,7 +963,7 @@ class TestFilesystemEdgeCases:
 
         fs = NotADirFilesystem()
 
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.FULL)
+        config = BundleConfig(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)
@@ -1090,7 +977,7 @@ class TestFilesystemEdgeCases:
         fs = InMemoryFilesystem()
         _ = fs.write("/level1/level2/deep.txt", "deep content")
 
-        config = BundleConfig(target=tmp_path, mode=CaptureMode.FULL)
+        config = BundleConfig(target=tmp_path)
 
         with BundleWriter(tmp_path, config=config) as writer:
             writer.write_filesystem(fs)

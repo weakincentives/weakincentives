@@ -22,7 +22,7 @@ import pytest
 
 from weakincentives import cli
 from weakincentives.cli import wink
-from weakincentives.debug.bundle import BundleConfig, BundleWriter, CaptureMode
+from weakincentives.debug.bundle import BundleConfig, BundleWriter
 from weakincentives.runtime.session import Session
 
 
@@ -36,9 +36,7 @@ def _create_test_bundle(target_dir: Path) -> Path:
     session = Session()
     session.dispatch(_ExampleSlice("a"))
 
-    with BundleWriter(
-        target_dir, config=BundleConfig(mode=CaptureMode.STANDARD)
-    ) as writer:
+    with BundleWriter(target_dir, config=BundleConfig()) as writer:
         writer.write_session_after(session)
         writer.write_request_input({"task": "test"})
         writer.write_request_output({"status": "ok"})
