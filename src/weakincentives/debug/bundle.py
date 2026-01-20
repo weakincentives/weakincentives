@@ -842,14 +842,11 @@ class BundleWriter:
             ),
         )
 
-        # Write manifest
+        # Write manifest (excluded from checksums to avoid circular dependency)
         manifest_content = manifest.to_json()
         manifest_path = self._temp_dir / BUNDLE_ROOT_DIR / "manifest.json"
         _ = manifest_path.write_text(manifest_content, encoding="utf-8")
         self._files.append("manifest.json")
-        self._checksums["manifest.json"] = _compute_checksum(
-            manifest_content.encode("utf-8")
-        )
 
         # Create zip archive
         self._target.mkdir(parents=True, exist_ok=True)
@@ -1089,8 +1086,6 @@ class DebugBundle:
             True if all checksums match, False otherwise.
         """
         for rel_path, expected in self._manifest.integrity.checksums.items():
-            if rel_path == "manifest.json":  # pragma: no cover
-                continue  # Skip manifest itself (not included in checksums)
             try:
                 content = self._read_artifact(rel_path)
                 actual = _compute_checksum(content)
