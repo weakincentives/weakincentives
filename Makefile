@@ -76,12 +76,8 @@ typecheck:
 test:
 	@uv run --all-extras python check.py -q test
 
-# Run OpenAI integration tests
+# Run integration tests (tests skip automatically when API keys are not set)
 integration-tests:
-	@if [ -z "$$OPENAI_API_KEY" ]; then \
-		echo "OPENAI_API_KEY is not set; export it to run integration tests." >&2; \
-		exit 1; \
-	fi
 	@uv run --all-extras pytest --no-cov --strict-config --strict-markers -vv --maxfail=1 integration-tests
 
 # Run all Redis integration tests (standalone + cluster)
